@@ -4,8 +4,8 @@
     agents-remember paseo status    --config <MCP settings file>
     agents-remember paseo stop      --config <MCP settings file>
 
-Each command uses the named MCP file and the single user configuration
-(``~/.config/agents-remember/settings.json``, or ``$XDG_CONFIG_HOME``) host block and prints one JSON document. ``--config`` is required: these commands install software and start or stop a daemon,
+Each command reads the ``paseoRuntime`` host block from the active MCP settings file
+named by ``--config`` and prints one JSON document. ``--config`` is required: these commands install software and start or stop a daemon,
 so they never fall back to a discovered settings file.
 
 Exit status: 0 when the command did what it reports; 1 when a step failed (the document's
@@ -56,7 +56,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         command.add_argument(
             "--config",
             required=True,
-            help="Absolute path of the harness MCP settings file; the host block is in the single user configuration file.",
+            help="Absolute path of the active MCP settings file that holds the paseoRuntime host block.",
         )
 
 

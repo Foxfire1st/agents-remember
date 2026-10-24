@@ -17,7 +17,7 @@ Arguments: none.
 
 Answer fields: `ok`, `server` (this package's own name), `version`,
 `transport`, `configPath`, `coordinationRoot`, `workspaceRoot`,
-`transcriptRoot`, `harnessSkillRoot` (absent when unconfigured),
+`transcriptRoot`,
 `allowedRepoIds` (the configured repositories), `unusedProviderKeys` (old
 provider keys, reported once as unused — MIK-R112 removed the provider
 tools, so enabled keys drive nothing), `unusedSettingsKeys` (settings keys
@@ -41,7 +41,8 @@ startup, before any tool is served.
 Install or refresh the packaged coordinator runtime into the coordination
 root; safe to re-run. Preserves user data (`memory-repos/`,
 `providers/data/`, `providers/runners/`); replaces the managed scaffold
-(`skills/`, `docs/`) and prunes legacy binaries.
+(`docs/` and the applicable `AGENTS.md` targets) and prunes legacy binaries. Skills
+are served from the package as MCP resources; no installed skill tree is created.
 
 Arguments: `dry_run=false` (preview: changes nothing), `include_benchmarks=false`
 (copy benchmark fixtures), `install_provider_deps=true` (retained knob: no longer
@@ -55,8 +56,8 @@ record).
 
 `experiment=role-capsules` is the one supported experiment. `capsule` mode
 withholds the legacy AR startup chain in the installation (the coordinator
-`AGENTS.md` targets) while still installing the `skills/` authored copy — read
-by humans, the dashboard and curators, never compiled; a per-run record
+`AGENTS.md` targets). Skills remain served from the package in either mode; neither
+mode installs a skill copy. A per-run record
 carries experiment, source, selection source and mode. Selection precedence:
 the request field, then the `AR_EXPERIMENT` environment fallback; empty at
 both means unselected (the legacy default). An unknown id is refused by name
@@ -73,8 +74,9 @@ the retired providers performs nothing from any product path: retired ids never 
 so no install/start/watch runs — no install, prepare, seed, watcher start or status — only the explicit `providers-remove` command deletes provider runtime folders,
 and only the old-watcher stop remains. Benchmark commands run providerless with
 the same empty setup. The final `host` part provisions the build-pinned
-host/plugin from the per-use shared `system/settings.json` block; shared
-authority is never written and needed restarts are deferred. Preview
+host/plugin from `paseoRuntime` in the active MCP authority file selected by
+`--config`, read per use; this maintenance call never writes that authority and
+needed restarts are deferred. Preview
 (`dry_run`) observes only and reports what would change (`wouldInstallHost`,
 `wouldStart`); an absent host reports `configured: false` with the setup
 message. A needed restart reports `restartRequired` with the remedy: run the

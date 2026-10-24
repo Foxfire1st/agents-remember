@@ -16,14 +16,15 @@ from pathlib import Path
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-C09 = REPO_ROOT / "skills/c-09-git-worktree-manager/SKILL.md"
-C12 = REPO_ROOT / "skills/c-12-closeout/SKILL.md"
+C09 = REPO_ROOT / "skills/w-02-light-task-workflow/workflows/worktree-operations.md"
+C12 = REPO_ROOT / "skills/w-02-light-task-workflow/workflows/closeout.md"
 C09_GENERATED = (
     REPO_ROOT
-    / "mcp/src/agents_remember/package_data/runtime/skills/c-09-git-worktree-manager/SKILL.md"
+    / "mcp/src/agents_remember/package_data/runtime/skills/w-02-light-task-workflow/workflows/worktree-operations.md"
 )
 C12_GENERATED = (
-    REPO_ROOT / "mcp/src/agents_remember/package_data/runtime/skills/c-12-closeout/SKILL.md"
+    REPO_ROOT
+    / "mcp/src/agents_remember/package_data/runtime/skills/w-02-light-task-workflow/workflows/closeout.md"
 )
 MCP_TOOLS = REPO_ROOT / "docs/reference/mcp-tools.md"
 

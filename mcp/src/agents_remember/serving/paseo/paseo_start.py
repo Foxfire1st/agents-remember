@@ -8,8 +8,8 @@ from typing import Any
 
 from agents_remember.errors import PaseoRuntimeFailure
 from agents_remember.kernel.primitives.paseo_authority import (
-    load_shared_paseo_runtime,
-    paseo_runtime_path,
+    authority_settings_path,
+    load_authority_paseo_runtime,
 )
 from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
@@ -72,9 +72,9 @@ def _bounded_runner(runner: CommandRunner, deadline: float) -> CommandRunner:
 
 
 def _settings(config: McpRuntimeConfig) -> PaseoRuntimeSettings | HostObservation:
-    path = paseo_runtime_path(config.coordination_root)
+    path = authority_settings_path(config.config_path)
     try:
-        settings = load_shared_paseo_runtime(config.coordination_root)
+        settings = load_authority_paseo_runtime(config.config_path)
     except (PaseoRuntimeSettingsError, OSError) as error:
         return HostObservation(
             "not installed", f"host settings cannot be read at {path}: {error}", {}

@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
 def test_curator_deduplication_keeps_distinct_authority_and_outcome_clauses() -> None:
     surface = normalized(instruction_surface(ROOT, "roles/curator.md"))
     for clause in (
-        "Foundation has no leaf, Manager or brief.",
+        "Report a missing task; never fabricate a task, worktree or enclosure.",
         "never hand-write records, sidecar entries or history, open or edit the derived index",
         "`planned` and `refused` wrote nothing",
         "report refusals exactly as returned.",

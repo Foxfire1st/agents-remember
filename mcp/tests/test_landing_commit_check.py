@@ -43,6 +43,7 @@ from agents_remember.worktrees.modules.landing_commit_check import (
     commit_check_trailer,
     run_landing_commit_check,
 )
+from closeout_skill_surface import closeout_texts
 
 PASS_HOOK = '#!/bin/sh\necho "[gate] result: unit PASS"\nexit 0\n'
 FAIL_HOOK = '#!/bin/sh\necho "[gate] result: ruff FAIL"\necho "[gate] ruff found one unused import" >&2\nexit 1\n'
@@ -436,15 +437,8 @@ class AnswerAndTextTests(unittest.TestCase):
     def test_texts_state_the_new_behavior(self) -> None:
         """MIK-R152 rule 10: the texts that stated the old behavior are corrected."""
 
-        package = Path(__file__).resolve().parent.parent / "src" / "agents_remember"
         checkout = Path(__file__).resolve().parent.parent.parent
-        canonical = (checkout / "skills" / "c-12-closeout" / "SKILL.md").read_text(encoding="utf-8")
-        for skill in (
-            canonical,
-            (
-                package / "package_data" / "runtime" / "skills" / "c-12-closeout" / "SKILL.md"
-            ).read_text(encoding="utf-8"),
-        ):
+        for skill in closeout_texts():
             self.assertIn("no landing publishes without", skill)
             self.assertNotIn("uses `--no-verify`", skill)
             self.assertNotIn("runs no `pre-commit`", skill)
@@ -457,8 +451,8 @@ class AnswerAndTextTests(unittest.TestCase):
     def test_canonical_and_generated_skills_match(self) -> None:
         """MIK-R152 rule 10: the generated copies come from the canonical skill.
 
-        The repository's own generator check passes: every copy of c-12-closeout
-        (package data and harness starters) matches the canonical source.
+        The repository's own generator check passes: every copy of w-02-light-task-workflow
+        (packaged serving data) matches the canonical source.
         """
 
         checkout = Path(__file__).resolve().parent.parent.parent

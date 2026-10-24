@@ -104,9 +104,9 @@ The `c-05-create-or-update-onboarding-files` skill owns file-level onboarding an
 
 The `c-08-ar-coordination-context-resolver` skill owns context resolution facts only.
 
-The `c-09-git-worktree-manager` skill owns worktree lifecycle, integration, and cleanup.
+The `w-02-light-task-workflow` skill owns worktree lifecycle, integration, and cleanup.
 
-The `c-12-closeout` skill owns closeout approval and the code → memory-content commit sequence for
+The `w-02-light-task-workflow` skill owns closeout approval and the code → memory-content commit sequence for
 worktree-backed tasks and the sanctioned branch-direct landing route. Memory commit messages carry
 `Code-Commit` attribution. `memory.md` is an ignored consumer cache computed from that history,
 outside staging, commits, and transaction admission or recovery. Regenerating the cache does not

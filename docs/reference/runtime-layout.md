@@ -2,7 +2,8 @@
 
 The source checkout keeps canonical skills at repository root and packages
 runtime and benchmark assets under `mcp/src/agents_remember/package_data/`. The
-MCP `runtime_install` tool reconciles those assets into `ar-coordination/`.
+MCP `runtime_install` tool reconciles runtime assets into `ar-coordination/`; skills
+remain package-served MCP resources and are never installed into that root or a harness.
 
 ## Source Checkout
 
@@ -10,7 +11,7 @@ MCP `runtime_install` tool reconciles those assets into `ar-coordination/`.
 agents-remember/
   skills/                         # canonical skill source tree
   scripts/
-    sync-skills.py                # copies root skills into generated targets
+    sync-skills.py                # regenerates the package-served skill tree
   mcp/
     src/agents_remember/
       install/
@@ -18,7 +19,6 @@ agents-remember/
         runtime/
           agents-md-files/
             coordinator/AGENTS.md
-            skills/AGENTS.md
             system/AGENTS.md
             tasks/AGENTS.md
           providers/
@@ -34,9 +34,8 @@ agents-remember/
       mcp/
 ```
 
-Edit `skills/` directly. Do not edit the generated skill copies in
-`mcp/src/agents_remember/package_data/runtime/skills/` or the harness starter
-packages by hand; run `python3 scripts/sync-skills.py` after root skill edits.
+Edit `skills/` directly. Do not edit the generated skill tree in
+`mcp/src/agents_remember/package_data/runtime/skills/` by hand; run `python3 scripts/sync-skills.py` after root skill edits.
 
 ## Installed Runtime
 
@@ -52,7 +51,6 @@ ar-coordination/
       <provider>/
     logs/
       <provider>/
-  skills/
   system/
     AGENTS.md
   tasks/
@@ -69,7 +67,6 @@ ar-coordination/
 `runtime_install` reconciles these package runtime assets:
 
 - installed coordinator `AGENTS.md` templates
-- installed skills
 - installed provider defaults, such as pinned requirement files and patch
   assets
 - optional benchmark fixtures when `--include-benchmarks` is passed
@@ -131,18 +128,19 @@ package-local provider modules.
 
 When benchmark installation is enabled, `runtime_install` reconciles package-owned benchmark content under `ar-coordination/benchmarks/` and preserves only user-generated outputs under `ar-coordination/benchmarks/user-runs/`. Source benchmark content includes case manifests, prompts, author results, docs, and workspace templates, not pre-created workspaces. Generated benchmark workspaces are resettable state; normal user memory under `ar-coordination/memory-repos/` is not touched.
 
-Each generated benchmark case workspace has one shared code checkout area under `workspaces/<case-id>/repos/` and one benchmark-local coordination root under `workspaces/<case-id>/ar-coordination/`. `prepare` renders `workspaces/<case-id>/AGENTS.md` from the benchmark template, then clones both pinned code repositories and pinned memory repositories into those resettable workspace locations. Variants are execution modes and result groups, not duplicated workspace trees.
+Each generated benchmark case workspace has separate `source-only/` and `with-memory/`
+environments under `workspaces/<case-id>/`. Both contain the same pinned source checkout
+under `repos/<repo>/`, a rendered `AGENTS.md` and a benchmark root marker. The memory-enabled
+environment also has `ar-coordination/memory-repos/ar-<repo>/` and a `.codex/config.toml`
+registration for its package MCP server. The runner forwards that registration to the
+child process. See [benchmark methodology](../benchmarks-methodology.md).
 
-## Skill Install Contract
+## Skill Resource Contract
 
-`skills_install` copies the packaged skills into a harness skill root for
-maintenance/manual and non-package installs. It is MCP-owned and does not create
-symlinks. The package-based first-run path gets these skills from the copied
-harness starter package instead. The packaged skills are flat (one folder per
-skill), so each is copied directly:
+The MCP server serves its generated package tree as resources. `skill://index.json`
+lists available skills; selected skill and supporting-file URIs read bytes from that
+same installed build. There is no installed skill root or skill-install operation.
 
-```text
-<install-root>/<skill-name>/
-```
-
-`<skill-name>` is the skill's lowercase frontmatter name. There is no layout option or namespace folder — the source is already flat, so the installer just copies the skills across.
+Root `skills/` is the authored source. `scripts/sync-skills.py` regenerates only the
+package-serving tree at `mcp/src/agents_remember/package_data/runtime/skills/`;
+installation and benchmark preparation create no harness or coordination-root skill copy.

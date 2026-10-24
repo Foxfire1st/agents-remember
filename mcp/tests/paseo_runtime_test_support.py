@@ -89,27 +89,52 @@ def runtime_settings(root: Path, **overrides: Any) -> PaseoRuntimeSettings:
     return settings
 
 
-def write_shared_runtime(root: Path, settings: PaseoRuntimeSettings | None) -> None:
-    """One fixture authority per installation, with the same layout the product reads."""
-    path = user_settings_path_for_write()
+def runtime_block(settings: PaseoRuntimeSettings) -> dict[str, Any]:
+    """The authority file's block for one runtime, as the product reads it back."""
+
+    return {
+        "installPrefix": settings.install_prefix.as_posix(),
+        "home": settings.home.as_posix(),
+        "listen": settings.listen,
+        "providers": settings.providers,
+        "embed": settings.embed_payload(),
+    }
+
+
+def _write_block(path: Path, settings: PaseoRuntimeSettings | None) -> Path:
+    """Put (or drop) the block in ``path``'s JSON object, leaving every other key alone."""
+
+    document: dict[str, Any] = {}
+    if path.is_file():
+        document = json.loads(path.read_text(encoding="utf-8"))
     if settings is None:
-        path.unlink(missing_ok=True)
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "paseoRuntime": {
-                    "installPrefix": settings.install_prefix.as_posix(),
-                    "home": settings.home.as_posix(),
-                    "listen": settings.listen,
-                    "providers": settings.providers,
-                    "embed": settings.embed_payload(),
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
+        document.pop("paseoRuntime", None)
+    else:
+        document["paseoRuntime"] = runtime_block(settings)
+    if document:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(document), encoding="utf-8")
+    elif path.is_file():
+        path.unlink()
+    return path
+
+
+def write_runtime_block(config_path: str | Path, settings: PaseoRuntimeSettings | None) -> Path:
+    """The host authority of one installation, in the MCP settings file its config names.
+
+    MIK-R196 rule 3: the ``paseoRuntime`` block is read from the authority settings file the
+    process was started with, so a test writes it into exactly the path its own
+    ``McpRuntimeConfig`` carries — never into the developer's user settings. ``None`` is the
+    unconfigured state: the block (and a file this fixture created) is removed.
+    """
+
+    return _write_block(Path(config_path), settings)
+
+
+def write_user_settings_block(settings: PaseoRuntimeSettings | None) -> Path:
+    """The developer's own settings file, through the guard; only MIK-R137 subjects write it."""
+
+    return _write_block(user_settings_path_for_write(), settings)
 
 
 def write_plugin(root: Path, marker: str) -> Path:

@@ -24,7 +24,6 @@ REQUIRED_ROOTS = (
     "coordinationRoot",
     "workspaceRoot",
     "transcriptRoot",
-    "harnessSkillRoot",
     "receipts.taskless",
     "receipts.messageBindings",
     "reports.taskless",

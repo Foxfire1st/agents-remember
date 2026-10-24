@@ -209,6 +209,12 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
             "task_document_ref": LEAF_REF,
             "role": "worker",
         },
+        # MIK-R196 rule 3 with the architect's ruling: the host block belongs to the MCP authority
+        # settings file, so asking this surface to write it into the user's file is refused by
+        # name -- before any read of a live host and whatever the destination holds.
+        "user_settings_init": {
+            "target": "host-authority",
+        },
         "role_message": {
             "text": "refusal census",
             "agent_id": "00000000-0000-4000-8000-000000000002",

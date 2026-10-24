@@ -21,7 +21,8 @@ from agents_remember.worktrees.modules import closeout_external
 from agents_remember.worktrees.modules.future_code_candidate import capture_future_code_candidate
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
 from test_source_lineage import _git as git
-from test_transaction_only_worktree_delivery import _apply, _closeout_fixture
+from test_transaction_only_worktree_delivery import _apply
+from transaction_only_worktree_delivery_test_support import _closeout_fixture
 
 pytestmark = pytest.mark.integration
 

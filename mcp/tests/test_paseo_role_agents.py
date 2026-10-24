@@ -27,7 +27,7 @@ from agents_remember.serving.paseo.paseo_plugin_files import (
     role_agents_path,
 )
 from agents_remember.serving.paseo.paseo_settings import PaseoRuntimeSettings
-from paseo_runtime_test_support import write_shared_runtime
+from paseo_runtime_test_support import write_runtime_block
 
 
 @pytest.mark.parametrize("ended_count", [8, 256])
@@ -124,9 +124,10 @@ def runtime_config(root: Path, home: Path | None) -> McpRuntimeConfig:
         if home is not None
         else None
     )
-    write_shared_runtime(root, settings)
+    config_path = root / "settings" / "ar.json"
+    write_runtime_block(config_path, settings)
     return McpRuntimeConfig(
-        config_path=root / "settings" / "ar.json",
+        config_path=config_path,
         coordination_root=root / "coordination",
         workspace_root=root / "projects",
         transcript_root=root / "coordination" / "logs" / "mcp",

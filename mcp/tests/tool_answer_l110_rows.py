@@ -641,6 +641,43 @@ CARRYOVER_APPLY_ROW_BOUND = 800
 CARRYOVER_APPLY_PRODUCTION_PATHS = ("applied",)
 
 
+# MIK-R196 rule 11: ``user_settings_init`` answers with the state of the one user settings file --
+# what it changed, which keys it kept, which harnesses each role now uses, and where the file is.
+# Nothing here carries the file's text: the caller reads the file it was pointed at.
+USER_SETTINGS_INIT_ROW_FIELDS = frozenset(
+    {
+        "ok",
+        "changed",
+        "dryRun",
+        "state",
+        "target",
+        "path",
+        "writtenKeys",
+        "preservedKeys",
+        "roleHarnesses",
+        "settingsSources",
+        "detail",
+    }
+)
+
+USER_SETTINGS_INIT_ROW_USES = {
+    "ok": "branch on whether the write was taken",
+    "changed": "tell a run that wrote from one that found the file already carrying it",
+    "dryRun": "tell a preview from a run that wrote",
+    "state": "read the state of the file: absent, host-only, configured, refused or preview",
+    "target": "confirm which of the two writes answered",
+    "path": "find the file the answer is about without searching for it",
+    "writtenKeys": "read which keys this call added, without opening the file",
+    "preservedKeys": "confirm an existing file's own keys were kept, not merged or completed",
+    "roleHarnesses": "read the harness each role now uses, role by role",
+    "settingsSources": "see which file the answer was read from when more than one is in play",
+    "detail": "read why a call refused or what it found, in one sentence",
+}
+
+USER_SETTINGS_INIT_ROW_BOUND = 900
+USER_SETTINGS_INIT_PRODUCTION_PATHS = ("path",)
+
+
 # Row lookup for the production derivation tests: tool to its fields, uses,
 # bound, and production paths.
 L110_ROW_DATA = {
@@ -661,6 +698,12 @@ L110_ROW_DATA = {
         QUALITY_ROW_USES,
         QUALITY_ROW_BOUND,
         QUALITY_PRODUCTION_PATHS,
+    ),
+    "user_settings_init": (
+        USER_SETTINGS_INIT_ROW_FIELDS,
+        USER_SETTINGS_INIT_ROW_USES,
+        USER_SETTINGS_INIT_ROW_BOUND,
+        USER_SETTINGS_INIT_PRODUCTION_PATHS,
     ),
     "route_index_refresh": (
         ROUTE_ROW_FIELDS,

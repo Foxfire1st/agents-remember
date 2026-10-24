@@ -15,7 +15,7 @@ from agents_remember.serving import daemon
 from agents_remember.serving.paseo.paseo_settings import daemon_settings
 from agents_remember.serving.paseo.paseo_start import HostObservation, ensure_host
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
-from paseo_runtime_test_support import FakePaseo, free, runtime_settings, write_shared_runtime
+from paseo_runtime_test_support import FakePaseo, free, runtime_settings, write_runtime_block
 
 
 def config(root):
@@ -185,7 +185,7 @@ def test_real_background_function_serves_before_host_outcome_and_logs(
     cfg = config(tmp_path)
     entered, release, finished = threading.Event(), threading.Event(), threading.Event()
     settings = runtime_settings(tmp_path)
-    write_shared_runtime(tmp_path, settings)
+    write_runtime_block(cfg.config_path, settings)
     fake = FakePaseo(settings)
     fake.install(settings.install_prefix, settings.version)
     fake.write_settings(daemon_settings(settings))
@@ -257,7 +257,7 @@ def test_discovered_config_path_is_named_in_normal_and_transition_outcomes(tmp_p
     resolved, cfg = resolution
     assert resolved == str(path)
     settings = runtime_settings(tmp_path)
-    write_shared_runtime(tmp_path, settings)
+    write_runtime_block(cfg.config_path, settings)
     fake = FakePaseo(settings)
     fake.install(settings.install_prefix, settings.version)
     fake.write_settings(daemon_settings(settings))

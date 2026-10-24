@@ -34,7 +34,8 @@ from agents_remember_test_support.testing.leaf_instruction_wording import (
     normalized,
 )
 from test_role_capsule_audiences import _compile_corpus_pair
-from test_role_instruction_wording import PACKAGED, HandoverTextWordingTests
+from test_role_instruction_wording import PACKAGED
+from test_role_instruction_wording_handover import HandoverTextWordingTests
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 LIFECYCLE = "l-01-agent-lifecycles"
@@ -61,10 +62,10 @@ def surfaces() -> list[Path]:
     return [root / LIFECYCLE for root in roots]
 
 
-#: The ten surfaces the inventory names today: the canonical tree plus nine
-#: generated copies. A dropped or added surface fails here, visibly, instead
-#: of passing silent on a smaller census.
-EXPECTED_SURFACE_COUNT = 10
+#: The two surfaces the inventory names today (MIK-R196 rule 7): the canonical tree and the
+#: packaged serving copy, which is the only generated copy the product ships. A dropped or
+#: added surface fails here, visibly, instead of passing silent on a smaller census.
+EXPECTED_SURFACE_COUNT = 2
 
 ROLE_FILES = tuple(
     f"roles/{name}.md"

@@ -36,7 +36,7 @@ PNT_BUILD_FILES = (
     "mcp/src/agents_remember/package_data/paseo_plugin/paseo-plugin.json",
     "dashboard/package.json",
     "scripts/sync-dashboard.py",
-    "scripts/harness/render_starter.py",
+    "scripts/pnt_sandbox/settings_expectation.py",
 )
 _ERROR_TAIL = 1500
 
@@ -161,10 +161,10 @@ class Operations:
         return report
 
     def render_settings(self, checkout: Path) -> dict[str, Any]:
-        """The tooling's one renderer consumes native setup; the checkout supplies the SDK."""
+        """The sandbox's own settings owner prepares setup; the product supplies its defaults."""
         done = self.helper(
             checkout,
-            "render_starter_settings.py",
+            "settings_expectation.py",
             [
                 "--settings",
                 str(self.layout.settings_file),
@@ -172,8 +172,6 @@ class Operations:
                 str(self.layout.projects),
                 "--coordination",
                 str(self.layout.coordination),
-                "--host-port",
-                str(self.layout.paseo_port),
                 "--dashboard-port",
                 str(self.layout.dashboard_port),
                 "--repo",
@@ -182,9 +180,9 @@ class Operations:
             120,
         )
         if done.returncode != 0:
-            raise StepFailed("starter render", done.tail)
+            raise StepFailed("sandbox settings", done.tail)
         report = json.loads(done.stdout)
-        (self.layout.run_dir / "starter-render-receipt.json").write_text(
+        (self.layout.run_dir / "settings-receipt.json").write_text(
             json.dumps(report, indent=2) + "\n"
         )
         return report

@@ -14,36 +14,27 @@ coordinator scripts directly.
 
 ## Quickstart
 
-Setup is agent-driven. Ask your agent to:
+Install this build and register the MCP server using your
+[harness guide](https://github.com/Foxfire1st/agents-remember/tree/main/docs/install).
+For this checkout, build a wheel (`uv build --wheel mcp`) and point the registration
+at its absolute path:
 
-1. **Copy the harness package** — Pick your harness guide under
-   [docs/install](https://github.com/Foxfire1st/agents-remember/tree/main/docs/install),
-   copy that harness's native starter files from the source repo into the
-   workspace, then render the copied package. The `render-starter` script is a
-   convenience: it infers the workspace root from the copied harness folder and
-   fills the copied package's path, repository, and hook-command placeholders
-   from a single `--repo` list such as `--repo my-app shared-lib`. You can also
-   do those replacements by hand. These packages include the harness-visible skills,
-   hooks/rules/instructions, MCP settings templates, and local renderers.
-2. **Wire the MCP server** — Build a wheel from this checkout (`uv build --wheel mcp`
-   at the repository root), then register it with `uvx` and the copied settings file:
+```text
+uvx --python 3.14 --from /absolute/path/to/built-wheel.whl agents-remember-mcp --config /absolute/path/to/agents-remember-settings.json
+```
 
-   ```text
-   uvx --python 3.14 --from /absolute/path/to/built-wheel.whl agents-remember-mcp --config /absolute/path/to/agents-remember-settings.json
-   ```
+Restart the harness if needed to discover that registration. From your own chat,
+call `role_start(role="bootstrap", request_id=<fresh UUID>)` once. The call prepares
+a missing runtime/host and starts one instructed Bootstrap seat; its answer names
+the seat and the dashboard/chat where you continue setup. It creates no task or
+other role. On refusal, use the reported stage/effects and recovery action, then
+retry the same request UUID.
 
-   Use the `agents-remember-settings.json` path from the copied harness package.
-   Then **restart the harness once** so it loads the MCP server, native skills,
-   and package hooks/rules/instructions.
-3. **Onboard your project** — Invoke the copied skill
-   `c-13-install-and-onboard`. It runs or verifies `runtime_install()`, asks
-   whether to scaffold a new memory repo or use an existing one, and bootstraps
-   onboarding when needed. (Provider indexing is retired: no provider install,
-   index, or watch step runs.)
-
-That is the normal first-run path. The starter packages already provide the
-initial skills and harness files. Your only required first-run restart is after
-copying the harness package and wiring the MCP server.
+Skills are MCP resources served from the package. No starter package, renderer or
+harness/project/coordination-root skill folder is required. Optional native
+instruction/hook files carry only the first-action directive. Bootstrap previews
+role settings and sets up or reads memory; the user starts an Architect for
+optional onboarding and knowledge work as a regular task.
 
 ## Requirements
 
@@ -62,9 +53,8 @@ The requirements here describe the current checkout and wheels built from it: Py
   Ollama as a Docker container and pull an embedding model (`nomic-embed-text`)
   on first setup — no host Ollama install is required.
 
-Claude Code hooks do not require `jq`. Older starter packages used a `jq`
-one-liner to encode hook output; the current starter packages use Python
-renderers and Python hook scripts.
+Optional first-action hooks are described in the harness install guides. They do
+not distribute skills or render setup settings.
 
 ### Canonical Linux/WSL development runtime
 
@@ -127,8 +117,8 @@ agents-remember dashboard --daemon --config /absolute/path/to/active-harness-set
 ```
 
 The install brings the build-pinned Paseo host and its whole locked tree on the
-product's checked Node (Linux x86_64). One shared paseoRuntime block in
-<coordinationRoot>/system/settings.json supplies its facts. Each dashboard start
+product's checked Node (Linux x86_64). The paseoRuntime block in the
+active MCP authority settings file supplies its facts. Each dashboard start
 ensures the installed host without installing/upgrading; dashboard stop/restart
 keeps host sessions running. Explicit paseo stop ends running turns and pending
 prompts, with sessions resumable after a new start. --status prints both states
@@ -159,7 +149,7 @@ registration folder in an `mcp/` subdirectory** (see
 
 ## Settings
 
-A minimal starter `agents-remember-settings.json` (your agent can fill this in):
+A minimal MCP authority `agents-remember-settings.json` (your agent can fill this in):
 
 ```json
 {
@@ -202,11 +192,11 @@ stops leftover watchers and reports enabled provider keys once as unused.)
 
 ### Settings file location
 
-Place the settings file where the copied starter package expects it. Keep it
-under the harness registration folder, not loose in the workspace root and not
-inside `ar-coordination/`.
+Use the absolute settings path in the MCP registration. The per-harness guides
+use the locations below; this authority file is separate from the user's
+role-harness settings file.
 
-| Harness | Starter package | Settings path after copy |
+| Harness | Registration folder | MCP settings path |
 | --- | --- | --- |
 | Claude Code | `.claude/` | `.claude/mcp/agents-remember-settings.json` |
 | Codex | `.codex/` | `.codex/mcp/agents-remember-settings.json` |
@@ -242,14 +232,13 @@ installed console command) and the absolute settings path:
 ```
 
 After installing or changing the MCP server registration, restart the harness so
-it reloads the server and discovers the tool list. Use the starter package for
-your harness whenever possible; it already carries the matching skills,
-hooks/rules/instructions, and settings template.
+it reloads the server and discovers the tools and packaged skill resources. The
+per-harness guide separately describes optional native first-action directives.
 
 ### Per-harness setup pages
 
-Harnesses differ in where settings and skills go — so follow your harness's
-page, don't guess:
+Harnesses differ in their MCP registration and optional native instruction files;
+follow your harness's page:
 
 | Harness | Setup guide |
 | --- | --- |
@@ -262,44 +251,32 @@ page, don't guess:
 | Pi.dev | [docs/install/pi.md](https://github.com/Foxfire1st/agents-remember/blob/main/docs/install/pi.md) |
 | OpenClaw | [docs/install/openclaw.md](https://github.com/Foxfire1st/agents-remember/blob/main/docs/install/openclaw.md) |
 
-**One flat folder per skill.** The copied starter package already includes the
-skills in the harness-native skill root.
+Canonical skill directories are served from the server package as MCP resources;
+no harness-native skill root is populated.
 
 ## Install Order And First Operations
 
-With starter packages, the strict first-run order is **package + MCP wiring →
-one harness restart → runtime and onboarding**.
+The first-run order is **MCP registration → restart if needed → one Bootstrap call**.
+Continue with the returned seat in its dashboard chat. Bootstrap initializes or
+reads memory and role settings without overwriting existing targets; it starts no
+other role and authors no onboarding or knowledge. At exit, the user starts an
+Architect for that optional regular work.
+
+The package-served `c-13-install-and-onboard` procedure describes this setup and
+its maintenance owners. For an explicitly requested runtime refresh, the existing
+maintenance tools remain:
 
 ```text
-server_info()                      # confirm resolved roots / allowed providers
-runtime_install(dry_run=true)      # preview, then apply:
-runtime_install(dry_run=false)     # scaffold coordinator (no provider image
-                                 # build remains: the install only stops leftover
-                                 # watchers and reports enabled provider keys
-                                 # once as unused)
+server_info()
+runtime_install(dry_run=true)
+runtime_install(dry_run=false)
 context_packet(repo_id="<repo-id>")
 ```
 
-The copied `c-13-install-and-onboard` skill owns this post-restart phase. It
-runs or verifies `runtime_install()`, sets up the memory repo, and bootstraps
-onboarding. (Provider indexing is retired: it starts nothing.)
-
-Why this order:
-
-1. **Harness-native files first.** Skills, hooks/rules/instructions, and MCP
-   settings are loaded by the harness, so the copied starter package must be in
-   place before restart.
-2. **Runtime scaffolding after restart.** The MCP server must be loaded before
-   the agent can run `runtime_install()`. The runtime tool creates the
-   coordinator directory and records the provider-runner integrity manifest.
-3. **Providers retired.** The two former providers were heavy (Docker, plus
-   Ollama for grepai), per-repo, and optional; both are retired and never count
-   as enabled, so nothing in this section runs anymore. Note the retained
-   parameters: `install_provider_deps` now only scopes the providers-tree copy
-   (dependency-skipped copies preserve live runner state), and `no_cache`
-   rebuilds nothing provider-side — neither starts any provider install, index,
-   or watch. Old enabled keys are reported once as unused, and leftover
-   watchers are stopped; remove leftover Docker containers only if asked.
+A runtime refresh creates no skill copy and starts no retired provider indexing
+or watcher. It preserves user-owned memory, tasks and state. Its host result
+reports absent authority, retained sessions or a required restart truthfully;
+the one-call Bootstrap preparation owns creation of a missing authority block.
 
 ## Troubleshooting
 
@@ -336,7 +313,7 @@ work can still proceed — commits just won't carry your identity until you set 
 The server exposes tools for:
 
 - startup context and drift checks
-- runtime and skill installation
+- runtime scaffold installation and package-served skill resources
 - memory initialization, memory quality checks, and route index refresh
 - worktree-backed closeout and task workflows
 - benchmark preparation and execution (opt-in; see the note below)

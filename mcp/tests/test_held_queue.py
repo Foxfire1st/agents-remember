@@ -26,15 +26,13 @@ from agents_remember.cli.role_held_messages import (
 from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA
 from agents_remember.observer.host_activity import HOST_ACTIVITY_FILE
 from agents_remember.serving.projections import host_activity as host_activity_module
-from agents_remember.serving.projections.host_activity import (
-    activity_directory,
-    turn_ended_agents,
-)
+from agents_remember.serving.projections.host_activity import activity_directory, turn_ended_agents
 
 read_receipt = receipts_module._read_receipt
 """Read one execution receipt in these proofs."""
+from paseo_role_tools_test_support import ARCHIVED_AT
 from test_native_retire import retire
-from test_paseo_role_tools import ARCHIVED_AT, RoleToolsTestCase, binding, selection_of
+from test_paseo_role_tools import RoleToolsTestCase, binding, selection_of
 
 
 class HeldQueueRecoveryTests(RoleToolsTestCase):

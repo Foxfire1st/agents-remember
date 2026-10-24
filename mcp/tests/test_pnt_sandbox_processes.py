@@ -159,8 +159,11 @@ class StartAndStopTests(SandboxCase):
         self.assertTrue(builder.is_built(self.layout))
         self.assertLess(ops.calls.index("tool calls"), ops.calls.index("runtime_install"))
         self.assertEqual(keep.read_text(), "user task survives the normal rebuild")
-        self.assertNotIn("paseoRuntime", json.loads(self.layout.settings_file.read_text()))
-        self.assertIn("public starter render", ops.calls)
+        # MIK-R196 rule 3: the rebuilt sandbox carries its own host block in its authority
+        # settings file, and the developer's user settings file is never created for it.
+        self.assertIn("paseoRuntime", json.loads(self.layout.settings_file.read_text()))
+        self.assertFalse(self.layout.user_settings_file.exists())
+        self.assertIn("sandbox settings owner", ops.calls)
         self.assertTrue((self.layout.repository / "textkit" / "case.py").is_file())
         self.assertEqual(self.stop(ops), 0)
 

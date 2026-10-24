@@ -27,11 +27,7 @@ from agents_remember.cli.developer_message_files import (
     read_developer_message,
     read_sent,
 )
-from agents_remember.cli.developer_message_forms import (
-    OPENING_CALLS,
-    FormRoots,
-    written_form,
-)
+from agents_remember.cli.developer_message_forms import OPENING_CALLS, FormRoots, written_form
 from agents_remember.cli.developer_messages import (
     HELD_TEXT_LIMIT,
     DeveloperMessageRequest,
@@ -55,9 +51,10 @@ from agents_remember.serving.projector import ProjectionCadence
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from paseo_launch_test_support import SERVER_ID
+from paseo_role_tools_test_support import ARCHIVED_AT
 from pydantic import TypeAdapter
 from test_paseo_launch import LEAF_REF, REPO
-from test_paseo_role_tools import ARCHIVED_AT, RoleToolsTestCase
+from test_paseo_role_tools import RoleToolsTestCase
 
 PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(64))
 INVARIANT_FILE = "knowledge/invariants/INV-1ZKP4R-turn-end.json"

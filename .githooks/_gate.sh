@@ -106,7 +106,6 @@ generated_copy_checks() {
   generated_projection_check || return 1
   generated_check skills scripts/sync-skills.py || return 1
   generated_check runtime scripts/sync-runtime.py || return 1
-  generated_check harness scripts/sync-harness.py || return 1
   return 0
 }
 

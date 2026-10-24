@@ -26,7 +26,7 @@ from agents_remember.kernel.primitives.paseo_runtime_settings import (
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from paseo_runtime_test_support import write_shared_runtime
+from paseo_runtime_test_support import write_runtime_block
 
 SERVER_ID = "srv_frameTest"
 LOCAL = PaseoEmbedEntry("http://127.0.0.1:9797", "http://127.0.0.1:6820")
@@ -46,9 +46,10 @@ def runtime_settings(root: Path) -> PaseoRuntimeSettings:
 
 
 def runtime_config(root: Path, settings: PaseoRuntimeSettings | None) -> McpRuntimeConfig:
-    write_shared_runtime(root, settings)
+    config_path = root / "settings" / "ar.json"
+    write_runtime_block(config_path, settings)
     return McpRuntimeConfig(
-        config_path=root / "settings" / "ar.json",
+        config_path=config_path,
         coordination_root=root / "coordination",
         workspace_root=root / "projects",
         transcript_root=root / "coordination" / "logs" / "mcp",

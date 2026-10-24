@@ -9,7 +9,7 @@ names, keep today's single-source row; the overview refusal stands; ``RowRequest
 again, whose item must come back ``satisfiedBy`` the row the writer wrote. No hand-composed item,
 no constructed code snapshot and no mocked gate stand in for that loop.
 
-The group is L56's shape: one canonical ``c-05`` skill file and its nine generated copies.
+The group is L56's shape: one canonical ``c-05`` skill file and its packaged generated copy.
 """
 
 from __future__ import annotations
@@ -46,23 +46,16 @@ ABSENT = "absent"
 
 SKILL = "skills/c-05-write-onboarding/assets/file-level-onboarding-template.md"
 COPY_TARGETS = (
+    # MIK-R196 rule 7: the packaged serving copy is the only generated copy that survives.
     "mcp/src/agents_remember/package_data/runtime/skills",
-    ".claude/skills",
-    ".codex/skills",
-    ".cursor/skills",
-    ".github-vscode/skills",
-    ".hermes/skills",
-    ".openclaw/workspace/skills",
-    ".pi/skills",
-    ".agents/skills",
 )
 COPIES = tuple(
     f"{target}/c-05-write-onboarding/assets/file-level-onboarding-template.md"
     for target in COPY_TARGETS
 )
 GROUP = (SKILL, *COPIES)
-BODY = "# the template\n\nOne template, nine generated copies.\n"
-CHANGED_BODY = "# the template\n\nOne template, nine generated copies, one wording.\n"
+BODY = "# the template\n\nOne template, one generated copy.\n"
+CHANGED_BODY = "# the template\n\nOne template, one generated copy, one wording.\n"
 
 
 # -- fixtures ------------------------------------------------------------------------------------
@@ -72,7 +65,7 @@ def _rebased(world: World, code_head: str, memory_head: str) -> WorktreeContract
     """The leaf contract re-based on the commits that hold the group and its card.
 
     The fixture's contract pins the bases it was built with. A leaf whose code base is the commit
-    that holds the ten copies (so the change at C is their deletion) and whose memory base is the
+    that holds the two copies (so the change at C is their deletion) and whose memory base is the
     commit that holds their card states both here, as a real leaf's contract does.
     """
 
@@ -107,14 +100,14 @@ def _card(world: World, source: str) -> None:
 
 
 def _grouped_leaf(world: World, *, deleted: bool) -> WorktreeContract:
-    """The ten identical copies at the code base, then deleted (or reworded) at C, with the card.
+    """The two identical copies at the code base, then deleted (or reworded) at C, with the card.
 
     The card's memory commit names the code base in its ``Code-Commit`` trailer, so the leaf's own
     worklist pairs the two sides as a landed leaf's do.
     """
 
     write(world.code, {path: BODY for path in GROUP})
-    commit_all(world.code, "the template and its nine copies")
+    commit_all(world.code, "the template and its packaged copy")
     code_head = git(world.code, "rev-parse", "HEAD")
     if deleted:
         for path in GROUP:
@@ -208,7 +201,7 @@ def _item(subject: str, sources: tuple[str, ...], blobs: Mapping[str, str]) -> d
 
 
 def test_a_card_row_binds_every_copy_of_its_source(tmp_path: Path) -> None:
-    """L56's shape: ten identical copies deleted at C; the row binds ten and the item closes."""
+    """L56's shape: two identical copies deleted at C; the row binds two and the item closes."""
 
     world = build_world(tmp_path)
     contract = _grouped_leaf(world, deleted=True)
@@ -217,7 +210,7 @@ def test_a_card_row_binds_every_copy_of_its_source(tmp_path: Path) -> None:
     assert before is not None
     item = _trace_item(before, subject)
     sources = tuple(item["facts"]["sources"])
-    assert len(sources) == 10 and set(sources) == set(GROUP)
+    assert len(sources) == 2 and set(sources) == set(GROUP)
     assert item["facts"]["sourceBlobs"] == {path: ABSENT for path in sources}
     assert item["satisfiedBy"] is None  # the item is open before the row exists
     report = _writer(world, subject, before)
@@ -242,7 +235,7 @@ def test_a_grouped_card_row_binds_the_copies_blobs_when_they_are_present(tmp_pat
     item = _trace_item(before, subject)
     sources = tuple(item["facts"]["sources"])
     blobs = dict(item["facts"]["sourceBlobs"])
-    assert len(sources) == 10 and set(sources) == set(GROUP)
+    assert len(sources) == 2 and set(sources) == set(GROUP)
     assert blobs == {path: _blob(world, path) for path in GROUP}
     report = _writer(world, subject, before)
     assert report.state == "written", report.render()

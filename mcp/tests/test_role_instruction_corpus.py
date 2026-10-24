@@ -14,7 +14,7 @@ the properties a consumer depends on:
 * EVERY relative path the corpus cites resolves, so a consolidation cannot leave a dangling
   reference;
 * a manifest that points at a missing source is reported rather than silently accepted; and
-* retired instruction sentences are gone from the canonical tree and all nine copies,
+* retired instruction sentences are gone from the canonical tree and every declared package copy,
   while the compact curator role and operation preserve the current complete-quality policy.
 """
 
@@ -34,6 +34,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
     task_doc_tool,
 )
 from agents_remember.tasks import write_task_doc
+from curation_statement_surface import fragment_one_surfaces
 from test_task_document import _config, _doc
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -736,7 +737,7 @@ def test_link_check_reports_a_repo_relative_anchor_pointed_at_nothing(tmp_path: 
 #
 # WHAT THIS DOES NOT COVER (stated, not implied). Neither registry is a semantic check: a corpus
 # that denied the rule, or restated the wrong gate, in fresh vocabulary the registries have never
-# seen would pass. Scope is the canonical `skills/**` tree plus the nine generated copies
+# seen would pass. Scope is the canonical `skills/**` tree plus its declared package copies
 # `scripts/sync-skills.py` owns, and for the loop gate the reference documents named in
 # `LOOP_GATE_DOCUMENTS`; the copies' byte-identity with their originals is that generator's own
 # contract (`scripts/sync-skills.py --check`), while what is asserted here is that every copy
@@ -789,7 +790,7 @@ class CurationPolicyTests:
             assert doctrine_files(REPOSITORY_ROOT, copy_root), f"{copy_root} produced no surfaces"
         assert set(CURATION_DOCTRINE_SURFACES) == {"skills", *GENERATED_SKILL_COPIES}
 
-        # The loop-gate census ranges over those same ten surfaces plus the reference documents
+        # The loop-gate census ranges over those same declared surfaces plus the reference documents
         # outside the skill tree that state the loop, so its coverage boundary is asserted rather
         # than assumed: a document that dropped a corrected field name is reported here, and one
         # that moved away is reported as missing, instead of silently leaving the census.
@@ -816,7 +817,7 @@ class CurationPolicyTests:
         )
 
     def test_every_generated_copy_carries_the_policy_its_canonical_original_states(self) -> None:
-        """A stale copy is a real defect: a seat on that harness reads the old policy."""
+        """A stale package copy serves the old policy to its reader."""
 
         missing: list[str] = []
         for copy_root in GENERATED_SKILL_COPIES:
@@ -934,19 +935,13 @@ class CurationGuardTeethTests:
     def test_a_statement_is_reported_only_on_a_surface_that_shipped_it(self) -> None:
         """The registry is a census of surfaces, not a single-file check."""
 
-        fragment_one = next(
-            row
-            for row in RETIRED_CURATION_STATEMENTS
-            if row.reason.startswith("fragment 1:")
-            and row.sources == ("skills/l-01-agent-lifecycles/templates/curator-brief.md",)
+        statement, declared, undeclared = fragment_one_surfaces()
+        assert retired_statement_findings(normalize_statement(statement), declared), (
+            "the curator brief must be a declared surface for fragment 1"
         )
-        assert retired_statement_findings(
-            normalize_statement(fragment_one.statement),
-            "l-01-agent-lifecycles/templates/curator-brief.md",
-        ), "the curator brief must be a declared surface for fragment 1"
-        assert not retired_statement_findings(
-            normalize_statement(fragment_one.statement), "c-02-memory-quality-control/SKILL.md"
-        ), "an undeclared surface must not be reported for a statement it never shipped"
+        assert not retired_statement_findings(normalize_statement(statement), undeclared), (
+            "an undeclared surface must not be reported for a statement it never shipped"
+        )
 
 
 def test_new_series_guidance_requires_json_primary_master_before_dependencies() -> None:

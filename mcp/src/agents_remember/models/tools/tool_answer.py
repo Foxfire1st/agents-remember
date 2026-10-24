@@ -136,6 +136,9 @@ TOOL_ANSWER_EXCEPTIONS: dict[tuple[str, str | None], tuple[int, str]] = {
 # bounds and the production bounds are one number, not two.
 SHAPED_TOOL_BOUNDS: dict[tuple[str, str | None], int] = {
     ("citation_fix", None): 1500,
+    # MIK-R196 rule 11: the settings answer carries the state, the two key lists, the harness of
+    # every role and its sources; its largest measured answer is 572 chars.
+    ("user_settings_init", None): 900,
     ("memory_quality_check", None): 1500,
     # MIK-R73 rule 4: the answer carries every family's routes beside the findings, so this
     # tool's own bound is the one that grew; every other tool keeps the default.

@@ -15,6 +15,7 @@ from paseo_runtime_test_support import FakePaseo, file_states, free, runtime_set
 
 
 def setup_config(root):
+    root.mkdir(parents=True, exist_ok=True)
     config_file = root / "settings.json"
     config_file.write_text(
         json.dumps(
@@ -28,9 +29,8 @@ def setup_config(root):
     return load_config(config_file)
 
 
-def write_host(root, version_marker):
-    root.mkdir(parents=True, exist_ok=True)
-    settings = runtime_settings(root)
+def write_host(config, version_marker):
+    settings = runtime_settings(config.config_path.parent)
     block = {
         "installPrefix": str(settings.install_prefix),
         "home": str(settings.home),
@@ -40,16 +40,16 @@ def write_host(root, version_marker):
     }
     if version_marker is not None:
         block["version"] = version_marker
-    path = user_settings_path_for_write()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"paseoRuntime": block}))
+    document = json.loads(config.config_path.read_text())
+    document["paseoRuntime"] = block
+    config.config_path.write_text(json.dumps(document))
     return settings
 
 
 def test_install_reads_added_shared_block_at_call_and_provisions_once(tmp_path):
     config = setup_config(tmp_path)
     assert config.paseo_runtime is None
-    settings = write_host(tmp_path, "latest")
+    settings = write_host(config, "latest")
     fake = FakePaseo(settings)
 
     def provision(actual):
@@ -74,7 +74,7 @@ def test_install_reads_added_shared_block_at_call_and_provisions_once(tmp_path):
         second = run_runtime_install(config, RuntimeInstallRequest())
         second_mutations = fake.mutations(at)
         second_files = file_states(tmp_path)
-        shared = user_settings_path_for_write()
+        shared = config.config_path
         document = json.loads(shared.read_text())
         document["paseoRuntime"]["providers"]["new-provider"] = {"extends": "acp"}
         shared.write_text(json.dumps(document))
@@ -101,7 +101,7 @@ def test_install_reads_added_shared_block_at_call_and_provisions_once(tmp_path):
     assert whole["summary"] == previous["summary"]
     assert whole["host"]["version"] == PASEO_VERSION
     assert "latest" in whole["host"]["notice"]
-    assert str(user_settings_path_for_write()) in whole["host"]["notice"]
+    assert str(config.config_path) in whole["host"]["notice"]
     assert fake.mutations().count(("npm", "ci")) == 1
     assert {
         "ok",
@@ -145,7 +145,7 @@ def test_preview_and_absent_host_make_no_mutation_and_host_error_preserves_earli
         result = run_runtime_install(config, RuntimeInstallRequest(dry_run=True))
     assert not result["host"]["configured"]
     assert not (user_settings_path_for_write()).exists()
-    settings = write_host(tmp_path, None)
+    settings = write_host(config, None)
     fake = FakePaseo(settings)
     before = file_states(tmp_path)
     preview_call = paseo_install.preview_host
@@ -207,8 +207,8 @@ def test_preview_and_absent_host_make_no_mutation_and_host_error_preserves_earli
 def test_build_pin_wins_all_settings_selectors_and_legacy_harness_block_is_ignored(tmp_path):
     config = setup_config(tmp_path)
     for selector in (None, PASEO_VERSION, "0.10.0", "*"):
-        settings = write_host(tmp_path / str(selector), selector)
         variant = setup_config(tmp_path / str(selector))
+        settings = write_host(variant, selector)
         fake = FakePaseo(settings)
         actual = variant.paseo_runtime
         assert actual is not None
@@ -218,10 +218,9 @@ def test_build_pin_wins_all_settings_selectors_and_legacy_harness_block_is_ignor
         assert fake.version_at(settings.install_prefix) == PASEO_VERSION
         if selector not in (None, PASEO_VERSION):
             assert actual.version_notice and str(selector) in actual.version_notice
-    shared = user_settings_path_for_write()
-    shared.unlink(missing_ok=True)
-    document = json.loads(config.config_path.read_text())
-    document["paseoRuntime"] = {"listen": "127.0.0.1:9786"}
-    config.config_path.write_text(json.dumps(document))
-    with __import__("pytest").warns(UserWarning, match="ignored; move that block"):
-        assert load_config(config.config_path).paseo_runtime is None
+    legacy = user_settings_path_for_write()
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(json.dumps({"paseoRuntime": {"listen": "127.0.0.1:9786"}}))
+    # L188 moved the host authority to the MCP settings file: the old user-settings block is
+    # ignored, not read, and the authority file remains the only source of `paseoRuntime`.
+    assert load_config(config.config_path).paseo_runtime is None

@@ -10,52 +10,27 @@ the tool server ``agents-remember-task``, and the handover says that a server na
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 import tempfile
 import unittest
-import uuid
 from pathlib import Path
-from typing import Any, get_args
-from unittest.mock import patch
 
 from agents_remember.application.role_capsules.compilation import (
     compile_admitted_capsule,
-)
-from agents_remember.application.role_capsules.launch import _capsule_launch
-from agents_remember.application.role_launch_context import (
-    RoleLaunchContext,
-    resolve_role_launch_context,
 )
 from agents_remember.application.skill_resources.capsule import (
     CapsuleSeatAddress,
     routed_admission_for,
 )
-from agents_remember.cli import role_launch_preparation
-from agents_remember.cli.paseo_launch import StartingAgent
-from agents_remember.cli.role_launch_preparation import (
-    RoleHandoverRequest,
-    _ar_mcp_context,
-    _compile_handover,
-)
-from agents_remember.kernel.primitives.runtime_config import (
-    McpRuntimeConfig,
-    RepositoryScope,
-)
-from agents_remember.mcp.registration.role_agents import register_role_agent_tools
 from agents_remember.models.role_capsules.types import (
     CapsuleAdmittedFacts,
     CapsuleBinding,
-    CapsuleOperation,
     CapsuleRoleSeat,
     CapsuleToolPolicy,
     compute_content_digest,
 )
-from agents_remember.models.role_identity import canonical_role
-from agents_remember.models.role_launcher import LauncherRole, RoleSelection
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
-from agents_remember.tasks import TaskDocument
 from agents_remember_test_support.testing.capsule_wording import (
     assert_git_comparison_scope,
     clause_mutations,
@@ -74,85 +49,20 @@ from agents_remember_test_support.testing.leaf_instruction_wording import (
     forbidden_autonomy_clauses,
     missing_clauses,
 )
-from mcp.server.fastmcp import FastMCP
-
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-LIFECYCLE = Path("l-01-agent-lifecycles")
-CANONICAL = REPOSITORY_ROOT / "skills"
-# The copy the capsule compiler reads; a rewrite is not live until the sync has run.
-PACKAGED = (
-    REPOSITORY_ROOT / "mcp" / "src" / "agents_remember" / "package_data" / "runtime" / "skills"
+from role_instruction_wording_support import (
+    _NAMED_TOOL,
+    CANONICAL,
+    LAUNCHER_ROLES,
+    LIFECYCLE,
+    PACKAGED,
+    REPOSITORY_ROOT,
+    STARTERS,
+    TOOL_SERVER,
+    forbidden_in,
+    instruction_files,
+    read,
+    role_text,
 )
-
-# PNT-R06 item 12, searched case-insensitively.
-FORBIDDEN = (
-    "orca",
-    "native Run",
-    "Run/Task/Dispatch",
-    "Dispatch worker",
-    "worker-start",
-    "run-create",
-    "worker_done",
-    "dispatch_agent",
-    "message_parent",
-    "message_child",
-    # MIK-R113 rule 10: the other removed tools, the seat variables of the earlier way and the
-    # removed argument of worktree_attach. No role text tells an agent to use a removed part.
-    "rename_child",
-    "rename_self",
-    "lifecycle_start",
-    "lifecycle_resume",
-    "lifecycle_turn_end_notification",
-    "lifecycle_end",
-    "switch_lifecycle",
-    "lifecycle_phase",
-    "lifecycle_gate",
-    "gate_decide",
-    "gate_list",
-    "AR_SPAWN_ROLE",
-    "AR_HOSTED_SESSION_ID",
-    "on_unsaved",
-)
-# The report directory of a role, as a segment of the report and artifact paths in a handover. It
-# carried the previous host's name until the rename leaf (PNT-R08); the search below now reads
-# the whole text, this segment included.
-REPORT_DIRECTORY = "/role-launch/"
-
-TOOL_SERVER = "agents-remember-task"
-OTHER_INSTALLATION = "agents-remember"
-LAUNCHER_ROLES: tuple[str, ...] = tuple(
-    dict.fromkeys(canonical_role(role) for role in get_args(LauncherRole))
-)
-STARTERS = ("architect", "orchestrator", "manager")
-_NAMED_TOOL = re.compile("`(" + "|".join(sorted(map(re.escape, PUBLIC_TOOLS))) + ")`")
-
-
-def forbidden_in(text: str) -> list[str]:
-    """The forbidden strings a text contains, in the packet's spelling."""
-
-    folded = text.casefold()
-    return [word for word in FORBIDDEN if word.casefold() in folded]
-
-
-def instruction_files() -> list[Path]:
-    """The router, the launcher roles' files and their operations, relative to a skill tree."""
-
-    manifest = json.loads((CANONICAL / LIFECYCLE / "composition-manifest.json").read_text("utf-8"))
-    roles = [manifest["roles"][role]["file"] for role in LAUNCHER_ROLES]
-    operations = [
-        entry["source"]
-        for entry in manifest["operations"].values()
-        if set(entry["applies_to_roles"]) & set(LAUNCHER_ROLES)
-    ]
-    return [LIFECYCLE / name for name in ("SKILL.md", *roles, *sorted(operations))]
-
-
-def read(relative: Path) -> str:
-    return (CANONICAL / relative).read_text(encoding="utf-8")
-
-
-def role_text(role: str) -> str:
-    return " ".join(read(LIFECYCLE / "roles" / f"{role}.md").split())
 
 
 class InstructionFileWordingTests(unittest.TestCase):
@@ -242,7 +152,7 @@ class InstructionFileWordingTests(unittest.TestCase):
                 "When an Investigator is needed, start it with `role_start` on `agents-remember-task` without a task reference, on a sprint, or on a sprint and master. Send the scoped concern as your first `role_message` on `agents-remember-task` to the returned agent ID. A Manager or Orchestrator may also start an Investigator within its own scope.",
                 "Put questions for the developer, and requests for a ruling, in your own chat; the developer answers there. Under developer-chosen direct coordination, review the full candidate diff, including unattributed changes; under delegation, the Manager owns the leaf-diff and repair loop and supplies aggregate evidence through the Orchestrator where one exists. Treat invariant-family attribution as an additional review dimension, not a filter on changed files. Keep a finished turn, semantic review, curation, and paired Git publication as separate facts. Do not accept your own work or convert green checks into requirement acceptance. Record decisions and task truth through the existing AR task/data owners.",
                 "You may check, measure, run tests and builds, read the code and sources of the product, the host and the harnesses, and try things out in a sandbox yourself, as the developer would; that includes a check before a landing. Such work informs your rulings, your requirements and the developer. It never takes the place of a leaf's build, review, curation or gate, and you change no leaf's code or memory: those go through its Worker, Reviewer and Curator. You grade nothing you wrote. Nothing of yours runs in a candidate's worktree; work on a copy. Reading code and sources for a check is not loading another task's documents or another role's instructions; the read-only rules of line 42 and of `operations/orientation.md` stay as they are. You perform no step of a landing except the paired closeout in the developer-chosen direct-coordination case below; a check before a landing is not a step of it. For a check or investigation you do not do yourself, give the needed check or investigation to the Manager or Orchestrator coordinating the work; under developer-chosen direct coordination, assign a leaf's check to its Worker or Reviewer and a check or investigation that belongs to no leaf to an Investigator.",
-                "You may author requirements, tasks, plans, and rulings. Do not write onboarding. Flat mode here is only the developer-chosen direct-coordination exception. In flat mode, when no Manager or Orchestrator owns closeout, you may coordinate the existing c-09/c-12 paired transaction only under its already-delegated authority and after independent review and required curation evidence exist. In that case you call the paired closeout yourself and start no Manager for that step alone; it grants no other execution. Human-pinned approvals remain human; never substitute raw Git or self-approval. A high-impact design/security choice, requirement contradiction, missing authority, or scope change returns to the developer. One concise report preserves the decision, refs, evidence, open questions, and limits; no completion claim replaces inspection of the artifact.\n",
+                "You may author requirements, tasks, plans, and rulings. Do not write onboarding. Flat mode here is only the developer-chosen direct-coordination exception. In flat mode, when no Manager or Orchestrator owns closeout, you may coordinate the existing paired closeout only under the already-delegated authority of the kept closeout procedure (`../operations/closeout.md` with its `../../w-02-light-task-workflow/workflows/closeout.md` workflow) and after independent review and required curation evidence exist. In that case you call the paired closeout yourself and start no Manager for that step alone; it grants no other execution. Human-pinned approvals remain human; never substitute raw Git or self-approval. A high-impact design/security choice, requirement contradiction, missing authority, or scope change returns to the developer. One concise report preserves the decision, refs, evidence, open questions, and limits; no completion claim replaces inspection of the artifact.\n",
             ],
             "roles/orchestrator.md": [
                 "You coordinate one selected sprint when two or more masters are worked on at the same time, or when the developer explicitly asks for an Orchestrator above a single master. You operate at Projects altitude. A launch supplies the canonical sprint reference and allowed workspace; the state of an agent in Paseo is not an AR acceptance ledger.",
@@ -270,7 +180,7 @@ class InstructionFileWordingTests(unittest.TestCase):
             "operations/coordination.md": [
                 "The Manager starts a leaf's Worker, Reviewer and Curator as a set in one `role_start_set` call on `agents-remember-task`: the Worker opens at once, and the Reviewer and the Curator are held until their first message opens them, unless the call carries the Reviewer's first work. The Reviewer first cold-reads the requirement before code exists. The Worker, Reviewer and Curator run the leaf repair loop directly with `role_message` on `agents-remember-task`: Worker freeze to Reviewer, verdict and sealed findings back to Worker, passed freeze and producer lists to Curator, memory change and verdict between Curator and Reviewer. A Curator's code concern goes to both Reviewer and Worker even after code PASS; the Reviewer answers it and the Curator records the answer. The Manager reads their reports, decides the gate and keeps closeout, integration, status, acceptance and landing order; it relays no freeze, finding, verdict or memory change. Keep paired code/memory/report paths and exact task references in each hand-over.",
                 "The Architect delegates coordination first to one Manager for one master, or to one Orchestrator on the sprint when two or more masters are worked on at the same time. The Orchestrator starts one Manager per master; each Manager coordinates its distinct Workers, Reviewers, and Curators. Only the developer may choose direct coordination by the Architect. The developer may also ask for an Orchestrator above a single master. If the Architect's coordinating-agent start is refused, the Architect tells the developer the refusal and its reason; it does not fall back to direct coordination.",
-                "Send one message to one agent with `role_message` on `agents-remember-task`, addressed by agent ID or by role plus task references. A leaf hand-over uses the role and exact task reference its seat list gives for the role addressed; use a product-supplied agent ID only whole and unchanged. The current leaf resolver reaches a seat's single live agent; a seat with two live occupants is refused naming both, and the tool never picks one; an empty-seat refusal is reported once to the Manager with its text and no candidate is chosen. A role address never means you yourself. A recipient that is mid-turn takes the message up without its turn being cancelled; when the host cannot hand a message to the running turn, the message is held, and while anything is held for a recipient a further message is held behind it. A message to a recipient that waits for a permission decision, or whose start has not finished, is held the same way: the answer says `held` and why, and the product delivers what it holds in the order it took it once the recipient can take it. The host is never sent a message for a recipient that waits at a permission prompt, because it would answer the permission with a denial; only the developer answers the prompt, in that agent's chat. A closed session is resumed first; an archived or missing agent is refused and stays as it is. With `wait` the call returns when the turn that took your message has ended: with the recipient's final text, or saying that the turn failed or was cancelled; or it returns a pending permission, also for a wait on a held message, or a timeout with the message still delivered. It can also return `accepted` without a text, when the host cannot say which turn took the message; read the reply later then. The text of a message delivered during a turn can be that running turn's own; `detail` says so. Do not wait on an agent that may be waiting on you: two agents that wait on each other both stand still until one wait runs out. If your own tool calls are cut off earlier than the wait, pass a shorter `timeout_seconds`. An Orchestrator, Manager or developer-direct-coordinating Architect follows assignments until the work is complete, blocked, or a true developer decision is needed; it does not start a role and stop. The Architect releases execution coordination after the handover and continues the developer conversation and status reading; it holds no wait on an Orchestrator or Manager for execution completion. On a refusal or an uncertain result, act on the named reason; do not guess a parent or start duplicate work. A role started from the dashboard works directly with the developer and needs no parent.",
+                "Send one message to one agent with `role_message` on `agents-remember-task`, addressed by agent ID or by role plus task references. A leaf hand-over uses the role and exact task reference in `leafSeats.roleMessageArguments`; use a product-supplied agent ID only whole and unchanged. The current leaf resolver reaches a seat's single live agent; a seat with two live occupants is refused naming both, and the tool never picks one; an empty-seat refusal is reported once to the Manager with its text and no candidate is chosen. A role address never means you yourself. A recipient that is mid-turn takes the message up without its turn being cancelled; when the host cannot hand a message to the running turn, the message is held, and while anything is held for a recipient a further message is held behind it. A message to a recipient that waits for a permission decision, or whose start has not finished, is held the same way: the answer says `held` and why, and the product delivers what it holds in the order it took it once the recipient can take it. The host is never sent a message for a recipient that waits at a permission prompt, because it would answer the permission with a denial; only the developer answers the prompt, in that agent's chat. A closed session is resumed first; an archived or missing agent is refused and stays as it is. With `wait` the call returns when the turn that took your message has ended: with the recipient's final text, or saying that the turn failed or was cancelled; or it returns a pending permission, also for a wait on a held message, or a timeout with the message still delivered. It can also return `accepted` without a text, when the host cannot say which turn took the message; read the reply later then. The text of a message delivered during a turn can be that running turn's own; `detail` says so. Do not wait on an agent that may be waiting on you: two agents that wait on each other both stand still until one wait runs out. If your own tool calls are cut off earlier than the wait, pass a shorter `timeout_seconds`. An Orchestrator, Manager or developer-direct-coordinating Architect follows assignments until the work is complete, blocked, or a true developer decision is needed; it does not start a role and stop. The Architect releases execution coordination after the handover and continues the developer conversation and status reading; it holds no wait on an Orchestrator or Manager for execution completion. On a refusal or an uncertain result, act on the named reason; do not guess a parent or start duplicate work. A role started from the dashboard works directly with the developer and needs no parent.",
             ],
             "SKILL.md": [
                 "Use the agent IDs these tools return and the sender line of each message you receive; never invent a sender, recipient, parent, or delivery result.",
@@ -279,10 +189,10 @@ class InstructionFileWordingTests(unittest.TestCase):
             ],
             "roles/curator.md": [
                 "Intake/writer admission: `../operations/curation.md` §Required inputs and §Bound Paseo intake and capabilities.",
-                "taskless `agents-remember knowledge-bootstrap` under `c-14-knowledge-bootstrap`, with **no enclosure in scope**, otherwise `enclosure_in_scope`, never writing onto a task's line.",
-                "Never fabricate a leaf, worktree or enclosure for either route;",
-                "or the mounted `knowledge_write`, which runs the same writer with the same arguments;",
-                "No other route writes knowledge.",
+                "**Repository foundation is regular task work.** After setup reports memory/baseline state, the user starts the Architect, which opens the real foundation task, standalone or under a master/sprint.",
+                "Never fabricate a leaf, worktree or enclosure;",
+                "or the mounted `knowledge_write`, which runs the same writer with the same arguments.",
+                "No other route writes knowledge from this seat.",
                 "Report one full-intake worklist of distinct outstanding memory actions:",
                 "A Curator started from the dashboard has no parent and needs none.",
                 "A Curator starts no role:",
@@ -302,7 +212,7 @@ class InstructionFileWordingTests(unittest.TestCase):
 
     def test_direct_closeout_keeps_the_architect_and_its_existing_gates(self) -> None:
         architect = role_text("architect")
-        kept = "In flat mode, when no Manager or Orchestrator owns closeout, you may coordinate the existing c-09/c-12 paired transaction only under its already-delegated authority and after independent review and required curation evidence exist."
+        kept = "In flat mode, when no Manager or Orchestrator owns closeout, you may coordinate the existing paired closeout only under the already-delegated authority of the kept closeout procedure (`../operations/closeout.md` with its `../../w-02-light-task-workflow/workflows/closeout.md` workflow) and after independent review and required curation evidence exist."
         self.assertIn(kept, architect)
         self.assertIn(
             "Flat mode here is only the developer-chosen direct-coordination exception.",
@@ -310,7 +220,7 @@ class InstructionFileWordingTests(unittest.TestCase):
         )
         closeout = " ".join(read(LIFECYCLE / "operations/closeout.md").split())
         self.assertIn(
-            "In a flat run with neither role, the owning Architect may coordinate the same transaction only when existing delegated c-09/c-12 authority permits it.",
+            "In a flat run with neither role, the owning Architect may coordinate the same transaction only when the already-delegated authority of the kept closeout workflow (`../../w-02-light-task-workflow/workflows/closeout.md`) permits it.",
             closeout,
         )
         self.assertNotIn(kept, [row.statement for row in RETIRED_CURATION_STATEMENTS])
@@ -370,12 +280,15 @@ class InstructionFileWordingTests(unittest.TestCase):
     ) -> None:
         names = [path.relative_to(LIFECYCLE).as_posix() for path in instruction_files()]
         self.assertEqual(names[0], "SKILL.md")
-        self.assertEqual(names[1:8], [f"roles/{role}.md" for role in LAUNCHER_ROLES])
+        roles_end = 1 + len(LAUNCHER_ROLES)
+        self.assertEqual(names[1:roles_end], [f"roles/{role}.md" for role in LAUNCHER_ROLES])
         self.assertEqual(
-            names[8:],
+            names[roles_end:],
             [
                 f"operations/{name}.md"
                 for name in (
+                    # MIK-R196: the free agent's operation is reachable from a launch now.
+                    "bootstrap",
                     "closeout",
                     "coordination",
                     "curation",
@@ -491,12 +404,16 @@ class InstructionFileWordingTests(unittest.TestCase):
                     self.assertNotIn("`role_start`", text)
                     self.assertRegex(
                         text,
-                        r"(?:A (?:Worker|Reviewer|Curator)|An Investigator) starts no role",
+                        r"(?:A (?:Worker|Reviewer|Curator)|An Investigator) starts no role"
+                        r"|Bootstrap starts no role",
                     )
         for role in set(LAUNCHER_ROLES) - {"architect"}:
             with self.subTest(role=role, told="a role without a parent needs none"):
                 text = role_text(role)
-                original = r"started from the dashboard,? (has no parent|has none|needs no parent)"
+                original = (
+                    r"started from the dashboard,? (?:it )?"
+                    r"(has no parent|has none|needs no parent|have no parent|need none)"
+                )
                 if role == "reviewer":
                     self.assertTrue(
                         re.search(original, text)
@@ -724,566 +641,6 @@ class InstructionFileWordingTests(unittest.TestCase):
             '`agents-remember-task` names it (write "agent ID not known" when you sent no '
             "message), and open limitations.",
             implementation,
-        )
-
-
-class HandoverTextWordingTests(unittest.TestCase):
-    """The handover text as the launch code builds it, with the reader context of the launch.
-
-    The role resolver and role-specific capsule compiler run. Only task-reader/enclosure plumbing
-    is isolated; no launch, model or lifecycle operation runs in this fixture.
-    """
-
-    def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        root = Path(temporary.name).resolve()
-        self.config = McpRuntimeConfig(
-            config_path=root / "settings" / "mcp.json",
-            coordination_root=root / "coordination",
-            workspace_root=root / "projects",
-            transcript_root=root / "coordination" / "logs" / "mcp",
-            repositories={
-                "repo": RepositoryScope(
-                    repo_id="repo",
-                    path=root / "projects" / "repo",
-                    memory_root=root / "memory",
-                )
-            },
-        )
-        for name, stub in (
-            ("compile_launch_capsule", self.role_capsule),
-            (
-                "build_context_packet",
-                lambda *_args, **_kwargs: {"repo": {"id": "repo"}},
-            ),
-            (
-                "_read_task_doc",
-                lambda _config, resolved: {
-                    "canonicalTaskPath": resolved.ref.key,
-                    "taskDocumentRef": resolved.ref.model_dump(mode="json"),
-                },
-            ),
-            # A leaf's readers are confined to its enclosure, which this test does not create.
-            ("task_scoped_mcp_config_for_reader", lambda config, **_scope: config),
-        ):
-            patcher = patch.object(role_launch_preparation, name, stub)
-            patcher.start()
-            self.addCleanup(patcher.stop)
-
-    def role_capsule(
-        self, _config: McpRuntimeConfig, request: Any, *, operation: CapsuleOperation
-    ) -> Any:
-
-        corpus = PACKAGED / LIFECYCLE
-        manifest_bytes = (corpus / "composition-manifest.json").read_bytes()
-        manifest = json.loads(manifest_bytes)
-        role = request.role
-        binding = CapsuleBinding(
-            operation=operation,
-            admitted=CapsuleAdmittedFacts(
-                task_reference=request.task_document_ref.key
-                if request.task_document_ref
-                else "fixture:Projects",
-                task_document_digest=compute_content_digest(b"fixed handover comparison inputs"),
-                seat=CapsuleRoleSeat(role=role, altitude=manifest["roles"][role]["altitude"]),
-                repository_id="repo",
-                work_branch="fixture",
-                tool_policy=CapsuleToolPolicy(granted=frozenset(PUBLIC_TOOLS)),
-            ),
-        )
-        outcome = compile_admitted_capsule(
-            binding,
-            routed_admission_for(
-                corpus,
-                "composition-manifest.json",
-                manifest_bytes,
-                CapsuleSeatAddress(role=role, operation=operation),
-            ),
-        )
-        self.assertTrue(outcome.ok, outcome.render_explanation())
-        assert outcome.result is not None
-        return _capsule_launch(role, outcome.result)
-
-    def launch_of(self, role: str) -> tuple[RoleLaunchContext, dict[str, str]]:
-        """Taskless, sprint, master and leaf selections admitted by the production resolver."""
-
-        root = self.config.coordination_root
-        documents = {
-            "sprint/task.json": {
-                "id": "SPRINT",
-                "kind": "master",
-                "orchestrates": ["master"],
-            },
-            "master/task.json": {
-                "id": "MASTER",
-                "kind": "master",
-                "subTasks": [
-                    {
-                        "number": "01",
-                        "name": "Leaf",
-                        "file": "01_leaf.md",
-                        "status": "inProgress",
-                    }
-                ],
-            },
-            "master/01_leaf.json": {
-                "id": "01_LEAF",
-                "kind": "subTask",
-                "master": "task.md",
-                "status": "inProgress",
-            },
-        }
-        for relative, fields in documents.items():
-            document = TaskDocument.model_validate(
-                {
-                    "slug": Path(relative).stem,
-                    "title": fields["id"],
-                    "repo": "repo",
-                    "createdAt": "2026-10-02T00:00:00+00:00",
-                    **fields,
-                }
-            )
-            path = root / "tasks" / "repo" / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(document.model_dump_json(by_alias=True), encoding="utf-8")
-        refs = {}
-        if role not in {"architect", "investigator"}:
-            refs["sprintDocumentRef"] = {
-                "repository": "repo",
-                "path": "sprint/task.json",
-            }
-        if role in {"manager", "worker", "reviewer", "curator"}:
-            refs["masterDocumentRef"] = {
-                "repository": "repo",
-                "path": "master/task.json",
-            }
-        if role in {"worker", "reviewer", "curator"}:
-            refs["taskDocumentRef"] = {
-                "repository": "repo",
-                "path": "master/01_leaf.json",
-            }
-        context = resolve_role_launch_context(
-            self.config, RoleSelection.model_validate({"role": role, **refs})
-        )
-        workspace = {"path": self.config.workspace_root.as_posix()}
-        if context.task is not None:
-            enclosure = self.config.workspace_root / "enclosure"
-            workspace = {
-                "path": enclosure.as_posix(),
-                "contractPath": (enclosure / "contract.json").as_posix(),
-                "taskReportAccessRoot": (enclosure / "role-reports").as_posix(),
-                "taskReportRoot": (context.task.path.parent / "notes" / "reports").as_posix(),
-            }
-        return context, workspace
-
-    def compiled(self, role: str, started_by: StartingAgent | None) -> tuple[str, dict[str, Any]]:
-        context, workspace = self.launch_of(role)
-        request_id = uuid.uuid4()
-        role_launch_preparation._prepare_role_folders(context, workspace, request_id)
-        prepared = _compile_handover(
-            RoleHandoverRequest(
-                config=self.config,
-                context=context,
-                workspace=workspace,
-                agent_id="some-provider",
-                ar_mcp_context=_ar_mcp_context(self.config, context, workspace),
-                request_id=request_id,
-                started_by=started_by,
-            )
-        )
-        return prepared["prompt"], prepared["handover"]
-
-    def test_developer_question_channel_matches_role_and_parent(self) -> None:
-        ordinary = (
-            "Put every question for the developer in your own chat: write it as your reply "
-            "in this session and end your turn. The developer reads this chat in the "
-            "dashboard and answers in it. Never send a developer question to another agent."
-        )
-        architect = StartingAgent("1f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "architect", "Projects")
-        orchestrator = StartingAgent(
-            "2f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "orchestrator", "SPRINT"
-        )
-        for role, parent, routed in (
-            ("orchestrator", architect, True),
-            ("orchestrator", None, False),
-            ("manager", architect, True),
-            ("manager", orchestrator, True),
-            ("manager", None, False),
-            ("worker", architect, True),
-            ("worker", orchestrator, True),
-            (
-                "worker",
-                StartingAgent("3f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "manager", "MASTER"),
-                True,
-            ),
-            ("reviewer", architect, True),
-            ("curator", architect, True),
-            ("investigator", architect, True),
-        ):
-            with self.subTest(role=role, parent=parent.role if parent else None):
-                prompt, handover = self.compiled(role, parent)
-                question = handover["host"]["developerQuestions"]
-                self.assertIn(question, prompt)
-                if routed:
-                    assert parent is not None
-                    self.assertIn(
-                        "send what needs the developer's decision to that parent",
-                        question,
-                    )
-                    # A question stays addressed to the parent's agent ID (MIK-R93
-                    # rules 1 and 10; architect QADDR ruling option (a)): rule 10's
-                    # return address is not extended to questions.
-                    self.assertIn(f"addressed to agent {parent.agent_id}", question)
-                    self.assertNotIn("addressed to the return address", question)
-                    self.assertIn("role_message on agents-remember-task", question)
-                    self.assertIn("takes precedence over generic own-chat guidance", question)
-                    self.assertIn("do not end your turn on the question", question)
-                else:
-                    self.assertEqual(question.encode(), ordinary.encode())
-        for role in LAUNCHER_ROLES:
-            with self.subTest(dashboard_role=role):
-                _prompt, handover = self.compiled(role, None)
-                self.assertEqual(handover["host"]["developerQuestions"].encode(), ordinary.encode())
-
-    def test_owner_relation_routes_developer_questions_and_preserves_coordinators(
-        self,
-    ) -> None:
-        parents = (
-            StartingAgent("1f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "architect", "Projects"),
-            StartingAgent("2f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "orchestrator", "SPRINT"),
-            StartingAgent("3f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "manager", "MASTER"),
-        )
-        final = "Send one further message with the path of your report when the whole assignment is finished or cannot be finished."
-        for role in LAUNCHER_ROLES:
-            for parent in (None, *parents):
-                with self.subTest(role=role, parent=parent.role if parent else None):
-                    prompt, handover = self.compiled(role, parent)
-                    relation = handover["host"]["ownerRelation"]
-                    self.assertIn(relation, prompt)
-                    if parent is None:
-                        expected = "This role was started from the dashboard launcher. It has no parent agent and needs none: the developer who reads this chat owns its decisions. The selected AR sprint/master/leaf is work scope, not a parent."
-                        self.assertEqual(relation.encode(), expected.encode())
-                    elif role in {"orchestrator", "manager"}:
-                        self.assertIn(
-                            f"Agent {parent.agent_id} ({parent.role} · {parent.subject}) started this role and is its parent in Paseo.",
-                            relation,
-                        )
-                        # The categories of a developer decision are the role text's, named
-                        # rather than repeated: the same passage may not stand twice in one
-                        # first message (MIK-R193 rule 6).
-                        self.assertIn(
-                            "what needs the developer's decision, as your role text defines it",
-                            relation,
-                        )
-                        self.assertIn(final, relation)
-                        self.assertIn("addressed to the return address", relation)
-                        self.assertNotIn("addressed to its agent id", relation)
-                        self.assertNotIn("questions about the assignment and your result", prompt)
-                    elif role in {"worker", "reviewer", "curator"}:
-                        self.assertIn("Send no routine result to the parent.", relation)
-                        self.assertIn("leafSeats.roleMessageArguments", relation)
-                        # A leaf's parent is the current Manager of its master, and a
-                        # return goes to that role with its task references (rule 10).
-                        self.assertIn("the current Manager of this master", relation)
-                        self.assertIn("addressed to the return address role manager", relation)
-                        self.assertNotIn("addressed to its agent id", relation)
-                    else:
-                        self.assertIn(
-                            f"Agent {parent.agent_id} ({parent.role} · {parent.subject}) started this role and is its parent in Paseo.",
-                            relation,
-                        )
-                        self.assertIn("addressed to the return address", relation)
-                        self.assertIn("is not the address of a return", relation)
-                        self.assertNotIn("addressed to its agent id", relation)
-                        self.assertIn(
-                            "your questions about the assignment, questions requiring the "
-                            "developer's decision, and your result",
-                            relation,
-                        )
-
-    def test_the_first_message_names_no_forbidden_host_string(self) -> None:
-        parent = StartingAgent("1f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "architect", "Projects")
-        for label, role, started_by in (
-            ("a taskless role started from the dashboard", "architect", None),
-            ("a sprint-bound role started by an agent", "orchestrator", parent),
-            ("a leaf role started by an agent", "worker", parent),
-        ):
-            with self.subTest(label):
-                prompt, handover = self.compiled(role, started_by)
-                self.assertIn(REPORT_DIRECTORY, prompt)
-                self.assertEqual(forbidden_in(prompt), [])
-                self.assertEqual(forbidden_in(json.dumps(handover, ensure_ascii=False)), [])
-                # The first message carries the reader arguments; the rest of the reader context
-                # is in the complete hand-over file the message names (MIK-R193 rule 1).
-                projection = json.loads(
-                    prompt.split("AR owner assignment and canonical task handover:\n", 1)[1]
-                )
-                reader = handover["arMcpContext"]
-                reader_arguments = reader["readerArguments"]
-                expected = (
-                    {"readerArguments": reader_arguments}
-                    if reader_arguments is not None
-                    else {
-                        key: reader[key]
-                        for key in ("availableRepositoryIds", "repositorySelection")
-                        if reader.get(key) is not None
-                    }
-                )
-                self.assertEqual(projection["arMcpContext"], expected)
-                self.assertEqual(
-                    projection["handoverFile"]["path"],
-                    handover["taskReportPath"].rsplit(".", 1)[0] + ".handover.json",
-                )
-
-    def test_the_reader_context_names_the_readers_of_the_task_tool_server(self) -> None:
-        _prompt, leaf = self.compiled("worker", None)
-        _prompt, taskless = self.compiled("architect", None)
-        self.assertEqual(
-            (leaf["arMcpContext"]["scopeKind"], taskless["arMcpContext"]["scopeKind"]),
-            ("canonical-leaf", "configured-projects"),
-        )
-        self.assertEqual(
-            leaf["arMcpContext"]["missingCapabilityAction"],
-            f"If the context_packet or the read_ar_files schema of {TOOL_SERVER} lacks "
-            "task_context with both task_document_ref and contract_path, stop and report the "
-            "missing ar-task-scoped-readers/v1 capability. Do not call a task reader without "
-            "task_context or substitute caller-selected roots.",
-        )
-        self.assertEqual(
-            taskless["arMcpContext"]["missingCapabilityAction"],
-            f"If the context_packet or the read_ar_files schema of {TOOL_SERVER} is unavailable, "
-            "report that; do not invent a repository id or pass caller-selected roots.",
-        )
-        # "The installed AR" is the developer's other installation: no reader text points there.
-        for handover in (leaf, taskless):
-            told = json.dumps([handover["arMcpContext"], handover["host"]], ensure_ascii=False)
-            self.assertNotIn("installed", told)
-            self.assertNotIn("AR MCP tool", told)
-
-    def test_the_handover_names_the_tool_server_the_two_tools_and_the_host(
-        self,
-    ) -> None:
-        prompt, handover = self.compiled("architect", None)
-        host = handover["host"]
-        self.assertEqual((host["name"], host["arToolServer"]), ("Paseo", TOOL_SERVER))
-        self.assertIn(
-            f"Call every Agents Remember tool on the tool server named {TOOL_SERVER}",
-            host["arMcpUsage"],
-        )
-        for said in (
-            "and its tools are in this session.",
-            # A lookup by the server's name as it is spelled here can find nothing, and one by a
-            # tool's own name finds another installation's tool: the server's name, in either
-            # spelling, is what to look for.
-            "A harness shows them in its own way, so find them by the server's name in either "
-            f"spelling, {TOOL_SERVER} or agents_remember_task.",
-            "Either a tool is declared to you under a name that contains that spelling and ends "
-            "in the tool's own name, for example mcp__agents_remember_task__server_info: call "
-            "it.",
-            "Or your harness's own instructions to you list a server or namespace in that "
-            "spelling, for example mcp__agents_remember_task, and say how its tools are "
-            "reached, for example through the harness's tool search or its script tool: reach "
-            "them that way, and learn a tool's arguments there too.",
-            # A tool that proxies other servers answers for those servers only.
-            "A tool that lists, describes, connects or proxies tool servers holds only the "
-            f"servers it was configured with. When it does not list {TOOL_SERVER} itself, do "
-            "not use it for AR tools at all, not even to search for or describe a tool by its "
-            "name: what it answers then comes from another installation, and its answer "
-            '"server not found" speaks only for that tool.',
-            # The developer's own installation, which every harness carries, by its name; and
-            # any other AR tool server, whatever its name: not connected to, listed or called.
-            f"Do not connect to, list, describe or call a tool server named {OTHER_INSTALLATION} "
-            "or any of its tools, nor an AR tool server under any other name: it belongs to "
-            "another installation, its tools carry the same tool names, and nothing found there "
-            "serves this assignment.",
-            f"look once more before reporting {TOOL_SERVER} missing, and report that instead of "
-            "substituting another.",
-            "add the requested files to read_ar_files as a list of path strings such as "
-            '"<path in the repository>". A read names where each file is and carries no file '
-            "text: read the named files with your harness's own file tool.",
-        ):
-            with self.subTest(said=said):
-                self.assertIn(said, host["arMcpUsage"])
-        # The paragraph tells an agent where to look and names no harness and no harness's tool.
-        self.assertNotRegex(host["arMcpUsage"], r"(?i)codemode|tool_search|\bmcp\(")
-        # The first message says it in plain text before the capsule, which names AR tools, and
-        # again as a field of the handover.
-        self.assertEqual(prompt.count(host["arMcpUsage"]), 1)
-        self.assertLess(
-            prompt.index(f"AR tools, before your first tool call: {host['arMcpUsage']}"),
-            prompt.index("AR owner assignment and canonical task handover:"),
-        )
-        self.assertEqual(
-            {key: host["roleTools"][key] for key in ("toolServer", "start", "message")},
-            {
-                "toolServer": TOOL_SERVER,
-                "start": "role_start",
-                "message": "role_message",
-            },
-        )
-        usage = host["roleTools"]["usage"]
-        for said in (
-            f"role_start on {TOOL_SERVER} starts one role agent",
-            f"role_message on {TOOL_SERVER} sends one message to one role agent",
-            "It never interrupts a running turn.",
-            "repeat the same id to reconcile an uncertain start",
-            "an agent created another way has no capsule and no binding",
-            "A message the host cannot take now is held by the product instead of refused: to "
-            "a recipient that waits for a permission decision, whose start has not finished, "
-            "or that is in a turn the host cannot write into.",
-            "The answer says held and why, and the product delivers what it holds in the order "
-            "it took it once the recipient can take it.",
-            "The host is never sent a message for a recipient that waits at a permission "
-            "prompt, because it would answer the permission with a denial: the developer "
-            "answers it in that agent's chat.",
-            "A role address never means the caller itself.",
-            "Without wait the call answers accepted once the host took the message, or held "
-            "once the product held it.",
-            "or it says that a permission is pending, also for a wait on a held message, or "
-            "that the time was up, and the message stays delivered then.",
-            "the recipient's final text, or that the turn failed or was cancelled",
-            "It can answer accepted without a text when the host cannot say which turn took "
-            "the message, and the text of a message delivered during a turn can be the running "
-            "turn's own; detail says which.",
-            "Do not wait on an agent that may be waiting on you: two agents that wait on each "
-            "other both stand still until one wait runs out.",
-            # What a recipient does with a message: its chat reply is the answer.
-            'A message another agent sent you begins with a line "From <role> · <task> · agent '
-            '<agent id>": your reply in that turn reaches the sender only when it waits on '
-            "its own call; otherwise answer with role_message to that agent id.",
-        ):
-            with self.subTest(said=said):
-                self.assertIn(said, usage)
-        self.assertIn(
-            "Put every question for the developer in your own chat",
-            host["developerQuestions"],
-        )
-        self.assertIn("taskless role has no task document", handover["ownerHandover"])
-        self.assertTrue(
-            prompt.startswith("AR ROLE BRIEF: the dashboard launcher started this role")
-        )
-        self.assertEqual(handover["schema"], "ar-role-handover/v1")
-        self.assertEqual(handover["agent"], "some-provider")
-
-    def test_a_role_without_a_parent_is_told_it_needs_none_and_a_started_role_who_started_it(
-        self,
-    ) -> None:
-        _prompt, manual = self.compiled("architect", None)
-        self.assertEqual(manual["host"]["entryMode"], "dashboard-role-start")
-        self.assertIsNone(manual["host"]["parent"])
-        self.assertIn("It has no parent agent and needs none", manual["host"]["ownerRelation"])
-        parent = StartingAgent("1f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "architect", "Projects")
-        prompt, started = self.compiled("orchestrator", parent)
-        self.assertEqual(started["host"]["entryMode"], "agent-role-start")
-        self.assertEqual(
-            started["host"]["parent"],
-            {
-                "agentId": parent.agent_id,
-                "role": "architect",
-                "task": "Projects",
-                "sprintDocumentRef": None,
-                "masterDocumentRef": None,
-                "taskDocumentRef": None,
-                "returnAddress": {"role": "architect"},
-            },
-        )
-        self.assertIn(
-            f"Agent {parent.agent_id} (architect · Projects) started this role and is its parent",
-            started["host"]["ownerRelation"],
-        )
-        self.assertIn(
-            "addressed to the return address role architect", started["host"]["ownerRelation"]
-        )
-        self.assertNotIn("addressed to its agent id", started["host"]["ownerRelation"])
-        self.assertTrue(
-            prompt.startswith(
-                f"AR ROLE BRIEF: agent {parent.agent_id} (architect · Projects) started this role"
-            )
-        )
-
-
-class RoleToolDescriptionWordingTests(unittest.TestCase):
-    def test_the_three_tool_descriptions_name_no_forbidden_host_string(self) -> None:
-        async def descriptions() -> dict[str, str]:
-            server = FastMCP("role-tool-descriptions")
-            register_role_agent_tools(server, None)  # type: ignore[arg-type]
-            return {tool.name: tool.description or "" for tool in await server.list_tools()}
-
-        described = asyncio.run(descriptions())
-        self.assertEqual(sorted(described), ["role_message", "role_start", "role_start_set"])
-        reference = " ".join(
-            (REPOSITORY_ROOT / "docs/reference/mcp-tools.md").read_text("utf-8").split()
-        )
-        for name, text in described.items():
-            with self.subTest(tool=name):
-                self.assertEqual(forbidden_in(text), [])
-                if name == "role_message":
-                    self.assertIn("Reference: docs/reference/mcp-tools.md.", text)
-                    self.assertIn("Only a role agent that AR launched can call it", reference)
-                else:
-                    self.assertIn("Only a role agent that AR launched can call this", text)
-        self.assertIn("in Paseo", described["role_start"])
-        told = {name: " ".join(text.split()) for name, text in described.items()}
-        told["role_message"] += " " + reference
-        for name, sentence in (
-            (
-                "role_start",
-                "Only the agent that started an execution repeats its request_id.",
-            ),
-            ("role_start", "Starts run one at a time."),
-            (
-                "role_message",
-                "When the host cannot say which turn consumed the message, the call "
-                "returns `accepted` without a text and detail says the reply must be read later.",
-            ),
-            (
-                "role_message",
-                "A reply to a message delivered during a turn can be the running turn's text; "
-                "detail says so then.",
-            ),
-            (
-                "role_message",
-                "A recipient waiting on a permission decision, whose start has not finished, "
-                "or that is in a turn the host cannot write into is answered `held`, not refused:",
-            ),
-            (
-                "role_message",
-                "the reason (`heldReason`), what waits and why (`detail`), "
-                "the permission as the host names it or null when unnamed (`permission`)",
-            ),
-            (
-                "role_message",
-                "Code `recipient-busy` is refused outright only when the recipient already holds "
-                "twenty messages",
-            ),
-            (
-                "role_message",
-                "Only the host request is promised: without wait the call answers once the host "
-                "accepted the message",
-            ),
-            (
-                "role_message",
-                "with wait it answers when the consuming turn ends "
-                "(finished, failed, cancelled, permission, timeout)",
-            ),
-            (
-                "role_start_set",
-                "Start a leaf's Worker, Reviewer and Curator in one call (MIK-R100 rule 1).",
-            ),
-            (
-                "role_start_set",
-                "A repeat with the same request id reconciles the same three agents: it "
-                "creates no fourth and opens no held seat.",
-            ),
-            ("role_message", "an address by role never means the caller itself."),
-            ("role_start", "rejected (the launch is closed; no usable agent exists)"),
-        ):
-            with self.subTest(tool=name, sentence=sentence[:40]):
-                self.assertIn(sentence, told[name])
-        self.assertIn(
-            "`From <role> · <task id or Projects> · agent <sender agent id>`",
-            told["role_message"],
         )
 
 

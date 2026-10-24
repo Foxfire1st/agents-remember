@@ -18,7 +18,7 @@ from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, agent_title
 from agents_remember.cli.role_handover_artifacts import artifact_line
 from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
 from agents_remember.cli.role_launch_receipts import _message_binding_projection_reference
-from agents_remember.models.role_launcher import RoleDispatchRequest
+from agents_remember.models.role_launcher import RoleDispatchRequest, RoleLauncherOptionsRequest
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from fastapi import HTTPException
 
@@ -893,7 +893,7 @@ class ServiceTierReplayTests(RepeatTestCase):
             self.refresh(request)
             options = role_launch_routes._role_launch_options_endpoint(
                 self.config,
-                launch.RoleLauncherOptionsRequest.model_validate(
+                RoleLauncherOptionsRequest.model_validate(
                     {"role": "worker", **launch.ROLE_REFS["worker"]}
                 ),
             )

@@ -21,7 +21,7 @@ from agents_remember.kernel.primitives.paseo_runtime_settings import (
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
-from paseo_runtime_test_support import write_shared_runtime
+from paseo_runtime_test_support import write_runtime_block
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BRIDGE_SCRIPT = REPO_ROOT / "mcp/src/agents_remember/cli/paseo_bridge.mjs"
@@ -44,9 +44,10 @@ def runtime_settings(root: Path, **overrides: Any) -> PaseoRuntimeSettings:
 
 
 def runtime_config(root: Path, settings: PaseoRuntimeSettings | None) -> McpRuntimeConfig:
-    write_shared_runtime(root, settings)
+    config_path = root / "settings" / "mcp.json"
+    write_runtime_block(config_path, settings)
     return McpRuntimeConfig(
-        config_path=root / "settings" / "mcp.json",
+        config_path=config_path,
         coordination_root=root / "coordination",
         workspace_root=root / "projects",
         transcript_root=root / "coordination" / "logs" / "mcp",

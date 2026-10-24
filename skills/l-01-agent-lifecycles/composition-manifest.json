@@ -522,7 +522,9 @@
         "runtime_install",
         "memory_init",
         "memory_baseline_status",
-        "memory_baseline_adopt"
+        "memory_baseline_adopt",
+        "role_message",
+        "user_settings_init"
       ],
       "skills": [
         "l-01-agent-lifecycles"
@@ -624,10 +626,18 @@
     },
     "bootstrap-foundation-d301": {
       "source": "reference/bootstrap-foundation-d301.md",
-      "description": "Foundation state and ownership instructions before Bootstrap step 7.",
+      "description": "The foundation state this seat reports and the Architect handover that follows it.",
       "injected": false,
       "step_detail": true,
-      "step": "when you reach step 7 (Reach the repository's knowledge foundation), not before",
+      "step": "when you reach step 8, not before",
+      "roles": ["bootstrap"]
+    },
+    "bootstrap-failure-states": {
+      "source": "reference/bootstrap-failure-states.md",
+      "description": "The states a new user's setup actually hits, and the move for each.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach a step that answers with a state you cannot name, not before",
       "roles": ["bootstrap"]
     },
     "curator-intake-details": {

@@ -18,7 +18,7 @@ from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import RoleDispatchRequest
 from agents_remember.worktrees.role_handover_locator import locator_directory
-from paseo_runtime_test_support import runtime_settings, write_shared_runtime
+from paseo_runtime_test_support import runtime_settings, write_runtime_block
 
 SERVER_ID = "srv_configured"
 CATALOG: dict[str, Any] = {
@@ -388,7 +388,7 @@ class GivenToAgentExpectations(unittest.TestCase):
         self.assertEqual(Path(artifact["path"]).read_text(encoding="utf-8"), self.prompt)
 
 
-def prepare_host(root: Path, *, configured: bool) -> None:
-    """One shared host authority for the installation a launch fixture represents."""
+def prepare_host(root: Path, config_path: Path, *, configured: bool) -> Path:
+    """The host authority of the installation a launch fixture represents, in its config file."""
     settings = runtime_settings(root, listen="127.0.0.1:6835", providers={}, embed=[])
-    write_shared_runtime(root, settings if configured else None)
+    return write_runtime_block(config_path, settings if configured else None)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sync the root skill tree into package and harness skill copies."""
+"""Sync the root skill tree into the package copy served as MCP resources."""
 
 from __future__ import annotations
 
@@ -62,8 +62,7 @@ def skill_targets(root: Path = REPO_ROOT) -> tuple[SkillTarget, ...]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Copy the canonical root skills/ tree into the MCP package data "
-            "and every harness starter package."
+            "Copy the canonical root skills/ tree into the MCP package data served resource tree."
         )
     )
     parser.add_argument(

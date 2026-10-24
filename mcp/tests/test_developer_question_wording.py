@@ -1,6 +1,6 @@
 """Keep parent routing, refusal recovery and developer-answer provenance in each capsule."""
 
-import test_role_instruction_wording as wording
+import test_role_instruction_wording_handover as handover_wording
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember_test_support.testing.curation_doctrine import (
     normalize_statement,
@@ -123,7 +123,7 @@ def test_question_operations_keep_conditional_routing_and_pending_recovery() -> 
 
 
 def test_leaf_owner_relation_keeps_peer_results_and_named_parent_occasions() -> None:
-    fixture = wording.HandoverTextWordingTests()
+    fixture = handover_wording.HandoverTextWordingTests()
     fixture.setUp()
     parent = StartingAgent("1f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "manager", "MASTER")
     try:

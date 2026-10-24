@@ -15,8 +15,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import Field
 
-from agents_remember.application.role_launch_context import resolve_role_launch_context
+from agents_remember.application.role_launch_context import (
+    TASKLESS_ROLES,
+    resolve_role_launch_context,
+)
 from agents_remember.cli.paseo_status import read_agent
+from agents_remember.cli.role_agent_override import FREE_AGENT_ROLE
 from agents_remember.cli.role_answers import alias_response
 from agents_remember.cli.role_launch_receipts import (
     _read_receipt,
@@ -25,7 +29,11 @@ from agents_remember.cli.role_launch_receipts import (
     _taskless_execution_receipts,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.role_launcher import RoleResultRequest, RoleSelection
+
+# How many launch records one read visits: the host is asked once per record it is shown.
+_PAGE_SIZE = 3
 
 # The document references of a stored selection, and the label each gives its agent.
 _REFERENCE_LABELS = (
@@ -61,9 +69,7 @@ def _records(
         scope = RoleResultRequest.model_validate(
             {**selection.model_dump(), "request_id": request_id}
         )
-        path = _receipt_path(
-            config, scope, request_id if scope.role in {"architect", "investigator"} else None
-        )
+        path = _receipt_path(config, scope, request_id if scope.role in TASKLESS_ROLES else None)
         receipt = _undamaged_receipt(path)
         if receipt is None:
             return []
@@ -73,21 +79,29 @@ def _records(
             )
         return [receipt]
 
-    records = []
-    for role in _primary_roles(selection):
-        scope = RoleResultRequest.model_validate({**selection.model_dump(), "role": role})
-        if role == "architect":
-            records.extend(receipt for _, receipt in _taskless_execution_receipts(config, scope))
-            continue
-        receipt = _undamaged_receipt(_receipt_path(config, scope))
-        if receipt is None:
-            continue
-        if not _receipt_address_matches(receipt, scope):
-            raise HTTPException(
-                409, "The role receipt belongs to another document; reconcile it before starting."
-            )
-        records.append(receipt)
-    return records
+    roles = _primary_roles(selection)
+    # One block per role, newest first (each role's own listing is), so a page can step over the
+    # older records of a role it has already answered: L188-B08's continuation follows a role
+    # block rather than a global position, and no page re-lists a seat an earlier page answered.
+    return [receipt for role in roles for receipt in _role_records(config, selection, role)]
+
+
+def _role_records(
+    config: McpRuntimeConfig, selection: RoleSelection, role: str
+) -> list[dict[str, Any]]:
+    """The launch records of one role of this selection, or the refusal of another document's."""
+
+    scope = RoleResultRequest.model_validate({**selection.model_dump(), "role": role})
+    if role in TASKLESS_ROLES:
+        return [receipt for _path, receipt in _taskless_execution_receipts(config, scope)]
+    receipt = _undamaged_receipt(_receipt_path(config, scope))
+    if receipt is None:
+        return []
+    if not _receipt_address_matches(receipt, scope):
+        raise HTTPException(
+            409, "The role receipt belongs to another document; reconcile it before starting."
+        )
+    return [receipt]
 
 
 def _undamaged_receipt(path: Path) -> dict[str, Any] | None:
@@ -103,7 +117,14 @@ def _undamaged_receipt(path: Path) -> dict[str, Any] | None:
 
 
 def _primary_roles(selection: RoleSelection) -> tuple[str, ...]:
-    """The roles whose chats belong to the selected document itself."""
+    """The roles whose chats belong to the selected document itself.
+
+    The selection with no document at all is the free-agent one (MIK-R196 rule 1): the architect
+    and the bootstrap seat a new user starts to set a repository up, each found through its own
+    receipt rather than through a task document. A selection that names the free agent is that
+    role's own seats: asking for the bootstrap chat must not answer with an architect's
+    (L188-B08).
+    """
 
     if selection.task_document_ref:
         return ("worker", "reviewer", "curator")
@@ -111,7 +132,9 @@ def _primary_roles(selection: RoleSelection) -> tuple[str, ...]:
         return ("manager",)
     if selection.sprint_document_ref:
         return ("orchestrator",)
-    return ("architect",)
+    if canonical_role(selection.role) == FREE_AGENT_ROLE:
+        return (FREE_AGENT_ROLE,)
+    return ("architect", FREE_AGENT_ROLE)
 
 
 def _chat_record(receipt: dict[str, Any]) -> dict[str, Any] | None:
@@ -221,28 +244,52 @@ def _document_agent(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _block_end(records: list[dict[str, Any]], index: int) -> int:
+    """The first index after ``index`` whose record names another role than this one."""
+
+    role = str(records[index].get("role"))
+    end = index + 1
+    while end < len(records) and str(records[end].get("role")) == role:
+        end += 1
+    return end
+
+
 def document_chats(
     config: McpRuntimeConfig, selection: RoleSelection, offset: int, request_id: UUID | None = None
 ) -> dict[str, Any]:
     records = _records(config, selection, request_id)
     agents = []
     asked: list[str] = []
-    # Host reads are bounded per request; old archived Projects actors are walked in pages.
-    for receipt in records[offset : offset + 3]:
+    primary = _primary_roles(selection)
+    listed_roles: set[str] = set()
+    index = offset
+    # Host reads are bounded per request: a page asks about at most this many seats, however many
+    # records it steps over, and old archived Projects actors are walked in pages.
+    while index < len(records) and len(asked) < _PAGE_SIZE:
         # A record of the Projects listing is checked for damage here, when the read reaches it.
-        record = _readable_chat_record(receipt)
+        record = _readable_chat_record(records[index])
+        role = str(record["role"])
+        if len(primary) > 1 and role in listed_roles:
+            # This page already answered this role (MIK-R196 rule 1): its older records add no
+            # second seat, and stepping over them costs no host read.
+            index += 1
+            continue
         agent_id = _hosted_agent_id(record)
         if agent_id is None:
+            index += 1
             continue
         asked.append(agent_id)
         reading = read_agent(config, agent_id)
         if not reading.reachable:
             return {"agents": [], "detail": reading.unreachable_reason, "unavailable": True}
         if not reading.found or reading.archived:
+            index += 1
             continue
         agents.append(_document_agent(record))
-        if not selection.sprint_document_ref:
-            break
+        listed_roles.add(role)
+        # The rest of this role's block is older records of the seat just answered: the next page
+        # starts after them, so a continuation never re-lists a seat this one already answered.
+        index = _block_end(records, index)
     if asked:
         # A clicked agent goes first in a warmup pass that is still running
         # (MIK-R145 rule 4): the click names the agent before its own chat is
@@ -251,5 +298,8 @@ def document_chats(
         from agents_remember.cli.paseo_warmup_state import TRACKER  # noqa: PLC0415
 
         TRACKER.promote(asked)
-    next_offset = offset + 3 if not agents and offset + 3 < len(records) else None
-    return {"agents": agents, "nextOffset": next_offset}
+    # L188-B08: a page that left an eligible seat unlisted is continued from the record the walk
+    # stopped on, even when it listed another role's seat. Stopping as soon as anything was found
+    # answered a page of architect records as the whole listing, and the bootstrap seat behind
+    # them was never reached.
+    return {"agents": agents, "nextOffset": index if index < len(records) else None}

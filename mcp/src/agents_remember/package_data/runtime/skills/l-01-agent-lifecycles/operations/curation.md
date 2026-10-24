@@ -3,11 +3,11 @@
 # Operation — Curation
 
 <!-- ar:roles all -->
-**Scope:** reconcile a leaf's intended, current and implemented meaning; write affected onboarding. The Manager starts the Curator at the Worker's first freeze; Worker and Reviewer supply candidate-bound inputs directly. It also covers **first or resumed repository knowledge foundation**: the same authoring work, different admission/scope.
+**Scope:** reconcile a leaf's intended, current and implemented meaning; write affected onboarding. The Manager starts the Curator at the Worker's first freeze; Worker and Reviewer supply candidate-bound inputs directly. It also covers **first or resumed repository knowledge foundation** inside the real task the user-started Architect opens, with that task's leaf admission and scope.
 
 <!-- ar:roles all -->
 **Select:** leaf Worker freeze plus affected memory. The Manager assigns; the Worker sends its list; the Reviewer sends its passed code freeze.
-The role's Inputs state the bounded foundation entry before any leaf exists.
+For foundation work, the role's Inputs name the Architect's task and its enclosure; no incidental code delta is required.
 
 <!-- ar:roles all -->
 ## Who carries it, and their job
@@ -29,7 +29,7 @@ The curator never runs the closeout preview, never stages a sync resolution or r
 never decides whether a leaf lands.
 
 <!-- ar:roles curator -->
-Manager ownership applies to the **leaf** entry. Foundation has no leaf, Manager or brief.
+The same task/Manager ownership applies to a foundation leaf. Setup reads and reports its state; it does not author the foundation.
 
 <!-- ar:roles curator -->
 ## Required inputs

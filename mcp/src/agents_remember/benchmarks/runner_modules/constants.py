@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 from agents_remember.models.benchmarks import CODEX_BENCHMARK_SANDBOX
@@ -8,7 +7,6 @@ from agents_remember.models.benchmarks import CODEX_BENCHMARK_SANDBOX
 AGENTS_MD_TARGETS = {
     Path("runtime/agents-md-files/coordinator/AGENTS.md"): Path("AGENTS.md"),
     Path("runtime/agents-md-files/system/AGENTS.md"): Path("system/AGENTS.md"),
-    Path("runtime/agents-md-files/skills/AGENTS.md"): Path("skills/AGENTS.md"),
     Path("runtime/agents-md-files/tasks/AGENTS.md"): Path("tasks/AGENTS.md"),
 }
 PROVIDER_ASSET_DIRS = (Path("requirements"), Path("patches"))
@@ -26,10 +24,7 @@ USAGE_TOKEN_KEYS = (
 WORKSPACE_AGENTS_TEMPLATE = Path("templates/workspace-AGENTS.md")
 SOURCE_ONLY_AGENTS_TEMPLATE = Path("templates/source-only-AGENTS.md")
 BENCHMARK_ROOT_MARKER = ".benchmark-root"
-SKILLS_EXPOSURE_NAMESPACE = "agents-remember"
 CODEX_HARNESS_DIR = ".codex"
-COPYTREE_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
-SKILL_EXPOSURE_MODES = ("copy", "none")
 CODEX_EXECUTABLE_NAME = "codex"
 CODEX_EXECUTABLE_RESOLUTION = "PATH"
 CODEX_SANDBOX_DANGER_FULL_ACCESS = "danger-full-access"

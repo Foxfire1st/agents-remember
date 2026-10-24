@@ -1,64 +1,73 @@
 # Install For Antigravity
 
-Antigravity is Google's agentic development platform. It supports workspace
-context files, workspace skills, workspace MCP configuration, plugins, and
-execution hooks.
+Antigravity supports workspace context files, workspace MCP configuration, plugins, execution
+hooks, and workspace skills. Agents Remember needs the MCP registration and one call; its skills
+arrive from the tool server as MCP resources, so no skill folder is copied into the workspace.
 
 Official references:
 
 - [Antigravity CLI Plugins & Skills](https://antigravity.google/docs/cli-plugins)
-- [Antigravity CLI Migration](https://antigravity.google/docs/gcli-migration)
 - [Antigravity IDE MCP](https://antigravity.google/docs/ide-mcp)
-- [Antigravity IDE Skills](https://antigravity.google/docs/ide-skills)
 - [Antigravity IDE Rules](https://antigravity.google/docs/ide-rules)
 - [Antigravity IDE Hooks](https://antigravity.google/docs/ide-hooks)
 
-## Root Starter Package
+## Register The MCP Server
 
-The repository includes an Antigravity starter package at `.agents/`. Copy that
-folder to your workspace root, then render the copied package. The
-`.agents/render-starter` script is a convenience: with a single `--repo` list
-such as `--repo my-app shared-lib`, it infers the workspace root from the copied
-`.agents/` folder, fills path and repository placeholders, writes the installed
-`GEMINI.md`, and validates that each requested repository exists before you
-start or reload Antigravity from that workspace once. If you prefer not to run
-the renderer, make those same replacements by hand, copy or merge the directive
-into `GEMINI.md`, and verify that no placeholder tokens remain.
+Write an MCP authority settings file (copy `examples/mcp/settings.example.json` and replace its
+paths), then add the server to the workspace `.agents/mcp_config.json`:
 
-If the workspace root already has a different `GEMINI.md`, merge the rendered
-Agents Remember directive into that file before rerunning the renderer.
-
-The source checkout keeps the template under `.agents/` so the repository root
-remains reserved for source-project files such as its own `AGENTS.md`.
-
-The package contains:
-
-- `.agents/GEMINI.md` - template for the installed Antigravity/Gemini workspace
-  context file with the mandatory first-action directive.
-- `.agents/mcp_config.json` - workspace-local Antigravity MCP server
-  registration.
-- `.agents/mcp/agents-remember-settings.json` - Agents Remember MCP authority
-  settings.
-- `.agents/skills/` - Agents Remember skills in Antigravity's workspace skill
-  root.
-
-After the restart or reload, invoke:
-
-```text
-c-13-install-and-onboard
+```json
+{
+  "mcpServers": {
+    "agents-remember": {
+      "command": "uvx",
+      "args": [
+        "--refresh-package",
+        "agents-remember-mcp@latest",
+        "--config",
+        "<PATH/TO/YOUR/PROJECTS_FOLDER>/.agents/mcp/agents-remember-settings.json"
+      ]
+    }
+  }
+}
 ```
 
-That skill runs or verifies `runtime_install()` and then handles memory,
-onboarding, and providers.
+`.agents/mcp_config.json` in this repository is that registration with
+`<PATH/TO/YOUR/PROJECTS_FOLDER>` markers to replace by hand; no script renders it. Antigravity IDE
+also exposes a raw MCP config from its MCP settings UI, at `~/.gemini/config/mcp_config.json` for
+the global file. Open `/mcp` in the CLI, or the IDE MCP Store's raw config view, to confirm the
+server is visible after a restart.
 
-## Workspace Instructions Or Start Hook
+## Start With One Call
 
-Antigravity reads workspace `GEMINI.md` and `AGENTS.md` files, and also reads
-global `~/.gemini/GEMINI.md`. The starter package ships `.agents/GEMINI.md` as a
-template so it does not overwrite this source checkout's root `AGENTS.md`.
+In an Antigravity chat, name no task and no repository:
 
-If you set it up by hand, place this directive in the Antigravity `GEMINI.md`
-file:
+```text
+role_start(role="bootstrap", request_id="<a UUID you generate>")
+```
+
+That one call prepares the runtime scaffold, provisions and starts the Paseo host, verifies the
+Agents Remember plug-in, and starts one instructed Bootstrap seat. Its answer names the seat and
+the dashboard address of its chat; continue setup there. A retry with the same `request_id`
+reconciles to the same seat instead of a second one.
+
+Bootstrap ends at memory setup and tells you to start the Architect, which organises the knowledge
+foundation as ordinary task work. Bootstrap starts no role and authors no onboarding or knowledge.
+
+## Skills
+
+Antigravity discovers workspace skills from folders it scans; Agents Remember writes none. The
+tool server publishes each skill as an MCP resource (the SEP-2640 skills extension) and Antigravity
+reads them from the running server, so there is no skill tree to copy, render or keep in sync.
+
+## Optional: Workspace Context File
+
+Antigravity reads workspace `GEMINI.md` and `AGENTS.md` files, and also reads global
+`~/.gemini/GEMINI.md`. Do not overwrite a repository's root `AGENTS.md` just to wire Agents
+Remember; root `AGENTS.md` is project-specific.
+
+Copy `.agents/GEMINI.md` into your workspace root as `GEMINI.md` and replace
+`<PATH/TO/YOUR/PROJECTS_FOLDER>` with your absolute path:
 
 ```markdown
 # Workspace Agent Instructions
@@ -69,62 +78,10 @@ Treat these rules as workspace instructions!
 @<PATH/TO/YOUR/PROJECTS_FOLDER>/ar-coordination/AGENTS.md
 ```
 
-Add both the coordination runtime and target repository to the workspace when possible. If not, point the include at an absolute readable path.
+If the workspace root already has a different `GEMINI.md`, merge the directive into it rather than
+replacing the file. Add both the coordination runtime and the target repository to the workspace
+when possible; if not, point the include at an absolute readable path.
 
-Do not overwrite a repository's root `AGENTS.md` just to wire Agents Remember;
-root `AGENTS.md` is project-specific.
-
-Antigravity documents command hooks in `.agents/hooks.json` and supports a
-`PreInvocation` hook that can inject transient context before a model call. It
-does not currently document a simple project-local `session_start` hook. Keep
-the root starter package on the documented always-loaded context file unless
-you intentionally add a hook script for your own environment.
-
-## Runtime And Skills
-
-After the restart or reload, the copied `c-13-install-and-onboard` skill runs or
-verifies:
-
-```text
-runtime_install()
-```
-
-Antigravity discovers workspace skills in
-`.agents/skills/<skill-name>/SKILL.md`. Global skills live under
-`~/.gemini/antigravity/skills/<skill-name>/` for the IDE and under
-`~/.gemini/antigravity-cli/skills/` for the CLI.
-
-The copied starter package already provides one flat folder per skill under
-`.agents/skills/`.
-
-Do not install skills for first-run setup; the copied package already carries them.
-
-Antigravity can invoke skills automatically or on request once they are discovered.
-
-## MCP
-
-Antigravity CLI reads workspace MCP servers from `.agents/mcp_config.json`.
-Antigravity IDE also exposes a raw MCP config from its MCP settings UI; current
-IDE docs show that global file at `~/.gemini/config/mcp_config.json`.
-
-The starter package uses the workspace-local CLI-compatible file:
-
-```json
-{
-  "mcpServers": {
-    "agents-remember": {
-      "command": "uvx",
-      "args": [
-        "--refresh-package",
-        "agents-remember-mcp",
-        "agents-remember-mcp@latest",
-        "--config",
-        "<PATH/TO/YOUR/PROJECTS_FOLDER>/.agents/mcp/agents-remember-settings.json"
-      ]
-    }
-  }
-}
-```
-
-Open `/mcp` in Antigravity CLI, or the IDE MCP Store's raw config view, to
-confirm the server is visible after setup.
+Antigravity documents command hooks in `.agents/hooks.json` and a `PreInvocation` hook that can
+inject transient context; it does not document a simple project-local `session_start` hook, so the
+always-loaded context file is the instruction surface to rely on.

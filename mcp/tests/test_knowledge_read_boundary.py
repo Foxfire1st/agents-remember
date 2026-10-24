@@ -81,13 +81,11 @@ from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueE
 from agents_remember.worktrees.worktree_contract import write_contract
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from test_knowledge_review_source_endpoints import (
-    build_endpoint_fixture,
-    compose_endpoint_review,
-)
+from test_knowledge_review_source_endpoints import build_endpoint_fixture, compose_endpoint_review
 from test_source_lineage import _git as git
-from test_transaction_only_worktree_delivery import _apply, _closeout_fixture
+from test_transaction_only_worktree_delivery import _apply
 from test_worktree_support import init_repo
+from transaction_only_worktree_delivery_test_support import _closeout_fixture
 
 pytestmark = pytest.mark.evidence_unit
 

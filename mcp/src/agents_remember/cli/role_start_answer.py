@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from agents_remember.cli import paseo_role_tools as tools
+from agents_remember.cli.dashboard_address import chat_address_for, dashboard_address_for
 from agents_remember.cli.role_instructions import launch_choice_metadata
 from agents_remember.cli.role_launch_receipts import _public_execution
 from agents_remember.cli.role_step_up import step_up_note
@@ -83,4 +84,23 @@ def started_answer(config: McpRuntimeConfig, request: RoleDispatchRequest) -> di
         **({"warning": receipt["warning"]} if receipt.get("warning") else {}),
         **({"nextAction": next_action} if next_action else {}),
     }
+    if request.role == "bootstrap":
+        # MIK-R196 rule 1: the one call answers with the seat's identity and the address at
+        # which the user continues the setup, not only with a path inside the host. The address
+        # is answered only when something serves it: the dashboard owner is asked first, and a
+        # dashboard that does not come up is reported rather than published (L188-B24, 7c1153ee).
+        result.update(dashboard_address_for(config))
+        result.update(chat_address_for(config, agent_id))
+        if launch == "running":
+            address = result.get("dashboardAddress")
+            result["nextAction"] = (
+                f"Open {address} and continue the setup with this seat in the chat it lists; "
+                "the call started no task and no other role."
+                if address
+                else (
+                    "The dashboard could not be started, so this answer names no address to open: "
+                    f"{result.get('dashboardAddressDetail')}. Start the dashboard, then open this "
+                    "answer's seat in the chat the dashboard lists."
+                )
+            )
     return result

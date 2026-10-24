@@ -444,7 +444,12 @@ def test_bootstrap_skill_texts_state_the_fixer_and_the_order(tmp_path: Path) -> 
     assert "Never write sidecar JSON by hand" in bootstrap
 
     install = (REPO_ROOT / "skills/c-13-install-and-onboard/SKILL.md").read_text(encoding="utf-8")
-    assert install.index("Scaffold onboarding") < install.index(
+    # MIK-R196 rules 4-5: setup initialises the memory root and authors no onboarding, so the order
+    # claim follows the step that survives -- the root before its baseline, the baseline before the
+    # foundation is handed to the Architect.
+    assert "Setup authors no onboarding" in install
+    assert "citation fixer here" in install, "setup must not run the fixer"
+    assert install.index("Initialise the memory repo, and author no onboarding") < install.index(
         "Adopt the first attributed baseline"
     )
     assert install.index("Adopt the first attributed baseline") < install.index(
@@ -454,30 +459,43 @@ def test_bootstrap_skill_texts_state_the_fixer_and_the_order(tmp_path: Path) -> 
     operation = (REPO_ROOT / "skills/l-01-agent-lifecycles/operations/bootstrap.md").read_text(
         encoding="utf-8"
     )
-    assert operation.index("Scaffold the first onboarding") < operation.index(
+    # MIK-R196 rule 5 removed the onboarding-scaffold/fixer step from this operation, so the order
+    # it protected now runs from the memory root's own init: the root is initialized (or repaired)
+    # before its baseline is adopted, and the baseline before the foundation is reported.
+    assert operation.index("Initialize or repair the memory root") < operation.index(
         "Adopt the first attributed baseline"
     )
+    # The foundation left this operation for the Architect (MIK-R196 rule 4), so the order claim
+    # follows the step that survives: the baseline still comes before the foundation is reported
+    # and handed over. Retiring the assertion instead would drop the order it protects.
     assert operation.index("Adopt the first attributed baseline") < operation.index(
-        "Reach the repository's knowledge foundation"
+        "Report the knowledge foundation's state and hand its making to the Architect"
     )
-    instructions, foundation = delivered_step(
+    instructions, _foundation = delivered_step(
         REPO_ROOT / "skills/l-01-agent-lifecycles",
         ("bootstrap", "bootstrap"),
         "reference/bootstrap-foundation-d301.md",
-        "when you reach step 7 (Reach the repository's knowledge foundation), not before",
+        # MIK-R196 rule 4 inserted the user-settings step and moved the foundation to the
+        # Architect's work: the eighth step still stands after the baseline, and it now reads
+        # "Report the knowledge foundation's state and hand its making to the Architect".
+        "when you reach step 8, not before",
         tmp_path / "bootstrap.md",
     )
-    assert "7. **Reach the repository's knowledge foundation.** Read" in instructions
-    assert instructions.index("Adopt the first attributed baseline") < instructions.index(
-        "7. **Reach the repository's knowledge foundation.**"
-    )
-    flat_foundation = " ".join(foundation.split())
-    assert "On a new memory repo this step runs after the baseline" in flat_foundation
-    assert "before the first baseline no leaf can exist" in flat_foundation
+    # MIK-R196 rule 4: the foundation is the Architect's work and the operation reports it at
+    # step 8. Read off the compiled instruction rather than reconstructed:
     assert (
-        "Only a repository whose memory already has a commit may reach its foundation "
-        "before the onboarding or the baseline."
-    ) in flat_foundation
+        "8. **Report the knowledge foundation's state and hand its making to the Architect.**"
+        in (instructions)
+    )
+    assert instructions.index("Adopt the first attributed baseline") < instructions.index(
+        "8. **Report the knowledge foundation's state and hand its making to the Architect.**"
+    )
+    # MIK-R196 rule 4 moved the foundation's ordering rules out of the bootstrap detail and
+    # they survive on the install-and-onboard surface; read from the owner that states them.
+    flat_install = " ".join(install.split())
+    assert "runs after the baseline" in flat_install
+    assert "before the first baseline no leaf can exist" in flat_install
+    assert "already has a commit" in flat_install
 
 
 def test_bootstrap_skill_texts_state_taskless_route_and_audit_trail() -> None:
@@ -558,7 +576,8 @@ def test_bootstrap_journey_from_init_to_second_fixer_refusal(
 
     reread = memory_init_tool(load_config(path), repo_id=REPO_ID)
     assert reread["knowledge"]["state"] == "not-recorded", reread["knowledge"]
-    assert "knowledge-bootstrap" in reread["knowledge"]["nextAction"], reread["knowledge"]
+    assert "developer start the Architect" in reread["knowledge"]["nextAction"], reread["knowledge"]
+    assert "knowledge-bootstrap" not in reread["knowledge"]["nextAction"], reread["knowledge"]
 
     reading = read_ar_files_tool(config, repo_id=REPO_ID, files=["pkg/alpha.py"])
     assert reading["ok"] is True and reading["state"] == "named", reading

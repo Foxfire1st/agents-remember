@@ -80,8 +80,10 @@ class McpConfigTests(unittest.TestCase):
                     },
                 ],
             }
-            shared = user_settings_path_for_write()
-            write_json(shared, {"paseoRuntime": block})
+            # MIK-R196 rule 3 with the Manager's ruling: the host block lives in the MCP
+            # authority settings file this call names, never in the user's own settings file
+            # (MIK-R137).
+            write_json(path, {**payload, "paseoRuntime": block})
             configured = load_config(path).paseo_runtime
             assert configured is not None
             self.assertEqual(configured, load_paseo_runtime_settings(path))
@@ -105,11 +107,11 @@ class McpConfigTests(unittest.TestCase):
                     "https://xn--bcher-kva.example",
                 )
             ]
-            write_json(shared, {"paseoRuntime": {**block, "embed": canonical}})
+            write_json(path, {**payload, "paseoRuntime": {**block, "embed": canonical}})
             kept = require_paseo_runtime(load_config(path).paseo_runtime, source=path)
             self.assertEqual(kept.embed_payload(), canonical)
 
-            write_json(shared, {"paseoRuntime": {**block, "providers": {}, "embed": []}})
+            write_json(path, {**payload, "paseoRuntime": {**block, "providers": {}, "embed": []}})
             self.assertEqual(load_paseo_runtime_settings(path), load_config(path).paseo_runtime)
             self.assertEqual(
                 require_paseo_runtime(load_config(path).paseo_runtime, source=path).embed, ()
@@ -172,7 +174,7 @@ class McpConfigTests(unittest.TestCase):
                 )
             ]
             for candidate, message in invalid:
-                write_json(shared, {"paseoRuntime": candidate})
+                write_json(path, {**payload, "paseoRuntime": candidate})
                 with self.subTest(message=message), self.assertRaisesRegex(ConfigError, message):
                     _ = load_config(path).paseo_runtime
 
@@ -236,7 +238,6 @@ class McpConfigTests(unittest.TestCase):
                 config.transcript_root,
                 root / "ar-coordination" / "logs" / "mcp",
             )
-            self.assertEqual(config.harness_skill_root, root / ".codex" / "skills")
             self.assertEqual(
                 config.repositories["agents-remember"].path,
                 root / "workspace" / "agents-remember",
@@ -273,6 +274,25 @@ class McpConfigTests(unittest.TestCase):
             # as never-enabled, so no product install/start/watch can follow.
             self.assertEqual(providers, {})
             self.assertFalse(lifecycle_settings["contextProviders"]["enabled"])
+
+    def test_a_retired_harness_skill_root_is_tolerated_and_unread(self) -> None:
+        """MIK-R196 rule 7: the installed-copy root left the configuration contract.
+
+        A settings file that still carries the retired key loads as if it were not there — no
+        root is parsed or inferred from the settings path — and the loaded configuration has no
+        field for it.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / ".codex" / "mcp" / "settings.json"
+            payload = settings_payload(root)
+            payload["harnessSkillRoot"] = (root / ".codex" / "skills").as_posix()
+            write_json(path, payload)
+
+            config = load_config(path)
+
+            self.assertEqual(config.coordination_root, root / "ar-coordination")
+            self.assertFalse(hasattr(config, "harness_skill_root"))
 
     def test_repository_certification_profile_reference_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

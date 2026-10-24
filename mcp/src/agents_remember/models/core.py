@@ -63,7 +63,6 @@ class ServerInfoResponse(ResponseModel):
     coordinationRoot: str
     workspaceRoot: str
     transcriptRoot: str
-    harnessSkillRoot: str | None = None
     allowedRepoIds: list[str] = Field(default_factory=list)
     # Provider ids still present in settings, named once as no longer used: no tool
     # reports on the CGC or GrepAI providers anymore and nothing starts them.

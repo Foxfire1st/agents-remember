@@ -16,13 +16,13 @@ memory-repos/ar-agents-remember/onboarding/src/orchestrator/core_editor.py.md
 - **Search that finds, not decides:** Optional semantic memory and code-graph providers help locate relevant files, callers, dependencies, and concepts, but verified Markdown and source code remain the truth.
 - **Memory that lands with code:** External memory repos use a `memory.md` ledger, isolated dual worktrees, preview/apply closeout, and all-or-nothing integration so code and memory stay synchronized.
 - **Repo-owned agent behavior:** Each memory repo carries `system/` files for path rules, tools, coding guidelines, documentation sources, branch policy, and reporting shape, so the same project rules load across harnesses.
-- **Harness-ready first run:** Starter packages for Claude Code, Codex, Cursor, Antigravity, VS Code Copilot, Hermes, Pi.dev, and OpenClaw carry the native MCP, skills, hooks, rules, and instruction files each harness needs.
+- **One-call first run:** Register the MCP server with your harness, then start Bootstrap from your own chat. The server serves the skills as package resources; optional native instruction files carry only the first-action directive.
 
 The setup stores durable memory in a memory repository of its own, under `ar-coordination/memory-repos/ar-<repo>/`. Repo-local internal memory under `<repo>/ar-memory/` was removed from the product and is refused. For the full tour, see [Features](docs/features.md).
 
 ## Start Here
 
-- [Getting Started](getting-started.md) - the agent-driven setup path: copy the harness starter package, wire the MCP with `uvx`, restart once, then let `c-13-install-and-onboard` run `runtime_install` and set up memory, onboarding, and providers.
+- [Getting Started](getting-started.md) - the setup path: register MCP, restart if needed, call Bootstrap once and continue in its dashboard chat; optional onboarding and knowledge work goes to a user-started Architect.
 - [Features](features.md) - the concentrated product tour: by-path memory, drift, providers, worktrees, harness setup, and operational guardrails.
 - [Concepts](concepts.md) - the memory model and the terms used throughout the project.
 - [Architecture](architecture.md) - how the source checkout, installed runtime, coordination root, and memory roots fit together.
@@ -60,6 +60,6 @@ The setup stores durable memory in a memory repository of its own, under `ar-coo
 - [Path Rules](reference/path-rules.md)
 - [Skills](reference/skills.md)
 - [c-08-ar-coordination-context-resolver Resolver](reference/resolver-c08.md)
-- [c-02-memory-quality-control Memory Quality Control](reference/drift-c02.md)
-- [c-09-git-worktree-manager Worktrees And Closeout](reference/worktrees-c09.md)
+- [c-05-create-or-update-onboarding-files Memory Quality Control](reference/drift-c02.md)
+- [w-02-light-task-workflow Worktrees And Closeout](reference/worktrees-c09.md)
 - [Release Checklist](release-checklist.md) - pre-release quality, version-sync, and smoke gate.

@@ -20,8 +20,15 @@ ROLE_LEVELS = {
     "worker": "leaf",
     "reviewer": "leaf",
     "curator": "leaf",
+    # The free agent a new user reaches through the one start call (MIK-R196): it holds no
+    # task altitude, so no per-level override applies to it and its role row is the whole
+    # of its launch choices.
+    "bootstrap": "free-agent",
 }
-TASKLESS_ROLES = frozenset({"architect", "investigator"})
+# The roles whose execution is keyed by its request id rather than by a document: a
+# selection with no document at all. ``bootstrap`` joins them as the identity-free first
+# seat (MIK-R196 rule 1), not as a second identity of any other role.
+TASKLESS_ROLES = frozenset({"architect", "investigator", "bootstrap"})
 LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
 
 # What may be started without a parent (MIK-R113 rule 6): the selections the
@@ -34,6 +41,10 @@ LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
 # apart and a refused selection is refused with the same reason either way.
 PARENTLESS_START_SELECTIONS: dict[str, tuple[bool | None, bool | None, bool | None]] = {
     "architect": (False, False, False),
+    # The free agent takes no document at all (MIK-R196 rule 2): no sprint, master, leaf,
+    # task document, worktree or enclosure is invented for it, and a repository is chosen
+    # inside its dashboard conversation rather than by its launch.
+    "bootstrap": (False, False, False),
     "investigator": (True, None, False),
     "orchestrator": (True, False, False),
     "manager": (True, True, False),

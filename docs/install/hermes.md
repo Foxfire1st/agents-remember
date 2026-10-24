@@ -1,68 +1,19 @@
 # Install For Hermes.md
 
-Hermes Agent supports project context files, MCP servers, and a skills system.
+Hermes Agent supports project context files, MCP servers, and a skills system. Agents Remember
+needs the MCP registration and one call; its skills arrive from the tool server as MCP resources,
+so `~/.hermes/config.yaml` names no external skill folder.
 
 Official references:
 
 - [Hermes Context Files](https://hermes-agent.nousresearch.com/docs/user-guide/features/context-files/)
 - [Hermes MCP](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp/)
-- [Hermes Skills](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/skills.md)
 - [Hermes Configuration](https://hermes-agent.nousresearch.com/docs/user-guide/configuration/)
 
-## Root Starter Package
+## Register The MCP Server
 
-The repository includes a Hermes starter package at `.hermes/`. Copy that
-folder to your workspace root, then render the copied package. The
-`.hermes/render-starter` script is a convenience: with a single `--repo` list
-such as `--repo my-app shared-lib`, it infers the workspace root from the copied
-`.hermes/` folder, fills path and repository placeholders, writes the installed
-`HERMES.md`, and validates that each requested repository exists before you
-merge `.hermes/config.yaml` into `~/.hermes/config.yaml` and start or reload
-Hermes from that workspace once. If you prefer not to run the renderer, make
-those same replacements by hand, copy or merge the directive into `HERMES.md`,
-and verify that no placeholder tokens remain.
-
-If the workspace root already has a different `HERMES.md`, merge the rendered
-Agents Remember directive into that file before rerunning the renderer.
-
-The source checkout keeps the template under `.hermes/` so the repository root
-remains reserved for source-project files such as its own `AGENTS.md`.
-
-The package contains:
-
-- `.hermes/HERMES.md` - template for the installed highest-priority Hermes
-  project context file.
-- `.hermes/config.yaml` - merge template for Hermes' user-level config.
-- `.hermes/mcp/agents-remember-settings.json` - Agents Remember MCP authority
-  settings.
-- `.hermes/skills/` - Agents Remember skills exposed through
-  `skills.external_dirs`.
-
-After the restart or reload, invoke:
-
-```text
-c-13-install-and-onboard
-```
-
-That skill runs or verifies `runtime_install()` and then handles memory,
-onboarding, and providers.
-
-## Workspace Instructions
-
-Hermes uses `.hermes.md` or `HERMES.md` as highest-priority project context files, and also supports `AGENTS.md` and `CLAUDE.md`.
-
-Use the packaged `HERMES.md` template for Hermes-specific priority. Do not
-overwrite a repository's root `AGENTS.md` just to wire Agents Remember; root
-`AGENTS.md` is project-specific.
-
-The starter package ships `.hermes/HERMES.md` as a template because Hermes loads
-installed `.hermes.md` / `HERMES.md` before `AGENTS.md` when building project
-context.
-
-## MCP
-
-Hermes reads MCP server configuration from `~/.hermes/config.yaml` under
-`mcp_servers`. Merge this starter snippet into that file:
+Write an MCP authority settings file (copy `examples/mcp/settings.example.json` and replace its
+paths), then merge this into `~/.hermes/config.yaml`:
 
 ```yaml
 mcp_servers:
@@ -70,37 +21,54 @@ mcp_servers:
     command: "uvx"
     args:
       - "--refresh-package"
-      - "agents-remember-mcp"
       - "agents-remember-mcp@latest"
       - "--config"
       - "<PATH/TO/YOUR/PROJECTS_FOLDER>/.hermes/mcp/agents-remember-settings.json"
 ```
 
-If you edit MCP configuration while Hermes is running, use `/reload-mcp`.
+`.hermes/config.yaml` in this repository is that snippet with the marker to replace by hand; no
+script renders it. If you edit MCP configuration while Hermes is running, use `/reload-mcp`.
 
-## Runtime And Skills
+## Start With One Call
 
-After the restart or reload, the copied `c-13-install-and-onboard` skill runs or
-verifies:
+In a Hermes chat, name no task and no repository:
 
 ```text
-runtime_install()
+role_start(role="bootstrap", request_id="<a UUID you generate>")
 ```
 
-Hermes local skills commonly live under `~/.hermes/skills/`. Place the MCP
-settings under `~/.hermes/mcp/` to infer `~/.hermes/skills/`, or set
-`harnessSkillRoot` to a category folder when you want one. The starter package
-already provides one flat folder per skill under `.hermes/skills/` and exposes
-that folder through `skills.external_dirs`.
+That one call prepares the runtime scaffold, provisions and starts the Paseo host, verifies the
+Agents Remember plug-in, and starts one instructed Bootstrap seat. Its answer names the seat and
+the dashboard address of its chat; continue setup there. A retry with the same `request_id`
+reconciles to the same seat instead of a second one.
 
-Do not run `skills_install()` for first-run setup. It remains available for
-manual maintenance and non-package installs.
+Bootstrap ends at memory setup and tells you to start the Architect, which organises the knowledge
+foundation as ordinary task work. Bootstrap starts no role and authors no onboarding or knowledge.
 
-You can also use `harnessSkillRoot` for a shared skills directory and add it to
-`~/.hermes/config.yaml` when it does not follow the sibling-folder convention:
+## Skills
 
-```yaml
-skills:
-  external_dirs:
-    - "<PATH/TO/YOUR/PROJECTS_FOLDER>/.hermes/skills"
+Hermes reads the Agents Remember skills from the tool server: each skill is published as an MCP
+resource (the SEP-2640 skills extension) by the running server. That is the served copy, the
+package's own, so what a session reads belongs to one installed build and no external skill folder
+is added to `~/.hermes/config.yaml`.
+
+## Optional: Project Context File
+
+Hermes uses `HERMES.md` (or `.hermes.md`) as its highest-priority project context file, and also
+supports `AGENTS.md` and `CLAUDE.md`.
+
+Copy `.hermes/HERMES.md` to your workspace root as `HERMES.md` and replace
+`<PATH/TO/YOUR/PROJECTS_FOLDER>` with your absolute path:
+
+```markdown
+# Workspace Agent Instructions
+
+Read and follow `<PATH/TO/YOUR/PROJECTS_FOLDER>/ar-coordination/AGENTS.md` as workspace
+instructions.
+
+@<PATH/TO/YOUR/PROJECTS_FOLDER>/ar-coordination/AGENTS.md
 ```
+
+If the workspace root already has a different `HERMES.md`, merge the directive into it. Do not
+overwrite a repository's root `AGENTS.md` just to wire Agents Remember; root `AGENTS.md` is
+project-specific.

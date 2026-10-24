@@ -165,12 +165,12 @@ def _host_block(raw: object, path: Path) -> tuple[str, str] | None:
 
 
 def _sandbox_host(layout: Any) -> tuple[str, str] | None:
-    """The Paseo home and listen address the sandbox's own shared settings record.
+    """The Paseo host the sandbox's own authority settings record (MIK-R196 rule 3).
 
     ``None`` until a fresh build writes its ``paseoRuntime`` block: the asset bootstrap runs
     before the sandbox supplies its host, and the sandbox records none while it runs.
     """
-    path = layout.user_settings_file
+    path = layout.settings_file
     if not path.exists():
         return None
     try:
@@ -198,16 +198,18 @@ def _environment_in_force(environment: Mapping[str, str]) -> Iterator[None]:
         os.environ.update(caller)
 
 
-def _resolved_host(
-    environment: Mapping[str, str], coordination_root: Path
-) -> tuple[str, str] | None:
-    """The Paseo home and listen address the build's own code selects under ``environment``."""
+def _resolved_host(environment: Mapping[str, str], settings_file: Path) -> tuple[str, str] | None:
+    """The Paseo host the build's own code selects under ``environment``.
+
+    MIK-R196 rule 3: the host block is the MCP authority settings file's, so the sandbox's own
+    authority file is what this reads -- the same file its tool server is started with.
+    """
     from agents_remember.kernel.primitives.paseo_authority import (  # noqa: PLC0415
-        load_shared_paseo_runtime,
+        load_authority_paseo_runtime,
     )
 
     with _environment_in_force(environment):
-        settings = load_shared_paseo_runtime(coordination_root)
+        settings = load_authority_paseo_runtime(settings_file)
     return None if settings is None else (settings.home.as_posix(), settings.listen)
 
 
@@ -222,11 +224,11 @@ def _admitted(request: dict[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
     expected = (layout.paseo_home.as_posix(), layout.paseo_listen)
     recorded = _sandbox_host(layout)
     try:
-        resolved = _resolved_host(environment, layout.coordination)
+        resolved = _resolved_host(environment, layout.settings_file)
     except (OSError, ValueError) as error:
         raise Refused(
             "the build cannot read the Paseo host the sandbox environment selects: "
-            f"{error}; check the sandbox's user settings file"
+            f"{error}; check the sandbox's authority settings file"
         ) from error
     if recorded is not None and recorded != expected:
         raise Refused(

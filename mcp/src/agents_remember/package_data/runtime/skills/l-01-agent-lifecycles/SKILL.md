@@ -9,7 +9,7 @@ This is a thin router. It does not define a shared lifecycle or inject shared co
 
 ## Select the supplied role and operation
 
-The role launcher supports these seven role IDs: `architect`, `investigator`, `orchestrator`, `manager`, `worker`, `reviewer`, and `curator`. `system-specialist` is the earlier ID of the same Investigator role. The manifest retains other registry entries, but this router does not launch them. If the handover lacks a supported role or one applicable operation, report the exact missing or unsupported field in your own chat and stop. Do not infer a role, operation, task, repository, or owner from a chat title, runtime directory, or nearby document.
+The role launcher supports these eight role IDs: `architect`, `investigator`, `orchestrator`, `manager`, `worker`, `reviewer`, `curator`, and `bootstrap`. `system-specialist` is the earlier ID of the same Investigator role. The manifest retains other registry entries, but this router does not launch them. If the handover lacks a supported role or one applicable operation, report the exact missing or unsupported field in your own chat and stop. Do not infer a role, operation, task, repository, or owner from a chat title, runtime directory, or nearby document.
 
 For a task-bound launch, use only the canonical task reference and paired workspace supplied in the handover. Follow that role and operation's exact task-read arguments. Do not manufacture task IDs or parent relationships. Projects is a shared execution workspace, not a repository identity; leaf roles use the selected AR-paired task enclosure already bound by the launcher.
 

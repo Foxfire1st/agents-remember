@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from _user_settings_guard import user_settings_path_for_write
 from agents_remember.errors import PaseoRuntimeFailure
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving.paseo.paseo_daemon_config import (
@@ -63,12 +62,11 @@ def served_config(root: Path) -> McpRuntimeConfig:
     home = root / "home"
     home.mkdir(exist_ok=True)
     (home / "config.json").write_text(json.dumps({"agents": {"providers": {}}}), encoding="utf-8")
-    path = user_settings_path_for_write()
+    path = root / "mcp.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
-                "orchestration": {},
                 "paseoRuntime": {
                     "installPrefix": (root / "prefix").as_posix(),
                     "home": home.as_posix(),
@@ -81,7 +79,7 @@ def served_config(root: Path) -> McpRuntimeConfig:
         encoding="utf-8",
     )
     return McpRuntimeConfig(
-        config_path=root / "mcp.json",
+        config_path=path,
         coordination_root=root / "coordination",
         workspace_root=root / "projects",
         transcript_root=root / "coordination" / "logs" / "mcp",

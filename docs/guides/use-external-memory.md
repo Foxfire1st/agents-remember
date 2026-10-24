@@ -9,7 +9,7 @@ External memory is useful when:
 - code and memory should be reviewed or permissioned separately
 - several code repositories share one coordination root
 - long-running branches need matching code and memory versions
-- `c-12-closeout` worktree closeout should record code-memory ledger mappings
+- `w-02-light-task-workflow` worktree closeout should record code-memory ledger mappings
 
 ## Layout
 
@@ -87,7 +87,7 @@ that exact path and the route to re-point it. Resolution is per target repositor
 
 ## Closeout
 
-External-memory changes need code and memory to stay mapped. `c-12-closeout` handles that sequence for both direct edits in the current checkout and worktree-backed tasks:
+External-memory changes need code and memory to stay mapped. `w-02-light-task-workflow` handles that sequence for both direct edits in the current checkout and worktree-backed tasks:
 
 1. for Agents Remember source changes, run the leaf change-set-scoped quality contract (`--targeted`); the full wrapper runs once per master at the master integration gate
 2. commit code

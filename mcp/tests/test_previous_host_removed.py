@@ -35,7 +35,7 @@ from agents_remember.serving.app import create_app
 from agents_remember.serving.projector import ProjectionCadence
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from paseo_runtime_test_support import runtime_settings, write_shared_runtime
+from paseo_runtime_test_support import runtime_block, runtime_settings
 from starlette.routing import Match, Mount
 from test_paseo_launch import ROLE_REFS, PaseoLaunchTestCase
 
@@ -73,8 +73,8 @@ ALLOWED_IDENTIFIERS: dict[str, tuple[str, ...]] = {
 ALLOWED_FILES: dict[str, str] = {
     THIS_FILE: "the search itself, and the cases for the leftover settings block, the former "
     "routes and the previous line's receipts",
-    "mcp/tests/test_role_instruction_wording.py": "PNT-R06 item 12: the forbidden strings of "
-    "the role instructions",
+    "mcp/tests/role_instruction_wording_support.py": "PNT-R06 item 12: the forbidden strings of "
+    "the role instructions, in the support module the rail split moved them to",
 }
 # By file name with the number of hits (item 3): the sandbox tooling removes the variables of the
 # previous host from the environment of what it starts, which it can only do by naming their
@@ -204,10 +204,15 @@ class NoTrackedFileNamesThePreviousHostTests(unittest.TestCase):
                 self.assertGreater(len(paths), 0)
                 self.assertEqual(set(paths) & set(ALLOWED_FILES), set())
         self.assertEqual(
-            sorted(ALLOWED_FILES), [THIS_FILE, "mcp/tests/test_role_instruction_wording.py"]
+            sorted(ALLOWED_FILES),
+            ["mcp/tests/role_instruction_wording_support.py", THIS_FILE],
         )
         for path, reason in ALLOWED_FILES.items():
-            self.assertRegex(path, r"^mcp/tests/test_\w+\.py$")
+            # A wording test's forbidden strings may live in its own support module, which the
+            # rail split owns; every other allowed file is a test module.
+            self.assertRegex(
+                path, r"^mcp/tests/(test_\w+\.py|role_instruction_wording_support\.py)$"
+            )
             self.assertGreater(len(reason), 40, f"{path} is allowed without a reason")
         # The counted files are the removal list of item 3 and the unit test that pins it.
         self.assertEqual(
@@ -348,14 +353,14 @@ class NoTrackedFileNamesThePreviousHostTests(unittest.TestCase):
 
 
 def settings_document(root: Path) -> dict[str, Any]:
-    write_shared_runtime(
-        root, runtime_settings(root / "paseo", listen="127.0.0.1:6862", providers={}, embed=[])
-    )
     return {
         "version": 1,
         "coordinationRoot": (root / "coordination").as_posix(),
         "workspaceRoot": (root / "projects").as_posix(),
         "repositories": {},
+        "paseoRuntime": runtime_block(
+            runtime_settings(root / "paseo", listen="127.0.0.1:6862", providers={}, embed=[])
+        ),
     }
 
 

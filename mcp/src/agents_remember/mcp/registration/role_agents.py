@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.lowlevel.server import request_ctx
 from pydantic import Field, StrictBool, StrictStr
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -14,6 +15,7 @@ from agents_remember.mcp.tools.role_agents import (
     role_message_payload,
     role_start_payload,
     role_start_set_payload,
+    user_settings_init_payload,
 )
 from agents_remember.models.role_agents import (
     DEFAULT_WAIT_SECONDS,
@@ -63,6 +65,26 @@ def seat_override(role: str, mapping: dict[str, Any] | None) -> SeatLaunchOverri
     )
 
 
+def caller_harness_name() -> str | None:
+    """The name the calling harness sent in its MCP ``initialize`` request, else ``None``.
+
+    This is the whole caller-harness signal (MIK-R196 rule 1): the transport's own report about
+    its client, read from the request the server is serving. A caller that sends no name, or a
+    call made outside a served request (an in-process check), gives ``None`` -- reported as
+    unknown, never replaced by a guess.
+    """
+
+    try:
+        context = request_ctx.get()
+    except LookupError:
+        return None
+    session = getattr(context, "session", None)
+    params = getattr(session, "client_params", None)
+    info = getattr(params, "clientInfo", None)
+    name = getattr(info, "name", None)
+    return name.strip() if isinstance(name, str) and name.strip() else None
+
+
 def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     """Register ``role_start``, ``role_start_set`` and ``role_message``, in that order."""
 
@@ -96,6 +118,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
             replaces_agent_id=replaces_agent_id,
             replaces_interrupt_turn=replaces_interrupt_turn,
             step_up=step_up,
+            caller_harness=caller_harness_name(),
         )
         return await asyncio.to_thread(role_start_payload, config, call)
 
@@ -138,6 +161,24 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
                 "requestId": str(request_id),
             }
         return await asyncio.to_thread(role_start_set_payload, config, call)
+
+    @server.tool()
+    async def user_settings_init(
+        target: Literal["host-authority", "role-settings"],
+        *,
+        harness: str | None = None,
+        roles: dict[str, str] | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, object]:
+        """Preview or create role-settings with a harness per named role; model and effort stay unset. Name one harness or a harness per role. Existing choices are read and never overwritten. Call dry_run first. host-authority is refused: host preparation writes paseoRuntime in the active MCP settings file. The answer names state, path and changes. More: docs/reference/mcp-tools.md."""
+        return await asyncio.to_thread(
+            user_settings_init_payload,
+            config,
+            harness=harness,
+            roles=roles,
+            dry_run=dry_run,
+            target=target,
+        )
 
     @server.tool()
     async def role_message(

@@ -159,7 +159,7 @@ def test_per_level_step_up_refusal_preserves_settings_file_and_exact_feature_key
     path.write_text(
         json.dumps(
             {
-                **json.loads(path.read_text()),
+                **(json.loads(path.read_text()) if path.exists() else {}),
                 "orchestration": {
                     "roles": {"worker": {"harness": "codex", "model": "gpt-a"}},
                     "rolesPerLevel": {
@@ -266,7 +266,9 @@ def test_same_scope_native_tier_step_up_is_not_hidden_by_inherited_alias(launch_
     ]
     world.replace(world.runtime, "_catalog", return_value=catalog)
     path = user_settings_path_for_write()
-    raw = json.loads(path.read_text())
+    # MIK-R137: the user settings file holds the role choices and nothing creates it for a test
+    # that only reads them, so an absent file is "no choices yet", not an error.
+    raw = json.loads(path.read_text()) if path.exists() else {}
     raw["orchestration"] = {
         "roles": {
             "worker": {
@@ -277,6 +279,7 @@ def test_same_scope_native_tier_step_up_is_not_hidden_by_inherited_alias(launch_
             }
         }
     }
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(raw))
     world.replace(
         role_launch_preparation,

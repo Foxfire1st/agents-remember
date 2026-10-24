@@ -5,8 +5,6 @@ import json
 import os
 import shutil
 import stat
-import subprocess
-import sys
 from argparse import Namespace
 from pathlib import Path
 from unittest.mock import patch
@@ -15,13 +13,24 @@ import pytest
 from _user_settings_guard import user_settings_path_for_write
 from agents_remember.cli import paseo_runtime
 from agents_remember.install.runtime import upgrade_user_settings
-from agents_remember.kernel.primitives.paseo_authority import load_shared_paseo_runtime
-from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettingsError
+from agents_remember.kernel.primitives.paseo_runtime_settings import (
+    parse_paseo_runtime_settings,
+)
 from agents_remember.kernel.primitives.runtime_config import load_config
+from agents_remember.kernel.primitives.user_settings_location import (
+    UserSettingsLocationError,
+    require_user_settings_path,
+)
 from agents_remember.serving.paseo.paseo_daemon import runtime_status, stop_runtime
 from agents_remember.serving.paseo.paseo_provision import provision_runtime
 from agents_remember.serving.paseo.paseo_start import ensure_host, observe_host
-from paseo_runtime_test_support import FakePaseo, free, runtime_settings, write_shared_runtime
+from paseo_runtime_test_support import (
+    FakePaseo,
+    free,
+    runtime_settings,
+    write_runtime_block,
+    write_user_settings_block,
+)
 
 
 def test_plugin_pin_drift_fails_release_concordance(tmp_path):
@@ -43,37 +52,6 @@ def test_plugin_pin_drift_fails_release_concordance(tmp_path):
     assert module.check(tmp_path) == [
         "plugin development SDK version does not match the build host"
     ]
-
-
-def test_starter_renders_one_shared_block_and_preserves_existing_settings(tmp_path, monkeypatch):
-    root = Path(__file__).resolve().parents[2]
-    spec = importlib.util.spec_from_file_location(
-        "starter_renderer", root / "scripts/harness/render_starter.py"
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    settings = tmp_path / "harness/mcp/settings.json"
-    settings.parent.mkdir(parents=True)
-    settings.write_text((root / "scripts/harness/shared/agents-remember-settings.json").read_text())
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    module.render_settings(settings, tmp_path, ["repo"])
-    shared = user_settings_path_for_write()
-    host = json.loads(shared.read_text())["paseoRuntime"]
-    assert "paseoRuntime" not in json.loads(settings.read_text())
-    assert "version" not in host
-    assert host["listen"] == "127.0.0.1:8766"
-    assert host["installPrefix"] == str(tmp_path / "data/agents-remember/paseo/prefix")
-    assert host["home"] == str(tmp_path / "state/agents-remember/paseo")
-    document = json.loads(shared.read_text())
-    document["paseoRuntime"]["listen"] = "127.0.0.1:9786"
-    document["developerSetting"] = "keep"
-    shared.write_text(json.dumps(document))
-    before = shared.read_bytes()
-    module.render_settings(settings, tmp_path, ["repo"])
-    assert shared.read_bytes() == before
 
 
 @pytest.mark.parametrize("mutation", ["host-lock", "node-url"])
@@ -101,110 +79,6 @@ def test_release_concordance_rejects_mismatched_lock_entry_or_archive(tmp_path, 
         archive["url"] = archive["url"].replace("linux-x64", "linux-arm64")
     path.write_text(json.dumps(data))
     assert module.check(tmp_path)
-
-
-def test_same_starter_input_differs_only_in_recorded_root_and_ports(tmp_path, monkeypatch):
-    root = Path(__file__).resolve().parents[2]
-    spec = importlib.util.spec_from_file_location(
-        "renderer_options", root / "scripts/harness/render_starter.py"
-    )
-    assert spec is not None and spec.loader is not None
-    renderer = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(renderer)
-    for name, folder in (("XDG_DATA_HOME", "data"), ("XDG_STATE_HOME", "state")):
-        monkeypatch.setenv(name, str(tmp_path / folder))
-    template = (root / "scripts/harness/shared/agents-remember-settings.json").read_text()
-    default, actual = tmp_path / "default.json", tmp_path / "explicit.json"
-    default.write_text(template)
-    actual.write_text(template)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "default-user"))
-    renderer.render_settings(default, tmp_path, ["repo"])
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "explicit-user"))
-    renderer.render_settings(
-        actual,
-        tmp_path,
-        ["repo"],
-        renderer.RenderOptions(tmp_path / "custom-coordination", 6820, 9797),
-    )
-    standard = json.loads(default.read_text())
-    explicit = json.loads(actual.read_text())
-    assert {
-        key: value
-        for key, value in standard.items()
-        if key not in {"coordinationRoot", "transcriptRoot", "dashboard"}
-    } == {
-        key: value
-        for key, value in explicit.items()
-        if key not in {"coordinationRoot", "transcriptRoot", "dashboard"}
-    }
-    assert standard["dashboard"]["port"] == 8765 and explicit["dashboard"]["port"] == 9797
-    for path, expected_port in ((default, 8766), (actual, 6820)):
-        monkeypatch.setenv(
-            "XDG_CONFIG_HOME",
-            str(tmp_path / ("default-user" if path == default else "explicit-user")),
-        )
-        config = load_config(path)
-        host = config.paseo_runtime
-        assert host is not None
-        assert host.listen_port == expected_port
-        assert host.install_prefix == tmp_path / "data/agents-remember/paseo/prefix"
-        assert host.home == tmp_path / "state/agents-remember/paseo"
-        assert host.providers == {} and len(host.embed) == 2
-
-
-def test_native_public_renderer_consumes_shared_setup_without_output_edits(tmp_path, monkeypatch):
-    root = Path(__file__).resolve().parents[2]
-    spec = importlib.util.spec_from_file_location(
-        "native_renderer", root / "scripts/pnt_sandbox/render_starter_settings.py"
-    )
-    assert spec is not None and spec.loader is not None
-    adapter = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(adapter)
-    coordination = tmp_path / "coordination"
-    shared = user_settings_path_for_write()
-    shared.parent.mkdir(parents=True)
-    block = {
-        "installPrefix": str(tmp_path / "paseo/prefix"),
-        "home": str(tmp_path / "paseo/home"),
-        "listen": "127.0.0.1:6820",
-        "providers": {"pi": {"command": ["pi", "--no-extensions", "-e", "builtin:mcp"]}},
-        "embed": [
-            {"dashboardOrigin": f"http://{host}:9797", "frameBaseUrl": "http://127.0.0.1:6820"}
-            for host in ("127.0.0.1", "localhost")
-        ],
-    }
-    shared.write_text(json.dumps({"paseoRuntime": block}))
-    for name, folder in (("XDG_DATA_HOME", "data"), ("XDG_STATE_HOME", "state")):
-        monkeypatch.setenv(name, str(tmp_path / folder))
-    settings = tmp_path / "settings.json"
-    settings.write_text((root / "scripts/harness/shared/agents-remember-settings.json").read_text())
-    before = shared.read_bytes()
-    result = adapter.render(
-        Namespace(
-            settings=settings,
-            workspace=tmp_path,
-            coordination=coordination,
-            host_port=6820,
-            dashboard_port=9797,
-            repo="repo",
-        )
-    )
-    assert result["invocations"] == 1 and shared.read_bytes() == before
-    assert set(result["hostDifferenceKeys"]) == {
-        "installPrefix",
-        "home",
-        "listen",
-        "providers",
-        "embed",
-    }
-    host = load_config(settings).paseo_runtime
-    assert host is not None and host.providers == block["providers"]
-    assert result["sharedBeforeSha256"] == result["sharedAfterSha256"]
-    assert (
-        result["renderedSettingsSha256"]
-        == __import__("hashlib").sha256(settings.read_bytes()).hexdigest()
-    )
-    assert result["rendererSource"] == str(root / "scripts/harness/render_starter.py")
 
 
 @pytest.mark.parametrize("command", ["build", "check", "start", "stop"])
@@ -256,20 +130,13 @@ def test_retired_selector_notice_once_on_each_public_command_and_dashboard_line(
 ):
 
     settings = runtime_settings(tmp_path)
-    write_shared_runtime(tmp_path, settings)
-    shared = user_settings_path_for_write()
-    document = json.loads(shared.read_text())
-    document["paseoRuntime"]["version"] = "*"
-    shared.write_text(json.dumps(document))
     path = tmp_path / "settings.json"
-    path.write_text(
-        json.dumps(
-            {
-                "coordinationRoot": str(tmp_path / "coordination"),
-                "workspaceRoot": str(tmp_path / "projects"),
-            }
-        )
-    )
+    write_runtime_block(path, settings)
+    document = json.loads(path.read_text())
+    document["paseoRuntime"]["version"] = "*"
+    document["coordinationRoot"] = str(tmp_path / "coordination")
+    document["workspaceRoot"] = str(tmp_path / "projects")
+    path.write_text(json.dumps(document))
     cfg = load_config(path)
     fake = FakePaseo(settings)
     operations = {
@@ -289,13 +156,14 @@ def test_retired_selector_notice_once_on_each_public_command_and_dashboard_line(
         output = capsys.readouterr().out
         assert output.count("paseoRuntime.version") == 1
         notice = json.loads(output)["notice"]
-        assert "'*'" in notice and settings.version in notice and str(shared) in notice
+        assert "'*'" in notice and settings.version in notice and str(path) in notice
     for result in (
         ensure_host(cfg, runner=fake, reader=fake.reader, probe=free),
         observe_host(cfg, runner=fake, reader=fake.reader),
     ):
         assert result.line.count("paseoRuntime.version") == 1
-        assert result.line.count(str(shared)) == 1
+        # One file is both the command's config and the host settings the notice names.
+        assert result.line.count(f"host settings: {path}") == 1
         assert settings.version in result.line and "'*'" in result.line
 
 
@@ -303,7 +171,6 @@ def test_retired_selector_notice_once_on_each_public_command_and_dashboard_line(
 def test_host_and_all_standalone_starters_refuse_old_location_before_any_write(
     tmp_path, monkeypatch, both
 ):
-    root = Path(__file__).resolve().parents[2]
     coordination = tmp_path / "old coordination"
     old = coordination / "system/settings.json"
     old.parent.mkdir(parents=True)
@@ -315,56 +182,24 @@ def test_host_and_all_standalone_starters_refuse_old_location_before_any_write(
         new.parent.mkdir(parents=True)
         new.write_bytes(b"\xff existing user settings must not be read")
     before = old.read_bytes(), new.read_bytes() if both else None
-    with pytest.raises(PaseoRuntimeSettingsError, match="location-upgrade-required") as caught:
-        load_shared_paseo_runtime(coordination)
+    with pytest.raises(UserSettingsLocationError, match="location-upgrade-required") as caught:
+        require_user_settings_path(coordination)
     for path in (old, new):
         assert str(path) in str(caught.value)
-    for harness in (
-        ".claude",
-        ".codex",
-        ".cursor",
-        ".github-vscode",
-        ".hermes",
-        ".openclaw",
-        ".pi",
-        ".agents",
-    ):
-        workspace = tmp_path / harness.removeprefix(".")
-        (workspace / "repo").mkdir(parents=True)
-        starter = workspace / harness / "render-starter.py"
-        starter.parent.mkdir()
-        shutil.copyfile(root / harness / "render-starter.py", starter)
-        original = starter.read_bytes()
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-B",
-                str(starter),
-                "--repo",
-                "repo",
-                "--coordination-root",
-                str(coordination),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert result.returncode != 0
-        assert "location-upgrade-required" in result.stderr
-        assert str(old) in result.stderr and str(new) in result.stderr
-        assert "agents-remember upgrade-user-settings --coordination-root" in result.stderr
-        assert starter.read_bytes() == original
-        assert sorted(
-            p.relative_to(workspace).as_posix() for p in workspace.rglob("*") if p.is_file()
-        ) == [f"{harness}/render-starter.py"]
-    assert (old.read_bytes(), new.read_bytes() if both else None) == before
+    # The eight starter packages carried this renderer until MIK-R196 rule 9 retired it: a
+    # starter package now carries configuration, hooks and instruction files only, so there is
+    # no starter left to ask. The claim that survives is the location refusal itself, above,
+    # and that neither the removed file nor an existing user file was read.
+    assert old.read_bytes() == before[0]
+    if both:
+        assert new.read_bytes() == before[1]
 
 
 def test_whole_file_upgrade_retains_configured_host_and_all_other_families(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "sandbox/config"))
     coordination = tmp_path / "sandbox/coordination"
     settings = runtime_settings(tmp_path / "sandbox")
-    write_shared_runtime(tmp_path, settings)
+    write_user_settings_block(settings)
     new = user_settings_path_for_write()
     document = json.loads(new.read_text())
     document["futureFamily"] = {"unknownKey": ["keep", 42]}
@@ -383,8 +218,10 @@ def test_whole_file_upgrade_retains_configured_host_and_all_other_families(tmp_p
     assert stat.S_IMODE(new.stat().st_mode) == 0o444
     assert stat.S_IMODE(new.parent.stat().st_mode) == 0o555
     new.parent.chmod(0o755)
-    actual = load_shared_paseo_runtime(coordination)
-    assert actual is not None and actual.source_path == new
+    actual = parse_paseo_runtime_settings(
+        json.loads(new.read_text(encoding="utf-8")).get("paseoRuntime")
+    )
+    assert actual is not None and new == require_user_settings_path(coordination)
     assert (actual.home, actual.install_prefix, actual.listen, actual.providers, actual.embed) == (
         settings.home,
         settings.install_prefix,
@@ -413,5 +250,12 @@ def test_sandbox_environment_reads_only_its_own_user_settings(tmp_path, monkeypa
     assert environment["HOME"] == str(real_home)
     with patch.dict(os.environ, environment, clear=True):
         assert user_settings_path_for_write() == layout.user_settings_file
-        assert load_shared_paseo_runtime(layout.coordination) is None
+        assert (
+            parse_paseo_runtime_settings(
+                json.loads(layout.user_settings_file.read_text(encoding="utf-8")).get(
+                    "paseoRuntime"
+                )
+            )
+            is None
+        )
     assert outside.read_bytes() == b"\xff must not be read by the sandbox"

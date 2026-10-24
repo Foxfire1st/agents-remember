@@ -9,7 +9,6 @@ exercised against the real ``/proc``.
 from __future__ import annotations
 
 import contextlib
-import importlib.util
 import json
 import os
 import random
@@ -357,7 +356,6 @@ class SandboxCase(unittest.TestCase):
                 "coordinationRoot": layout.coordination.as_posix(),
                 "workspaceRoot": layout.projects.as_posix(),
                 "transcriptRoot": (layout.coordination / "logs" / "mcp").as_posix(),
-                "harnessSkillRoot": layout.harness_skills.as_posix(),
                 "receipts.taskless": (layout.coordination / "notes" / "reports").as_posix(),
                 "receipts.messageBindings": (layout.coordination / "notes").as_posix(),
                 "reports.taskless": (layout.projects / ".agents-remember").as_posix(),
@@ -423,23 +421,36 @@ class FakeOperations(Operations):
         return []
 
     def render_settings(self, checkout: Path) -> dict[str, Any]:
-        self.note("public starter render", checkout)
-        spec = importlib.util.spec_from_file_location(
-            "fake_case_renderer", REPOSITORY_ROOT / "scripts/harness/render_starter.py"
+        """The sandbox's settings owner prepares the file the sandbox's tool server reads.
+
+        MIK-R196 rule 9 retired the starter renderer; the surviving owner of this file is
+        ``scripts/pnt_sandbox/settings_expectation.py``, which the real operations run the same
+        way -- as one subprocess with the sandbox's own environment.
+        """
+        self.note("sandbox settings owner", checkout)
+        done = subprocess.run(
+            [
+                sys.executable,
+                str(REPOSITORY_ROOT / "scripts/pnt_sandbox/settings_expectation.py"),
+                "--settings",
+                self.layout.settings_file.as_posix(),
+                "--workspace",
+                self.layout.projects.as_posix(),
+                "--coordination",
+                self.layout.coordination.as_posix(),
+                "--dashboard-port",
+                str(self.layout.dashboard_port),
+                "--repo",
+                REPOSITORY_ID,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=checkout.as_posix(),
+            env={**os.environ, **self.environment},
         )
-        assert spec is not None and spec.loader is not None
-        renderer = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(renderer)
-        with mock.patch.dict(os.environ, self.environment):
-            renderer.render_settings(
-                self.layout.settings_file,
-                self.layout.projects,
-                [REPOSITORY_ID],
-                renderer.RenderOptions(
-                    self.layout.coordination, self.layout.paseo_port, self.layout.dashboard_port
-                ),
-            )
-        return {"renderedSettingsPath": self.layout.settings_file.as_posix(), "invocations": 1}
+        self.case.assertEqual(done.returncode, 0, done.stderr[-2000:])
+        return {"preparedSettingsPath": self.layout.settings_file.as_posix(), "invocations": 1}
 
     def resolve_roots(self, checkout: Path, mode: str) -> dict[str, Any]:
         self.note(f"resolve roots as {mode}", checkout)

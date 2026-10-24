@@ -8,12 +8,13 @@ description: "Initialize or repair the Agents Remember memory root for a target 
 Create the minimal memory root required before onboarding or task workflows can use Agents Remember for a target repository.
 
 This skill initializes durable repo memory through MCP `memory_init`. It does
-not install the coordinator runtime, expose harness skills, create task
+not install the coordinator runtime, create task
 worktrees, or generate onboarding content. Request MCP `runtime_install` only
-when the coordinator runtime scaffold is missing or stale. Harness skill
-exposure for first-run setup comes from the copied starter package, not from
-this skill. Use `c-03-repo-bootstrap` after the memory scaffold exists when the
-developer wants onboarding content generated.
+when the coordinator runtime scaffold is missing or stale. Skills are not installed
+as files at all: the tool server serves the canonical skill tree from its packaged
+copy as MCP resources, so no harness, project or coordination-root skill folder is
+part of setup or of this skill. Use `c-03-repo-bootstrap` after the memory scaffold
+exists when the developer wants onboarding content generated.
 
 Use `c-08-ar-coordination-context-resolver` to inspect an existing repository's active context. This skill creates or repairs missing memory scaffolding; it does not replace the `c-08-ar-coordination-context-resolver` skill as the normal resolver.
 
@@ -45,10 +46,11 @@ runtime_install(include_benchmarks=false, install_provider_deps=false)
 
 Use `memory_init` for creating or repairing the configured memory root for a
 repo. Use `runtime_install` only when the coordinator runtime scaffold itself is
-missing or stale. Do not install skills as part of package-based first-run
-setup; copied starter packages already carry the harness skills. The skill
-tree is instruction-only; installed and development workflows use the
-MCP/package route.
+missing or stale. Do not install skills, and do not create a skill folder in the
+harness, the project or the coordination root: the tool server serves the canonical
+skills from its packaged copy as MCP resources, and a coordinator root without a
+`skills/` directory is correct. The root `skills/` tree is the source repository's
+authoring source; it is never a runtime dependency of a project.
 
 ## Safety Rules
 
@@ -114,10 +116,12 @@ job.
 
 ```text
 <coordination-root>/AGENTS.md
-<coordination-root>/skills/
 <coordination-root>/tasks/
 <coordination-root>/memory-repos/
 ```
+
+   The scaffold carries no skills copy, so an absent `skills/` directory is the expected state and
+   not a missing-runtime defect; the skills a session reads come from the tool server.
 
 4. If the runtime is missing, stop and ask the developer to request (preview
    first with `runtime_install(dry_run=true)`):
@@ -173,7 +177,7 @@ Create only missing directories:
   docs/
 ```
 
-Ensure `<coordination-root>/memory-repos/` exists before creating the per-repo memory root. Do not create or modify coordinator runtime directories such as `skills/`, `tasks/`, `worktrees/`, `notes/`, or `temp/`.
+Ensure `<coordination-root>/memory-repos/` exists before creating the per-repo memory root. Do not create or modify coordinator runtime directories such as `tasks/`, `worktrees/`, `notes/`, or `temp/`, and do not create a `skills/` directory anywhere: the runtime carries none, and the tool server serves the skills.
 
 When creating the memory Git repository, add `docs/.gitkeep` if `docs/` would otherwise be empty so the scaffold can be committed.
 

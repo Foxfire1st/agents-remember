@@ -41,6 +41,8 @@ class RoleStartCall:
     # replacement (rule 8). Without it a running holder is refused, as in retirement.
     replaces_interrupt_turn: bool = False
     step_up: str | None = None
+    # The harness the calling chat runs, as its MCP client named itself (MIK-R196 rule 1).
+    caller_harness: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +151,9 @@ class RoleEnvironmentPreparation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enclosure: Literal["created", "found", "not-applicable"]
     workspace: Literal["created", "found", "opened"] | None = None
+    # L188-B02: a cold start reports what the first run did; the field was produced and not declared,
+    # so the report was lost at the boundary that validates this model.
+    firstRun: dict[str, Any] | None = None
 
 
 class RoleStartResponse(ToolResponse):
@@ -159,9 +164,21 @@ class RoleStartResponse(ToolResponse):
     launch is closed; ``agentId`` names no usable agent) or ``unknown`` (no usable answer; the same
     ``requestId`` reconciles the same agent). ``executionStatus`` is what the execution's receipt
     says now, which differs from the launch status once the agent has finished a turn.
+    ``dashboardAddress`` and ``chatAddress`` are where the started seat is continued (MIK-R196
+    rule 1); ``dashboardAddressDetail`` and ``chatAddressDetail`` name why those routes cannot be
+    given when they cannot,
+    and ``preparation.firstRun`` is what a cold start established before the seat existed.
     """
 
     operation: Literal["role_start"] = "role_start"
+    # L188-B02: MIK-R196 rule 1's continuation -- the address of the seat and of its chat. Declared
+    # here because the producer emits them and this model is strict; undeclared, they were dropped.
+    dashboardAddress: str | None = None
+    # L188-B24: an address nobody serves is not a continuation. When the dashboard could not be
+    # brought up, ``dashboardAddress`` is absent and this names the reason (7c1153ee).
+    dashboardAddressDetail: str | None = None
+    chatAddress: str | None = None
+    chatAddressDetail: str | None = None
     stepUp: dict[str, Any] | None = None
     status: RoleStartStatus
     detail: str

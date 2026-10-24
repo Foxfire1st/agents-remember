@@ -69,22 +69,15 @@ OVERVIEW_SUBJECT = "onboarding:overview"
 
 SKILL = "skills/c-05-write-onboarding/assets/file-level-onboarding-template.md"
 COPY_TARGETS = (
+    # MIK-R196 rule 7: the packaged serving copy is the only generated copy that survives.
     "mcp/src/agents_remember/package_data/runtime/skills",
-    ".claude/skills",
-    ".codex/skills",
-    ".cursor/skills",
-    ".github-vscode/skills",
-    ".hermes/skills",
-    ".openclaw/workspace/skills",
-    ".pi/skills",
-    ".agents/skills",
 )
 COPIES = tuple(
     f"{target}/c-05-write-onboarding/assets/file-level-onboarding-template.md"
     for target in COPY_TARGETS
 )
 GROUP = (SKILL, *COPIES)
-BODY = "# the template\n\nOne template, nine generated copies.\n"
+BODY = "# the template\n\nOne template, one generated copy.\n"
 GROUPS = "identical-copy groups"
 
 
@@ -125,10 +118,10 @@ def _card(world: World, source: str) -> None:
 
 
 def _grouped_leaf(world: World) -> WorktreeContract:
-    """Ten identical copies at the code base, deleted at C, with the one card that owns them."""
+    """Two identical copies at the code base, deleted at C, with the one card that owns them."""
 
     write(world.code, {path: BODY for path in GROUP})
-    commit_all(world.code, "the template and its nine copies")
+    commit_all(world.code, "the template and its packaged copy")
     code_head = git(world.code, "rev-parse", "HEAD")
     for path in GROUP:
         (world.code / path).unlink()
@@ -250,7 +243,7 @@ def test_one_row_binding_every_copy_answers_the_worklist_and_the_gate(
     assert known is not None
     item = _trace_item(known, subject)
     sources = tuple(item["facts"]["sources"])
-    assert len(sources) == 10 and set(sources) == set(GROUP)
+    assert len(sources) == 2 and set(sources) == set(GROUP)
     assert item["satisfiedBy"] is None  # open before the row exists
     assert item["facts"]["sourceBlobs"] == {path: ABSENT for path in sources}
     groups = dict(known["identicalChanges"])
@@ -285,7 +278,7 @@ def test_an_empty_group_is_the_old_singleton_item_and_the_row_does_not_answer_it
     assert known is not None
     changed, _before = _answered_group(world, contract)
     row = _stored_row(world, subject)
-    assert len(row.sources or ()) == 10
+    assert len(row.sources or ()) == 2
     result, findings = _gate(world, contract, changed, {}, [])
     item = _by_subject(result)[subject]
     assert item.sources == (SKILL,)  # the singleton construction, not the worklist's item

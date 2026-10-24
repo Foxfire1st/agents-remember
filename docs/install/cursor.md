@@ -1,52 +1,70 @@
 # Install For Cursor
 
-Cursor supports native Agent Skills, project rules, project hooks, and
-project-local MCP configuration.
+Cursor supports project rules, project hooks, project-local MCP configuration, and native Agent
+Skills. Agents Remember needs the MCP registration and one call; its skills arrive from the tool
+server as MCP resources, so no skill folder is copied into the workspace.
 
 Official references:
 
 - [Cursor Rules](https://cursor.com/docs/rules.md)
 - [Cursor Hooks](https://cursor.com/docs/hooks.md)
 - [Cursor MCP](https://cursor.com/docs/mcp.md)
-- [Cursor Agent Skills](https://cursor.com/docs/skills.md)
 
-## Root Starter Package
+## Register The MCP Server
 
-The repository includes a Cursor starter package at `.cursor/`. Copy that folder
-to your workspace root, then render the copied package. The
-`.cursor/render-starter` script is a convenience: with a single `--repo` list
-such as `--repo my-app shared-lib`, it infers the workspace root from the copied
-`.cursor/` folder, fills path and repository placeholders, writes the Python
-hook command, and validates that each requested repository exists before you open
-or restart the workspace in Cursor once. If you prefer not to run the renderer,
-make those same replacements by hand and verify that no placeholder tokens
-remain.
+Write an MCP authority settings file (copy `examples/mcp/settings.example.json` and replace its
+paths), then add the server to `.cursor/mcp.json` in your workspace:
 
-The package contains:
-
-- `.cursor/rules/agents-remember.mdc` - always-applied first-action instruction.
-- `.cursor/hooks.json` and `.cursor/hooks/agents-remember-session-start.py` -
-  project `sessionStart` hook that injects the same startup directive.
-- `.cursor/mcp.json` - project-local Cursor MCP registration.
-- `.cursor/mcp/agents-remember-settings.json` - Agents Remember MCP authority
-  settings.
-- `.cursor/skills/` - Agents Remember skills for Cursor Agent.
-
-After the restart, invoke:
-
-```text
-c-13-install-and-onboard
+```json
+{
+  "mcpServers": {
+    "agents-remember": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--refresh-package",
+        "agents-remember-mcp@latest",
+        "--config",
+        "<PATH/TO/YOUR/PROJECTS_FOLDER>/.cursor/mcp/agents-remember-settings.json"
+      ]
+    }
+  }
+}
 ```
 
-That skill runs or verifies `runtime_install()` and then handles memory,
-onboarding, and providers.
+`.cursor/mcp.json` in this repository is that registration with
+`<PATH/TO/YOUR/PROJECTS_FOLDER>` markers to replace by hand; no script renders it. Restart Cursor
+once so it starts the server.
 
-## Persistent Instructions
+## Start With One Call
 
-Use the packaged Cursor project rule. Do not overwrite a repository's root
-`AGENTS.md` just to wire Agents Remember; root `AGENTS.md` is project-specific.
+In a Cursor chat, name no task and no repository:
 
-The starter package includes `.cursor/rules/agents-remember.mdc`:
+```text
+role_start(role="bootstrap", request_id="<a UUID you generate>")
+```
+
+That one call prepares the runtime scaffold, provisions and starts the Paseo host, verifies the
+Agents Remember plug-in, and starts one instructed Bootstrap seat. Its answer names the seat and
+the dashboard address of its chat; continue setup there. A retry with the same `request_id`
+reconciles to the same seat instead of a second one.
+
+Bootstrap ends at memory setup and tells you to start the Architect, which organises the knowledge
+foundation as ordinary task work. Bootstrap starts no role and authors no onboarding or knowledge.
+
+## Skills
+
+Cursor discovers skills from folders it scans; Agents Remember writes none. The tool server
+publishes each skill as an MCP resource (the SEP-2640 skills extension) and Cursor reads them from
+the running server, so there is no skill tree to copy, render or keep in sync.
+
+## Optional: Always-Applied Rule
+
+An always-applied project rule is the dependable instruction surface: Cursor documents
+`sessionStart` hooks as fire-and-forget, so the rule is what a chat reliably reads.
+
+Copy `.cursor/rules/agents-remember.mdc` into your workspace `.cursor/rules/`, replace
+`<PATH/TO/YOUR/PROJECTS_FOLDER>` with your absolute path, and keep the front matter:
 
 ```markdown
 ---
@@ -60,46 +78,6 @@ Treat these rules as workspace instructions!
 @ar-coordination/AGENTS.md
 ```
 
-Use an absolute path when `ar-coordination` is outside the workspace.
-
-Cursor also supports project hooks. The starter package uses a `sessionStart`
-hook to inject the startup directive, but the always-applied project rule remains
-the dependable instruction surface because Cursor documents `sessionStart` as
-fire-and-forget.
-
-## MCP
-
-Cursor project MCP config lives at `.cursor/mcp.json`.
-
-```json
-{
-  "mcpServers": {
-    "agents-remember": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": [
-        "--refresh-package",
-        "agents-remember-mcp",
-        "agents-remember-mcp@latest",
-        "--config",
-        "<PATH/TO/YOUR/PROJECTS_FOLDER>/.cursor/mcp/agents-remember-settings.json"
-      ]
-    }
-  }
-}
-```
-
-## Runtime And Skills
-
-After the restart, the copied `c-13-install-and-onboard` skill runs or verifies:
-
-```text
-runtime_install()
-```
-
-Cursor loads skills from `.agents/skills`, `.cursor/skills`, `~/.agents/skills`,
-and `~/.cursor/skills`; it also supports Claude and Codex compatibility folders.
-The copied starter package already provides the Agents Remember skills in
-`.cursor/skills/`.
-
-Do not install skills for first-run setup; the copied package already carries them.
+Do not overwrite a repository's root `AGENTS.md` just to wire Agents Remember; root `AGENTS.md` is
+project-specific. If you also want the session-start hook, copy `.cursor/hooks/` and
+`.cursor/hooks.json` the same way and replace the same marker there.

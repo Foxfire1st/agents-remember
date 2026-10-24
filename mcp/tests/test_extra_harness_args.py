@@ -562,12 +562,11 @@ def host_config(root: Path, providers: dict[str, Any]) -> McpRuntimeConfig:
     home = root / "home"
     home.mkdir(exist_ok=True)
     (home / "config.json").write_text(json.dumps({"agents": {"providers": providers}}))
-    path = user_settings_path_for_write()
+    path = root / "mcp.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
-                "orchestration": {},
                 "paseoRuntime": {
                     "installPrefix": (root / "prefix").as_posix(),
                     "home": home.as_posix(),
@@ -580,7 +579,7 @@ def host_config(root: Path, providers: dict[str, Any]) -> McpRuntimeConfig:
         encoding="utf-8",
     )
     return McpRuntimeConfig(
-        config_path=root / "mcp.json",
+        config_path=path,
         coordination_root=root / "coordination",
         workspace_root=root / "projects",
         transcript_root=root / "coordination" / "logs" / "mcp",

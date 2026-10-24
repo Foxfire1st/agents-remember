@@ -44,11 +44,12 @@ launch_world = step_up_support.launch_world
 
 def test_memory_record_answer_uses_curator_lane_without_reopening_passed_code(launch_world) -> None:
     settings_path = user_settings_path_for_write()
-    settings = json.loads(settings_path.read_text())
+    settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
     settings.setdefault("orchestration", {}).setdefault("roles", {})["curator"] = {
         "model": "gpt-a",
         "stepUp": {"model": "gpt-b", "afterTries": 3},
     }
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(json.dumps(settings))
     passed_code = {
         "round": 1,

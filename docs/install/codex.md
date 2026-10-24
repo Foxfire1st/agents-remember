@@ -3,75 +3,93 @@
 Codex needs two things:
 
 1. the Agents Remember MCP server in Codex config
-2. Codex-visible skills and startup instructions from the `.codex/` starter package
+2. one call that starts Bootstrap and returns its dashboard seat
+
+Codex reads the skills from the tool server as MCP resources. Nothing is copied into the harness.
 
 Official references:
 
 - [Codex configuration reference](https://developers.openai.com/codex/config-reference)
 - [Codex MCP](https://developers.openai.com/codex/mcp)
 - [Codex hooks](https://developers.openai.com/codex/hooks)
-- [Codex agent skills](https://developers.openai.com/codex/skills)
 - [Codex AGENTS.md instructions](https://developers.openai.com/codex/guides/agents-md)
 
-## Root Starter Package
+## Register The MCP Server
 
-The repository includes a Codex starter package at `.codex/`. Copy that folder
-to your workspace root, then render the copied package. The
-`.codex/render-starter` script is a convenience: with a single `--repo` list
-such as `--repo my-app shared-lib`, it infers the workspace root from the copied
-`.codex/` folder, fills path and repository placeholders, writes the Python hook
-command, and validates that each requested repository exists. If you prefer not
-to run the renderer, make those same replacements by hand and verify that no
-placeholder tokens remain. Restart Codex once after rendering.
+Write an MCP authority settings file (copy `examples/mcp/settings.example.json` and replace its
+paths), then add the server to `~/.codex/config.toml`:
 
-The package contains:
+```toml
+[mcp_servers.agents-remember]
+command = "uvx"
+args = [
+    "--refresh-package",
+    "agents-remember-mcp@latest",
+    "--config",
+    "<PATH/TO/YOUR/PROJECTS_FOLDER>/.codex/mcp/agents-remember-settings.json"
+]
+```
 
-- `.codex/config.toml` - MCP registration and `SessionStart` hook registration.
-- `.codex/hooks/agents-remember-session-start.*` - startup directive emitted as
-  session context.
-- `.codex/mcp/agents-remember-settings.json` - Agents Remember MCP authority
-  settings.
-- `.codex/skills/` - Agents Remember skills in Codex's project skill root.
+Replace the settings path with your absolute one. `.codex/mcp/agents-remember-settings.json` in
+this repository is a template with `<PATH/TO/YOUR/PROJECTS_FOLDER>` and
+`<YOUR_REPOSITORY_FOLDER_NAME>` markers to fill in by hand; no script renders it.
 
-After the restart, invoke:
+Restart Codex once so it starts the server.
+
+## Start With One Call
+
+In a Codex chat, name no task and no repository:
 
 ```text
-c-13-install-and-onboard
+role_start(role="bootstrap", request_id="<a UUID you generate>")
 ```
 
-That skill runs or verifies `runtime_install()` and then handles memory,
-onboarding, and providers.
+That one call prepares the runtime scaffold, provisions and starts the Paseo host, verifies the
+Agents Remember plug-in, and starts one instructed Bootstrap seat. Its answer names the seat and
+the dashboard address of its chat; continue setup there. A retry with the same `request_id`
+reconciles to the same seat instead of a second one.
 
-## Workspace Instructions
-
-Do not overwrite a repository's root `AGENTS.md` just to wire Agents Remember;
-root `AGENTS.md` is project-specific. Codex can read `AGENTS.md` when a project
-already owns one, but the starter package uses the copied `SessionStart` hook as
-the first-run instruction surface.
-
-The hook emits this directive:
-
-```markdown
-# Workspace Agent Instructions
-
-Read and follow `ar-coordination/AGENTS.md` before working in any sibling project.
-Treat these rules as workspace instructions!
-
-@ar-coordination/AGENTS.md
-```
-
-Use an absolute path in the `@...` include when the coordination runtime is outside the workspace.
-
-The starter package already includes the Codex `SessionStart` hook. `c-13-install-and-onboard`
-does not install hooks during first-run setup.
+Bootstrap ends at memory setup and tells you to start the Architect, which organises the knowledge
+foundation as ordinary task work. Bootstrap starts no role and authors no onboarding or knowledge.
 
 ## Skills
 
-The copied starter package already includes one flat folder per skill under
-`.codex/skills/`:
+The tool server publishes every skill as an MCP resource (the SEP-2640 skills extension). Codex
+reads them from the running server, so there is no skill folder to create, copy or keep in sync. If
+a chat does not see the skills, check that the server is running and that the client reads MCP
+resources — not that a skill folder is missing.
 
-```text
-.codex/skills/<skill-name>/
+## Optional: Workspace Instruction File
+
+Do not overwrite a repository's root `AGENTS.md` just to wire Agents Remember; root `AGENTS.md` is
+project-specific.
+
+If you want the free chat to load the first-action notice at session start, copy
+`.codex/hooks/agents-remember-session-start.py` and its sibling `.md` directive into your
+workspace's `.codex/hooks/`, replace `<PATH/TO/YOUR/PROJECTS_FOLDER>` in the directive with your
+absolute path, and register the hook in `~/.codex/config.toml` with the interpreter you want:
+
+```toml
+[[hooks.SessionStart]]
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "<PYTHON_EXECUTABLE> <PATH/TO/YOUR_PROJECTS_FOLDER>/.codex/hooks/agents-remember-session-start.py"
+timeout = 60
+statusMessage = "Loading Agents Remember workspace directive"
 ```
 
-Do not install skills for first-run setup; the copied package already carries them.
+The hook emits this directive and stays silent for a role agent, which arrives with its own
+hand-over:
+
+```markdown
+**Agents Remember — session start.**
+
+You are the developer-facing **free chat**: read
+`ar-coordination/AGENTS.md`. Answer a question inline; for work on a managed
+repository, create or resolve the sprint document, write the request of the
+developer into it, start an Architect with `role_start` (the call for an
+Architect names no document), and tell the developer that the agent is in the
+dashboard and which sprint document holds the request. Another role is started
+this way only when the developer names the role and the task.
+```

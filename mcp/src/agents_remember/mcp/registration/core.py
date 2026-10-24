@@ -130,13 +130,12 @@ def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> N
         no_cache: bool = False,
         experiment: str | None = None,
     ) -> dict[str, Any]:
-        """Install or refresh the packaged coordinator runtime into the coordination root, safe
-        to re-run. Preserves user data (memory-repos/, providers/data/); replaces the scaffold
-        (skills/, docs/) and prunes legacy binaries. No provider install/start/watch
-        path remains: the install stops leftover watchers and reports enabled provider keys
-        once as unused. The final host part provisions the build-pinned host/plugin from the
-        shared paseoRuntime block; it never writes shared settings and defers needed restarts.
-        Preview first with dry_run=true: it changes nothing. Longer explanation:
+        """Install/refresh coordinator scaffold (instructions, docs, provider assets).
+        Preserves memory-repos/ and providers/data/; prunes legacy binaries. Skills remain
+        package-served resources; no skill folder is installed. Stops leftover provider
+        watchers, reports retired keys, and starts none. The host part provisions the
+        pinned host/plugin from active MCP authority's paseoRuntime; it writes no settings
+        and defers needed restarts. dry_run=true previews without changes. Longer explanation:
         docs/tool-details.md."""
         return runtime_install_payload(
             config,

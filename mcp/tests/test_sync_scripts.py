@@ -2,12 +2,10 @@
 
 THE SUBJECT
 -----------
-An agent does not read the canonical tree. It reads whichever skill tree its harness installed --
-root ``skills/``, the MCP package data that ``runtime_install`` copies into a coordination root, or
-one of the eight harness starter packages. Correcting one copy and leaving eight stale ones is
-therefore not a partial fix; it is a role-dependent lifecycle truth, where two agents in the same
-task hold different authority boundaries and neither can tell. ``scripts/sync-skills.py`` is the
-mechanism that makes that impossible, and this module is the executable statement that it happened:
+Root ``skills/`` is the authoring source; the declaration selects its generated package
+copies. The current target is the MCP package data served to agents. A stale declared copy
+can expose lifecycle authority that differs from the source. ``scripts/sync-skills.py`` is
+the mechanism that keeps those copies aligned, and this module states that it happened:
 one pinned inventory, the real trees read byte for byte, and the copy-then-swap sequence
 characterized at the two places it can fail.
 
@@ -16,7 +14,7 @@ WHAT DEFENDS WHAT
     reading                                              defended by
     --------------------------------------------------   ---------------------------------------
     every declared copy equals ``skills/`` byte for       ``test_every_declared_projection...``,
-      byte, in this checkout, with no pytest-only          which reads the real nine targets and
+      byte, in this checkout, with no pytest-only          which reads the real declared targets and
       invocation required                                  names the repair command that fixes
                                                            each drifted path
     the drift reader itself can still fail                ``test_the_drift_reader...``, which
@@ -36,7 +34,7 @@ WHAT DEFENDS WHAT
                                                            refusal rather than trusting it
     the corrected boundary reaches every packaged copy    the reach cases, which hold three clauses
                                                            quoted from the shipped doctrine against
-                                                           the canonical tree and all nine copies,
+                                                           the canonical tree and every declared copy,
                                                            and a mutant that must name the copy
                                                            that lost one
 
@@ -54,8 +52,8 @@ argued rather than land silently.
 
 WHAT THIS DOES NOT COVER (stated, not implied)
 ---------------------------------------------
-- **Scope is the skill projection.** ``sync-runtime.py``, ``sync-harness.py``, ``sync-dashboard.py``,
-  and ``sync-projection-types.py`` project different trees and are not this module's subject.
+- **Scope is the skill projection.** ``sync-runtime.py``, ``sync-dashboard.py`` and
+  ``sync-projection-types.py`` project different trees and are not this module's subject.
 - **The doctrine's meaning is not restated here.** Which clauses each surface owes, and what they
   mean, is canonical-tree subject matter owned by
   ``mcp/tests/test_lifecycle_turn_truth_doctrine.py``. The reach cases quote that module's shipped
@@ -119,8 +117,8 @@ class BoundaryClause:
 # parent report notice) are guarded by the retired-wording register
 # (`retired_leaf_handover_wording.RETIRED_LEAF_HANDOVER_WORDING`) and stay out per
 # the packet preservation boundary.
-# A clause whose surface or marker stops matching the canonical tree and its nine copies still fails,
-# which is what `test_a_clause_missing_from_one_...` pins by deleting one clause from one copy.
+# A clause whose surface or marker stops matching the canonical tree and its declared copies still
+# fails, which is what `test_a_clause_missing_from_one_...` pins by deleting one clause from one copy.
 PROJECTED_BOUNDARY_CLAUSES: tuple[BoundaryClause, ...] = (
     BoundaryClause(
         "core/acceptance.md", "Terminal truth is mechanical; acceptance is the owner's."
@@ -224,7 +222,7 @@ def drift_entries(target: Any) -> list[str]:
     """One entry per file where ``target`` disagrees with ``skills/``, named where a reader looks.
 
     Each entry is rebased onto the target, so the failure names the copy that has to be fixed
-    rather than the canonical path it shares with eight other copies.
+    rather than the canonical path shared by the declared package copies.
     """
 
     module = sync_skills_module()
@@ -592,7 +590,7 @@ class BoundaryPropagationTests(unittest.TestCase):
 
     Byte equality already implies these cases, and that is the point of stating them separately: an
     implied property has no named subject, so a copy that lost the clause is diagnosed here as the
-    path that lost it rather than as an anonymous hash disagreement in one of nine trees.
+    path that lost it rather than as an anonymous hash disagreement in a declared copy.
     """
 
     def test_every_declared_copy_carries_the_corrected_boundary_clauses(self) -> None:

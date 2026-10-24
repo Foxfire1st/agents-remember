@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.errors import PaseoRuntimeFailure
-from agents_remember.kernel.primitives.paseo_authority import paseo_runtime_path
+from agents_remember.kernel.primitives.paseo_authority import authority_settings_path
 from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
     NO_PASEO_RUNTIME_CONFIGURED,
@@ -168,7 +168,7 @@ def require_bridge_runtime(config: McpRuntimeConfig) -> PaseoRuntimeSettings:
     if settings is None:
         raise PaseoBridgeFailure(
             RUNTIME_NOT_CONFIGURED,
-            f"{NO_PASEO_RUNTIME_CONFIGURED}: {paseo_runtime_path(config.coordination_root)} has no paseoRuntime block",
+            f"{NO_PASEO_RUNTIME_CONFIGURED}: {authority_settings_path(config.config_path)} has no paseoRuntime block",
         )
     return settings
 

@@ -20,6 +20,10 @@ from pydantic import (
 from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
+# Every role a launch may select (MIK-R196). ``bootstrap`` is the free agent a new user
+# reaches through the one start call: identity-free, parentless and taskless, it sets one
+# repository up and hands over. ``system-specialist`` is the documented alias of
+# ``investigator`` and keeps the same value here.
 LauncherRole = Literal[
     "architect",
     "investigator",
@@ -29,6 +33,7 @@ LauncherRole = Literal[
     "worker",
     "reviewer",
     "curator",
+    "bootstrap",
 ]
 
 
@@ -91,6 +96,10 @@ class RoleDispatchRequest(RoleSelection):
     # parent, the parentless table applies, the launch record says so. Absent for
     # every dashboard start and every role agent's start.
     chat_started: bool = Field(default=False, alias="chatStarted")
+    # The harness the calling chat itself runs, as the MCP client named itself (MIK-R196
+    # rule 1). It is the honest signal the free seat's harness is chosen from; absent means
+    # the caller did not name one, and nothing substitutes a provider for it.
+    caller_harness: str | None = Field(default=None, alias="callerHarness", max_length=120)
 
 
 class RoleResultRequest(RoleSelection):

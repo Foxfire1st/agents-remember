@@ -97,8 +97,9 @@ Before the Quickstart, make sure the host has:
 
 Providers, Docker, and Ollama are only needed for the optional Docker-backed
 providers; the core by-path memory works without them. Claude Code hooks do not
-require `jq`; the current starter package uses a Python hook. Full detail and
-troubleshooting live in the [current MCP README](mcp/README.md).
+require `jq`; the optional session-start hooks in this repository are Python
+programs. Full detail and troubleshooting live in the
+[current MCP README](mcp/README.md).
 
 ## Quickstart
 
@@ -106,36 +107,44 @@ This is the short path for a new workspace. The detailed walkthrough lives in [G
 
 Ask your agent to:
 
-1. **Copy the harness package** — Pick your harness guide under
-   [docs/install](docs/install/README.md), copy that harness's native starter
-   files from this repo into the workspace, then render the copied package.
-   The `render-starter` script is a convenience: it infers the workspace root
-   from the copied harness folder and fills the copied package's path,
-   repository, and hook-command placeholders from a single `--repo` list such as
-   `--repo my-app shared-lib`. You can also do those replacements by hand. These
-   packages include the harness-visible skills, hooks/rules/instructions, and
-   MCP settings templates.
-2. **Wire the MCP server** — Build this checkout's wheel with `uv build --wheel mcp`
-   and register that local artifact with `uvx`:
+1. **Write the MCP authority settings** — Copy `examples/mcp/settings.example.json`
+   to a path of your own and replace its paths with absolute ones: the
+   coordination folder (it may not exist yet), the workspace root, the transcript
+   folder, and one entry per code repository. The server reads that file at boot
+   and resolves workspace paths from it.
+2. **Register the MCP server** — Build this checkout's wheel with `uv build --wheel mcp`
+   and register that local artifact with `uvx`, or use the published package:
 
    ```text
    uvx --python 3.14 --from /absolute/path/to/built-wheel.whl agents-remember-mcp --config /absolute/path/to/agents-remember-settings.json
    ```
 
-   Use the `agents-remember-settings.json` path from the copied harness package.
-   Then **restart the harness once** so it loads the MCP server, native skills,
-   and package hooks/rules/instructions.
-3. **Onboard your project** — Invoke the copied skill
-   `c-13-install-and-onboard`. It runs or verifies `runtime_install()`, asks
-   whether to scaffold a new memory repo or use an existing one, bootstraps
-   onboarding when needed, and starts provider indexing when providers are
-   enabled.
+   Each harness guide under [docs/install](docs/install/README.md) carries the
+   registration file that harness reads. Then **restart the harness once** so it
+   starts the server.
+3. **Make one call** — In a chat of that harness, name no task, sprint or
+   repository:
 
-That is the normal first-run path. `skills_install()` remains available as a
-maintenance/manual MCP tool, but the starter packages already provide the
-initial skills and harness files.
+   ```text
+   role_start(role="bootstrap", request_id="<a UUID you generate>")
+   ```
 
-After that, normal work runs through the `l-01-agent-lifecycles` skill: developer-facing free chat answers a question inline and, for work on a managed repository, creates or resolves the sprint document, writes the request of the developer into it, starts an Architect with `role_start` (the call for an Architect names no document), and tells the developer that the agent is in the dashboard and which sprint document holds the request. Another role is started this way only when the developer names the role and the task. Role agents follow their handovers. The agent resolves the active context with `c-08-ar-coordination-context-resolver`, checks memory quality with `c-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
+   That call prepares the runtime scaffold, provisions and starts the Paseo host,
+   verifies the Agents Remember plug-in, starts one instructed Bootstrap seat, and
+   returns that seat's dashboard address. Continue setup there: choose the
+   repository and memory root, initialize or read the memory baseline, adopt its
+   content, and pick the harness each role should use (model and effort may stay
+   unset, so the harness keeps its own defaults). Bootstrap writes the user
+   settings file during installation and reports an existing one instead of
+   overwriting it. Then it tells you to start the Architect, which organises the
+   knowledge foundation as ordinary task work.
+
+That is the whole first-run path. No skill folder, starter package or rendered
+settings is copied into a harness: the tool server serves the canonical skills to
+a harness as MCP resources, so the skills a session reads belong to exactly one
+installed build. There is no separate skill-install route to run.
+
+After that, normal work runs through the `l-01-agent-lifecycles` skill: developer-facing free chat answers a question inline and, for work on a managed repository, creates or resolves the sprint document, writes the request of the developer into it, starts an Architect with `role_start` (the call for an Architect names no document), and tells the developer that the agent is in the dashboard and which sprint document holds the request. Another role is started this way only when the developer names the role and the task. Role agents follow their handovers. The agent resolves the active context with `c-08-ar-coordination-context-resolver`, checks memory quality with `c-05-create-or-update-onboarding-files`, reads relevant onboarding beside code, and updates onboarding after approved changes.
 
 ## Run The Dashboard
 
@@ -194,7 +203,7 @@ not an installation example for the current Python 3.14 build.
 - [External Memory Guide](docs/guides/use-external-memory.md) - separate memory repos for selected code repos.
 - [Cost-aware Bootstrap](docs/guides/cost-aware-bootstrap.md) - model and wave-sizing choices for token-heavy repository bootstrap.
 - [Settings Reference](docs/reference/settings-json.md) - memory-layer `system/settings.json` and MCP authority settings.
-- [Skills Reference](docs/reference/skills.md) - the installed skill families.
+- [Skills Reference](docs/reference/skills.md) - the served skill families and the one generated copy that serves them.
 
 ## Repository Layout
 
@@ -203,10 +212,8 @@ agents-remember/
   AGENTS.md                         # source checkout instructions
   README.md                         # public front door
   skills/                           # canonical skill source tree
-  scripts/sync-skills.py            # sync skills into package/harness copies
+  scripts/sync-skills.py            # sync skills into the served package copy
   scripts/sync-runtime.py           # sync runtime assets into package data
-  scripts/sync-harness.py           # generate the nine harness configuration trees
-  scripts/harness/                  # canonical source for those trees
   agents-md-files/                  # canonical installed AGENTS.md templates
   benchmarks/                       # canonical optional benchmark package source
   providers/                        # canonical provider runtime assets
@@ -215,7 +222,7 @@ agents-remember/
     src/agents_remember/package_data/
       runtime/
         agents-md-files/            # generated copy of root agents-md-files/
-        skills/                     # generated package copy of root skills/
+        skills/                     # generated package copy of root skills/, served to harnesses
         providers/                  # generated copy of root providers/
         system/defaults/examples/   # generated copy of root system/defaults/examples/
       benchmarks/                   # generated copy of root benchmarks/
@@ -223,20 +230,24 @@ agents-remember/
 ```
 
 Edit skills in root `skills/`, then run `python3 scripts/sync-skills.py` to
-refresh the MCP package data and every harness starter package. The pre-commit
-and pre-push hooks run `python3 scripts/sync-skills.py --check`.
+refresh the MCP package data. The packaged copy is the only generated skill copy:
+the tool server serves it to a harness as MCP resources, and no harness folder
+receives a skill tree. The pre-commit and pre-push hooks run
+`python3 scripts/sync-skills.py --check`.
 
 Edit runtime assets in root `agents-md-files/`, `benchmarks/`, `providers/`,
 and `system/`, then run `python3 scripts/sync-runtime.py` to refresh MCP package
 data only. The pre-commit and pre-push hooks run
 `python3 scripts/sync-runtime.py --check`.
 
-Edit the self-hosted harness configuration in root `scripts/harness/`, then run
-`python3 scripts/sync-harness.py` to regenerate the nine `.claude/`, `.codex/`,
-`.cursor/`, `.github-vscode/`, `.vscode/`, `.hermes/`, `.openclaw/`, `.pi/` and
-`.agents/` trees. The pre-commit and pre-push hooks run
-`python3 scripts/sync-harness.py --check`, and `mcp/tests/test_sync_harness.py`
-runs the same check inside the suite.
+The self-hosted harness configuration in `.claude/`, `.codex/`, `.cursor/`,
+`.github-vscode/`, `.vscode/`, `.hermes/`, `.openclaw/`, `.pi/` and `.agents/` is
+maintained in place, one file per harness: MCP registration, optional
+instructions, and the optional session-start hook or rule. It carries no skill
+folder and no placeholder renderer — installing Agents Remember does not copy or
+render it. The hooks and rules are the convenience described in
+[docs/install](docs/install/README.md), and their `<PATH/TO/YOUR/PROJECTS_FOLDER>`
+markers are replaced by hand.
 
 The hooks are tiered, and both are thin wrappers over `.githooks/_gate.sh`.
 pre-commit runs the fast tier over the **staged** content: the generated-copy
@@ -306,14 +317,14 @@ current-checkout bytes at index-known paths; it runs no tests and never claims a
 pushed commit range.
 
 The installed runtime lives in `ar-coordination/` — by default `<workspace>/ar-coordination/`,
-inside the workspace (never your home directory) — not in the source checkout. The
-`c-13-install-and-onboard` skill shows this and every other install path as a workspace-first
+inside the workspace (never your home directory) — not in the source checkout. The one Bootstrap
+call creates that scaffold when the configured root does not exist yet, and the
+`c-13-install-and-onboard` skill shows every other install path as a workspace-first
 default you can accept or override:
 
 ```text
 ar-coordination/
   AGENTS.md
-  skills/
   system/
   memory-repos/
   providers/                        # provider runtimes (images, runners, indexes)
@@ -323,6 +334,9 @@ ar-coordination/
   worktrees/
   temp/
 ```
+
+No `skills/` folder is created there: the tool server serves the packaged skill copy as MCP
+resources, so the coordination root carries no second skill tree to keep current.
 
 ## Status
 

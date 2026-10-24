@@ -29,8 +29,7 @@ import _user_settings_guard as guard_module
 import conftest
 import pytest
 from _user_settings_guard import UserSettingsWriteRefused, user_settings_path_for_write
-from paseo_launch_test_support import prepare_host
-from paseo_runtime_test_support import runtime_settings, write_shared_runtime
+from paseo_runtime_test_support import runtime_settings, write_user_settings_block
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 TESTS_ROOT = REPOSITORY_ROOT / "mcp" / "tests"
@@ -464,17 +463,17 @@ def test_the_rule3_check_fails_a_nested_test_file_that_writes_directly(tmp_path:
     assert "test_nested_guarded.py" not in message, "the check must pass a guarded nested write"
 
 
-def _every_test_support_writer(root: Path) -> list[tuple[str, Callable[[], None]]]:
+def _every_test_support_writer(root: Path) -> list[tuple[str, Callable[[], object]]]:
     """Every writer of the user's settings path the tests hold, read from the code.
 
-    ``write_shared_runtime`` is the fixture authority every paseo test calls;
-    ``prepare_host`` is the launch-fixture route onto it. Both reach the path
-    through the guard.
+    ``write_user_settings_block`` is the one fixture that writes the developer's
+    own settings file — the MIK-R137 subject — and it reaches the path through
+    the guard. A host block for a test's own MCP settings file is written by
+    ``write_runtime_block`` instead, which never touches this path.
     """
     settings = runtime_settings(root)
     return [
-        ("write_shared_runtime", lambda: write_shared_runtime(root, settings)),
-        ("prepare_host", lambda: prepare_host(root, configured=True)),
+        ("write_user_settings_block", lambda: write_user_settings_block(settings)),
     ]
 
 
@@ -515,8 +514,7 @@ def test_cleared_environment_and_stopped_patches_still_refuse_every_writer(
 
 # Where each of those writers is defined, as a traceback through it names it.
 WRITER_SOURCES = {
-    "write_shared_runtime": TESTS_ROOT / "paseo_runtime_test_support.py",
-    "prepare_host": TESTS_ROOT / "paseo_launch_test_support.py",
+    "write_user_settings_block": TESTS_ROOT / "paseo_runtime_test_support.py",
 }
 GUARD_ERROR = f"{UserSettingsWriteRefused.__module__}.{UserSettingsWriteRefused.__qualname__}"
 
@@ -538,12 +536,10 @@ def _child_writer_program(home: Path, roots: Path) -> str:
         "from types import SimpleNamespace\n"
         "pwd.getpwuid = lambda _uid: SimpleNamespace(pw_dir=home)\n"
         "from pathlib import Path\n"
-        "from paseo_launch_test_support import prepare_host\n"
-        "from paseo_runtime_test_support import runtime_settings, write_shared_runtime\n"
+        "from paseo_runtime_test_support import runtime_settings, write_user_settings_block\n"
         f"root = Path({str(roots)!r})\n"
         "writers = {\n"
-        "    'write_shared_runtime': lambda: write_shared_runtime(root, runtime_settings(root)),\n"
-        "    'prepare_host': lambda: prepare_host(root, configured=True),\n"
+        "    'write_user_settings_block': lambda: write_user_settings_block(runtime_settings(root)),\n"
         "}\n"
         "stopped = None\n"
         "for name, call in writers.items():\n"

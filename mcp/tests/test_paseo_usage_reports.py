@@ -26,7 +26,7 @@ from agents_remember.cli.paseo_bridge import bridge_call
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from paseo_runtime_test_support import write_shared_runtime
+from paseo_runtime_test_support import write_runtime_block
 
 SERVER_ID = "srv_configured"
 WORKER = "f3c1a2b4-5d6e-4f70-8a91-b2c3d4e5f607"
@@ -151,7 +151,7 @@ class UsageReportsScriptTests(unittest.TestCase):
         assert settings is not None
         settings.home.mkdir(parents=True)
         (settings.home / "server-id").write_text(SERVER_ID + "\n", encoding="utf-8")
-        write_shared_runtime(self.root, settings)
+        write_runtime_block(self.root / "settings" / "mcp.json", settings)
         self.config = McpRuntimeConfig(
             config_path=self.root / "settings" / "mcp.json",
             coordination_root=self.root / "coordination",

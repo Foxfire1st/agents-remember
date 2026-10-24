@@ -416,9 +416,9 @@ places the routes; nothing assigns them automatically.
 
 ## The file writer's sections (MIK-R12)
 
-`agents-remember knowledge-ingest` (a leaf, by its enclosure contract) and `agents-remember
-knowledge-bootstrap` (a taskless foundation wave) write through the curator file writer. It is the
-only writer. Both commands need a **converted** memory tree (one that holds the knowledge layout
+`agents-remember knowledge-ingest` and the mounted `knowledge_write` use the task's leaf
+enclosure contract and the same curator file writer. Repository foundation work enters through
+the user-started Architect's regular task under `c-14-knowledge-bootstrap`, with this same writer and no taskless authoring session. It needs a **converted** memory tree (one that holds the knowledge layout
 marker, MIK-R21 rule 1): on a tree in the legacy format they refuse with `legacy-format` and name
 the conversion command (`agents-remember knowledge-convert`). The producer's thirteen fields do not
 change: everything below is the **curator's**.

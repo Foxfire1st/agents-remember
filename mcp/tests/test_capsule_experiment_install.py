@@ -288,8 +288,9 @@ def test_a_selected_run_cuts_over_to_the_capsule_path(tmp_path: Path) -> None:
     for target in install_experiment.WITHHELD_STARTUP_TARGETS:
         assert not (coordination_root / target).exists(), target
     assert fingerprint_count(coordination_root, LEGACY_FINGERPRINT) == 0
-    # The one canonical authored source is still installed: it is the compiler's input.
-    assert (coordination_root / "skills" / "l-01-agent-lifecycles" / "core").is_dir()
+    # MIK-R196 rule 7: the compiled corpus is served from the package, so a selected run installs
+    # no skill tree under the coordination root at all -- not even the authored source.
+    assert not (coordination_root / "skills").exists()
 
 
 def test_a_selected_run_removes_an_earlier_legacy_installation(tmp_path: Path) -> None:
@@ -507,8 +508,15 @@ def test_the_selection_is_recorded_per_run_and_never_persisted(tmp_path: Path) -
     # 1. Root-scoped, and not vacuous: the authored corpus legitimately names the experiment, so
     #    the scan must find something -- and every hit must be an authored asset copied through
     #    byte-for-byte. Anything else is a persisted selection, however old the file is.
+    # Non-vacuity control: with no skill tree installed the corpus no longer echoes the needle, so
+    # the scan is proven by a planted hit of our own rather than by the authored text.
+    probe = coordination_root / "scan-probe.txt"
+    probe.write_bytes(needle)
+    try:
+        assert files_containing(coordination_root, needle), "the scan cannot see a planted hit"
+    finally:
+        probe.unlink()
     offenders = files_containing(coordination_root, needle)
-    assert offenders, "the scan found nothing at all, so it proves nothing about the root"
     unexplained = [
         relative
         for relative in offenders
@@ -535,13 +543,13 @@ def test_the_selection_is_recorded_per_run_and_never_persisted(tmp_path: Path) -
 def test_the_installed_root_carries_the_canonical_corpus_only_as_authored_source(
     tmp_path: Path,
 ) -> None:
-    """The corpus in the *installed* root is authored source, never received startup material.
+    """No received startup material carries the corpus (baseline finding `L9-3`).
 
     This reads the installed coordination root itself — the screen the delivery-side capsule count
-    does not read (baseline finding `L9-3`). The canonical block appears exactly once there, inside
-    the copied ``skills/`` tree, which the production compiler never reads (it resolves its corpus
-    from ``packaged_source_root()/runtime/skills``); none of the four auto-loaded startup files
-    carries it.
+    does not read. MIK-R196 rule 7 moved the whole corpus into the package, so the installed root
+    carries no ``skills/`` tree to hold an authored copy beside the startup files: the question the
+    finding asked is settled by the tree being absent, and the startup files are still asserted
+    withheld rather than carrying corpus text.
     """
 
     source = create_install_source(tmp_path)
@@ -549,20 +557,11 @@ def test_the_installed_root_carries_the_canonical_corpus_only_as_authored_source
 
     run_install(source, coordination_root, experiment="role-capsules")
 
-    authored = coordination_root / "skills" / "l-01-agent-lifecycles" / "roles" / "bootstrap.md"
-    assert CORPUS_FINGERPRINT in authored.read_text(encoding="utf-8")
-    assert material_text(coordination_root / "skills").count(CORPUS_FINGERPRINT) == 1
-    # The shared core block is carried into the installed root as authored corpus too, and it is
-    # asserted present there so the capsule-side absence above cannot be a missing file.
-    installed_core = (
-        coordination_root / "skills" / "l-01-agent-lifecycles" / "core" / "acceptance.md"
-    )
-    assert RETIRED_CORE_FINGERPRINT in installed_core.read_text(encoding="utf-8")
+    assert not (coordination_root / "skills").exists()
     startup_material = [
         coordination_root / target for target in install_experiment.WITHHELD_STARTUP_TARGETS
     ]
     assert all(not path.exists() for path in startup_material)
-    assert fingerprint_count(coordination_root / "skills", LEGACY_FINGERPRINT) == 0
 
 
 def test_the_registered_tool_takes_the_selection_as_this_run_s_own_input(tmp_path: Path) -> None:

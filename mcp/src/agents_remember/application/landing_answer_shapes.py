@@ -477,8 +477,23 @@ def _trim_preview_commit_locations(answer: dict[str, Any]) -> None:
 # but that do not exist). Anything else (rejected, unknown, refused) keeps
 # its shape: the caller reads why and what to do from the detail file, and
 # the refusal keeps its reason.
+# L188-B02: the success answer keeps the continuation the producer emits. The whitelist was written
+# before rule 1 promised an address, so a successful start could not cross it. ``nextAction`` is the
+# producer's one following move -- for a bootstrap start, opening the dashboard seat -- and no other
+# role sets one on a successful start.
 _ROLE_START_SUCCESS_KEPT = frozenset(
-    {"ok", "agentId", "handoverArtifactPath", "handoverFilePath", "warning"}
+    {
+        "ok",
+        "agentId",
+        "handoverArtifactPath",
+        "handoverFilePath",
+        "warning",
+        "dashboardAddress",
+        "dashboardAddressDetail",
+        "chatAddress",
+        "chatAddressDetail",
+        "nextAction",
+    }
 )
 
 

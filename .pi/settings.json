@@ -4,8 +4,5 @@
   ],
   "extensions": [
     "extensions/agents-remember-start.ts"
-  ],
-  "skills": [
-    "skills"
   ]
 }

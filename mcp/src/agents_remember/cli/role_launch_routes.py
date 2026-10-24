@@ -22,7 +22,6 @@ from agents_remember.application.role_launch_context import (
     LEAF_ROLES,
     TASKLESS_ROLES,
     RoleLaunchContext,
-    parentless_selection_violation,
     resolve_role_launch_context,
 )
 from agents_remember.cli import role_launch_progress
@@ -31,8 +30,6 @@ from agents_remember.cli.investigator_receipts import (
     investigator_start_capacity,
 )
 from agents_remember.cli.paseo_bridge import (
-    BRIDGE_TIMEOUT,
-    RUNTIME_NOT_CONFIGURED,
     PaseoBridgeFailure,
     require_bridge_runtime,
 )
@@ -55,6 +52,12 @@ from agents_remember.cli.role_handover_artifacts import (
 )
 from agents_remember.cli.role_handover_publication import publish_handover_files
 from agents_remember.cli.role_instructions import launch_choice_metadata
+from agents_remember.cli.role_launch_admission import admit, prepare_first_run_for
+from agents_remember.cli.role_launch_first_run import (
+    _FIRST_RUN_REPORT,
+    recall_first_run_report,
+    refuse_after_preparation,
+)
 from agents_remember.cli.role_launch_liveness import (
     HostUnreachableRefusal,
     _reconcile_prior_execution,
@@ -91,6 +94,11 @@ from agents_remember.cli.role_launch_receipts import (
 from agents_remember.cli.role_launch_receipts import (
     digest as _digest,
 )
+from agents_remember.cli.role_launch_request_rules import (
+    bridge_http_error,
+    missing_copies_receipt_warning,
+    with_caller_harness,
+)
 from agents_remember.cli.role_report import register_role_report_route
 from agents_remember.cli.role_start_execution import start_execution
 from agents_remember.cli.role_step_up_runtime import (
@@ -110,10 +118,9 @@ from agents_remember.tasks.document_refs import TaskDocumentRefError
 
 _DISPATCH_LOCK = threading.Lock()
 __all__ = ["_refuse_reused_request_id", "_request_digest", "prepare_role_handover"]
+
+
 # How a failed bridge call answers a launcher route; every other bridge failure is a bad gateway.
-_BRIDGE_FAILURE_STATUS = {RUNTIME_NOT_CONFIGURED: 503, BRIDGE_TIMEOUT: 504}
-
-
 @dataclass(frozen=True, slots=True)
 class _PreparedRoleStart:
     config: McpRuntimeConfig
@@ -225,7 +232,7 @@ def _role_launch_options_endpoint(
     except LaunchLockBusy as busy:
         return busy.read_answer()
     except PaseoBridgeFailure as error:
-        raise _bridge_http_error(error) from error
+        raise bridge_http_error(error) from error
     except (OSError, ValueError, TaskDocumentRefError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -243,36 +250,31 @@ def _role_launch_dispatch_endpoint(
     the receipt, the reconciliation of a repeated request and the lock are the same either way.
     The launcher's route never waits for the lock; the role-start tool waits ``lock_wait_seconds``
     for it, because one agent issues its starts side by side.
+
+    Admission and preparation share the dispatch lock: a queued request sees the binding or
+    receipt its predecessor published, rather than preparing from a stale pre-lock decision.
+    Invalid selections still refuse before any preparation writes.
     """
 
-    _require_paseo_runtime(config)
-    if request.action == "start" and request.chat_started:
-        # MIK-R113 rule 6: a chat without a role starts through the same table as
-        # the dashboard's start. The resolver below would refuse the same selection
-        # with the same reason; this names it before the lock is taken.
-        violated = parentless_selection_violation(
-            request.role,
-            request.sprint_document_ref,
-            request.master_document_ref,
-            request.task_document_ref,
-        )
-        if violated is not None:
-            raise HTTPException(status_code=409, detail=violated)
     _acquire_dispatch_lock(lock_wait_seconds)
     role_launch_progress.begin(request.request_id)
+    first_run_token = _FIRST_RUN_REPORT.set(None)
     try:
+        admission = admit(config, request, started_by)
+        prepare_first_run_for(config, request, admission)
+        request = with_caller_harness(config, request)
         if request.action == "revive":
             return _revive_execution(config, request)
         with investigator_start_capacity(config, request):
             return _start_execution(config, request, started_by)
     except HostUnreachableRefusal as refusal:
         return JSONResponse({"detail": refusal.detail, "hostUnreachable": True}, status_code=409)
-    except (OSError, ValueError, TaskDocumentRefError, PaseoBridgeFailure) as error:
-        # A refusal: this call recorded nothing, and a request that has its receipt keeps it
-        # unchanged. The launcher shows the reason of a 409; a bridge failure reaches this point
-        # only while the selection is validated, before a receipt.
-        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (HTTPException, OSError, ValueError, TaskDocumentRefError, PaseoBridgeFailure) as error:
+        # The receipt/retry owners keep their existing behavior; the refusal also names
+        # preparation effects already made by this call before its context is cleared.
+        refuse_after_preparation(error)
     finally:
+        _FIRST_RUN_REPORT.reset(first_run_token)
         role_launch_progress.finish()
         _DISPATCH_LOCK.release()
 
@@ -283,7 +285,7 @@ def _role_launch_result_endpoint(
     try:
         require_bridge_runtime(config)
     except PaseoBridgeFailure as error:
-        raise _bridge_http_error(error) from error
+        raise bridge_http_error(error) from error
     # The lock is held for the receipt and the one bridge call of the refresh, nothing longer.
     try:
         _acquire_dispatch_lock()
@@ -315,30 +317,6 @@ def _role_launch_result_endpoint(
         raise HTTPException(status_code=409, detail=str(error)) from error
     finally:
         _DISPATCH_LOCK.release()
-
-
-def _missing_copies_receipt_warning(
-    document_files: object, step_up_warning: str | None = None
-) -> dict[str, str]:
-    """The receipt warning for requirement files the leaf names but lack.
-
-    MIK-R111 rule 3, failure behavior: the start succeeds, and INDEX.json,
-    the answer and the handover name the missing file. The handover names it
-    through ``taskDocumentFiles.missingCopies``; this carries it onto the
-    receipt, from which the start answer reads its warning.
-    """
-
-    missing = document_files.get("missingCopies") if isinstance(document_files, dict) else None
-    if not missing:
-        return {"warning": step_up_warning} if step_up_warning else {}
-    names = ", ".join(str(name) for name in missing)
-    return {
-        "warning": (
-            f"{step_up_warning + ' ' if step_up_warning else ''}Task document copies missing: {names}. The start succeeds; the "
-            "next task_doc write on the leaf document refreshes the copies once "
-            "the files exist."
-        )
-    }
 
 
 def _prepared_message_binding_projection(
@@ -574,7 +552,7 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         "instructionComposition": prepared.get("instructionComposition"),
         "taskDocumentFiles": prepared.get("taskDocumentFiles"),
         "predecessorReports": prepared.get("predecessorReports"),
-        **_missing_copies_receipt_warning(
+        **missing_copies_receipt_warning(
             prepared.get("taskDocumentFiles"), session_options.get("stepUpWarning")
         ),
         "choices": session_options.get("choices", {}),
@@ -606,7 +584,10 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         "stepUp": session_options.get("stepUp"),
         "requestedStepUp": request.step_up,
         "execution": {},
-        "preparation": {"enclosure": workspace.get("enclosurePreparation", "not-applicable")},
+        "preparation": {
+            "enclosure": workspace.get("enclosurePreparation", "not-applicable"),
+            **({"firstRun": report} if (report := recall_first_run_report()) is not None else {}),
+        },
         "handoverArtifact": artifact,
         "handoverFile": {**handover_file, "content": prepared["handoverFileContent"]},
         "stepUpArtifact": prepared.get("stepUpArtifact"),
@@ -691,12 +672,6 @@ def _host_denied_tools(config: McpRuntimeConfig, provider: str) -> tuple[str, ..
 
     runtime = config.paseo_runtime
     return provider_denied_tools(runtime.home, provider) if runtime is not None else ()
-
-
-def _bridge_http_error(error: PaseoBridgeFailure) -> HTTPException:
-    """A failed bridge call as a route error whose text names the state (the launcher shows it)."""
-
-    return HTTPException(status_code=_BRIDGE_FAILURE_STATUS.get(error.code, 502), detail=str(error))
 
 
 class LaunchLockBusy(HTTPException):

@@ -49,6 +49,7 @@ from agents_remember.application.role_launch_context import (
     resolve_role_launch_context,
     selection_binding,
 )
+from agents_remember.cli import role_agent_override as launch_overrides
 from agents_remember.cli.investigator_receipts import (
     investigator_message_capacity,
     open_investigator_receipts,
@@ -62,7 +63,10 @@ from agents_remember.cli.paseo_bridge import (
     bridge_call,
     require_bridge_runtime,
 )
-from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
+from agents_remember.cli.paseo_catalog import (  # noqa: F401
+    forget_launcher_catalogs,
+    runnable_harnesses,
+)
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.paseo_role_wait import SentMessage, wait_for_turn
 from agents_remember.cli.paseo_status import read_agent
@@ -94,6 +98,7 @@ from agents_remember.cli.role_launch_receipts import (
     _taskless_execution_receipts,
     _write_receipt,
 )
+from agents_remember.cli.role_launch_request_rules import with_caller_harness
 from agents_remember.cli.role_launch_routes import (
     SET_SEAT_ROLES,
     LaunchLockBusy,
@@ -505,6 +510,7 @@ def _start_role(
                 "replacesAgentId": call.replaces_agent_id,
                 "replacesInterruptTurn": call.replaces_interrupt_turn,
                 "chatStarted": binding is None,
+                "callerHarness": call.caller_harness,
                 "stepUp": call.step_up,
             }
         )
@@ -536,6 +542,14 @@ def _start_role(
     # Agent, model and effort are checked against the catalog as the runtime reports it at the
     # time of this call; this process keeps no catalog between calls.
     forget_launcher_catalogs()
+    # MIK-R196 rule 1: a free-agent model-only choice is bound to the caller's harness and
+    # validated with the selection owner here, so an unbindable or unoffered model is refused
+    # before the dispatch path prepares anything.
+    request, not_offered = launch_overrides.bound_to_caller_harness(
+        config, request, with_caller_harness
+    )
+    if not_offered is not None:
+        raise _launch_refused(not_offered)
     try:
         response = _role_launch_dispatch_endpoint(
             config,
@@ -581,23 +595,9 @@ def _host_not_read(response: JSONResponse) -> str | None:
 
 
 def _agent_override(call: RoleStartCall) -> dict[str, Any] | None:
-    if call.agent is None:
-        if call.model is not None or call.effort is not None:
-            raise ValueError("a model or an effort is given without the agent it belongs to")
-        if not call.feature_values:
-            return None
-    return {
-        **({"featureValues": call.feature_values} if call.feature_values else {}),
-        **{
-            key: value
-            for key, value in (
-                ("agentId", call.agent),
-                ("modelId", call.model),
-                ("effortId", call.effort),
-            )
-            if value is not None
-        },
-    }
+    # MIK-R196 rule 1: the free agent's model-only choice binds the caller's harness, so the
+    # override rule lives with the binding it depends on.
+    return launch_overrides.agent_override(call)
 
 
 def _launch_refused(detail: str) -> _Refused:

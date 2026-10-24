@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import test_role_instruction_wording as wording
+import test_role_instruction_wording_handover as wording
 from agents_remember.cli import (
     role_held_messages,
     role_instruction_details,

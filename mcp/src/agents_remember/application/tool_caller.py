@@ -55,9 +55,9 @@ def derive_harness(config_path: Path | str | None) -> str | None:
     """Name the harness from the settings file the server was started with.
 
     A harness starter package keeps its authority settings at
-    ``<root>/mcp/settings.json`` (see ``infer_harness_skill_root``), so the
-    harness is the directory that owns that ``mcp`` folder. Anything else falls
-    back to the file's own stem; an unreadable value names nothing.
+    ``<root>/mcp/settings.json``, so the harness is the directory that owns that
+    ``mcp`` folder. Anything else falls back to the file's own stem; an
+    unreadable value names nothing.
     """
     try:
         path = Path(config_path) if config_path is not None else None

@@ -1,6 +1,6 @@
 ---
 name: c-14-knowledge-bootstrap
-description: "Build or resume a repository's first knowledge foundation through the existing curator: resolve the repository and its code/memory line, inventory bounded sources, hand the evidence to the curator, author invariants/families through the curator's own file writer as a taskless bootstrap wave, read the result back, and report coverage and unresolved work."
+description: "Build or resume a repository's first knowledge foundation through the existing curator, as regular task work the user-started Architect organises: resolve the repository and its code/memory line, inventory bounded sources, hand the evidence to the curator, author invariants/families through the curator's own file writer on the task's leaf, read the result back, and report coverage and unresolved work."
 ---
 
 # c-14-knowledge-bootstrap Knowledge Bootstrap
@@ -24,13 +24,14 @@ those existing owners are used in, and the states a run must distinguish.
 
 | Situation | Use this skill? |
 | --- | --- |
-| A new project has a memory root but no knowledge foundation | yes — the first-foundation entry |
+| A new project has a memory root but no knowledge foundation | yes — as the procedure the Architect's first task runs for it |
 | The memory tree is in the legacy format (no `knowledge/layout.json`) | not yet — the write commands refuse it with `legacy-format`. Converting it (`agents-remember knowledge-convert`) is its own step, and the developer's decision |
-| An existing project has onboarding and no knowledge records | yes — this is the ordinary existing-project entry |
-| A previous bootstrap was interrupted, or stopped after writing part of its scope | yes — resume under the same wave; the wave's history file and the records in the tree name what was written |
+| An existing project has onboarding and no knowledge records | yes — the ordinary existing-project case |
+| A previous bootstrap was interrupted, or stopped after writing part of its scope | yes — resume on the same task with the same list; the leaf's history file and the records in the tree name what was written |
 | The repository's foundation exists and the requested work extends one route | yes, as an extend/refresh run over that bounded scope |
-| A leaf's own change set needs its requirement-shaped items authored | no — the curator's ordinary route is `agents-remember knowledge-ingest` inside that leaf; this skill is for the repository's foundation, not a leaf's delta |
+| A leaf's own change set, unrelated to the repository's foundation, needs its requirement-shaped items authored | no — the curator's ordinary curation of that leaf owns it; this skill is the repository's foundation, not a leaf's incidental delta |
 | Only onboarding is missing | no — `c-03-repo-bootstrap` owns that, and this skill does not require onboarding to exist |
+| No task exists yet, and the repository's foundation is wanted now | not yet — setup reports the state it read, and the developer starts the Architect, whose task opens this procedure (see Who Runs It) |
 
 Onboarding is **optional input, never a precondition**. A repository with no onboarding file at all
 is a supported starting state: the source inventory in step 2 is what the run reads, and a thick
@@ -38,30 +39,30 @@ corpus of onboarding is one of the sources available to it rather than a gate in
 
 ## Who Runs It
 
-**This procedure is the curator's work. Which session carries it depends on the task document.**
+**This procedure is the curator's work, and it runs as regular task work that the user-started
+Architect organises.** That order is fixed: every clause below is one link of it.
 
-There are three real entries, and no longer a fourth that does not exist:
+1. **Setup stops at the memory setup and the baseline.** The bootstrap seat of a first run
+   establishes the repository's memory root and first attributed baseline, reports existing
+   onboarding and the knowledge state it read, and tells the developer to start the Architect. It
+   neither reaches this procedure nor authors a record — see
+   `skills/l-01-agent-lifecycles/operations/bootstrap.md` step 8 and its
+   `reference/bootstrap-foundation-d301.md`.
+2. **The developer starts the Architect**, the one next step setup names.
+3. **The Architect opens a task for the foundation** — one leaf with its task document, or a leaf under
+   a master, or under a sprint, according to the size of the work. That task owns the foundation's
+   making: its scope, its order and its completion are decided there, not in this skill.
+4. **The curator authors the foundation inside that task**, started on the task's document through the
+   ordinary launch route. Step 4's writer writes into the memory worktree that task's enclosure
+   contract names, and the leaf's own closeout publishes it like any other memory change.
 
-- **A task exists** — open the curator on that task's document, through the ordinary launch route.
-  That is the curator's own seat, and step 4's **leaf entry** is its writer: the foundation it builds
-  is written into that leaf's memory worktree.
-- **No task exists, first hour** — the **bootstrap** seat carries this procedure. It is the seat
-  without a task document that is instructed about the repository's knowledge foundation:
-  it reads the state at the declared location and reports it (see the `l-01-agent-lifecycles`
-  bootstrap role and operation). It does **not** author the records — it reaches the step and hands
-  it to the curator.
-- **No task exists, the foundation is to be built now** — the taskless writer in step 4 is run by an
-  instructed session that holds this procedure, from a workspace with **no enclosure in scope**: that
-  writer refuses one (`enclosure_in_scope`) so a bootstrap can never write onto a task's memory line.
-  **The write plane does not gate on role:** its admission is the repository entry, the resolved memory
-  line and the real revisions, and its report records the `--authorization-ref` it ran under.
-  That is exactly why the semantic ownership matters here — the reconciliation, the record actions, the
-  family guarantees and the memberships are authored under the curator's rules, and a session that is
-  not a curator seat follows them rather than inventing its own.
-
-No curator seat opens without a task document: a curator is started only on a leaf, with its sprint,
-master and leaf selected. Before any task exists the carriers are the last two entries above, and
-the session that authors is an instructed one, not a curator seat.
+**There is no taskless entry to this procedure, and no instructed session stands in for one.** A
+curator's authoring seat is opened on a task document, and an instruction to author a repository's
+foundation "before any task exists" is reported as the missing task it names rather than improvised
+into an authorship. Reading and reporting the knowledge state before such a task exists stays with the
+bootstrap seat, where it is a fact about setup rather than a production route. A curator started from
+the dashboard has no task and therefore no authoring entry here: it reads and reports, and the writing
+happens once the Architect has opened the task the work belongs to.
 
 **Collection and search assistance may be delegated; the authored result may not.** A curator may
 spawn read-only sub-agents to read source at exact revisions, search providers, or summarize declared
@@ -73,11 +74,11 @@ curator, and the curator's hand-off list is the only thing handed to the writer.
 
 - **The repository id the MCP authority settings declare**, and the resolved coordination context
   (`context_packet`, `server_info`). There is no default repository.
-- **The code and memory revision the foundation is being built against.** The taskless entry derives
-  both from the real checkouts; a caller does not type them. Both lines must resolve `HEAD`: a
-  checkout that answers no commit is refused by name (`code_revision_unavailable`,
-  `memory_revision_unavailable`) with its own next action, because an admission with no commit would
-  make every anchor the run resolves meaningless while still looking admitted.
+- **The code and memory revision the foundation is being built against.** The run derives both from
+  the real checkouts the task's enclosure contract names; a caller does not type them. Both lines must
+  resolve `HEAD`: a checkout that answers no commit is refused by name
+  (`code_revision_unavailable`, `memory_revision_unavailable`) with its own next action, because a run
+  with no commit would make every anchor it resolves meaningless while still looking admitted.
 - **The requested scope** — the whole repository, or a named area, route or obligation set.
 - **The available sources** — code at exact revisions; declared external specifications and
   documentation; existing onboarding when it is present.
@@ -87,16 +88,16 @@ curator, and the curator's hand-off list is the only thing handed to the writer.
 
 ## The Procedure
 
-### 1. Resolve the entry and name the current state
+### 1. Name the task the run belongs to, and the current state
 
 Resolve the repository and the memory line first, then read what the memory tree holds **now**.
 Four states are four different facts, and a run that merges them invents history:
 
 | State | Where it is observed | What it means, and the move |
 | --- | --- | --- |
-| **Context not admitted** — `context-not-admitted` | `memory_init`'s `knowledge` block, or the refusal a `knowledge-bootstrap` run prints | The bootstrap admission itself refused (see the refusal table below). The route is the refusal's own `nextAction`; it is not a knowledge state at all. |
+| **Context not admitted** — `context-not-admitted` | `memory_init`'s `knowledge` block, or the refusal the read route prints | The knowledge admission itself refused (see the refusal table below). The route is the refusal's own `nextAction`; it is not a knowledge state at all. |
 | **Legacy format** | the memory root holds no `knowledge/layout.json`; `knowledge_read` and the write commands answer `legacy-format` | The tree is not converted, and nothing can be written to it. **Report it; do not create the marker by hand.** The refusal names the conversion command. |
-| **Converted, no records** | the memory root holds `knowledge/layout.json` and no record file under `knowledge/<kind>/` | This is the first-foundation entry: continue to step 2. A memory root that `memory_init` created is in this state. |
+| **Converted, no records** | the memory root holds `knowledge/layout.json` and no record file under `knowledge/<kind>/` | This is the first foundation's starting state: continue to step 2. A memory root that `memory_init` created is in this state. |
 | **Converted, records present** | record files under `knowledge/<kind>/`; name them with `knowledge_read`, then open the named files natively (`memoryRoot` and one of `view="family"`, `view="invariant"`, `view="source_context"`; without a seed each lists the records the tree holds) | A foundation exists. Read it before extending it: never author a second record for an obligation the tree already holds. |
 
 For an admitted converted memory tree, `memory_init.knowledge` reports `not-recorded` when its
@@ -184,58 +185,48 @@ admission rule (MIK-R27)" section.
 Where code contradicts accepted intent, **preserve the intent and record the contradiction** rather
 than quietly rewriting either half.
 
-### 4. Author through the curator's own writer
+### 4. Author through the curator's own writer, inside the task that owns the work
 
-The writer is the curator file writer, reached by the shipped command line. A bootstrap has no leaf,
-so it writes as a **wave**: `--wave` names it, and the wave's judgment rows go to
-`knowledge/history/<wave>.json`. Plan first:
+The writer is the curator file writer, reached by the shipped command line, and the run happens on the
+task the Architect opened for this foundation. `--contract` is that task's leaf enclosure contract: the
+run reads the code worktree and writes the memory worktree the contract names, so no argument list can
+aim a knowledge write at another line. Plan first:
 
 ```text
-agents-remember knowledge-bootstrap --config <active MCP authority settings> --repo <repo_id> --list <hand-off list>
-    --wave <wave> --authorization-ref <ref> --json
+agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <hand-off list>
+    --authorization-ref <ref> --json
 ```
 
-Then, with the developer's commit word, write:
+Then, with the developer's commit word, the same call writes:
 
 ```text
-agents-remember knowledge-bootstrap --config <active MCP authority settings> --repo <repo_id> --list <hand-off list>
-    --wave <wave> --authorization-ref <ref> --commit --json
+agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <hand-off list>
+    --authorization-ref <ref> --commit --json
 ```
 
 - **Planning is the default, and planning is the dry run.** Without `--commit` the list is read, the
   tree the run would produce is validated and reported, and **nothing is written**. Run it that way
   first and put its report in front of the developer. The record IDs a planning run prints are
   provisional: the writing run mints its own.
-- **Name the active MCP authority settings explicitly with `--config`.** Use the same absolute
-  settings path that configured this repository's serving MCP. Default CLI discovery may find
-  another harness's settings and therefore another repository registry. Use that explicit path
-  for planning and for `--commit`, and verify the repository the report names before proceeding. Do
-  not change global discovery or invent an enclosure to repair a wrong selection.
-- **`--commit` is the developer's commit word**, and it is the whole of the write act. It writes
-  files into the admitted memory root; it makes no Git commit. The curator does not give itself that
-  word.
+- **Run it from the task, with the task's own contract.** Use the enclosure contract of the leaf the
+  Architect opened for this work, and the settings that configured this repository's serving MCP.
+  Verify the leaf and the repository the report names before proceeding. Do not change global
+  discovery, and do not invent a leaf, worktree or enclosure to repair a wrong selection.
+- **`--commit` is the developer's commit word**, and it is the whole of the write act. It writes files
+  into the task's memory worktree; it makes no Git commit — the leaf's closeout commits that worktree.
+  The curator does not give itself that word.
 - **`--authorization-ref` is the authorization this run is admitted under.** It must not be blank and
   must not be invented. The report records it.
-- **No enclosure is fabricated and no boolean grants admission.** The taskless entry resolves its own
-  real admission — the repository entry the settings declare, the memory layer the ordinary read route
-  resolves, and the exact code and memory revisions the real checkouts stand at. A repository whose
-  only knowledge is its first knowledge therefore needs no development leaf, no worktree and no
-  synthetic enclosure, and creating one to satisfy an argument list is exactly what this entry exists
-  to make unnecessary.
-- The memory root is **derived, never accepted**: it is the one the ordinary read route itself
-  selects. No argument on this surface aims a bootstrap at another location.
-- **The memory root must be converted.** On a tree in the legacy format the command refuses with
+- **No task, no write.** A foundation with no task behind it is a state to report, not work to
+  improvise: this procedure does not create the leaf, the worktree, the enclosure or the task document
+  the writer would need, and no flag or boolean takes the place of the task's ownership.
+- The memory worktree is **the task's, never chosen here**: it is the one the enclosure contract names
+  and the ordinary read route resolves. No argument on this surface aims a knowledge write elsewhere.
+- **The memory worktree must be converted.** On a tree in the legacy format the command refuses with
   `legacy-format`, writes nothing, and names the conversion command.
 
-The leaf route — for a repository that already has a leaf, authoring that leaf's own change set — is
-the curator's ordinary one:
-
-```text
-agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <list>
-    --authorization-ref <ref> --commit --json
-```
-
-It writes into that leaf's memory worktree and takes no destination argument.
+The writer commits nothing to Git. The records land with the rest of that leaf's memory work, and the
+leaf's own closeout publishes the worktree — this procedure claims no landing of its own.
 
 ### 5. Read the result back — the report is the result
 
@@ -245,14 +236,19 @@ its own fact:
 - `state`: `written`, `planned` or `refused`. A refused run wrote nothing and names every problem;
 - the records and the sidecar entries the run wrote, each with its ID, its path and whether it was
   created, updated, unchanged or removed;
-- the history rows written to the wave's history file;
+- the history rows the run wrote, and the history file they went to;
 - the tests the evidence names and what became of each (`proof_written`, `needs_facet`,
   `unresolvable`).
 
 Verify the stored result through the ordinary read surface as well — `knowledge_read` over the memory
-root (`memoryRoot`) for the records and families the run wrote (open each named file at its line and
-confirm the ID it declares), and `agents-remember
-knowledge-validate` for the tree — so the claim is about the files and not about the run's own prose.
+worktree (`memoryRoot`) for the records and families the run wrote, opening each named file at its
+line to confirm the ID it declares — and validate the tree itself:
+
+```text
+agents-remember knowledge-validate <memory worktree> --code <code worktree> --code-commit <revision> --json
+```
+
+Both readings are about the files, not about the run's own prose.
 
 ### 6. Report coverage and unresolved work
 
@@ -265,8 +261,8 @@ Report, in the curator's own output:
 - the files the run wrote, or the state that says nothing was written.
 
 **A partial run stays explicitly partial and keeps a resumable next action.** A rerun of the same
-list under the same wave writes the same files with the same IDs, so a resumed run continues the
-wave. A run that did not examine a required area **cannot claim the foundation complete for it**. A
+list on the same task writes the same files with the same IDs, so a resumed run continues the same
+work. A run that did not examine a required area **cannot claim the foundation complete for it**. A
 tree with no records, a refused run, or an exit status of zero is not a populated foundation.
 
 ### 7. A weakness met while reading a file is recorded in the same step (MIK-R118 rule 8)
@@ -278,41 +274,42 @@ the symbol where it occurs, with one sentence and any measurement the reader too
 curator and the route is the writer, exactly as for every other record: nothing here writes a
 weakness by hand, and nobody is sent to look for one.
 
-**A wave's check neither counts them nor asks for any.** The census, the coverage plan and the
-independent check of a wave count records and obligations; a weakness is not one of those, it is not
-a finding, and its absence from a file is not an omission. A run that meets none records none.
+**A run's check neither counts them nor asks for any.** The census, the coverage plan and the
+independent check count records and obligations; a weakness is not one of those, it is not a finding,
+and its absence from a file is not an omission. A run that meets none records none.
 
 ## Failure And Recovery Behavior
 
 | State | Observed from | The move |
 | --- | --- | --- |
-| A repository the settings do not declare (`repository_not_allowed`) | the run's refusal payload: `state`, `code`, `detail`, `nextAction` | Report it and stop: there is no default repository. |
+| A repository the settings do not declare (`repository_not_allowed`) | the refusal payload of the surface that answered: `state`, `code`, `detail`, `nextAction` | Report it and stop: there is no default repository. |
 | No coordination root, no code checkout, a checkout that is not a Git checkout, an unreadable revision (`coordination_root_unavailable`, `code_checkout_unavailable`, `code_checkout_is_not_a_git_checkout`, `code_revision_unavailable`, `memory_revision_unavailable`) | the same refusal payload | Report the real route the refusal names. Do not substitute a path or a revision. |
 | No memory layer resolved, or the resolved line is not the declared one (`memory_layer_not_resolved`, `memory_line_moved`) | the same refusal payload | Repair the repository entry or the coordination settings, then re-observe. Never write onto a line the ordinary reader does not select. |
-| The resolved context is a task's enclosure (`enclosure_in_scope`) | the same refusal payload | Resolve the bootstrap with no enclosure selector in scope; a leaf's delta belongs to the leaf route. |
-| The memory root is in the legacy format (`legacy-format`) | the refusal the command prints | Report it. Conversion (`agents-remember knowledge-convert`) is its own step and the developer's decision. **Nothing was written.** |
-| The repository is under its cutover lock | the refusal the command prints | The repository holds converted memory on another line and this line is not converted yet. Follow the route the refusal names (the crossing sync). |
+| The enclosure contract cannot be loaded, or names no leaf | the refusal the command prints | Report it and stop: `--contract` is the write guard, so a contract that cannot be loaded writes nothing. No other destination and no invented enclosure is substituted. |
+| The memory worktree is in the legacy format (`legacy-format`) | the refusal the command prints | Report it. Conversion (`agents-remember knowledge-convert`) is its own step and the developer's decision. **Nothing was written.** |
 | The writer refused the list | the report: `state: refused`, with every problem named | Correct the list and run it again. **Nothing was written.** |
-| A run was interrupted, or a later run is narrower than an earlier one | the wave's history file and the records in the tree | Resume through the same entry and the same wave. A rerun of the same list writes the same files with the same IDs and does not duplicate records. A rerun removes the sidecar entries this wave wrote earlier from an entry the list no longer names, and reports them `removed`. |
+| A run was interrupted, or a later run is narrower than an earlier one | the leaf's history file and the records in the tree | Resume on the same task with the same list. A rerun of the same list writes the same files with the same IDs and does not duplicate records. A rerun removes the sidecar entries this run wrote earlier from an entry the list no longer names, and reports them `removed`. |
 | A moved input revision | the code revision the admission bound, against the checkout | A moved source is an explicit new observation, not a silent reuse: re-observe and decide. Anchors are resolved at the revision the run was admitted on. |
 | A missing optional source | the source inventory | Absent, not failed. It becomes no fact. |
 
 ## Preservation Boundaries
 
-1. **No new agent role, harness, scheduler or parallel onboarding implementation.** The curator, the
-   bootstrap seat and the setup path are the existing carriers.
+1. **No new agent role, harness, scheduler or parallel onboarding implementation.** The curator
+   authors the foundation, the Architect organises the task it is authored under, and the bootstrap
+   seat reports the state it read: those are the existing owners.
 2. **No blind onboarding import.** Onboarding is a source to read and reconcile, never a corpus to
    copy into the store.
 3. **Onboarding stays where it is.** A foundation does not retire or rewrite a card, and nothing
    here rewrites a memory file to make a check pass.
 4. **No database, no second writer and no second destination.** The curator file writer and the
-   memory root the ordinary read route selects are the only ones used. Records and sidecar entries
-   are never written by hand.
+   memory worktree the task's enclosure contract names are the only ones used. Records and sidecar
+   entries are never written by hand.
 5. **No invented semantic approval and no invented authority.** The commit word is the developer's,
-   the authorization reference is the run's own, and admission is derived from the repository entry
-   and the real revisions rather than from a flag.
+   the authorization reference is the run's own, and admission is the task's real enclosure contract
+   and the real revisions rather than a flag or a word in a document.
 6. **No fabricated development leaf, worktree, enclosure or task document**, and no layout marker
-   created by hand, to satisfy an input shape.
+   created by hand, to satisfy an input shape: the leaf a foundation is authored on is one a real
+   Architect task opened.
 7. **No invented project truths, no back-dating, no backfilled task history, no favorable default in
    place of absent evidence.** A fixture, a prototype or another repository's records are never
    presented as this repository's foundation.
@@ -323,33 +320,34 @@ a finding, and its absence from a file is not an omission. A run that meets none
 
 | Skill or surface | Relationship |
 | --- | --- |
-| `c-13-install-and-onboard` | The ordinary setup path. Its memory-repo stages reach the knowledge foundation through this skill; it does not reimplement it, and it does not report a repository's knowledge as ready without this skill's outcome. |
+| `c-13-install-and-onboard` | The setup path. It stops at the baseline, reads the knowledge state and hands the foundation's making to the user-started Architect; it neither reimplements this procedure nor reports a repository's knowledge as ready, because only the Architect's task takes the foundation further. |
 | `c-03-repo-bootstrap` | Builds onboarding. Its handoff names the knowledge foundation as this skill's step in both directions: onboarding is optional input here, and this procedure does not write onboarding. |
 | `c-00-initialize-memory-repo` | Creates or repairs the memory root. `memory_init` creates a new memory root in the text format (it writes `knowledge/layout.json`) and reports whether the bootstrap context is admitted — part of the state step 1 reads. It creates no knowledge and never pretends to. |
 | `c-10-adopt-memory-baseline` | Commits memory *content* as the first attributed baseline. A baseline is not a knowledge foundation: neither substitutes for the other, and this procedure neither adopts a baseline nor claims one. |
 | `c-05-create-or-update-onboarding-files` | Owns onboarding content. The curator writes onboarding there, and authors the foundation here. |
-| `c-02-memory-quality-control` | The complete curation operation the curator runs around its work; the foundation's authored records are not a substitute for it, and it is not a substitute for authoring them. |
-| `l-01-agent-lifecycles` | Houses the carriers: `skills/l-01-agent-lifecycles/roles/curator.md` and `skills/l-01-agent-lifecycles/operations/curation.md` (the semantic owner and its authoring route), and `skills/l-01-agent-lifecycles/roles/bootstrap.md` and `skills/l-01-agent-lifecycles/operations/bootstrap.md` (the first-hour seat and the step that reaches this procedure). |
+| `c-05-create-or-update-onboarding-files` | The complete curation operation the curator runs around its work; the foundation's authored records are not a substitute for it, and it is not a substitute for authoring them. |
+| `l-01-agent-lifecycles` | Houses the carriers: `skills/l-01-agent-lifecycles/roles/curator.md` and `skills/l-01-agent-lifecycles/operations/curation.md` (the semantic owner and its authoring route), and `skills/l-01-agent-lifecycles/roles/bootstrap.md` and `skills/l-01-agent-lifecycles/operations/bootstrap.md` (the first-hour seat, which reads the knowledge state, reports it and hands its making to the Architect). |
 | `templates/curator-handoff-list.md` | The shape the hand-off list is authored in. This skill names the shape; that template owns it. |
 
 ## Acceptance Criteria
 
-1. A new project reaches this procedure without any onboarding existing — through the taskless
-   bootstrap seat, whose own instructions name it, and through the shipped skill catalog, which any
-   instructed session reads — and a curator seat opened on a task document holds the same procedure.
+1. A new project reaches this procedure without any onboarding existing: the bootstrap seat reads and
+   reports the knowledge state and names the Architect, the Architect opens the task, and the curator
+   seat opened on that task's document carries this procedure. The shipped skill catalog lets any
+   session read it, which is discovery rather than authority to author.
 2. The state of the memory tree is read before anything is authored, and a tree in the legacy
    format, a converted tree with no records and a converted tree with records are reported as the
    three different facts they are — with a refused admission (`context-not-admitted`) reported as an
    admission failure rather than as any of the three.
-3. The taskless entry runs with planning as its default, and a run without the developer's commit
-   word writes no file.
-4. Admission is derived from the declared repository entry and the real revisions, and no enclosure,
-   leaf, layout marker or database is fabricated at any point.
+3. The authoring run defaults to planning, and a run without the developer's commit word writes no
+   file.
+4. Admission is the task's real enclosure contract and the real revisions, and no enclosure, leaf,
+   layout marker or database is fabricated at any point.
 5. Every record's outcome, the history rows and the remaining work are read from the report, and a
    zero exit status is never quoted as a written foundation.
 6. A partial run reports itself partial, names the areas it did not examine, and leaves a resumable
    next action.
-7. The foundation is written into the memory root the ordinary read route selects, and the records a
-   later task's planner will read are named by ID and path.
+7. The foundation is written into the memory worktree the task's enclosure contract names, and the
+   records a later task's planner will read are named by ID and path.
 8. Nothing in this skill writes onboarding, changes another skill's owner, or adds a role, a store or
    a destination.

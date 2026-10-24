@@ -6,7 +6,7 @@ import json
 from dataclasses import replace
 
 import pytest
-import test_role_instruction_wording as wording
+import test_role_instruction_wording_handover as wording
 from agents_remember.application.role_launch_context import resolve_role_launch_context
 from agents_remember.cli.role_launch_preparation import RoleHandoverRequest, _compile_handover
 from agents_remember.models.role_launcher import RoleSelection

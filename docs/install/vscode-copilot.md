@@ -1,91 +1,75 @@
 # Install For VS Code + GitHub Copilot
 
-VS Code supports Agent Skills, always-on repository instructions, workspace MCP
-configuration, and agent hooks for GitHub Copilot Chat.
+VS Code supports always-on repository instructions, workspace MCP configuration, and agent hooks
+for GitHub Copilot Chat. Agents Remember needs the MCP registration and one call; its skills arrive
+from the tool server as MCP resources, so no skill folder is copied into the workspace.
 
 Official references:
 
-- [Use Agent Skills in VS Code](https://code.visualstudio.com/docs/copilot/customization/agent-skills)
 - [Use custom instructions in VS Code](https://code.visualstudio.com/docs/copilot/customization/custom-instructions)
 - [Agent hooks in VS Code](https://code.visualstudio.com/docs/copilot/customization/hooks)
 - [Add and manage MCP servers in VS Code](https://code.visualstudio.com/docs/agent-customization/mcp-servers)
-- [Copilot settings reference](https://code.visualstudio.com/docs/copilot/reference/copilot-settings)
 
-## Root Starter Package
+## Register The MCP Server
 
-The repository includes a VS Code + GitHub Copilot starter package at
-`.github-vscode/` and `.vscode/`. Copy `.vscode/` to your workspace root, then
-copy the contents of `.github-vscode/` into your workspace `.github/` folder.
-Then render the copied package. The `.github/render-starter` script is a
-convenience: with a single `--repo` list such as `--repo my-app shared-lib`, it
-infers the workspace root from the copied `.github/` folder, fills path and
-repository placeholders, writes the OS-specific Python hook command, and
-validates that each requested repository exists before you open or restart the
-workspace in VS Code once. If you prefer not to run the renderer, make those
-same replacements by hand and verify that no placeholder tokens remain.
-
-The starter package uses `.github-vscode/` only to avoid mixing harness files
-with this source checkout's real `.github/workflows/`. VS Code and Copilot still
-expect the installed files under `.github/`.
-
-The package contains:
-
-- `.github-vscode/copilot-instructions.md` - template for the installed
-  `.github/copilot-instructions.md` always-on repository instruction.
-- `.github-vscode/hooks/agents-remember-session-start.json` and sibling hook
-  files - templates for installed `.github/hooks/` `SessionStart` startup
-  context injection.
-- `.github-vscode/skills/` - templates for installed `.github/skills/`, which
-  is Copilot's default project skill root.
-- `.vscode/mcp.json` - workspace MCP registration for VS Code.
-- `.vscode/mcp/agents-remember-settings.json` - Agents Remember MCP authority
-  settings.
-
-After the restart, invoke:
-
-```text
-c-13-install-and-onboard
-```
-
-That skill runs or verifies `runtime_install()` and then handles memory,
-onboarding, and providers.
-
-## Skills
-
-VS Code discovers project skills from `.github/skills`, `.claude/skills`, and
-`.agents/skills`, and personal skills from `~/.copilot/skills`,
-`~/.claude/skills`, and `~/.agents/skills`. The copied starter package already
-provides Agents Remember skills in the installed `.github/skills/` folder.
-
-Do not install skills for first-run setup; the copied package already carries them.
-
-If you prefer to point VS Code directly at the installed runtime, add the
-installed skill roots in the workspace settings:
+Write an MCP authority settings file (copy `examples/mcp/settings.example.json` and replace its
+paths), then add the server to `.vscode/mcp.json` in your workspace:
 
 ```json
 {
-  "settings": {
-    "chat.agentSkillsLocations": {
-      "ar-coordination/skills": true
+  "servers": {
+    "agents-remember": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--refresh-package",
+        "agents-remember-mcp@latest",
+        "--config",
+        "<PATH/TO/YOUR/PROJECTS_FOLDER>/.vscode/mcp/agents-remember-settings.json"
+      ]
     }
   }
 }
 ```
 
-Use `chat.useCustomizationsInParentRepositories` when a monorepo or parent workspace should provide skills to nested repositories.
+This repository keeps the templates under `.github-vscode/` and `.vscode/` so they do not collide
+with its own `.github/workflows/`. Copy `.vscode/` to your workspace root if you use it, and replace
+the `<PATH/TO/YOUR/PROJECTS_FOLDER>` markers by hand; no script renders them. Restart the window
+once so VS Code starts the server.
 
-## Instructions
+## Start With One Call
 
-Copilot supports repository instructions such as
-`.github/copilot-instructions.md`. The starter package installs the Agents
-Remember instruction there. Keep repo-specific guidance separate when the
-repository already owns its `.github/copilot-instructions.md`.
+In a Copilot Chat session, name no task and no repository:
 
-## Hooks
+```text
+role_start(role="bootstrap", request_id="<a UUID you generate>")
+```
 
-VS Code discovers workspace hooks from `.github/hooks/*.json`. The starter
-package includes a `SessionStart` hook that emits the same first-action
-directive as additional context:
+That one call prepares the runtime scaffold, provisions and starts the Paseo host, verifies the
+Agents Remember plug-in, and starts one instructed Bootstrap seat. Its answer names the seat and
+the dashboard address of its chat; continue setup there. A retry with the same `request_id`
+reconciles to the same seat instead of a second one.
+
+Bootstrap ends at memory setup and tells you to start the Architect, which organises the knowledge
+foundation as ordinary task work. Bootstrap starts no role and authors no onboarding or knowledge.
+
+## Skills
+
+VS Code discovers project skills from folders it scans; Agents Remember writes none. The tool
+server publishes each skill as an MCP resource (the SEP-2640 skills extension) and Copilot reads
+them from the running server, so there is no skill tree to copy, render or keep in sync.
+
+## Optional: Repository Instructions And Hook
+
+Copilot supports repository instructions at `.github/copilot-instructions.md`. Copy
+`.github-vscode/copilot-instructions.md` into your workspace `.github/` folder, replace
+`<PATH/TO/YOUR/PROJECTS_FOLDER>` with your absolute path, and keep repository-specific guidance
+separate when the repository already owns that file.
+
+If you want the first-action directive injected as session context, copy
+`.github-vscode/hooks/` into `.github/hooks/` the same way. VS Code discovers workspace hooks from
+`.github/hooks/*.json`, and the template registers a `SessionStart` command with per-platform
+overrides:
 
 ```json
 {
@@ -100,28 +84,6 @@ directive as additional context:
         "timeout": 60
       }
     ]
-  }
-}
-```
-
-## MCP
-
-VS Code workspace MCP config lives at `.vscode/mcp.json`.
-
-```json
-{
-  "servers": {
-    "agents-remember": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": [
-        "--refresh-package",
-        "agents-remember-mcp",
-        "agents-remember-mcp@latest",
-        "--config",
-        "<PATH/TO/YOUR/PROJECTS_FOLDER>/.vscode/mcp/agents-remember-settings.json"
-      ]
-    }
   }
 }
 ```

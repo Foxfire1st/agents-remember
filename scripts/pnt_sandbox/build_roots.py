@@ -32,7 +32,6 @@ CONFIGURATION_ROOTS = (
     "coordinationRoot",
     "workspaceRoot",
     "transcriptRoot",
-    "harnessSkillRoot",
     "paseoRuntime.home",
     "paseoRuntime.installPrefix",
 )
@@ -216,10 +215,10 @@ def _launch_roots(found: _Roots, config: Any) -> None:
 
     def message_bindings() -> Path:
         from agents_remember.cli.role_launch_receipts import (  # noqa: PLC0415
-            _message_binding_projection_path,
+            message_binding_projection_path,
         )
 
-        return _message_binding_projection_path(config, uuid.UUID(int=0)).parent
+        return message_binding_projection_path(config, uuid.UUID(int=0)).parent
 
     found.add("receipts.taskless", taskless_receipts)
     found.add("receipts.messageBindings", message_bindings)

@@ -616,12 +616,20 @@ R125_OPERATION_SHA256 = {
     "orientation": "cb21c41525efc28773e5497b396701ef0f9b246833958c3d7b3448c57a5b11f1",
     "planning": "d6a1c6458d3a67ed54c0bbf0b399066022d8ac094110e5fae4673c5d0bd36f63",
     "review": "c7ddda94f04ea23c555296fbf8108037598098a17d22cad26613be65de64c317",
-    "coordination": "747dc35ea5a1a47710963073a88bea17cdf6286c89433ce2b96c1a6c0096d54f",
+    # MIK-R196: the coordination text now names leafSeats.roleMessageArguments, so its pinned
+    # digest follows the sentence the wording suite requires.
+    "coordination": "4d0e8fe886c1806091a9355cad05d3d28199bf7b5bd9d1f5d4283c0ee015b2be",
     "recovery": "ae7583596bc9f30d49b5d675e48b5076da2aabca5cf3d992ab97ce438e7607b1",
     "implementation": "53561f31eed705d04851973f654d9670b48a061075a132c704f83b2817798ce9",
-    "bootstrap": "e1235cd05d77c8684df3f9028ade5ac361d725097082a3604ae658b7ae1589bf",
+    # MIK-R196 rule 4: the bootstrap operation's step 8 hands the foundation to the Architect and
+    # the failure states moved to their own detail file; re-pinned on the new text.
+    # MIK-R196 rules 4-5 (L188) rewrote this operation: the onboarding-scaffold and citation-fixer
+    # steps left it and the foundation is handed to the Architect, so the seal moved with the text.
+    "bootstrap": "1bfd3c57a6bb7d6f4759cc41a9076debfaf25429e8a9525fb78ab3a3de391c4e",
 }
-R125_CLOSEOUT_SHA256 = "baea8d9c29a19b55b3bd58cb8c81382965f4ad5f2d665e42839f2843ef3411f0"
+# MIK-R196 rule 8 (L188) repointed this operation's closeout authority to the kept workflow,
+# so the seal moved with the text it pins.
+R125_CLOSEOUT_SHA256 = "5792285c5b5606253dcd9bb8cfa5e5dd7c139b180d8395810390c022cf2e9146"
 R125_OPERATION_ROLES: dict[str, tuple[str, ...]] = {
     "orientation": (
         "architect",

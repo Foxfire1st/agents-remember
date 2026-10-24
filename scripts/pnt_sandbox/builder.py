@@ -201,7 +201,9 @@ def _corpus_request(layout: SandboxLayout, ops: Operations, out: Out) -> dict[st
     target = {"repo_id": REPOSITORY_ID}
     steps: list[tuple[bool, dict[str, Any]]] = [
         (
-            all((layout.coordination / name).is_dir() for name in ("skills", "system", "tasks")),
+            # The two folders the runtime install always creates: a capsule-delivery install
+            # withholds AGENTS.md, so `system/` is not a reliable marker of a prepared root.
+            all((layout.coordination / name).is_dir() for name in ("docs", "tasks")),
             {
                 "name": "coordination root",
                 "tool": "runtime_install",
@@ -291,7 +293,6 @@ def build_unlocked(
         _write_marker(layout, "building", recorded_eve)
     for folder in (
         layout.projects,
-        layout.harness_skills,
         layout.run_dir,
         layout.tmux_dir,
         layout.dagger_authority,
@@ -317,11 +318,15 @@ def build_unlocked(
         "coordination root, memory repository and task documents (through the build's tool server):"
     )
     _seed_corpus(layout, checkout, ops, out)
-    shared = layout.user_settings_file
-    document = json.loads(shared.read_text(encoding="utf-8")) if shared.exists() else {}
+    # MIK-R196 rule 3: the host block is the MCP authority settings file's, so the sandbox's
+    # block joins the same document its tool server is started with -- never the user's file.
+    authority = layout.settings_file
+    document = json.loads(authority.read_text(encoding="utf-8")) if authority.exists() else {}
     document.update(host_settings_document(layout, eve_env_file))
-    _put(shared, json.dumps(document, indent=2) + "\n")
+    _put(authority, json.dumps(document, indent=2) + "\n")
     rendered = ops.render_settings(checkout)
-    out(f"settings rendered once from shared setup: {rendered['renderedSettingsPath']}")
+    # The producer names its own product `preparedSettingsPath`; reading a key it does not
+    # return made this line a KeyError the moment the settings owner changed (L188 round 2).
+    out(f"settings rendered once from shared setup: {rendered['preparedSettingsPath']}")
     _write_marker(layout, "built", recorded_eve)
     out(f"sandbox built at {layout.root}")

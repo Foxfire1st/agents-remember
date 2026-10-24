@@ -36,9 +36,10 @@ treats as a successful no-provider setup. The memory comparison above
 depended on provider backends. The explicitly required old-watcher stop is a
 separate install-time mechanism and is unchanged.
 
-Benchmark preparation copies the runtime skill tree into the memory-enabled
-workspace by default. Use `--skill-exposure-mode none` only when skill discovery
-is handled outside the benchmark harness.
+Benchmark preparation registers the package MCP server in the memory-enabled workspace.
+Its `skill://index.json` resource lists the skills served from that installed package;
+selected skill and supporting-file URIs read those package bytes. Preparation creates
+no coordination-root or harness-local skill tree.
 
 ## Current Cases
 
@@ -73,8 +74,6 @@ benchmarks/
           config.toml
           mcp/
             agents-remember-benchmark.settings.json
-          skills/
-            agents-remember/ # copied tree from ar-coordination/skills
         AGENTS.md              # rendered from templates/workspace-AGENTS.md
         ar-coordination/
           AGENTS.md
@@ -98,7 +97,7 @@ Each prompt has comparable variants:
 - `with-onboarding`: Codex works from `workspaces/<case-id>/with-memory/`, where `ar-coordination/` resolves to the cloned pinned external memory and `repos/<repo>/` contains the same pinned checkout.
 - `with-onboarding-warm`: when present, Codex starts from the same memory-enabled workspace but treats the benchmark-local memory as already validated, so it can test steady-state memory use without spending the run on startup resolver and drift gates.
 
-The memory-enabled workspace also exposes the benchmark-local Agents Remember runtime through `.codex/skills/agents-remember` and writes the benchmark-local MCP server registration to `.codex/config.toml`. During `codex exec`, the runner forwards that registration as explicit `-c mcp_servers...` overrides so the child process gets the same MCP surface that `ar-coordination/AGENTS.md` references without relying on a parent workspace's `.codex` tree. The runner copies that tree by default.
+The memory-enabled workspace writes the package MCP server registration to `.codex/config.toml`. During `codex exec`, the runner forwards that registration as explicit `-c mcp_servers...` overrides so the child process gets the benchmark-local MCP settings and the package-served skill resources without relying on a parent workspace's `.codex` tree. No skill directory is installed into the workspace.
 
 Each prompt defaults to three repetitions per variant. For each repetition, the selected variants are placed under the same dated run root and submitted together when the job count allows parallelism. The runner writes raw JSONL, stderr, final messages, metadata, and generated summaries under `user-runs/`.
 

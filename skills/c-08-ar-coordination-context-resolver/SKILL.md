@@ -117,13 +117,13 @@ MCP/package route.
 ## Consumers
 
 - `AGENTS.md` Gate 1 uses this skill to resolve coordination root, memory root, task root, temp root, onboarding root, worktree facts and ledger path; it reads settings, storage, `pathRules` and cross-repo allowances from the source-bound settings files, and code roots and build identity from the `server_info` metadata route.
-- `c-02-memory-quality-control` consumes the resolved context and owns memory quality checks, including task-start drift classification and trust reporting.
+- `c-05-create-or-update-onboarding-files` consumes the resolved context and owns memory quality checks, including task-start drift classification and trust reporting.
 - `c-03-repo-bootstrap`, `c-04-retrieval-strategy-router`, `c-05-create-or-update-onboarding-files`, and task workflows use the resolved roots instead of rebuilding topology rules.
-- `c-09-git-worktree-manager` consumes the resolved context and owns Git worktree mutation, task contract updates, and closeout sequencing.
+- `w-02-light-task-workflow` consumes the resolved context and owns Git worktree mutation, task contract updates, and closeout sequencing.
 
 ## Boundaries
 
 1. The `c-08-ar-coordination-context-resolver` skill owns topology detection, coordination-root and memory-root resolution, JSON-first settings parsing with Markdown fallback, storage semantics, `pathRules`, task-contract fact loading, and cross-repo allowance parsing.
 2. Other skills may request MCP `context_packet`, but they must not keep parallel resolver implementations.
 3. The top `AGENTS.md` topology explanation remains orientation guidance for humans and agents, not a replacement runtime path.
-4. The `c-08-ar-coordination-context-resolver` skill resolves where context lives; it does not create missing scaffolding or Git worktrees. Use the `c-00-initialize-memory-repo` skill for memory-root creation and the `c-09-git-worktree-manager` skill for worktree lifecycle mutation.
+4. The `c-08-ar-coordination-context-resolver` skill resolves where context lives; it does not create missing scaffolding or Git worktrees. Use the `c-00-initialize-memory-repo` skill for memory-root creation and the `w-02-light-task-workflow` skill for worktree lifecycle mutation.

@@ -804,10 +804,11 @@ def test_incomplete_historical_count_warns_without_inventing_tries(launch_world,
     )
     assert failed_role_tries(document, "worker") is None
     settings_path = user_settings_path_for_write()
-    settings = json.loads(settings_path.read_text())
+    settings = json.loads(settings_path.read_text()) if settings_path.is_file() else {}
     settings["orchestration"] = {
         "roles": {"worker": {"model": "gpt-a", "stepUp": {"model": "gpt-b", "afterTries": 1}}}
     }
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(json.dumps(settings))
     review_answer = with_review_step_up(
         world.config,

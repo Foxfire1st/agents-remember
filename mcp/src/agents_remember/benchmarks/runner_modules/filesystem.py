@@ -9,11 +9,7 @@ from pathlib import Path
 from agents_remember.benchmarks.runner_modules.constants import (
     AGENTS_MD_TARGETS,
     BENCHMARK_ROOT_MARKER,
-    CODEX_HARNESS_DIR,
-    COPYTREE_IGNORE,
     PROVIDER_ASSET_DIRS,
-    SKILL_EXPOSURE_MODES,
-    SKILLS_EXPOSURE_NAMESPACE,
 )
 from agents_remember.install.assets import long_path, packaged_source_root
 
@@ -28,15 +24,6 @@ def copy_file(source: Path, destination: Path, dry_run: bool) -> None:
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(long_path(source), long_path(destination))
-
-
-def replace_tree(source: Path, destination: Path, dry_run: bool) -> None:
-    if dry_run:
-        print(f"Would replace {destination} from {source}")
-        return
-    if destination.exists() or destination.is_symlink():
-        remove_path(destination)
-    shutil.copytree(long_path(source), long_path(destination), ignore=COPYTREE_IGNORE)
 
 
 def copy_tree(source: Path, destination: Path, dry_run: bool) -> None:
@@ -121,16 +108,20 @@ def remove_path(path: Path) -> None:
 
 
 def sync_runtime_assets(coordination_root: Path, dry_run: bool) -> None:
+    """The workspace's instruction files and provider assets — no skill copy (MIK-R196 rule 7).
+
+    Skills reach the workspace's harness from the tool server's own package copy, through the
+    benchmark-local MCP registration this workspace also writes; a coordination-root skill
+    folder would be a second distribution surface with no reader.
+    """
+
     with packaged_source_root() as source_root:
         if dry_run:
             print(f"Would ensure directory {coordination_root}")
         else:
             coordination_root.mkdir(parents=True, exist_ok=True)
-        runtime_root = source_root / "runtime"
-        replace_tree(runtime_root / "skills", coordination_root / "skills", dry_run)
         for source_rel, target_rel in AGENTS_MD_TARGETS.items():
             copy_file(source_root / source_rel, coordination_root / target_rel, dry_run)
-
         sync_provider_assets(source_root, coordination_root, dry_run)
 
     for folder in (
@@ -169,37 +160,6 @@ def sync_provider_assets(root: Path, coordination_root: Path, dry_run: bool) -> 
         source = providers_source / relative
         if source.exists():
             copy_tree(source, providers_target / relative, dry_run)
-
-
-def copy_workspace_skill_exposure(
-    workspace_root: Path, coordination_root: Path, dry_run: bool
-) -> None:
-    install_root = workspace_root / CODEX_HARNESS_DIR / "skills"
-    exposure_path = install_root / SKILLS_EXPOSURE_NAMESPACE
-    skills_source = coordination_root / "skills"
-    if dry_run:
-        print(f"Would copy benchmark skills {skills_source} -> {exposure_path}")
-        return
-    if not skills_source.is_dir():
-        raise RuntimeError(f"benchmark runtime skills directory missing: {skills_source}")
-    if exposure_path.exists() or exposure_path.is_symlink():
-        remove_path(exposure_path)
-    exposure_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(skills_source, exposure_path, ignore=COPYTREE_IGNORE)
-
-
-def sync_workspace_skill_exposure(
-    workspace_root: Path,
-    coordination_root: Path,
-    dry_run: bool,
-    mode: str = "copy",
-) -> None:
-    if mode not in SKILL_EXPOSURE_MODES:
-        raise RuntimeError(f"unsupported skill exposure mode: {mode}")
-    if mode == "none":
-        print(f"Skipping benchmark skill exposure for {workspace_root}")
-        return
-    copy_workspace_skill_exposure(workspace_root, coordination_root, dry_run)
 
 
 def write_benchmark_root_marker(root: Path, dry_run: bool) -> Path:

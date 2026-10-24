@@ -25,8 +25,8 @@ from agents_remember.cli.role_message_files import (
 from agents_remember.mcp.registration.role_agents import register_role_agent_tools
 from agents_remember.worktrees import role_reports
 from mcp.server.fastmcp import FastMCP
+from paseo_role_tools_test_support import ARCHIVED_AT
 from test_paseo_role_tools import (
-    ARCHIVED_AT,
     RoleToolsTestCase,
     binding,
     selection_of,

@@ -49,7 +49,7 @@ When an onboarding unit grows too large, that is often a signal that the source 
 
 ### How does the agent know memory is not stale?
 
-File-level sidecar onboarding records verification metadata. `c-02-memory-quality-control` compares the source file against that verification point before the agent plans against onboarding.
+File-level sidecar onboarding records verification metadata. `c-05-create-or-update-onboarding-files` compares the source file against that verification point before the agent plans against onboarding.
 
 Typical outcomes are `up to date`, `drifted`, `missing verification`, `missing`, `orphaned`, `disabled`, or `unsupported`.
 
@@ -83,7 +83,7 @@ If a change fits in one session, use a minimal `w-02-light-task-workflow` task. 
 
 The agent should route the discovery to the right artifact instead of quietly changing requirements or memory.
 
-Durable current-state findings can go through the `c-05-create-or-update-onboarding-files` skill. Requirement or architecture changes need explicit developer approval. The `c-01-findings-capture` skill keeps that routing visible.
+Durable current-state findings can go through the `c-05-create-or-update-onboarding-files` skill. Requirement or architecture changes need explicit developer approval. The `c-05-create-or-update-onboarding-files` skill keeps that routing visible.
 
 ### Why keep task files separate from onboarding?
 
@@ -102,7 +102,7 @@ makes a memory update attributable.
 
 ### What is `memory.md`?
 
-`memory.md` is the external-memory ledger. It records which memory commit was verified against which code commit. The `c-12-closeout` skill writes it during closeout and the `c-09-git-worktree-manager` skill uses it during worktree integration, so code and memory do not drift apart silently.
+`memory.md` is the external-memory ledger. It records which memory commit was verified against which code commit. The `w-02-light-task-workflow` skill writes it during closeout and the `w-02-light-task-workflow` skill uses it during worktree integration, so code and memory do not drift apart silently.
 
 ### How is a repository's memory located?
 

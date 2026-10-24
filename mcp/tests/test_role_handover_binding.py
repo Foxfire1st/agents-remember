@@ -8,7 +8,6 @@ from tempfile import TemporaryDirectory
 from typing import Any
 from unittest.mock import patch
 
-from _user_settings_guard import user_settings_path_for_write
 from agents_remember.application.role_launch_context import (
     RoleLaunchContext,
     resolve_role_launch_context,
@@ -707,10 +706,6 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
                     "embed": [],
                 },
             }
-            atomic_write_text(
-                user_settings_path_for_write(),
-                json.dumps({"paseoRuntime": settings.pop("paseoRuntime")}),
-            )
             atomic_write_text(settings_path, json.dumps(settings))
             request = RoleDispatchRequest.model_validate(
                 {

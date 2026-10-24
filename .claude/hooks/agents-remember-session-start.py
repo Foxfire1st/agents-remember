@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Emit Agents Remember workspace startup context for Claude Code SessionStart."""
 
-# Generated file -- do not edit.
-# Source: scripts/harness/session_start_hook.py
-# Regenerate: python3 scripts/sync-harness.py
+# Maintained in place, one copy per harness: this hook is an optional convenience for a
+# chat the product did not start. Its directive is the sibling .md file.
 
 from __future__ import annotations
 

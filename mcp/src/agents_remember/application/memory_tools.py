@@ -655,11 +655,10 @@ def route_index_refresh_tool(
     }
 
 
-# The one route that populates a repository's knowledge foundation, named once because two
-# different operations have to hand the developer the same next step.
+# The foundation handover shared by the two knowledge-state reporting branches below.
 KNOWLEDGE_BOOTSTRAP_ROUTE = (
-    "run the taskless bootstrap: agents-remember knowledge-bootstrap --repo <repo_id> "
-    "--list <curator hand-off list> --authorization-ref <ref> --commit"
+    "report knowledge state {state!r}, then have the developer start the Architect, which runs "
+    "the knowledge foundation as a regular task with a Curator"
 )
 
 
@@ -727,7 +726,7 @@ def _knowledge_foundation_state(config: McpRuntimeConfig, repo_id: str) -> dict[
                     subject="this memory root",
                 )
                 if resolved.code == LEGACY_FORMAT_CODE
-                else KNOWLEDGE_BOOTSTRAP_ROUTE
+                else KNOWLEDGE_BOOTSTRAP_ROUTE.format(state=resolved.state)
             ),
         }
     tree = resolved.memory_tree
@@ -755,7 +754,7 @@ def _knowledge_foundation_state(config: McpRuntimeConfig, repo_id: str) -> dict[
         "nextAction": (
             "repair the named knowledge files, then rebuild their derived index"
             if state == "unusable"
-            else KNOWLEDGE_BOOTSTRAP_ROUTE
+            else KNOWLEDGE_BOOTSTRAP_ROUTE.format(state=state)
         ),
     }
 

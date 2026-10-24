@@ -45,6 +45,11 @@ from agents_remember.cli.role_instructions import (
     instruction_metadata,
     launch_choice_metadata,
 )
+from agents_remember.cli.role_launch_assignments import (
+    architect_assignment,
+    bootstrap_assignment,
+    investigator_assignment,
+)
 from agents_remember.cli.role_launch_defaults import role_defaults
 from agents_remember.cli.role_launch_receipts import (
     _message_binding_projection_reference,
@@ -82,6 +87,7 @@ ROLE_START_OPERATIONS: dict[LauncherRole, CapsuleOperation] = {
     "worker": "implementation",
     "reviewer": "review",
     "curator": "curation",
+    "bootstrap": "bootstrap",  # MIK-R196 rule 4: the same capsule, now reachable from a launch
 }
 
 
@@ -1071,22 +1077,11 @@ def _role_assignment(
 ) -> str:
     selected = context.effective_task
     if context.role == "architect":
-        return (
-            "Project-scoped architect launch. Ask the developer what outcome they want and which "
-            "registered repository it concerns. The shared Projects workspace is an execution "
-            "location, not a repository selection. Until the developer names a repository, do no "
-            "repository-specific trust-packet or task-corpus work; do not infer a target from the "
-            "workspace name or from a singleton repository registry. Then orient from the selected "
-            f"repository's existing AR task portfolio. Do not invent a sprint or task identity. "
-            f"Write this session's report to {report_path}."
-        )
+        return architect_assignment(report_path)
     if context.role == "investigator":
-        concern = (
-            "The concern arrives in the parent's first role_message. Ask that parent once for a missing concern or scope and wait; do not invent one."
-            if started_by
-            else "Ask the developer for the scoped concern before acting."
-        )
-        return f"Investigator launch: investigate one scoped concern of any kind. {concern} Write one report to {report_path}. Change no code checkout or leaf enclosure, memory, task document or status; make no commit, closeout or integration and start no role. Change provider or system state only after the report and an explicit authorized order."
+        return investigator_assignment(report_path, started_by=started_by)
+    if context.role == "bootstrap":
+        return bootstrap_assignment(report_path, started_by=started_by)
     assert selected is not None
     return (
         f"Perform the {context.role} role for canonical AR document "

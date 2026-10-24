@@ -16,7 +16,6 @@ from agents_remember.benchmarks.runner_modules.filesystem import (
     remove_path,
     render_template,
     sync_runtime_assets,
-    sync_workspace_skill_exposure,
     write_benchmark_root_marker,
 )
 from agents_remember.benchmarks.runner_modules.manifest import (
@@ -267,10 +266,9 @@ def prepare_case(
     prepare_repo(repository, with_memory_repo_root, dry_run, force_clone=force_clone)
 
     coordination_root = with_memory_root / coordination_path(case)
+    # The workspace's harness reads the skills the tool server serves from the package copy
+    # (MIK-R196 rule 7); nothing installs a coordination-root or harness-local skill folder.
     sync_runtime_assets(coordination_root, dry_run)
-    sync_workspace_skill_exposure(
-        with_memory_root, coordination_root, dry_run, preparation.skill_exposure_mode
-    )
     memory_repo = prepare_memory_repo(case, coordination_root, dry_run, force_clone=force_clone)
     workspace = BenchmarkWorkspace(
         case=case,

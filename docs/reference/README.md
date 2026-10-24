@@ -9,5 +9,5 @@ Use these pages when you need exact file layout, settings, or skill behavior.
 - [Path Rules](path-rules.md)
 - [Skills](skills.md)
 - [c-08-ar-coordination-context-resolver Resolver](resolver-c08.md)
-- [c-02-memory-quality-control Memory Quality Control](drift-c02.md)
-- [c-09-git-worktree-manager Worktrees And Closeout](worktrees-c09.md)
+- [c-05-create-or-update-onboarding-files Memory Quality Control](drift-c02.md)
+- [w-02-light-task-workflow Worktrees And Closeout](worktrees-c09.md)

@@ -1,92 +1,84 @@
 # Install Guides
 
-These pages explain how to copy the Agents Remember starter package for each
-agent harness.
+One path starts Agents Remember on every harness: register the MCP tool server, then make one
+tool call. The call prepares the runtime scaffold, provisions and starts the Paseo host, starts
+one instructed Bootstrap seat, and returns that seat's dashboard address. Setup then continues in
+the dashboard.
 
-The normal first-run path is:
+Nothing is copied into a harness: no skill folder, no starter package, no rendered settings. The
+tool server serves the canonical skills to a harness as MCP resources (MIK-R196), so the skills a
+session reads belong to exactly one installed build.
 
-1. Copy the harness-native package files from this repo into your workspace.
-2. Render the copied package. The `render-starter` script is a convenience for
-   replacing placeholders in the copied files: it infers the workspace root from
-   the copied harness folder, fills repository names and hook/context commands,
-   and validates that each requested repository folder exists. It also creates
-   the one shared host settings file when absent; manual placeholder replacement
-   needs the complete shared block described in the install skill. Pass every
-   repository folder name after one `--repo`, for example:
+The steps, once per workspace:
 
-   ```text
-   python .codex/render-starter.py --repo my-repo shared-lib
-   ```
-
-   On POSIX systems you can use `render-starter.sh`; on native Windows you can
-   use `render-starter.ps1`.
-
-   If you prefer not to run the renderer, manually replace every placeholder in
-   the copied package and validate that no `<PATH/TO/YOUR/PROJECTS_FOLDER>`,
-   `<YOUR_REPOSITORY_FOLDER_NAME>`, or hook-command placeholder remains.
-3. Register the Agents Remember MCP server, usually:
+1. **Write the MCP authority settings.** Copy `examples/mcp/settings.example.json` to a path of
+   your own and replace its paths with absolute ones: `coordinationRoot` (the installation's
+   coordination folder — it may not exist yet), `workspaceRoot`, `transcriptRoot`, and one entry
+   per code repository under `repositories`. The server reads this file at boot and resolves
+   workspace paths from it, not from where a directory happens to sit.
+2. **Register the MCP server** in your harness's own MCP configuration, pointing `--config` at
+   that file:
 
    ```text
-   uvx agents-remember-mcp@latest --config <absolute path to agents-remember-settings.json>
+   uvx agents-remember-mcp@latest --config <absolute path to your settings file>
    ```
 
-4. Restart the harness once.
-5. Invoke `c-13-install-and-onboard`; it runs or verifies `runtime_install()`, which
-   provisions the build-pinned Paseo host and its plugin on the product's checked
-   Node, then handles memory, onboarding, and providers. No separate host command
-   is needed during install.
-6. Start both with the same package installation and actual MCP config file.
-   For the uvx registration above, take the served version from server_info and run:
+3. **Restart or reload the harness once** so it starts the server.
+4. **Make one call** in a chat of that harness, naming no task, sprint or repository:
 
    ```text
-   uvx --from "agents-remember-mcp==<served-version>" agents-remember dashboard --daemon --config "<absolute active MCP settings file>"
+   role_start(role="bootstrap", request_id="<a UUID you generate>")
    ```
 
-   Replace both placeholders; a local-wheel registration uses that exact wheel
-   for --from. [uv's tool guide](https://docs.astral.sh/uv/guides/tools/#commands-with-different-package-names)
-   documents this separate executable name. uvx does not place a bare command on
-   PATH. A uv tool-installed package can use its agents-remember executable with
-   the same explicit --config. Repeat this one start after a reboot. A start
-   uses the installed host and never installs or upgrades. Dashboard stop/restart
-   leaves the host and agent sessions running; `paseo stop` is explicit and ends
-   running turns and permission prompts.
+   Bootstrap is parentless and taskless: it invents no sprint, master, leaf, task document or
+   worktree. The call creates the coordination scaffold when the configured root does not exist
+   yet, provisions and starts the host when it is not running, verifies the Agents Remember
+   plug-in, and starts one seat with its compiled instructions. Its answer names that seat and the
+   dashboard address of its chat. A retry with the same `request_id` reconciles to the same seat.
+5. **Continue setup in the dashboard.** Choose the repository and the memory root, initialize or
+   read the memory baseline, adopt its content after review, and choose the harness each role
+   should use. Harness-only choices are valid: leave model and effort unset and the harness picks
+   its own defaults. Bootstrap writes the user settings file
+   (`~/.config/agents-remember/settings.json`, or under `XDG_CONFIG_HOME`) during installation, and
+   it reports an existing file instead of overwriting it.
+6. **Start the Architect.** Bootstrap hands the knowledge foundation to you: it tells you to start
+   the Architect, which organises memory and knowledge bootstrapping as ordinary task, master or
+   sprint work. Bootstrap authors no onboarding and no knowledge, and it starts no role.
 
-The renderer creates one shared `~/.config/agents-remember/settings.json`
-(or `$XDG_CONFIG_HOME/agents-remember/settings.json`)
-`paseoRuntime` block for all harnesses, with absolute data/state paths and fresh
-listen `127.0.0.1:8766`; it never overwrites an existing file. The host currently
-supports Linux x86_64 with `/proc` only. The build carries one exact host, a whole
-npm lock, and Node 26.11.1 plus its official archive digest. A missing shared block
-is reported as configured=false by install. During approved setup, add the
-complete five-key block from c-13 to that one shared file, preserving other
-families; retry runtime_install afterwards. Existing per-harness blocks
-are ignored with a migration notice; move one to the shared file, preserving
-explicit listen/home/prefix and other settings. The renderer also accepts
---coordination-root, --host-port and --dashboard-port; omitting them retains
-workspace/ar-coordination, 8766 and 8765. Sandbox tooling supplies its recorded
-root and two ports through that public invocation and does not edit the rendered
-file. The developer chooses the real
-settings upgrade (`agents-remember upgrade-user-settings --coordination-root
-<absolute root>`) and any terminal provision needed to switch a running host
-from another Node. `runtime_install` only reads this authority and defers a restart.
+The skills themselves — `c-00-initialize-memory-repo` to `c-14-knowledge-bootstrap`,
+`l-01-agent-lifecycles` and `w-02-light-task-workflow` — are served by the server. A harness that
+reads MCP resources finds them without any install step, and no project or home skill folder has to
+be kept in sync.
 
-Initial skills and hooks/rules/instructions come from the copied package. Do not
-install skills for first-run setup; the copied package already carries them.
+## Host notes
 
-**Native Windows note:** enable long paths before working with worktree-backed
-tasks — worktree folders nest deeply enough that repos with deep trees exceed
-the legacy 260-character `MAX_PATH`, which breaks Python tooling, pip installs,
-and test fixtures mid-task. Run in an elevated PowerShell, then restart your
-harness:
+The build-pinned Paseo host supports Linux x86_64 with `/proc`. The build carries one exact host,
+a whole npm lock, and Node 26.11.1 plus its official archive digest. The one call prepares a
+missing `paseoRuntime` block in the active MCP authority settings file with absolute data/state paths
+and listen `127.0.0.1:8766`; an existing block is read as it stands, never rewritten. A host whose
+settings are invalid, or a host the call may not touch because it holds live sessions, is reported
+with the stage that failed and the daemon state it left behind — never as a successful launch.
+
+**Native Windows note:** enable long paths before working with worktree-backed tasks — worktree
+folders nest deeply enough that repos with deep trees exceed the legacy 260-character `MAX_PATH`,
+which breaks Python tooling, pip installs, and test fixtures mid-task. Run in an elevated
+PowerShell, then restart your harness:
 
 ```text
 Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name LongPathsEnabled -Value 1 -Type DWord
 git config --global core.longpaths true
 ```
 
-`worktree_start` checks this up front and refuses with the projected path
-length when the host cannot represent the worktree's deepest files. WSL is not
-affected.
+`worktree_start` checks this up front and refuses with the projected path length when the host
+cannot represent the worktree's deepest files. WSL is not affected.
+
+## Optional per-harness instruction files
+
+Each guide below names the instruction file, hook or rule that makes a harness's free chat load the
+Agents Remember first-action notice at session start. Those files are conveniences for a chat the
+product did not start: they carry a directive and nothing else, they hold no skill folder, and
+copying one is optional. Replace their `<PATH/TO/YOUR/PROJECTS_FOLDER>` markers with your absolute
+path by hand; there is no renderer.
 
 Then choose the guide for your tool:
 
@@ -98,7 +90,3 @@ Then choose the guide for your tool:
 - [Hermes.md](hermes.md)
 - [Pi.dev](pi.md)
 - [OpenClaw](openclaw.md)
-
-An old coordination settings file, alone or beside the user file, refuses rendering
-before any harness file is changed. The refusal names both paths and the explicit
-whole-file upgrade command; the renderer never selects or migrates an old file.

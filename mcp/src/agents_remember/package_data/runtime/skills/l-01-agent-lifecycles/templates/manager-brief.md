@@ -79,22 +79,26 @@ master's leaf loop to the master-exit seam, then hand over.
   logical formal-attempt boundary. A malformed pre-handoff row is preserved with an append-only
   `non-attempt-correction`/void reference and consumes no attempt ID; a malformed handed-off row
   requires independent reviewer rejection before a successor handoff. The worker never self-rejects.
-- Closeout-door publication: after that handoff and a current-lineage proof, call
-  `closeout_door(request={action:"declare", contract_path:...})` against the configured leaf
-  contract with complete current
-  task/source/memory/admission evidence and the accepted priority grade. Send the
-  orchestrator the published waiting generation plus canonical leaf/master/sprint refs,
-  execution nature, routes/seams, blockers, and acceptance facts. The door is source truth; the
-  closeout queue is only a disposable projection of current waiting generations. Report facts
-  only; do not rank other masters, claim the generation, or close out until the orchestrator
-  releases the current first-ready generation from a valid-built projection.
+- Closeout hand-off: after that handoff and a current-lineage proof, the leaf is closed out
+  through its own procedure — `worktree_closeout_preview`, then the approval stop (explicit
+  developer commit approval for standalone/final work, or the recorded delegated series
+  authority), then `worktree_closeout_apply` with an explicit nonblank message per enabled leg
+  and that authority as its intent note. That transaction owner proves admission itself (task
+  intent, super → master → leaf lineage, the invariant/knowledge gate and the curator's
+  coherence authority) and records recoverable per-leg journal evidence. No advertised tool
+  declares or publishes a waiting generation, so name none as the publisher; a refusal that
+  reports a missing generation is a developer decision reported with its exact code. Send the
+  orchestrator the generation and state that the apply or its refusal returned plus canonical
+  leaf/master/sprint refs, execution nature, routes/seams, blockers, and acceptance facts.
+  `closeout_queue` is only the sprint's disposable waiting-only projection (`status`,
+  `rebuild`) and confers no authority. Report facts only; do not rank other masters, claim a
+  generation, or close out until the orchestrator releases it.
 - Task edits never wait for closeout scheduling. Apply every intrinsically valid `task_doc`
   mutation, inspect its machine-readable `projectionEffects`, and relay every incomplete effect's
   exact `nextAction` to the orchestrator for sprint-addressed rebuild. Never whitelist task
-  operations, patch a stale queue row, or treat queue/door/operation state as a task lock. If the
-  change affects a waiting generation's evidence, re-prove it through
-  `closeout_door(request={action:"update-provenance", ...})` or change its door disposition before
-  it is schedulable again.
+  operations, patch a stale queue row, or treat queue/operation state as a task lock. If the
+  change affects closeout evidence already accepted for a generation, re-prove it before the
+  transaction is retried.
 - Every requested `reviewMode=baseline` organizational leaf code-change session receives
   an independent route review before curator handoff, with complete coverage of the agreed
   surface. The reviewer seat must be distinct from both the leaf's builder

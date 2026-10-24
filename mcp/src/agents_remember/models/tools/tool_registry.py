@@ -55,6 +55,7 @@ from agents_remember.models.tools.knowledge_responses import (
     KnowledgeReadResponse,
     KnowledgeWriteResponse,
 )
+from agents_remember.models.user_settings_init import UserSettingsInitResponse
 from agents_remember.models.worktree import (
     WorktreeAbandonResponse,
     WorktreeAttachResponse,
@@ -115,6 +116,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "role_start": RoleStartResponse,
     "role_start_set": RoleStartSetResponse,
     "role_message": RoleMessageResponse,
+    "user_settings_init": UserSettingsInitResponse,
     "knowledge_read": KnowledgeReadResponse,
     "knowledge_diff": KnowledgeDiffResponse,
     "knowledge_integrity_check": KnowledgeIntegrityCheckResponse,

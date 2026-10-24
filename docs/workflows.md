@@ -57,13 +57,13 @@ retired heavy workflow.
 
 Every build is worktree-backed (only research-only exits skip the worktree); the invariant ladder is
 task doc (approved) → branch (intent) → worktree (only where something is built). The
-`c-09-git-worktree-manager` skill creates the task
-worktree; a worktree-backed task has a `contract.md` beside the task file. The `c-09-git-worktree-manager` skill owns the worktree
-lifecycle, integration, and cleanup; `c-12-closeout` runs the closeout itself. A master series runs in
+`w-02-light-task-workflow` skill creates the task
+worktree; a worktree-backed task has a `contract.md` beside the task file. The `w-02-light-task-workflow` skill owns the worktree
+lifecycle, integration, and cleanup; `w-02-light-task-workflow` runs the closeout itself. A master series runs in
 **one** shared worktree for the whole series.
 
 Closeout and commit approval are separate from implementation approval. The agent presents a dry-run
-preview before any `c-12-closeout` closeout creates commits. The git-landing flow (direct vs PR-gated) is
+preview before any `w-02-light-task-workflow` closeout creates commits. The git-landing flow (direct vs PR-gated) is
 deferred to the repo's `system/git-workflow.md` when present.
 
 ## Choosing A Build Mode
@@ -74,4 +74,4 @@ deferred to the repo's `system/git-workflow.md` when present.
 | One-session code change, low risk | Minimal `w-02-light-task-workflow` task (thin doc, worktree-backed) |
 | Needs a durable plan or checklist | `w-02-light-task-workflow` light task |
 | Outgrows a single-page plan, or broad/high-risk | Master + light sub-task series |
-| Parallel implementation or explicit closeout tracking | Any build mode — all builds are worktree-backed via the `c-09-git-worktree-manager` skill |
+| Parallel implementation or explicit closeout tracking | Any build mode — all builds are worktree-backed via the `w-02-light-task-workflow` skill |

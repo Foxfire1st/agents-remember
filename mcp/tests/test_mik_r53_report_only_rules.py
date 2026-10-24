@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 from typing import Any
 from unittest import mock
 
@@ -49,6 +48,7 @@ from knowledge_validator_test_support import (
     invariant_path,
     tree,
 )
+from mik_r53_rule_surfaces import quality_control_workflow_text
 
 DECISION = "knowledge/decisions/DEC-D12RTE-local-family-routes.json"
 PROOF_SIDECAR = "onboarding/mcp/tests/test_direct_landing.py.json"
@@ -726,10 +726,7 @@ def test_the_command_help_lists_the_ten_rules_with_their_decision() -> None:
 
 
 def test_the_c02_skill_lists_the_ten_rules_with_their_decision() -> None:
-    skill = (
-        Path(__file__).parent.parent.parent / "skills" / "c-02-memory-quality-control" / "SKILL.md"
-    )
-    text = skill.read_text(encoding="utf-8")
+    text = quality_control_workflow_text()
 
     for rule_id in sorted(MERGE_RULES | DEBT_RULES | {"R13.3-governs"}):
         assert rule_id in text, rule_id

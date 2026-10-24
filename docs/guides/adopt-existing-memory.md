@@ -10,7 +10,7 @@ Convert first: when the memory is still in the legacy format (no `knowledge/layo
 
 ## Before Adoption
 
-Resolve the target repository with the `c-08-ar-coordination-context-resolver` skill and run `c-02-memory-quality-control` drift detection.
+Resolve the target repository with the `c-08-ar-coordination-context-resolver` skill and run `c-05-create-or-update-onboarding-files` drift detection.
 
 If drift is actionable, choose one path:
 
@@ -25,8 +25,8 @@ Ask the agent to run the `c-10-adopt-memory-baseline` skill in status mode for t
 
 ## Adopt
 
-When ready, ask the agent to run the `c-10-adopt-memory-baseline` skill adoption. The `c-10-adopt-memory-baseline` skill delegates the Git mutation and ledger creation to the `c-09-git-worktree-manager` skill so the memory commit and `memory.md` row are created consistently.
+When ready, ask the agent to run the `c-10-adopt-memory-baseline` skill adoption. The `c-10-adopt-memory-baseline` skill delegates the Git mutation and ledger creation to the `w-02-light-task-workflow` skill so the memory commit and `memory.md` row are created consistently.
 
 ## After Adoption
 
-Future external-memory work runs through `c-09-git-worktree-manager` worktrees with `c-12-closeout` worktree closeout. The ledger gives that flow a known baseline for code-memory compatibility.
+Future external-memory work runs through `w-02-light-task-workflow` worktrees with `w-02-light-task-workflow` worktree closeout. The ledger gives that flow a known baseline for code-memory compatibility.

@@ -1,0 +1,610 @@
+<!-- Kept from the retired retired the worktree manager skill (MIK-R196 rule 8): the surviving
+owner of the seat's worktree procedure -- intake and intent, start/attach/status, mid-task sync,
+closeout, integration, finalization and cleanup, and reopening. The tools are the `worktree_*`
+family, whose own descriptions are their authority; the retired `## MCP Tools` table named two
+tools no server exposes and was dropped with them. -->
+
+---
+name: w-02-light-task-workflow
+description: "Create, attach to, report on, integrate, finalize, and clean up Agents Remember worktree-backed tasks while preserving delegated/human approval gates and external-memory compatibility."
+---
+
+# Worktree Operations (kept procedure)
+
+Use this skill when a task should run through an explicit code/memory worktree wrapper.
+
+The `w-02-light-task-workflow` skill wraps the existing light-task or external workflow (a build that fits one session still rides a THIN `w-02-light-task-workflow` doc — chat is never a build route, per the `l-01-agent-lifecycles` invariant). It owns Git worktree state, series contracts, leaf enclosures, external-memory compatibility checks, integration, lifecycle finalization, and cleanup. It does not replace the workflow that performs the actual implementation.
+
+For closeout, use the sibling [closeout procedure](closeout.md). This worktree procedure
+supplies its contract path and integration/finalization follow-up rules.
+
+## Stable Address, Enclosure Root, And Lifecycle Resume
+
+The stable public address is the leaf's configured `series-contract.md`; it is not the live
+operation store. `worktree_start` reserves one strict address-only locator for that contract and
+publishes an immutable manifest under the worktree enclosure root's dedicated `.lifecycle/`
+directory. The same root-local metadata directory owns the canonical live operation journals and
+history. The locator binds the exact contract address, root, manifest digest, and publication
+generation; it contains no task state, queue row, attempt, worker, commit, certification, or Git
+truth.
+
+Lifecycle reads have exactly two strict, state-disjoint routes:
+
+```text
+live operation
+  configured contract address
+  -> exact independent locator
+  -> immutable enclosure-root manifest
+  -> canonical root-local journal/history
+
+terminal cleanup
+  configured contract address
+  -> exact terminal locator
+  -> exact external archive + receipt
+  + surviving configured contract truth
+```
+
+The live route is valid only while the locator is addressable and the enclosure root still owns the
+manifest and journal. A `terminal-archived` locator never falls through to that root path: its exact
+external archive and receipt preserve the collected manifest/journal/history, while the configured
+contract supplies the surviving cleanup truth. Neither route scans task documents, worktree
+folders, names, or `reports/`, and neither accepts a caller-supplied worktree group as authority. A
+legacy enclosure created before locators existed is addressable only after the explicit audited
+`worktree_enclosure_adopt` MCP tool validates the exact contract/root pair and publishes its
+receipt. Normal readers never become compatibility readers.
+
+`worktree_status` is the public status action for both routes. Before terminal archival it reports
+the live journal generation and its executable controls. After terminal archival it must report
+the archive-ready state plus surviving contract cleanup state, not claim that the deleted or
+partially deleted live root remains addressable. `terminal-archived` is only archive-ready: cleanup
+is complete only after the destructive tail succeeds and the contract records `cleanup=completed`
+or `cleanup=abandoned`. If archive proof exists but that contract publication is still incomplete,
+retry the exact accepted public disposition with its original arguments: `worktree_cleanup` owns
+the accepted `teardown_providers` value and `worktree_abandon` owns the accepted `force` value.
+The terminal archive binds that typed `cleanupArguments` object into its request identity.
+`worktree_status` and terminal-request conflicts return the same `cleanupArguments` plus the exact
+public retry `nextArgs`; execute those bytes rather than reconstructing a call. A retry with a
+different argument value refuses. Omission/default replay is not a recovery fallback. This terminal
+retry is not a `worktree_operation_control` action.
+
+`worktree_start` creates the task's worktree and records its location in the configured contract.
+`worktree_attach` resolves that contract through the proven address chain and reports its worktree.
+The landing chain keeps its own lifecycle in the contract.
+
+## Pre-Worktree Intake
+
+The `w-02-light-task-workflow` skill starts after the normal task intake and onboarding gate, not before them.
+
+The intended order is:
+
+1. run the `c-08-ar-coordination-context-resolver` skill for the target repository
+2. run the `c-05-create-or-update-onboarding-files` skill's task-start drift check and follow the existing AGENTS Gate 3/4 choice point
+3. when onboarding is refreshed, commit the memory content before starting any worktree; keep the computed ledger cache outside Git staging and commits
+4. place every build in a leaf under a master, even when the leaf is tiny and one owner wears the
+   backend hats; “short root” changes orchestration depth, not the task topology
+5. read the repository's `system/git-workflow.md` and the master's recorded
+   `executionNature`, then identify the actual parent branch edge. An atomic master owns a
+   root `series-contract.md` and one pushable integration branch first; each of its leaf
+   enclosures branches from that integration branch and integrates back into it, and a
+   nested atomic master takes its child integration branch from the parent integration
+   branch. An organizational master is a logical owner: it carries no series contract and no
+   integration branch of its own, and its leaves branch from and land on the recorded super
+   branch (`integrationBranch`). Read that nature and edge before naming any branch; an
+   integration branch is never a repair workbench, only a landing target.
+6. choose or review the task slug and workflow variables
+7. establish the applicable worktree-start authority: for a new master/leaf plan, hand off the
+   **Worktree Intent Gate** for explicit developer approval; for subordinate leaves/edges inside an
+   accepted orchestrated series, record the accepted-series authority and continue without a new
+   developer hand-off
+8. create the durable task wrapper when one is needed
+9. request the `worktree_start` MCP tool only after the task identity is stable, the
+   correct landable `source_branch` is selected, external memory is clean, and
+   the applicable authority has been recorded
+
+The Worktree Intent Gate must name:
+
+1. target repo and build mode
+2. discovered branch policy from `system/git-workflow.md`
+3. proposed protected/source branch and, for an atomic master, its integration branch (an
+   organizational master names the super branch its leaves land on instead)
+4. proposed leaf work branch, worktree name, and `leaf_id`
+5. memory mode and memory branch behavior
+6. intended landing path from closeout through integration, PR/merge when needed,
+   memory carryover, and lifecycle finalization, along the recorded parent edge
+7. material risks, unusual choices, or unresolved branch-policy questions
+
+If the repo is PR-gated, the intent packet must make the protection boundary
+visible: leaf work branches integrate into the pushable integration/source branch
+recorded by their enclosure; protected targets are reached later through the
+repo's PR flow.
+
+For developer-gated starts, run the applicable dry-run/preflight first, then send the intent
+packet to your parent with `role_message`; without a parent, deliver
+the intent packet as your final prose and **hold the action there** — the relay ends the action,
+not the turn, and `../../l-01-agent-lifecycles/operations/orientation.md` governs the turn. Run
+`worktree_start` when
+the approval has arrived.
+
+For subordinate orchestrated-series starts, do the same dry-run/preflight, record the accepted
+planner/series authority in the task decision log or worktree intent note, and continue. Do not add
+a developer stop for every leaf worktree.
+
+For `w-02-light-task-workflow` task documents, the durable master artifact shape is
+`<task-root>/<task-slug>/task.md`. Each build leaf stores its enclosure at
+`<master-task-folder>/enclosures/<leaf-id>/series-contract.md`; an atomic master also stores its
+integration contract at `<master-task-folder>/series-contract.md`. An organizational master
+stores no series contract: its leaves land on the recorded super edge, and a start refuses an
+organizational task root that still carries a live atomic series contract.
+
+## Start / Attach / Status
+
+The `worktree_start` MCP tool resolves `c-08-ar-coordination-context-resolver` context, creates or
+loads the leaf `series-contract.md`, prepares the code worktree first, and then prepares
+external-memory state when enabled. Before exposing the checkout it publishes the reserved locator,
+the strict enclosure-root manifest, and the exact initial contract generation in their declared
+order. A crash at any cut is recovered through the same stable contract address; an exact retry
+converges and a conflicting reservation refuses. If the task root is an atomic master and no root series
+contract exists yet, start first creates the master integration branch and root
+`series-contract.md`, then starts the leaf from that integration branch; an organizational task
+root never creates one and starts its leaf from the recorded super edge. External-memory start
+refuses to continue when source memory content has uncommitted changes; refreshed onboarding must
+be committed first so the new worktree starts from an auditable memory baseline. The ignored
+`memory.md` cache is not part of that cleanliness or admission check.
+
+Before start, attach or reopen can expose a
+checkout to an agent, the control plane resolves **transitive source lineage from task identity**.
+Follow each recorded branch edge: an atomic master integration branch must contain its actual
+source parent, and a leaf must contain its recorded source branch. An organizational master adds
+no branch or series contract; its leaves use the recorded super edge directly. External memory
+follows the same recorded edges. Integration branches accumulate reviewed leaf results and are
+never repair workbenches. Missing contracts,
+missing/mismatched branches, and incomparable Git histories are `source-lineage-unavailable`;
+behind or diverged descendants are `source-lineage-stale`. Both fail closed before the checkout
+is exposed or a lifecycle changes. The projection names relations, branches, ahead/behind counts, and
+ordered `worktree_sync` contract paths, but never asks an agent to retain a commit id.
+
+This is distinct from remote stale-base policy. `stale_base_choice="proceed-stale"` can override a
+remote-tracking freshness choice, but never ancestry along the actual recorded branch edges.
+Resuming an atomic master after other masters landed can surface this gate: sync its recorded
+source edge rather than splitting follow-up work into artificial new masters. `worktree_status` and the
+Engine Room expose `sourceLineage` so the reason and recovery remain visible.
+
+Start runs a **stale-base preflight** (GitHub #54) before any worktree exists:
+when the code or memory source branch is `behind` or `diverged` from its remote
+tracking branch, start blocks with `choose_stale_base_recovery` — a stale base
+produces wrong code and silently converts the provider seed fast-path into a
+multi-minute reindex. Recoveries: re-run with
+`stale_base_choice="fast-forward"` (the tool fast-forwards the stale local
+branches, then starts) or `stale_base_choice="proceed-stale"` (explicit
+override). Offline (`unknown`) and `no-upstream` states never block. A missing
+external-memory source branch is no longer a manual step: start auto-creates it
+at the official memory tip using the code source branch name as template
+(reported as `memorySourceBranch` in the result).
+
+The recorded leaf `source_branch` is not merely the base branch. It is the branch
+that `worktree_integrate` will later fast-forward or replay into, and it follows the
+leaf's recorded parent edge rather than a fixed stack: under an atomic master it is
+that master's integration branch (the nearest parent integration branch for a nested
+atomic master), while an organizational leaf's recorded edge is the super branch. No
+branch is created for a master whose recorded nature is organizational. Protected
+targets are handled after that branch lands.
+
+When external memory is enabled, the `w-02-light-task-workflow` skill validates the memory repository and the actual code/memory objects, ancestry, and refs. Missing external memory is not a `w-02-light-task-workflow` bootstrap path; run the `c-00-initialize-memory-repo` skill first. If the actual memory history cannot be reconciled, the skill stops and reports the allowed human choices:
+
+1. `reconciliation`
+2. `custom`
+
+Memory cannot be disabled for a task: there is no `disabled-memory` recovery choice, and a start that names it is refused (`memory-opt-out-refused`). A contract on disk that carries the removed mode is abandoned and started again: save the changes worth keeping, run `worktree_abandon` (the dry run first), then `worktree_start` at the same address without `memory_mode`.
+
+`memory.md` is an ignored consumer cache computed from `Code-Commit` trailers in memory commits.
+Its absence, stale rows, or malformed bytes never make an otherwise valid pair incompatible.
+A freshly merged code SHA may have no new attribution when memory is unchanged; report that fact
+without creating a mapping-only commit. Use `c-10-adopt-memory-baseline` after the merge only
+when applicable richer onboarding needs carrying into a recovery leaf. Historical attribution
+rewrites are separately authorized deployment work, never routine cache regeneration.
+
+For a live locator, `worktree_attach` and `worktree_status` resolve the configured contract address
+through the locator and root manifest, then report recoverable state without mutating Git. A
+malformed, moved, or deleted task document cannot hide a live journal. Conversely, a missing or
+mismatched locator/manifest is a typed addressability refusal, never permission to scan or infer
+another root. In this live route, `worktree_status` includes the current operation generation,
+phase, task-addressed legal next actions, dirty worktree flags, and a fetch-free `freshness` block
+comparing the contract's recorded base commits against the current local source branch tips. When
+behind, it carries the exact `worktree_sync` route.
+
+`worktree_attach` refuses a terminal locator because there is no live workbench to resume.
+`worktree_status` instead takes the terminal archive/receipt plus surviving-contract route and
+reports archive-ready separately from cleanup-completed or abandoned, including the exact accepted
+`cleanupArguments` and `nextArgs` for the required `worktree_cleanup` / `worktree_abandon` retry.
+Queue presence is neither required nor consulted on either route.
+
+Atomic-series implementation admission is a separate, contract-scoped authority. Each canonical
+series contract owns its own activation record, so masters that share one exact code/memory source
+pair never share this state and one master's selection never pauses or excludes another.
+Atomic `worktree_start` and `worktree_attach` are selecting operations;
+reviewer and curator inspection is not. Once the requested canonical contract exists, selection
+first publishes `reconciling` for that contract, which suspends nothing — not its chat, process,
+worktree, contract, or already-claimed lifecycle journal. The selected contract is source-synced
+and becomes `active` only when both protected source tips are current. A completed sync pass whose
+source moved again remains reconciling. Explicit sync cancellation publishes durable `vacant`;
+terminal cleanup releases an exact selected contract before its authority can disappear. Contract
+presence never elects an owner, and multiple nonterminal contracts remain valid.
+
+Task authoring never reads this activation authority and is never blocked by it. A task mutation
+publishes first and invalidates/rebuilds affected queue projections. The closeout queue merely
+projects active, reconciling, or vacant waiting candidates; it owns none of those lifecycle
+facts. A malformed selection makes only the affected projection invalid-empty. An exact selecting
+operation archives the malformed bytes with evidence and replaces them; there is no tolerant reader
+or contract-presence fallback.
+
+## Mid-Task Sync
+
+A live worktree's base pair decays while parallel cycles land (a sibling leaf may advance the
+integration/source branch; carryover may advance official memory). `worktree_sync` (GitHub #54)
+reconciles the exact moved code/memory source pair as one resumable transaction. It fetches source
+upstreams, proves the actual source code/memory objects and ancestry, pins the
+recorded base, pre-sync branch head, and source tip for each participating side, and writes its
+journal below the stable worktree-enclosure root before merge mutation. An unreconcilable source
+pair returns its concrete recovery guidance. Missing cache mappings do not block sync. Preview
+with `dry_run=true` before admission.
+
+Automatic sync is only the first phase. A code or memory merge conflict is retained in its exact
+sync worktree and published as `code-resolution-required` or `memory-resolution-required`; it is not
+aborted or reduced to a generic refusal. Resolve mechanically derivable conflicts, stage the result,
+validate it, then call the advertised `resolution_action=continue` on the same contract. The journal
+and pinned refs make that continuation resumable across calls and process restarts. Escalate only
+when competing changes encode a semantic truth the agent cannot derive from current requirements,
+code, tests, and durable decisions. A routine textual, import, fixture, or memory-content conflict
+is not by itself a developer decision.
+
+Converted memory merges structurally in every sync: knowledge records field by field, a card's
+JSON sidecar entry by entry, and a card's Markdown by a three-way text merge. Mechanical anchor
+fields (the blob, the content hash, line numbers) never conflict; the incoming side's are taken.
+An item both lines authored differently is retained: the JSON item holds a `crossing-conflict`
+value with the base, own and incoming values, a card holds Git's conflict markers, and
+`resolution.crossing` names the report that lists each item. Resolve a card and its sidecar
+together in the files. Resolve a knowledge record through the knowledge writer: its `revision`
+becomes one more than the higher side's, and its history row goes to the leaf's history file or,
+on a master line, to the `<task-id>-crossing-<n>` file the sync opened. Stage the result and
+continue; the file validator runs before the merge is committed and refuses an unresolved value.
+
+Unconverted memory is refused before anything moves (MIK-R46 rules 1–3): a sync whose memory
+sides are unconverted refuses with the code `legacy-format`, except a fast-forward that takes
+a converted source (the line converts by taking it) and a crossing merge with a converted
+side. The plain Git merge of three unconverted trees is gone, and a fast-forward from an
+unconverted source onto a converted target refuses rather than taking the line out of the
+text format. A refused line converts first — one new leaf converts inside its memory
+worktree, every other open line crosses at its next `worktree_sync` with `merge-memory` —
+as the `c-13-install-and-onboard` skill's first-conversion procedure
+(`docs/guides/first-conversion.md`) describes.
+
+Closeout invokes this sync automatically when its ancestor check finds a carry it can settle — a
+fast-forward, or a merge where the leaf owns its own commit — so a moved line is not an operator
+step: the sync parks any pending uncommitted candidate, carries the moved source into the leaf's code
+and memory worktrees, reapplies the candidate, and closeout continues in the same call. The parked
+work is part of the sync journal, so `cancel` and resume give it back rather than absorbing it; never
+hand-stash around this. Only a retained merge conflict, or a break no carry can settle, reaches an
+agent or the developer.
+
+`resolution_action=cancel` is the explicit escape hatch when the operation should be abandoned. It
+restores each participating branch to its pinned pre-sync head, removes retained temporary sync
+worktrees, terminalizes the journal, and releases an exact reconciling atomic-series selection to
+vacant. Never imitate continuation or cancellation with direct Git. A selected atomic master remains
+reconciling while a conflict is retained; its worktree and journal stay intact.
+
+**Sync early — before memories are written.** With parked memory the sync is a pure fast-forward:
+the other cycle's sidecars and attributed memory commits end up beneath this task's future memory
+work, closeout appends on top, and end-of-series integration stays `ff-only` with no carryover reconciliation. If
+the memory work branch already has local commits and official memory moved, sync requires a
+`memory_sync_choice`: `merge-memory` retains real memory-content conflicts for explicit resolution,
+and the retained resolution is committed as the exact pinned merge. The owner excludes `memory.md`
+from the merge output and refreshes its cache from Git history; cache-row conflicts never require
+manual reconciliation. Repeated code attributions remain valid newest-first memory history and are
+never collapsed; `skip-memory`
+defers memory to end-of-task carryover and
+advances only the code base. An atomic-series selection cannot become active after `skip-memory`; it
+remains reconciling until the exact current memory source is merged and validated.
+
+## Worktree Closeout
+
+Use the sibling [closeout procedure](closeout.md) for worktree closeout. That procedure owns
+the explicit approval/series authority, code commit, and prepared memory-content
+commit. The consumer ledger cache is refreshed separately from those outputs. Closeout is a Git
+transaction that runs no code-quality checks, test suites, or independent review itself: it consumes
+the worker's targeted checks and the curator's complete memory-quality result, which travel with the
+handoff as prerequisites.
+
+Closeout has one execution owner and no publication step in front of it. No advertised
+tool declares, publishes, defers, withdraws or claims a waiting closeout generation: the
+retired door tool is not on the roster, and nothing replaced it. The callable sequence is:
+
+1. `worktree_closeout_preview` reads the contract and answers `would-closeout`, `blocked`, or
+   `closeout-gate-blocked` with the concrete Git transaction, the proposed commits and the
+   input conflicts. It is a read: it runs no quality, test, memory, certification, or review
+   tool.
+2. The approval stop. Every enabled commit leg needs its own explicit nonblank message, and
+   `worktree_closeout_apply` needs the applicable authority recorded as its intent note:
+   explicit developer commit approval for standalone/final work, or the recorded delegated
+   series authority for a subordinate accepted-series leaf. Without both the transaction
+   owner refuses before it commits anything.
+3. `worktree_closeout_apply` then runs that transaction for real: it proves the
+   actual recorded source lineage (settling a plain fast-forward through `worktree_sync`
+   rather than refusing), re-proves the accepted candidate, refuses an open worklist item, an
+   un-gated candidate or a missing knowledge gate before either leg is committed, and
+   publishes recoverable per-leg journal evidence. The curator's complete memory-quality
+   result is input evidence; an optional review record may be attached when requested.
+4. Recovery is the advertised task-addressed action for the accepted generation through
+   `worktree_operation_control` — `retry`, `recover`, `resume`, `cancel`, `retire` or
+   `supersede`, addressed by `contract_path`, `operation_kind` and `expected_generation`.
+
+`closeout_queue` is not a publication or scheduling authority and cannot stand in for the
+missing tool. It is only the sprint's source-fingerprinted ordering projection of the waiting
+generations that already exist, with `status` and `rebuild`; it has no declare, select, claim,
+defer, withdraw, retry, recover, certify, integrate, replan, or drain action, it holds no
+lifecycle or commit evidence, and no recovery path may use an old queue row. A refusal that
+names a missing generation (`closeout-door-missing`, or `closeout-resume-door-missing` on a
+resume) is a developer decision reported with that exact code — never worked around with raw
+Git, a task or worktree scan, a reports file, or naming inference.
+
+Task documents remain authoritative during every closeout phase. An intrinsically valid task
+mutation applies first, then every scope in its before/after governing-sprint union becomes
+non-admitting `invalid-empty` and rebuilds from current task plus current waiting-door facts (a
+leaf with no waiting generation contributes none).
+`task_doc` returns a machine-readable `projectionEffects` entry for each affected scope and an exact
+`nextAction` whenever a rebuild did not finish. Agents execute that rebuild hint; they never roll
+back or postpone the accepted task write, patch an old candidate row, or wait for operation
+completion. Unrelated sprints and repositories retain their projection revisions.
+
+For worktree-backed tasks, pass the configured leaf `series-contract.md` to
+`worktree_closeout_preview` / `worktree_closeout_apply`. Every enabled commit leg requires its own
+explicit nonblank message before authority is acquired. The accepted code/memory input is
+immutable per generation. On converted memory the apply runs the mandatory invariant gate
+(see the [closeout preconditions](closeout.md#preconditions)), and a leaf it would refuse is answered `knowledge-gate-refused`
+with the open findings. `cancel` preserves source changes and historical evidence; `resume`
+continues an unfinished commit leg without reconstructing certification history. Execute only the
+advertised task-addressed closeout action through `worktree_operation_control`; never repeat Git
+directly or use queue state as recovery evidence.
+
+Integration and direct-landing keep their own advertised retry/recover actions: a pre-output failure
+may retry the same input, while ambiguous or proven output must reconcile/recover the same generation.
+
+Admission proves the whole recorded ancestor chain, not just the immediate parent: organizational
+masters add no branch, while atomic masters contribute their actual integration edge. If
+a recorded code or external-memory source branch has moved, closeout **does not simply refuse**: it
+runs the upstream check and, when every stale edge is a carry it can settle — a fast-forward where
+the descendant owns no commits, a merge where it does, which is the normal shape for a closed-out
+leaf — performs the `worktree_sync` itself and continues. No operator turn is spent on the happy path. A break higher in
+the chain (a sibling or a parent sprint advancing the line above this leaf's master) is satisfied the
+same way, because the sync walks the recorded edges down to this leaf and the sibling leaves pick up
+the propagated changes when their own turn comes.
+
+A `worktree_sync` that retains merge conflicts ends the automatic phase: closeout completes for
+neither code nor memory. The response directs the agent to check **both** worktrees, re-run the
+targeted test utility after code fixes, and for memory to run the memory tooling first and then make
+the memory adjustments. Small conflicts may be handled ad hoc by the orchestrating/managing agent;
+larger ones return to the responsible worker and/or curator agent. A break no downstream carry can
+settle — an unprovable edge, or a sync that reports it cannot settle the delta — is escalated to the
+human developer rather than auto-resolved.
+The moved source does not veto task authoring and does not erase the journal or door generation.
+
+## Integration
+
+Integration runs only after closeout completed and is authority-gated by context. It performs the
+declared merge/fast-forward/replay strategy, moves the recorded code and memory refs together, and
+records the actual resulting code/memory pair in the operation journal. It does not run or require
+acceptance, code quality, test suites, or independent review; the curator's complete memory-quality
+result already traveled with the closeout handoff as a prerequisite.
+
+Every landing judges what it lands (MIK-R52). `worktree_integrate` on a leaf contract judges
+the closeout cell's pair once more before any ref moves, in preview and apply; on a series
+contract it runs the validator, the net staleness check, the landing chain proof, and the
+history-file check. `worktree_checkpoint_landing` runs those master-level judgments over the
+leaves that have landed. `worktree_record_landing` judges the landed pair on a leaf contract,
+in the dry run too, and runs the master-level judgments up to the landed commits on a master
+contract.
+A queue projection may be absent or invalid-empty throughout integration; `worktree_status` and
+`worktree_operation_control` remain task-addressed through the locator/manifest/journal chain. If a
+crash occurs before or after protected ref moves, recovery reconciles the live ref and recorded
+accepted base pair before advertising a next action. A later landing may not pass the same target
+until that exact owner is reconciled, but the landing exclusion never blocks task-document mutation.
+In an accepted orchestrated run, dependency-ordered leaf→master and master→super integrations ride
+the series' standing approval (the developer's portfolio-gate approval recorded in the planner
+master). A raised durable `integration-approval` gate still awaits the developer.
+
+An ordinary master/series integration has no leaf closeout door of its own: its integration journal
+records source-door authority as `not-applicable`. That is an explicit series lifecycle state, not
+the grant-gated branch-direct leaf route. It therefore needs no direct-execution grant and no
+harness setting. If a series contract does carry a direct-landing door, integration must
+still prove that exact claimed door and its source journal; absence is never inferred by ignoring a
+present or stale door. Leaf integration continues to require its exact claimed closeout source.
+That last rule governs admission of a new leaf integration; an already-journaled no-door operation
+remains recoverable under its retained journal identity and is not reclassified as direct execution.
+
+On an orchestrated master's exit (master → super integration), an explicitly
+raised `master-handover-approval` remains an authority check: an undecided or
+policy-invalid gate addressed to the master returns `handover-gate-blocked`
+instead of landing. This is a human/series authority control, not a review or
+quality certificate. When no gate addresses the integrating master but open
+handover gates exist elsewhere, integration proceeds and reports the spelling
+warning.
+
+Run `worktree_integrate(..., dry_run=true)` first. For subordinate accepted-series integrations,
+record the standing series authority and then run the real integration without a developer stop.
+For developer-gated integrations, send the integration preview to your parent with
+`role_message`; without a parent, deliver
+the integration preview as your final prose and **hold the action**; the turn follows
+`../../l-01-agent-lifecycles/operations/orientation.md`.
+Run `worktree_integrate` when the approval has arrived; the agent never self-approves a human-pinned durable gate.
+
+Before previewing integration, check out the recorded code and memory `source_branch` in their source repositories; `worktree_integrate` requires those active checkouts even for `dry_run=true`.
+
+Integration always lands into the recorded `source_branch`. It does not open a
+PR and it does not discover protected-branch policy on its own; that policy must
+be reflected in the branch choice made before `worktree_start`.
+
+Strategies:
+
+1. `ff-only`: require current code and memory source branches to be ancestors of the closeout commits, then fast-forward both source branches.
+2. `replay`: replay the code task commit onto current code source and the memory-content commit onto current memory source with its landed-code attribution, then fast-forward both source branches and refresh the ignored ledger cache from history. Use this where carryover is genuinely the only choice. It is not the recovery for a leaf whose source merely advanced while its own candidate sat unlanded: that leaf refreshes downstream with `worktree_sync` and produces a new targeted closeout.
+
+Conflict rule: a retained code or memory conflict stops the operation before any source branch
+moves; resolve it through the advertised continuation path. The agent owns technically derivable
+merge resolution and its validation. After code conflicts are resolved, re-run the targeted test
+utility before retrying. For memory, run the memory tooling first and then make the memory
+adjustments. Small conflicts may be resolved ad hoc by the orchestrating/managing agent; larger ones
+go back to the responsible worker and/or curator agent. Escalate through the architect only when
+current requirements and evidence leave a genuine semantic ambiguity; do not label ordinary
+technical reconciliation `developerDecisionRequired`. A stale edge is carried downstream — a
+fast-forward where the descendant owns no commits, a merge where it does, which is the normal shape
+because a closed-out leaf always owns its own commit. Only a break no carry can settle — an
+unprovable edge (missing contract, branch, or comparable history), or a sync that reports it cannot
+settle the delta — escalates to the human developer, never an automatic resolution. Keep the
+computed ledger cache outside replay and refresh it from the resulting memory history.
+
+After successful integration, complete any repo-specific landing tail first: push/PR/merge for PR-gated code, pull the protected target back locally, and carry any applicable richer onboarding through its recovery leaf. An unchanged memory commit does not need a new mapping-only commit for the merged code SHA. Then use `lifecycle_finalize_task` for the terminal edge.
+
+## Lifecycle Finalization And Cleanup
+
+Lifecycle finalization runs only after closeout, integration, and any PR/carryover tail are
+complete, and its approval authority follows the same series boundary. For subordinate
+accepted-series leaf/master edges, the owning manager/orchestrator may finalize and clean up after
+the dry-run proves the landed edge. For final super→main cleanup, standalone work, or a deliberately
+raised `cleanup-approval` gate, stop for developer approval.
+
+Terminal cleanup has an additional evidence boundary because the enclosure root contains the live
+manifest and journal. Before deleting any part of that root, the terminal operation:
+
+1. proves the exact operation generation is terminal and no active or ambiguous worker/Git evidence
+   remains;
+2. archives the canonical manifest, journal, and history outside the deletion target;
+3. reads the archive back and verifies its exact bytes;
+4. publishes a compact external terminal receipt and advances the address-only locator to
+   `terminal-archived`;
+5. only then removes worktrees, merged branches, disposable reports, and the enclosure root.
+
+Until the locator advances to `terminal-archived`, the live route remains authoritative even when
+the exact external archive/receipt bytes were already published and read back. A crash before that
+locator advance retries the exact accepted `worktree_cleanup` or `worktree_abandon` call, reuses
+those bytes, and finishes terminal-locator publication. A crash after the locator advance but
+before deletion or contract publication leaves archive-ready, not cleanup-completed, truth; the
+same accepted disposition and exact archived `cleanupArguments` must finish the destructive tail.
+Use `worktree_status` to observe which state survives and execute its exact `nextArgs`. A changed
+`teardown_providers` or `force` value is a request conflict, not a revised cleanup generation.
+Missing, unreadable, or mismatched archive/receipt proof refuses deletion.
+`reports/` files are not canonical lifecycle evidence and are not copied as a substitute. Active
+or ambiguous journals are never collectable. After deletion, deliberate root absence is accepted
+only through the exact external receipt plus the surviving contract state; accidental absence
+remains a typed failure.
+
+Bounded no-remains exception (MIK-R82 rule 5): when no locator was ever published for the
+enclosure and its worktree folder and work branches do not exist, there is nothing to adopt
+and nothing to delete. `worktree_cleanup` (integration completed) or `worktree_abandon`
+(never integrated) then finishes directly: the surviving contract records its terminal state
+(`cleanup=completed` / `cleanup=abandoned`) together with the durable why, and the result
+reports `nothingToArchive` / `nothingToDelete` with that reason. A dry run changes no
+contract bytes; repeating the exact accepted call is idempotent. Any remaining folder, work
+branch (code or external-memory), or wrong integration state stays outside this exception
+and keeps the adoption-first refusal above, and no adoption or archive evidence is invented
+for the empty case. `worktree_status` observes the surviving contract truth afterwards; if
+the finish did not complete, retry the exact accepted call with its original arguments
+(`teardown_providers` for cleanup, `force` for abandon) -- the `nextArgs` the conflict
+payload returns.
+
+Finalization separately proves the current parent-child branch edge and updates task documents.
+Task completion is not the evidence that authorizes enclosure deletion, and deletion is not allowed
+to erase the evidence that proves task completion.
+
+Run `lifecycle_finalize_task(..., dry_run=true)` first. For subordinate accepted-series cleanup,
+record the standing authority and run the real finalizer. For developer-gated cleanup, send the
+landed-commit proof, cleanup plan, and task-document updates to your parent with `role_message`;
+without a parent, deliver them as your final prose and **hold the action**
+(`../../l-01-agent-lifecycles/operations/orientation.md` governs the turn). Run
+`lifecycle_finalize_task` when the approval has arrived; a model-attributed decision is never developer approval for a
+human-pinned durable gate.
+
+`lifecycle_finalize_task` proves one immediate edge: the contract's landed code
+commit (`integrated_code_commit` when present, otherwise `code_commit`) must be an
+ancestor of the recorded local `code_source_branch`, and external-memory carryover
+must already be done. This handles leaf-to-parent and parent-to-parent chains the
+same way; for a PR-gated edge, the model first finishes the PR workflow and pulls
+the target branch locally, then the finalizer sees the same local branch
+relationship as a direct edge. The tool does not infer squash equivalence by
+default; squash merges are emergency/manual recovery because they erase commit
+lineage and can invalidate memory lookup history.
+
+The finalizer resolves the leaf from the contract's task root and leaf id. An omitted
+`task_doc_path` adopts that exact document; a supplied path is an assertion and must
+match it. Before any cleanup (including a dry-run cleanup preview), every declared
+top-level step and nested substep must be `done`. Use `task_doc.skip_step` with an
+exact id and nonblank reason for an intentional skip; cleanup/finalization never
+auto-checks work. When the bound leaf declares an existing immediate parent, or names
+none and its folder's `task.json` master lists it, the finalizer always derives that
+parent and reconciles its exact row to `Completed`, even when both optional parent
+assertions are omitted. A sub-task naming none whose folder `task.json` is not a
+master is refused. `master_doc_path` and `subtask_number` are independent identity
+assertions; when supplied, each must match that derived edge.
+The finalizer does not mark the parent task itself complete
+or recursively complete ancestors; each parent-child edge is finalized separately.
+
+Standalone `worktree_cleanup` is deliberately non-terminal for task documents. If a
+declared final step includes cleanup, run standalone cleanup first, then mark that
+exact step `done`, and finally run `lifecycle_finalize_task` against the already-clean
+contract. Do not mark a self-referential "make this task Completed" step prematurely;
+split or reword it as the concrete cleanup/preparation work.
+
+Cleanup is idempotent only against the same proven terminal generation. If the worktrees,
+merged branches, or enclosure root are already gone, the external terminal receipt must prove that
+their absence was deliberate before the tool reports the already-clean state. If Git refuses to
+delete an unmerged branch, cleanup leaves that branch and the exact terminal archive/receipt
+evidence in place and reports it for developer review.
+
+## Reopening A Completed Leaf
+
+Reopening reuses the EXACT same leaf id — never mint a suffixed leaf (`…-r1`).
+`task_reopen(contract_path=…)` is a state reset, not a worktree creator: it refuses
+anything but a fully landed leaf (closeout, integration, and cleanup completed, worktrees
+gone), then resets the contract's review/closeout/integration state, clears the stale
+lifecycle binding, marks `cleanup: reopened`, and puts the leaf's task document back to
+`planning` (master index entry flipped, audit decision appended). Preview with
+`dry_run=true` first. Afterwards: edit the doc's steps via `task_doc` (add, change, or
+untick work), then run a normal `worktree_start` with the same leaf id. Start may reserve a new
+generation at the same stable locator address only after the prior terminal archive and exact
+restartable predecessor contract are proven under one short CAS. The successor manifest carries
+the typed immediate-predecessor archive link; exact retries converge, conflicting successors
+refuse, and the prior archive remains independently readable. After successor reservation, the
+stable contract address may contain only the exact accepted predecessor tombstone bytes or the
+already accepted successor bytes. The reservation atomically replaces only those exact predecessor
+bytes with the accepted successor contract; an identical observation converges and every other
+byte state refuses. This is neither a generic contract overwrite nor a compatibility reader. Start
+then recreates the worktrees off current source tips, promotes/mints a fresh lifecycle, and
+restamps the document's `lifecycleId`. The same rule applies to a sanctioned successor after
+abandonment. A live, ambiguous, or merely cleaned-without-receipt locator can never be overwritten.
+
+## Boundaries
+
+1. This worktree procedure may create or reuse worktrees, root series contracts, and leaf enclosure contracts.
+2. It does not initialize memory roots; use the `c-00-initialize-memory-repo` skill before starting external-memory worktrees. Nothing here narrows that skill's own powers.
+3. Closeout belongs to the sibling closeout procedure of this skill (`workflows/closeout.md`); this procedure supplies its worktree contract context and grants itself no commit or closeout authority.
+4. This procedure must not use divergent memory as semi-trusted reference context.
+5. It must not bypass the closeout procedure's applicable authority gate (`workflows/closeout.md`).
+6. It must not create closeout commits outside the closeout procedure's code-then-memory sequence.
+7. The `w-02-light-task-workflow` skill must not call `worktree_start` until
+   the applicable authority has been recorded: developer-approved Worktree Intent Gate for a new
+   master/leaf plan, or accepted-series authority for subordinate orchestrated work.
+8. The `w-02-light-task-workflow` skill must not move source branches during integration until
+   replay/preflight has produced fast-forwardable code and memory commits and applicable
+   integration authority exists.
+9. The `w-02-light-task-workflow` skill must not finalize or clean up without applicable
+   cleanup/finalization authority and proven external terminal archive/readback/receipt.
+10. The `w-02-light-task-workflow` skill must not treat squash-merged content as a normal landed edge.
+11. The `c-08-ar-coordination-context-resolver` skill remains the facts-only resolver; the `w-02-light-task-workflow` skill owns worktree and lifecycle mutation.
+12. No queue, lane, operation, locator, or blocker state may refuse an intrinsically valid
+    `task_doc` mutation; the mutation's projection effects own invalid-empty rebuild guidance.
+13. The closeout queue owns no lifecycle or commit evidence, and no recovery path may use an old
+    queue row, raw Git, a task/worktree scan, naming inference, or a reports-path journal.
+14. The address-only locator must not duplicate task, door, operation, worker, commit,
+    certification, or Git truth.
+15. A terminal archive must bind the exact accepted `teardown_providers` or `force` argument and
+    return that value in every retry action; changed terminal arguments never fall back or replay.
+16. A successor reservation may replace only the exact accepted predecessor tombstone at the
+    stable contract address; no mismatch is overwritten or interpreted through compatibility code.

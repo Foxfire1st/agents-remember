@@ -117,12 +117,11 @@ def _declare_test_process() -> None:
     declare_test_process()
 
 
-def _settings_document(coord: Path, root: Path, skills: Path) -> dict:
+def _settings_document(coord: Path, root: Path) -> dict:
     return {
         "version": 1,
         "coordinationRoot": coord.as_posix(),
         "workspaceRoot": root.as_posix(),
-        "harnessSkillRoot": skills.as_posix(),
         "repositories": {
             REPO: {
                 "path": (coord / "repo").as_posix(),
@@ -158,12 +157,11 @@ def _build_world(root: Path):
     coord = root / "coord"
     code = coord / "repo"
     memory = coord / "memory"
-    skills = root / "skills"
-    for directory in (code, memory, skills):
+    for directory in (code, memory):
         directory.mkdir(parents=True, exist_ok=True)
     settings = root / "mcp" / "settings.json"
     settings.parent.mkdir(parents=True, exist_ok=True)
-    settings.write_text(json.dumps(_settings_document(coord, root, skills)), encoding="utf-8")
+    settings.write_text(json.dumps(_settings_document(coord, root)), encoding="utf-8")
     system = coord / "system"
     system.mkdir(parents=True, exist_ok=True)
     (system / "settings.json").write_text(
@@ -183,7 +181,6 @@ def _build_world(root: Path):
         coordination_root=coord,
         workspace_root=root,
         transcript_root=coord / "logs" / "mcp",
-        harness_skill_root=skills,
         benchmarks_enabled=True,
         repositories={
             REPO: RepositoryScope(repo_id=REPO, path=code, memory_root=memory),

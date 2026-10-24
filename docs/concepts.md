@@ -79,7 +79,7 @@ promotion remain the truth controls.
 
 ## Drift Detection
 
-Each file-level sidecar onboarding unit records verification metadata, including the source commit it was checked against. Before planning against onboarding, `c-02-memory-quality-control` compares the source file with that verification point.
+Each file-level sidecar onboarding unit records verification metadata, including the source commit it was checked against. Before planning against onboarding, `c-05-create-or-update-onboarding-files` compares the source file with that verification point.
 
 Common outcomes:
 

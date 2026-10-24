@@ -420,8 +420,6 @@ class EntryPointWorld:
         (self.adopt / "onboarding" / ".gitkeep").write_text("", encoding="utf-8")
         _git(self.adopt, "add", "-A")
         _git(self.adopt, "commit", "-m", "adopt base")
-        self.skills = self.root / "skills"
-        self.skills.mkdir()
         self.settings = self.root / "mcp" / "settings.json"
         self.settings.parent.mkdir(parents=True)
         self.settings.write_text(
@@ -430,7 +428,6 @@ class EntryPointWorld:
                     "version": 1,
                     "coordinationRoot": self.coord.as_posix(),
                     "workspaceRoot": self.coord.as_posix(),
-                    "harnessSkillRoot": self.skills.as_posix(),
                     "repositories": {
                         REPO: {
                             "path": self.code.as_posix(),
@@ -465,7 +462,6 @@ class EntryPointWorld:
                 coordination_root=self.coord,
                 workspace_root=self.coord,
                 transcript_root=self.coord / "logs" / "mcp",
-                harness_skill_root=self.skills,
                 benchmarks_enabled=True,
                 repositories={
                     REPO: RepositoryScope(repo_id=REPO, path=self.code, memory_root=self.memory),
@@ -684,6 +680,7 @@ class EntryPointWorld:
             "read_ar_files": {"repo_id": REPO, "files": [{"path": "not-covered.md"}]},
             "runtime_install": {"dry_run": True, "install_provider_deps": False},
             "retire_child": {"task_document_ref": self.task_ref, "role": "worker"},
+            "user_settings_init": {"target": "host-authority", "dry_run": True},
             "memory_quality_check": {
                 "request": {"mode": "sync", "repo_id": REPO, "contract_path": contract}
             },

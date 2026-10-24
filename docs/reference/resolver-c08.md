@@ -50,4 +50,4 @@ For worktree-backed tasks, the `c-08-ar-coordination-context-resolver` skill can
 
 ## Boundary
 
-The `c-08-ar-coordination-context-resolver` skill does not mutate Git, create memory roots, update onboarding, or start worktrees. Use the `c-00-initialize-memory-repo`, `c-03-repo-bootstrap`, `c-05-create-or-update-onboarding-files`, and `c-09-git-worktree-manager` skills for those actions.
+The `c-08-ar-coordination-context-resolver` skill does not mutate Git, create memory roots, update onboarding, or start worktrees. Use the `c-00-initialize-memory-repo`, `c-03-repo-bootstrap`, `c-05-create-or-update-onboarding-files`, and `w-02-light-task-workflow` skills for those actions.

@@ -30,7 +30,7 @@ from agents_remember.models.role_launcher import RoleDispatchRequest
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
-from paseo_runtime_test_support import write_shared_runtime
+from paseo_runtime_test_support import write_runtime_block
 
 
 def _runtime_config(root: Path) -> McpRuntimeConfig:
@@ -44,9 +44,10 @@ def _runtime_config(root: Path) -> McpRuntimeConfig:
             "embed": [],
         }
     )
-    write_shared_runtime(root, settings)
+    config_path = root / "settings" / "ar.json"
+    write_runtime_block(config_path, settings)
     return McpRuntimeConfig(
-        config_path=root / "settings" / "ar.json",
+        config_path=config_path,
         coordination_root=root / "coordination",
         workspace_root=root / "projects",
         transcript_root=root / "coordination" / "logs" / "mcp",
@@ -273,6 +274,8 @@ class RoleExecutionResultTests(unittest.TestCase):
                 "worker",
                 "reviewer",
                 "curator",
+                # The free agent this leaf admits to native launch (MIK-R196 rule 1).
+                "bootstrap",
             },
         )
         expected_altitudes = {
@@ -283,6 +286,7 @@ class RoleExecutionResultTests(unittest.TestCase):
             "worker": "leaf",
             "reviewer": "leaf | master | sprint, by seam",
             "curator": "leaf",
+            "bootstrap": "free-agent",
         }
         self.assertEqual(
             {role: parsed.roles[role].altitude for role in ROLE_START_OPERATIONS},

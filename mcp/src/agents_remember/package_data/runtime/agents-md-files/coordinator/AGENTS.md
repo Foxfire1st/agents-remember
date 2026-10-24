@@ -30,7 +30,7 @@ scope into a managed repository, enter the architect lifecycle first.
 **IMPORTANT:**
 Do not change code without entering the architect lifecycle and clearing its plan gate.
 Do not change task plan items without approval.
-Do not randomly commit. Use the `c-12-closeout` skill instead!
+Do not randomly commit. Use the `w-02-light-task-workflow` skill instead!
 
 ---
 
@@ -63,7 +63,7 @@ Count your `read_ar_files` calls as retrieval evidence alongside CGC and GrepAI.
 ### Developer Clarifications
 
 When a developer clarifies an important concept, invariant, boundary, or
-current-state behavior, use `c-01-findings-capture`. Ask whether the verified
+current-state behavior, use `c-05-create-or-update-onboarding-files`. Ask whether the verified
 clarification should be documented in onboarding.
 
 Do not copy the clarification into onboarding verbatim. Verify it against the
@@ -116,7 +116,7 @@ report no providers.
   `system/coding-guidelines.md`, and `system/git-workflow.md` when present.
 - Read `system/git-workflow.md` (when present) **before any commit, push, PR, or
   release** — it owns the repo's gated-branch landing flow.
-- Before committing read the `c-12-closeout` skill!
+- Before committing read the `w-02-light-task-workflow` skill!
 
 ### Memory Repo User Settings, Instructions, and Guidelines
 

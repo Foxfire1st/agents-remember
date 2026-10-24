@@ -25,7 +25,7 @@ JSON-primary master through `task_doc` and intentionally migrate the existing pl
   sub-task slice gets `enclosures/<leaf-id>/series-contract.md`, its own worktree branch, and its own
   worktree.
 - **Each leaf lands into the master branch.** Each sub-task slice is committed via its own
-  `c-09-git-worktree-manager` closeout behind an explicit commit gate, integrated into the master
+  `w-02-light-task-workflow` closeout behind an explicit commit gate, integrated into the master
   integration branch, and finalized for that parent-child edge.
 - **The master owns the single release:** the version bump and any tag/release packaging happen once,
   at series end, after all sub-task commits exist. Sub-tasks never bump the version.
@@ -101,7 +101,7 @@ Use `append_decision` and `set_subtask` for decisions and the index, not duplica
 
 ## Single Release (the master owns the final bump + tags)
 
-- Sub-tasks commit **incrementally** (one `c-09-git-worktree-manager` closeout per slice, behind a commit gate);
+- Sub-tasks commit **incrementally** (one `w-02-light-task-workflow` closeout per slice, behind a commit gate);
   each leaf integrates into the master integration branch and finalizes its own edge.
 - The master owns the **final release step only**: the version bump and any tag/release packaging,
   once every sub-task commit exists.

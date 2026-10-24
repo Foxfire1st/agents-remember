@@ -59,6 +59,8 @@ PUBLIC_TOOLS = (
     # Role start and role messaging by role agents.
     "role_start",
     "role_start_set",
+    # MIK-R196 rule 11: the one user settings file, previewed and written once.
+    "user_settings_init",
     "role_message",
     # Knowledge operations over a memory tree: read, diff and integrity.
     "knowledge_read",

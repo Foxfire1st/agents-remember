@@ -5,7 +5,7 @@ Agents Remember has five settings families with stated authorities:
 | Family | Home | Read cadence |
 | --- | --- | --- |
 | Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard) | MCP authority settings file (outside the coordinator root) | boot |
-| Host runtime (`paseoRuntime`) | user configuration `agents-remember/settings.json`, shared by every harness | per use; install reads at each call |
+| Host runtime (`paseoRuntime`) | active MCP authority settings file selected by `--config` | per use; install reads at each call |
 | Memory topology (`onboarding.storage`, `pathRules`, `crossRepo`) | memory-root `system/settings.json` (beside `settings.md`) | per resolution |
 | **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness ids, qualityGate resource policy, roleMessageLimit) | **user configuration `agents-remember/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
 | Provider lifecycle settings | server-generated from the authority config (`--from-settings`) | per command |
@@ -150,17 +150,18 @@ Even when enabled, `codex_sandbox` defaults to Codex's own `default` sandbox; pa
 
 ### Paseo runtime
 
-`paseoRuntime` lives once in `~/.config/agents-remember/settings.json`
-(or `$XDG_CONFIG_HOME/agents-remember/settings.json`), linked
-by every harness using the same user configuration directory. It is optional and describes one
-build-pinned Paseo install, one daemon home and one listen address. The shared
-block is read per use; `runtime_install` reads it at each call and never writes
-it. Starter/setup creates it, preserving an existing file. Old per-harness
-blocks are ignored with a migration notice; there is no fallback to them. When the block is absent the settings are in the named state
-"no Paseo runtime configured" and each consumer refuses in its own words. When
-the block is present its five operational keys are required and an unknown key fails on the next host read.
-The dashboard's role launcher and the tools `role_start` and `role_message` use
-this block and no other to reach the host.
+`paseoRuntime` lives in the active MCP authority settings file selected by the
+server's absolute `--config` path, separately from the user's role-harness settings.
+The optional block describes one build-pinned Paseo install, one daemon home and
+one listen address. Consumers read that authority per use; `runtime_install` reads
+it at each call and never writes it. The one Bootstrap call creates an absent
+block once and preserves an existing block unchanged. An absent block means
+"no Paseo runtime configured": maintenance reports that state, while cold Bootstrap
+preparation establishes it. A present block requires its five operational keys;
+an unknown key fails on the next host read. The dashboard's role launcher and the
+tools `role_start` and `role_message` reach the host through this same authority.
+
+Setup assumes one Bootstrap at a time; concurrent writers of the host authority settings file are unsupported.
 
 ```json
 {
@@ -375,13 +376,9 @@ succeeds. When absent, 268435456 bytes (256 MiB) apply.
 enclosure in bytes (MIK-R108 rule 3, D1-D4), the only removal there before
 cleanup. When absent, 67108864 bytes (64 MiB) apply.
 
-`harnessSkillRoot` is optional. It was only needed for the removed `skills_install`
-tool and is retained for settings compatibility; nothing else reads it. By default, when the MCP settings file lives under
-`<registration-root>/mcp/`, skills come from
-`<registration-root>/skills/`. Set `harnessSkillRoot` only for non-standard
-harness layouts where the registration folder and skill folder are not siblings.
-The package-based first-run path gets skills from the copied
-harness starter package and does not need this field.
+Skills are served as MCP resources from the server's packaged canonical tree. There is
+no installed harness skill root to configure, and installation creates no harness,
+project or coordination-root skill copy. See [Skills](skills.md) for resource discovery.
 
 `repositories` is an allow-list keyed by repo id. The MCP server derives each
 code repository path from `workspaceRoot/<repo-id>` and each memory root from
@@ -472,10 +469,11 @@ The agentic settings family — everything under the top-level `orchestration`
 key — lives in TWO JSON files merged on every read (260703-L13):
 
 - **Global:** `~/.config/agents-remember/settings.json` (or
-  `$XDG_CONFIG_HOME/agents-remember/settings.json`). Starter/setup owns the
-  host block; the c-13 interview adds the developer's agentic preferences after
-  approval. Absent knobs retain built-in defaults without a seeded copy.
-  User-owned: runtime_install never writes this file.
+  `$XDG_CONFIG_HOME/agents-remember/settings.json`). The c-13 interview adds the
+  developer's agentic preferences after approval. Absent knobs retain built-in
+  defaults without a seeded copy. User-owned: runtime_install never writes this file.
+  Host provisioning uses `paseoRuntime` in the active MCP authority file selected
+  by `--config`.
 - **Repo-local override:** `<code-repo>/system/settings.json` (optional). The
   same `orchestration.*` shape; repo-local values supersede global ones.
 

@@ -12,7 +12,6 @@ from agents_remember.benchmarks.runner_modules.analysis import (
 from agents_remember.benchmarks.runner_modules.constants import (
     CODEX_BENCHMARK_SANDBOX,
     CODEX_BENCHMARK_SANDBOX_MODES,
-    SKILL_EXPOSURE_MODES,
 )
 from agents_remember.benchmarks.runner_modules.manifest import load_cases
 from agents_remember.benchmarks.runner_modules.models import (
@@ -48,7 +47,6 @@ def command_prepare(args: argparse.Namespace) -> int:
                 target=args.target,
                 case_id=args.case_id,
                 dry_run=args.dry_run,
-                skill_exposure_mode=args.skill_exposure_mode,
                 force_clone=args.force_clone,
                 provider_timeout=args.provider_timeout,
             )
@@ -71,7 +69,6 @@ def command_run(args: argparse.Namespace) -> int:
                 jobs=args.jobs,
                 dry_run=args.dry_run,
                 skip_prepare=args.skip_prepare,
-                skill_exposure_mode=args.skill_exposure_mode,
                 force_clone=args.force_clone,
                 provider_timeout=args.provider_timeout,
                 codex_sandbox=args.codex_sandbox,
@@ -115,9 +112,6 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("target", choices=("all", "case"))
     prepare_parser.add_argument("case_id", nargs="?")
     prepare_parser.add_argument(
-        "--skill-exposure-mode", choices=SKILL_EXPOSURE_MODES, default="copy"
-    )
-    prepare_parser.add_argument(
         "--force-clone",
         action="store_true",
         help="Discard existing benchmark repository checkouts before cloning.",
@@ -149,7 +143,6 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--skip-prepare", action="store_true", help="Use the existing workspace fixture state."
     )
-    run_parser.add_argument("--skill-exposure-mode", choices=SKILL_EXPOSURE_MODES, default="copy")
     run_parser.add_argument(
         "--force-clone",
         action="store_true",

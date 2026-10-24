@@ -64,55 +64,31 @@
       "generatedScopes": [
         ".agents/GEMINI.md",
         ".agents/mcp/agents-remember-settings.json",
-        ".agents/render-starter.ps1",
-        ".agents/render-starter.py",
-        ".agents/render-starter.sh",
         ".claude/hooks/agents-remember-session-start.md",
         ".claude/hooks/agents-remember-session-start.py",
         ".claude/mcp/agents-remember-settings.json",
-        ".claude/render-starter.ps1",
-        ".claude/render-starter.py",
-        ".claude/render-starter.sh",
         ".codex/hooks/agents-remember-session-start.md",
         ".codex/hooks/agents-remember-session-start.py",
         ".codex/mcp/agents-remember-settings.json",
-        ".codex/render-starter.ps1",
-        ".codex/render-starter.py",
-        ".codex/render-starter.sh",
         ".cursor/hooks/agents-remember-session-start.md",
         ".cursor/hooks/agents-remember-session-start.py",
         ".cursor/mcp/agents-remember-settings.json",
-        ".cursor/render-starter.ps1",
-        ".cursor/render-starter.py",
-        ".cursor/render-starter.sh",
         ".cursor/rules/agents-remember.mdc",
         ".github-vscode/copilot-instructions.md",
         ".github-vscode/hooks/agents-remember-session-start.md",
         ".github-vscode/hooks/agents-remember-session-start.py",
-        ".github-vscode/render-starter.ps1",
-        ".github-vscode/render-starter.py",
-        ".github-vscode/render-starter.sh",
         ".hermes/HERMES.md",
         ".hermes/mcp/agents-remember-settings.json",
-        ".hermes/render-starter.ps1",
-        ".hermes/render-starter.py",
-        ".hermes/render-starter.sh",
         ".openclaw/mcp/agents-remember-settings.json",
-        ".openclaw/render-starter.ps1",
-        ".openclaw/render-starter.py",
-        ".openclaw/render-starter.sh",
         ".openclaw/workspace/AGENTS.md",
         ".pi/mcp/agents-remember-settings.json",
-        ".pi/render-starter.ps1",
-        ".pi/render-starter.py",
-        ".pi/render-starter.sh",
         ".vscode/mcp/agents-remember-settings.json"
       ],
       "inputId": "generated-harness",
       "schemaVersion": "generated-candidate-input/v1",
       "sourceScopes": [
-        "scripts/harness",
-        "scripts/sync-harness.py"
+        "generated-copies.json",
+        "skills"
       ]
     },
     {
@@ -161,14 +137,6 @@
         "version": "1.0.0"
       },
       "generatedScopes": [
-        ".agents/skills",
-        ".claude/skills",
-        ".codex/skills",
-        ".cursor/skills",
-        ".github-vscode/skills",
-        ".hermes/skills",
-        ".openclaw/workspace/skills",
-        ".pi/skills",
         "mcp/src/agents_remember/package_data/runtime/skills"
       ],
       "inputId": "generated-skills",
@@ -180,7 +148,7 @@
       ]
     }
   ],
-  "profileDigest": "c314d420358949fef8078f10e217c968d2fd17267b5a544779707909ada718f7",
+  "profileDigest": "bad1bb1bad607d0575cac0f74b49e826ad7988836227fe1434ba67d58babc203",
   "profileId": "agents-remember-certification",
   "publishedArtifacts": [
     {
@@ -1550,7 +1518,7 @@
         "cleanRoom": false,
         "command": [
           "/opt/ar-venv/bin/python",
-          "scripts/sync-harness.py",
+          "scripts/sync-skills.py",
           "--check"
         ],
         "environmentContract": [

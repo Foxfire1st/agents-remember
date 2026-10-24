@@ -183,8 +183,9 @@ named record files with your own tools.
 `onboarding/`, records under `knowledge/`. The read goes through the tree's **derived index**, a
 cache the tools build from those files and rebuild when the tree changes; nothing writes it
 directly, and there is no knowledge database to publish to. The curator's writer
-(`agents-remember knowledge-ingest`, or `knowledge-bootstrap` for a taskless wave) writes the files,
-and a read of the tree sees them.
+(`agents-remember knowledge-ingest`, or the mounted `knowledge_write`) writes the files under
+the task's leaf contract, including repository foundation work the user-started Architect
+organises through `c-14-knowledge-bootstrap`. A read of the tree sees those files.
 
 Which memory root that is depends on scope, and there is no fallback between the two. With no
 enclosure in scope -- the taskless planner this route exists for -- it is the canonical external

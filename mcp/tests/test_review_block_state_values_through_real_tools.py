@@ -47,11 +47,9 @@ from test_review_result_blocks_through_real_tools import (
     _integrate_without_item_judgment,
     _record_review,
 )
-from test_transaction_only_worktree_delivery import (
-    _apply,
-    _closeout_fixture,
-)
+from test_transaction_only_worktree_delivery import _apply
 from test_worktree_sync_knowledge_merge import _commit, _converted_lines
+from transaction_only_worktree_delivery_test_support import _closeout_fixture
 
 pytestmark = pytest.mark.integration
 

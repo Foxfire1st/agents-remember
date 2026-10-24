@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.install.assets import long_path, packaged_source_root
+from agents_remember.install.effects import observe_install_effect
 from agents_remember.install.experiment import (
     WITHHELD_STARTUP_TARGETS,
     CapabilityReport,
@@ -55,7 +56,6 @@ from agents_remember.providers.settings import lifecycle_settings_from_config
 AGENTS_MD_TARGETS = {
     "agents-md-files/coordinator/AGENTS.md": "AGENTS.md",
     "agents-md-files/system/AGENTS.md": "system/AGENTS.md",
-    "agents-md-files/skills/AGENTS.md": "skills/AGENTS.md",
     "agents-md-files/tasks/AGENTS.md": "tasks/AGENTS.md",
 }
 
@@ -253,19 +253,20 @@ def leftover_provider_folders(coordination_root: Path) -> list[dict[str, Any]]:
 
 
 def ensure_dir(path: Path, summary: InstallSummary, dry_run: bool) -> None:
-    if path.is_symlink():
-        if not dry_run:
-            path.unlink()
-            path.mkdir(parents=True, exist_ok=True)
-        summary.replaced_links += 1
-        summary.created_dirs += 1
-        return
-    if path.exists() and not path.is_dir():
-        raise RuntimeError(f"cannot create directory because a file already exists: {path}")
-    if not path.exists():
-        if not dry_run:
-            path.mkdir(parents=True, exist_ok=True)
-        summary.created_dirs += 1
+    with observe_install_effect(path, "directory", dry_run):
+        if path.is_symlink():
+            if not dry_run:
+                path.unlink()
+                path.mkdir(parents=True, exist_ok=True)
+            summary.replaced_links += 1
+            summary.created_dirs += 1
+            return
+        if path.exists() and not path.is_dir():
+            raise RuntimeError(f"cannot create directory because a file already exists: {path}")
+        if not path.exists():
+            if not dry_run:
+                path.mkdir(parents=True, exist_ok=True)
+            summary.created_dirs += 1
 
 
 def _close_user_settings_permissions(path: Path) -> None:
@@ -392,26 +393,27 @@ def upgrade_user_settings(coordination_root: Path, *, dry_run: bool) -> dict[str
 
 
 def copy_file(source: Path, destination: Path, summary: InstallSummary, dry_run: bool) -> None:
-    if destination.is_symlink():
+    with observe_install_effect(destination, "copy", dry_run):
+        if destination.is_symlink():
+            if not dry_run:
+                destination.unlink()
+            summary.replaced_links += 1
+        elif destination.exists() and destination.is_dir():
+            raise RuntimeError(f"cannot replace directory with file: {destination}")
+
+        ensure_dir(destination.parent, summary, dry_run)
+        same_file = destination.exists() and filecmp.cmp(
+            long_path(source),
+            long_path(destination),
+            shallow=False,
+        )
+        if same_file:
+            summary.unchanged_files += 1
+            return
+
         if not dry_run:
-            destination.unlink()
-        summary.replaced_links += 1
-    elif destination.exists() and destination.is_dir():
-        raise RuntimeError(f"cannot replace directory with file: {destination}")
-
-    ensure_dir(destination.parent, summary, dry_run)
-    same_file = destination.exists() and filecmp.cmp(
-        long_path(source),
-        long_path(destination),
-        shallow=False,
-    )
-    if same_file:
-        summary.unchanged_files += 1
-        return
-
-    if not dry_run:
-        shutil.copy2(long_path(source), long_path(destination))
-    summary.copied_files += 1
+            shutil.copy2(long_path(source), long_path(destination))
+        summary.copied_files += 1
 
 
 def remove_readonly(function, path: str, exc_info) -> None:
@@ -449,11 +451,12 @@ def _remove_with_retry(path: Path, target: Path) -> None:
 
 
 def remove_path(path: Path, summary: InstallSummary, dry_run: bool) -> None:
-    if not path.exists() and not path.is_symlink():
-        return
-    if not dry_run:
-        _remove_with_retry(path, long_path(path))
-    summary.removed_paths += 1
+    with observe_install_effect(path, "remove", dry_run):
+        if not path.exists() and not path.is_symlink():
+            return
+        if not dry_run:
+            _remove_with_retry(path, long_path(path))
+        summary.removed_paths += 1
 
 
 def is_path_match(relative: Path, paths: set[Path]) -> bool:
@@ -509,20 +512,23 @@ def copy_tree(sync: RuntimeTreeSync, summary: InstallSummary, dry_run: bool) -> 
 
 
 def ensure_gitignore_entry(path: Path, entry: str, summary: InstallSummary, dry_run: bool) -> None:
-    if path.exists() and path.is_dir():
-        raise RuntimeError(f"cannot update .gitignore because a directory already exists: {path}")
+    with observe_install_effect(path, "gitignore", dry_run):
+        if path.exists() and path.is_dir():
+            raise RuntimeError(
+                f"cannot update .gitignore because a directory already exists: {path}"
+            )
 
-    existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    entries = {line.strip() for line in existing.splitlines()}
-    if entry in entries:
-        summary.unchanged_files += 1
-        return
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        entries = {line.strip() for line in existing.splitlines()}
+        if entry in entries:
+            summary.unchanged_files += 1
+            return
 
-    if not dry_run:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        separator = "" if not existing or existing.endswith(("\n", "\r\n")) else "\n"
-        path.write_text(f"{existing}{separator}{entry}\n", encoding="utf-8")
-    summary.copied_files += 1
+        if not dry_run:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            separator = "" if not existing or existing.endswith(("\n", "\r\n")) else "\n"
+            path.write_text(f"{existing}{separator}{entry}\n", encoding="utf-8")
+        summary.copied_files += 1
 
 
 def require_runtime_tree(runtime_root: Path) -> None:
@@ -818,13 +824,10 @@ def _install_runtime(scope: RuntimeInstallScope) -> InstallSummary:
         )
     ensure_dir(coordination_root, summary, dry_run)
 
-    skills_sync = RuntimeTreeSync(
-        source_root=runtime_root / "skills",
-        destination_root=coordination_root / "skills",
-        preserve=frozenset({Path("AGENTS.md")}),
-    )
-    prune_tree(skills_sync, summary, dry_run)
-    copy_tree(skills_sync, summary, dry_run)
+    # MIK-R196 rule 7: no skill tree is installed beside the runtime. The canonical skills live
+    # in the source tree and are served from the package copy by the tool server's own resource
+    # surface, so a second copy in the coordination root would be a distribution surface with no
+    # reader. The folder itself is not created either: nothing writes it any more.
     # The shipped tool-detail docs (MIK-R112 rule 7): the short tool
     # descriptions name docs/tool-details.md, and this copy is what an
     # installed runtime reads.

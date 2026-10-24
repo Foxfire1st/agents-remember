@@ -24,11 +24,10 @@ from agents_remember.models.role_agents import (
 from agents_remember.observer.host_activity import HOST_ACTIVITY_FILE
 from agents_remember.serving.projections.host_activity import activity_directory
 from agents_remember.worktrees import role_reports
+from paseo_role_tools_test_support import ARCHIVED_AT, TURN
 from test_paseo_launch import runtime_config
 from test_paseo_role_tools import (
-    ARCHIVED_AT,
     OTHER_SPRINT,
-    TURN,
     RoleToolsTestCase,
     binding,
     selection_of,

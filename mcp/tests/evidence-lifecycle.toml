@@ -32,9 +32,19 @@ owner = "mcp/tests/read_scope_test_support.py"
 evidence_node = "mcp/tests/test_knowledge_read_scope.py::test_a_path_seed_returns_the_sibling_realizations_and_advertises_the_unreached_family"
 
 [[contract]]
+id = "landing-report-scratch-pair-cases"
+owner = "mcp/tests/landing_report_test_support.py"
+evidence_node = "mcp/tests/test_landing_report_closeout.py::test_clean_check_reports_both_with_ok_true"
+
+[[contract]]
 id = "paseo-launch-given-to-agent-cases"
 owner = "mcp/tests/paseo_launch_test_support.py"
-evidence_node = "mcp/tests/test_paseo_launch.py::RoleFolderAndIdentityTests::test_each_role_class_gets_one_agent_in_its_folder_with_title_and_labels"
+evidence_node = "mcp/tests/test_paseo_launch_roles.py::RoleFolderAndIdentityTests::test_each_role_class_gets_one_agent_in_its_folder_with_title_and_labels"
+
+[[contract]]
+id = "paseo-role-tool-fixture-cases"
+owner = "mcp/tests/paseo_role_tools_test_support.py"
+evidence_node = "mcp/tests/test_paseo_role_tools.py::MayStartRuleTests::test_each_role_may_start_exactly_the_roles_the_rule_names"
 
 [[contract]]
 id = "paseo-runtime-command-cases"
@@ -65,6 +75,16 @@ evidence_node = "mcp/tests/tool_log_witness.py::main"
 id = "tool-refusal-census-cases"
 owner = "mcp/tests/tool_refusal_census_support.py"
 evidence_node = "mcp/tests/test_tool_refusal_conformance.py::FailurePathCensusTests::test_every_failure_path_answers_in_one_of_the_four_named_shapes"
+
+[[contract]]
+id = "transaction-only-delivery-git-fixture-cases"
+owner = "mcp/tests/transaction_only_worktree_delivery_test_support.py"
+evidence_node = "mcp/tests/test_transaction_only_worktree_delivery.py::test_public_closeout_commits_code_and_memory_without_acceptance_tools"
+
+[[contract]]
+id = "workflow-chain-walk-fixture-cases"
+owner = "mcp/tests/workflow_chain_guidance_test_support.py"
+evidence_node = "mcp/tests/test_workflow_chain_guidance.py::WorkflowChainTests::test_the_chain_runs_in_the_declared_order_through_the_registered_entry_points"
 
 [[artifact]]
 path = "mcp/tests/_evidence_catalog_fixture.py"
@@ -239,6 +259,7 @@ consumers = [
   "mcp/tests/test_conversion_cost_scans.py",
   "mcp/tests/test_converted_carryover.py",
   "mcp/tests/test_converted_onboarding_drift.py",
+  "mcp/tests/test_converted_onboarding_drift_leaf_route.py",
   "mcp/tests/test_crap_calculator.py",
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_curator_coherence_closed_out.py",
@@ -382,6 +403,7 @@ consumers = [
   "mcp/tests/test_landing_final_trust.py",
   "mcp/tests/test_landing_page_cadence.py",
   "mcp/tests/test_landing_report.py",
+  "mcp/tests/test_landing_report_closeout.py",
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_landing_sweep_remote_budget.py",
   "mcp/tests/test_landing_unreadable_inputs.py",
@@ -429,6 +451,13 @@ consumers = [
   "mcp/tests/test_mik_r173_card_row_binds_every_copy.py",
   "mcp/tests/test_mik_r177_gate_groups_identical_copies.py",
   "mcp/tests/test_mik_r178_closeout_memory_fault_preflight.py",
+  "mcp/tests/test_mik_r196_authority_replacement.py",
+  "mcp/tests/test_mik_r196_bootstrap_delivery.py",
+  "mcp/tests/test_mik_r196_bootstrap_one_call.py",
+  "mcp/tests/test_mik_r196_dashboard_address_truth.py",
+  "mcp/tests/test_mik_r196_l188_preparation_order.py",
+  "mcp/tests/test_mik_r196_l188_round2_guards.py",
+  "mcp/tests/test_mik_r196_settings_init_preserves_existing.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_onboarding_gate.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
@@ -451,13 +480,16 @@ consumers = [
   "mcp/tests/test_paseo_bridge.py",
   "mcp/tests/test_paseo_bridge_agents.py",
   "mcp/tests/test_paseo_catalog.py",
+  "mcp/tests/test_paseo_catalog_r71.py",
   "mcp/tests/test_paseo_daemon_config_guard.py",
   "mcp/tests/test_paseo_frame.py",
   "mcp/tests/test_paseo_host_environment.py",
   "mcp/tests/test_paseo_install_contract.py",
   "mcp/tests/test_paseo_install_no_stop.py",
   "mcp/tests/test_paseo_launch.py",
+  "mcp/tests/test_paseo_launch_outcomes.py",
   "mcp/tests/test_paseo_launch_repeat.py",
+  "mcp/tests/test_paseo_launch_roles.py",
   "mcp/tests/test_paseo_no_harness_name.py",
   "mcp/tests/test_paseo_node.py",
   "mcp/tests/test_paseo_reopened_workspace.py",
@@ -466,6 +498,7 @@ consumers = [
   "mcp/tests/test_paseo_role_bridge.py",
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",
+  "mcp/tests/test_paseo_role_tools_start.py",
   "mcp/tests/test_paseo_runtime.py",
   "mcp/tests/test_paseo_single_path.py",
   "mcp/tests/test_paseo_start.py",
@@ -485,6 +518,7 @@ consumers = [
   "mcp/tests/test_pnt_sandbox.py",
   "mcp/tests/test_pnt_sandbox_processes.py",
   "mcp/tests/test_pnt_sandbox_provision_fallback.py",
+  "mcp/tests/test_pnt_sandbox_settings.py",
   "mcp/tests/test_post_integration_cleanup_guidance.py",
   "mcp/tests/test_previous_host_removed.py",
   "mcp/tests/test_projection_failure_retry.py",
@@ -573,10 +607,12 @@ consumers = [
   "mcp/tests/test_role_capsule_manifest_edges.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_first_message.py",
+  "mcp/tests/test_role_first_message_guards.py",
   "mcp/tests/test_role_handover_binding.py",
   "mcp/tests/test_role_handover_locator.py",
   "mcp/tests/test_role_instruction_corpus.py",
   "mcp/tests/test_role_instruction_wording.py",
+  "mcp/tests/test_role_instruction_wording_handover.py",
   "mcp/tests/test_role_launch_routes.py",
   "mcp/tests/test_role_locator_replay.py",
   "mcp/tests/test_role_message_files.py",
@@ -661,9 +697,17 @@ consumers = [
   "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_tool_answer_rows_quality.py",
   "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_answer_table_enclosure.py",
+  "mcp/tests/test_tool_answer_table_guards.py",
+  "mcp/tests/test_tool_answer_table_install.py",
+  "mcp/tests/test_tool_answer_table_log.py",
+  "mcp/tests/test_tool_answer_table_measure.py",
+  "mcp/tests/test_tool_answer_table_rows.py",
   "mcp/tests/test_tool_descriptions.py",
   "mcp/tests/test_tool_entry_point_controls.py",
+  "mcp/tests/test_tool_entry_point_read_only.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_sweep_controls.py",
   "mcp/tests/test_tool_entry_point_valid_progression.py",
   "mcp/tests/test_tool_event_river.py",
   "mcp/tests/test_tool_log_budgets.py",
@@ -672,6 +716,7 @@ consumers = [
   "mcp/tests/test_tool_response_conformance.py",
   "mcp/tests/test_tools.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
   "mcp/tests/test_unexplained_change_disposition.py",
   "mcp/tests/test_untyped_sprint_rows.py",
   "mcp/tests/test_unused_settings_keys.py",
@@ -791,8 +836,6 @@ consumers = [
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_tool_answer_table.py",
-  "mcp/tests/test_tool_entry_point_sweep.py",
-  "mcp/tests/test_tool_refusal_conformance.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_candidate_capture.py",
 ]
@@ -899,6 +942,26 @@ consumers = [
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
+]
+
+[[artifact]]
+path = "mcp/tests/closeout_skill_surface.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "closeout-skill-surface"
+category = "unit-regression"
+fidelity = "repository-structure"
+cadence = "affected"
+source_version_or_generator = "the closeout workflow of the w-02 light-task skill and the packaged copy under the runtime skills, read as text by the cases that assert the landing texts"
+introduced_by = "260928-MIK-L188"
+lifetime = "permanent"
+permanence_rationale = "The text a landing publishes says the check is not optional, and it lives in a skill tree whose copies must stay equal; naming the tree once keeps the two copies of the assertion from disagreeing about where it is."
+replacement_contract = "node:mcp/tests/test_landing_commit_check.py::AnswerAndTextTests::test_texts_state_the_new_behavior"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_l61_remaining_findings.py",
+  "mcp/tests/test_landing_commit_check.py",
 ]
 
 [[artifact]]
@@ -915,6 +978,43 @@ lifetime = "permanent"
 permanence_rationale = "Every test uses isolated local state; certification services load only for explicit --certify delivery."
 replacement_contract = "node:mcp/tests/test_pytest_bootstrap_boundaries.py::PytestBootstrapBoundaryTests::test_environment_is_candidate_bound_scrubbed_disposable_and_reversible"
 consumer_scope = "all-tests"
+
+[[artifact]]
+path = "mcp/tests/converted_onboarding_drift_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "converted-drift-cases"
+category = "unit-regression"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "git code and memory checkouts with converted sidecars, current and stale anchors, and the real worktree validation binding, built once for the two converted-drift modules"
+introduced_by = "260928-MIK-L188"
+lifetime = "permanent"
+permanence_rationale = "The converted-drift cases are split over two modules so each stays readable, and both build the same tree, the same card and the same stale anchor; one definition is what stops the halves from disagreeing about what a converted memory is."
+replacement_contract = "node:mcp/tests/test_converted_onboarding_drift.py::test_converted_trees_take_the_converted_branch_and_skip_legacy_discovery"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_converted_onboarding_drift.py",
+  "mcp/tests/test_converted_onboarding_drift_leaf_route.py",
+]
+
+[[artifact]]
+path = "mcp/tests/curation_statement_surface.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "curation-statement-surface"
+category = "unit-regression"
+fidelity = "repository-structure"
+cadence = "affected"
+source_version_or_generator = "the retired curation statement registry and the one row whose declared surface the guard-tooth case contrasts with a surface that never shipped it"
+introduced_by = "260928-MIK-L188"
+lifetime = "permanent"
+permanence_rationale = "The guard is a census of surfaces, and the surfaces a retired sentence shipped are a registry fact; the case reads them from the registry rather than restating them, so the row has to be named once."
+replacement_contract = "node:mcp/tests/test_role_instruction_corpus.py::CurationGuardTeethTests::test_a_statement_is_reported_only_on_a_surface_that_shipped_it"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_role_instruction_corpus.py",
+]
 
 [[artifact]]
 path = "mcp/tests/curator_coherence_test_support.py"
@@ -960,6 +1060,7 @@ consumers = [
   "mcp/tests/test_context_packet_slim.py",
   "mcp/tests/test_converted_carryover.py",
   "mcp/tests/test_converted_onboarding_drift.py",
+  "mcp/tests/test_converted_onboarding_drift_leaf_route.py",
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_curator_coherence_closed_out.py",
   "mcp/tests/test_curator_coherence_file_transport.py",
@@ -978,6 +1079,7 @@ consumers = [
   "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_landing_report.py",
+  "mcp/tests/test_landing_report_closeout.py",
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_landing_sweep_remote_budget.py",
   "mcp/tests/test_leaf_agent_archive.py",
@@ -1014,6 +1116,7 @@ consumers = [
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
   "mcp/tests/test_role_capsule_manifest_edges.py",
   "mcp/tests/test_role_first_message.py",
+  "mcp/tests/test_role_first_message_guards.py",
   "mcp/tests/test_role_handover_binding.py",
   "mcp/tests/test_route_index_memory_scope.py",
   "mcp/tests/test_series_finalize_rules.py",
@@ -1038,11 +1141,10 @@ consumers = [
   "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_tool_answer_rows_quality.py",
   "mcp/tests/test_tool_answer_table.py",
-  "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_entry_point_valid_progression.py",
-  "mcp/tests/test_tool_refusal_conformance.py",
   "mcp/tests/test_tools.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
   "mcp/tests/test_untyped_sprint_rows.py",
   "mcp/tests/test_unused_settings_keys.py",
   "mcp/tests/test_workspace_wake_zero_census.py",
@@ -1391,7 +1493,14 @@ consumers = [
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_answer_table_guards.py",
+  "mcp/tests/test_tool_answer_table_install.py",
+  "mcp/tests/test_tool_answer_table_log.py",
+  "mcp/tests/test_tool_answer_table_measure.py",
+  "mcp/tests/test_tool_answer_table_rows.py",
+  "mcp/tests/test_tool_entry_point_read_only.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_sweep_controls.py",
   "mcp/tests/test_tool_refusal_conformance.py",
 ]
 
@@ -1414,7 +1523,14 @@ consumers = [
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_answer_table_guards.py",
+  "mcp/tests/test_tool_answer_table_install.py",
+  "mcp/tests/test_tool_answer_table_log.py",
+  "mcp/tests/test_tool_answer_table_measure.py",
+  "mcp/tests/test_tool_answer_table_rows.py",
+  "mcp/tests/test_tool_entry_point_read_only.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_sweep_controls.py",
   "mcp/tests/test_tool_refusal_conformance.py",
 ]
 
@@ -1437,7 +1553,14 @@ consumers = [
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_answer_table_guards.py",
+  "mcp/tests/test_tool_answer_table_install.py",
+  "mcp/tests/test_tool_answer_table_log.py",
+  "mcp/tests/test_tool_answer_table_measure.py",
+  "mcp/tests/test_tool_answer_table_rows.py",
+  "mcp/tests/test_tool_entry_point_read_only.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_sweep_controls.py",
   "mcp/tests/test_tool_refusal_conformance.py",
 ]
 
@@ -1460,7 +1583,14 @@ consumers = [
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_answer_table_guards.py",
+  "mcp/tests/test_tool_answer_table_install.py",
+  "mcp/tests/test_tool_answer_table_log.py",
+  "mcp/tests/test_tool_answer_table_measure.py",
+  "mcp/tests/test_tool_answer_table_rows.py",
+  "mcp/tests/test_tool_entry_point_read_only.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_sweep_controls.py",
   "mcp/tests/test_tool_refusal_conformance.py",
 ]
 
@@ -1483,7 +1613,14 @@ consumers = [
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_answer_table_guards.py",
+  "mcp/tests/test_tool_answer_table_install.py",
+  "mcp/tests/test_tool_answer_table_log.py",
+  "mcp/tests/test_tool_answer_table_measure.py",
+  "mcp/tests/test_tool_answer_table_rows.py",
+  "mcp/tests/test_tool_entry_point_read_only.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_sweep_controls.py",
   "mcp/tests/test_tool_refusal_conformance.py",
 ]
 
@@ -1506,7 +1643,14 @@ consumers = [
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_answer_table_guards.py",
+  "mcp/tests/test_tool_answer_table_install.py",
+  "mcp/tests/test_tool_answer_table_log.py",
+  "mcp/tests/test_tool_answer_table_measure.py",
+  "mcp/tests/test_tool_answer_table_rows.py",
+  "mcp/tests/test_tool_entry_point_read_only.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_sweep_controls.py",
   "mcp/tests/test_tool_refusal_conformance.py",
 ]
 
@@ -1529,7 +1673,14 @@ consumers = [
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_answer_table_guards.py",
+  "mcp/tests/test_tool_answer_table_install.py",
+  "mcp/tests/test_tool_answer_table_log.py",
+  "mcp/tests/test_tool_answer_table_measure.py",
+  "mcp/tests/test_tool_answer_table_rows.py",
+  "mcp/tests/test_tool_entry_point_read_only.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_sweep_controls.py",
   "mcp/tests/test_tool_refusal_conformance.py",
 ]
 
@@ -1552,7 +1703,14 @@ consumers = [
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_answer_table_guards.py",
+  "mcp/tests/test_tool_answer_table_install.py",
+  "mcp/tests/test_tool_answer_table_log.py",
+  "mcp/tests/test_tool_answer_table_measure.py",
+  "mcp/tests/test_tool_answer_table_rows.py",
+  "mcp/tests/test_tool_entry_point_read_only.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_sweep_controls.py",
   "mcp/tests/test_tool_refusal_conformance.py",
 ]
 
@@ -1726,6 +1884,7 @@ consumers = [
   "mcp/tests/test_conversion_cost_scans.py",
   "mcp/tests/test_converted_carryover.py",
   "mcp/tests/test_converted_onboarding_drift.py",
+  "mcp/tests/test_converted_onboarding_drift_leaf_route.py",
   "mcp/tests/test_crap_calculator.py",
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_curator_coherence_closed_out.py",
@@ -1869,6 +2028,7 @@ consumers = [
   "mcp/tests/test_landing_final_trust.py",
   "mcp/tests/test_landing_page_cadence.py",
   "mcp/tests/test_landing_report.py",
+  "mcp/tests/test_landing_report_closeout.py",
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_landing_sweep_remote_budget.py",
   "mcp/tests/test_landing_unreadable_inputs.py",
@@ -1916,6 +2076,13 @@ consumers = [
   "mcp/tests/test_mik_r173_card_row_binds_every_copy.py",
   "mcp/tests/test_mik_r177_gate_groups_identical_copies.py",
   "mcp/tests/test_mik_r178_closeout_memory_fault_preflight.py",
+  "mcp/tests/test_mik_r196_authority_replacement.py",
+  "mcp/tests/test_mik_r196_bootstrap_delivery.py",
+  "mcp/tests/test_mik_r196_bootstrap_one_call.py",
+  "mcp/tests/test_mik_r196_dashboard_address_truth.py",
+  "mcp/tests/test_mik_r196_l188_preparation_order.py",
+  "mcp/tests/test_mik_r196_l188_round2_guards.py",
+  "mcp/tests/test_mik_r196_settings_init_preserves_existing.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_onboarding_gate.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
@@ -1938,13 +2105,16 @@ consumers = [
   "mcp/tests/test_paseo_bridge.py",
   "mcp/tests/test_paseo_bridge_agents.py",
   "mcp/tests/test_paseo_catalog.py",
+  "mcp/tests/test_paseo_catalog_r71.py",
   "mcp/tests/test_paseo_daemon_config_guard.py",
   "mcp/tests/test_paseo_frame.py",
   "mcp/tests/test_paseo_host_environment.py",
   "mcp/tests/test_paseo_install_contract.py",
   "mcp/tests/test_paseo_install_no_stop.py",
   "mcp/tests/test_paseo_launch.py",
+  "mcp/tests/test_paseo_launch_outcomes.py",
   "mcp/tests/test_paseo_launch_repeat.py",
+  "mcp/tests/test_paseo_launch_roles.py",
   "mcp/tests/test_paseo_no_harness_name.py",
   "mcp/tests/test_paseo_node.py",
   "mcp/tests/test_paseo_reopened_workspace.py",
@@ -1953,6 +2123,7 @@ consumers = [
   "mcp/tests/test_paseo_role_bridge.py",
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",
+  "mcp/tests/test_paseo_role_tools_start.py",
   "mcp/tests/test_paseo_runtime.py",
   "mcp/tests/test_paseo_single_path.py",
   "mcp/tests/test_paseo_start.py",
@@ -1972,6 +2143,7 @@ consumers = [
   "mcp/tests/test_pnt_sandbox.py",
   "mcp/tests/test_pnt_sandbox_processes.py",
   "mcp/tests/test_pnt_sandbox_provision_fallback.py",
+  "mcp/tests/test_pnt_sandbox_settings.py",
   "mcp/tests/test_post_integration_cleanup_guidance.py",
   "mcp/tests/test_previous_host_removed.py",
   "mcp/tests/test_projection_failure_retry.py",
@@ -2060,10 +2232,12 @@ consumers = [
   "mcp/tests/test_role_capsule_manifest_edges.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_first_message.py",
+  "mcp/tests/test_role_first_message_guards.py",
   "mcp/tests/test_role_handover_binding.py",
   "mcp/tests/test_role_handover_locator.py",
   "mcp/tests/test_role_instruction_corpus.py",
   "mcp/tests/test_role_instruction_wording.py",
+  "mcp/tests/test_role_instruction_wording_handover.py",
   "mcp/tests/test_role_launch_routes.py",
   "mcp/tests/test_role_locator_replay.py",
   "mcp/tests/test_role_message_files.py",
@@ -2148,9 +2322,17 @@ consumers = [
   "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_tool_answer_rows_quality.py",
   "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_answer_table_enclosure.py",
+  "mcp/tests/test_tool_answer_table_guards.py",
+  "mcp/tests/test_tool_answer_table_install.py",
+  "mcp/tests/test_tool_answer_table_log.py",
+  "mcp/tests/test_tool_answer_table_measure.py",
+  "mcp/tests/test_tool_answer_table_rows.py",
   "mcp/tests/test_tool_descriptions.py",
   "mcp/tests/test_tool_entry_point_controls.py",
+  "mcp/tests/test_tool_entry_point_read_only.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_sweep_controls.py",
   "mcp/tests/test_tool_entry_point_valid_progression.py",
   "mcp/tests/test_tool_event_river.py",
   "mcp/tests/test_tool_log_budgets.py",
@@ -2159,6 +2341,7 @@ consumers = [
   "mcp/tests/test_tool_response_conformance.py",
   "mcp/tests/test_tools.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
   "mcp/tests/test_unexplained_change_disposition.py",
   "mcp/tests/test_untyped_sprint_rows.py",
   "mcp/tests/test_unused_settings_keys.py",
@@ -2237,6 +2420,7 @@ consumers = [
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
 ]
@@ -2272,6 +2456,7 @@ consumers = [
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
 ]
 
@@ -2319,6 +2504,7 @@ consumers = [
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
 ]
 
 [[artifact]]
@@ -2375,7 +2561,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_citation_fix_documents.py",
   "mcp/tests/test_conversion_cost_scans.py",
-  "mcp/tests/test_converted_onboarding_drift.py",
+  "mcp/tests/test_converted_onboarding_drift_leaf_route.py",
   "mcp/tests/test_knowledge_conversion.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_crossing.py",
@@ -2455,8 +2641,6 @@ consumers = [
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_tool_answer_table.py",
-  "mcp/tests/test_tool_entry_point_sweep.py",
-  "mcp/tests/test_tool_refusal_conformance.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_candidate_capture.py",
 ]
@@ -2579,8 +2763,6 @@ consumers = [
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_tool_answer_table.py",
-  "mcp/tests/test_tool_entry_point_sweep.py",
-  "mcp/tests/test_tool_refusal_conformance.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_candidate_capture.py",
 ]
@@ -2652,8 +2834,6 @@ consumers = [
   "mcp/tests/test_reconsideration_recovery.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
-  "mcp/tests/test_tool_entry_point_sweep.py",
-  "mcp/tests/test_tool_refusal_conformance.py",
   "mcp/tests/test_writer_case_proofs.py",
   "mcp/tests/test_writer_command_layouts.py",
   "mcp/tests/test_writer_command_raise.py",
@@ -2682,6 +2862,25 @@ replacement_contract = "node:mcp/tests/test_tool_event_river.py::ToolEventRiverT
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_tool_event_river.py",
+]
+
+[[artifact]]
+path = "mcp/tests/landing_report_test_support.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "landing-report-scratch-pair-cases"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the two scratch leaf pairs the landing cases build on -- a memory Git repository and a code Git repository committed at one base, and the clean variant whose sidecar carries a real blob anchor and an accepted invariant -- with the probes the report reads: the layout marker, the anchored sidecar, the curator checklist and the gate trees"
+introduced_by = "260928-MIK-L188"
+lifetime = "permanent"
+permanence_rationale = "A landing is measured against Git: the base commit the leaf was admitted on, the R-name a rename records, and the tree the gate validates. Every case has to build those, so the pairs and their builders live here once. MIK-R196 rule 10 keeps each case module under the size limit by moving them out of the module that first declared them."
+replacement_contract = "contract:landing-report-scratch-pair-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_landing_report.py",
+  "mcp/tests/test_landing_report_closeout.py",
 ]
 
 [[artifact]]
@@ -2755,6 +2954,42 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/mik_r53_rule_surfaces.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "mik-r53-rule-surfaces"
+category = "unit-regression"
+fidelity = "repository-structure"
+cadence = "affected"
+source_version_or_generator = "the shipped skill workflow that lists the ten merge and debt rules with their decision"
+introduced_by = "260928-MIK-L188"
+lifetime = "permanent"
+permanence_rationale = "The ten-rule listing moved from the retired c-02 skill into the c-05 onboarding workflow, and the case that asserts it exists to catch a listing that went missing; naming the surface once keeps that path out of the assertion body."
+replacement_contract = "node:mcp/tests/test_mik_r53_report_only_rules.py::test_the_c02_skill_lists_the_ten_rules_with_their_decision"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_mik_r53_report_only_rules.py",
+]
+
+[[artifact]]
+path = "mcp/tests/paseo_allowance_table.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "paseo-allowance-table"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the vocabulary of the Paseo single-path scan and its per-file allowance table: rule names, path prefixes, and for each rule and file the counted uses with their reason"
+introduced_by = "260928-MIK-L188"
+lifetime = "permanent"
+permanence_rationale = "Every legitimate use of a Paseo name outside the boundary is a written decision with a number and a reason, and the scan's audit cases read the same table; one home is what makes a new entry a reviewable change."
+replacement_contract = "node:mcp/tests/test_paseo_single_path.py::SinglePathTests::test_the_scan_catches_each_kind_of_second_path"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_paseo_single_path.py",
+]
+
+[[artifact]]
 path = "mcp/tests/paseo_launch_test_support.py"
 kind = "shared-support"
 authority = "internal-hand-authored"
@@ -2774,25 +3009,59 @@ consumers = [
   "mcp/tests/test_investigator.py",
   "mcp/tests/test_leaf_enclosure_start.py",
   "mcp/tests/test_memory_review_lane.py",
+  "mcp/tests/test_mik_r196_bootstrap_delivery.py",
   "mcp/tests/test_native_retire.py",
   "mcp/tests/test_paseo_agent_tools.py",
-  "mcp/tests/test_paseo_catalog.py",
+  "mcp/tests/test_paseo_catalog_r71.py",
   "mcp/tests/test_paseo_launch.py",
+  "mcp/tests/test_paseo_launch_outcomes.py",
   "mcp/tests/test_paseo_launch_repeat.py",
+  "mcp/tests/test_paseo_launch_roles.py",
   "mcp/tests/test_paseo_role_answers_l111.py",
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",
+  "mcp/tests/test_paseo_role_tools_start.py",
   "mcp/tests/test_paseo_status.py",
   "mcp/tests/test_previous_host_removed.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_first_message.py",
+  "mcp/tests/test_role_first_message_guards.py",
   "mcp/tests/test_role_message_files.py",
   "mcp/tests/test_role_revival_registration.py",
   "mcp/tests/test_role_start_set.py",
   "mcp/tests/test_role_step_up.py",
   "mcp/tests/test_step_up_choice_validation.py",
   "mcp/tests/test_step_up_recovery.py",
-  "mcp/tests/test_user_settings_guard.py",
+]
+
+[[artifact]]
+path = "mcp/tests/paseo_role_tools_test_support.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "paseo-role-tool-fixture-cases"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the fake bridge both role-tool case modules run against -- a runtime that records every call, holds the agents and their receipts, answers sends and waits, and resolves the fixture's task documents -- with the role tables and the binding and selection helpers every case builds its caller from"
+introduced_by = "260928-MIK-L188"
+lifetime = "permanent"
+permanence_rationale = "Both role tools are judged by what the runtime holds after the call, so every case needs the same stand-in, the same three task documents and the same role tables; the table the may-start rule reads is asserted equal in both directions, so it cannot drift from the shared copy. MIK-R196 rule 10 keeps each case module under the size limit by moving the fixture out of the module that first declared it."
+replacement_contract = "contract:paseo-role-tool-fixture-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_developer_messages.py",
+  "mcp/tests/test_held_queue.py",
+  "mcp/tests/test_investigator.py",
+  "mcp/tests/test_mik_r196_bootstrap_delivery.py",
+  "mcp/tests/test_native_retire.py",
+  "mcp/tests/test_paseo_role_answers_l111.py",
+  "mcp/tests/test_paseo_role_messages.py",
+  "mcp/tests/test_paseo_role_tools.py",
+  "mcp/tests/test_paseo_role_tools_start.py",
+  "mcp/tests/test_role_document_chats.py",
+  "mcp/tests/test_role_message_files.py",
+  "mcp/tests/test_role_start_set.py",
+  "mcp/tests/test_step_up_recovery.py",
 ]
 
 [[artifact]]
@@ -2822,22 +3091,27 @@ consumers = [
   "mcp/tests/test_investigator.py",
   "mcp/tests/test_leaf_enclosure_start.py",
   "mcp/tests/test_memory_review_lane.py",
+  "mcp/tests/test_mik_r196_bootstrap_delivery.py",
   "mcp/tests/test_native_retire.py",
   "mcp/tests/test_paseo_agent_tools.py",
   "mcp/tests/test_paseo_bridge.py",
   "mcp/tests/test_paseo_bridge_agents.py",
   "mcp/tests/test_paseo_catalog.py",
+  "mcp/tests/test_paseo_catalog_r71.py",
   "mcp/tests/test_paseo_frame.py",
   "mcp/tests/test_paseo_install_contract.py",
   "mcp/tests/test_paseo_install_no_stop.py",
   "mcp/tests/test_paseo_launch.py",
+  "mcp/tests/test_paseo_launch_outcomes.py",
   "mcp/tests/test_paseo_launch_repeat.py",
+  "mcp/tests/test_paseo_launch_roles.py",
   "mcp/tests/test_paseo_reopened_workspace.py",
   "mcp/tests/test_paseo_role_agents.py",
   "mcp/tests/test_paseo_role_answers_l111.py",
   "mcp/tests/test_paseo_role_bridge.py",
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",
+  "mcp/tests/test_paseo_role_tools_start.py",
   "mcp/tests/test_paseo_runtime.py",
   "mcp/tests/test_paseo_start.py",
   "mcp/tests/test_paseo_status.py",
@@ -2846,6 +3120,7 @@ consumers = [
   "mcp/tests/test_previous_host_removed.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_first_message.py",
+  "mcp/tests/test_role_first_message_guards.py",
   "mcp/tests/test_role_launch_routes.py",
   "mcp/tests/test_role_message_files.py",
   "mcp/tests/test_role_revival_registration.py",
@@ -2969,8 +3244,6 @@ consumers = [
   "mcp/tests/test_review_subject_catalogue.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
-  "mcp/tests/test_tool_entry_point_sweep.py",
-  "mcp/tests/test_tool_refusal_conformance.py",
 ]
 
 [[artifact]]
@@ -3039,6 +3312,7 @@ consumers = [
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
 ]
@@ -3104,6 +3378,51 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/role_first_message_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "mcp/tests/role_first_message_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the answer/row tables and wording fixtures this leaf's rail split moved out of the case module"
+introduced_by = "260928-MIK-L188"
+lifetime = "permanent"
+permanence_rationale = "Several case modules read the same table or fixture; a copy per module would drift from the product's own row."
+replacement_contract = "node:mcp/tests/test_role_first_message.py::FirstMessageMatrixTests::test_the_shared_block_comes_from_the_compilation_on_both_start_paths"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_role_first_message.py",
+  "mcp/tests/test_role_first_message_guards.py",
+]
+
+[[artifact]]
+path = "mcp/tests/role_instruction_wording_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "role-instruction-wording"
+category = "unit-regression"
+fidelity = "repository-structure"
+cadence = "affected"
+source_version_or_generator = "the canonical skill tree, the forbidden host strings and the file readers the two wording modules share"
+introduced_by = "260928-MIK-L188"
+lifetime = "permanent"
+permanence_rationale = "The instruction-file cases and the handover cases read the same router, role files and forbidden list; one definition is what keeps the two halves of the wording check measuring the same surfaces."
+replacement_contract = "node:mcp/tests/test_role_instruction_wording.py::InstructionFileWordingTests::test_every_role_organises_its_harness_work_with_seat_boundaries"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_capsule_replay_integrity.py",
+  "mcp/tests/test_developer_question_wording.py",
+  "mcp/tests/test_leaf_handover.py",
+  "mcp/tests/test_previous_host_removed.py",
+  "mcp/tests/test_role_handover_binding.py",
+  "mcp/tests/test_role_instruction_wording.py",
+  "mcp/tests/test_role_instruction_wording_handover.py",
+  "mcp/tests/test_role_locator_replay.py",
+  "mcp/tests/test_role_message_wording.py",
+]
+
+[[artifact]]
 path = "mcp/tests/selected_lifecycle_test_support.py"
 kind = "shared-support"
 authority = "internal-canonical"
@@ -3129,6 +3448,7 @@ consumers = [
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
 ]
 
 [[artifact]]
@@ -3185,6 +3505,27 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/tool_answer_l109_cases.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "mcp/tests/tool_answer_l109_cases.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the answer/row tables and wording fixtures this leaf's rail split moved out of the case module"
+introduced_by = "260928-MIK-L188"
+lifetime = "permanent"
+permanence_rationale = "Several case modules read the same table or fixture; a copy per module would drift from the product's own row."
+replacement_contract = "node:mcp/tests/test_tool_answer_table_rows.py::ToolAnswerRowGateTests::test_valid_shaped_row_passes"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_landing_state_refusals.py",
+  "mcp/tests/test_legacy_refusal_envelope.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
+  "mcp/tests/test_tool_answer_table.py",
+]
+
+[[artifact]]
 path = "mcp/tests/tool_answer_l110_rows.py"
 kind = "shared-support"
 authority = "internal-canonical"
@@ -3209,7 +3550,14 @@ consumers = [
   "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_tool_answer_rows_quality.py",
   "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_answer_table_guards.py",
+  "mcp/tests/test_tool_answer_table_install.py",
+  "mcp/tests/test_tool_answer_table_log.py",
+  "mcp/tests/test_tool_answer_table_measure.py",
+  "mcp/tests/test_tool_answer_table_rows.py",
+  "mcp/tests/test_tool_entry_point_read_only.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_sweep_controls.py",
   "mcp/tests/test_tool_refusal_conformance.py",
 ]
 
@@ -3234,7 +3582,65 @@ consumers = [
   "mcp/tests/test_task_doc_ordinary_l111.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_answer_table_guards.py",
+  "mcp/tests/test_tool_answer_table_install.py",
+  "mcp/tests/test_tool_answer_table_log.py",
+  "mcp/tests/test_tool_answer_table_measure.py",
+  "mcp/tests/test_tool_answer_table_rows.py",
+  "mcp/tests/test_tool_entry_point_read_only.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_sweep_controls.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
+]
+
+[[artifact]]
+path = "mcp/tests/tool_answer_table_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "mcp/tests/tool_answer_table_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the answer/row tables and wording fixtures this leaf's rail split moved out of the case module"
+introduced_by = "260928-MIK-L188"
+lifetime = "permanent"
+permanence_rationale = "Several case modules read the same table or fixture; a copy per module would drift from the product's own row."
+replacement_contract = "node:mcp/tests/test_tool_answer_table_rows.py::ToolAnswerRowGateTests::test_valid_shaped_row_passes"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_landing_state_refusals.py",
+  "mcp/tests/test_legacy_refusal_envelope.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_answer_table_guards.py",
+  "mcp/tests/test_tool_answer_table_install.py",
+  "mcp/tests/test_tool_answer_table_log.py",
+  "mcp/tests/test_tool_answer_table_measure.py",
+  "mcp/tests/test_tool_answer_table_rows.py",
+  "mcp/tests/test_tool_entry_point_read_only.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_sweep_controls.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
+]
+
+[[artifact]]
+path = "mcp/tests/tool_entry_point_sweep_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "mcp/tests/tool_entry_point_sweep_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the answer/row tables and wording fixtures this leaf's rail split moved out of the case module"
+introduced_by = "260928-MIK-L188"
+lifetime = "permanent"
+permanence_rationale = "Several case modules read the same table or fixture; a copy per module would drift from the product's own row."
+replacement_contract = "node:mcp/tests/test_tool_entry_point_sweep.py::EntryPointCoverageTests::test_the_swept_population_is_the_advertised_one"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_tool_entry_point_read_only.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_sweep_controls.py",
   "mcp/tests/test_tool_refusal_conformance.py",
 ]
 
@@ -3269,8 +3675,9 @@ consumers = [
   "mcp/tests/test_tool_answer_log.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_answer_table_enclosure.py",
+  "mcp/tests/test_tool_answer_table_log.py",
   "mcp/tests/test_tool_entry_point_controls.py",
-  "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_entry_point_valid_progression.py",
   "mcp/tests/test_tool_refusal_conformance.py",
   "mcp/tests/test_user_settings_guard.py",
@@ -3311,6 +3718,49 @@ replacement_contract = "contract:tool-refusal-census-cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_tool_refusal_conformance.py",
+]
+
+[[artifact]]
+path = "mcp/tests/transaction_only_worktree_delivery_test_support.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "transaction-only-delivery-git-fixture-cases"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the temp-Git leaf fixtures the transaction cases run on -- a code repository and an external memory repository with their worktrees, a converted-memory layout with an open history row, the real failing and passing pre-commit hooks, the branch-move seam racers, and the assertions that read a landed subject and its memory attribution back out of Git"
+introduced_by = "260928-MIK-L188"
+lifetime = "permanent"
+permanence_rationale = "Every case here is a Git fact -- the tree a commit bound, the branch a refusal left untouched, the trailer an attribution carries -- so the fixture and the assertions that read those facts back are shared rather than copied. MIK-R196 rule 10 keeps each case module under the size limit by moving them out of the module that first declared them."
+replacement_contract = "contract:transaction-only-delivery-git-fixture-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
+  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
+  "mcp/tests/test_terminal_blocker_reasons.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
+]
+
+[[artifact]]
+path = "mcp/tests/workflow_chain_guidance_test_support.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "workflow-chain-walk-fixture-cases"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the disposable world the workflow walk runs in -- two real Git repositories, real task documents, a real registered server called through an in-memory MCP session -- the one walk and the arrangements driven around it, and the populations derived from that walk: the hops, the withheld guidance, the operational triples called verbatim, and the stale-base calls"
+introduced_by = "260928-MIK-L188"
+lifetime = "permanent"
+permanence_rationale = "The workflow statement is asserted over populations derived by running the chain, never over literals, so the world, the walk and its derived populations are the instrument itself and the case module reads all of it. MIK-R196 rule 10 keeps the case module under the size limit by moving the instrument out of it."
+replacement_contract = "contract:workflow-chain-walk-fixture-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_workflow_chain_guidance.py",
 ]
 
 [[artifact]]
@@ -3394,6 +3844,7 @@ consumers = [
   "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_tool_entry_point_valid_progression.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
   "mcp/tests/test_workspace_wake_zero_census.py",
   "mcp/tests/test_worktree_sync_knowledge_merge.py",
   "mcp/tests/test_writer_case_proofs.py",

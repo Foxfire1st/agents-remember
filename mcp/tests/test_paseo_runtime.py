@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any, ClassVar
 from unittest.mock import patch
 
-from _user_settings_guard import user_settings_path_for_write
 from agents_remember.cli.__main__ import main
 from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.serving.paseo.paseo_command import (
@@ -976,9 +975,10 @@ class PaseoRuntimeTests(unittest.TestCase):
                     self.assertEqual(document["error"]["code"], "paseo_runtime_not_configured")
                     self.assertIn("no Paseo runtime configured", document["error"]["message"])
             block = {"installPrefix": (self.root / "prefix").as_posix()}
-            shared = user_settings_path_for_write()
-            shared.parent.mkdir(parents=True, exist_ok=True)
-            shared.write_text(json.dumps({"paseoRuntime": block}), encoding="utf-8")
+            settings_path.write_text(
+                json.dumps({"coordinationRoot": self.root.as_posix(), "paseoRuntime": block}),
+                encoding="utf-8",
+            )
             code, document = command("provision")
             self.assertEqual((code, document["error"]["code"]), (2, "settings_invalid"))
             # A file that is not UTF-8 text is refused the same way, by all three commands.
@@ -998,10 +998,8 @@ class PaseoRuntimeTests(unittest.TestCase):
             "embed": [],
         }
         settings_path.write_text(
-            json.dumps({"coordinationRoot": self.root.as_posix()}), encoding="utf-8"
-        )
-        (user_settings_path_for_write()).write_text(
-            json.dumps({"paseoRuntime": block}), encoding="utf-8"
+            json.dumps({"coordinationRoot": self.root.as_posix(), "paseoRuntime": block}),
+            encoding="utf-8",
         )
         code, document = command("stop")
         self.assertEqual((code, document["action"]), (0, "not running"))

@@ -14,6 +14,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from agents_remember.application.user_settings_init import SettingsInitRefused
 from agents_remember.cli.paseo_bridge import (
     BRIDGE_INVALID_REPLY,
     PaseoBridgeFailure,
@@ -79,6 +80,24 @@ def launcher_catalog(config: McpRuntimeConfig, *, refresh: bool = False) -> Laun
         )
         _CATALOGS[scope] = catalog
         return catalog
+
+
+def runnable_harnesses(config: McpRuntimeConfig) -> list[str]:
+    """The provider ids the configured host can run, as the catalog answers them now.
+
+    The role-settings initializer needs this check; the MCP tool handler supplies this reader so
+    the application layer never imports the CLI.
+    """
+
+    try:
+        catalog = launcher_catalog(config)
+    except PaseoBridgeFailure as error:
+        raise SettingsInitRefused(
+            "host-unreadable",
+            f"The host's providers cannot be read: {error}",
+            "Start the host (runtime_install, then retry) and call again.",
+        ) from error
+    return [agent["id"] for agent in catalog.agents]
 
 
 def paseo_catalog_scope(config: McpRuntimeConfig) -> tuple[str, str, str, str]:

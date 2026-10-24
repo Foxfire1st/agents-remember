@@ -11,7 +11,7 @@ Light-task-workflow still follows the same shared discipline documented in `READ
 1. drift check before planning when onboarding is part of the planning context
 2. approval before implementation
 3. onboarding update through `c-05-create-or-update-onboarding-files` after approved changes, with durable findings routed through that skill during implementation when they become clear enough
-4. separate commit approval before `c-09-git-worktree-manager` closeout creates Git commits for worktree-backed tasks
+4. separate commit approval before `w-02-light-task-workflow` closeout creates Git commits for worktree-backed tasks
 
 ## Phase 0 — Compile And Approve Requirements Before Task Topology
 
@@ -59,7 +59,7 @@ All light-task artifacts live under the `c-08-ar-coordination-context-resolver` 
 
 The same `<task-slug>` wrapper and `requirements/` corpus already exist from Phase 0. Create
 `task.md` only after the corpus approval. If the task later becomes worktree-backed, the
-`c-09-git-worktree-manager` skill places its leaf contract at
+`w-02-light-task-workflow` skill places its leaf contract at
 `enclosures/<leaf-id>/series-contract.md` under the wrapper folder.
 
 ### 2. Reuse an existing active task when appropriate
@@ -84,12 +84,12 @@ The task document inside the wrapper is always `task.md`.
 
 If the task plan relies on onboarding files:
 
-1. invoke `c-02-memory-quality-control` before planning against those files
-2. apply the `c-02-memory-quality-control` skill's clean-source versus dirty-source drift classification before planning against pre-existing onboarding
+1. invoke `c-05-create-or-update-onboarding-files` before planning against those files
+2. apply the `c-05-create-or-update-onboarding-files` skill's clean-source versus dirty-source drift classification before planning against pre-existing onboarding
 3. do not plan against clean-source drifted or missing-verification pre-existing onboarding until the update candidates have been handed off to `c-05-create-or-update-onboarding-files` or the developer has explicitly accepted directional-only trust
 4. leave dirty-source drift findings alone as active work-in-progress unless the developer explicitly takes ownership of them in this task
 5. treat files created or modified during the current task as task-local working state after that initial gate passes; they remain pending verification, but they do not by themselves re-block planning for the same task
-6. before any `c-09-git-worktree-manager` worktree starts, commit refreshed external-memory onboarding so the worktree starts from a clean Git memory baseline; keep the computed ledger cache outside staging and commits
+6. before any `w-02-light-task-workflow` worktree starts, commit refreshed external-memory onboarding so the worktree starts from a clean Git memory baseline; keep the computed ledger cache outside staging and commits
 
 ### 5. Gather context before writing the plan
 
@@ -254,7 +254,7 @@ When the approved plan has been fully implemented:
    exception is not completion
 3. confirm each delivered leaf manifestation has a newly appended immutable worker attempt bound
    to the exact candidate and that all predecessor findings are accounted for
-4. for worktree-backed tasks, run `c-09-git-worktree-manager` closeout in dry-run mode to prepare the commit preview; this does not require commit approval and must not mutate Git
+4. for worktree-backed tasks, run `w-02-light-task-workflow` closeout in dry-run mode to prepare the commit preview; this does not require commit approval and must not mutate Git
 5. present a concise completion summary in chat covering what changed, what onboarding was updated, which listed checks were run, and the proposed code and memory commit messages
 6. ask explicitly for commit/closeout approval; do not treat implementation approval as commit approval
 7. leave worktree-backed task status below `Completed` after closeout; every declared parent/nested step must be explicitly `done` (or intentionally skipped through exact `task_doc.skip_step`) before `lifecycle_finalize_task` can set completion. If a final step includes cleanup, run standalone `worktree_cleanup`, mark that exact step done afterwards, then finalize the already-clean contract

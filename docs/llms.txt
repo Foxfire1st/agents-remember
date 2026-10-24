@@ -1,4 +1,4 @@
-Version: 2.8.0 | Creation-Date: 2026-06-10T08:42:24Z | Hash: f62c732
+Original export stamp (historical): Version: 2.8.0 | Creation-Date: 2026-06-10T08:42:24Z | Hash: f62c732
 
 # Agents Remember: Memory your coding agent can trust
 
@@ -33,9 +33,9 @@ This page walks through what that buys:
 - **Behavior that travels with the repo** — each project's own settings,
   commands, conventions, and landing rules ride along in the memory and are read
   the same way across different coding harnesses.
-- **Harness-native setup instead of generic glue** — starter packages for the
-  major coding harnesses carry the MCP registration, skills, hooks, rules, and
-  instructions that each harness actually discovers.
+- **One-call setup across harnesses** — one MCP call starts Bootstrap, while
+  canonical skills remain package-served resources and native instruction files
+  carry only the first-action directive.
 - **Operational guardrails for real teams** — authority settings, baseline
   adoption, branch memory carryover, cross-repo gates, benchmarks, and source
   quality checks round out the happy path.
@@ -391,21 +391,18 @@ repository's own rules win.
 
 ## Harness-native setup
 
-Agents Remember does not ask every coding harness to pretend it has the same
-plugin surface. The source repo ships starter packages for Claude Code, Codex,
-Cursor, Antigravity, VS Code with GitHub Copilot, Hermes, Pi.dev, and OpenClaw.
-Each package carries the files that harness actually loads: MCP registration
-templates, Agents Remember authority settings, skill folders, startup hooks,
-rules, or always-on instruction files.
+Register the MCP server with Claude Code, Codex, Cursor, Antigravity, VS Code
+with GitHub Copilot, Hermes, Pi.dev or OpenClaw using that harness's install guide.
+The server serves canonical skills from its packaged resource tree. Optional native
+hooks, rules or instruction files carry only the first-action directive.
 
-The first-run path is deliberately short. Copy the starter package, replace the
-workspace and repository placeholders, restart the harness once, then invoke
-`c-13-install-and-onboard`. That skill verifies the MCP server, runs or checks
-`runtime_install()`, initializes or adopts memory, bootstraps onboarding when
-needed, and starts provider indexing when providers are enabled. The core
-by-path memory path still works without Docker or providers; the starter package
-just makes sure the harness can actually see the server and skills before setup
-moves on.
+From your own chat, make one `role_start(role="bootstrap", request_id=<UUID>)`
+call. It prepares a missing runtime and host and starts an instructed Bootstrap
+seat; its answer names the seat and the dashboard/chat where setup continues.
+Bootstrap previews settings, initializes or reads the external memory scaffold,
+and hands optional onboarding and the knowledge foundation to a user-started
+Architect's regular task. No harness or coordination-root skill copy, renderer,
+provider indexing or setup-authored knowledge is part of this path.
 
 This is also why the setup is portable. A contributor can use Claude Code while
 another uses Codex or Cursor, and both resolve the same committed memory,
@@ -456,8 +453,8 @@ The whole system hangs off one invariant and compounds from there:
   approvals.
 - The **`system/` folder** carries each repo's own rules with its memory, so the
   same generic skills behave the way that project wants — across harnesses.
-- **Starter packages** expose the same memory system through each harness's
-  native discovery surface.
+- **Package-served skills** expose the same memory system as MCP resources
+  through the registered tool server.
 - **Operational guards** cover authority, baselines, carryover, cross-repo
   context, benchmarks, and quality checks when the simple path is not enough.
 
@@ -479,6 +476,6 @@ what your team already knows.
 - [External Memory](guides/use-external-memory.md) — separate memory repos and
   the ledger.
 - [Workflows](workflows.md) — the agent lifecycles and their build modes.
-- [Install Guides](install/README.md) — harness-native starter packages.
+- [Install Guides](install/README.md) — MCP registration and optional native directives.
 - [Settings Reference](reference/settings-json.md) — MCP authority settings.
 - [Getting Started](getting-started.md) — set it up in your own workspace.

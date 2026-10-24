@@ -11,13 +11,10 @@ every harness.
 
 from __future__ import annotations
 
-import hashlib
 import sys
-from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest import mock
 
 import pytest
 
@@ -27,15 +24,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.application.knowledge_gate.gate import (
-    GateTrees,
-    evaluate_leaf_gate,
-    validation_findings,
-)
-from agents_remember.application.knowledge_worklist.leaf import CandidateTrees
 from agents_remember.application.memory_quality.answer import quality_result_answer
 from agents_remember.application.memory_quality.converted_base import (
-    leaf_base_port,
     leaf_base_request,
 )
 from agents_remember.application.role_capsules.compilation import (
@@ -45,19 +35,10 @@ from agents_remember.application.skill_resources.capsule import (
     CapsuleSeatAddress,
     routed_admission_for,
 )
-from agents_remember.application.worktree_services import MemoryQualityAdapter
 from agents_remember.memory_quality import landing_report
-from agents_remember.memory_quality.check import DriftCheckContext, run_memory_quality_check
 from agents_remember.memory_quality.converted_check import converted_knowledge_check
 from agents_remember.memory_quality.curator_checklist import (
-    CuratorChecklist,
-    split_commit_owned_findings,
     write_curator_checklist,
-)
-from agents_remember.memory_quality.landing_report import LeafBaseRequest
-from agents_remember.models.knowledge_files.canonical import canonical_text
-from agents_remember.models.lifecycles.memory_candidate import (
-    MemoryCandidatePairIdentity,
 )
 from agents_remember.models.role_capsules.manifest import parse_composition_manifest
 from agents_remember.models.role_capsules.types import (
@@ -70,108 +51,25 @@ from agents_remember.models.role_capsules.types import (
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.models.tools.tool_answer import TOOL_ANSWER_STATUS_ENTRY_MAX
-from agents_remember.worktrees.modules.quality.closeout_memory import (
-    run_memory_quality_phase,
-)
-from agents_remember.worktrees.services import (
-    WorktreeServices,
-    bind_worktree_services,
-    reset_worktree_services,
-)
 from agents_remember.worktrees.worktree_contract import load_contract
 from agents_remember_test_support.testing.leaf_instruction_wording import delivered_step
+from landing_report_test_support import (
+    CURATOR_SENTENCE_EQUIVALENTS,
+    CURATOR_SENTENCES,
+    REVIEWER_SENTENCES,
+    SIDECAR,
+    _checklist,
+    _commit_all,
+    _curator_landing_missing,
+    _landing_counts,
+    _leaf_pair,
+    _leaf_port,
+    _operation_contract,
+    _rename_pair,
+    _report,
+    _reviewer_landing_roots,
+)
 from test_worktree_support import git, init_repo
-
-LAYOUT_MARKER = '{\n  "conversion": "1",\n  "schema": "ar-memory-layout/v2"}\n'
-SIDECAR = '{"schema": "ar-onboarding-file/v1", "path": "%s", "references": {}}\n'
-
-CURATOR_SENTENCES = (
-    "the handover names the change of this task that made the removed text untrue",
-    "Text is never removed to clear a finding of the quality check",
-    "never into the memory worktree",
-)
-CURATOR_SENTENCE_EQUIVALENTS = {
-    CURATOR_SENTENCES[
-        0
-    ]: "For every quality-check cut card, name in the handover this task's change that made its removed text untrue.",
-}
-
-
-def _curator_landing_missing(text: str) -> list[str]:
-    reading = " ".join(text.replace("**", "").split())
-    return [
-        sentence
-        for sentence in CURATOR_SENTENCES
-        if not any(
-            " ".join(variant.split()) in reading
-            for variant in (sentence, CURATOR_SENTENCE_EQUIVALENTS.get(sentence, sentence))
-        )
-    ]
-
-
-REVIEWER_SENTENCES = (
-    "text removed\n   without a named change is a finding",
-    "an added file outside the knowledge without a place in the task's requirement",
-)
-
-
-def _report(
-    candidate_cards: Mapping[str, bytes],
-    base_cards: Mapping[str, bytes] | None,
-    **fields: Any,
-) -> dict[str, Any]:
-    return landing_report.check_landing_report(
-        landing_report.LandingReportInputs(
-            candidate_cards=candidate_cards, base_cards=base_cards, **fields
-        )
-    )
-
-
-def _commit_all(repo: Path, message: str) -> str:
-    git(repo, "add", "-A")
-    git(repo, "commit", "-qm", message)
-    return git(repo, "rev-parse", "HEAD")
-
-
-def _checklist(
-    report_path: Path,
-    report_only: list[dict[str, Any]],
-    *,
-    repair_findings: list[dict[str, Any]] | None = None,
-    commit_owned_findings: list[dict[str, Any]] | None = None,
-    finding_count: int = 0,
-) -> CuratorChecklist:
-    return CuratorChecklist(
-        report_path=report_path,
-        repo_id="repo-a",
-        code_root=report_path.parent / "code",
-        onboarding_root=report_path.parent / "memory" / "onboarding",
-        pair_identity=MemoryCandidatePairIdentity(
-            repoId="repo-a",
-            contractPath="/coordination/tasks/repo-a/task/series-contract.md",
-            contractDigest="7" * 64,
-            codeRoot="/code",
-            memoryRoot="/memory",
-            codeSourceBranch="ar/series",
-            codeWorkBranch="ar/leaf",
-            codeBaseCommit="1" * 40,
-            memorySourceBranch="ar/series",
-            memoryWorkBranch="ar/leaf",
-            memoryBaseCommit="2" * 40,
-            onboardingRoot="/memory/onboarding",
-            ledgerPath="memory.md",
-        ),
-        code_candidate_tree="c" * 40,
-        memory_candidate_tree="d" * 40,
-        quality={"findingCount": finding_count},
-        repair_findings=[] if repair_findings is None else repair_findings,
-        commit_owned_findings=[] if commit_owned_findings is None else commit_owned_findings,
-        missing_onboarding={"missing": [], "missingCount": 0},
-        stale_route_indexes=[],
-        source_candidates=(),
-        drift_rows=[],
-        report_only_findings=report_only,
-    )
 
 
 def test_card_over_measure_reports_both_numbers() -> None:
@@ -461,7 +359,10 @@ def test_role_texts_hold_landing_sentences_everywhere() -> None:
         for path in REPO_ROOT.glob("**/skills/l-01-agent-lifecycles/roles/curator.md")
         if ".venv" not in path.parts
     )
-    assert len(roots) >= 9
+    # MIK-R196 rule 7: the canonical tree and its packaged serving copy are the only two
+    # deliveries of the corpus. The eight harness mirrors are gone, so the equality this
+    # test can still claim is that both surviving copies carry the sentences.
+    assert len(roots) == 2
     for root in sorted(roots):
         curator = (root / "l-01-agent-lifecycles" / "roles" / "curator.md").read_text()
         assert _curator_landing_missing(curator) == [], root
@@ -503,17 +404,6 @@ def test_role_texts_hold_landing_sentences_everywhere() -> None:
         assert _curator_landing_missing(text) == [], f"compiled {role}/{operation}"
 
 
-def _reviewer_landing_roots() -> list[Path]:
-    roots = {REPO_ROOT / "skills"}
-    roots.update(
-        path.parent.parent.parent
-        for path in REPO_ROOT.glob("**/skills/l-01-agent-lifecycles/roles/reviewer.md")
-        if ".venv" not in path.parts
-    )
-    assert len(roots) >= 9
-    return sorted(roots)
-
-
 @pytest.mark.parametrize(
     "root", _reviewer_landing_roots(), ids=lambda root: root.relative_to(REPO_ROOT).as_posix()
 )
@@ -536,50 +426,6 @@ def test_reviewer_landing_sentences_are_delivered_before_memory_review(
         mutant = reading.replace(flat_sentence, "")
         assert mutant != reading
         assert flat_sentence not in mutant
-
-
-def _leaf_pair(root: Path) -> dict[str, Any]:
-    """A converted scratch leaf pair: memory and code git repos at one base."""
-
-    memory = root / "memory"
-    code = root / "code"
-    (memory / "knowledge").mkdir(parents=True)
-    (memory / "onboarding").mkdir(parents=True)
-    code.mkdir(parents=True)
-    (memory / "knowledge" / "layout.json").write_text(LAYOUT_MARKER, encoding="utf-8")
-    (memory / "onboarding" / "a.py.md").write_text(
-        "# Card\n\n" + "".join(f"line {index}\n" for index in range(40)), encoding="utf-8"
-    )
-    (memory / "onboarding" / "a.py.json").write_text(SIDECAR % "a.py", encoding="utf-8")
-    (memory / "notes").mkdir(exist_ok=True)
-    (memory / "notes" / "kept.txt").write_text("older base file\n", encoding="utf-8")
-    (code / "a.py").write_text("VALUE = 1\n", encoding="utf-8")
-    init_repo(memory)
-    init_repo(code)
-    _commit_all(memory, "base")
-    _commit_all(code, "base")
-    return {
-        "memory": memory,
-        "code": code,
-        "memory_base": git(memory, "rev-parse", "HEAD").strip(),
-        "code_base": git(code, "rev-parse", "HEAD").strip(),
-    }
-
-
-def _leaf_port(pair: dict[str, Any], memory_base: str | None = None):  # type: ignore[no-untyped-def]
-    return leaf_base_port(
-        LeafBaseRequest(
-            memory_repository=pair["memory"],
-            base_commit=pair["memory_base"] if memory_base is None else memory_base,
-            code_repository=pair["code"],
-            code_base_commit=pair["code_base"],
-            cache_directory=None,
-        )
-    )
-
-
-def _landing_counts(result: dict[str, Any]) -> tuple[int, int]:
-    return int(result["cutCardCount"]), int(result["addedFileCount"])
 
 
 def test_leaf_base_reports_committed_and_keeps_older_base_out(tmp_path: Path) -> None:
@@ -616,32 +462,6 @@ def test_leaf_base_update_excludes_older_base_files(tmp_path: Path) -> None:
     )
     assert _landing_counts(result) == (0, 1)
     assert [row["path"] for row in result["addedFiles"]] == ["notes/later.txt"]
-
-
-def _rename_pair(root: Path) -> dict[str, Any]:
-    """A scratch leaf pair whose code worktree renames a source with an edit."""
-
-    pair = _leaf_pair(root)
-    code = pair["code"]
-    old_source = "\n".join(f"VALUE_{index} = {index}" for index in range(20)) + "\n"
-    (code / "old.py").write_text(old_source, encoding="utf-8")
-    memory = pair["memory"]
-    (memory / "onboarding" / "old.py.md").write_text(
-        "# Card\n\n" + "".join(f"line {index}\n" for index in range(40)), encoding="utf-8"
-    )
-    (memory / "onboarding" / "old.py.json").write_text(SIDECAR % "old.py", encoding="utf-8")
-    _commit_all(code, "add old source")
-    _commit_all(memory, "add old card")
-    pair["code_base"] = git(code, "rev-parse", "HEAD").strip()
-    pair["memory_base"] = git(memory, "rev-parse", "HEAD").strip()
-    edited = old_source.replace("VALUE_0 = 0", "VALUE_0 = 1")
-    git(code, "mv", "old.py", "new.py")
-    (code / "new.py").write_text(edited, encoding="utf-8")
-    (memory / "onboarding" / "old.py.md").unlink()
-    (memory / "onboarding" / "old.py.json").unlink()
-    (memory / "onboarding" / "new.py.md").write_text("# Card\n\nshort\n", encoding="utf-8")
-    (memory / "onboarding" / "new.py.json").write_text(SIDECAR % "new.py", encoding="utf-8")
-    return pair
 
 
 def test_named_rename_cut_reported_across_move(tmp_path: Path) -> None:
@@ -791,97 +611,6 @@ def test_leaf_run_proves_deletion_with_both_code_trees(tmp_path: Path) -> None:
     ]
 
 
-def _operation_context(root: Path, memory: Path) -> Any:
-    coordination = root / "coordination"
-    temporary = root / "temp"
-    coordination.mkdir(parents=True, exist_ok=True)
-    temporary.mkdir(parents=True, exist_ok=True)
-    return SimpleNamespace(
-        onboarding_root=memory / "onboarding",
-        memory_root=memory,
-        coordination_root=coordination,
-        temp_root=temporary,
-    )
-
-
-def _operation_pair(root: Path, landed: bool) -> tuple[dict[str, Any], Any]:
-    """A converted pair with (or without) one cut and one added file."""
-
-    pair = _leaf_pair(root)
-    memory = pair["memory"]
-    if landed:
-        (memory / "onboarding" / "a.py.md").write_text("# Card\n\nshort\n", encoding="utf-8")
-        (memory / "notes" / "working.txt").write_text("scratch\n", encoding="utf-8")
-    context = _operation_context(root, memory)
-    drift = DriftCheckContext(
-        code_repository_root=pair["code"],
-        context=context,
-        knowledge_base=None,
-        landing_base=_leaf_port(pair),
-    )
-    return pair, drift
-
-
-def _operation_contract(root: Path, pair: dict[str, Any]) -> Path:
-    """A minimal loadable leaf contract binding the fixture pair's bases."""
-
-    path = root / "series-contract.md"
-    path.write_text(
-        "---\n"
-        "schema: ar-series-contract/v1\n"
-        "schemaVersion: 1.0\n"
-        "kind: leaf\n"
-        "task_id: TEST_LANDING\n"
-        "task_name: test_landing\n"
-        "repo_name: agents-remember\n"
-        "workflow_kind: light-task\n"
-        "memory_mode: external\n"
-        "coordination:\n"
-        f"  root: {root / 'coordination'}\n"
-        f"  task_root: {root}\n"
-        f"  task_artifact: {root / 'task.md'}\n"
-        f"  worktree_group: {root}\n"
-        "  leaf_id: TEST-L120\n"
-        "code:\n"
-        f"  repo_path: {pair['code']}\n"
-        "  source_branch: main\n"
-        "  work_branch: leaf\n"
-        f"  base_commit: {pair['code_base']}\n"
-        f"  worktree: {pair['code']}\n"
-        "memory:\n"
-        "  mode: external\n"
-        f"  repo_path: {pair['memory']}\n"
-        "  source_branch: main\n"
-        "  work_branch: leaf\n"
-        f"  base_commit: {pair['memory_base']}\n"
-        f"  worktree: {pair['memory']}\n"
-        f"  ledger: {pair['memory'] / 'memory.md'}\n"
-        "human_review:\n"
-        "  status: pending-review\n"
-        "  approved_for_commit: no\n"
-        "closeout:\n"
-        "  status: not-started\n"
-        "integration:\n"
-        "  status: not-started\n"
-        "  cleanup: pending\n"
-        "---\n",
-        encoding="utf-8",
-    )
-    return path
-
-
-def _gate_trees(pair: dict[str, Any]) -> Any:
-    return GateTrees(
-        code_repository=pair["code"],
-        code_tree=git(pair["code"], "rev-parse", "HEAD").strip(),
-        memory_repository=pair["memory"],
-        memory_tree=git(pair["memory"], "rev-parse", "HEAD").strip(),
-        validation_bases=(pair["memory_base"],),
-        base_code_commit=pair["code_base"],
-        cache_directory=None,
-    )
-
-
 def test_leaf_base_request_reads_contract_and_none_without_base(tmp_path: Path) -> None:
     """The contract builder binds the admitted base, else nothing to bind."""
 
@@ -905,351 +634,6 @@ def test_leaf_base_request_reads_contract_and_none_without_base(tmp_path: Path) 
     assert request.memory_repository == pair["memory"]
     assert request.code_repository == pair["code"]
     assert request.code_base_commit == pair["code_base"]
-
-
-def _clean_pair(root: Path) -> dict[str, Any]:
-    """A validator-clean scratch leaf pair: canonical files, anchored sidecar."""
-
-    pair = _leaf_pair(root)
-    memory, code = pair["memory"], pair["code"]
-    source = (code / "a.py").read_bytes()
-    blob = git(code, "hash-object", "a.py")
-    sidecar = {
-        "schema": "ar-onboarding-file/v1",
-        "path": "a.py",
-        "references": {},
-        "realizes": [
-            {
-                "id": "RLZ-000001",
-                "role": "support",
-                "rationale": ("The card documents the module whose value anchors the fixture."),
-                "invariant": "INV-000001",
-                "anchor": {
-                    "locator": {"kind": "file"},
-                    "blob": blob,
-                    "content": "sha256:" + hashlib.sha256(source).hexdigest(),
-                },
-            }
-        ],
-    }
-    (memory / "onboarding" / "a.py.json").write_text(canonical_text(sidecar))
-    (memory / "knowledge" / "layout.json").write_text(
-        canonical_text({"conversion": "1", "schema": "ar-memory-layout/v2"})
-    )
-    (memory / "knowledge" / "invariants").mkdir(exist_ok=True)
-    record = {
-        "schema": "ar-invariant/v1",
-        "id": "INV-000001",
-        "origin": {"task": "fixture"},
-        "revision": 1,
-        "status": "accepted",
-        "statement": "The fixture module holds its value.",
-        "applicability": "The scratch fixture only.",
-        "conditions": [],
-        "exclusions": [],
-        "supersedes": [],
-        "admission": {
-            "criteria": ["prevents_costly_mistake"],
-            "justification": (
-                "Without this record a worker could delete the value the card documents."
-            ),
-        },
-    }
-    (memory / "knowledge" / "invariants" / "INV-000001-fixture.json").write_text(
-        canonical_text(record)
-    )
-    _commit_all(memory, "clean base")
-    pair["memory_base"] = git(memory, "rev-parse", "HEAD").strip()
-    return pair
-
-
-def _land(pair: dict[str, Any]) -> None:
-    """Cut the fixture card and add one scratch file, uncommitted."""
-
-    memory = pair["memory"]
-    (memory / "onboarding" / "a.py.md").write_text("# Card\n\nshort\n", encoding="utf-8")
-    (memory / "notes" / "working.txt").write_text("scratch\n", encoding="utf-8")
-
-
-def test_clean_check_reports_both_with_ok_true(tmp_path: Path) -> None:
-    """F06: the real check passes clean and still reports both populations."""
-
-    for index, landed_flag in enumerate((True, False)):
-        pair = _clean_pair(tmp_path / f"clean-check-{index}")
-        if landed_flag:
-            _land(pair)
-        context = _operation_context(tmp_path / f"clean-check-{index}", pair["memory"])
-        payload = run_memory_quality_check(
-            pair["memory"] / "onboarding",
-            checks=["integrity.onboarding_drift_check.summary"],
-            drift_context=DriftCheckContext(
-                code_repository_root=pair["code"],
-                context=context,
-                knowledge_base=None,
-                landing_base=_leaf_port(pair),
-            ),
-            include_report_only_findings=True,
-        )
-        assert payload["ok"] is True
-        assert payload["findingCount"] == 0
-        assert payload["findings"] == []
-        expected = (1, 1) if landed_flag else (0, 0)
-        assert _landing_counts(payload["checks"]["knowledge.converted"]) == expected
-
-
-def test_clean_gate_ready_with_landing_aboard(tmp_path: Path) -> None:
-    """F06: the gate refuses nothing on a landed candidate it is ready for."""
-
-    for index, landed_flag in enumerate((True, False)):
-        pair = _clean_pair(tmp_path / f"clean-gate-{index}")
-        if landed_flag:
-            _land(pair)
-            _commit_all(pair["memory"], "land the cut and the addition")
-        refusing, reports = validation_findings(_gate_trees(pair))
-        assert refusing == []
-        assert reports == []
-
-
-def test_clean_closeout_adapter_ok_true(tmp_path: Path) -> None:
-    """F06: the closeout adapter passes clean with both populations aboard."""
-
-    adapter = MemoryQualityAdapter()
-    for index, landed_flag in enumerate((True, False)):
-        pair = _clean_pair(tmp_path / f"clean-adapter-{index}")
-        if landed_flag:
-            _land(pair)
-        root = tmp_path / f"clean-adapter-{index}"
-        context = _operation_context(root, pair["memory"])
-        context.contract_path = _operation_contract(root, pair)
-        payload = adapter.run_check(
-            pair["memory"] / "onboarding",
-            checks=("integrity.onboarding_drift_check.summary",),
-            drift_context=adapter.drift_context(pair["code"], context, 50),
-        )
-        assert payload["ok"] is True
-        assert payload["findingCount"] == 0
-        expected = (1, 1) if landed_flag else (0, 0)
-        assert _landing_counts(payload["checks"]["knowledge.converted"]) == expected
-
-
-def _paired_gate_contract(root: Path, pair: dict[str, Any]) -> Any:
-    """A loadable leaf contract whose memory line pairs the fixture code base."""
-
-    git(
-        pair["memory"],
-        "commit",
-        "--allow-empty",
-        "-qm",
-        f"pair code base\n\nCode-Commit: {pair['code_base']}",
-    )
-    pair["memory_base"] = git(pair["memory"], "rev-parse", "HEAD").strip()
-    return load_contract(_operation_contract(root, pair))
-
-
-def _gate_candidate(pair: dict[str, Any]) -> Any:
-    return CandidateTrees(
-        code=git(pair["code"], "rev-parse", "HEAD^{tree}").strip(),
-        memory=git(pair["memory"], "rev-parse", "HEAD^{tree}").strip(),
-    )
-
-
-def test_real_gate_evaluates_landed_candidate_clean(tmp_path: Path) -> None:
-    """F06: evaluate_leaf_gate judges the landed candidate with no refusal."""
-
-    for index, landed_flag in enumerate((True, False)):
-        pair = _clean_pair(tmp_path / f"real-gate-{index}")
-        contract = _paired_gate_contract(tmp_path / f"real-gate-{index}", pair)
-        if landed_flag:
-            _land(pair)
-            _commit_all(pair["memory"], "land the cut and the addition")
-        result = evaluate_leaf_gate(
-            contract, _gate_candidate(pair), parent_memory_tip=pair["memory_base"]
-        )
-        assert result is not None
-        assert result.worklist["state"] == "complete"
-        assert result.findings == ()
-        assert result.reports == ()
-        assert not [
-            finding for finding in (*result.findings, *result.reports) if "landing" in str(finding)
-        ]
-
-
-def test_real_closeout_phase_passes_with_landing_aboard(tmp_path: Path) -> None:
-    """F06: the closeout quality phase passes clean with both populations."""
-
-    bind_worktree_services(
-        WorktreeServices(
-            provider_lifecycle=mock.Mock(),
-            memory_quality=MemoryQualityAdapter(),
-            citation_guard=mock.Mock(),
-            knowledge_validation=mock.Mock(),
-            knowledge_gate=mock.Mock(),
-        )
-    )
-    try:
-        for index, landed_flag in enumerate((True, False)):
-            pair = _clean_pair(tmp_path / f"real-phase-{index}")
-            if landed_flag:
-                _land(pair)
-            root = tmp_path / f"real-phase-{index}"
-            context = SimpleNamespace(
-                onboarding_root=pair["memory"] / "onboarding",
-                code_repository_root=pair["code"],
-                contract_path=_operation_contract(root, pair),
-            )
-            result = run_memory_quality_phase(
-                context, ("integrity.onboarding_drift_check.summary",)
-            )
-            assert result["ok"] is True
-            assert result["findingCount"] == 0
-            expected = (1, 1) if landed_flag else (0, 0)
-            assert _landing_counts(result["checks"]["knowledge.converted"]) == expected
-    finally:
-        reset_worktree_services()
-
-
-def test_operations_hold_both_populations_without_new_refusals(tmp_path: Path) -> None:
-    """F06: the real check holds both populations without new refusals."""
-
-    landed_pair, landed_drift = _operation_pair(tmp_path / "landed", True)
-    control_pair, control_drift = _operation_pair(tmp_path / "control", False)
-    landed = run_memory_quality_check(
-        landed_pair["memory"] / "onboarding",
-        checks=["integrity.onboarding_drift_check.summary"],
-        drift_context=landed_drift,
-        include_report_only_findings=True,
-    )
-    control = run_memory_quality_check(
-        control_pair["memory"] / "onboarding",
-        checks=["integrity.onboarding_drift_check.summary"],
-        drift_context=control_drift,
-        include_report_only_findings=True,
-    )
-    landed_check = landed["checks"]["knowledge.converted"]
-    control_check = control["checks"]["knowledge.converted"]
-    assert _landing_counts(landed_check) == (1, 1)
-    assert _landing_counts(control_check) == (0, 0)
-    assert landed["findingCount"] == control["findingCount"]
-    assert landed["findings"] == control["findings"]
-    assert landed["ok"] == control["ok"]
-
-
-def test_checklist_actionable_parity_on_real_populations(tmp_path: Path) -> None:
-    """F06: the checklist renders the real payloads with equal actionability."""
-
-    landed_pair, landed_drift = _operation_pair(tmp_path / "landed", True)
-    control_pair, control_drift = _operation_pair(tmp_path / "control", False)
-    landed = run_memory_quality_check(
-        landed_pair["memory"] / "onboarding",
-        checks=["integrity.onboarding_drift_check.summary"],
-        drift_context=landed_drift,
-        include_report_only_findings=True,
-    )
-    control = run_memory_quality_check(
-        control_pair["memory"] / "onboarding",
-        checks=["integrity.onboarding_drift_check.summary"],
-        drift_context=control_drift,
-        include_report_only_findings=True,
-    )
-    summaries = []
-    rendered = []
-    for payload, pair, name in (
-        (landed, landed_pair, "landed.md"),
-        (control, control_pair, "control.md"),
-    ):
-        onboarding = pair["memory"] / "onboarding"
-        code_files = sorted(
-            path.name for path in pair["code"].iterdir() if path.is_file() and path.suffix == ".py"
-        )
-        assert code_files == ["a.py"]
-        assert (onboarding / "a.py.json").is_file()
-        assert list(onboarding.rglob("overview.index.json")) == []
-        repair, owned = split_commit_owned_findings(payload["findings"], onboarding)
-        summary = write_curator_checklist(
-            _checklist(
-                tmp_path / name,
-                payload["reportOnlyFindings"],
-                repair_findings=repair,
-                commit_owned_findings=owned,
-                finding_count=payload["findingCount"],
-            )
-        )
-        summaries.append(summary)
-        rendered.append((tmp_path / name).read_text(encoding="utf-8"))
-    assert summaries[0]["checklistStatus"] == summaries[1]["checklistStatus"]
-    assert summaries[0]["curatorActionableCount"] == summaries[1]["curatorActionableCount"]
-    for payload in (landed, control):
-        assert not [
-            finding
-            for finding in payload["findings"]
-            if str(finding.get("check", "")).startswith("knowledge.landing.")
-        ]
-    assert "onboarding/a.py.md" in rendered[0]
-    assert "notes/working.txt" in rendered[0]
-
-
-def test_gate_refuses_nothing_landing(tmp_path: Path) -> None:
-    """F06: the gate judges the candidate on its own rules alone."""
-
-    pairs = []
-    for index, landed_flag in enumerate((True, False)):
-        pair = _leaf_pair(tmp_path / f"gate-{index}")
-        pairs.append(pair)
-        if landed_flag:
-            memory = pair["memory"]
-            (memory / "onboarding" / "a.py.md").write_text("# Card\n\nshort\n", encoding="utf-8")
-            (memory / "notes" / "working.txt").write_text("scratch\n", encoding="utf-8")
-            _commit_all(memory, "land the cut and the addition")
-    for pair in pairs:
-        refusing, reports = validation_findings(_gate_trees(pair))
-        for finding in list(refusing) + list(reports):
-            assert "landing" not in str(finding)
-
-
-def test_existing_refusal_fires_identically_with_landing(tmp_path: Path) -> None:
-    """F06: an existing refusal fires the same with and without populations."""
-
-    refusals = []
-    for index, landed_flag in enumerate((True, False)):
-        pair = _leaf_pair(tmp_path / f"refusal-{index}")
-        if landed_flag:
-            memory = pair["memory"]
-            (memory / "onboarding" / "a.py.md").write_text("# Card\n\nshort\n", encoding="utf-8")
-            (memory / "notes" / "working.txt").write_text("scratch\n", encoding="utf-8")
-        (pair["memory"] / "onboarding" / "a.py.json").write_text("{not json}\n", encoding="utf-8")
-        _commit_all(pair["memory"], "break one sidecar with landing aboard")
-        refusing, _ = validation_findings(_gate_trees(pair))
-        assert refusing
-        refusals.append([str(finding) for finding in refusing])
-    assert refusals[0] == refusals[1]
-
-
-def test_closeout_adapter_binds_leaf_base_through_contract(tmp_path: Path) -> None:
-    """F06: the closeout adapter reports both on uncommitted work, else none."""
-
-    adapter = MemoryQualityAdapter()
-    adapter_payloads = []
-    for index, landed_flag in enumerate((True, False)):
-        pair = _leaf_pair(tmp_path / f"adapter-{index}")
-        if landed_flag:
-            memory = pair["memory"]
-            (memory / "onboarding" / "a.py.md").write_text("# Card\n\nshort\n", encoding="utf-8")
-            (memory / "notes" / "working.txt").write_text("scratch\n", encoding="utf-8")
-        root = tmp_path / f"adapter-{index}"
-        context = _operation_context(root, pair["memory"])
-        context.contract_path = _operation_contract(root, pair)
-        drift = adapter.drift_context(pair["code"], context, 50)
-        adapter_payloads.append(
-            adapter.run_check(
-                pair["memory"] / "onboarding",
-                checks=("integrity.onboarding_drift_check.summary",),
-                drift_context=drift,
-            )
-        )
-    assert adapter_payloads[0]["findingCount"] == adapter_payloads[1]["findingCount"]
-    assert adapter_payloads[0]["findings"] == adapter_payloads[1]["findings"]
-    assert _landing_counts(adapter_payloads[0]["checks"]["knowledge.converted"]) == (1, 1)
-    assert _landing_counts(adapter_payloads[1]["checks"]["knowledge.converted"]) == (0, 0)
 
 
 def test_symlinks_reported_without_following_targets(tmp_path: Path) -> None:

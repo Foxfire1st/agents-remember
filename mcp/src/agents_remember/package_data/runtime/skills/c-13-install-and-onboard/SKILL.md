@@ -1,56 +1,62 @@
 ---
 name: c-13-install-and-onboard
-description: "After the harness starter package and MCP server are wired and the harness has restarted, run/verify runtime_install, set up the memory repo, bootstrap onboarding when scaffolding new, reach the repository's knowledge foundation through the curator's c-14-knowledge-bootstrap procedure, and configure providers to index the code and memory."
+description: "After the MCP tool server is installed and registered, run the setup path the one Bootstrap call starts (runtime scaffold, agentic settings, memory repo and first baseline), read the knowledge foundation's state, hand its making to the user-started Architect's regular task under c-14-knowledge-bootstrap, and configure providers to index the code and memory."
 ---
 
 # c-13-install-and-onboard Install And Onboard
 
-Take over setup **after** the developer has copied the harness starter package,
-wired the Agents Remember MCP server, and restarted the harness once.
+Take over setup **after** the developer has installed the Agents Remember MCP tool
+server and registered it with the harness.
 
-The harness package owns harness-native files: skills, hooks, rules,
-instructions, MCP registration templates, and settings templates. This skill does
-not install or repair those files during first-run setup. If they are missing,
-stop and tell the developer to copy the correct starter package from this repo,
-render the copied package with its `render-starter` script or by hand, restart
-the harness, and invoke this skill again.
+Installation no longer distributes the canonical skills. The tool server serves them
+from its own packaged copy as MCP resources, so nothing is copied into a harness,
+project or coordination-root skill folder, and no skill-rendering or skill-sync step
+belongs to a user's install. The harness guide owns MCP registration and optional
+native first-action directives; no starter package or renderer is required.
 
-The MCP layer still exposes deterministic maintenance tools such as
-`runtime_install()`. In the normal first-run path, no skills installation step
-is used because the starter package already placed the
-skills where the harness can discover them. `runtime_install()` remains the first
-runtime action this skill performs because it creates or refreshes the
-coordinator scaffold under `ar-coordination/`.
+The user starts setup with **one call** from their own chat:
+`role_start(role="bootstrap", request_id=<UUID>)`. That call prepares a missing
+runtime scaffold and the host, verifies the plug-in and starts one instructed
+Bootstrap seat, and it answers with that seat's identity and the dashboard address
+of its chat. Setup continues in that dashboard conversation, and the Bootstrap
+operation (`skills/l-01-agent-lifecycles/operations/bootstrap.md`) owns its steps.
+This skill is the setup reference for the path as a whole: how installation works,
+the order of the stages, which skill owns each one, and the handover the first run
+ends on.
+
+`runtime_install()` still exposes the deterministic maintenance surface. Its
+scaffold creates or refreshes the coordinator root under `ar-coordination/` and
+contains no skills copy, and no installation step creates one.
 
 ## When To Use
 
 Use this skill after these prerequisites are in place:
 
-1. The developer copied the harness-native starter package for the active
-   harness into the workspace and ran that package's `render-starter` script
-   with an explicit `--repo` list, or manually replaced every path, repository,
-   and hook-command placeholder. The renderer infers the workspace root from the
-   copied harness folder.
-2. The Agents Remember MCP server is registered with the harness, typically with
-   a command like:
+1. The Agents Remember MCP tool server is installed and registered with the
+   harness, typically with a command like:
 
    ```text
    uvx agents-remember-mcp@latest --config <absolute path to agents-remember-settings.json>
    ```
 
-3. The harness was restarted once so it can load the MCP server, native skills,
-   hooks, rules, and instruction files from the copied package.
+2. The harness was restarted once so it can load the MCP server and its own
+   configuration, hooks and instruction files.
+
+3. The user made the one call that starts Bootstrap, and its answer named the seat
+   and its chat. Nothing else has to be installed for the procedures this skill
+   names to be readable: the skills are served by the tool server, not copied onto
+   disk.
 
 If any prerequisite is missing, do not improvise a harness installer. Point the
-developer at the appropriate `docs/install/<harness>.md` page, have them copy the
-starter package, and resume after the restart.
+developer at the appropriate `docs/install/<harness>.md` page and resume after the
+restart. A skill folder, a `render-starter` run and a skill sync are not
+prerequisites, and must not be invented as one.
 
 ## What This Skill Owns
 
 Run this sequence in order:
 
-0. Preflight: verify the copied package and MCP setup are usable enough to
-   continue.
+0. Preflight: verify the MCP setup is usable enough to continue.
 1. Runtime scaffold: run or verify `runtime_install()`.
 2. Agentic settings: walk the developer through the orchestration defaults in
    the global settings file with built-in defaults for absent knobs.
@@ -61,12 +67,12 @@ Run this sequence in order:
    while a certification profile is authored only as that requested operation and routine closeout
    and master integration do not enter this stage.
 4. Memory repo: ask scaffold-new vs use-existing, unless memory already exists.
-5. Bootstrap: when a new memory repo was scaffolded, hand off to
-   `c-03-repo-bootstrap` (running the fixer on the cards before the baseline),
-   adopt the first baseline through `c-10-adopt-memory-baseline`, then reach the
-   repository's knowledge foundation through `c-14-knowledge-bootstrap`. That procedure is the curator's work, and the session
-   that carries it — the taskless bootstrap seat or an instructed session before a
-   task exists, or a curator opened on a task document — is stated there.
+5. Baseline and handover: for a new memory repo, initialise it and adopt the first
+   baseline through `c-10-adopt-memory-baseline`, as Stage5 states. Setup authors no
+   onboarding or knowledge and runs no citation fixer. Read and report existing
+   onboarding and foundation state; the user starts the Architect, which organises
+   optional onboarding and the knowledge foundation as regular task work through
+   the existing Curator procedures (MIK-R196 rules 4-5).
 6. Providers: when providers are enabled, start/refresh indexing and verify
    readiness.
 
@@ -85,27 +91,23 @@ Check, in order:
 1. **MCP reachable.** Confirm the MCP responds (`server_info`). If not, the harness did not load
    the server; tell
    the developer to verify the MCP registration path and restart the harness.
-2. **Harness package present.** Confirm this skill is running from a
-   harness-discoverable skill root and that the active harness package includes
-   its native settings/instruction files. Do not create missing harness files
-   here; ask the developer to recopy the package and restart.
+2. **Skills served, not installed.** Confirm this skill and the procedures it
+   names are read through the tool server's packaged copy of the skill tree, not
+   from a harness, project or coordination-root skill folder. There is no skill
+   folder to repair: do not create one, and do not send the developer to an
+   installer or a renderer for it.
 3. **Settings sane.** Confirm `server_info` reports the expected
    `coordinationRoot`, `workspaceRoot`, allowed repositories, and providers.
-   Surface the resolved absolute paths because wrong paths are the common cause
-   of resolver failures. Also report whether the global agentic settings file
-   (`~/.config/agents-remember/settings.json`, under `XDG_CONFIG_HOME` when set) exists and carries `paseoRuntime`.
-   When `server_info` carries `openUserSettings`, that file or its folder is open to writing: tell the
-   developer so and give both of its commands as they stand; change no mode yourself.
-   Starter setup supplies one block; runtime_install never writes this authority.
-   If missing, calculate the complete five-key block below using the installation's
-   actual absolute data/state folders. Empty or unset XDG values use the home
-   defaults; refuse relative overrides. Show the resolved block and its destination
-   before asking to add it. Preserve other families and any explicit existing
-   home/installPrefix/listen. For a legacy per-harness block, offer to move that
-   complete block to this one shared file and remove its old copy after approval.
-   Do not duplicate it or use a fallback. After the approved setup, retry
-   runtime_install; configured=false is an incomplete host setup, not a failed
-   scaffold. Stage 2 configures the agentic posture.
+   Surface the resolved absolute paths and the active MCP authority `configPath`,
+   because wrong paths are the common cause of resolver failures. The host's
+   `paseoRuntime` block belongs to that MCP authority file. The separate user settings
+   file records role-harness choices. If `server_info` carries `openUserSettings`,
+   give both reported permission commands unchanged and change no mode yourself.
+   The one Bootstrap call establishes an absent host block once; an existing block
+   is preserved. A maintenance call with missing or unusable authority reports that
+   state and directs the developer to the Bootstrap call or the exact refusal remedy.
+   Do not move, merge, duplicate or hand-author a host block in the user settings file.
+   Stage2 configures the agentic posture.
 
    The fresh block is the following, with <data> and <state> replaced by the
    actual absolute XDG_DATA_HOME/XDG_STATE_HOME or $HOME/.local/share and
@@ -126,9 +128,10 @@ Check, in order:
    }
    ```
 4. **Runtime state.** Check whether the coordinator scaffold already exists under
-   `coordinationRoot` (`AGENTS.md`, `skills/`, `tasks/`, `memory-repos/`,
-   `system/` as applicable). If it is missing or stale, Stage 1 will run
-   `runtime_install()`.
+   `coordinationRoot` (`AGENTS.md`, `tasks/`, `memory-repos/`, `system/` as
+   applicable). If it is missing or stale, Stage 1 will run `runtime_install()`.
+   The scaffold carries no skills copy, so a missing skill folder is not a
+   scaffold defect.
 5. **Provider prerequisites, only when providers are enabled.** Providers run in
    Docker. If provider diagnostics report Docker/Ollama/image problems, explain
    the gap. A developer may explicitly defer providers and continue with core
@@ -142,8 +145,8 @@ Check, in order:
    transaction and does not require discovering or running a certification profile.
 
 Do not check for legacy hook prerequisites such as `jq`. Hook and instruction
-files are part of the copied, rendered harness package; this skill no longer
-installs them.
+files, when used, carry optional first-action directives from the harness guide;
+this skill does not install them.
 
 ## Stage 1 - Runtime Scaffold
 
@@ -172,8 +175,9 @@ package-owned runtime files. `runtime_install()` may also prepare provider
 runtime assets when providers are enabled, but it does not create memory repos,
 bootstrap onboarding, or start provider indexing.
 
-Do not install skills as part of first-run setup. The harness starter
-package already carries the skills.
+Do not install skills as part of first-run setup, and do not create a skill folder
+anywhere. The tool server serves the canonical skills from its packaged copy, and a
+coordinator root without a `skills/` directory is correct.
 
 ## Stage 2 - Agentic Settings: Interview The Developer
 
@@ -184,9 +188,10 @@ the entire file once. An old-only or both-file state refuses and names both path
 there is no old-location reader. Never migrate the MCP `--config` file or a repository
 or memory-repository settings file. In a sandbox, use its own user configuration directory.
 
-Starter/setup supplies the GLOBAL settings file at
-`~/.config/agents-remember/settings.json` (under `XDG_CONFIG_HOME` when set);
-`runtime_install()` never writes it. Absent agentic knobs retain their documented
+Setup supplies the GLOBAL settings file at
+`~/.config/agents-remember/settings.json` (under `XDG_CONFIG_HOME` when set): the Bootstrap seat
+writes it once through `user_settings_init`, and an existing file that holds choices of its own is
+read and reported rather than rewritten. `runtime_install()` never writes it. Absent agentic knobs retain their documented
 defaults: all-human gate delegation, the standard three-party-loop
 defaults, no concurrency caps, no spawn harness preference. This stage turns
 those defaults into the developer's actual posture so the intended workflows
@@ -231,7 +236,7 @@ If the developer wants to skip the interview, confirm the built-in defaults
 apply and continue; tell them the file can be edited any time (picked up
 per-use, except the gateDelegation restart note above).
 
-For every role offered by the Paseo launcher, guide a new user through permission mode choice. The accepted designer, strategist and bootstrap role entries have no Paseo start route in this build; name that limit instead of inventing an options request. Read the running host's modes
+For every role offered by the Paseo launcher, guide a new user through permission mode choice. The accepted designer and strategist role entries have no Paseo start route in this build; name that limit instead of inventing an options request. Bootstrap is admitted: `role_start(role="bootstrap", request_id=<UUID>)` is its one native entry, it needs no task reference, and it is the call that starts this setup path. Read the running host's modes
 and descriptions once per agent kind from the existing public `POST /api/role-launch/options`
 route with `{"role":"architect","refreshCatalog":true}`. This taskless catalog read needs no
 sprint, master or leaf; use the returned agent kinds to interview each launcher role. A running host/dashboard is a named setup
@@ -318,11 +323,11 @@ unless a memory repo is already present and resolvable:
 2. **Use an existing memory repo** - they already have one. Clone or checkout it
    to the resolved memory location, then adopt it as the Git-attributed baseline with
    `c-10-adopt-memory-baseline`. Its onboarding already exists, so skip Stage 5's
-   onboarding half — but **do not skip Stage 5's knowledge half**: an existing
+   onboarding half — but **do not skip Stage 5's knowledge part**: an existing
    memory repo is exactly the case that can have onboarding and no
-   knowledge records, so read the knowledge state and run the foundation step
-   when the location is `not-recorded`. An `unusable` location is reported with
-   its code and path and repaired first: nothing is written over it.
+   knowledge records, so read the knowledge state and hand the foundation's making
+   to the Architect when the location is `not-recorded`. An `unusable` location is
+   reported with its code and path and repaired first: nothing is written over it.
 
 Removed-layout note: repo-local internal memory lived inside the code repo at
 `<repo>/ar-memory/`. That layout was removed from the product and is refused, not
@@ -378,59 +383,54 @@ database, and conversion-format version 1 are permanent parts of the product, be
 unconverted lines live in other clones and on other machines (MIK-R46 rule 7). Never
 propose retiring them as part of this master's work.
 
-## Stage 5 - Bootstrap, The First Baseline, Then The Knowledge Foundation
+## Stage 5 - Bootstrap, The First Baseline, Then The Architect's Foundation
 
-Run this stage's onboarding and baseline halves only when Stage 4 scaffolded a new memory repo; the
-knowledge half applies to **both** memory-repo answers, because a `recorded` knowledge foundation is not
+Run this stage's initialisation and baseline halves only when Stage 4 scaffolded a new memory repo; the
+knowledge part applies to **both** memory-repo answers, because a `recorded` knowledge foundation is not
 something an existing memory repo is guaranteed to have. For a new memory repo the order is
-`memory_init`, then the first onboarding through `c-03-repo-bootstrap` with the fixer, then
-`memory_baseline_adopt`, and only then the knowledge foundation, which needs the commit the
-baseline made. Stage 5 has three parts:
+`memory_init` and then `memory_baseline_adopt`. Setup authors no onboarding: MIK-R196 rules 4-5 leave
+the knowledge foundation to the user-started Architect's regular task, and `c-14-knowledge-bootstrap`
+treats onboarding as optional input rather than a step of setup. Stage 5 has three parts, and the third
+is a handover rather than a production step:
 
-1. **Scaffold onboarding** - hand off to `c-03-repo-bootstrap` to generate initial
-   onboarding. A thin `overview.md` is enough to start; deeper route-local overviews and
-   file-level onboarding should grow as work touches new areas. Run the fixer
-   (`citation_fix` / `memory-citations --fix`) on the cards before the baseline: without a
-   contract it is admitted on the configured memory root while that root has no attributed
-   baseline. Whether the developer wants
-   onboarding at all is their call: `system/` alone is enough to adopt.
+1. **Initialise the memory repo, and author no onboarding** - `memory_init` creates the root.
+   Do not hand the onboarding to `c-03-repo-bootstrap` and do not run the citation fixer here: an
+   unattributed onboarding corpus is not a setup product, and the Architect's regular task under
+   `c-14-knowledge-bootstrap` reads onboarding only as one optional input when it is already there.
+   Whether the developer wants onboarding at all is their call: `system/` alone is enough to adopt.
 2. **Adopt the first attributed baseline** - hand off to `c-10-adopt-memory-baseline`,
    which owns the procedure. Read `memory_baseline_status` **before** adoption, put the
    drift-acceptance decision to the developer rather than assuming it, adopt through
    `memory_baseline_adopt`, then read `memory_baseline_status` **again** and report both.
    Baseline adoption is valid only before attributed memory exists, so an
    `already-adopted` report means this half is already done.
-3. **Reach the repository's knowledge foundation** - hand off to
-   `c-14-knowledge-bootstrap`. That procedure is the curator's work and states its own
-   carriers; before a task exists, an instructed session that holds that procedure
-   authors it under the curator's rules and the taskless bootstrap seat reaches
-   the read-and-report step, as that procedure states. Read the state first:
-   `memory_init` returns a `knowledge` block naming where the repository's
-   foundation lives and what a read of that location finds now (`not-recorded`,
-   `recorded` at an exact identity, `unusable`, or a refused admission with its
-   own `nextAction`). Say which state it is, and run
-   the foundation step when the location is `not-recorded`. An `unusable` location
-   is reported with its code and path and repaired before anything is written to
-   it. A memory tree in the legacy format is refused by the writer as
-   `legacy-format`, naming the conversion command.
+3. **Reach the repository's knowledge foundation through the Architect** - setup does not
+   author it. Read the state first: `memory_init` returns a `knowledge` block naming where
+   the repository's foundation lives and what a read of that location finds now
+   (`not-recorded`, `recorded` at an exact identity, `unusable`, or a refused admission
+   with its own `nextAction`). Say which state it is, and name the next step in words the
+   developer can act on: **start the Architect**. The Architect organises the foundation as
+   regular task work — one leaf, or a task under a master or a sprint, according to the size
+   of the work — and `c-14-knowledge-bootstrap` is the procedure its Curator runs there. An
+   `unusable` location is reported with its code and path; nothing is written over it. A
+   memory tree in the legacy format is refused by the writer as `legacy-format`, naming the
+   conversion command.
 
    On a new memory repo this part runs after the baseline: the foundation writer needs
    the memory commit the baseline made, and before the first baseline no leaf can exist.
    Only a repository whose memory already has a commit may reach its foundation before
-   the onboarding or the baseline. It authors
-   knowledge records through the curator's own writer, so this skill never
-   writes knowledge records itself, never invents records to make setup look
-   finished, and never creates a development leaf, worktree or enclosure to give
-   the writer an argument list it does not need — and it never names a seat that
-   cannot be started: a curator seat opens only on a leaf's task document, so before
-   a task exists the authoring is handed on as `c-14-knowledge-bootstrap`
-   states rather than worked around. The knowledge write needs the developer's
-   commit word, exactly as the other effectful stages do.
+   the onboarding or the baseline. Setup writes no knowledge record, invents none to make
+   setup look finished, and creates no development leaf, worktree or enclosure to give a
+   writer an argument list — the task that owns the foundation is the Architect's to open,
+   and the developer's commit word belongs to that work rather than to setup. This skill's
+   claim stops at the state it read: a repository whose memory has a commit may still read
+   `not-recorded` when the stage ends, and that is the honest result rather than a gap to
+   fill here.
 
 The `onboarding/bootstrap/` working files ship with the first baseline commit as the run's audit trail. Say so before the first adoption, because the developer is the one who decides whether they are removed beforehand. Only a memory-root-level `bootstrap/` staging directory is transient and excluded from memory commits.
 
 Skip the onboarding and baseline halves when an existing memory repo was adopted. The knowledge
-half is not skipped with them: see Stage 4 case 2.
+part is not skipped with them: see Stage 4 case 2.
 
 ## Stage 6 - Retire Providers
 
@@ -446,8 +446,8 @@ Providers are accelerators. Core by-path memory works without them; a provider g
 
 Summarize:
 
-1. harness package: detected and left untouched, or missing with the exact copy
-   step the developer must perform;
+1. skills: served by the tool server from its packaged copy, with the build reported;
+   nothing installed into a harness, project or coordination-root skill folder;
 2. runtime scaffold: `runtime_install()` run or already current, with the
    resolved coordination root;
 3. agentic settings: interviewed and written, or left at the built-in defaults,
@@ -457,13 +457,13 @@ Summarize:
    closeout/integration needs no profile;
 5. memory repo: scaffolded, existing-adopted, or already present, with the
    resolved memory root;
-6. bootstrap: run via `c-03-repo-bootstrap` or skipped, with the fixer run on the
-   cards before the baseline;
+6. onboarding: existing content read and reported, or absent; setup authors none
+   and runs no citation fixer; optional authoring belongs to the Architect's regular task;
 7. first baseline: `memory_baseline_status` before and after adoption, the adoption
    result at its memory-content commit, or the exact reason it was not run;
-8. knowledge foundation: the state read from `memory_init`'s `knowledge` block,
-   and then either the foundation run carried as `c-14-knowledge-bootstrap`
-   states, with the records it wrote, or the exact reason it was not run;
+8. knowledge foundation: the state read from `memory_init`'s `knowledge` block, and the
+   handover to the user-started Architect, naming `c-14-knowledge-bootstrap` as the
+   procedure its task runs for it; setup reports no knowledge records of its own;
 9. providers: indexing status and any deferred/degraded state;
 10. host: shared settings path, pinned host/product Node, provision result,
     no-change repeat or deferred restart, and any incomplete migration.
@@ -484,21 +484,21 @@ dashboard stop/restart never stops the host. A host start drops the caller's
 session/seat identities by exact name and preserves harness logins.
 
 End by telling the developer whether the project is ready for normal work — and say the
-knowledge foundation's state in that same sentence. A repository whose knowledge
-location reads `not-recorded` is set up for ordinary work and has **no recorded
-intent** for a planner to read; `recorded` names the identity that is there, and
-`unusable` is a state to report with its path rather than a ready repository. Do
-not tell them to restart for hooks installed by this skill, because this skill no
-longer installs hooks.
+knowledge foundation's state in that same sentence, and name the Architect as the next step for it.
+A repository whose knowledge location reads `not-recorded` is set up for ordinary work and has **no
+recorded intent** for a planner to read, with the foundation now the Architect's first piece of
+regular work; `recorded` names the identity that is there, and `unusable` is a state to report with
+its path rather than a ready repository. Do not tell them to restart for hooks installed by this
+skill, because this skill no longer installs hooks.
 
 ## Boundaries
 
 1. This skill is guidance for the model; it adds no MCP tool and no hardcoded
    per-harness installer.
 2. It must not install, overwrite, or invent harness hooks, rules, instruction
-   files, skills, or MCP registration files during first-run setup.
-3. It must not install skills as part of the package-based first-run
-   path.
+   files, or MCP registration files during first-run setup.
+3. It must not install skills or create a skill folder in a harness, a project root
+   or the coordination root: the tool server serves them from its packaged copy.
 4. It must not scaffold a memory repo without asking unless memory already
    exists and resolves cleanly.
 5. It delegates memory init to `c-00-initialize-memory-repo`, bootstrap to
@@ -506,10 +506,11 @@ longer installs hooks.
    `c-10-adopt-memory-baseline`, and context resolution to
    `c-08-ar-coordination-context-resolver`. The fresh-scaffold path reaches baseline
    adoption in Stage 5; it does not stop at the scaffold.
-6. It delegates the repository's knowledge foundation to `c-14-knowledge-bootstrap`,
-   and its own stages never author knowledge records. It does not report a repository's
-   knowledge as ready without that skill's outcome, and the absence of a knowledge
-   foundation is a named state of the report rather than a silent omission.
+6. It hands the repository's knowledge foundation to the user-started Architect, whose
+   task runs `c-14-knowledge-bootstrap` for it, and its own stages never author knowledge
+   records. It does not report a repository's knowledge as ready, because setup does not
+   produce the foundation: the state it read is a named fact of the report rather than a
+   silent omission.
 7. It must not invent a certification profile, discover one by convention, or copy another
    repository's commands. A missing/invalid profile blocks only the explicitly requested
    certification operation; routine code/memory/ledger closeout remains a Git transaction.

@@ -4,14 +4,22 @@ Stale onboarding is expected. The important rule is that agents should detect it
 
 ## Detect Drift
 
-Run the `c-02-memory-quality-control` skill for the target repository, requesting drift
-reporting (`context_packet` with `include_drift`, or `memory_quality_check`).
+Follow the [memory-quality diagnostic procedure](../../skills/c-05-create-or-update-onboarding-files/workflows/memory-quality-control.md#2-run-task-start-drift-control)
+for the target repository. `context_packet(include_drift=true)` answers the drift
+summary in its response and writes no report.
 
-The helper writes drift reports under the resolved coordination root, usually:
+`memory_quality_check` replaces one contract-scoped checklist at the `reportPath`
+it returns, with its `attestationPath` beside it. In a worktree-backed leaf, pass
+the enclosure contract: the result is the enclosure's `reports/curator-memory-quality.md`,
+outside both Git worktrees. Cleanup or abandon removes that operational report
+with the enclosure; no temporary drift-report file is a prerequisite.
 
-```text
-ar-coordination/temp/drift-reports/<repo>/
-```
+Classify actionable drift by the corresponding source file's state: a clean source
+is an onboarding update candidate; a dirty source is active work and stays with
+its owner unless the developer explicitly takes it over. Missing onboarding
+remains gradual-adoption work rather than a repository-wide start gate. A scoped
+diagnostic does not replace the Curator's complete curation, memory-quality and
+required coherence work.
 
 ## Interpret Results
 

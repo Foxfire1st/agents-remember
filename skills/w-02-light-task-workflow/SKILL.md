@@ -12,6 +12,10 @@ This skill is the thin orchestration contract for the in-between case: work that
 1. `workflow.md`
 2. `template.md`
 3. `master-template.md`
+4. `workflows/worktree-operations.md` — the seat's worktree procedure, kept from the retired worktree manager skill (MIK-R196 rule 8): intake and intent, start/attach/status,
+   mid-task sync, closeout, integration, finalization and cleanup, reopening.
+5. `workflows/closeout.md` — the seat's closeout procedure, kept from the retired closeout skill: approval authority, durable gates, closeout order, granted
+   branch-direct landing, failure conditions and boundaries.
 
 ## When To Use
 
@@ -32,7 +36,7 @@ Naming convention:
 1. ticket-linked: `YYMMDD_#<number>_<short-slug>/task.md`
 2. organic: `YYMMDD_<descriptive-slug>/task.md`
 
-Create the wrapper folder at the same time the durable task artifact is created, before any `c-09-git-worktree-manager` worktree exists. Use `template.md` as the canonical scaffold. Implementation steps and substeps are tracked with checkboxes, and that checklist is the live execution state during implementation. When code changes are in scope, the task file also carries proposed code examples for each distinct change type so the developer can review the intended implementation shape before approval.
+Create the wrapper folder at the same time the durable task artifact is created, before any `w-02-light-task-workflow` worktree exists. Use `template.md` as the canonical scaffold. Implementation steps and substeps are tracked with checkboxes, and that checklist is the live execution state during implementation. When code changes are in scope, the task file also carries proposed code examples for each distinct change type so the developer can review the intended implementation shape before approval.
 
 Light-task artifacts use minute-precision timestamps in `YYYY-MM-DDTHH:MM` format wherever they record task-local dates or times.
 
@@ -75,10 +79,10 @@ The agent should:
 4. keep requirements, implementation steps, and decisions aligned with the latest approved intent
 5. treat the task file's checkboxes as the live implementation tracker
 6. include proposed code examples for each distinct implementation change when code changes are in scope
-7. run `c-02-memory-quality-control` before planning against onboarding files
+7. run `c-05-create-or-update-onboarding-files` before planning against onboarding files
 8. stop for approval before implementation
 9. after approval, treat code changes, onboarding propagation through `c-05-create-or-update-onboarding-files`, and the checks listed in the `c-08-ar-coordination-context-resolver` resolved `system/tools.md` as one implementation cycle
-10. for worktree-backed tasks, present a commit/closeout preview and stop for explicit commit approval before any `c-09-git-worktree-manager` closeout commits are created
+10. for worktree-backed tasks, present a commit/closeout preview and stop for explicit commit approval before any `w-02-light-task-workflow` closeout commits are created
 11. after the task branch has landed, ensure every declared parent/nested step is `done`; if the final step includes cleanup, run standalone `worktree_cleanup`, then mark that exact step done; finally use `lifecycle_finalize_task` to prove the edge, verify/run cleanup, and set the exact leaf plus immediate parent row to `Completed`
 
 ## Context Gathering
@@ -95,9 +99,9 @@ Optional supporting tools such as Confluence search, Brave search, or Context7 m
 
 1. Every light-task change gets a task wrapper folder and `task.md`.
 2. The task file is the living contract for requirements, checklist state, decisions, and proposed code examples.
-3. When onboarding files are part of planning context, drift is checked before planning using `c-02-memory-quality-control`.
+3. When onboarding files are part of planning context, drift is checked before planning using `c-05-create-or-update-onboarding-files`.
 4. No implementation begins before explicit developer approval.
-5. Refreshed external-memory onboarding content is committed, with the computed ledger cache excluded, before the `c-09-git-worktree-manager` skill starts worktrees.
+5. Refreshed external-memory onboarding content is committed, with the computed ledger cache excluded, before the `w-02-light-task-workflow` skill starts worktrees.
 6. Implementation approval is separate from commit approval; worktree-backed closeout commits require a later explicit developer approval after a closeout preview.
 7. Implementation steps and substeps use checkbox state rather than freeform progress prose.
 8. Code-changing light tasks include code examples for each distinct implementation change; a slice that intentionally defers its examples to the plan gate sets `codeExamplesNote` (e.g. "Drafted at the plan gate.") so the render distinguishes *deferred* from *none needed*.

@@ -956,19 +956,13 @@ class TaskDocReadRemovalSweepTests(unittest.TestCase):
     instructions and are scoped out by shape, not by path.
     """
 
+    # MIK-R196 rule 7: the harness mirrors are gone; the packaged skill copy and the canonical
+    # trees are what a task-document instruction can still sit in.
     ROOTS = (
         "mcp/src/agents_remember",
         "mcp/src/agents_remember/package_data/runtime/skills",
         "skills",
         "docs",
-        ".claude/skills",
-        ".codex/skills",
-        ".cursor/skills",
-        ".github-vscode/skills",
-        ".hermes/skills",
-        ".openclaw/workspace/skills",
-        ".pi/skills",
-        ".agents/skills",
     )
 
     # Call shapes: an instruction that reads through task_doc.

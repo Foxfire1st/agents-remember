@@ -1,14 +1,14 @@
-# `c-09-git-worktree-manager` Worktrees And Closeout
+# `w-02-light-task-workflow` Worktrees And Closeout
 
-The `c-09-git-worktree-manager` skill owns worktree creation, exact enclosure addressability,
-integration, terminal archival, and cleanup. The `c-12-closeout` skill owns validated immutable
+The `w-02-light-task-workflow` skill owns worktree creation, exact enclosure addressability,
+integration, terminal archival, and cleanup. The `w-02-light-task-workflow` skill owns validated immutable
 closeout input, approval, and code-then-memory commit order. The accepted Git pair,
 its ancestry, and recorded refs supply transaction authority. `memory.md` is an ignored cache
 computed from memory commit trailers; its bytes and rows never authorize or block the transaction.
 
 ## When To Use It
 
-Use the `c-09-git-worktree-manager` skill when:
+Use the `w-02-light-task-workflow` skill when:
 
 - a task needs isolated code and memory worktrees;
 - external-memory closeout needs code and memory commits mapped in `memory.md`;

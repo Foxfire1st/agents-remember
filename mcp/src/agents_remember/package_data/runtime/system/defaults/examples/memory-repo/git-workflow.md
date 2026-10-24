@@ -14,7 +14,7 @@ doesn't apply.
   land via PR>` or `<no — direct pushes allowed>`. State it explicitly so agents don't guess.
 - Work branches are cut from the spear: **`feat/<slug>`** (features) and **`fix/<slug>`** (fixes).
 - **Worktree-backed?** `<yes — chat and task both>` keeps external memory consistent: memory parks on
-  the worktree memory branch and lands on the spear via the **`c-11-memory-carryover-from-branch` skill** *after* the code lands.
+  the worktree memory branch and lands on the spear via the **`c-10-adopt-memory-baseline` skill** *after* the code lands.
   Repos with `disabled` memory can relax this.
 
 ---
@@ -34,16 +34,16 @@ Adapt to your repo; a gated-`main` repo typically does:
 
 1. `<gh issue create>` for feat/fix/chore (skip for pure research).
 2. Cut `feat/<slug>` | `fix/<slug>` from the spear.
-3. The `c-09-git-worktree-manager` skill creates a worktree on that branch (task adds `task.md`; chat doesn't).
+3. The `w-02-light-task-workflow` skill creates a worktree on that branch (task adds `task.md`; chat doesn't).
 4. Work in the worktree; memory parks on the worktree memory branch.
-5. **Commit gate (human)** — nothing is committed before explicit developer approval (the `c-12-closeout` skill
+5. **Commit gate (human)** — nothing is committed before explicit developer approval (the `w-02-light-task-workflow` skill
    worktree closeout preview first).
 6. **Push gate (human — one question)** — after commit approval, a single "push?" approval hands the
    tail to the agent.
 7. Agent owns the tail: **push branch → `gh pr create` (target spear) → checks green →
    `gh pr merge --delete-branch`.**
-8. The `c-09-git-worktree-manager` skill handles closeout + worktree/provider cleanup.
-9. The `c-11-memory-carryover-from-branch` skill carries parked memory into an ordinary recovery
+8. The `w-02-light-task-workflow` skill handles closeout + worktree/provider cleanup.
+9. The `c-10-adopt-memory-baseline` skill carries parked memory into an ordinary recovery
    leaf against the merged spear. Each actual memory-content commit attributes the landed code
    HEAD. If no content needs carrying, it creates no commit. The consumer ledger is computed
    from history and never authorizes the next worktree.

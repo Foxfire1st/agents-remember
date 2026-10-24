@@ -87,9 +87,9 @@ Avoid entries that are:
 
 1. re-read the `c-08-ar-coordination-context-resolver` skill resolved `system/sources.md`, the current catalog, and the relevant source materials for the entity being updated; use the registry only to locate evidence
 2. prefer updating an existing entry over creating a near-duplicate
-3. when the `c-02-memory-quality-control` skill reports fingerprint drift, inspect the changed evidence paths and update the entity prose only if the entity meaning, identifiers, relationships, naming drift, source references, or cross-layer projections changed
-4. when the `c-02-memory-quality-control` skill reports a missing fingerprint row, curate evidence paths and add the row before treating that entity as verified
-5. when the `c-02-memory-quality-control` skill reports an orphaned fingerprint row or a missing evidence path, verify whether the entity was removed, renamed, or moved before deleting the row or replacing paths
+3. when the `c-05-create-or-update-onboarding-files` skill reports fingerprint drift, inspect the changed evidence paths and update the entity prose only if the entity meaning, identifiers, relationships, naming drift, source references, or cross-layer projections changed
+4. when the `c-05-create-or-update-onboarding-files` skill reports a missing fingerprint row, curate evidence paths and add the row before treating that entity as verified
+5. when the `c-05-create-or-update-onboarding-files` skill reports an orphaned fingerprint row or a missing evidence path, verify whether the entity was removed, renamed, or moved before deleting the row or replacing paths
 6. refresh the stored fingerprint after review, even when the prose remains correct
 7. update `lastUpdated` whenever the entity set, entity prose, evidence path set, or stored fingerprint meaningfully changes
 8. append a newest-first `Update History` entry without deleting or rewriting earlier entries

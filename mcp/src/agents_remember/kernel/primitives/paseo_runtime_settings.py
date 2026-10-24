@@ -311,3 +311,9 @@ def _compressed_ipv6(address: ipaddress.IPv6Address) -> str:
     if length == 1:
         return ":".join(groups)
     return ":".join(groups[:start]) + "::" + ":".join(groups[start + length :])
+
+
+#: The listen address of the dedicated host, and the origins its dashboard may be reached on. They
+#: are the installed procedure's numbers (c-13 step 3), held beside the parser that reads them.
+DEFAULT_HOST_LISTEN = "127.0.0.1:8766"
+DASHBOARD_ORIGINS = ("http://127.0.0.1:{port}", "http://localhost:{port}")

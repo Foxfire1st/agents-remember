@@ -20,7 +20,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
     task_doc_tool,
 )
 from agents_remember.cli import role_launch_preparation as preparation
-from agents_remember.cli.role_launch_routes import _missing_copies_receipt_warning
+from agents_remember.cli.role_launch_request_rules import missing_copies_receipt_warning
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.role_launcher import LauncherRole, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -451,7 +451,7 @@ class TaskDocumentCopyTests(unittest.TestCase):
         )
         self.assertEqual(metadata["missingCopies"], ["master/requirements/NOPE.md"])
 
-        warning = _missing_copies_receipt_warning(metadata)
+        warning = missing_copies_receipt_warning(metadata)
         self.assertIn("master/requirements/NOPE.md", warning["warning"])
 
     def test_write_adding_a_requirement_adds_its_copy(self) -> None:

@@ -33,8 +33,8 @@ from agents_remember.kernel.primitives.identity import (
     provider_instance_id,
 )
 from agents_remember.kernel.primitives.paseo_authority import (
-    load_shared_paseo_runtime,
-    warn_per_harness_paseo,
+    HostAuthorityRefused,
+    load_authority_paseo_runtime,
 )
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
     PaseoRuntimeSettings,
@@ -193,7 +193,6 @@ class McpRuntimeConfig:
     coordination_root: Path
     workspace_root: Path
     transcript_root: Path
-    harness_skill_root: Path | None = None
     repositories: dict[str, RepositoryScope] = field(default_factory=dict)
     providers: dict[str, ProviderScope] = field(default_factory=dict)
     timeout_caps: dict[str, int] = field(default_factory=dict)
@@ -213,7 +212,7 @@ class McpRuntimeConfig:
     @property
     def paseo_runtime(self) -> PaseoRuntimeSettings | None:
         """Host authority is per-use, so adding its block never requires a server restart."""
-        settings = _paseo_runtime_block(self.coordination_root)
+        settings = _paseo_runtime_block(self.config_path)
         return None if settings is None else replace(settings, command_config_path=self.config_path)
 
     @property
@@ -334,11 +333,6 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
     transcript_root = optional_absolute_path(data, "transcriptRoot", owner="MCP settings")
     if transcript_root is None:
         transcript_root = coordination_root / "logs" / "mcp"
-    harness_skill_root = optional_absolute_path(
-        data,
-        "harnessSkillRoot",
-        owner="MCP settings",
-    ) or infer_harness_skill_root(config_path)
 
     if path_is_relative_to(config_path, coordination_root):
         raise ConfigError("MCP settings must not live inside the coordinator root")
@@ -364,14 +358,14 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         config_path=config_path,
     )
     tool_log = parse_tool_log_settings(data.get("toolLog"))
-    warn_per_harness_paseo(data, config_path, coordination_root)
+    # MIK-R196 rule 3: the authority file now holds the host block it establishes itself, so that
+    # block is read authority, not a stray key and not a per-harness override to migrate.
 
     return McpRuntimeConfig(
         config_path=config_path,
         coordination_root=coordination_root,
         workspace_root=workspace_root,
         transcript_root=transcript_root,
-        harness_skill_root=harness_skill_root,
         repositories=repositories,
         providers=providers,
         timeout_caps=timeout_caps,
@@ -385,19 +379,27 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
 
 
 def load_paseo_runtime_settings(config_path: str | Path) -> PaseoRuntimeSettings | None:
-    """Use the named harness file's coordinationRoot to read the one shared host block."""
-    path = require_config_path(config_path)
-    data = _read_config_mapping(path)
-    root = required_absolute_path(data, "coordinationRoot")
-    warn_per_harness_paseo(data, path, root)
-    settings = _paseo_runtime_block(root)
+    """Read the ``paseoRuntime`` block of the authority file this call names.
+
+    MIK-R196 rule 3: the host authority is the product's own settings file, so the block a cold
+    first run writes and the block every later call reads are the same bytes in the same file.
+    """
+    # A cold root has no authority file yet: that is "no host configured", not an unreadable
+    # settings file, and MIK-R196 rule 3 has the launch create the block before the host stage.
+    candidate = Path(config_path).expanduser()
+    if not candidate.exists() and not candidate.is_symlink():
+        return None
+    path = require_config_path(candidate)
+    settings = _paseo_runtime_block(path)
     return None if settings is None else replace(settings, command_config_path=path)
 
 
-def _paseo_runtime_block(coordination_root: Path) -> PaseoRuntimeSettings | None:
+def _paseo_runtime_block(config_path: Path) -> PaseoRuntimeSettings | None:
+    # An unreadable or malformed authority file is a settings refusal with a recovery action, not
+    # an exception that escapes the model: every caller answers `settings_invalid` (L188-B07).
     try:
-        return load_shared_paseo_runtime(coordination_root)
-    except PaseoRuntimeSettingsError as error:
+        return load_authority_paseo_runtime(config_path)
+    except (PaseoRuntimeSettingsError, HostAuthorityRefused) as error:
         raise ConfigError(str(error)) from error
 
 
@@ -537,12 +539,6 @@ def default_memory_root(repo_path: Path, coordination_root: Path, repo_id: str) 
     if legacy_root.exists():
         refuse_removed_memory_mode("internal", artifact=legacy_root.as_posix())
     return coordination_root / "memory-repos" / f"ar-{repo_id}"
-
-
-def infer_harness_skill_root(config_path: Path) -> Path | None:
-    if config_path.parent.name != "mcp":
-        return None
-    return (config_path.parent.parent / "skills").resolve()
 
 
 def parse_providers(

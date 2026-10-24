@@ -171,15 +171,15 @@
       "budget_words": 1221
     },
     "bootstrap/orientation": {
-      "size_words": 2370,
-      "budget_words": 2607
+      "size_words": 2628,
+      "budget_words": 2891
     },
     "bootstrap/recovery": {
-      "size_words": 1686,
-      "budget_words": 1855
+      "size_words": 1944,
+      "budget_words": 2139
     },
     "bootstrap/bootstrap": {
-      "size_words": 3679,
+      "size_words": 3688,
       "budget_words": 3700
     },
     "launcher/orientation": {
@@ -221,8 +221,8 @@
       "budget_words": 70
     },
     "reference/bootstrap-foundation-d301.md": {
-      "size_words": 154,
-      "budget_words": 170
+      "size_words": 241,
+      "budget_words": 266
     },
     "reference/curator-intake-details.md": {
       "size_words": 42,
@@ -247,6 +247,10 @@
     "reference/shared-writing-profile.md": {
       "size_words": 1334,
       "budget_words": 1468
+    },
+    "reference/bootstrap-failure-states.md": {
+      "size_words": 724,
+      "budget_words": 797
     }
   },
   "decisions_L88": {
@@ -815,5 +819,27 @@
       }
     }
   },
-  "decisions_L118_A15": {"authority": "L118 second landing check: the two detail-link sentences only; unchanged 3700 capsule and 2500 step ceilings.", "change": "Remove only the two redundant immediate Apply links added by L118; keep the existing step-qualified Read links and both verbatim stage paragraphs. No other role or detail instruction changes.", "changes": {"curator/orientation": {"before": {"size_words": 3144, "budget_words": 3459}, "after": {"size_words": 3142, "budget_words": 3457}}, "curator/curation": {"before": {"size_words": 3700, "budget_words": 3700}, "after": {"size_words": 3698, "budget_words": 3700}}, "curator/recovery": {"before": {"size_words": 2460, "budget_words": 2706}, "after": {"size_words": 2458, "budget_words": 2704}}, "reviewer/orientation": {"before": {"size_words": 3698, "budget_words": 3700}, "after": {"size_words": 3696, "budget_words": 3700}}, "reviewer/review": {"before": {"size_words": 3652, "budget_words": 3700}, "after": {"size_words": 3650, "budget_words": 3700}}, "reviewer/recovery": {"before": {"size_words": 3014, "budget_words": 3316}, "after": {"size_words": 3012, "budget_words": 3314}}}}
+  "decisions_L118_A15": {"authority": "L118 second landing check: the two detail-link sentences only; unchanged 3700 capsule and 2500 step ceilings.", "change": "Remove only the two redundant immediate Apply links added by L118; keep the existing step-qualified Read links and both verbatim stage paragraphs. No other role or detail instruction changes.", "changes": {"curator/orientation": {"before": {"size_words": 3144, "budget_words": 3459}, "after": {"size_words": 3142, "budget_words": 3457}}, "curator/curation": {"before": {"size_words": 3700, "budget_words": 3700}, "after": {"size_words": 3698, "budget_words": 3700}}, "curator/recovery": {"before": {"size_words": 2460, "budget_words": 2706}, "after": {"size_words": 2458, "budget_words": 2704}}, "reviewer/orientation": {"before": {"size_words": 3698, "budget_words": 3700}, "after": {"size_words": 3696, "budget_words": 3700}}, "reviewer/review": {"before": {"size_words": 3652, "budget_words": 3700}, "after": {"size_words": 3650, "budget_words": 3700}}, "reviewer/recovery": {"before": {"size_words": 3014, "budget_words": 3316}, "after": {"size_words": 3012, "budget_words": 3314}}}},
+  "decision_L196_B10": {
+    "authority": "MIK-R196 rules 4, 5 and 10; MIK-R125 capped eleven-tenths rule",
+    "capsule_ceiling": 3700,
+    "step_detail_ceiling": 2500,
+    "measurement": "post-edit sizes compiled from the canonical texts with the shipped compiler (compiled_size and detail_sizes in test_role_capsule_budgets.py); task data and seals excluded; every step detail re-measured and unchanged",
+    "reason": "L188-B10 repair: operations/bootstrap.md step 6 no longer scaffolds onboarding through c-03-repo-bootstrap or runs the citation fixer; it reads what the baseline will carry and says plainly that optional onboarding and the knowledge foundation are the later Architect task's work. Step 7 keeps the preview, the status readback, the developer's drift decision and the unconditional validator refusal. roles/bootstrap.md puts the prohibitions of 'What you must not do' above the operation on disagreement, reports onboarding as read rather than produced, and states that no step orders onboarding or knowledge authoring or a citation fix while the same role denies those writes. No other capsule, step detail, ceiling or compiler count rule changes.",
+    "changes": {
+      "bootstrap/bootstrap": {
+        "before": {"size_words": 3622, "budget_words": 3700},
+        "after": {"size_words": 3688, "budget_words": 3700}
+      },
+      "bootstrap/orientation": {
+        "before": {"size_words": 2593, "budget_words": 2853},
+        "after": {"size_words": 2628, "budget_words": 2891}
+      },
+      "bootstrap/recovery": {
+        "before": {"size_words": 1909, "budget_words": 2100},
+        "after": {"size_words": 1944, "budget_words": 2139}
+      }
+    },
+    "step_detail_changes": {}
+  }
 }

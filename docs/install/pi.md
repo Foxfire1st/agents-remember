@@ -1,92 +1,33 @@
 # Install For Pi.dev
 
-Pi supports context files, project settings, project-local extensions, Agent
-Skills, and package-managed extensions. Pi core intentionally does not include
-built-in MCP; the starter package uses `pi-mcp-adapter`.
+Pi supports context files, project settings, project-local extensions, and package-managed
+extensions. Pi core has no built-in MCP client, so the project settings load `pi-mcp-adapter`.
+Agents Remember needs that registration and one call; its skills arrive from the tool server, so
+`.pi/settings.json` lists no skill folder.
 
 Official references:
 
 - [Pi Using Pi](https://pi.dev/docs/latest/usage)
 - [Pi Settings](https://pi.dev/docs/latest/settings)
 - [Pi Extensions](https://pi.dev/docs/latest/extensions)
-- [Pi Skills](https://pi.dev/docs/latest/skills)
 - [Pi Packages](https://pi.dev/docs/latest/packages)
 - [pi-mcp-adapter](https://pi.dev/packages/pi-mcp-adapter)
 
-## Root Starter Package
+## Register The MCP Server
 
-The repository includes a Pi starter package at `.pi/`. Copy that folder to
-your workspace root, then render the copied package. The `.pi/render-starter`
-script is a convenience: with a single `--repo` list such as
-`--repo my-app shared-lib`, it infers the workspace root from the copied `.pi/`
-folder, fills path and repository placeholders, renders the project extension
-constant, and validates that each requested repository exists before you start
-or reload Pi from the workspace once. If you prefer not to run the renderer,
-make those same replacements by hand and verify that no placeholder tokens
-remain.
+Write an MCP authority settings file (copy `examples/mcp/settings.example.json` and replace its
+paths), then write your workspace `.pi/settings.json` and `.pi/mcp.json`:
 
-The package contains:
-
-- `.pi/settings.json` - project settings that load the local extension, local
-  skills, and `npm:pi-mcp-adapter`.
-- `.pi/extensions/agents-remember-start.ts` - project-local
-  `before_agent_start` extension that injects the mandatory first-action
-  directive.
-- `.pi/mcp/agents-remember-settings.json` - Agents Remember MCP authority
-  settings.
-- `.pi/mcp.json` - Pi project override consumed by `pi-mcp-adapter`.
-- `.pi/skills/` - Agents Remember skills in Pi's project skill root.
-
-After the restart or reload, invoke:
-
-```text
-c-13-install-and-onboard
+```json
+{
+  "packages": [
+    "npm:pi-mcp-adapter"
+  ],
+  "extensions": [
+    "extensions/agents-remember-start.ts"
+  ]
+}
 ```
-
-That skill runs or verifies `runtime_install()` and then handles memory,
-onboarding, and providers.
-
-## Workspace Instructions
-
-The starter package uses a project-local `.pi/extensions/agents-remember-start.ts`
-extension. Pi runs `before_agent_start` before an agent turn and allows the
-extension to inject the mandatory first-action directive into the system prompt.
-
-Do not overwrite a repository's root `AGENTS.md` just to wire Agents Remember;
-root `AGENTS.md` is project-specific. Pi also supports global context under
-`~/.pi/agent/AGENTS.md`, but the starter package does not need it for first-run
-setup.
-
-If you edit the extension while Pi is already running, use `/reload`.
-
-## Runtime And Skills
-
-After the restart or reload, the copied `c-13-install-and-onboard` skill runs or
-verifies:
-
-```text
-runtime_install()
-```
-
-Pi loads skills from project `.pi/skills`, project `.agents/skills`, global
-`~/.pi/agent/skills`, global `~/.agents/skills`, settings entries, package
-entries, and repeated `--skill <path>` flags. The starter package keeps skills
-in `.pi/skills` and also lists `skills` in `.pi/settings.json` to make the
-project package self-contained.
-
-Pi can discover `SKILL.md` directories recursively, but skill names should still match their parent folder for clean validation.
-
-Do not install skills for first-run setup; the copied package already carries them.
-
-## MCP
-
-Pi core has no built-in MCP client. The starter package loads
-`npm:pi-mcp-adapter` from `.pi/settings.json`; Pi installs missing project
-packages automatically on startup.
-
-`pi-mcp-adapter` can read shared project `.mcp.json`, but this starter keeps the
-Pi package self-contained with the documented Pi-owned project override
-`.pi/mcp.json`:
 
 ```json
 {
@@ -95,7 +36,6 @@ Pi package self-contained with the documented Pi-owned project override
       "command": "uvx",
       "args": [
         "--refresh-package",
-        "agents-remember-mcp",
         "agents-remember-mcp@latest",
         "--config",
         "<PATH/TO/YOUR/PROJECTS_FOLDER>/.pi/mcp/agents-remember-settings.json"
@@ -105,5 +45,41 @@ Pi package self-contained with the documented Pi-owned project override
 }
 ```
 
-Use `/mcp` to inspect adapter status or `/mcp setup` when you want Pi to adopt
-existing host-specific MCP configs.
+The files under `.pi/` in this repository are those two documents with
+`<PATH/TO/YOUR/PROJECTS_FOLDER>` markers to replace by hand; no script renders them. Pi installs a
+missing project package on startup. Use `/mcp` to inspect adapter status. Restart or `/reload` Pi
+once so it starts the server.
+
+## Start With One Call
+
+In a Pi chat, name no task and no repository:
+
+```text
+role_start(role="bootstrap", request_id="<a UUID you generate>")
+```
+
+That one call prepares the runtime scaffold, provisions and starts the Paseo host, verifies the
+Agents Remember plug-in, and starts one instructed Bootstrap seat. Its answer names the seat and
+the dashboard address of its chat; continue setup there. A retry with the same `request_id`
+reconciles to the same seat instead of a second one.
+
+Bootstrap ends at memory setup and tells you to start the Architect, which organises the knowledge
+foundation as ordinary task work. Bootstrap starts no role and authors no onboarding or knowledge.
+
+## Skills
+
+Pi loads skills from folders it scans; Agents Remember writes none. The tool server publishes each
+skill as an MCP resource (the SEP-2640 skills extension) and Pi reads them from the running server
+through the adapter, so its settings name no skill folder and there is no skill tree to copy,
+render or keep in sync.
+
+## Optional: First-Action Extension
+
+Pi runs `before_agent_start` before an agent turn and lets a project extension inject the
+first-action directive into the system prompt. Copy `.pi/extensions/` into your workspace and
+replace `<PATH/TO/YOUR/PROJECTS_FOLDER>` in `agents-remember-start.ts` with your absolute path. If
+you edit the extension while Pi is running, use `/reload`.
+
+Do not overwrite a repository's root `AGENTS.md` just to wire Agents Remember; root `AGENTS.md` is
+project-specific. Pi also supports global context under `~/.pi/agent/AGENTS.md`, which this setup
+does not need.

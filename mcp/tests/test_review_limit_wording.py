@@ -43,19 +43,9 @@ CANONICAL_SKILLS = REPOSITORY_ROOT / "skills"
 PACKAGED_SKILLS = (
     REPOSITORY_ROOT / "mcp" / "src" / "agents_remember" / "package_data" / "runtime" / "skills"
 )
-STARTER_SKILLS = tuple(
-    CANONICAL_SKILLS.parent / dirname
-    for dirname in (
-        ".claude/skills",
-        ".codex/skills",
-        ".cursor/skills",
-        ".github-vscode/skills",
-        ".hermes/skills",
-        ".openclaw/workspace/skills",
-        ".pi/skills",
-        ".agents/skills",
-    )
-)
+# MIK-R196 rule 7: the eight harness mirrors are gone, so the canonical tree and its packaged
+# serving copy are the only two skill trees any wording claim can still hold over.
+STARTER_SKILLS: tuple[Path, ...] = ()
 SKILL_TREES = (CANONICAL_SKILLS, PACKAGED_SKILLS, *STARTER_SKILLS)
 LIFECYCLE = "l-01-agent-lifecycles"
 MANIFEST_RELATIVE = "composition-manifest.json"

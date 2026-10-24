@@ -110,6 +110,8 @@ MUTATING_TOOLS: frozenset[str] = frozenset(
         "direct_execution_grant",
         # Installs.
         "runtime_install",
+        # MIK-R196 rule 11: the one user settings file, previewed then written once.
+        "user_settings_init",
     }
 )
 

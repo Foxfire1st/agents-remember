@@ -7,7 +7,11 @@ description: "Adopt existing external-memory onboarding as the first Git-attribu
 
 Use this skill when an external memory repo already contains onboarding content and the developer wants to adopt that content as its first Git-attributed baseline and compute the consumer ledger cache.
 
-This skill does not decide that stale onboarding is true. It makes the trust boundary explicit: the `c-02-memory-quality-control` skill's drift is checked first, and actionable drift blocks adoption unless the developer explicitly accepts the current onboarding as the baseline.
+This skill does not decide that stale onboarding is true. It makes the trust boundary explicit: the memory quality control procedure in `c-05-create-or-update-onboarding-files` (`workflows/memory-quality-control.md`, kept from a retired skill) is checked first, and actionable drift blocks adoption unless the developer explicitly accepts the current onboarding as the baseline.
+
+Carrying memory from one branch to another is `workflows/carryover-from-branch.md`, kept here
+from the retired carryover skill (MIK-R196 rule 8): plan then apply, candidate units, code evidence
+and anchors, records, and recovery.
 
 ## MCP Tools
 
@@ -31,7 +35,7 @@ installed and development workflows use the MCP/package route.
 ## Workflow
 
 1. Resolve the code repository with the `c-08-ar-coordination-context-resolver` skill and confirm external topology.
-2. Run the `c-02-memory-quality-control` skill's drift classification against the resolved onboarding root; its reusable report is written under the `c-08-ar-coordination-context-resolver` skill's resolved temp root.
+2. Run the `c-05-create-or-update-onboarding-files` skill's drift classification (`workflows/memory-quality-control.md` §2) against the resolved onboarding root. `context_packet(include_drift=true)` answers that classification in its own response and files no temporary report; the contract-scoped result is the checklist `memory_quality_check` replaces at the `reportPath` it returns (the enclosure's `reports/curator-memory-quality.md`), when a leaf enclosure is in scope.
 3. Inspect reachable memory commits for existing `Code-Commit:` attribution.
 4. If attributed memory already exists, report `already-adopted` and stop; cache presence does not determine adoption.
 5. If drift has actionable findings, stop unless `accept_drift=true` is part of the approved `memory_baseline_adopt` request. On converted memory, `blocked-invalid` (the knowledge validator refuses the tree) stops adoption with or without `accept_drift`: accepting drift accepts stale anchors only, never a validator violation. The first baseline of a converted tree is validated before it is committed.
@@ -62,4 +66,4 @@ and a curator re-authors a stale one.
 1. Baseline adoption commits real memory content and computes the cache; it never commits the cache.
 2. The `c-10-adopt-memory-baseline` skill must not refresh onboarding content itself; use the `c-05-create-or-update-onboarding-files` skill for that.
 3. A missing, stale, or malformed `memory.md` is a cache state, not evidence that a baseline exists or is absent.
-4. `accept_drift=true` means the developer is asserting the current onboarding content is factual enough to become the baseline despite the `c-02-memory-quality-control` skill's warnings. On converted memory it accepts stale anchors only: it never lets a tree with a validator violation through.
+4. `accept_drift=true` means the developer is asserting the current onboarding content is factual enough to become the baseline despite the `c-05-create-or-update-onboarding-files` skill's warnings. On converted memory it accepts stale anchors only: it never lets a tree with a validator violation through.

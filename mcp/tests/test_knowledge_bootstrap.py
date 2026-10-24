@@ -38,6 +38,10 @@ from agents_remember.application.knowledge_bootstrap_admission import (
     admit_bootstrap_context,
 )
 from agents_remember.application.memory_tools import memory_init_tool
+from agents_remember.application.published_intent import (
+    PublishedIntentUnavailable,
+    resolve_published_intent,
+)
 from agents_remember.cli.__main__ import main
 from agents_remember.cli.knowledge_bootstrap import add_arguments
 from agents_remember.kernel.primitives.runtime_config import load_config
@@ -217,6 +221,14 @@ def tree(root: Path) -> dict[str, bytes]:
     }
 
 
+def _assert_architect_handover(knowledge: dict[str, Any]) -> None:
+    action = knowledge["nextAction"]
+    assert "knowledge-bootstrap" not in action, knowledge
+    assert "developer start the Architect" in action, knowledge
+    assert "regular task" in action and "Curator" in action, knowledge
+    assert action.index(knowledge["state"]) < action.index("Architect"), knowledge
+
+
 def test_a_repository_the_settings_do_not_declare_is_refused_by_name(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -339,16 +351,19 @@ def test_memory_init_reports_empty_recorded_and_partial_text_knowledge(
     config = load_config(one.settings_path)
 
     def reported():
-        return memory_init_tool(config, repo_id=REPO_ID, dry_run=True, initial_branch="main")[
+        before = tree(one.memory_root)
+        result = memory_init_tool(config, repo_id=REPO_ID, dry_run=True, initial_branch="main")[
             "knowledge"
         ]
+        assert tree(one.memory_root) == before
+        return result
 
     empty = reported()
     assert empty["state"] == "not-recorded", empty
     assert (
         Path(empty["datasetPath"]).parent == one.coordination_root / "runtime" / "knowledge-index"
     )
-    assert "knowledge-bootstrap" in empty["nextAction"]
+    _assert_architect_handover(empty)
     row = {
         "subject": "handoff:B-one",
         "disposition": "extended",
@@ -360,17 +375,48 @@ def test_memory_init_reports_empty_recorded_and_partial_text_knowledge(
     capsys.readouterr()
     complete = reported()
     assert complete["state"] == "recorded", complete
+    _assert_architect_handover(complete)
     (record,) = (one.memory_root / "knowledge/invariants").glob("*.json")
     record.write_text("{broken knowledge record")
     partial = reported()
     assert partial["state"] == "unusable", partial
     assert "partial" in partial["detail"] and record.name in partial["detail"]
+    assert (
+        partial["nextAction"]
+        == "repair the named knowledge files, then rebuild their derived index"
+    )
     legacy = world(tmp_path / "legacy")
     refused = memory_init_tool(
         load_config(legacy.settings_path), repo_id=REPO_ID, dry_run=True, initial_branch="main"
     )["knowledge"]
     assert refused["code"] == "legacy-format", refused
     assert "worktree_sync" in refused["nextAction"] and "knowledge-convert" in refused["nextAction"]
+
+
+def test_memory_init_hands_unavailable_nonlegacy_knowledge_to_the_architect(tmp_path: Path) -> None:
+    """An obstructed derived-cache directory exercises the real unavailable publication branch."""
+    one = world(tmp_path / "world", converted=True)
+    cache = one.coordination_root / "runtime" / "knowledge-index"
+    cache.parent.mkdir(parents=True)
+    cache.write_text("an existing file prevents index creation", encoding="utf-8")
+    unavailable = resolve_published_intent(one.admitted().context)
+    assert isinstance(unavailable, PublishedIntentUnavailable), unavailable
+    assert unavailable.state == "unusable" and unavailable.code == "snapshot_unavailable"
+    before = tree(one.memory_root)
+
+    knowledge = memory_init_tool(
+        load_config(one.settings_path), repo_id=REPO_ID, dry_run=True, initial_branch="main"
+    )["knowledge"]
+
+    assert {key: value for key, value in knowledge.items() if key != "nextAction"} == {
+        "state": unavailable.state,
+        "datasetPath": unavailable.dataset_path.as_posix(),
+        "code": unavailable.code,
+        "detail": unavailable.detail,
+    }
+    _assert_architect_handover(knowledge)
+    assert tree(one.memory_root) == before
+    assert cache.read_text(encoding="utf-8") == "an existing file prevents index creation"
 
 
 def test_the_bootstrap_skill_describes_the_states_memory_init_reports(tmp_path: Path) -> None:
@@ -395,16 +441,7 @@ def test_the_bootstrap_skill_describes_the_states_memory_init_reports(tmp_path: 
         assert word in paragraph, word
     assert "measures no record population" not in paragraph
     assert "complete index contains authored records" in paragraph.replace("the ", "")
-    roots = (
-        "mcp/src/agents_remember/package_data/runtime/skills",
-        ".claude/skills",
-        ".codex/skills",
-        ".cursor/skills",
-        ".github-vscode/skills",
-        ".hermes/skills",
-        ".openclaw/workspace/skills",
-        ".pi/skills",
-        ".agents/skills",
-    )
+    # MIK-R196 rule 7: the packaged serving copy is the only copy beside the canonical source.
+    roots = ("mcp/src/agents_remember/package_data/runtime/skills",)
     copies = [repository / root / "c-14-knowledge-bootstrap/SKILL.md" for root in roots]
     assert {path.read_text("utf-8") for path in copies} == {canonical}

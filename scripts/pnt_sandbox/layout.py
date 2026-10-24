@@ -113,10 +113,6 @@ class SandboxLayout:
         return self.config_home / "agents-remember" / "settings.json"
 
     @property
-    def harness_skills(self) -> Path:
-        return self.root / "harness" / "skills"
-
-    @property
     def paseo_home(self) -> Path:
         return self.root / "paseo" / "home"
 
@@ -283,7 +279,6 @@ def settings_document(layout: SandboxLayout) -> dict[str, Any]:
         "coordinationRoot": layout.coordination.as_posix(),
         "workspaceRoot": layout.projects.as_posix(),
         "transcriptRoot": (layout.coordination / "logs" / "mcp").as_posix(),
-        "harnessSkillRoot": layout.harness_skills.as_posix(),
         "repositories": {REPOSITORY_ID: {}},
         "providers": {},
         # Named explicitly: left out, the port would default to 8765, the developer's own

@@ -1,88 +1,70 @@
 # Install For Claude Code
 
-Claude Code separates always-loaded project instructions from native skills.
-
-- Use a `SessionStart` hook to load the coordinator first-action directive.
-- Use `.claude/skills` or `~/.claude/skills` for Claude Code skills.
+Claude Code separates always-loaded project instructions from the MCP servers it starts. Agents
+Remember needs one registration and one call; its skills arrive from the tool server, so nothing is
+copied into a skill folder.
 
 Official references:
 
 - [Claude Code settings](https://code.claude.com/docs/en/settings)
 - [Claude Code hooks reference](https://code.claude.com/docs/en/hooks)
 - [Claude Code MCP](https://code.claude.com/docs/en/mcp)
-- [Claude Code skills](https://code.claude.com/docs/en/skills)
 - [Claude Code memory and CLAUDE.md](https://code.claude.com/docs/en/memory)
 
-## Root Starter Package
+## Register The MCP Server
 
-The repository includes a Claude Code starter package at `.claude/`. Copy that
-folder to your workspace root, then render the copied package. The
-`.claude/render-starter` script is a convenience: with a single `--repo` list
-such as `--repo my-app shared-lib`, it infers the workspace root from the copied
-`.claude/` folder, fills path and repository placeholders, writes the Python
-hook command/args, and validates that each requested repository exists. If you
-prefer not to run the renderer, make those same replacements by hand and verify
-that no placeholder tokens remain. Restart Claude Code once after rendering.
-Also copy `.claude/mcp/mcp.json` to `<workspace>/.mcp.json`; Claude Code will
-not detect the MCP registration if the file only lives under `.claude/mcp/`.
+Write an MCP authority settings file (copy `examples/mcp/settings.example.json` and replace its
+paths), then add the server to `<workspace>/.mcp.json`:
 
-The package contains:
+```json
+{
+  "mcpServers": {
+    "agents-remember": {
+      "command": "uvx",
+      "args": [
+        "--refresh-package",
+        "agents-remember-mcp@latest",
+        "--config",
+        "<PATH/TO/YOUR/PROJECTS_FOLDER>/.claude/mcp/agents-remember-settings.json"
+      ]
+    }
+  }
+}
+```
 
-- `.claude/settings.json` - `SessionStart` hook registration.
-- `.claude/hooks/agents-remember-session-start.py` and `.md` - Python startup
-  hook that emits the directive as `additionalContext`.
-- `.claude/mcp/mcp.json` - MCP registration template to copy to root
-  `.mcp.json`.
-- `.claude/mcp/agents-remember-settings.json` - Agents Remember MCP authority
-  settings.
-- `.claude/skills/` - Agents Remember skills in Claude Code's project skill
-  root.
+`.claude/mcp/mcp.json` in this repository is that registration with
+`<PATH/TO/YOUR/PROJECTS_FOLDER>` markers to replace by hand; no script renders it. Restart Claude
+Code once so it starts the server.
 
-After the restart, invoke:
+## Start With One Call
+
+In a Claude Code chat, name no task and no repository:
 
 ```text
-c-13-install-and-onboard
+role_start(role="bootstrap", request_id="<a UUID you generate>")
 ```
 
-That skill runs or verifies `runtime_install()` and then handles memory,
-onboarding, and providers.
+That one call prepares the runtime scaffold, provisions and starts the Paseo host, verifies the
+Agents Remember plug-in, and starts one instructed Bootstrap seat. Its answer names the seat and
+the dashboard address of its chat; continue setup there. A retry with the same `request_id`
+reconciles to the same seat instead of a second one.
 
-## Workspace Instructions
+Bootstrap ends at memory setup and tells you to start the Architect, which organises the knowledge
+foundation as ordinary task work. Bootstrap starts no role and authors no onboarding or knowledge.
 
-Load the coordinator first-action directive with the starter package's
-`SessionStart` hook. This is the recommended setup for Claude Code, and the only
-one that reliably makes the directive authoritative.
+## Skills
 
-A `CLAUDE.md` import alone is not enough. Claude Code loads imported workspace
-instructions as project context tagged with a "this context may or may not be
-relevant" disclaimer, so the coordinator doctrine reads as optional and is easily
-skipped. The hook instead injects the directive as authoritative
-`additionalContext`.
+Claude Code discovers project skills from folders it scans. Agents Remember creates none: the tool
+server publishes each skill as an MCP resource (the SEP-2640 skills extension) and Claude Code reads
+them from the running server, so there is no skill tree to copy, render or keep in sync.
 
-Claude Code itself does not require `jq` for hooks. The starter package uses a
-Python hook, and the renderer writes the local Python executable into
-`.claude/settings.json`.
+## Optional: Session-Start Directive
 
-The starter package includes `.claude/hooks/agents-remember-session-start.md`
-with the directive text:
-
-```markdown
-**Agents Remember — session start.**
-
-You are the developer-facing **free chat**: read
-`ar-coordination/AGENTS.md`. Answer a question inline; for work on a managed
-repository, create or resolve the sprint document, write the request of the
-developer into it, start an Architect with `role_start` (the call for an
-Architect names no document), and tell the developer that the agent is in the
-dashboard and which sprint document holds the request. Another role is started
-this way only when the developer names the role and the task.
-```
-
-The directive is entry-only by design: the hook gives this text to a chat that
-the product did not start, and says nothing to a role agent that has a binding.
-Free chat remains a launcher rather than a global role identity.
-
-The starter package registers the hook in `.claude/settings.json`:
+A `SessionStart` hook is the reliable way to make the first-action directive authoritative in a
+chat the product did not start. Copy `.claude/hooks/agents-remember-session-start.py` and its
+sibling `.md` directive into your workspace `.claude/hooks/`, replace
+`<PATH/TO/YOUR/PROJECTS_FOLDER>` in the directive with your absolute path, and write the hook into
+`.claude/settings.json` with the interpreter you want:
 
 ```json
 {
@@ -104,15 +86,24 @@ The starter package registers the hook in `.claude/settings.json`:
 }
 ```
 
-The hook reads the directive file and emits it as `additionalContext`, which
-Claude Code injects as authoritative session context. This is what makes the
-coordinator first action reliably run before any sibling-repo work.
-`$CLAUDE_PROJECT_DIR` resolves to the folder that holds `.claude`; an absolute
-path to the directive file works too.
+The directive it emits:
 
-Claude Code snapshots `settings.json` hooks at session start, so restart after
-copying the package; confirm the directive appears as injected session context
-on the new session.
+```markdown
+**Agents Remember — session start.**
+
+You are the developer-facing **free chat**: read
+`ar-coordination/AGENTS.md`. Answer a question inline; for work on a managed
+repository, create or resolve the sprint document, write the request of the
+developer into it, start an Architect with `role_start` (the call for an
+Architect names no document), and tell the developer that the agent is in the
+dashboard and which sprint document holds the request. Another role is started
+this way only when the developer names the role and the task.
+```
+
+The directive is entry-only by design: the hook gives this text to a chat that the product did not
+start, and says nothing to a role agent that already carries its hand-over. Free chat remains a
+launcher rather than a global role identity. Claude Code snapshots `settings.json` hooks at session
+start, so restart after writing the file.
 
 ### Fallback Without The Hook
 
@@ -127,30 +118,6 @@ Treat these rules as workspace instructions!
 @ar-coordination/AGENTS.md
 ```
 
-If `ar-coordination` is outside the workspace, point at the actual readable path.
-
-This loads the doctrine, but only as optional context. Expect noticeably weaker
-instruction following: the agent often will not read `ar-coordination/AGENTS.md`
-or resolve context unless you remind it at the start of each session. Treat this
-as a degraded fallback, not an equivalent to the hook.
-
-## Skills
-
-Claude Code is a **direct** skill-folder scanner: it discovers a skill only when
-`SKILL.md` sits one level under the skill root, in a folder whose name matches the
-skill's lowercase `name`. The copied starter package already provides one flat
-folder per skill at `.claude/skills/<name>/SKILL.md`.
-
-This produces, for example:
-
-```text
-.claude/skills/c-13-install-and-onboard/SKILL.md
-.claude/skills/w-02-light-task-workflow/SKILL.md
-```
-
-Keep the copied package flat: one folder per skill directly under
-`.claude/skills/`, named by the skill's lowercase frontmatter name. Claude Code
-discovers that layout without recursive scanning.
-
-Do not run `skills_install()` for first-run setup. It remains available for
-manual maintenance and non-package installs.
+If `ar-coordination` is outside the workspace, point at the actual readable path. This loads the
+doctrine, but only as optional context: expect weaker instruction following, and treat this as a
+degraded fallback rather than an equivalent to the hook.

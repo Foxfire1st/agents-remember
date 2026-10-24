@@ -45,7 +45,7 @@ file or format is chosen.
 **IMPORTANT:**
 Do not change code or documentation without entering the architect lifecycle and clearing its plan gate.
 Do not change task plan items without approval. Think before acting.
-Do not randomly commit. Use the `c-12-closeout` skill instead!
+Do not randomly commit. Use the `w-02-light-task-workflow` skill instead!
 
 ---
 
@@ -73,7 +73,7 @@ context_packet(repo_id="agents-remember", include_providers=true)
 Skip this provider check when no MCP server is configured or the MCP settings
 report no providers.
 
-Then run `c-02-memory-quality-control` for the resolved context before
+Then run `c-05-create-or-update-onboarding-files` for the resolved context before
 reasoning from onboarding or source files.
 
 After the `c-08-ar-coordination-context-resolver` skill resolves `memory_root`, read that memory layer's repository-specific
@@ -102,16 +102,19 @@ Use `c-04-retrieval-strategy-router` to understand the full benefit of the strat
 ## Source Layout
 
 - `skills/` is the canonical skill source tree. Edit skills here first.
-- `scripts/sync-skills.py` copies root `skills/` into the MCP package-data copy
-  and all harness starter package skill folders. Run it after any skill edit.
+- `scripts/sync-skills.py` copies root `skills/` into the MCP package-data copy,
+  which is the only generated skill copy: the tool server serves skills to a
+  harness as MCP resources, and no harness starter package carries a skill
+  folder (MIK-R196). Run it after any skill edit.
 - `agents-md-files/`, `benchmarks/`, `providers/`, and `system/` are canonical
   runtime asset source folders. Edit them at the root and run
   `python3 scripts/sync-runtime.py` to refresh MCP package data.
-- `scripts/harness/` is the single source for the eight self-hosted harness
-  starter packages (`.claude/`, `.codex/`, `.cursor/`, `.github-vscode/` with
-  `.vscode/`, `.hermes/`, `.openclaw/`, `.pi/`, `.agents/`). Edit it and run
-  `python3 scripts/sync-harness.py`. Its `README.md` records which differences
-  between harnesses are genuine requirements and which files it does not manage.
+- The eight self-hosted harness starter packages keep their configuration,
+  hooks and instruction files in their own directories (`.claude/`, `.codex/`,
+  `.cursor/`, `.github-vscode/` with `.vscode/`, `.hermes/`, `.openclaw/`, `.pi/`,
+  `.agents/`). Maintain those files in place, including each harness's specific
+  configuration and hooks. A starter package carries no skill folder, because
+  skills are served by the tool server.
 - `mcp/` contains the MCP server, tool surface, and package-owned runtime
   services.
 - `mcp/src/agents_remember/package_data/runtime/agents-md-files/` contains the
@@ -133,10 +136,8 @@ Use `c-04-retrieval-strategy-router` to understand the full benefit of the strat
   `python3 scripts/sync-skills.py`.
 - Do not edit generated runtime asset copies directly; edit the matching root
   folder and run `python3 scripts/sync-runtime.py`.
-- Do not edit a generated harness starter file directly (each one says so in a
-  header comment); edit `scripts/harness/` and run
-  `python3 scripts/sync-harness.py`. Files a starter package owns alone, such as
-  `.codex/config.toml` or `.cursor/hooks.json`, are edited in place.
+- Edit harness starter configuration, hooks and instruction files in their own
+  package directories; they are source files, not generated projections.
 - Keep user-specific behavior, project notes, and repo policy in the resolved
   memory layer, not in package-owned installed `AGENTS.md` templates.
 - Do not create, close out, integrate, push, or clean up worktrees without the

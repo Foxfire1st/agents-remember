@@ -75,7 +75,9 @@ def test_the_shipped_corpus_parses_and_every_served_skill_has_a_root_revision() 
 
     catalog = skill_catalog_registry()
     assert catalog.unreadable == ()
-    assert len(catalog.entries) >= 14
+    # MIK-R196 rule 8 retired five skills into kept workflows, so the shipped corpus is smaller;
+    # the floor follows the authored tree rather than the pre-retirement count.
+    assert len(catalog.entries) >= 10
     for entry in catalog.entries:
         root = entry.root
         assert root is not None, entry.name

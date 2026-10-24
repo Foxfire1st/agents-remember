@@ -85,7 +85,7 @@ KEPT = (
 # The roots the build's own code answers for a settings file with one repository and one
 # provider: spelled out, so a root the resolver stops reporting is noticed.
 RESOLVED_ROOTS = (
-    "configPath", "coordinationRoot", "workspaceRoot", "transcriptRoot", "harnessSkillRoot",
+    "configPath", "coordinationRoot", "workspaceRoot", "transcriptRoot",
     "agenticSettings", "observerRoot", "dashboardDaemonDir", "daggerAuthorityRoot",
     "receipts.taskless", "receipts.messageBindings", "reports.taskless",
     "paseoRuntime.home",
@@ -153,7 +153,6 @@ class SafetyCheckTests(SandboxCase):
             "coordinationRoot",
             "workspaceRoot",
             "transcriptRoot",
-            "harnessSkillRoot",
             "receipts.taskless",
             "receipts.messageBindings",
             "reports.taskless",
@@ -241,10 +240,9 @@ class SafetyCheckTests(SandboxCase):
         """Resolved by the build's own loader: no settings key names these roots."""
         settings = self.layout.settings_file
         settings.parent.mkdir(parents=True)
-        shared = self.layout.user_settings_file
-        shared.parent.mkdir(parents=True, exist_ok=True)
-        shared.write_text(json.dumps(host_settings_document(self.layout, None)))
+        _write_host(self.layout)
         document = settings_document(self.layout)
+        document.update(host_settings_document(self.layout, None))
         del document["transcriptRoot"]
         document["providers"] = {"grepai-memory": {}}
         # A path relative to the repository names a file in it, not a root.
@@ -284,15 +282,13 @@ class SafetyCheckTests(SandboxCase):
         self.assertIn("outside the sandbox directory", defaulted["daggerAuthorityRoot"])
 
         document["coordinationRoot"] = (self.root / "live" / "ar-coordination").as_posix()
-        del document["harnessSkillRoot"]
         _resolved, outside = judged()
         for key in (memory, "transcriptRoot", "coordinationRoot", TASK_ROOT, "observerRoot"):
             self.assertIn("outside the sandbox directory", outside[key])
         self.assertNotIn(f"{REPOSITORY}.path", outside)
-        self.assertIn("cannot be resolved", outside["harnessSkillRoot"])
 
         del document["dashboard"]
-        shared.unlink(missing_ok=True)
+        document.pop("paseoRuntime", None)
         _resolved, unconfigured = judged()
         self.assertIn("cannot be resolved", unconfigured["paseoRuntime.home"])
         self.assertIn("8765", unconfigured["dashboard.port"])
@@ -355,9 +351,7 @@ class SafetyCheckTests(SandboxCase):
         document = settings_document(self.layout)
         document["providers"] = {"grepai-memory": {}}
         settings.write_text(json.dumps(document), encoding="utf-8")
-        shared = self.layout.user_settings_file
-        shared.parent.mkdir(parents=True, exist_ok=True)
-        shared.write_text(json.dumps(host_settings_document(self.layout, None)))
+        _write_host(self.layout)
         # The resolver answers for a repository whose memory holds a first commit.
         self.layout.repository.mkdir(parents=True, exist_ok=True)
         memory = self.layout.memory
@@ -592,10 +586,7 @@ class BuildInputTests(SandboxCase):
             list(host_settings_document(layout, None)["paseoRuntime"]["providers"]),
             ["hermes", "pi"],
         )
-        paths = [
-            settings[key]
-            for key in ("coordinationRoot", "workspaceRoot", "transcriptRoot", "harnessSkillRoot")
-        ]
+        paths = [settings[key] for key in ("coordinationRoot", "workspaceRoot", "transcriptRoot")]
         paths += [
             runtime["home"],
             runtime["installPrefix"],
@@ -822,14 +813,21 @@ def _recording_stream(started: list[Any]) -> Any:
     return stream
 
 
+def _write_host(layout: Any, host_document: Any = None) -> None:
+    """The sandbox's authority settings file, carrying the host block MIK-R196 rule 3 reads."""
+
+    document = settings_document(layout)
+    if host_document is not False:
+        document.update(host_document or host_settings_document(layout, None))
+    layout.settings_file.parent.mkdir(parents=True, exist_ok=True)
+    layout.settings_file.write_text(json.dumps(document), encoding="utf-8")
+
+
 def _driving_request(tmp_path: Path) -> tuple[dict[str, Any], SandboxLayout]:
     """A prepared sandbox and the request that drives its tool server."""
     layout = SandboxLayout(tmp_path / "sandbox")
     layout.run_dir.mkdir(parents=True)
-    layout.user_settings_file.parent.mkdir(parents=True)
-    layout.user_settings_file.write_text(
-        json.dumps(host_settings_document(layout, None)), encoding="utf-8"
-    )
+    _write_host(layout)
     expect = {
         "coordinationRoot": layout.coordination.as_posix(),
         "workspaceRoot": layout.projects.as_posix(),
@@ -915,7 +913,7 @@ def test_a_resolved_host_outside_the_sandbox_is_refused_before_any_call(tmp_path
         providers={},
         embed=(),
     )
-    monkeypatch.setattr(paseo_authority, "load_shared_paseo_runtime", lambda _root: foreign)
+    monkeypatch.setattr(paseo_authority, "load_authority_paseo_runtime", lambda _path: foreign)
     calls: list[str] = []
     started: list[Any] = []
     monkeypatch.setattr(client, "ClientSession", _recording_session({}, calls))
@@ -966,7 +964,7 @@ def test_a_sandbox_whose_settings_select_another_host_is_refused(tmp_path, monke
     document = host_settings_document(layout, None)
     foreign_home = (tmp_path / "developer/paseo").as_posix()
     document["paseoRuntime"]["home"] = foreign_home
-    layout.user_settings_file.write_text(json.dumps(document), encoding="utf-8")
+    _write_host(layout, document)
     calls: list[str] = []
     started: list[Any] = []
     monkeypatch.setattr(client, "ClientSession", _recording_session({}, calls))
@@ -978,7 +976,7 @@ def test_a_sandbox_whose_settings_select_another_host_is_refused(tmp_path, monke
 
     document["paseoRuntime"]["home"] = layout.paseo_home.as_posix()
     document["paseoRuntime"]["listen"] = "127.0.0.1:9786"
-    layout.user_settings_file.write_text(json.dumps(document), encoding="utf-8")
+    _write_host(layout, document)
     refused = asyncio.run(client._run(request))
     assert refused["ok"] is False
     assert "127.0.0.1:9786" in refused["error"] and layout.paseo_listen in refused["error"]
@@ -988,7 +986,7 @@ def test_a_sandbox_whose_settings_select_another_host_is_refused(tmp_path, monke
 def test_a_host_outside_the_sandbox_refuses_in_the_unconfigured_phase(tmp_path, monkeypatch):
     client = _helper_under_test()
     request, layout = _driving_request(tmp_path)
-    layout.user_settings_file.unlink()
+    _write_host(layout, False)
     foreign = PaseoRuntimeSettings(
         install_prefix=tmp_path / "developer/prefix",
         home=tmp_path / "developer/paseo",
@@ -996,7 +994,7 @@ def test_a_host_outside_the_sandbox_refuses_in_the_unconfigured_phase(tmp_path, 
         providers={},
         embed=(),
     )
-    monkeypatch.setattr(paseo_authority, "load_shared_paseo_runtime", lambda _root: foreign)
+    monkeypatch.setattr(paseo_authority, "load_authority_paseo_runtime", lambda _path: foreign)
     calls: list[str] = []
     started: list[Any] = []
     monkeypatch.setattr(client, "ClientSession", _recording_session({}, calls))
@@ -1026,7 +1024,7 @@ def test_a_request_port_that_is_not_a_sandbox_port_is_refused(tmp_path, monkeypa
 def test_a_sandbox_that_records_no_host_yet_is_admitted_only_without_one(tmp_path, monkeypatch):
     client = _helper_under_test()
     request, layout = _driving_request(tmp_path)
-    layout.user_settings_file.unlink()
+    _write_host(layout, False)
     answers = {"server_info": _admitted_info(request), "runtime_install": {"ok": True}}
     calls: list[str] = []
     started: list[Any] = []
@@ -1038,10 +1036,8 @@ def test_a_sandbox_that_records_no_host_yet_is_admitted_only_without_one(tmp_pat
     assert started[0].env["XDG_CONFIG_HOME"] == layout.config_home.as_posix()
     assert not [name for name in started[0].env if name.startswith("PASEO_")]
 
-    layout.user_settings_file.write_text(
-        json.dumps(host_settings_document(layout, None)), encoding="utf-8"
-    )
-    monkeypatch.setattr(paseo_authority, "load_shared_paseo_runtime", lambda _root: None)
+    _write_host(layout)
+    monkeypatch.setattr(paseo_authority, "load_authority_paseo_runtime", lambda _path: None)
     refused = asyncio.run(client._run(request))
     assert refused["ok"] is False and layout.paseo_home.as_posix() in refused["error"]
 

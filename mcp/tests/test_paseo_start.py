@@ -6,7 +6,6 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 import pytest
-from _user_settings_guard import user_settings_path_for_write
 from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving.paseo import paseo_start
@@ -21,15 +20,16 @@ from paseo_runtime_test_support import (
     free,
     refused,
     runtime_settings,
-    write_shared_runtime,
+    write_runtime_block,
 )
 
 
 def configured(root):
     settings = runtime_settings(root)
-    write_shared_runtime(root, settings)
+    config_path = root / "settings.json"
+    write_runtime_block(config_path, settings)
     config = McpRuntimeConfig(
-        config_path=root / "settings.json",
+        config_path=config_path,
         coordination_root=root / "coordination",
         workspace_root=root / "projects",
         transcript_root=root / "logs",
@@ -136,9 +136,9 @@ def test_two_concurrent_starts_share_one_home_lock(tmp_path):
 
 def test_no_shared_block_is_a_named_non_starting_state(tmp_path):
     config, fake = configured(tmp_path)
-    write_shared_runtime(tmp_path, None)
+    write_runtime_block(config.config_path, None)
     result = ensure_host(config, runner=fake, reader=fake.reader, probe=free)
-    assert result.state == "not configured" and str(user_settings_path_for_write()) in result.line
+    assert result.state == "not configured" and str(config.config_path) in result.line
     assert fake.calls == []
 
 

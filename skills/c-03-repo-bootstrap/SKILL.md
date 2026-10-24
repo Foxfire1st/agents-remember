@@ -1267,7 +1267,7 @@ The orchestrator remains thin throughout.
 | `c-04-retrieval-strategy-router`                  | Consumes bootstrapped overviews and file maps as the Intent substrate and can route to semantic/relationship providers first. |
 | `c-10-adopt-memory-baseline`                      | The next step on a newly scaffolded memory repo: commits this skill's output as the first attributed memory baseline and computes the ledger cache. It owns the drift check and the adoption procedure. |
 | `c-14-knowledge-bootstrap`                        | Owns the repository's **knowledge foundation** - the authored records under `knowledge/` in the memory repository - as a step separate from onboarding. This skill's handoff names it; onboarding is optional input to it, and this skill neither produces it nor substitutes for it. |
-| `c-02-memory-quality-control`                     | Becomes relevant after bootstrap; touched files can be promoted from deferred to covered.                     |
+| `c-05-create-or-update-onboarding-files`                     | Becomes relevant after bootstrap; touched files can be promoted from deferred to covered.                     |
 | `l-01-agent-lifecycles`                           | May trigger targeted bootstrap when an active job enters an uncovered area.                                   |
 | `confluence-search` / documentation search skills | Feed the docs evidence pass through approved sources from the input ledger.                                   |
 

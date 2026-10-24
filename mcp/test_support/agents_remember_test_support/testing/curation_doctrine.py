@@ -42,8 +42,8 @@ COMPLETE_CURATION_RULE = (
     "Curation is always complete: a named scoped check never stands in for the full operation"
 )
 
-#: The nine generated skill copies ``scripts/sync-skills.py`` owns, relative to the repository
-#: root. A stale copy is a real defect: a seat on that harness reads the old sentence.
+#: The declared generated skill copies ``scripts/sync-skills.py`` owns, relative to the
+#: repository root. A stale package copy serves the old sentence.
 GENERATED_SKILL_COPIES = tuple(
     target.path
     for projection in parse_generated_copies(
@@ -248,8 +248,8 @@ RETIRED_CURATION_STATEMENTS: tuple[RetiredCurationStatement, ...] = (
         reason="the curator's own report template declared the complete operation separate and not a gate",
     ),
     RetiredCurationStatement(
-        statement="Full memory quality is an explicit developer-requested operation through `c-02-memory-quality-control`, not a closeout precondition.",
-        sources=("skills/c-12-closeout/SKILL.md",),
+        statement="Full memory quality is an explicit developer-requested operation through `c-05-create-or-update-onboarding-files`, not a closeout precondition.",
+        sources=("skills/w-02-light-task-workflow/SKILL.md",),
         probe="is not a closeout precondition",
         reason="closeout was told curation's completed result is not its precondition",
     ),
@@ -605,7 +605,7 @@ LOOP_GATE_CORRECTED_FIELDS = ("qualityChecklistStatus", "closeoutReady")
 #: field names each must carry. Membership is the census -- the retired pairing must never return to
 #: one of these -- and the positive half is asserted with the same reader the skill carriers use, so
 #: a document that drops a field name is caught rather than silently leaving the census.
-#: ``drift-c02.md`` documents the ``c-02-memory-quality-control`` operation, and ``mcp-tools.md``
+#: ``drift-c02.md`` documents the ``c-05-create-or-update-onboarding-files`` operation, and ``mcp-tools.md``
 #: documents the tool surface itself; both are read by seats that may never open a skill file.
 LOOP_GATE_DOCUMENTS: dict[str, tuple[str, ...]] = {
     "docs/reference/drift-c02.md": LOOP_GATE_CORRECTED_FIELDS,
@@ -699,7 +699,7 @@ def retired_loop_gate_findings(root: Path) -> list[str]:
     the pairing either -- the raw value it names belongs to a different published field, so a
     carrier cannot state it correctly by accident, which is what makes a fragment match safe here.
 
-    Scope is the canonical ``skills/**`` tree, the nine generated copies, and the reference
+    Scope is the canonical ``skills/**`` tree, the declared package copies, and the reference
     documents in :data:`LOOP_GATE_DOCUMENTS`. What it does NOT cover, stated rather than implied: a
     restatement of the wrong gate in fresh vocabulary that never writes the pairing (for example
     "repair until the combined status reads ready") passes, and it does not read the tool.

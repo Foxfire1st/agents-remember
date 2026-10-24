@@ -19,8 +19,8 @@ the system Python (3.10 or newer) or with a checkout's `mcp/.venv`. Two modules 
 under test and import that build's own code.
 
 `build`, `check`, `start` and `stop` accept `--host-port` and `--dashboard-port`.
-Defaults remain 6820 and 9797. Supply the same chosen pair to each command on that
-sandbox; the renderer, settings, safety check and listener ownership use that pair.
+defaults remain 6820 and 9797. Supply the same chosen pair to each command on that
+sandbox; the settings, safety check and listener ownership use that pair.
 The ports must differ and cannot be 9785 or 9786. A foreign holder refuses the start;
 the tooling never selects another port. `reset` still identifies owned processes by
 their exact configuration/home records and needs no port arguments.
@@ -36,8 +36,9 @@ python3 scripts/pnt-sandbox.py stop --sandbox /path/to/sandbox --host-port 6871 
 
 A different product checkout may use one named frozen tooling checkout: invoke that
 tooling's `scripts/pnt-sandbox.py`, with the product's own SDK and `--checkout` (or
-the `start` positional checkout). The single public renderer belongs to the tooling;
-the root resolver, tool server, install and dashboard run the actual product. Record
+the `start` positional checkout). The sandbox settings owner belongs to the tooling and asks
+the product for the host block it needs; the root resolver, tool server, install and dashboard
+run the actual product. Record
 both checkouts' HEAD/patch identities and the tooling freeze, then qualify safety and
 public `server_info` with zero model turns. A missing product API or wrong package/root
 refuses; do not substitute the tooling's runtime, copy a legacy settings block or
@@ -73,8 +74,8 @@ Rules for using it:
 | `projects/` | the Projects folder; `projects/sandbox-app` is a small Git repository with one test |
 | `remotes/sandbox-app.git` | the repository's origin, so leaf enclosures can be opened |
 | `coordination/` | the coordination root: one sprint, one master, two leaves with approved requirement packets, and the memory repository `memory-repos/ar-sandbox-app` |
-| `settings/agents-remember-settings.json` | dashboard/tool server MCP settings; user configuration supplies the host authority |
-| `config/agents-remember/settings.json` | the one user settings file for this sandbox, including `paseoRuntime` |
+| `settings/agents-remember-settings.json` | dashboard/tool server MCP authority settings, including `paseoRuntime` |
+| `config/agents-remember/settings.json` | the one user settings file for this sandbox |
 | `paseo/home`, `paseo/prefix` | the Paseo runtime's home and install prefix |
 | `eve/` | the Eve application, its launcher and the list of variables an env file may not set |
 | `dagger-authority/` | the registry of the build's quality tools, which the build otherwise keeps in the user's home |
@@ -234,7 +235,7 @@ The cost: a Pi agent of the sandbox runs without every extension and package of 
 Pi, not only the gateway. Nothing under `~/.pi` is read differently or written: the developer's
 Pi configuration, logins and models stay as they are, and a Pi started outside the sandbox loads
 its extensions as before. Outside the sandbox the entry is the developer's choice
-(`paseoRuntime.providers` of the shared user configuration settings file); without it only the instructions apply.
+(`paseoRuntime.providers` of the MCP authority settings file); without it only the instructions apply.
 
 ## Eve
 
@@ -282,8 +283,8 @@ The live roots are not among them. These are writes of other programs, in their 
 
 The host install phase uses the candidate's public `runtime_install` tool after
 server_info proves the exact sandbox roots and package root. Coordination asset
-bootstrap happens before the sandbox setup supplies its one shared
-`config/agents-remember/settings.json` paseoRuntime block; no per-harness fallback.
+bootstrap happens before the sandbox setup supplies its paseoRuntime block in
+`settings/agents-remember-settings.json`, the MCP authority; no per-harness fallback.
 Node data/state/cache variables are confined to this sandbox, and install receipts
 are kept under run/. Dashboard starts then ensure the already installed host and
 never run npm or rewrite daemon/plugin configuration. One host home lock covers

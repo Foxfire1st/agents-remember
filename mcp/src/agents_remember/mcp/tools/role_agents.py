@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.cli.paseo_role_tools import send_role_message, start_leaf_set, start_role
+from agents_remember.cli.paseo_role_tools import (
+    runnable_harnesses,
+    send_role_message,
+    start_leaf_set,
+    start_role,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_agents import (
     RoleMessageCall,
@@ -53,6 +58,85 @@ def role_message_payload(config: McpRuntimeConfig, call: RoleMessageCall) -> dic
         return _tool_payload("role_message", result, answer=result if held else None)
     finally:
         call_target_role.reset(token)
+
+
+def user_settings_init_payload(
+    config: McpRuntimeConfig,
+    *,
+    harness: str | None,
+    roles: dict[str, str] | None,
+    dry_run: bool,
+    target: str,
+) -> dict[str, Any]:
+    """Preview or write the one role-harness settings file (MIK-R196 rule 11).
+
+    ``target="role-settings"`` writes the harness choice of each role. Only an absent destination
+    is created; an existing one is read and reported, never completed. A refusal is an answer, not
+    an exception: it names its code, its reason and the next action, and nothing was written.
+
+    ``target="host-authority"`` is refused by name: the ``paseoRuntime`` block belongs to the
+    installed MCP settings file, not to this user settings file (MIK-R137), and the host
+    preparation stage owns that write.
+    """
+
+    from agents_remember.application.user_settings_init import (  # noqa: PLC0415 - one family
+        SettingsInitRefused,
+        SettingsInitRequest,
+        initialize_role_settings,
+        settings_path_without_read,
+    )
+
+    if target == "host-authority":
+        answer = _host_authority_not_here(config, settings_path_without_read(config), target)
+    else:
+        try:
+            written = initialize_role_settings(
+                config,
+                SettingsInitRequest(harness=harness, roles=roles, dry_run=dry_run),
+                runnable_harnesses=runnable_harnesses,
+            )
+            answer = {**_previewed(written, dry_run), "target": target}
+        except SettingsInitRefused as refused:
+            # The refusal is answered from the refusal itself. Nothing here re-enters the reader
+            # or the host catalog that refused (L188-B07): an unreadable, misplaced or colliding
+            # file cannot raise a second time, no write is attempted, and no file content is
+            # printed -- the path is resolved without reading the destination at all.
+            answer = {
+                # The refusal shape is the model's: ``state="refused"`` with ``code``, ``detail``
+                # and ``nextAction``. A ``status`` key here is not declared and makes the answer
+                # fail validation, which is how the census first caught it.
+                "ok": False,
+                "state": "refused",
+                "code": refused.code,
+                "detail": refused.detail,
+                "nextAction": refused.next_action,
+                "path": settings_path_without_read(config),
+                "target": target,
+            }
+    return _tool_payload("user_settings_init", answer)
+
+
+def _host_authority_not_here(config: McpRuntimeConfig, path: str, target: str) -> dict[str, Any]:
+    """The refusal of a user-file host block, naming the file that does own it."""
+
+    return {
+        "ok": False,
+        "state": "refused",
+        "code": "host-authority-not-in-user-settings",
+        "detail": f"The paseoRuntime block belongs to the installed MCP settings file "
+        f"({config.config_path.as_posix()}); the user settings file carries role harness "
+        "choices only, and this tool writes no host block.",
+        "nextAction": "Configure paseoRuntime in the MCP settings file, or let the host "
+        "preparation stage establish it; then call again with target role-settings.",
+        "path": path,
+        "target": target,
+    }
+
+
+def _previewed(answer: dict[str, Any], dry_run: bool) -> dict[str, Any]:
+    """One answer whose state reads ``preview`` when the call wrote nothing."""
+
+    return {**answer, "state": "preview" if dry_run else answer["state"]}
 
 
 def retire_child_payload(

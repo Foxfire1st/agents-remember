@@ -75,7 +75,7 @@ A repo-level `overview.md` is enough to start. Larger repositories can add route
 When a task touches a file, the agent should:
 
 1. resolve context with the `c-08-ar-coordination-context-resolver` skill
-2. check drift with the `c-02-memory-quality-control` skill
+2. check drift with the `c-05-create-or-update-onboarding-files` skill
 3. read or create the relevant onboarding
 4. implement approved work
 5. refresh onboarding through the `c-05-create-or-update-onboarding-files` skill

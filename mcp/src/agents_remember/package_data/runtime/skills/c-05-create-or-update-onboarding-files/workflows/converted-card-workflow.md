@@ -178,5 +178,8 @@ The row is written through the writer (`knowledge-ingest`, the hand-off's `histo
   table left in place after the fixer has run.
 - Hand-written or hand-edited sidecar anchors, or a reference number you allocated yourself.
 
-c-11 carryover selects pairs/records, validates, commits nothing; leaf rows close out. Route indexes (`overview.index.json`) are uncommitted caches. Regenerate them with `route_index_refresh`, scoped to
+Carryover — `c-10-adopt-memory-baseline` `workflows/carryover-from-branch.md`, the retained
+recovery-leaf → curator-row → normal-closeout publication sequence behind
+`memory_carryover_plan` / `memory_carryover_apply` — selects pairs/records, validates, commits
+nothing; leaf rows close out. Route indexes (`overview.index.json`) are uncommitted caches. Regenerate them with `route_index_refresh`, scoped to
 this leaf's contract.

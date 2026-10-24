@@ -1,218 +1,96 @@
 # Getting Started
 
-This guide sets up Agents Remember in a workspace that contains one or more code repositories.
+Agents Remember setup starts with one call after the MCP server is installed and registered
+with your harness. Follow your [harness install guide](install/README.md) to wire the server;
+restart the harness if it needs that to discover the MCP connection.
 
-Setup is agent-driven. Once the MCP server is wired in, you ask your agent to do the work and answer one question along the way.
+## Start Setup
 
-## The Short Version
+From your own chat, call:
 
-Ask your agent to:
+```text
+role_start(role="bootstrap", request_id="<fresh UUID>")
+```
 
-1. **Copy the harness package** — Use the install guide for your harness and copy
-   its native starter files from this repo into the workspace. Either run the
-   copied package's `render-starter` script with a single `--repo` list, for
-   example `--repo my-app shared-lib`, or replace the package placeholders by
-   hand.
-2. **Wire the MCP server** — Register Agents Remember MCP with this harness using
-   `uvx` and the copied `agents-remember-settings.json`, then **restart the
-   harness once** so it loads the MCP server, skills, hooks/rules/instructions,
-   and settings from the package.
-3. **Onboard your project** — Invoke `c-13-install-and-onboard`. It pre-checks
-   setup, runs or verifies `runtime_install()`, sets up the memory repo (it asks:
-   scaffold a new one or use an existing one), bootstraps onboarding, and starts
-   provider indexing.
+The call prepares a missing coordinator scaffold and host, verifies the product plug-in and
+starts one instructed Bootstrap seat. Its answer names that seat and the dashboard/chat where
+you continue. It creates no task or other role. If preparation refuses, read the named stage,
+actual effects and remaining host state, resolve that reason, and retry the same request UUID.
 
-Your only required restart in the package-based first-run path is after copying
-the harness package and wiring the MCP server.
-
-## Restart Points
-
-Setup is agent-driven, but the harness must restart once after package and MCP
-wiring so it can load new skills, settings, hooks/rules/instructions, and MCP
-tools:
-
-| Step | Why restart? | Required? |
-| --- | --- | --- |
-| After copying the harness package and registering MCP | The harness loads the MCP server, copied skills, hooks/rules/instructions, and settings. | Yes |
-
-`c-13-install-and-onboard` does not install hooks or skills, so it does not add
-another restart point.
+No skill folder, starter package or renderer is required. The MCP server serves canonical
+skills from its package as resources. Optional harness-native instruction/hook files carry only
+the first-action directive; the install guides describe them separately from server wiring.
 
 ## Example Workspace
 
 ```text
 projects/
-  AGENTS.md
-  agents-remember/
-  my-app/
-  ar-coordination/
+  agents-remember/       # source checkout when developing the product
+  my-app/               # your code repository
+  ar-coordination/      # runtime and local coordination
 ```
 
-`agents-remember` is the source checkout. `ar-coordination` is the installed runtime and local coordination area. `my-app` is the repository you want agents to work on.
+Skills remain in the server package, rather than in a harness or the coordination root.
+The source checkout is not required by an installation built from a wheel.
 
-## Copy The Harness Package
+## MCP Registration
 
-Different tools discover instructions, hooks, MCP settings, and skills in
-different native locations. Use the install page for your harness, copy its
-starter package into the workspace, and render that copied package by running
-its local `render-starter` script:
-
-| Harness | Setup guide |
-| --- | --- |
-| Codex | [install/codex.md](install/codex.md) |
-| Claude Code | [install/claude-code.md](install/claude-code.md) |
-| Cursor | [install/cursor.md](install/cursor.md) |
-| Antigravity | [install/antigravity.md](install/antigravity.md) |
-| VS Code + GitHub Copilot | [install/vscode-copilot.md](install/vscode-copilot.md) |
-| Hermes.md | [install/hermes.md](install/hermes.md) |
-| Pi.dev | [install/pi.md](install/pi.md) |
-| OpenClaw | [install/openclaw.md](install/openclaw.md) |
-
-The starter packages are intentionally copy-pasteable. They carry the initial
-skills, harness-native hooks/rules/instructions, and a renderer that fills the
-copied settings. The renderer infers the workspace root from the copied harness
-folder. Pass every repository folder the MCP server should cover after one
-`--repo`, for example:
-
-```text
-python .codex/render-starter.py --repo my-app shared-lib
-```
-
-The renderer fills workspace paths, repository names and harness-specific hook
-or context commands. It also creates or consumes the one shared `paseoRuntime`
-block in `~/.config/agents-remember/settings.json`
-(or `$XDG_CONFIG_HOME/agents-remember/settings.json`), with absolute data/state
-paths and the configured host/dashboard origins. Run it for host setup; manual
-placeholder edits alone do not supply that block. The [settings reference](reference/settings-json.md#paseo-runtime)
-and [install guide](install/README.md) describe the complete block and the
-approved add/move-and-retry procedure for existing installations.
-
-## Manual Wire Of The MCP Server
-
-Your agent should usually handle MCP setup for you. If that does not work, wire it manually. The simplest path is `uvx`, which fetches and runs the server on demand — no manual virtualenv or PATH setup. Register it with your harness by pointing the command at `uvx` and an **absolute** settings path:
+Use the [install guide](install/README.md) for your harness and the build you installed. It
+names the command and an absolute MCP settings path. A source-built Python3.14 wheel can be
+registered with:
 
 ```json
 {
   "command": "uvx",
   "args": [
-    "agents-remember-mcp",
-    "--config",
-    "/absolute/path/to/agents-remember-settings.json"
+    "--python", "3.14", "--from", "/absolute/path/to/built-wheel.whl",
+    "agents-remember-mcp", "--config", "/absolute/path/to/agents-remember-settings.json"
   ]
 }
 ```
 
-A minimal starter `agents-remember-settings.json`:
+The MCP settings name your absolute `workspaceRoot`, `coordinationRoot`, and repository
+allow-list; see the [settings reference](reference/settings-json.md). This authority file is
+separate from the user settings file that records the harness choice for each role.
 
-```json
-{
-  "version": 1,
-  "coordinationRoot": "/absolute/path/to/ar-coordination",
-  "workspaceRoot": "/absolute/path/to/workspace",
-  "repositories": {
-    "<your-repo-name>": {
-      "certificationProfile": "config/repository-certification.json"
-    }
-  },
-  "providers": {
-    "codegraphcontext-code": {},
-    "grepai-memory": {}
-  }
-}
-```
+Bootstrap creates a missing `paseoRuntime` block in the active MCP authority file. An existing
+block stays unchanged; an invalid or unusable host is reported instead of silently replaced.
+There is no renderer or instruction to move a host block into the user's role-settings file.
 
-`certificationProfile` is an explicit path inside that repository, not a conventional filename.
-Create the repository-owned file for its actual commands, artifacts, runtimes, selectors, and
-clean-room scenarios; do not copy the Agents Remember rail inventory into another repository.
-The `c-13-install-and-onboard` flow checks and compiles it before declaring code closeout ready.
-See [Repository Certification Profiles](reference/repository-certification-profile.md). A
-repository without this field can still be configured and onboarded, but any later operation that
-would certify code fails closed before running tests.
+## Continue With Bootstrap
 
-The settings file must be absolute and must live **outside** the
-`ar-coordination/` runtime folder. See the [settings.json reference](reference/settings-json.md)
-for every field. After registering or changing the server, **restart the
-harness** so it discovers the MCP tool list and the copied starter package.
+In the dashboard conversation, choose the repositories and the harness each role should use.
+Harness-only choices leave the model and effort unset so that harness's own defaults apply.
+Bootstrap previews the settings and exclusively creates an absent user settings file; an
+existing file is reported without overwriting it.
 
-## Run c-13 And Install The Runtime
-
-After the restart, invoke the copied skill:
+For each repository, choose a new memory scaffold or an existing memory repository.
+External memory is the only supported topology:
 
 ```text
-c-13-install-and-onboard
+ar-coordination/memory-repos/ar-my-app/
+  system/
+  onboarding/
+  docs/
 ```
 
-The skill first runs or verifies:
+The removed repo-local `ar-memory/` layout is refused by its exact path; setup does not migrate
+or recreate it. Existing memory is inspected and its baseline/state reported, with dirty or
+unusable inputs kept distinct from an absent root. See [Use External Memory](guides/use-external-memory.md).
 
-```text
-runtime_install()
-```
+Setup authors no onboarding or knowledge and starts no other role. At exit it tells you how to
+start an Architect, which organizes optional onboarding and the knowledge foundation as a
+regular task, master or sprint. The substantive procedures remain in the package-served
+`c-13-install-and-onboard`, `c-00-initialize-memory-repo` and `c-14-knowledge-bootstrap` references.
 
-The runtime installer reconciles package-owned runtime files into `ar-coordination`: installed `AGENTS.md` templates, skills, provider defaults, and runtime folders. It does not create memory repos, run onboarding bootstrap, overwrite live settings, or modify tasks, notes, worktrees, memory content, or temporary artifacts. Preview with `runtime_install(dry_run=true)`.
+## Maintenance And Normal Work
 
-When providers are enabled in the settings, `runtime_install` also builds or pulls their Docker images. It does **not** start indexing on its own — the `c-13-install-and-onboard` skill (or the [Providers guide](guides/providers.md)) does that.
+`runtime_install(dry_run=true)` previews a runtime refresh; applying it reconciles managed
+runtime files while preserving memory, tasks and user-owned state. It creates no skill copy.
+Benchmark fixtures are optional (`include_benchmarks=true`), and local benchmark outputs are
+preserved. Retired providers are reported as unused; setup starts no provider indexing or watcher.
 
-Benchmark fixtures are optional and not installed by default. Install or refresh them with `runtime_install(include_benchmarks=true)`. The benchmark package is idempotent and preserves local outputs under `ar-coordination/benchmarks/user-runs/`.
-
-## Skills And Hooks
-
-The package-based first-run path gets skills and hooks/rules/instructions from
-the copied harness starter package. Do not install skills for initial
-setup; the starter package already carries them.
-
-## Set Up Memory
-
-The `c-13-install-and-onboard` skill asks whether to **scaffold a new memory repo** or **use an existing one** — it does not assume you always want a fresh one. If you answer "scaffold," it runs `c-00-initialize-memory-repo` for the target repository.
-
-The `c-00-initialize-memory-repo` skill creates the external memory repo for the target
-repository:
-
-```text
-ar-coordination/
-  memory-repos/
-    ar-my-app/
-      memory.md
-      onboarding/
-      docs/
-      system/
-        settings.md
-        settings.json
-        sources.md
-        tools.md
-```
-
-See [Use External Memory](guides/use-external-memory.md).
-
-**How the resolver picks a location.** External memory is the only supported topology, so the
-resolver binds each configured repository to `ar-coordination/memory-repos/ar-<repo>/`. If that
-location does not exist, resolution fails until you initialize it, which is exactly what the
-`c-13-install-and-onboard` and `c-00-initialize-memory-repo` skills do here. A repository that
-still carries the removed repo-local `ar-memory/` root is refused with that exact path and the
-route to re-point it at its external memory root.
-
-## Bootstrap Onboarding
-
-For a new memory repo, the `c-13-install-and-onboard` skill runs `c-03-repo-bootstrap` for the target repository. A thin `overview.md` is enough to start. Larger repositories can grow route-local overviews and file-level onboarding as work touches new areas. For token-conscious bootstraps of large repos, see [Cost-aware Bootstrap](guides/cost-aware-bootstrap.md).
-
-## Providers (Retired Operation)
-
-MIK-R112 removed the provider tools: no product path installs, starts, or watches the `codegraphcontext-code` / `grepai-memory` providers. The `c-13-install-and-onboard` skill stops leftover watcher processes during install and reports old provider keys once as unused; verify with `server_info`. There is nothing to start:
-
-```text
-server_info()
-```
-
-Providers are optional — memory, onboarding, drift, and task workflows all work without them. See [Providers](guides/providers.md).
-
-## Start Working
-
-Sessions route by role through the `l-01-agent-lifecycles` skill: developer-facing free chat answers a question inline and, for work on a managed repository, creates or resolves the sprint document, writes the request of the developer into it, starts an Architect with `role_start` (the call for an Architect names no document), and tells the developer that the agent is in the dashboard and which sprint document holds the request. Another role is started this way only when the developer names the role and the task. Role agents follow their handovers. For normal tasks the agent should:
-
-1. resolve the repository context with `c-08-ar-coordination-context-resolver`
-2. run `c-02-memory-quality-control` before planning against onboarding
-3. read the relevant onboarding beside the code
-4. propose changes and wait for approval
-5. implement approved work
-6. update onboarding through `c-05-create-or-update-onboarding-files`
-
-Escalate to a [durable `w-02-light-task-workflow` task or master series](workflows.md) when the work needs a durable plan that survives the session.
+After setup, the user-started Architect follows the repository's normal task and approval
+workflow. Read verified onboarding alongside source, qualify drift, and keep code and memory
+changes under their existing owners. Role agents follow their exact handovers. See
+[Workflows](workflows.md), [Skills](reference/skills.md), and [Refresh Stale Onboarding](guides/refresh-stale-onboarding.md).

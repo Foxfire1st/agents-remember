@@ -1,6 +1,6 @@
 ---
 name: c-05-create-or-update-onboarding-files
-description: "Create and maintain file-level onboarding and repo entity catalogs. Enforces strict 1-to-1 source mapping, governing overview links, metadata, and references, and routes package/module/source-slice create, refresh, move, or delete cases to the c-03-repo-bootstrap skill."
+description: "Create and maintain file-level onboarding and repo entity catalogs. Enforces strict 1-to-1 source mapping, governing overview links, metadata, and references, routes package/module/source-slice create, refresh, move, or delete cases to the c-03-repo-bootstrap skill, and measures the reference anchors of onboarding cards against the source tree, so it reports currentness, the duty that follows and the repair."
 ---
 
 # c-05-create-or-update-onboarding-files Create Or Update Onboarding Files
@@ -13,6 +13,12 @@ This package owns durable onboarding maintenance for two artifact types and one 
 Inline onboarding does not replace the file-level content model. It reuses the same semantic sections and adds storage-specific syntax, placement, and digest rules through the inline adapter workflow/template.
 
 Planning stays in task artifacts. This package defines how onboarding itself is created, updated, and kept structurally consistent.
+
+It also owns the two procedures the retired skills left behind (MIK-R196 rule 8):
+`workflows/findings-capture.md` (a finding's durable destination, kept from the retired findings
+capture skill) and `workflows/memory-quality-control.md` (the pre-commit and pre-curation checks,
+kept from the retired memory quality control skill). The `memory_quality_check` and
+`curator_coherence` tools own the checks themselves.
 
 Before maintaining onboarding, use `c-08-ar-coordination-context-resolver` to resolve the target repository's active coordination context. It must use the `Domain Documentation` category declared in the resolved `system/sources.md` for the onboarding slice being maintained, rather than assuming that adjacent onboarding alone is sufficient or hard-coding one particular documentation system into the skill.
 
@@ -28,7 +34,7 @@ strict 1-to-1 source mapping and governing-overview links are unchanged by
 this routing. A solo flat session with no separate curator seat runs
 this skill itself, exactly as before.
 
-When onboarding maintenance is happening inside a `c-09-git-worktree-manager`
+When onboarding maintenance is happening inside a `w-02-light-task-workflow`
 worktree, check `worktree_status` before starting memory entries. If its
 `freshness` block reports that the recorded code or memory source branch moved,
 run `worktree_sync` before writing onboarding content unless that sync is blocked
@@ -49,3 +55,13 @@ route overviews follow `workflows/converted-card-workflow.md`:
 - a change with no onboarding impact is an `onboarding_trace` row written through `knowledge-ingest`.
 
 Never write sidecar JSON by hand. Old-format memory is refused; convert it by the procedure of MIK-R46 rule 6.
+
+## The drift check on converted cards
+
+MIK-R30's drift check measures the reference anchors of onboarding cards and the validity of the
+tree: how many anchors are current, how many are stale against the code, and which files the
+knowledge validator refuses. Whether an invariant is still current is answered by `knowledge_read`
+and `knowledge_integrity_check`, not here. A stale reference is reported and never blocks by itself.
+A reference whose path is gone refuses the leaf's closeout or landing. Nothing is repaired by this
+check: `citation_fix` re-records anchors that only moved, and a curator decides what a moved anchor
+means for the card's text. The workflow is `workflows/memory-quality-control.md`.

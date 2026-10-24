@@ -10,9 +10,9 @@ This page is a map of the surface, not a complete index of it: the tables below 
 of the roster above. Behavior detail lives in the linked skill and reference pages.
 
 **Skills vs tools.** Many skills wrap one or more of these tools and add the
-procedure, gates, and ordering around them: the `c-00-initialize-memory-repo` skill drives the `memory_init` MCP tool, the `c-02-memory-quality-control` skill
-drives drift reporting (`context_packet` / `memory_quality_check`), the `c-09-git-worktree-manager` skill drives the `worktree_*`
-MCP tools, and the `c-12-closeout` skill drives the `*_closeout_*` MCP tools. When the docs say "run a core skill,"
+procedure, gates, and ordering around them: the `c-00-initialize-memory-repo` skill drives the `memory_init` MCP tool, the `c-05-create-or-update-onboarding-files` skill
+drives drift reporting (`context_packet` / `memory_quality_check`), the `w-02-light-task-workflow` skill drives the `worktree_*`
+MCP tools, and the `w-02-light-task-workflow` skill drives the `*_closeout_*` MCP tools. When the docs say "run a core skill,"
 the agent runs the skill, which calls the matching tool with the right
 preconditions. Call the raw tool directly only when you do not need the skill's
 surrounding procedure. See the [Skills reference](skills.md).
@@ -304,7 +304,7 @@ Register. `attach_master` attaches one master as a single validated batch
 mismatches, uncommanded masters).
 - `Completed` refuses while any declared step/substep or master row stays unresolved.
 
-See [c-09-git-worktree-manager Worktrees And Closeout](worktrees-c09.md) for the lifecycle and gates.
+See [w-02-light-task-workflow Worktrees And Closeout](worktrees-c09.md) for the lifecycle and gates.
 
 ## Knowledge operations
 

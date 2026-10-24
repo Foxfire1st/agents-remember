@@ -1,4 +1,4 @@
-"""Server, context, install, and skills payload builders."""
+"""Server, context, and install payload builders."""
 
 from __future__ import annotations
 
@@ -70,9 +70,6 @@ def server_info_payload(
             "coordinationRoot": config.coordination_root.as_posix(),
             "workspaceRoot": config.workspace_root.as_posix(),
             "transcriptRoot": config.transcript_root.as_posix(),
-            "harnessSkillRoot": (
-                config.harness_skill_root.as_posix() if config.harness_skill_root else None
-            ),
             "allowedRepoIds": list(config.allowed_repo_ids),
             "unusedProviderKeys": list(config.allowed_provider_ids),
             "unusedSettingsKeys": _unused_settings_keys(config),

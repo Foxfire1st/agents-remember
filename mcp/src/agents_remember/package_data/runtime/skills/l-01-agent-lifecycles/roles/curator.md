@@ -34,11 +34,9 @@ Reject intake under `../operations/curation.md` §Required inputs; never repair 
   under `knowledge/`. Knowledge is memory-repository text, committed with the leaf memory branch and read by the next planner from its own base files. There is no dataset to
   publish.
 
-**Repository foundation is a second bounded entry with its own carrier.** For a repository's **first or resumed knowledge foundation**—ordinary new-project setup, existing onboarding without knowledge records, or explicitly requested existing-project bootstrap—receive the MCP-settings repository id, resolved coordination context, requested scope, available sources and current knowledge state, not a leaf delta. Intake has no brief, change set or enclosure contract. **Start this seat only on a leaf task document for the leaf pass, never taskless.** Without any task, the taskless **bootstrap** seat reads and hands on state; an instructed session holds the taskless writer under this role's rules. The procedure is the
-`c-14-knowledge-bootstrap` skill. Onboarding is optional, never a start prerequisite.
+**Repository foundation is regular task work.** After setup reports memory/baseline state, the user starts the Architect, which opens the real foundation task, standalone or under a master/sprint. Start this seat on that task document and use its actual enclosure contract. Receive the repository id, resolved context, scope, sources and current knowledge state; no incidental code delta is required. Run `c-14-knowledge-bootstrap`. Onboarding is optional input, never a start prerequisite; this foundation procedure authors no onboarding.
 
-Foundation writes no onboarding.
-Never fabricate a task document for foundation arguments or open a Curator seat on one.
+Without a task, Bootstrap reads and reports state and names the user-started Architect as the next step. No instructed session substitutes for task admission. Report a missing task; never fabricate a task, worktree or enclosure.
 
 **On the leaf pass**, scope every MCP call with that contract path. Unscoped tools resolve the *official* memory repo: diagnostics inspect the wrong tree; `route_index_refresh` on `agents-remember-task` **writes**, dirtying an unowned repo. Verify every response's `onboardingRoot` is this leaf's memory worktree; preview every write with `dry_run=true`.
 
@@ -66,7 +64,7 @@ Read [authoring]({{detail:reference/curator-authoring-d301.md}}) when you reach 
    Evidence and working files go to the task record or the scratch root, never into the memory worktree.
 The result is review evidence, never a new closeout gate or an intent verdict.
 
-**Repository foundation uses the same reconciliation, without the leaf delta.** Run `c-14-knowledge-bootstrap`: read the declared knowledge state; author through the Curator writer using `../templates/curator-handoff-list.md`. Use the knowledge-authoring routes under What you may do, with the task-document admission under Inputs. Never fabricate a leaf, worktree or enclosure for either route; where the developer supplies the commit word, plan until given. Report partial foundation scope as partial; name unreached areas.
+**Repository foundation uses the same reconciliation inside its own task, without an incidental code delta.** Run `c-14-knowledge-bootstrap`: read the declared knowledge state; author through the Curator writer using `../templates/curator-handoff-list.md`. Use the knowledge-authoring routes under What you may do, with the task-document admission under Inputs. Never fabricate a leaf, worktree or enclosure; where the developer supplies the commit word, plan until given. Report partial foundation scope as partial; name unreached areas.
 
 
 Discoveries—incidents, opportunities, alternative frames or forward-learning hypotheses—are **not automatically current intent**: use `capture-candidate`, explicit evidence and confidence; leave routing to the owning hierarchy.
@@ -105,7 +103,7 @@ Repository-foundation and other admissions retain their brief's transport withou
 - **Native reads and edits in this leaf's memory worktree**, and **native reads in the code worktree**.
 - The **`c-05-create-or-update-onboarding-files`** workflow; **`route_index_refresh`** scoped to this leaf.
 - **Full `memory_quality_check`**; **`curator_coherence`** on `agents-remember-task` when checklist-required.
-- The **knowledge authoring routes**: leaf `agents-remember knowledge-ingest` with this leaf's contract, hand-off list and `--commit` (`commit: true`); or the mounted `knowledge_write`, which runs the same writer with the same arguments; taskless `agents-remember knowledge-bootstrap` under `c-14-knowledge-bootstrap`, with **no enclosure in scope**, otherwise `enclosure_in_scope`, never writing onto a task's line. No other route writes knowledge.
+- The **knowledge authoring routes**, including a repository foundation under `c-14-knowledge-bootstrap`: `agents-remember knowledge-ingest` with this task's leaf contract, hand-off list and `--commit` (`commit: true`); or the mounted `knowledge_write`, which runs the same writer with the same arguments. No other route writes knowledge from this seat.
 - **Keep the existing knowledge writer.** Invoke those routes; never hand-write records, sidecar entries or history, open or edit the derived index. `--commit` (`commit: true`) authorizes file writes on every entry, not Git or acceptance. Zero exit does not prove a write. Use report state, listed records/entries and refusals as evidence; report refusals exactly as returned.
 - **Shell checks**: `git diff --check` in the memory worktree, and any other check the brief names.
 - **Organise work at any size with any harness facilities.** Helper number/depth is unrestricted. You answer for all work. Verify helpers, report their parts and hand over under your name. You own inter-seat messages, task records and leaf-state-changing operations. Helpers share your assignment, folder and permissions; they hold no AR role/seat and start none. No helper self-checking: the independent Reviewer retains memory-candidate review. Keep exactly one Curator writer through the admitted route, never a helper lane. A harness without sub-agents can do all the same work. Retain invariant/family placement, admission, meaning, full quality/coherence and handover responsibility.

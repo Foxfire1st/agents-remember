@@ -860,9 +860,7 @@ def add_common(parser: argparse.ArgumentParser) -> None:
         help="Optional topology override. `external` is the only supported topology.",
     )
     parser.add_argument("--coordination-root", type=Path, help="Optional coordination root.")
-    parser.add_argument(
-        "--report", type=Path, help="Optional c-02-memory-quality-control drift report path."
-    )
+    parser.add_argument("--report", type=Path, help="Optional c-05 drift report path.")
 
 
 def build_parser() -> argparse.ArgumentParser:

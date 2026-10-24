@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from agents_remember.errors import PaseoRuntimeFailure
-from agents_remember.kernel.primitives.paseo_authority import paseo_runtime_path
+from agents_remember.kernel.primitives.paseo_authority import authority_settings_path
 from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettings
 from agents_remember.kernel.primitives.runtime_config import (
@@ -40,7 +40,7 @@ from agents_remember.serving.paseo.paseo_settings import pending_settings
 
 
 def install_host(config: McpRuntimeConfig, dry_run: bool) -> dict[str, Any]:
-    source = paseo_runtime_path(config.coordination_root)
+    source = authority_settings_path(config.config_path)
     try:
         settings = load_paseo_runtime_settings(config.config_path)
         if settings is None:
@@ -51,7 +51,7 @@ def install_host(config: McpRuntimeConfig, dry_run: bool) -> dict[str, Any]:
                 "settingsPath": source.as_posix(),
                 "node": None,
                 "message": f"No host configured: {source} has no paseoRuntime block; "
-                "complete the shared host settings in the install setup.",
+                "a Bootstrap role_start establishes that block in this authority file.",
             }
         source = settings.source_path or source
         report = preview_host(settings) if dry_run else provision_for_install(settings)

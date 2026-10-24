@@ -65,10 +65,8 @@ class McpToolTests(unittest.TestCase):
             self.assertEqual(payload["server"], "agents-remember")
             self.assertEqual(payload["transport"], "stdio")
             self.assertEqual(payload["configPath"], path.resolve().as_posix())
-            self.assertEqual(
-                payload["harnessSkillRoot"],
-                (root / ".codex" / "skills").as_posix(),
-            )
+            # MIK-R196 rule 7: no installed-harness skill root is named by the running server.
+            self.assertNotIn("harnessSkillRoot", payload)
             self.assertEqual(payload["allowedRepoIds"], ["agents-remember"])
             self.assertEqual(
                 payload["unusedProviderKeys"],

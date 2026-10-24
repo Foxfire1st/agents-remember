@@ -391,7 +391,7 @@ def _message_binding_projection_reference(
     binding: dict[str, Any],
 ) -> dict[str, str]:
     body = _message_binding_projection_bytes(binding)
-    path = _message_binding_projection_path(config, request_id)
+    path = message_binding_projection_path(config, request_id)
     return {
         "path": path.as_posix(),
         "sha256": hashlib.sha256(body).hexdigest(),
@@ -451,7 +451,7 @@ def _verify_message_binding_projection(
         raise ValueError("The saved native message-binding projection is missing.")
 
 
-def _message_binding_projection_path(config: McpRuntimeConfig, request_id: uuid.UUID) -> Path:
+def message_binding_projection_path(config: McpRuntimeConfig, request_id: uuid.UUID) -> Path:
     return (
         config.coordination_root
         / "notes"
@@ -929,7 +929,7 @@ def _refuse_reused_request_id(
                 "AR role selection's task folder; start again under a new request id."
             ),
         )
-    binding_file = _message_binding_projection_path(config, request.request_id)
+    binding_file = message_binding_projection_path(config, request.request_id)
     if not binding_file.exists():
         return
     try:
@@ -960,7 +960,7 @@ def _refuse_reused_request_id(
 def _discard_message_binding_projection(config: McpRuntimeConfig, request_id: uuid.UUID) -> None:
     """Remove the binding file of a request that was refused after the file was written."""
 
-    _message_binding_projection_path(config, request_id).unlink(missing_ok=True)
+    message_binding_projection_path(config, request_id).unlink(missing_ok=True)
 
 
 def _now_iso() -> str:
