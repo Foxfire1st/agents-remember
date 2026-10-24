@@ -1,10 +1,29 @@
-# Git Workflow Example
+# Task Publication Example
 
-Copy or rename this file to the memory layer's `system/git-workflow.md` when a repo lands changes
-through a **gated branch** (e.g. a PR-gated `main`). The coordinator routes "read `git-workflow.md`
-when present," so this file is where a repo states *how its changes reach the protected branch*.
-PR-gating and the spear branch are per-repo — fill in the `<placeholders>` for yours and delete what
-doesn't apply.
+Copy this file to the memory layer's `system/task-publication.md`. It is where a repo states *how its
+changes land and get published*: the landing workflow it runs, its branch policy and parent-branch
+edge, the pull-request publication steps, and the release/tag flow. The coordinator routes "read
+`task-publication.md` when present," so a repo that fills this in is answered from here rather than
+guessed at.
+
+## Landing Workflow Setting
+
+The workflow itself is a machine-read setting, not prose. `system/settings.json` carries
+
+```json
+"landing": { "workflow": "pull-request" }
+```
+
+at the root, and `local` is what a missing key means. The value is read by `parse_landing_settings`,
+which refuses any spelling other than those two by name, so a typo fails loudly instead of landing
+the repo the wrong way. `local` is the behavior every repository had before the setting existed: the
+integration moves the master line. `pull-request` publishes each leaf landing as a merged pull
+request and lets the master chain proof admit that one merge — the merge whose parents are the
+recorded base and the integrated landing, and whose tree is the landing's.
+
+The rest of this file is the prose half: the branch policy an agent must discover before it starts,
+and the publication steps it runs at the end. PR-gating and the spear branch are per-repo — fill in
+the `<placeholders>` for yours and delete what doesn't apply.
 
 ---
 
@@ -28,7 +47,11 @@ doesn't apply.
 
 ---
 
-## The landing flow
+## The landing flow (the `local` workflow)
+
+This is the recipe for a repository that lands locally: the merge *is* the landing. A repository set
+to `pull-request` lands through the AR integration and then publishes - see the next section; the
+steps below do not apply to it, and its squash preference is wrong there.
 
 Adapt to your repo; a gated-`main` repo typically does:
 
@@ -55,7 +78,39 @@ merge → cleanup → carryover`. Merge is not its own gate — only timing.
 
 ---
 
-## PR merge: prefer a merge commit over squash
+## Publishing a landing (the `pull-request` workflow)
+
+Under `pull-request`, landing and publication are two events, in that order. The AR integration moves
+this side's master line first; the landing is done. Publishing then makes that landing visible on the
+forge without adding anything to it. Three names carry the whole rule:
+
+| Name | What it is | Where it comes from |
+| --- | --- | --- |
+| **B** | the master-line position this side held immediately *before* that integration | the accepted integration authority - never a branch name, a receipt or a local memory |
+| **H** | the integrated landing commit that integration produced | the same authority |
+| **M** | the merge that publishes H - the forge's publication merge | the forge, read back as a commit |
+
+M has exactly two parents, in this order: **B**, then **H**. M's tree equals H's tree, because M adds
+nothing of its own. Read every step against them - the base pinned to B, the head to H, the readback
+to M. B and H are facts of the integration, not of this file; if that pair cannot be read, the
+repository does not publish and the leaf stays open.
+
+1. Confirm the side is integrated and that its H differs from its B. A side whose H equals its B has
+   nothing to publish.
+2. Publish H onto the master line, whose position is B, and let the forge open the pull request.
+3. Let the checks go green, then merge with a merge commit - never squash, never rebase-merge.
+4. Read M back: two parents, B then H, and a tree equal to H's. If either disagrees, that merge is not
+   this landing's publication and must not be recorded as one.
+5. Pull the master line, confirm it now holds M, and close the leaf's publication only after both
+   sides are published. A side already published stays as it is; an unchanged side is decided by the
+   rule above, not by convenience.
+
+---
+
+## PR merge: prefer a merge commit over squash (the `local` workflow)
+
+The preference below holds where the merge *is* the landing. In `pull-request` mode it does not apply:
+M must keep H as its second parent with H's tree, so squash and rebase-merge are refused there.
 
 - **Default: merge commit** — preserves a branch's distinct commits on the spear, so a PR that
   bundles several self-contained changes (each with its own onboarding + ledger mapping) stays

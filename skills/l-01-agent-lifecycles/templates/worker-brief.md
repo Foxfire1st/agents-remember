@@ -99,7 +99,7 @@ Name any guideline finding or plan conflict in your turn report; a contradiction
 verdict finding, not a style note.
 
 ## Targeted checks (before you report)
-Run targeted checks and record the durable-evidence promotion hold point as `../templates/turn-report.md` states, using the repository-specific commands, environment and evidence requirements from `system/git-workflow.md`, `system/coding-guidelines.md` and `system/tools.md`. Full code-quality and full-test operations require an explicit developer request. A failed or not-run targeted check is reported and never relabeled as full green.
+Run targeted checks and record the durable-evidence promotion hold point as `../templates/turn-report.md` states, using the repository-specific commands, environment and evidence requirements from `system/task-publication.md`, `system/coding-guidelines.md` and `system/tools.md`. Full code-quality and full-test operations require an explicit developer request. A failed or not-run targeted check is reported and never relabeled as full green.
 - `git diff --check` in both worktrees.
 
 ## Curator handoff input

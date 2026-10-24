@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 
 from agents_remember.kernel.coordination_context.models import (
+    LANDING_WORKFLOWS,
     CrossRepoSettings,
+    LandingSettings,
     StorageRule,
     StorageSettings,
 )
@@ -34,6 +36,48 @@ def parse_json_settings(
         optional_mapping(root.get("onboarding"), "onboarding") if "onboarding" in root else root
     )
     return parse_json_storage_settings(root, onboarding), parse_json_cross_repo_settings(root)
+
+
+def parse_json_landing_settings(root: dict[str, object]) -> LandingSettings:
+    """The one landing-workflow value this file holds (MIK-R202@v2 rule 13).
+
+    Read from ``landing.workflow`` at the root of the settings file, the same scope
+    ``parse_json_cross_repo_settings`` reads ``crossRepo`` from: the settings contract in
+    ``parse_json_settings`` normalizes ``onboarding`` for *storage* (wrapper first, root as fallback)
+    and reads policy blocks at the root, so the policy block added here is read where policy lives and
+    nowhere else. A repo that writes ``landing`` inside ``onboarding`` is therefore not silently
+    honoured - it lands locally, exactly as it did before the setting existed.
+
+    A missing key means ``local``, the behavior every repository had before the setting existed. A
+    value this product does not implement is refused by name here, at the one place the value is read,
+    so no later stage can act on a workflow nobody defined.
+    """
+    if "landing" not in root:
+        return LandingSettings()
+    landing = require_mapping(root.get("landing"), "landing")
+    if "workflow" not in landing:
+        return LandingSettings()
+    raw = landing["workflow"]
+    if raw is None:
+        # An explicit null is a configured value, not an absent one: a repository that writes the key
+        # meant to set it, so the reader names the mistake instead of reading it as "land locally".
+        raise ValueError(
+            "landing.workflow is present but null; a file that sets the key must name one of "
+            f"{', '.join(LANDING_WORKFLOWS)} (omit the key, or omit 'landing' entirely, to land "
+            "locally)"
+        )
+    if not isinstance(raw, str):
+        raise ValueError(
+            f"landing.workflow must be a string, not {type(raw).__name__}; expected one of "
+            f"{', '.join(LANDING_WORKFLOWS)}"
+        )
+    value = clean_scalar(raw)
+    if value not in LANDING_WORKFLOWS:
+        raise ValueError(
+            f"landing.workflow {value!r} is not a landing workflow this product implements; "
+            f"expected one of: {', '.join(LANDING_WORKFLOWS)}"
+        )
+    return LandingSettings(workflow=value)
 
 
 def parse_json_storage_settings(

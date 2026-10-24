@@ -64,7 +64,8 @@ lifecycle, integration, and cleanup; `w-02-light-task-workflow` runs the closeou
 
 Closeout and commit approval are separate from implementation approval. The agent presents a dry-run
 preview before any `w-02-light-task-workflow` closeout creates commits. The git-landing flow (direct vs PR-gated) is
-deferred to the repo's `system/git-workflow.md` when present.
+deferred to the repo's `system/task-publication.md` when present, together with the
+`landing.workflow` setting that decides which of the two the repository runs.
 
 ## Choosing A Build Mode
 

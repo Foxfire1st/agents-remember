@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from agents_remember.kernel.coordination_context.json_settings import (
     apply_json_storage_mode,
     parse_json_cross_repo_settings,
+    parse_json_landing_settings,
     parse_json_path_rule,
     parse_json_path_rules,
     parse_json_settings,
     parse_json_storage_settings,
 )
 from agents_remember.kernel.coordination_context.markdown_settings import parse_settings_block
-from agents_remember.kernel.coordination_context.models import CrossRepoSettings, StorageSettings
+from agents_remember.kernel.coordination_context.models import (
+    CrossRepoSettings,
+    LandingSettings,
+    StorageSettings,
+)
 from agents_remember.kernel.coordination_context.paths import (
     extract_yaml_blocks,
     path_settings_path_for,
@@ -39,11 +45,39 @@ __all__ = [
     "parse_json_path_rules",
     "parse_json_settings",
     "parse_json_storage_settings",
+    "parse_landing_settings",
     "parse_settings_block",
     "require_mapping",
     "required_clean_string",
     "string_list",
 ]
+
+
+def parse_landing_settings(
+    settings_path: Path,
+    *,
+    coordination_root: Path | None = None,
+) -> LandingSettings:
+    """The landing workflow this repository's memory settings choose (MIK-R202@v2 rule 13).
+
+    Read from the same JSON settings file the storage and cross-repo settings come from: the path
+    settings file when a coordination root supplies one, otherwise ``settings.json`` beside the
+    onboarding file. A repository that declares nothing lands as it always has, ``local``; a value
+    this product does not implement is refused by name at the parse, never carried this far.
+    """
+    path_settings_path = path_settings_path_for(settings_path, coordination_root=coordination_root)
+    for candidate in (path_settings_path, settings_path):
+        if candidate.suffix != ".json" or not observed_exists(candidate):
+            # Markdown settings predate the landing setting and carry no key for it; a repository
+            # still on that form lands locally until it moves to JSON settings.
+            continue
+        try:
+            data = json.loads(observed_text(candidate))
+        except json.JSONDecodeError as error:
+            raise ValueError(f"invalid JSON settings in {candidate}: {error}") from error
+        root = require_mapping(data, "settings.json root")
+        return parse_json_landing_settings(root)
+    return LandingSettings()
 
 
 def parse_coordination_settings(

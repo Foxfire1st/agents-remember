@@ -7,6 +7,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from agents_remember.kernel.coordination_context.models import (
+    LANDING_WORKFLOW_LOCAL,
+    LANDING_WORKFLOW_PULL_REQUEST,
+)
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import completion_blockers
 from agents_remember.tasks.document_refs import (
@@ -24,6 +28,16 @@ from agents_remember.worktrees.modules.git import (
     require_ancestor,
     require_git,
     worktree_dirty,
+)
+from agents_remember.worktrees.publication_admission import (
+    PublicationMergeUnreadable,
+    landing_workflow,
+    publication_merge_admitted,
+    publication_ranges,
+)
+from agents_remember.worktrees.publication_admission import (
+    # Re-exported on purpose: this module's published seam keeps the rule reachable here.
+    publication_merge_is_admitted as publication_merge_is_admitted,  # noqa: PLC0414
 )
 from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
 from agents_remember.worktrees.queue.closeout_recovery import MemoryCloseoutOutcome
@@ -869,6 +883,13 @@ class _MergeAdmission:
     leaf_ranges: tuple[tuple[str, str, str], ...]
     positions: tuple[str, ...]
     legacy: bool
+    authority_ranges: tuple[tuple[str, str, str], ...] = ()
+    workflow: str = LANDING_WORKFLOW_LOCAL
+    """The repository's landing workflow (MIK-R202@v2 rules 13 and 14).
+
+    ``local`` admits nothing new: this proof is exactly the one every master line had. ``pull-request``
+    adds one admission below -- the merge that published a leaf's landing -- and only that merge.
+    """
 
 
 def _merge_admission(
@@ -899,9 +920,58 @@ def _merge_admission(
     return _MergeAdmission(
         heads=tuple(heads),
         leaf_ranges=leaf_ranges,
+        authority_ranges=publication_ranges(ordered, side),
         positions=positions,
         legacy=legacy,
+        workflow=_landing_workflow(series),
     )
+
+
+def _landing_workflow(series: WorktreeContract) -> str:
+    """The landing workflow this series lands under (MIK-R202@v2 rule 13).
+
+    The value itself is read in ``publication_admission``; here it is converted into this proof's
+    own refusal so an unreadable or invalid setting is named rather than quietly becoming ``local``
+    (MIK-R202@v2 v2 seam, L194-V2-002). A missing key still means ``local``, and that decision is
+    the parser's, not this wrapper's.
+    """
+
+    try:
+        return landing_workflow(series)
+    except (OSError, ValueError) as error:
+        raise CloseoutQueueError(
+            "atomic-series-landing-workflow-invalid",
+            f"atomic series {getattr(series, 'code_branch', '?')} cannot read its landing workflow "
+            f"({error}); the landing is blocked until the repository's settings name one of "
+            f"{LANDING_WORKFLOW_LOCAL!r} or {LANDING_WORKFLOW_PULL_REQUEST!r}",
+        ) from error
+
+
+def _publication_merge_admitted(
+    repository: Path,
+    merge: str,
+    admission: _MergeAdmission,
+    step: _SpineStep,
+) -> bool:
+    """Ask the publication rule about one merge, refusing an unreadable input in this proof's words.
+
+    The rule and its git reading live in ``publication_admission`` (MIK-R202@v2 rule 14); this keeps
+    the chain proof's evaluation order and its refusal text exactly where they were.
+    """
+
+    try:
+        return publication_merge_admitted(
+            repository,
+            merge,
+            workflow=admission.workflow,
+            authority_ranges=admission.authority_ranges,
+        )
+    except PublicationMergeUnreadable as error:
+        raise CloseoutQueueError(
+            "atomic-series-leaf-chain-invalid",
+            f"atomic series {step.side} ref {error}; the landing is blocked until the trees can "
+            "be read",
+        ) from error
 
 
 def _chain_ancestry(
@@ -972,6 +1042,7 @@ def _require_admitted_merges(
         merge
         for merge in candidates
         if merge not in admission.heads
+        and not _publication_merge_admitted(repository, merge, admission, step)
         and not any(
             _chain_ancestry(repository, base, merge, step=step, what=f"the merge {merge}")
             and _chain_ancestry(repository, merge, integrated, step=step, what=f"the merge {merge}")

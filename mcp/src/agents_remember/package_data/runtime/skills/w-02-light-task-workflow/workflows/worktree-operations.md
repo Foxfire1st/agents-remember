@@ -82,7 +82,7 @@ The intended order is:
 3. when onboarding is refreshed, commit the memory content before starting any worktree; keep the computed ledger cache outside Git staging and commits
 4. place every build in a leaf under a master, even when the leaf is tiny and one owner wears the
    backend hats; “short root” changes orchestration depth, not the task topology
-5. read the repository's `system/git-workflow.md` and the master's recorded
+5. read the repository's `system/task-publication.md` and the master's recorded
    `executionNature`, then identify the actual parent branch edge. An atomic master owns a
    root `series-contract.md` and one pushable integration branch first; each of its leaf
    enclosures branches from that integration branch and integrates back into it, and a
@@ -104,7 +104,7 @@ The intended order is:
 The Worktree Intent Gate must name:
 
 1. target repo and build mode
-2. discovered branch policy from `system/git-workflow.md`
+2. discovered branch policy from `system/task-publication.md`
 3. proposed protected/source branch and, for an atomic master, its integration branch (an
    organizational master names the super branch its leaves land on instead)
 4. proposed leaf work branch, worktree name, and `leaf_id`

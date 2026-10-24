@@ -88,7 +88,7 @@ block** (harness / model / effort / tools) — the defaults the role settings su
 - `w-02-light-task-workflow` owns the task format and the requirement-packet template.
 - The memory layer (`c-…` skills and the resolved `system/*` files) owns repository-specific
   commands, coding guidelines, and landing flow. A seat reads the resolved `system/tools.md`,
-  `system/coding-guidelines.md`, and `system/git-workflow.md` rather than inventing a runner.
+  `system/coding-guidelines.md`, and `system/task-publication.md` rather than inventing a runner.
 - `roles/` owns role duties; `operations/` owns operation-scoped procedure; `reference/` owns
   rationale, history, and superseded rulings. The normative path injects `core/` + the role + the
   current operation, and references rationale rather than embedding it.

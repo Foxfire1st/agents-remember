@@ -55,6 +55,22 @@ class StorageSettings:
     path_rules: list[StorageRule] = field(default_factory=list)
 
 
+LANDING_WORKFLOW_LOCAL = "local"
+LANDING_WORKFLOW_PULL_REQUEST = "pull-request"
+LANDING_WORKFLOWS = (LANDING_WORKFLOW_LOCAL, LANDING_WORKFLOW_PULL_REQUEST)
+"""The landing workflows a repository's memory settings may choose (MIK-R202@v2 rule 13).
+
+``local`` is today's behavior and the value a missing key means: the integration moves the master
+line and the Manager pushes it. ``pull-request`` publishes each leaf landing as a merged pull
+request, and the master chain proof admits that one merge and nothing else.
+"""
+
+
+@dataclass
+class LandingSettings:
+    workflow: str = LANDING_WORKFLOW_LOCAL
+
+
 @dataclass
 class CrossRepoAllowEntry:
     repo: str

@@ -368,12 +368,12 @@ Every memory repo ships a committed `system/` folder — the repository's own
 operating manual, versioned right next to its memory. It holds the storage and
 path rules that decide which files get notes, a registry of where the project's
 documentation lives, the exact lint / type-check / test / build commands for the
-repo, its coding guidelines, its branch-and-landing (`git-workflow`) flow, and the
+repo, its coding guidelines, its landing-and-publication (`task-publication`) flow, and the
 template for how a change should be reported.
 
 These files are **primitives, not skills**. The generic skills and the session
 lifecycle read them at the moment each one matters: the build step runs the checks
-from `tools.md` before every commit, the landing step follows `git-workflow.md`
+from `tools.md` before every commit, the landing step follows `task-publication.md`
 before any push, and a finished change is reported in the shape the repo's
 template defines. A repository tailors how an agent works on it — its commands,
 its branch policy, its code-shape budgets, its report format — by editing plain

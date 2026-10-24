@@ -113,9 +113,9 @@ report no providers.
   files; put them in that repository's memory layer.
 - After the `c-08-ar-coordination-context-resolver` skill resolves a `memory_root`, read that memory layer's `system/settings.md`
   and `system/tools.md`; also read `system/sources.md`,
-  `system/coding-guidelines.md`, and `system/git-workflow.md` when present.
-- Read `system/git-workflow.md` (when present) **before any commit, push, PR, or
-  release** — it owns the repo's gated-branch landing flow.
+  `system/coding-guidelines.md`, and `system/task-publication.md` when present.
+- Read `system/task-publication.md` (when present) **before any commit, push, PR, or
+  release** — it owns the repo's landing and publication flow.
 - Before committing read the `w-02-light-task-workflow` skill!
 
 ### Memory Repo User Settings, Instructions, and Guidelines
@@ -126,9 +126,9 @@ report no providers.
 - `system/settings.json` for storage, path-rule, and cross-repo policy.
 - `system/tools.md` for repo-specific test, lint, typecheck, build,
   smoke-check, and local command notes.
-- `system/git-workflow.md` when present for the repo's gated-branch landing flow:
-  the spear branch, commit/push gates, the PR + merge convention, and the
-  release/tag flow.
+- `system/task-publication.md` when present for the repo's landing and publication
+  flow: the landing-workflow setting, the spear branch, commit/push gates, the
+  pull-request publication steps, and the release/tag flow.
 - `system/sources.md` for domain documentation and external references.
 - `system/coding-guidelines.md` when present for repo-specific coding rules.
 
@@ -147,11 +147,11 @@ Use `c-04-retrieval-strategy-router` to understand the full benefit of the strat
 
 ### Branch And Workflow Notes
 
-Repo-specific branching and landing strategies belong in `system/git-workflow.md`
-when present (otherwise `system/tools.md`), so agents discover them **before
-committing, pushing, opening a PR, or using worktree integration commands**. Read
-`git-workflow.md` before landing changes on a gated branch (e.g. a PR-gated
-`main`). If a workflow helper has generic integration behavior, prefer the
+Repo-specific branching, landing and publication strategies belong in
+`system/task-publication.md` when present (otherwise `system/tools.md`), so agents
+discover them **before committing, pushing, opening a PR, or using worktree
+integration commands**. Read `task-publication.md` before landing changes on a gated
+branch (e.g. a PR-gated `main`). If a workflow helper has generic integration behavior, prefer the
 repository-specific landing notes when they are more restrictive.
 
 Coordinator-wide guidance may still apply as a default, but this memory layer is
