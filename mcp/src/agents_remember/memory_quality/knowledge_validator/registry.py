@@ -137,6 +137,18 @@ def writer_reported_rule_ids() -> frozenset[str]:
     )
 
 
+def merge_reported_rule_ids() -> frozenset[str]:
+    """The IDs of the refusing rules a sync merge reports instead of refusing (``merge_reports``).
+
+    A sync has two bases and no leaf publication, so a finding it creates from two valid sides is
+    debt to repair rather than a refusal; this is how a route names that debt instead of dropping it.
+    """
+
+    return frozenset(
+        rule.id for rule in _REGISTRY.values() if rule.merge_reports and not rule.report_only
+    )
+
+
 def sidecar_entries(sidecar: SidecarFile) -> tuple[RealizationEntry | ProofEntry, ...]:
     """The realization and proof entries of a file sidecar (none for a route sidecar)."""
 

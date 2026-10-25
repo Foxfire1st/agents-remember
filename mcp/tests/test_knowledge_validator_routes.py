@@ -43,6 +43,7 @@ from knowledge_validator_test_support import (
     code,
     edit_json,
     encode,
+    fixture_code_contents,
     fixture_tree_files,
     invariant_document,
     invariant_path,
@@ -81,7 +82,8 @@ def _commit(path: Path, files: dict[str, bytes], message: str) -> str:
 @pytest.fixture
 def code_repository(tmp_path: Path) -> tuple[Path, str]:
     root = tmp_path / "code"
-    return root, _repository(root, {path: b"# code\n" for path in CODE_PATHS})
+    files = {path: b"# code\n" for path in CODE_PATHS} | dict(fixture_code_contents())
+    return root, _repository(root, files)
 
 
 def test_marker_refusal_offers_fenced_code_block_and_code_span() -> None:

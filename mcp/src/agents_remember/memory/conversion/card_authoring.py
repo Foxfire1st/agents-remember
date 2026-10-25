@@ -37,10 +37,21 @@ would be skipped). The refusal names the line; a blank line above the second hea
 card is checked before anything is written**, so a run never stops with some cards written and others
 not: the cards that pass are written, the refused ones are named, and the run reports ``refused``.
 Cards without a citation table are never touched (except the named card's unused references).
+
+**The note-only revision (MIK-R198 rule 6a).** Re-authoring a reference through a table row resolves its
+targets again, so a note cannot be revised that way without also re-resolving what the reference points
+at. :func:`revise_reference_note` is that one missing act: it replaces one reference's ``note`` and
+nothing else, keyed by ``(sidecar path, references key [n])``. Every target, anchor and other reference
+stays byte-identical, no reference number is minted, and the repairing leaf is recorded as the author. It
+refuses a missing key, an input whose base digest is not the sidecar's current bytes, an empty note, an
+absent sidecar, and unconverted memory -- and, after the write, re-reads the file and refuses rather than
+report success if anything other than that note changed.
 """
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -68,7 +79,12 @@ from agents_remember.models.knowledge_files.sidecars import (
 )
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 
-__all__ = ["author_card_references"]
+__all__ = [
+    "NoteRevision",
+    "NoteRevisionRefused",
+    "author_card_references",
+    "revise_reference_note",
+]
 
 _NAMED: Final = re.compile(r"^(?P<finding>.*?)\s*\[(?P<number>[0-9]+)\]\s*$")
 _LIST_ITEM: Final = re.compile(r"^\s*[-*+]\s")
@@ -399,3 +415,231 @@ def author_card_references(
             (memory_root / card.path).write_text(card.text(), encoding="utf-8")
             (memory_root / sidecar).write_text(canonical_text(card.sidecar), encoding="utf-8")
     return report.document(dry_run)
+
+
+class NoteRevisionRefused(ValueError):
+    """Why one note-only revision is refused; nothing of the card is written.
+
+    ``code`` is the machine reason a caller branches on; the message names the object and the fix, so
+    the refusal is actionable without reading source.
+    """
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+
+
+def _bytes_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _kept(document: dict[str, Any], key: str) -> str:
+    """Everything a revision must keep, canonically: the sidecar without that reference's note."""
+
+    stripped = copy.deepcopy(document)
+    stripped["references"][key].pop("note", None)
+    return canonical_text(stripped)
+
+
+def _confined_operand(root: Path, relative: PurePosixPath, *, code: str, subject: str) -> Path:
+    """``relative`` inside ``root`` or a named refusal; no write authority leaves the admitted tree.
+
+    Scope admission names the tree; it does not name the operand. A relative path with ``..``, an
+    absolute path, or a symlink whose target lies outside the admitted tree is refused *before* any
+    read is trusted or any byte is written, so a card operand cannot address a sibling memory tree
+    that the caller's contract never admitted.
+    """
+
+    if relative.is_absolute() or ".." in relative.parts:
+        raise NoteRevisionRefused(
+            code,
+            f"{relative.as_posix()!r} leaves the admitted memory tree {root}: a note revision "
+            f"addresses a {subject} inside it by its onboarding-relative path",
+        )
+    resolved = (root / relative).resolve()
+    if not resolved.is_relative_to(root):
+        raise NoteRevisionRefused(
+            code,
+            f"{relative.as_posix()!r} resolves to {resolved.as_posix()}, outside the admitted "
+            f"memory tree {root}: a note revision writes only inside the tree its contract names",
+        )
+    return resolved
+
+
+@dataclass(frozen=True)
+class NoteRevision:
+    """One note-only revision: the reference identity, and the claim that replaces its note.
+
+    The identity is ``(sidecar path, references key [n])`` -- locator and blob are not identity, so a
+    mechanical re-point preserves it and this revision addresses it. ``base_digest`` is the sidecar's
+    SHA-256 as the caller read it: a revision written against other bytes is refused rather than
+    applied to a document it never saw, and ``author`` is the repairing leaf the revision is recorded
+    under.
+    """
+
+    memory_root: Path
+    card: str
+    number: int
+    note: str
+    base_digest: str
+    author: str
+
+
+def _card_operand(root: Path, card: str) -> Path:
+    """The card ``card`` names inside ``root``, or a named refusal; no read leaves the tree."""
+
+    own = PurePosixPath(card)
+    path = _confined_operand(root, own, code="card-escapes-memory", subject="card")
+    if (
+        own.suffix != ".md"
+        or not own.parts
+        or own.parts[0] != ONBOARDING_ROOT
+        or len(own.parts) < 2
+    ):
+        raise NoteRevisionRefused(
+            "card-absent",
+            f"{card!r} names no converted card under {root / ONBOARDING_ROOT}",
+        )
+    if not path.is_relative_to((root / ONBOARDING_ROOT).resolve()):
+        raise NoteRevisionRefused(
+            "card-escapes-memory",
+            f"{card!r} resolves outside {root / ONBOARDING_ROOT}: a note revision addresses a card "
+            "of the admitted memory tree only",
+        )
+    if not path.is_file():
+        raise NoteRevisionRefused(
+            "card-absent",
+            f"{card!r} names no converted card under {root / ONBOARDING_ROOT}",
+        )
+    return path
+
+
+def _sidecar_operand(root: Path, card: str) -> tuple[str, Path]:
+    """``(sidecar path, resolved path)`` for ``card``, confined to ``root`` or refused by name."""
+
+    sidecar_path = card_sidecar_path(card)
+    path = _confined_operand(
+        root,
+        PurePosixPath(sidecar_path),
+        code="sidecar-escapes-memory",
+        subject="sidecar",
+    )
+    if not path.is_relative_to((root / ONBOARDING_ROOT).resolve()):
+        raise NoteRevisionRefused(
+            "sidecar-escapes-memory",
+            f"the sidecar of {card!r} resolves outside {root / ONBOARDING_ROOT}",
+        )
+    if not path.is_file():
+        raise NoteRevisionRefused(
+            "sidecar-absent",
+            f"{card!r} has no sidecar {sidecar_path}, so it holds no reference to revise",
+        )
+    return sidecar_path, path
+
+
+def _revision_context(
+    revision: NoteRevision,
+) -> tuple[Path, dict[str, Any], str, str, str]:
+    """``(sidecar path, parsed sidecar, key, digest, kept)`` or a named refusal; nothing is written."""
+
+    memory_root = revision.memory_root
+    if not (memory_root / LAYOUT_MARKER_PATH).is_file():
+        raise NoteRevisionRefused(
+            "card-not-converted",
+            f"{memory_root} is not converted: its cards are not authored this way",
+        )
+    if not revision.author.strip():
+        raise NoteRevisionRefused(
+            "author-absent",
+            "a note revision records the leaf that repairs it: name the repairing leaf in author",
+        )
+    if not revision.note.strip():
+        raise NoteRevisionRefused(
+            "note-empty",
+            "a note revision replaces one claim with another: an empty note is a removal, which is a "
+            "different act on the card",
+        )
+    root = memory_root.resolve()
+    _card_operand(root, revision.card)
+    sidecar_path, path = _sidecar_operand(root, revision.card)
+    digest = _bytes_digest(path)
+    if revision.base_digest.strip().lower() != digest:
+        raise NoteRevisionRefused(
+            "stale-input",
+            f"the sidecar {sidecar_path} now holds {digest}, not the base "
+            f"{revision.base_digest.strip()} the revision was prepared from: read the sidecar again "
+            "and revise against its current bytes",
+        )
+    try:
+        sidecar = parse_json(path.read_text(encoding="utf-8"))
+        parse_document(sidecar)
+    except (ValueError, TypeError) as error:
+        raise NoteRevisionRefused(
+            "sidecar-unreadable", f"{sidecar_path} does not parse: {error}"
+        ) from error
+    key = str(revision.number)
+    references = sidecar.get("references") or {}
+    if key not in references:
+        raise NoteRevisionRefused(
+            "reference-missing",
+            f"{sidecar_path} holds no reference [{key}]: its references are "
+            f"{', '.join(sorted(references, key=int)) or 'none'}",
+        )
+    return path, sidecar, key, digest, _kept(sidecar, key)
+
+
+def revise_reference_note(revision: NoteRevision, *, dry_run: bool = False) -> dict[str, Any]:
+    """Replace one reference's ``note`` and nothing else (MIK-R198 rule 6a).
+
+    Every target, anchor and other reference of the card keeps its exact value, no reference number is
+    minted, and the repairing leaf is recorded in the result. Refused by name, with nothing written:
+    unconverted memory, an absent card or sidecar, a key the sidecar does not hold, a base digest that
+    is not the sidecar's current bytes (a stale input), an empty note, a sidecar that does not parse,
+    and any revision whose written bytes would change something other than that note.
+    """
+
+    path, sidecar, key, digest, kept = _revision_context(revision)
+    note = revision.note.strip()
+    revised = copy.deepcopy(sidecar)
+    previous = revised["references"][key].get("note")
+    revised["references"][key]["note"] = note
+    written = canonical_text(revised)
+    # The guarantee is checked on the bytes that will land, not on the dict in memory: what is written
+    # must re-read as the same card with one note replaced.
+    reread = parse_json(written)
+    parse_document(reread)
+    if _kept(reread, key) != kept:
+        raise NoteRevisionRefused(
+            "targets-would-change",
+            f"revision of {path.name} reference [{key}] would change more than its note: it was "
+            "refused before writing",
+        )
+    if reread["references"][key].get("note") != note:
+        raise NoteRevisionRefused(
+            "note-not-written",
+            f"revision of {path.name} reference [{key}] would not carry the note given",
+        )
+    after = hashlib.sha256(written.encode("utf-8")).hexdigest()
+    if not dry_run:
+        path.write_text(written, encoding="utf-8")
+        after = _bytes_digest(path)
+        if _kept(parse_json(path.read_text(encoding="utf-8")), key) != kept:
+            raise NoteRevisionRefused(
+                "targets-changed-on-write",
+                f"revision of {path.name} reference [{key}] changed more than its note on disk; "
+                "restore the sidecar from Git and revise again",
+            )
+    return {
+        "schema": "ar-reference-note-revision/v1",
+        "card": revision.card,
+        "sidecar": card_sidecar_path(revision.card),
+        "reference": key,
+        "author": revision.author.strip(),
+        "dryRun": dry_run,
+        "changed": previous != note,
+        "targetCount": len(sidecar["references"][key].get("targets") or []),
+        "referenceCount": len(sidecar["references"]),
+        "digestBefore": digest,
+        "digestAfter": after,
+    }

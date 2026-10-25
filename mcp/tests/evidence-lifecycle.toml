@@ -228,6 +228,8 @@ consumers = [
   "mcp/tests/test_checkout_coordination_isolation.py",
   "mcp/tests/test_checkpoint_landing.py",
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
+  "mcp/tests/test_citation_census_artifact.py",
+  "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_citation_fix_documents.py",
   "mcp/tests/test_citation_migrate_registration.py",
   "mcp/tests/test_clean_quality_executor.py",
@@ -262,6 +264,7 @@ consumers = [
   "mcp/tests/test_controlplane_store_durability.py",
   "mcp/tests/test_conversion_cost_scans.py",
   "mcp/tests/test_converted_carryover.py",
+  "mcp/tests/test_converted_onboarding_baseline.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_converted_onboarding_drift_leaf_route.py",
   "mcp/tests/test_crap_calculator.py",
@@ -584,6 +587,13 @@ consumers = [
   "mcp/tests/test_record_integrity.py",
   "mcp/tests/test_record_landing.py",
   "mcp/tests/test_recorded_read_audit.py",
+  "mcp/tests/test_reference_anchor_guard.py",
+  "mcp/tests/test_reference_anchor_integration_owners.py",
+  "mcp/tests/test_reference_anchor_owner_ledger.py",
+  "mcp/tests/test_reference_anchor_publication_owners.py",
+  "mcp/tests/test_reference_anchor_routes.py",
+  "mcp/tests/test_reference_anchors_census.py",
+  "mcp/tests/test_reference_note_revision.py",
   "mcp/tests/test_removed_stores.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_request_logical_digests.py",
@@ -959,6 +969,7 @@ consumers = [
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
+  "mcp/tests/test_reference_anchor_integration_owners.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
   "mcp/tests/test_sync_parked_candidate.py",
@@ -1045,6 +1056,7 @@ permanence_rationale = "The converted-drift cases are split over two modules so 
 replacement_contract = "node:mcp/tests/test_converted_onboarding_drift.py::test_converted_trees_take_the_converted_branch_and_skip_legacy_discovery"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_converted_onboarding_baseline.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_converted_onboarding_drift_leaf_route.py",
 ]
@@ -1110,6 +1122,7 @@ consumers = [
   "mcp/tests/test_context_packet.py",
   "mcp/tests/test_context_packet_slim.py",
   "mcp/tests/test_converted_carryover.py",
+  "mcp/tests/test_converted_onboarding_baseline.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_converted_onboarding_drift_leaf_route.py",
   "mcp/tests/test_cross_master_concurrency.py",
@@ -1159,6 +1172,8 @@ consumers = [
   "mcp/tests/test_quality_gate_public_contract.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_reader_task_context_protocol.py",
+  "mcp/tests/test_reference_anchor_integration_owners.py",
+  "mcp/tests/test_reference_anchor_owner_ledger.py",
   "mcp/tests/test_removed_stores.py",
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_review_assessment_history_repairs.py",
@@ -1262,6 +1277,7 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
@@ -1274,6 +1290,8 @@ consumers = [
   "mcp/tests/test_mik_r118_r124_marks.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_reference_anchor_guard.py",
+  "mcp/tests/test_reference_anchors_census.py",
   "mcp/tests/test_validator_link_targets.py",
   "mcp/tests/test_writer_correction_links.py",
 ]
@@ -1293,6 +1311,7 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
@@ -1305,6 +1324,8 @@ consumers = [
   "mcp/tests/test_mik_r118_r124_marks.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_reference_anchor_guard.py",
+  "mcp/tests/test_reference_anchors_census.py",
   "mcp/tests/test_validator_link_targets.py",
   "mcp/tests/test_writer_correction_links.py",
 ]
@@ -1324,6 +1345,7 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
@@ -1336,6 +1358,8 @@ consumers = [
   "mcp/tests/test_mik_r118_r124_marks.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_reference_anchor_guard.py",
+  "mcp/tests/test_reference_anchors_census.py",
   "mcp/tests/test_validator_link_targets.py",
   "mcp/tests/test_writer_correction_links.py",
 ]
@@ -1355,6 +1379,7 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
@@ -1367,6 +1392,8 @@ consumers = [
   "mcp/tests/test_mik_r118_r124_marks.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_reference_anchor_guard.py",
+  "mcp/tests/test_reference_anchors_census.py",
   "mcp/tests/test_validator_link_targets.py",
   "mcp/tests/test_writer_correction_links.py",
 ]
@@ -1386,6 +1413,7 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
@@ -1398,6 +1426,8 @@ consumers = [
   "mcp/tests/test_mik_r118_r124_marks.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_reference_anchor_guard.py",
+  "mcp/tests/test_reference_anchors_census.py",
   "mcp/tests/test_validator_link_targets.py",
   "mcp/tests/test_writer_correction_links.py",
 ]
@@ -1417,6 +1447,7 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
@@ -1429,6 +1460,8 @@ consumers = [
   "mcp/tests/test_mik_r118_r124_marks.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_reference_anchor_guard.py",
+  "mcp/tests/test_reference_anchors_census.py",
   "mcp/tests/test_validator_link_targets.py",
   "mcp/tests/test_writer_correction_links.py",
 ]
@@ -1448,6 +1481,7 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
@@ -1460,6 +1494,8 @@ consumers = [
   "mcp/tests/test_mik_r118_r124_marks.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_reference_anchor_guard.py",
+  "mcp/tests/test_reference_anchors_census.py",
   "mcp/tests/test_validator_link_targets.py",
   "mcp/tests/test_writer_correction_links.py",
 ]
@@ -1479,6 +1515,7 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
@@ -1491,6 +1528,8 @@ consumers = [
   "mcp/tests/test_mik_r118_r124_marks.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_reference_anchor_guard.py",
+  "mcp/tests/test_reference_anchors_census.py",
   "mcp/tests/test_validator_link_targets.py",
   "mcp/tests/test_writer_correction_links.py",
 ]
@@ -1510,6 +1549,7 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
@@ -1522,6 +1562,8 @@ consumers = [
   "mcp/tests/test_mik_r118_r124_marks.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_reference_anchor_guard.py",
+  "mcp/tests/test_reference_anchors_census.py",
   "mcp/tests/test_validator_link_targets.py",
   "mcp/tests/test_writer_correction_links.py",
 ]
@@ -1905,6 +1947,8 @@ consumers = [
   "mcp/tests/test_checkout_coordination_isolation.py",
   "mcp/tests/test_checkpoint_landing.py",
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
+  "mcp/tests/test_citation_census_artifact.py",
+  "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_citation_fix_documents.py",
   "mcp/tests/test_citation_migrate_registration.py",
   "mcp/tests/test_clean_quality_executor.py",
@@ -1939,6 +1983,7 @@ consumers = [
   "mcp/tests/test_controlplane_store_durability.py",
   "mcp/tests/test_conversion_cost_scans.py",
   "mcp/tests/test_converted_carryover.py",
+  "mcp/tests/test_converted_onboarding_baseline.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_converted_onboarding_drift_leaf_route.py",
   "mcp/tests/test_crap_calculator.py",
@@ -2261,6 +2306,13 @@ consumers = [
   "mcp/tests/test_record_integrity.py",
   "mcp/tests/test_record_landing.py",
   "mcp/tests/test_recorded_read_audit.py",
+  "mcp/tests/test_reference_anchor_guard.py",
+  "mcp/tests/test_reference_anchor_integration_owners.py",
+  "mcp/tests/test_reference_anchor_owner_ledger.py",
+  "mcp/tests/test_reference_anchor_publication_owners.py",
+  "mcp/tests/test_reference_anchor_routes.py",
+  "mcp/tests/test_reference_anchors_census.py",
+  "mcp/tests/test_reference_note_revision.py",
   "mcp/tests/test_removed_stores.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_request_logical_digests.py",
@@ -2656,6 +2708,9 @@ consumers = [
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_crossing.py",
   "mcp/tests/test_knowledge_index_inserts.py",
+  "mcp/tests/test_reference_anchor_integration_owners.py",
+  "mcp/tests/test_reference_anchor_publication_owners.py",
+  "mcp/tests/test_reference_note_revision.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
   "mcp/tests/test_sync_parked_candidate.py",
@@ -2874,6 +2929,7 @@ permanence_rationale = "Every validator, index, writer and conversion case start
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
@@ -2885,6 +2941,8 @@ consumers = [
   "mcp/tests/test_mik_r118_r124_marks.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_reference_anchor_guard.py",
+  "mcp/tests/test_reference_anchors_census.py",
   "mcp/tests/test_validator_link_targets.py",
   "mcp/tests/test_writer_correction_links.py",
 ]
@@ -3599,6 +3657,24 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/test_converted_onboarding_baseline.py"
+kind = "migration-proof"
+authority = "internal-hand-authored"
+owner = "mcp/src/agents_remember/memory/baseline.py"
+category = "unit-regression"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "One case lifted out of test_converted_onboarding_drift.py's rule-7 adoption family: accepting drift never waives a stale reference anchor (MIK-R198 rule 5). The rule-7 adoption cases stay in the drift module; this module owns the refusal and the adopt-after-repair, so a change to one rule fails without the other."
+introduced_by = "260928-MIK-L191"
+lifetime = "permanent"
+permanence_rationale = "Rule 5's refusal on the baseline route and rule 7's adoption are different decisions on the same call; kept in separate modules, a change to either leaves the other's case standing."
+replacement_contract = "node:mcp/tests/test_converted_onboarding_baseline.py::test_stale_anchors_refuse_the_baseline_even_when_drift_is_accepted"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_converted_onboarding_baseline.py",
+]
+
+[[artifact]]
 path = "mcp/tests/tool_answer_l109_cases.py"
 kind = "shared-support"
 authority = "internal-canonical"
@@ -3928,6 +4004,8 @@ consumers = [
   "mcp/tests/test_missing_master_tool_answers.py",
   "mcp/tests/test_no_grant_closeout_parity.py",
   "mcp/tests/test_pause_stop_only_end_to_end.py",
+  "mcp/tests/test_reference_anchor_integration_owners.py",
+  "mcp/tests/test_reference_anchor_publication_owners.py",
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",

@@ -64,6 +64,9 @@ MERGE_RULES = {
     "R04.4-unrealized-family",
     "R22.6-carried-stale",
     "R09-history-rows-merged",
+    # MIK-R198 rule 7: a sync merge can make a carried citation stale from two valid sides, and it
+    # is repaired only after the merge exists; every publication route refuses it.
+    "R198.1-reference-anchor",
 }
 DEBT_RULES = {
     "R22.3-sidecar-without-markdown",
@@ -77,6 +80,8 @@ REFUSING_WRITER_RULES = {
     "R04.1-carried-route-absent",
     "R04.4-unrealized-family",
     "R22.6-carried-stale",
+    # MIK-R198 rule 7: authoring reports the anchor debt it must repair before closeout.
+    "R198.1-reference-anchor",
 }
 BANNED = (
     "reported, not refused",

@@ -19,7 +19,7 @@ from knowledge_validator_test_support import (
     fixture_tree_files,
     tree,
 )
-from test_knowledge_validator import _add_reference, _code_anchor, _only, _rules, _validate
+from test_knowledge_validator import _add_reference, _code_anchor, _rules, _validate
 
 # Rule 6: anchors (moved without changing their assertions from test_knowledge_validator.py).
 
@@ -29,7 +29,12 @@ def test_an_added_anchor_must_name_an_existing_path() -> None:
     files = edit_json(fixture_tree_files(), DIRECT_LANDING_SIDECAR, _add_reference("8", target))
     files[DIRECT_LANDING_CARD] += b"\nAlso [8].\n"
 
-    [line] = _only(_validate(files, bases=[tree(fixture_tree_files(), "K_B")]), "R22.6-anchor-path")
+    # MIK-R198 rule 5 refuses the same absent anchor as a stale reference anchor; the anchor-path
+    # refusal is the one this case owns.
+    report = _validate(files, bases=[tree(fixture_tree_files(), "K_B")])
+    [line] = [
+        violation.render() for violation in report.refusals if violation.rule == "R22.6-anchor-path"
+    ]
 
     assert "references.8.targets.0.anchor.path" in line and "mcp/src/gone.py" in line
 
@@ -44,6 +49,8 @@ def test_a_carried_anchor_at_a_deleted_path_refuses_off_merge() -> None:
     assert _rules(report) == {
         "R22.6-carried-stale",
         "R04.1-carried-route-absent",
+        # MIK-R198 rule 5: the same anchors are stale reference anchors as well.
+        "R198.1-reference-anchor",
     } | {"R22.6-link-target-path"}
     assert _rules(report, refusing=False) == {LEGACY_COUNT}
 
@@ -81,6 +88,7 @@ def test_a_re_anchored_entry_is_checked_and_a_moved_entry_carries_nothing() -> N
         "R22.6-anchor-path",
         "R22.6-carried-stale",
         "R04.1-carried-route-absent",
+        "R198.1-reference-anchor",
     } | {"R22.6-link-target-path"}, report.render()
     [line] = [
         violation.render() for violation in report.refusals if violation.rule == "R22.6-anchor-path"

@@ -46,7 +46,7 @@ INTERIM_DESCRIPTION_LENGTHS: dict[str, int] = {
     "route_index_refresh": 244,
     "memory_init": 701,
     "memory_baseline_status": 111,
-    "memory_baseline_adopt": 278,
+    "memory_baseline_adopt": 284,
     "memory_carryover_plan": 172,
     "memory_carryover_apply": 233,
     "knowledge_integrity_check": 895,

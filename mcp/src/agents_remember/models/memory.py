@@ -175,6 +175,30 @@ class CitationFixResponse(FlexibleToolResponse):
     refusedCount: int | None = Field(default=None, ge=0)
 
 
+class CitationNoteRevisionResponse(FlexibleToolResponse):
+    """One reference's note revised in place: MIK-R198 rule 6a.
+
+    ``changed`` is false when the note already held the text given -- a revision that writes
+    nothing is still an answer, not a refusal. ``digestBefore``/``digestAfter`` are the
+    sidecar's bytes, so a caller can prove what it revised against.
+    """
+
+    operation: Literal["citation_note_revision"] = "citation_note_revision"
+    repoId: str | None = None
+    dryRun: bool | None = None
+    card: str | None = None
+    sidecar: str | None = None
+    reference: str | None = None
+    author: str | None = None
+    changed: bool | None = None
+    targetCount: int | None = Field(default=None, ge=0)
+    referenceCount: int | None = Field(default=None, ge=0)
+    digestBefore: str | None = None
+    digestAfter: str | None = None
+    code: str | None = None
+    detail: str | None = None
+
+
 class CitationMigrateResponse(FlexibleToolResponse):
     """The superseded-format conversion: what it rewrote and what it would not.
 

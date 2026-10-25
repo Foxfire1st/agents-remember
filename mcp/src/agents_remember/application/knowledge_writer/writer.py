@@ -200,7 +200,12 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
     validation = validate_tree(
         KnowledgeTree(label=f"{request.owner.id} candidate", files=files),
         bases=bases,
-        code=CodePathSet(label=f"code candidate {snapshot.tree}", paths=frozenset(snapshot.blobs)),
+        code=CodePathSet(
+            label=f"code candidate {snapshot.tree}",
+            paths=frozenset(snapshot.blobs),
+            blobs=dict(snapshot.blobs),
+            repository=snapshot.root,
+        ),
     )
     refusals, reports = _writer_split(validation)
     if refusals:

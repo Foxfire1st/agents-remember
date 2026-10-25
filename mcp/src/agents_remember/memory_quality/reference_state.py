@@ -204,8 +204,14 @@ def _stale_finding(relative: str, field_name: str, target: str, state: str) -> d
     }
 
 
-def _refreshed(path: str, anchor: dict[str, Any], data: bytes) -> dict[str, Any] | None:
-    """The anchor re-recorded at ``data`` when only mechanical fields moved, else ``None``."""
+def refreshed_anchor(path: str, anchor: dict[str, Any], data: bytes) -> dict[str, Any] | None:
+    """The anchor re-recorded at ``data`` when only mechanical fields moved, else ``None``.
+
+    This is the shipped repair rule: :func:`_refresh_document` applies exactly what it returns, and
+    the reference census (:mod:`agents_remember.memory_quality.reference_anchors`) asks it rather than
+    deciding for itself, so a worklist can never promise a mechanical repair the fixer refuses or
+    send a mechanically repairable target to judgment (MIK-R198 rule 2).
+    """
 
     blob = git_blob_id(data)
     if blob == anchor.get("blob"):
@@ -243,7 +249,9 @@ def _refresh_document(document: dict[str, Any], files: _WorkingFiles) -> int:
             path = target["anchor"].get("path") or own
             data = files.read(path) if path else None
             updated = (
-                _refreshed(path, target["anchor"], data) if path and data is not None else None
+                refreshed_anchor(path, target["anchor"], data)
+                if path and data is not None
+                else None
             )
             if updated is not None:
                 target["anchor"] = updated

@@ -159,7 +159,8 @@ def test_descriptions_say_what_the_check_is() -> None:
         text = _normalized_text(copy)
         for phrase in (*_MEASUREMENT, *_CURRENTNESS, *_ADVISORY):
             assert phrase in text, (copy, phrase)
-        assert "accepts stale anchors only" in text, copy
+        assert "lifts the stale-anchor gate only" in text, copy
+        assert "R198.1-reference-anchor" in text, copy
         assert "blocked-invalid" in text, copy
 
 
@@ -471,7 +472,7 @@ def test_interval_failure_leaves_everything_untouched(
         raise RuntimeError("boom")
 
     monkeypatch.setattr(baseline, "memory_commit_refusal", _boom)
-    config, _code, memory = _adoptable_converted_world(tmp_path, stale=True)
+    config, _code, memory = _adoptable_converted_world(tmp_path, card=True)
     (memory / "external-staged.txt").write_text("external\n", encoding="utf-8")
     git(memory, "add", "--", "external-staged.txt")
     (memory / "intended.txt").write_text("intended\n", encoding="utf-8")
@@ -505,7 +506,7 @@ def test_interval_failure_leaves_everything_untouched(
 def test_success_brings_real_index_to_adopted_state(tmp_path: Path, bound_validation: Any) -> None:
     """L44-C1-04: after validation passes the real index records the adopted tree."""
 
-    config, _code, memory = _adoptable_converted_world(tmp_path, stale=True)
+    config, _code, memory = _adoptable_converted_world(tmp_path, card=True)
     adopted = memory_baseline_adopt_tool(
         config,
         repo_id=REPO_ID,
@@ -537,7 +538,7 @@ def test_malicious_hook_cannot_change_the_recorded_tree(
         return real_refusal(**kwargs)
 
     monkeypatch.setattr(baseline, "memory_commit_refusal", _spy)
-    config, _code, memory = _adoptable_converted_world(tmp_path, stale=True)
+    config, _code, memory = _adoptable_converted_world(tmp_path, card=True)
     layout = memory / "knowledge" / "layout.json"
     original = layout.read_bytes()
     before = _fingerprint(memory)
@@ -600,7 +601,7 @@ def test_passing_hook_adoption_records_the_validated_tree(
         return real_refusal(**kwargs)
 
     monkeypatch.setattr(baseline, "memory_commit_refusal", _spy)
-    config, _code, memory = _adoptable_converted_world(tmp_path, stale=True)
+    config, _code, memory = _adoptable_converted_world(tmp_path, card=True)
     layout = memory / "knowledge" / "layout.json"
     original = layout.read_bytes()
     hook = memory / ".git" / "hooks" / "pre-commit"

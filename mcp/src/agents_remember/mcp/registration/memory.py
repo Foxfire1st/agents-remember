@@ -75,6 +75,29 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         )
 
     @server.tool()
+    def citation_note_revision(
+        repo_id: str,
+        contract_path: str,
+        *,
+        card: str,
+        reference: int,
+        note: str,
+        base_digest: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Revise one reference's note in a leaf memory worktree, keeping every target, anchor and other reference byte-identical. Pass repo_id, contract_path, card (the converted card), reference (n), note and base_digest (the sidecar's sha256 as read); preview with dry_run. A missing key, a stale base_digest, an empty note, an absent card or sidecar are refused, nothing written. Moved anchors are citation_fix's work. More: docs/tool-details.md."""
+        return tools.citation_note_revision_payload(
+            config,
+            repo_id,
+            contract_path,
+            card=card,
+            reference=reference,
+            note=note,
+            base_digest=base_digest,
+            dry_run=dry_run,
+        )
+
+    @server.tool()
     def route_index_refresh(
         repo_id: str,
         dry_run: bool = False,
@@ -127,7 +150,7 @@ def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -
         work_branch: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Adopt the first attributed external-memory baseline and commit memory. Pass repo_id; preview with dry_run. accept_drift permits stale anchors, never validator violations. More: docs/tool-details.md."""
+        """Adopt the first attributed external-memory baseline and commit memory. Pass repo_id; preview with dry_run. accept_drift lifts the drift gate on stale anchors only: the baseline still refuses a stale code or test reference anchor as R198.1-reference-anchor. More: docs/tool-details.md."""
         return tools.memory_baseline_adopt_payload(
             config,
             repo_id,

@@ -17,6 +17,7 @@ from pathlib import Path
 
 from agents_remember.application.memory_tools import (
     CitationOperationScope,
+    citation_census_tool,
     citation_check_tool,
     citation_fix_tool,
 )
@@ -64,6 +65,21 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "(those cards and their sidecars). Several --document flags need --fix.",
     )
     parser.add_argument(
+        "--census",
+        action="store_true",
+        help="Classify every code/test reference anchor of the leaf's tree at its exact pair and "
+        "name the cards a citation work order can carry (MIK-R198 rules 1-2). Read-only on the "
+        "memory tree; the complete census is written to an artifact the answer names, because the "
+        "printed answer is bounded. It refuses unconverted memory.",
+    )
+    parser.add_argument(
+        "--census-artifact",
+        default=None,
+        metavar="PATH",
+        help="With --census, write the complete census to PATH inside the coordination root "
+        "instead of the default temp/census/ location. The answer names the path and its digest.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="With --fix, report every rewrite it would make and write nothing.",
@@ -80,8 +96,9 @@ def run(args: argparse.Namespace) -> int:
     try:
         if args.contract is None and not args.fix:
             raise ValueError(
-                "--contract is required without --fix: only --fix is admitted on the "
-                "configured memory root before the first baseline."
+                "--contract is required without --fix: the census and the check are leaf reads of "
+                "the pair a contract encloses, and only --fix is admitted on the configured memory "
+                "root before the first baseline."
             )
         operation_scope = CitationOperationScope(
             document=document,
@@ -99,6 +116,14 @@ def run(args: argparse.Namespace) -> int:
                 contract_path=args.contract,
                 dry_run=args.dry_run,
                 operation_scope=operation_scope,
+            )
+        elif args.census:
+            assert args.contract is not None  # guarded above: the census is a leaf read
+            payload = citation_census_tool(
+                config,
+                repo_id=args.repo,
+                contract_path=args.contract,
+                artifact_path=getattr(args, "census_artifact", None),
             )
         else:
             assert args.contract is not None  # guarded above: only --fix runs unscoped

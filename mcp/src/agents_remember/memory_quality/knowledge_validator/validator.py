@@ -37,6 +37,9 @@ from agents_remember.memory_quality.knowledge_validator import (
     rules_reconsideration as _rules_reconsideration,  # noqa: F401  # registers MIK-R14's link guard
 )
 from agents_remember.memory_quality.knowledge_validator import (
+    rules_reference_anchors as _rules_reference_anchors,  # noqa: F401  # registers MIK-R198 rule 5
+)
+from agents_remember.memory_quality.knowledge_validator import (
     rules_references as _rules_references,  # noqa: F401  # registers MIK-R22 rules 3, 5, 6
 )
 from agents_remember.memory_quality.knowledge_validator import (

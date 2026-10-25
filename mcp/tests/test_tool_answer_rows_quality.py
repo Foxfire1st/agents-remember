@@ -249,7 +249,13 @@ class QualityProductionTests(unittest.TestCase):
                             self.assertLessEqual(count_response_tokens(delivered), bound_for(_TOOL))
 
     def test_sync_failure_derives_the_largest_case(self) -> None:
-        """A real sync over 25 sidecars with missing-path anchors answers 54 findings."""
+        """A real sync over 25 sidecars with missing-path anchors answers 104 findings.
+
+        MIK-R198 rules 2 and 5 raised this from 54: an anchor whose recorded blob matches but whose
+        recorded content identity does not resolve is curator work, not a mechanical repair, so the
+        same-blob/wrong-locator targets this fixture writes now count as curator-actionable findings
+        instead of being promised to the fixer.
+        """
 
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -282,7 +288,7 @@ class QualityProductionTests(unittest.TestCase):
             self.assertEqual(answer["code"], "action-required")
             self.assertEqual(
                 answer["error"],
-                "Memory quality found 54 curator-actionable findings; repair the "
+                "Memory quality found 104 curator-actionable findings; repair the "
                 "blocking findings and rerun the check.",
             )
             self.assertEqual(answer["nextAction"], "memory_quality_check")

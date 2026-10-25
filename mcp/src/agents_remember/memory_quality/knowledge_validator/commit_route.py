@@ -15,7 +15,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agents_remember.memory_quality.knowledge_validator.report import KnowledgeValidationError
+from agents_remember.memory_quality.knowledge_validator.report import (
+    KnowledgeValidationError,
+    ValidationReport,
+)
 from agents_remember.memory_quality.knowledge_validator.trees import (
     KnowledgeTree,
     code_tree_from_git,
@@ -91,6 +94,38 @@ class GitKnowledgeValidation:
             leaf_publication=True,
         )
 
+    def reports(
+        self,
+        *,
+        memory_repository: Path,
+        candidate_tree: str,
+        bases: Sequence[str],
+        code_repository: Path,
+        code_commit: str,
+    ) -> tuple[str, ...]:
+        """The rule IDs a passing-but-reporting validation carried as named repair debt.
+
+        A sync merge has two bases and publishes no leaf, so the validator reports what a leaf
+        publication would refuse (MIK-R198 rule 7). The refusal is ``None`` there, and without this
+        the report would be dropped: the debt is named here so the route can carry it. A tree that
+        refuses answers nothing here -- the refusal is the route's business, not the debt's.
+        """
+
+        commit = _Commit(
+            memory_repository,
+            candidate_tree,
+            tuple(bases),
+            code_repository,
+            code_commit,
+        )
+        try:
+            report = self._validate(commit, leaf_publication=False)
+        except (KnowledgeValidationError, ValueError, subprocess.SubprocessError):
+            return ()
+        if report is None:
+            return ()
+        return tuple(sorted({violation.rule for violation in report.reports}))
+
     def _refusal(self, commit: _Commit, *, leaf_publication: bool = False) -> str | None:
         try:
             self._validate(commit, leaf_publication)
@@ -105,8 +140,12 @@ class GitKnowledgeValidation:
             )
         return None
 
-    def _validate(self, commit: _Commit, leaf_publication: bool) -> None:
-        """Read the commit's trees and validate them; raises on a violation or an unreadable tree."""
+    def _validate(self, commit: _Commit, leaf_publication: bool) -> ValidationReport | None:
+        """Read the commit's trees and validate them; raises on a violation or an unreadable tree.
+
+        Returns the report when the candidate passes -- report-only findings included -- so a route
+        with a reporting disposition can name the debt the validator carried instead of dropping it.
+        """
 
         repository = commit.memory_repository
         candidate = knowledge_tree_from_git(
@@ -117,7 +156,7 @@ class GitKnowledgeValidation:
             for base in commit.bases
         ]
         if not validation_applies(candidate, bases):
-            return
+            return None
         if candidate.converted and self.base_converter is not None:
             bases = [
                 tree
@@ -135,7 +174,7 @@ class GitKnowledgeValidation:
             commit.code_repository, commit.code_commit, label=f"code {commit.code_commit}"
         )
         frozen = tuple(history_tree_from_git(repository, one) for one in commit.frozen)
-        require_valid_commit(
+        return require_valid_commit(
             candidate,
             bases=bases,
             code=code,

@@ -1,7 +1,9 @@
 """Validate converted knowledge and report reference currentness and landing changes.
 
-Refusing validator violations are findings; stale references and landing changes
-are report-only. The comparison base is supplied by the converted-base cache."""
+Refusing validator violations are findings. A code or test reference anchor that does not hold at the
+exact paired code tree is one of them (MIK-R198 rule 5): the whole-tree quality run refuses it and
+names the sidecar, field and target, so stale references are no longer report-only here. Landing
+changes stay report-only. The comparison base is supplied by the converted-base cache."""
 
 from __future__ import annotations
 
@@ -22,7 +24,8 @@ from agents_remember.memory_quality.landing_report import (
     LandingBasePort,
     landing_report_for_check,
 )
-from agents_remember.memory_quality.reference_state import check_references
+from agents_remember.memory_quality.reference_anchors import census as reference_census
+from agents_remember.memory_quality.reference_state import STALE_REFERENCE_CHECK
 
 CONVERTED_KNOWLEDGE_CHECK: Final = "knowledge.converted"
 CONVERTED_BASE_RULE: Final = "R24.7-converted-base"
@@ -97,11 +100,8 @@ def converted_knowledge_check(
 
     tree = knowledge_tree_from_directory(memory_root)
     bases, problem = _comparison_bases(memory_root, tree, base)
-    report = validate_tree(
-        tree,
-        bases=bases,
-        code=CodeDirectory(label=code_root.as_posix(), root=code_root),
-    )
+    code = CodeDirectory(label=code_root.as_posix(), root=code_root)
+    report = validate_tree(tree, bases=bases, code=code)
     findings = [_unbuildable_base(problem)] if problem is not None else []
     refused = [violation.to_document() for violation in report.refusals]
     if problem is not None:
@@ -111,8 +111,23 @@ def converted_knowledge_check(
         {"check": CONVERTED_KNOWLEDGE_CHECK, **violation.to_document()}
         for violation in report.reports
     ]
-    references = check_references(memory_root, code_root)
-    report_only.extend(references["reportOnlyFindings"])
+    census = reference_census(tree, code, memory=memory_root.as_posix())
+    debt = census["debtCount"]
+    reference_states = {"current": census["currentCount"], "stale": debt}
+    drift_rows = [
+        {
+            "check": STALE_REFERENCE_CHECK,
+            "path": item["sidecar"],
+            "field": item["field"],
+            "target": item["path"],
+            "state": "stale",
+            "detail": item["state"],
+            "repair": item["repair"],
+            "message": f"{item['path']} is {item['state']}: {item['reason']}",
+        }
+        for item in census["targets"]
+        if item["state"] != "current"
+    ]
     landing_counts: dict[str, Any] = {
         "cutCardCount": 0,
         "cutCards": [],
@@ -147,8 +162,13 @@ def converted_knowledge_check(
         "findingCount": len(findings),
         "findings": findings,
         "reportOnlyFindings": report_only,
-        "referenceStates": references["states"],
-        "sidecarCount": references["sidecarCount"],
-        "unreadableSidecars": references["unreadableSidecars"],
+        "referenceStates": reference_states,
+        "referenceStateDetail": census["states"],
+        "referenceRepairs": census["repairs"],
+        "referenceDriftRows": drift_rows,
+        "referenceDenominator": census["denominator"],
+        "referenceDebtCount": debt,
+        "sidecarCount": census["sidecarCount"],
+        "unreadableSidecars": census["unreadableSidecars"],
         **landing_counts,
     }

@@ -27,6 +27,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.report impo
     resolve_report_path,
 )
 from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTreeReadError
+from agents_remember.memory_quality.reference_anchors import REFERENCE_ANCHOR_RULE
 from agents_remember.memory_quality.reference_state import (
     STALE_REFERENCE_CHECK,
     is_converted_memory,
@@ -130,10 +131,18 @@ def _run_converted_summary(
     states = result["referenceStates"]
     current = int(states.get("current", 0))
     stale = int(states.get("stale", 0))
-    refusals = result["findings"]
+    # MIK-R198 rule 5 refuses a stale reference anchor at every publication route and in the full
+    # quality run. This summary is the curator's repair view, not a publication: it reports the same
+    # anchors as actionable drift rows (the documented "staleness never blocks by itself"), and keeps
+    # counting the other refusing findings as violations.
+    drift_rows = list(result.get("referenceDriftRows") or [])
+    refusals = [
+        finding for finding in result["findings"] if finding.get("rule") != REFERENCE_ANCHOR_RULE
+    ]
     report_only = result["reportOnlyFindings"]
     stale_findings = [
-        finding for finding in report_only if finding.get("check") == STALE_REFERENCE_CHECK
+        *drift_rows,
+        *[finding for finding in report_only if finding.get("check") == STALE_REFERENCE_CHECK],
     ]
     packet: DriftSummaryPacket = {
         "status": "checked",
@@ -147,7 +156,7 @@ def _run_converted_summary(
         "actionableSample": stale_findings[:detail_limit],
         "violationCount": len(refusals),
         "violationSample": [_violation_sample(finding) for finding in refusals[:detail_limit]],
-        "reportOnlyCount": len(report_only),
+        "reportOnlyCount": len(report_only) + len(drift_rows),
         "unreadableSidecars": list(result["unreadableSidecars"]),
     }
     report_path = output.report_path or resolve_report_path(

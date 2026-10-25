@@ -770,8 +770,9 @@ def test_the_memory_quality_run_counts_each_missing_trace_toward_the_actionable_
     # Review R3-1: the run's converted check is given its comparison base (MIK-R24 rule 7).
     assert callable(_QUALITY_RUN.call_args.kwargs["drift_context"].knowledge_base)
     # MIK-R09 counts each open item once: the card, its governing route, and the uncovered file's
-    # unexplained hunk (MIK-R10), which the card's own trace answers.
-    assert response["curatorActionableCount"] == 3
+    # unexplained hunk (MIK-R10), which the card's own trace answers. The appended source also makes
+    # the card's reference anchor stale (MIK-R198 rule 5), which is the curator's repair item.
+    assert response["curatorActionableCount"] == 4
     assert response["knowledgeGate"]["openItemCount"] == 3
     assert response["onboardingTrace"]["open"] == ["onboarding:pkg/a.py", "onboarding:pkg/overview"]
     rendered = (leaf.root / "group" / "reports" / "curator-memory-quality.md").read_text()
@@ -784,7 +785,7 @@ def test_the_memory_quality_run_counts_each_missing_trace_toward_the_actionable_
         _worklist(leaf),
     )
     response, _ = _run_controller(leaf, (A,))
-    assert response["curatorActionableCount"] == 0
+    assert response["curatorActionableCount"] == 1  # the stale anchor the traces do not answer
 
 
 def test_the_onboarding_trace_block_names_the_traces_the_gate_holds_open(leaf: Leaf) -> None:
@@ -801,7 +802,8 @@ def test_the_onboarding_trace_block_names_the_traces_the_gate_holds_open(leaf: L
 
     assert response["knowledgeGate"]["openItemCount"] == 3
     assert response["onboardingTrace"]["open"] == ["onboarding:pkg/a.py", "onboarding:pkg/overview"]
-    assert response["curatorActionableCount"] == 3
+    # The appended source makes the card's anchor stale (MIK-R198 rule 5): one more repair item.
+    assert response["curatorActionableCount"] == 4
 
 
 def test_the_persisted_worklist_carries_the_onboarding_items_in_its_one_list(leaf: Leaf) -> None:

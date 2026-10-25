@@ -72,6 +72,9 @@ class SyncSideRecord(BaseModel):
     temporary: bool = False
     resultHead: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     conflictFiles: tuple[str, ...] = ()
+    #: Named repair debt a sync merge reported rather than refused (MIK-R198 rule 7): the rule IDs the
+    #: validator carried as report-only findings at this side's two-base validation.
+    repairDebt: tuple[str, ...] = ()
     # The operation-created tree and index at a retained stop: path fingerprints captured
     # when a merge or parked-candidate reapply is retained (or a staged memory merge is
     # refused), so a cancel can tell owned output from later bytes. Each value is

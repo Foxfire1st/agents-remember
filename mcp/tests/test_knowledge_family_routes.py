@@ -241,6 +241,8 @@ def test_a_carried_route_whose_directory_is_gone_refuses_off_merge() -> None:
     assert _rules(leaf) == {
         "R22.6-carried-stale",
         "R04.1-carried-route-absent",
+        # MIK-R198 rule 5: the cards citing the removed application routes are stale as well.
+        "R198.1-reference-anchor",
     }, leaf.render()
     assert _rules(leaf, refusing=False) == {LEGACY_COUNT}, leaf.render()
     [line] = [v.render() for v in leaf.refusals if v.rule == "R04.1-carried-route-absent"]

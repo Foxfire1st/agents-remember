@@ -105,17 +105,20 @@ paths. `providers-remove` (not this tool) refuses when its watcher stop
 fails, when a live process holds a folder open (naming pid and command), or
 when the provider root or a deletion target escapes the owned tree.
 
-## Drift check: the carried-anchor exception (MIK-R53 rule 11)
+## Drift check: where a stale anchor reports and where it refuses (MIK-R53 rule 11, MIK-R198 rules 5 and 7)
 
 `context_packet` with `include_drift` measures the reference anchors of
-onboarding cards and the validity of the tree. A stale reference is reported
-and never blocks by itself — with one exception: a carried anchor at a path
-the leaf deleted refuses the leaf's closeout or landing as
-`R22.6-carried-stale`, and is only reported at a sync merge. MIK-R53 rule 11
-replaces the MIK-R22 rule 6 clause that exception rested on, and its
-Supersedes names MIK-R44 v2 for that one kind (the "`violationCount` stays 0"
-boundary and the never-blocks sentence for a carried anchor at a gone path).
-Every other stale reference keeps the never-blocks sentence.
+onboarding cards and the validity of the tree. That read reports and never
+blocks by itself. Publication is a different question: every code and test
+reference anchor of the exact paired tree must be current, and one that is not
+refuses the leaf's closeout, its landing and the full quality run as
+`R198.1-reference-anchor` (MIK-R198 rule 5). Authoring and a sync merge report
+that anchor debt for repair instead of waiving it (rule 7); the publication that
+follows still refuses it. An anchor carried at a path the leaf deleted refuses in
+the same way and also answers `R22.6-carried-stale`, and is only reported at a
+sync merge: MIK-R53 rule 11 replaces the MIK-R22 rule 6 clause that refusal
+rested on, and its Supersedes names MIK-R44 v2 for that one kind (the
+"`violationCount` stays 0" boundary for a carried anchor at a gone path).
 
 
 ## `citation_fix`
@@ -141,6 +144,26 @@ stale, unreadable, refused) -- and the whole result with every list is in the lo
 detail file. On converted memory it authors the cards' citation rows into sidecar
 references and re-records moved anchors; document selection scopes the run to those
 cards.
+
+
+## `citation_note_revision`
+
+Revise one reference's note in a leaf memory worktree, changing nothing else (MIK-R198 rule 6a).
+
+A reference's `note` is a claim about the code its targets anchor. Re-authoring through a citation table
+resolves those targets again, so a curator who must change only the note had no admitted operation: this
+is it. The reference identity is `(sidecar path, references key [n])` -- locator and blob are not
+identity, so a mechanical re-point keeps it. Pass `repo_id`, `contract_path`, the converted `card`
+(for example `onboarding/src/pkg/journal.py.md`), `reference` (`n`), the new `note`, and `base_digest`:
+the sidecar's SHA-256 as the caller read it. Preview with `dry_run=true`.
+
+Every target, anchor and other reference of the card keeps its exact value, no reference number is
+minted, and the leaf the contract names is recorded as the author of the revision. Refused, with
+nothing written: a key the sidecar does not hold, a `base_digest` that is not the sidecar's current
+bytes (a stale input -- read it again), an empty note (a removal is a different act), an absent card or
+sidecar, unconverted memory, and any revision whose written bytes would change something other than that
+note. Moved anchors stay `citation_fix`'s work, and the publication guard judges anchors, not whether a
+note is true.
 
 
 ## `context_packet`
@@ -194,9 +217,12 @@ are never searched as fallbacks.
 
 Create the first attributed memory baseline for an external memory repo. Mutating: commits
 memory content and refreshes its disposable ledger cache. Gated on clean drift unless accept_drift=true.
-`accept_drift` accepts stale anchors only: it never lets a tree with a validator
-violation through, and the first baseline of a converted tree is validated
-before it is committed. Preview with
+`accept_drift` lifts that gate for stale reference anchors and nothing else. It never waives a
+validator violation: a code or test reference anchor that does not hold at the exact paired code
+tree is refused with `R198.1-reference-anchor` whether the option is passed or not, so a tree
+whose anchors are stale answers `blocked-invalid` and the repair is the anchor, not the option
+(MIK-R198 rules 5 and 7). The first baseline of a converted tree is validated before it is
+committed. Preview with
 dry_run=true. Usually driven by the c-10-adopt-memory-baseline skill.
 
 

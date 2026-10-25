@@ -18,8 +18,8 @@ check sees what will be committed.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Collection, Mapping
+from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 from typing import Final, Protocol
@@ -87,7 +87,14 @@ class KnowledgeTree:
 
 
 class CodeTree(Protocol):
-    """The paired code tree, as anchor path existence sees it."""
+    """The paired code tree, as anchors read it.
+
+    ``has_file`` and ``has_directory`` answer existence (anchor paths, MIK-R22 rule 6; families,
+    MIK-R04 rule 1). ``read`` returns the exact bytes of a regular file at the tree, or ``None``
+    when the tree holds nothing at the path: the reference-anchor rule (MIK-R198 rule 5) resolves
+    an anchor's locator and content identity against those bytes, and the blob identity from
+    them, never against a remembered or working-tree copy.
+    """
 
     @property
     def label(self) -> str: ...
@@ -96,16 +103,72 @@ class CodeTree(Protocol):
 
     def has_directory(self, path: str) -> bool: ...
 
+    def read(self, path: str) -> bytes | None: ...
+
 
 @dataclass(frozen=True)
 class CodePathSet:
-    """A code tree given as the set of its file paths (a Git tree, or a test's literal set)."""
+    """A code tree given as the set of its file paths (a Git tree, or a test's literal set).
+
+    ``read`` serves the bytes behind those paths, in one of three ways: ``contents`` for an
+    in-memory set, ``repository`` plus ``blobs`` for a Git tree (each blob read once, on demand),
+    or ``root`` for a working-tree set. A set that carries none of the three answers ``read`` with
+    ``None`` for every path; a reference-anchor check against it refuses rather than guess.
+    """
 
     label: str
     paths: frozenset[str]
+    blobs: Mapping[str, str] | None = None
+    """The tree's blob ID per path, when the set came from a Git tree."""
+    repository: Path | None = None
+    """The Git repository holding ``blobs``' objects, read on demand."""
+    contents: Mapping[str, bytes] | None = None
+    """Exact bytes per path, for an in-memory tree."""
+    root: Path | None = None
+    """The working-tree directory ``paths`` were listed from, read on demand."""
+    _read: dict[str, bytes] = field(default_factory=dict, compare=False, repr=False)
 
     def has_file(self, path: str) -> bool:
         return path in self.paths
+
+    def read(self, path: str) -> bytes | None:
+        if path not in self.paths:
+            return None
+        if path in self._read:
+            return self._read[path]
+        data = self._content(path)
+        if data is not None:
+            self._read[path] = data
+        return data
+
+    def prefetch(self, paths: Collection[str]) -> None:
+        """Read many paths' bytes through one Git call, so a whole-tree check is not one call each.
+
+        The reference-anchor rule asks for every cited path of a memory tree before it resolves an
+        anchor (MIK-R198 rule 5); without this a Git-backed tree would start one ``git cat-file`` per
+        cited file. Only the requested files are read, never the whole tree.
+        """
+
+        wanted = {
+            path: self.blobs[path]
+            for path in paths
+            if path in self.paths and path not in self._read and self.blobs and path in self.blobs
+        }
+        if wanted and self.repository is not None:
+            contents = read_git_blobs_bytes(self.repository, wanted.values())
+            self._read.update({path: contents[blob] for path, blob in wanted.items()})
+            return
+        for path in paths:
+            self.read(path)
+
+    def _content(self, path: str) -> bytes | None:
+        if self.contents is not None and path in self.contents:
+            return self.contents[path]
+        blob = None if self.blobs is None else self.blobs.get(path)
+        if blob is not None and self.repository is not None:
+            return read_git_blobs_bytes(self.repository, [blob])[blob]
+        target = None if self.root is None else self.root / path
+        return target.read_bytes() if target is not None and target.is_file() else None
 
     @cached_property
     def directories(self) -> frozenset[str]:
@@ -123,16 +186,30 @@ class CodePathSet:
 
 @dataclass(frozen=True)
 class CodeDirectory:
-    """A code tree given as a working-tree directory: a path exists when it is a regular file."""
+    """A code tree given as a working-tree directory: a path exists when it is a regular file.
+
+    ``read`` serves the file's exact bytes, once per path: the reference-anchor rule resolves every
+    anchor of a whole tree against them (MIK-R198 rule 5), so a whole-tree run reads each cited file
+    once rather than once per anchor.
+    """
 
     label: str
     root: Path
+    _read: dict[str, bytes] = field(default_factory=dict, compare=False, repr=False)
 
     def has_file(self, path: str) -> bool:
         return (self.root / path).is_file()
 
     def has_directory(self, path: str) -> bool:
         return (self.root / path).is_dir()
+
+    def read(self, path: str) -> bytes | None:
+        if path not in self._read:
+            target = self.root / path
+            if not target.is_file():
+                return None
+            self._read[path] = target.read_bytes()
+        return self._read[path]
 
 
 def code_tree_from_working_directory(root: Path) -> CodePathSet:
@@ -145,7 +222,7 @@ def code_tree_from_working_directory(root: Path) -> CodePathSet:
         for path in result.stdout.split("\0")
         if path and (root / path).is_file() and not (root / path).is_symlink()
     )
-    return CodePathSet(label=root.as_posix(), paths=paths)
+    return CodePathSet(label=root.as_posix(), paths=paths, root=root)
 
 
 def knowledge_tree_from_directory(root: Path, *, label: str | None = None) -> KnowledgeTree:
@@ -222,7 +299,13 @@ def history_tree_from_git(repository: Path, treeish: str) -> KnowledgeTree:
 
 
 def code_tree_from_git(repository: Path, treeish: str, *, label: str | None = None) -> CodePathSet:
-    """Return the file paths of a commit or tree in the code ``repository``."""
+    """Return the file paths, and the blobs behind them, of a commit or tree in ``repository``."""
 
     tree = _resolve_tree(repository, treeish)
-    return CodePathSet(label=label or treeish, paths=frozenset(tree_blobs(repository, tree)))
+    blobs = tree_blobs(repository, tree)
+    return CodePathSet(
+        label=label or treeish,
+        paths=frozenset(blobs),
+        blobs=blobs,
+        repository=repository,
+    )

@@ -29,7 +29,7 @@ from agents_remember.worktrees.knowledge_validation import (
     memory_commit_refusal,
 )
 from agents_remember.worktrees.modules.git import head_commit
-from agents_remember.worktrees.services import CrossingPlanView
+from agents_remember.worktrees.services import CrossingPlanView, worktree_services
 from agents_remember.worktrees.sync_transaction_git._base import (
     SideMergeOutcome,
     SyncFastForwardValidationError,
@@ -116,7 +116,35 @@ def _require_active_merge(side: SyncSideRecord) -> None:
         raise SyncGitProofError(f"{side.side} active merge is not the pinned sync merge")
 
 
-def validate_memory_fast_forward(side: SyncSideRecord, paired_code: PairedCode | None) -> None:
+def _reported_repair_debt(
+    repository: Path, candidate_tree: str, side: SyncSideRecord, paired_code: PairedCode | None
+) -> tuple[str, ...]:
+    """The rule IDs this sync's memory validation reported instead of refusing (MIK-R198 rule 7).
+
+    Two bases and no leaf publication make the validator report what a publication would refuse; the
+    port hands that refusal back to the route, so the report has to be asked for separately or it is
+    dropped. A validator that cannot answer, or a build without the channel, names no debt rather than
+    inventing one.
+    """
+
+    if paired_code is None or not paired_code.commit:
+        return ()
+    validator = worktree_services().knowledge_validation
+    reports = getattr(validator, "reports", None)
+    if reports is None:
+        return ()
+    return reports(
+        memory_repository=repository,
+        candidate_tree=candidate_tree,
+        bases=(side.preSyncHead, side.sourceCommit),
+        code_repository=paired_code.repository,
+        code_commit=paired_code.commit,
+    )
+
+
+def validate_memory_fast_forward(
+    side: SyncSideRecord, paired_code: PairedCode | None
+) -> tuple[str, ...]:
     """Judge a fast-forward's incoming tree before the sync moves any ref (MIK-R61 rule 4).
 
     A fast-forward adopts its incoming tree as it is, so an incoming converted tree is run
@@ -136,7 +164,7 @@ def validate_memory_fast_forward(side: SyncSideRecord, paired_code: PairedCode |
             "refused and no ref moved"
         ) from error
     if not converted:
-        return
+        return ()
     incoming = run_git(repository, ["rev-parse", "--verify", f"{side.sourceCommit}^{{tree}}"])
     if incoming.returncode != 0:
         raise SyncFastForwardValidationError(
@@ -157,6 +185,7 @@ def validate_memory_fast_forward(side: SyncSideRecord, paired_code: PairedCode |
             f"the knowledge validator (MIK-R22): {refusal} The violation is on the source "
             "line: repair that line and sync again; the leaf's memory ref has not moved."
         )
+    return _reported_repair_debt(repository, incoming.stdout.strip(), side, paired_code)
 
 
 def _continue_memory_merge(
@@ -177,8 +206,12 @@ def _continue_memory_merge(
     if conflicts:
         return SideMergeOutcome(state="resolution-required", conflicts=conflicts)
     validate_staged_resolution(side)
+    head = _finish_staged_memory_merge(side, paired_code)
     return SideMergeOutcome(
-        state="completed", conflicts=(), message=_finish_staged_memory_merge(side, paired_code)
+        state="completed",
+        conflicts=(),
+        message=head,
+        repair_debt=staged_merge_repair_debt(side, paired_code),
     )
 
 
@@ -193,7 +226,12 @@ def _existing_side_merge(
             return _continue_memory_merge(side, paired_code)
         return SideMergeOutcome(state="resolution-required", conflicts=unmerged_paths(worktree))
     if side_merge_completed(side):
-        return SideMergeOutcome(state="completed", message=head_commit(worktree))
+        debt = (
+            staged_merge_repair_debt(side, paired_code)
+            if side.side == "memory" and side.plan == "merge"
+            else ()
+        )
+        return SideMergeOutcome(state="completed", message=head_commit(worktree), repair_debt=debt)
     return None
 
 
@@ -366,6 +404,18 @@ def _finish_staged_memory_merge(side: SyncSideRecord, paired_code: PairedCode | 
         raise SyncGitProofError("memory merge commit does not have the pinned parents")
     _refresh_memory_cache(side)
     return result_head
+
+
+def staged_merge_repair_debt(
+    side: SyncSideRecord, paired_code: PairedCode | None
+) -> tuple[str, ...]:
+    """The debt the committed memory merge carries: the validator's reports at its own tree."""
+
+    worktree = Path(side.worktree)
+    tree = run_git(worktree, ["rev-parse", "--verify", "HEAD^{tree}"])
+    if tree.returncode != 0:
+        return ()
+    return _reported_repair_debt(worktree, tree.stdout.strip(), side, paired_code)
 
 
 def continue_side_merge(side: SyncSideRecord, *, paired_code: PairedCode | None = None) -> str:
