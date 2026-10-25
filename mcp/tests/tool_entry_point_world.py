@@ -690,6 +690,17 @@ class EntryPointWorld:
                 "request": {"mode": "sync", "repo_id": REPO, "contract_path": contract}
             },
             "citation_fix": {"repo_id": REPO, "contract_path": contract, "dry_run": True},
+            # A dry run against a sidecar this world does not hold: the product answers its own
+            # stale-input refusal and writes nothing (MIK-R198 rule 6a).
+            "citation_note_revision": {
+                "repo_id": REPO,
+                "contract_path": contract,
+                "card": "onboarding/example.py.md",
+                "reference": 1,
+                "note": "entry-point controls",
+                "base_digest": "0" * 64,
+                "dry_run": True,
+            },
             "route_index_refresh": {"repo_id": REPO, "dry_run": True},
             "memory_init": {"repo_id": REPO, "initialize_git": True},
             "memory_baseline_status": {"repo_id": REPO},

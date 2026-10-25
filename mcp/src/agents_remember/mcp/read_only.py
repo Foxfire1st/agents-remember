@@ -102,6 +102,7 @@ MUTATING_TOOLS: frozenset[str] = frozenset(
         "knowledge_write",
         "memory_quality_check",
         "citation_fix",
+        "citation_note_revision",
         "route_index_refresh",
         "memory_init",
         "memory_baseline_adopt",

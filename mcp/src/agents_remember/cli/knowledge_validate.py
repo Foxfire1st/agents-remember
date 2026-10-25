@@ -46,9 +46,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.formatter_class = argparse.RawDescriptionHelpFormatter
     parser.description = (
         "Validate a converted memory tree with every registered knowledge-validator rule. "
-        "MIK-R53 rules 10-12 decide the ten rules that used to only report."
+        "MIK-R53 rules 10-12 decide the eleven rules that used to only report."
     )
-    parser.epilog = """the ten decided rules (MIK-R53 rule 11):
+    parser.epilog = """the eleven decided rules (MIK-R53 rule 11):
 
   refuses; merge_reports (refuse at every commit and landing route, report only at a sync merge):
     R27.2-existing-record      an existing record whose checkable admission criterion
@@ -68,8 +68,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
   refuses:
     R13.3-governs              a decision that links nothing it governs
 
-The five refusing rules report inside the writer (writer_reports) and refuse at every
+The six refusing rules report inside the writer (writer_reports) and refuse at every
 commit route. Every reported finding names its reason and the route that will refuse it.
+
+MIK-R198 rule 5 adds R198.1-reference-anchor: a code or test reference anchor that does
+not name the paired code tree's blob and resolve there to its recorded content. It
+refuses at every publication route and the full quality run, and reports inside the
+writer and at a sync merge (writer_reports, merge_reports).
 """
     parser.add_argument("memory_root", type=Path, help="The memory working tree to validate.")
     parser.add_argument(

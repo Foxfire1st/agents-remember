@@ -23,6 +23,7 @@ from .explainer_control import ExplainerControlCall, explainer_control_payload
 from .lifecycle_finalize import lifecycle_finalize_task_payload
 from .memory import (
     citation_fix_payload,
+    citation_note_revision_payload,
     memory_baseline_adopt_payload,
     memory_baseline_status_payload,
     memory_carryover_apply_payload,
@@ -58,6 +59,7 @@ __all__ = [
     "TRANSPORT",
     "ExplainerControlCall",
     "citation_fix_payload",
+    "citation_note_revision_payload",
     "closeout_queue_payload",
     "context_packet_payload",
     "curator_coherence_payload",

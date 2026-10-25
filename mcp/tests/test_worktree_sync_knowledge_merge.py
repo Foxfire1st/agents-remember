@@ -23,6 +23,7 @@ two invariants and a family), converted on the official line and fast-forwarded 
 
 from __future__ import annotations
 
+import copy
 import json
 import subprocess
 from dataclasses import dataclass, replace
@@ -40,6 +41,7 @@ from agents_remember.memory.conversion.convert import convert_memory
 from agents_remember.memory.conversion.inputs import memory_from_directory, write_changed
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.knowledge_files.ids import derived_record_id
+from agents_remember.worktrees import sync_transaction
 from agents_remember.worktrees.knowledge_crossing import (
     apply_crossing,
     crossing_plan,
@@ -80,7 +82,7 @@ from knowledge_conversion_test_support import (
     legacy_database,
     memory_files,
 )
-from test_worktree_sync import SyncFixture
+from test_worktree_sync import SyncFixture, section
 from writer_worklist_test_support import write_knowledge
 
 RECORD = f"knowledge/invariants/{derived_record_id('invariant', 'inv-one')}-FIX-I-1.json"
@@ -789,3 +791,166 @@ def test_successful_sync_carries_the_journaled_report_and_counts(tmp_path: Path)
         code=SimpleNamespace(crossingReport=""), memory=SimpleNamespace(crossingReport="")
     )
     assert successful_crossings(cast(Any, empty)) == []
+
+
+def test_a_memory_fast_forward_reports_a_stale_anchor_as_named_debt(tmp_path: Path) -> None:
+    """MIK-R198 rule 7: a fast-forward adopts the incoming tree and NAMES the anchor debt it carries.
+
+    Two bases and no leaf publication make rule 5 report rather than refuse at a sync, so the sync
+    must succeed and hand the debt on. Without the report channel the finding is discarded and the
+    line publishes later with a stale anchor nobody was told about (carried finding L191-PRE-04).
+    """
+
+    lines = _converted_lines(tmp_path)
+    base = _sidecar(lines.leaf)
+    lines.on_line({APP_SIDECAR: _edited(base, "1", blob="0" * 40)}, "stale anchor on the line")
+
+    result = lines.sync()
+
+    assert result["state"] == "synced", result
+    memory = section(result, "memory")
+    assert memory["plan"] == "fast-forward", memory
+    debt = result.get("memoryRepairDebt")
+    assert isinstance(debt, dict), result
+    assert debt["side"] == "memory", debt
+    # The debt names every rule the validator reported at this merge; the anchor rule is the one
+    # this case created, and the fixture's own report-only findings may ride beside it.
+    assert "R198.1-reference-anchor" in debt["rules"], debt
+    assert debt["statement"] and debt["resultHead"], debt
+
+    # The completed generation keeps its answer: replaying it names the same debt the live run did,
+    # rather than dropping the field the journal still carries (MIK-R198 rule 7).
+    replayed = lines.sync(resolution_action="continue")
+    assert replayed["state"] == "synced", replayed
+    assert replayed.get("memoryRepairDebt") == debt, replayed
+
+
+def test_a_memory_merge_created_from_two_valid_sides_names_the_anchor_debt(tmp_path: Path) -> None:
+    """MIK-R198 rule 7: an ordinary merge reports the debt the merge itself created.
+
+    Both sides are valid on their own; the merged tree is what carries a stale anchor. The merge
+    completes -- the repair is the Curator's, after the merge exists -- and the result says so.
+    """
+
+    lines = _converted_lines(tmp_path)
+    base = _sidecar(lines.leaf)
+    lines.on_leaf({APP_SIDECAR: _edited(base, "1", blob="0" * 40)}, "stale anchor on the leaf")
+    card = (lines.leaf / APP_CARD).read_bytes()
+    lines.on_line({APP_CARD: card + b"\nA line-side sentence.\n"}, "line change")
+    result = lines.merge()
+
+    assert result["state"] == "synced", result
+    memory = section(result, "memory")
+    assert memory["plan"] == "merge", memory
+    debt = result.get("memoryRepairDebt")
+    assert isinstance(debt, dict), result
+    assert "R198.1-reference-anchor" in debt["rules"], debt
+
+
+def test_a_conflict_resolved_and_continued_names_the_debt_its_merge_created(tmp_path: Path) -> None:
+    """MIK-R198 rule 7 on the retained-continue path: the merged debt survives the resolution.
+
+    A sync that stops on a textual conflict parks its side with an empty debt, because the debt of a
+    merge is only knowable once the resolved tree is committed. Continuing commits that tree, so this
+    path must compute the debt exactly as the automatic merge path does -- the journal and the answer
+    both name it, and the replay of the completed generation names the same debt rather than dropping
+    the field.
+    """
+
+    lines = _converted_lines(tmp_path)
+    base = _sidecar(lines.leaf)
+    both = json.loads(_edited(base, "1", note="Leaf wording."))
+    lines.on_leaf({APP_SIDECAR: _edited(both, "2", blob="0" * 40)}, "leaf wording, stale anchor")
+    lines.on_line({APP_SIDECAR: _edited(base, "1", note="Line wording.")}, "line wording")
+    conflicted = lines.merge()
+
+    assert conflicted["state"] == "sync-resolution-required", conflicted
+    assert lines.journal()["memory"]["repairDebt"] == [], "the parked side carries no debt yet"
+
+    resolved = json.loads(_edited(base, "1", note="Both wordings."))
+    (lines.leaf / APP_SIDECAR).write_bytes(_edited(resolved, "2", blob="0" * 40))
+    git(lines.leaf, "add", APP_SIDECAR)
+    finished = lines.sync(resolution_action="continue")
+
+    assert finished["state"] == "synced", finished
+    debt = finished.get("memoryRepairDebt")
+    assert isinstance(debt, dict), finished
+    assert "R198.1-reference-anchor" in debt["rules"], debt
+    journal = lines.journal()
+    assert "R198.1-reference-anchor" in journal["memory"]["repairDebt"], journal["memory"]
+    assert debt["resultHead"] == journal["memory"]["resultHead"], debt
+
+    replayed = lines.sync(resolution_action="continue")
+    assert replayed["state"] == "synced", replayed
+    assert replayed.get("memoryRepairDebt") == debt, replayed
+
+
+class _AdoptedSide:
+    """The smallest object the adoption cut touches: a plan, a debt, and ``model_copy``."""
+
+    def __init__(self, plan: str, debt: tuple[str, ...] = ()) -> None:
+        self.plan = plan
+        self.repairDebt = debt
+        self.preSyncHead = "pre"
+        self.worktree = "/nonexistent"
+
+    def model_copy(self, update: dict[str, Any]) -> _AdoptedSide:
+        clone = copy.copy(self)
+        for key, value in update.items():
+            setattr(clone, key, value)
+        return clone
+
+
+def test_adoption_recomputes_the_debt_for_a_fast_forward_as_well_as_a_merge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MIK-R198 rule 7 at the adoption cut: the guard covers both plans, and never overwrites debt."""
+
+    calls: list[tuple[str, tuple[str, ...]]] = []
+    sentinel = ("R198.1-reference-anchor",)
+
+    def recompute(side: _AdoptedSide, paired: object) -> tuple[str, ...]:
+        calls.append((side.plan, side.repairDebt))
+        return sentinel
+
+    captured: list[_AdoptedSide] = []
+
+    def advance(_store: object, record: Any, _name: str, side: _AdoptedSide) -> Any:
+        captured.append(side)
+        return record
+
+    monkeypatch.setattr(sync_transaction, "_paired_code", lambda _record: None)
+    monkeypatch.setattr(sync_transaction, "side_branch_head", lambda _side: "head")
+    monkeypatch.setattr(sync_transaction, "_side_live_complete", lambda _side: True)
+    monkeypatch.setattr(
+        sync_transaction,
+        "restore_parked_wip",
+        lambda _store, record, _name, side: (record, side, False),
+    )
+    monkeypatch.setattr(sync_transaction, "staged_merge_repair_debt", recompute)
+    monkeypatch.setattr(sync_transaction, "_advance_after_side", advance)
+
+    for plan in ("fast-forward", "merge"):
+        captured.clear()
+        calls.clear()
+        record = cast(
+            Any, SimpleNamespace(phase="running-memory", memory=_AdoptedSide(plan), code=None)
+        )
+        sync_transaction._reconcile_completed_sides(cast(Any, object()), record)
+        assert calls == [(plan, ())], (plan, calls)
+        assert captured and captured[0].repairDebt == sentinel, (plan, captured)
+
+    # Debt the journal already holds is never recomputed, so adoption cannot rewrite a recorded answer.
+    captured.clear()
+    calls.clear()
+    record = cast(
+        Any,
+        SimpleNamespace(
+            phase="running-memory",
+            memory=_AdoptedSide("fast-forward", ("R22.6-carried-stale",)),
+            code=None,
+        ),
+    )
+    sync_transaction._reconcile_completed_sides(cast(Any, object()), record)
+    assert calls == [], calls
+    assert captured and captured[0].repairDebt == ("R22.6-carried-stale",), captured

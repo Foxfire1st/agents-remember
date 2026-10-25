@@ -7,7 +7,11 @@ committed instead of by database constraints. One module, one rule registry:
 * :mod:`.parsed` -- every file read once through the MIK-R21 / MIK-R07 models;
 * :mod:`.markers` -- the ``[n]`` markers of a Markdown file;
 * :mod:`.registry` -- the rule registry (rule 9) and the context every rule reads;
-* :mod:`.rules_structure` and :mod:`.rules_references` -- MIK-R22's own rules 1 to 7;
+* :mod:`.rules_references` -- MIK-R22 rules 3, 5 and 6: markers, record links, families and anchor
+  paths;
+* :mod:`.rules_reference_anchors` -- MIK-R198 rule 5: every code or test reference anchor must name
+  the blob of its source path in the exact paired code tree and resolve there to its recorded
+  content identity, refusing publication and reporting only a writer input or a sync merge;
 * :mod:`.family_routes` and :mod:`.rules_routes` -- MIK-R04's family routes: Coverage, Non-empty,
   the reported states and the mechanical route suggestion;
 * :mod:`.rules_admission` -- MIK-R27's admission rule: refused on a new record, and the count
@@ -39,6 +43,7 @@ from agents_remember.memory_quality.knowledge_validator.registry import (
     Finding,
     ValidationContext,
     ValidationRule,
+    merge_reported_rule_ids,
     register_rule,
     registered_rules,
     writer_reported_rule_ids,
@@ -77,6 +82,7 @@ __all__ = [
     "code_tree_from_git",
     "knowledge_tree_from_directory",
     "knowledge_tree_from_git",
+    "merge_reported_rule_ids",
     "register_rule",
     "registered_rules",
     "require_valid_commit",

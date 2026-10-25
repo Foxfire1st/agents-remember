@@ -33,6 +33,7 @@ from agents_remember.models.lifecycles.curator_coherence import CuratorCoherence
 from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
 from agents_remember.models.memory import (
     CitationFixResponse,
+    CitationNoteRevisionResponse,
     MemoryBaselineAdoptResponse,
     MemoryBaselineStatusResponse,
     MemoryCarryoverApplyResponse,
@@ -89,6 +90,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "runtime_install": RuntimeInstallResponse,
     "memory_quality_check": MemoryQualityCheckResponse,
     "citation_fix": CitationFixResponse,
+    "citation_note_revision": CitationNoteRevisionResponse,
     "route_index_refresh": RouteIndexRefreshResponse,
     "memory_init": MemoryInitResponse,
     "worktree_start": WorktreeStartResponse,

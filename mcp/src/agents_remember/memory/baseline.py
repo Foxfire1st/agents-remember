@@ -714,8 +714,10 @@ def _converted_adopt_gate(
     """The converted adoption gate (MIK-R44 rule 7, MIK-R45 rule 3).
 
     Returns the refusal `(returncode, payload)` when the tree may not be adopted,
-    else `None`. `accept_drift` accepts stale anchors only: it never lets a tree
-    with a validator violation through, and it never lifts `blocked-legacy-cards`.
+    else `None`. `accept_drift` lifts the actionable stale-anchor count only: it
+    never lets a tree with a validator violation through, and a stale code or test
+    reference anchor is one (MIK-R198 rule 5, refused by the validation that follows
+    this gate), and it never lifts `blocked-legacy-cards`.
     """
 
     legacy_cards = payload.get("legacyCards")

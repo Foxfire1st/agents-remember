@@ -24,6 +24,7 @@ from agents_remember.application.memory_tools import (
     MemoryBranches,
     _carryover_legacy_refusal,
     citation_fix_tool,
+    citation_note_revision_tool,
     memory_baseline_adopt_tool,
     memory_baseline_status_tool,
     memory_carryover_apply_tool,
@@ -163,6 +164,57 @@ def citation_fix_payload(
     else:
         answer = _citation_fix_answer(whole)
     return _tool_payload("citation_fix", whole, answer=answer)
+
+
+def citation_note_revision_payload(  # noqa: PLR0913 -- mirrors the tool's named arguments
+    config: McpRuntimeConfig,
+    repo_id: str,
+    contract_path: str,
+    *,
+    card: str,
+    reference: int,
+    note: str,
+    base_digest: str,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Revise one reference's note in place, targets and anchors untouched (MIK-R198 rule 6a)."""
+
+    try:
+        whole = citation_note_revision_tool(
+            config,
+            repo_id=repo_id,
+            contract_path=contract_path,
+            card=card,
+            reference=reference,
+            note=note,
+            base_digest=base_digest,
+            dry_run=dry_run,
+        )
+    except ConfiguredContractAuthorityError as error:
+        whole = _citation_authority_refusal(repo_id, contract_path, error)
+    answer = {key: whole[key] for key in _NOTE_REVISION_ANSWER_KEYS if key in whole}
+    return _tool_payload("citation_note_revision", whole, answer=answer)
+
+
+_NOTE_REVISION_ANSWER_KEYS = (
+    "ok",
+    "operation",
+    "status",
+    "dryRun",
+    "repoId",
+    "card",
+    "sidecar",
+    "reference",
+    "author",
+    "changed",
+    "targetCount",
+    "referenceCount",
+    "digestBefore",
+    "digestAfter",
+    "code",
+    "detail",
+    "nextAction",
+)
 
 
 _CITATION_STATUS_KEYS = (

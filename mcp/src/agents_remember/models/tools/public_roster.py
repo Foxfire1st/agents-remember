@@ -28,6 +28,7 @@ PUBLIC_TOOLS = (
     "retire_child",
     "memory_quality_check",
     "citation_fix",
+    "citation_note_revision",
     "route_index_refresh",
     "memory_init",
     "memory_baseline_status",

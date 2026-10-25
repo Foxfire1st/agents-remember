@@ -339,28 +339,6 @@ def test_accept_drift_never_clears_a_validator_violation(
         assert refused["ok"] is False and refused["state"] == "blocked-invalid", refused
 
 
-def test_stale_anchors_adopt_once_accepted(tmp_path: Path, bound_validation: Any) -> None:
-    """Rule 7: accepted stale anchors adopt; the committed tree is attributed."""
-
-    config, code, memory = _adoptable_converted_world(tmp_path, stale=True)
-    refused = memory_baseline_adopt_tool(
-        config,
-        repo_id=REPO_ID,
-        branches=MemoryBranches(source_branch="main", work_branch="main"),
-    )
-    assert refused["state"] == "blocked-drift", refused
-
-    adopted = memory_baseline_adopt_tool(
-        config,
-        repo_id=REPO_ID,
-        accept_drift=True,
-        branches=MemoryBranches(source_branch="main", work_branch="main"),
-    )
-    assert adopted["ok"] is True and adopted["state"] == "adopted", adopted
-    message = git(memory, "log", "-1", "--format=%B")
-    assert f"Code-Commit: {git(code, 'rev-parse', 'main')}" in message, adopted
-
-
 def test_first_baseline_commits_exactly_the_validated_tree(
     tmp_path: Path, bound_validation: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -374,7 +352,7 @@ def test_first_baseline_commits_exactly_the_validated_tree(
         return real_refusal(**kwargs)
 
     monkeypatch.setattr(baseline, "memory_commit_refusal", _spy)
-    config, _code, memory = _adoptable_converted_world(tmp_path, stale=True)
+    config, _code, memory = _adoptable_converted_world(tmp_path, card=True)
     adopted = memory_baseline_adopt_tool(
         config,
         repo_id=REPO_ID,
@@ -389,7 +367,7 @@ def test_first_baseline_commits_exactly_the_validated_tree(
 def test_dry_run_and_refusal_change_nothing(tmp_path: Path, bound_validation: Any) -> None:
     """Rule 7: a dry run and a refusal leave the index, the refs and every file."""
 
-    config, _code, memory = _adoptable_converted_world(tmp_path, stale=True)
+    config, _code, memory = _adoptable_converted_world(tmp_path, card=True)
     before = _fingerprint(memory)
     preview = memory_baseline_adopt_tool(
         config,
@@ -436,7 +414,7 @@ def test_baseline_command_line_validates(
 ) -> None:
     """Rule 7: the module command line validates like the tool."""
 
-    config, code, _memory = _adoptable_converted_world(tmp_path, stale=True)
+    config, code, _memory = _adoptable_converted_world(tmp_path, card=True)
     coordination = config.coordination_root.as_posix()
     common = [
         "--code-repository-name",

@@ -395,7 +395,11 @@ def _landing_request(
     landed, *made_on = parents.split()
     # The comparison base is the parent line the task last synced from, so every record the task
     # introduced -- in however many of its own commits -- is judged new (MIK-R27, carried from L27).
-    bases = (contract.memory_base_commit,) if contract.memory_base_commit else tuple(made_on)
+    # Without a recorded base the first parent is that line, even when the landed commit is a merge:
+    # its second parent is the merged side, which the merge itself judged. Handing both parents in
+    # would make this publication look like a sync merge, and a sync merge reports rule-5 findings
+    # instead of refusing them (MIK-R198 rule 7) -- a landing of unchanged memory must still refuse.
+    bases = (contract.memory_base_commit,) if contract.memory_base_commit else tuple(made_on[:1])
     # Only a closeout the contract records freezes a history file (L09 review R1, finding 1): the
     # commit that closeout made is judged as the closeout judged it, with what it was made on
     # frozen. A commit made by any other hand -- a child of it, a merge made afterwards -- freezes

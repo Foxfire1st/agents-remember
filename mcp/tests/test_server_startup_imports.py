@@ -327,7 +327,7 @@ def test_discovery_loads_no_implementation_module(tmp_path: Path, mode: str) -> 
 
     tools, modules, timings = report["tools"], report["modules"], report["timings"]
     assert isinstance(tools, list) and isinstance(modules, list) and isinstance(timings, dict)
-    expected = 22 if mode == "explainer" else 43
+    expected = 22 if mode == "explainer" else 44
     assert len(tools) == expected, f"{mode}: {len(tools)} tools, expected {expected}"
     found = _forbidden_loaded(modules)
     # A machine-readable line on the passing path too: a run that prints nothing is a failed launch, and
@@ -394,7 +394,7 @@ def test_the_real_command_answers_initialize_and_tools_list(tmp_path: Path) -> N
     point itself is covered, for all three valid launches. Both response times are reported.
     """
 
-    for mode, expected in (("ordinary", 43), ("ordinary-role-bound", 43), ("explainer", 22)):
+    for mode, expected in (("ordinary", 44), ("ordinary-role-bound", 44), ("explainer", 22)):
         _root, settings, env = _world(tmp_path / mode, mode=mode)
         started = time.monotonic()
         process = subprocess.Popen(

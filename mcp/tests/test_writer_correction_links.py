@@ -12,6 +12,7 @@ from knowledge_validator_test_support import (
     INTEGRATE_CARD,
     INTEGRATE_SIDECAR,
     edit_json,
+    fixture_code_contents,
     fixture_tree_files,
 )
 from knowledge_writer_test_support import build_world, read_json
@@ -149,7 +150,8 @@ def test_optional_cli_endpoints_report_bad_utf8_active_and_archive_without_chang
     files[INTEGRATE_CARD] += b"\nPackets [7] [8].\n"
     memory, code = tmp_path / "memory", tmp_path / "code"
     base = _repository(memory, files)
-    _repository(code, dict.fromkeys(CODE_PATHS, b"# code\n"))
+    # The card anchors hold against the fixture's pinned code blob (MIK-R198 rule 5).
+    _repository(code, {**dict.fromkeys(CODE_PATHS, b"# code\n"), **fixture_code_contents()})
     if refusing:
         (memory / INTEGRATE_CARD).write_bytes(files[INTEGRATE_CARD] + b"\nMissing [999].\n")
     coordination = tmp_path / "coordination"

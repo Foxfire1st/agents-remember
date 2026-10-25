@@ -131,11 +131,20 @@ undocumented historical files from flooding the report.
 The drift check measures the reference anchors of onboarding cards and the validity of the tree:
 how many anchors are current, how many are stale against the code, and which files the knowledge
 validator refuses. Whether an invariant is still current is answered by `knowledge_read` and
-`knowledge_integrity_check`, not here. A stale reference is reported and never blocks by itself; a reference
-whose path is gone refuses the leaf's closeout or landing and is only reported at a sync merge; a leaf
-that changes a source file must change that file's card or record why not. Nothing is
-repaired by this check: `citation_fix` re-records anchors that only moved, and a curator
-re-authors a stale one.
+`knowledge_integrity_check`, not here.
+
+A stale reference anchor refuses. An anchor that does not name the exact paired code tree's blob at
+its source path, or does not resolve there to the content identity it recorded, refuses every
+publication route -- closeout/APPLY, integration, direct and recorded landing -- and the full quality
+run, and is only *reported* by two routes that cannot refuse: the drift summary and the writer and
+sync-merge runs (`writer_reports`, `merge_reports`, MIK-R198 rule 5). The drift summary is the
+curator's repair view of that debt; it is never an authorization to publish. A reference whose
+anchors are current but whose note no longer says what the code does is a note-truth matter rather
+than an anchor one: it is repaired by revising that one reference's note, which leaves every target,
+anchor and other reference byte-identical and mints no reference number (MIK-R198 rule 6a). A leaf
+that changes a source file must change that file's card or record why not. Nothing is repaired by
+this check: `citation_fix` re-records anchors that only moved, and a curator re-authors or re-notes
+a stale one.
 
 Old-format memory is refused; convert it by the procedure of MIK-R46 rule 6.
 
@@ -205,7 +214,7 @@ curation may not.
 
 No validator rule only reports without a stated reason (MIK-R53 rules 10-12).
 A rule either refuses, or it reports for a named reason and names the route
-that refuses in its place. The ten decided rules:
+that refuses in its place. The eleven decided rules:
 
 | Rule | State it names | Decision |
 | --- | --- | --- |
@@ -219,6 +228,7 @@ that refuses in its place. The ten decided rules:
 | `R22.3-unresolved-target` | a citation the conversion could not resolve | `migration_debt` |
 | `R04.4-route-unassigned` | an exported family with no route | `migration_debt` |
 | `R27.4-legacy-unassessed` | an exported record nobody assessed | `migration_debt`; one finding per record once it refuses |
+| `R198.1-reference-anchor` | a code or test reference anchor that does not name the paired code tree's blob and resolve there to its recorded content | refuses at every publication route and in the full quality run; `writer_reports`, `merge_reports` (MIK-R198 rule 5) |
 
 - `merge_reports`: refuse at every commit and landing route, report only at a
   sync merge (two or more bases, no leaf publication). A merge can create the
@@ -229,7 +239,7 @@ that refuses in its place. The ten decided rules:
   `excluded`) and refuses at every route once it is; a finding no base holds is
   new and refuses at once. The conversion writes these states, not a leaf. A
   reported debt finding names the number of routes not yet migrated.
-- The five refusing rules report inside the writer (`writer_reports`) and
+- The six refusing rules report inside the writer (`writer_reports`) and
   refuse at every commit route: repair them before closeout.
 - Every reported finding names its reason and the route that will refuse. No
   finding is reported without a stated reason.

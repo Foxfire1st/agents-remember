@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
+from agents_remember.application.census_artifacts import write_census_artifact
+from agents_remember.application.census_inputs import measured_census
 from agents_remember.application.knowledge_bootstrap_admission import (
     BootstrapRefusal,
     admit_bootstrap_context,
@@ -58,6 +60,9 @@ from agents_remember.worktrees.integration.integration_branch_repository import 
     BranchAuthorityUnavailable,
 )
 from agents_remember.worktrees.worktree_contract import load_contract
+
+#: How many per-target census rows one tool answer carries; the full artifact is the CLI's file.
+CENSUS_TARGET_ROWS: Final = 200
 
 
 @dataclass(frozen=True)
@@ -336,6 +341,167 @@ def citation_check_tool(
             subject=f"the memory tree {memory_root.as_posix()}",
         ),
     }
+
+
+def citation_census_tool(
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str,
+    contract_path: str,
+    artifact_path: str | None = None,
+) -> dict[str, Any]:
+    """Measure one leaf's code/test reference anchors at its exact pair (MIK-R198 rules 1-2).
+
+    Read-only for the memory tree, and separate from ``citation_check``: the check answers currentness
+    for a card, while the census classifies every target of the whole tree into the mechanical repairs
+    the shipped fixer may take (a blob-only move, a uniquely moved range) and the judgment cases it
+    must refuse, and names the cards a citation work order can carry.
+
+    The answer is bounded to ``CENSUS_TARGET_ROWS`` rows, but the complete population is never
+    discarded: the whole census is written to a named artifact -- ``artifact_path`` when the caller
+    names one inside the coordination root, otherwise ``temp/census/`` under it -- and the answer
+    carries that path, its digest, how many rows it returned and how many it omitted. A bounded answer
+    therefore always names the exact, retrievable complete artifact it is bounded from.
+    """
+
+    scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
+    memory_root = scope.onboarding_root.parent
+    if not reference_state.is_converted_memory(memory_root):
+        return {
+            "repoId": scope.repo_id,
+            "ok": False,
+            "code": LEGACY_FORMAT_CODE,
+            "detail": legacy_format_refusal(
+                memory_root,
+                operation="citation_census",
+                subject=f"the memory tree {memory_root.as_posix()}",
+            ),
+        }
+    full, inputs = measured_census(memory_root, scope.code_root)
+    rows = full["targets"]
+    summary = {
+        key: value
+        for key, value in full.items()
+        if key not in {"targets", "sidecars", "inputIdentities"}
+    }
+    artifact = write_census_artifact(
+        config,
+        full,
+        artifact_path,
+        repo_id=repo_id,
+        inputs=inputs,
+    )
+    bounded = rows[:CENSUS_TARGET_ROWS]
+    return {
+        "repoId": scope.repo_id,
+        "onboardingRoot": scope.onboarding_root.as_posix(),
+        **summary,
+        "targets": bounded,
+        "targetsReturned": len(bounded),
+        "targetsOmitted": max(0, len(rows) - len(bounded)),
+        **artifact,
+        **measuring_build_stamp(),
+    }
+
+
+def citation_note_revision_tool(  # noqa: PLR0913 -- a tool entry point: every argument is named, none derived
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str,
+    contract_path: str,
+    card: str,
+    reference: int,
+    note: str,
+    base_digest: str,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Revise one reference's note in place, keeping its targets and anchors (MIK-R198 rule 6a).
+
+    The re-authoring route through a citation table resolves a reference's targets again, so a Curator
+    who must change only a note has no admitted operation today. This is that operation, in the leaf's
+    memory worktree only: the reference identity is ``(sidecar path, references key [n])``, every target,
+    anchor and other reference stays byte-identical, no reference number is minted, and the leaf the
+    contract names is recorded as the author. A missing key, a base digest that is not the sidecar's
+    current bytes, an empty note and an absent card or sidecar are refused by name with nothing written.
+    """
+
+    try:
+        scope = _leaf_memory_writer_scope(
+            config,
+            repo_id=repo_id,
+            contract_path=contract_path,
+            operation="citation_note_revision",
+        )
+    except (AuthorityError, ValueError, RuntimeError) as error:
+        # A tool answers its refusal; it never leaves the transport to raise for a contract the
+        # caller named (MIK-R198 rule 6a, the product's refusal vocabulary).
+        return {
+            "repoId": repo_id,
+            "ok": False,
+            "operation": "citation_note_revision",
+            "status": "refused",
+            "code": "contract-refused",
+            "detail": f"citation_note_revision cannot read the leaf enclosure contract: {error}",
+            "nextAction": "citation_note_revision",
+            **measuring_build_stamp(),
+        }
+    memory_root = scope.onboarding_root.parent
+    if not reference_state.is_converted_memory(memory_root):
+        return {
+            "repoId": scope.repo_id,
+            "ok": False,
+            "status": "refused",
+            "code": LEGACY_FORMAT_CODE,
+            "detail": legacy_format_refusal(
+                memory_root,
+                operation="citation_note_revision",
+                subject=f"the memory tree {memory_root.as_posix()}",
+            ),
+            "nextAction": "citation_note_revision",
+            **measuring_build_stamp(),
+        }
+    try:
+        revision = card_authoring.revise_reference_note(
+            card_authoring.NoteRevision(
+                memory_root=memory_root,
+                card=card,
+                number=reference,
+                note=note,
+                base_digest=base_digest,
+                author=_repairing_leaf(scope),
+            ),
+            dry_run=dry_run,
+        )
+    except card_authoring.NoteRevisionRefused as refused:
+        return {
+            "repoId": scope.repo_id,
+            "ok": False,
+            "operation": "citation_note_revision",
+            "status": "refused",
+            "code": refused.code,
+            "detail": refused.detail,
+            "nextAction": "citation_note_revision",
+            **measuring_build_stamp(),
+        }
+    return {
+        "repoId": scope.repo_id,
+        "ok": True,
+        "operation": "citation_note_revision",
+        "onboardingRoot": scope.onboarding_root.as_posix(),
+        **revision,
+        **measuring_build_stamp(),
+    }
+
+
+def _repairing_leaf(scope: MemoryScope) -> str:
+    """The leaf a note revision is attributed to: the one the contract encloses.
+
+    A contract with no leaf identity names no repairing leaf, so the revision is refused by name
+    rather than attributed to nobody.
+    """
+
+    contract = scope.contract
+    return "" if contract is None else contract.leaf_id
 
 
 def citation_fix_tool(

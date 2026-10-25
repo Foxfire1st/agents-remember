@@ -677,6 +677,51 @@ USER_SETTINGS_INIT_ROW_USES = {
 USER_SETTINGS_INIT_ROW_BOUND = 900
 USER_SETTINGS_INIT_PRODUCTION_PATHS = ("path",)
 
+# MIK-R198 rule 6a: ``citation_note_revision`` answers with the reference it revised -- the outcome,
+# whether a preview ran, the rule the revision is attributed to, and the sidecar's digests before and
+# after so a caller can prove what it revised against. The sidecar's rows stay in the log.
+NOTE_REVISION_ROW_FIELDS = frozenset(
+    {
+        "ok",
+        "operation",
+        "status",
+        "dryRun",
+        "repoId",
+        "card",
+        "sidecar",
+        "reference",
+        "author",
+        "changed",
+        "targetCount",
+        "referenceCount",
+        "digestBefore",
+        "digestAfter",
+        "code",
+        "detail",
+        "nextAction",
+    }
+)
+NOTE_REVISION_ROW_USES = {
+    "ok": "branch on whether the revision was written",
+    "operation": "confirm the answer is the note revision and not another write",
+    "status": "tell a refusal from a revision without reading the code",
+    "dryRun": "tell a preview (nothing written) from a run that wrote",
+    "repoId": "confirm the answer is about the admitted repository",
+    "card": "confirm which converted card was revised",
+    "sidecar": "confirm which sidecar the note lives in",
+    "reference": "confirm which reference number was revised",
+    "author": "confirm the repairing leaf the revision is recorded under",
+    "changed": "tell a revision that changed the note from one that already held it",
+    "targetCount": "confirm the reference kept its targets",
+    "referenceCount": "confirm no reference number was minted",
+    "digestBefore": "prove which bytes the revision was prepared from",
+    "digestAfter": "prove which bytes landed",
+    "code": "read why a revision was refused",
+    "detail": "read the refusal's own words",
+    "nextAction": "rerun with the corrected input",
+}
+NOTE_REVISION_ROW_BOUND = 1200
+NOTE_REVISION_PRODUCTION_PATHS = ("converted",)
 
 # Row lookup for the production derivation tests: tool to its fields, uses,
 # bound, and production paths.
@@ -692,6 +737,12 @@ L110_ROW_DATA = {
         CITATION_FIX_ROW_USES,
         CITATION_FIX_ROW_BOUND,
         CITATION_FIX_PRODUCTION_PATHS,
+    ),
+    "citation_note_revision": (
+        NOTE_REVISION_ROW_FIELDS,
+        NOTE_REVISION_ROW_USES,
+        NOTE_REVISION_ROW_BOUND,
+        NOTE_REVISION_PRODUCTION_PATHS,
     ),
     "memory_quality_check": (
         QUALITY_ROW_FIELDS,

@@ -184,15 +184,21 @@ def _world(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _adoptable_converted_world(
-    tmp_path: Path, *, stale: bool = False, violation: bool = False
+    tmp_path: Path, *, stale: bool = False, violation: bool = False, card: bool = False
 ) -> tuple[Any, Path, Path]:
     code, path = _world(tmp_path)
     memory_init_tool(load_config(path), repo_id=REPO_ID, initial_branch="main")
     memory = load_config(path).repositories[REPO_ID].memory_root
     assert memory is not None
-    if stale or violation:
+    if stale or violation or card:
         target = "pkg/gone.py" if violation else "pkg/alpha.py"
-        anchor = _anchor(blob="0" * 40, content="sha256:" + "2" * 64)
+        # A stale anchor refuses the pair at every publication route (MIK-R198 rule 5), so a world
+        # that must be adopted carries an anchor that holds: ``card`` writes the current one.
+        anchor = (
+            _current_anchor(code, target)
+            if card
+            else _anchor(blob="0" * 40, content="sha256:" + "2" * 64)
+        )
         document = {
             "path": target,
             "schema": "ar-onboarding-file/v1",

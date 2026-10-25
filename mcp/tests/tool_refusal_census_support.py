@@ -81,6 +81,15 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
             "request": {"mode": "sync", "repo_id": REPO, "contract_path": contract}
         },
         "citation_fix": {"repo_id": REPO, "contract_path": contract, "dry_run": True},
+        "citation_note_revision": {
+            "repo_id": REPO,
+            "contract_path": contract,
+            "card": "onboarding/example.py.md",
+            "reference": 1,
+            "note": "refusal census",
+            "base_digest": "0" * 64,
+            "dry_run": True,
+        },
         "route_index_refresh": {
             "repo_id": REPO,
             "contract_path": contract,

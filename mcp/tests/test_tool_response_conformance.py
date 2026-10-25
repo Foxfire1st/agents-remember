@@ -87,8 +87,9 @@ def adapter_tool_ids() -> dict[str, list[str]]:
     """Every tool id a ``_tool_payload("<id>", ...)`` call site names, with its sites.
 
     Read from the source rather than from a hand-kept list, so this cannot drift from the
-    adapter surface it describes. 43 call sites name 41 ids: some tools have two entry
-    points, and every knowledge builder routes through the same choke point.
+    adapter surface it describes. 46 call sites name 44 ids: one tool (``memory_quality_check``)
+    has three entry points -- its plain read, its ``start`` and its ``poll`` -- and every
+    knowledge builder routes through the same choke point.
     """
 
     sites: dict[str, list[str]] = {}
@@ -196,25 +197,30 @@ def advertised_tool_names() -> set[str]:
 # of it, so an accidental change fails against the registration modules rather than against a
 # number somebody has to remember to update.
 #
-# 40 advertised tools, and the registry holds the same 40 names: every registered response
+# 44 advertised tools, and the registry holds the same 44 names: every registered response
 # model belongs to an advertised tool, so no payload builder sits below the public surface.
 # (MIK-R109 rule 5 removed `resolve_context`; `context_packet` is the orientation read.)
-# MIK-R196 rule 11 adds user_settings_init to the advertised roster; L183 adds
-# explainer_control, the review page's architect tool.
-ROSTER_SIZE = 43
+# MIK-R196 rule 11 adds user_settings_init to the advertised roster; MIK-R198 rule 6a adds
+# citation_note_revision to it, with one handler, and L183 adds explainer_control, the review
+# page's architect tool. Both are present at this merge: 44 advertised tools, the registry
+# holding the same 44 names.
+ROSTER_SIZE = 44
 
 # The tool-adapter module population and the handler population, same rule: the numbers are
 # asserted with the rule (every module's every handler returns `_tool_payload(...)`, and the
 # call-site total equals the handler total) so the rule cannot be satisfied by measuring
 # nothing, and the derivation below is what makes a silent change fail.
 #
-# 14 adapter modules hold 45 handlers: `closeout_queue`, `core`, `curator_coherence`,
+# 14 adapter modules hold 46 handlers: `closeout_queue`, `core`, `curator_coherence`,
 # `direct_execution`, `direct_landing`, `enclosure_adoption`, `explainer_control`, `knowledge`,
 # `lifecycle_finalize`, `memory`, `read_files`, `role_agents`, `task_doc` and `worktree`.
 # (A `*_payload`-suffixed helper that only shapes a dict, such as the install compactor,
 # is not a handler: it never reaches the choke point.)
 TOOL_MODULE_COUNT = 14
-TOOL_HANDLER_COUNT = 45
+# ...and its handler to the population one tool adds -- MIK-R196's settings writer, MIK-R198's
+# note revision and L183's explainer_control each add one: 46 handlers, 46 call sites, read
+# from the merged modules rather than carried over from either side of the sync.
+TOOL_HANDLER_COUNT = 46
 
 
 def literal_keyword_values(path: Path, keyword: str) -> set[str]:
@@ -435,7 +441,7 @@ class ToolResponseSurfaceTests(unittest.TestCase):
         handlers at all, and the call-site equality is load-bearing rather than decorative: a
         ``_tool_payload`` call whose result is discarded while a raw dict is returned is
         exactly the bypass shape, and it makes the module's call sites outnumber its
-        handlers. 14 modules hold 45 handlers and 45 call sites -- the same
+        handlers. 14 modules hold 46 handlers and 46 call sites -- the same
         count the registration census reports, so the two readings cannot drift apart -- and the
         handler/call-site totals are also asserted equal to the id-literal total read by
         :func:`adapter_tool_ids`, which is the derivation that cannot be satisfied by measuring

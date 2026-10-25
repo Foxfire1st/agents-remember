@@ -15,13 +15,16 @@ from __future__ import annotations
 
 import copy
 import json
+from functools import cache
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.git_command import read_git_blobs_bytes
 from agents_remember.memory_quality.knowledge_validator import CodePathSet, KnowledgeTree
 from agents_remember.models.knowledge_files import canonical_text
 
 FIXTURES = Path(__file__).parent / "fixtures" / "knowledge_files"
+REPOSITORY_ROOT = Path(__file__).parents[2]
 
 DIRECT_LANDING = "mcp/src/agents_remember/worktrees/direct_landing.py"
 INTEGRATE = "mcp/src/agents_remember/worktrees/modules/integrate.py"
@@ -190,8 +193,33 @@ def tree(files: dict[str, bytes], label: str = "candidate") -> KnowledgeTree:
     return KnowledgeTree(label=label, files=dict(files))
 
 
+@cache
+def fixture_code_contents() -> dict[str, bytes]:
+    """The bytes of each path at the blob the fixture's own reference anchors recorded.
+
+    The fixture is a pinned knowledge tree: its anchors name blobs of a code state, not of this
+    checkout. Serving exactly those bytes keeps the fixture internally consistent, so the
+    reference-anchor rule (MIK-R198 rule 5) reads the state the fixture describes and an unrelated
+    edit to the paired source file never turns the fixture red.
+    """
+
+    wanted: dict[str, str] = {}
+    for path, data in fixture_tree_files().items():
+        if not (path.startswith("onboarding/") and path.endswith(".json")):
+            continue
+        document = json.loads(data)
+        own = document.get("path")
+        for reference in document.get("references", {}).values():
+            for target in reference.get("targets", []):
+                if target.get("kind") in {"code", "test"}:
+                    anchor = target["anchor"]
+                    wanted[anchor.get("path") or own] = anchor["blob"]
+    contents = read_git_blobs_bytes(REPOSITORY_ROOT, set(wanted.values()))
+    return {path: contents[blob] for path, blob in wanted.items()}
+
+
 def code(paths: frozenset[str] = CODE_PATHS, label: str = "code") -> CodePathSet:
-    return CodePathSet(label=label, paths=paths)
+    return CodePathSet(label=label, paths=paths, contents=fixture_code_contents())
 
 
 def edit_json(files: dict[str, bytes], path: str, change: Any) -> dict[str, bytes]:

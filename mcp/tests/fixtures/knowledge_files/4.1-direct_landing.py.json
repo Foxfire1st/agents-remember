@@ -25,7 +25,7 @@
         {
           "anchor": {
             "blob": "d8baa15ca43be010159ae15f6b0e744949e6d33a",
-            "content": "sha256:7dd862a44a8df5216dda38bb5a5771ce6b0be1e1854544de157f9a8b6cc2cde7",
+            "content": "sha256:b6313075bca31824d7928b803603389bc5ea4d6d3e4bedbc190e46ccf408a255",
             "locator": {
               "kind": "symbol",
               "name": "DirectLandingRequest"
@@ -40,7 +40,7 @@
         {
           "anchor": {
             "blob": "d8baa15ca43be010159ae15f6b0e744949e6d33a",
-            "content": "sha256:5524589d645ba825e3c1d636d8ff517e0ea83a10297258eaf443808095afd44d",
+            "content": "sha256:acb0aa61b8e185ad27ae6f3bd40f5bfed3da7996b8ee3c2f0b9e941068777cc1",
             "locator": {
               "kind": "symbol",
               "name": "_verify_code_commit"
@@ -55,7 +55,7 @@
         {
           "anchor": {
             "blob": "d8baa15ca43be010159ae15f6b0e744949e6d33a",
-            "content": "sha256:d36fa4aab8ad9f5c146e7214eaf71f42ad595ec3eb92edfd3ac852c49fa85d5f",
+            "content": "sha256:2780f751b9394d215f434f8db87d87049f4ef62b8ef8db8ce718fd1683e8608e",
             "locator": {
               "kind": "symbol",
               "name": "_direct_memory_admission_snapshot"
@@ -70,7 +70,7 @@
         {
           "anchor": {
             "blob": "d8baa15ca43be010159ae15f6b0e744949e6d33a",
-            "content": "sha256:1454cd46e8c14b10a12837e6eb698e87d37bbfbf56d82f6f39d7b8978f97f54c",
+            "content": "sha256:78e7ea90e5a38e6272b65cfaf9c4febca753e2d6b17e59089740913f3ebcb2de",
             "locator": {
               "kind": "symbol",
               "name": "_create_direct_landing"
@@ -93,7 +93,7 @@
         {
           "anchor": {
             "blob": "8b386e9074f7f7e40dd308cb4a35ad1a34d5c168",
-            "content": "sha256:c4414b251c841f7940518df8c9386abcb53759d10d1a7d2f7631497ef95bb956",
+            "content": "sha256:16182a70a535e68c325ce3c6b0650ea2d3f987887d6e428d6cefb15b0742cfee",
             "locator": {
               "kind": "symbol",
               "name": "direct_landing_tool"
@@ -110,7 +110,7 @@
         {
           "anchor": {
             "blob": "6aa80fe43345f17ee2533b3d1f54b1c4b4e7a940",
-            "content": "sha256:bfef9c023a67107a344ac6ad4c1fe78ec7f18df1ba9f0a20200a9cbb4c319b70",
+            "content": "sha256:04010af4035543f16e10e1a085e08495cb9f7a998f349c69adf9950414a4cf4f",
             "locator": {
               "kind": "symbol",
               "name": "DirectLandingTests.test_direct_landing_publishes_memory_and_recovers_independently_of_cache"

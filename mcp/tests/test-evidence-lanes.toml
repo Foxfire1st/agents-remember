@@ -59,6 +59,8 @@ unit-regression = [
   "mcp/tests/test_changeset_cancellation.py",
   "mcp/tests/test_checkout_coordination_isolation.py",
   "mcp/tests/test_checkpoint_landing.py",
+  "mcp/tests/test_citation_census_artifact.py",
+  "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_citation_fix_documents.py",
   "mcp/tests/test_citation_migrate_registration.py",
   "mcp/tests/test_cli_discovery.py",
@@ -79,6 +81,7 @@ unit-regression = [
   "mcp/tests/test_context_providers.py",
   "mcp/tests/test_conversion_cost_scans.py",
   "mcp/tests/test_converted_carryover.py",
+  "mcp/tests/test_converted_onboarding_baseline.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_converted_onboarding_drift_leaf_route.py",
   "mcp/tests/test_crap_calculator.py",
@@ -345,6 +348,10 @@ unit-regression = [
   "mcp/tests/test_reconsideration_surfacing.py",
   "mcp/tests/test_record_landing.py",
   "mcp/tests/test_recorded_read_audit.py",
+  "mcp/tests/test_reference_anchor_guard.py",
+  "mcp/tests/test_reference_anchor_routes.py",
+  "mcp/tests/test_reference_anchors_census.py",
+  "mcp/tests/test_reference_note_revision.py",
   "mcp/tests/test_removed_stores.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_request_logical_digests.py",
@@ -506,11 +513,13 @@ unit-regression = [
   "mcp/tests/test_writer_question_publication.py",
   "mcp/tests/test_writer_refresh_restoration.py",
 ]
+
 public-contract = [
   "mcp/tests/test_drift_dismissal_occurrences.py",
   "mcp/tests/test_durable_store_contract.py",
   "mcp/tests/test_quality_gate_public_contract.py",
 ]
+
 integration = [
   "mcp/tests/test_activation_admission_registered.py",
   "mcp/tests/test_atomic_master_review_public.py",
@@ -577,6 +586,9 @@ integration = [
   "mcp/tests/test_pytest_bootstrap_boundaries.py",
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_reader_task_context_protocol.py",
+  "mcp/tests/test_reference_anchor_integration_owners.py",
+  "mcp/tests/test_reference_anchor_owner_ledger.py",
+  "mcp/tests/test_reference_anchor_publication_owners.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_review_external_git_movement_read.py",
@@ -616,6 +628,7 @@ integration = [
   "mcp/tests/test_worktree_sync.py",
   "mcp/tests/test_worktree_sync_knowledge_merge.py",
 ]
+
 architecture-fitness = [
   "mcp/tests/test_atomic_write.py",
   "mcp/tests/test_dependency_facts_store.py",
@@ -640,9 +653,12 @@ architecture-fitness = [
   "mcp/tests/test_wire_vocabulary_exhaustiveness.py",
   "mcp/tests/test_wire_vocabulary_exhaustiveness_boundary.py",
 ]
+
 provider-conformance = [
 ]
+
 stress-durability = [
 ]
+
 migration = [
 ]

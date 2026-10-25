@@ -61,7 +61,9 @@ Never write sidecar JSON by hand. Old-format memory is refused; convert it by th
 MIK-R30's drift check measures the reference anchors of onboarding cards and the validity of the
 tree: how many anchors are current, how many are stale against the code, and which files the
 knowledge validator refuses. Whether an invariant is still current is answered by `knowledge_read`
-and `knowledge_integrity_check`, not here. A stale reference is reported and never blocks by itself.
-A reference whose path is gone refuses the leaf's closeout or landing. Nothing is repaired by this
+and `knowledge_integrity_check`, not here. A stale reference is reported here and never blocks by
+itself. It does refuse publication: every code and test reference anchor of the exact paired tree must
+be current (`R198.1-reference-anchor`, MIK-R198 rule 5). A reference whose path is gone refuses the
+leaf's closeout or landing. Nothing is repaired by this
 check: `citation_fix` re-records anchors that only moved, and a curator decides what a moved anchor
 means for the card's text. The workflow is `workflows/memory-quality-control.md`.

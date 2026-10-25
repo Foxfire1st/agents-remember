@@ -110,7 +110,31 @@ def finalize_sync(
     _retire_restored_stashes(record)
     remove_temporary_worktrees(record)
     delete_authority(record)
-    return with_recomputed_worklist(completed_sync_result(current, record, fetch), current)
+    result = completed_sync_result(current, record, fetch)
+    _name_memory_repair_debt(result, record)
+    return with_recomputed_worklist(result, current)
+
+
+def _name_memory_repair_debt(result: WorktreeCommandResult, record: SyncOperationRecord) -> None:
+    """Name the debt a sync merge reported instead of refusing (MIK-R198 rule 7).
+
+    A sync validates with two bases and publishes no leaf, so a stale reference anchor is reported
+    rather than refused: the merged state can be created from two valid sides and is repaired after
+    the merge exists. The debt is the route's answer, so it is named here -- rule IDs and the rule
+    statement -- and a later publication of the line refuses until the Curator repairs it.
+    """
+
+    if record.memory is None or not record.memory.repairDebt:
+        return
+    result.payload["memoryRepairDebt"] = {
+        "side": "memory",
+        "rules": list(record.memory.repairDebt),
+        "statement": (
+            "the merged memory reports these refusing rules instead of refusing: repair them before "
+            "this line publishes again (MIK-R198 rule 7)"
+        ),
+        "resultHead": record.memory.resultHead,
+    }
 
 
 def with_recomputed_worklist(
@@ -196,7 +220,7 @@ def completed_sync_result(
         else "synced"
     )
     crossings = successful_crossings(record)
-    return WorktreeCommandResult(
+    result = WorktreeCommandResult(
         0,
         {
             "state": state,
@@ -230,6 +254,11 @@ def completed_sync_result(
             ),
         },
     )
+    # One place for every completed-sync answer, replayed or live: the journal is the record of what
+    # the merge reported, so a replay names the same debt the original answer did instead of dropping
+    # the field (MIK-R198 rule 7).
+    _name_memory_repair_debt(result, record)
+    return result
 
 
 def cancel_sync(

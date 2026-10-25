@@ -55,6 +55,7 @@ from agents_remember.worktrees.sync_transaction_git import (
     require_side_checkout,
     side_branch_head,
     side_merge_completed,
+    staged_merge_repair_debt,
     start_side_merge,
     validate_memory_fast_forward,
     worktree_dirty_paths,
@@ -784,7 +785,9 @@ def _run_side(
     if side_name == "memory" and side.plan == "fast-forward":
         # A fast-forward adopts its incoming tree as it is (MIK-R61 rule 4): a converted
         # incoming tree is judged before anything moves, and a refusal moves no ref.
-        validate_memory_fast_forward(side, _paired_code(record))
+        debt = validate_memory_fast_forward(side, _paired_code(record))
+        if debt:
+            side = side.model_copy(update={"repairDebt": debt})
     ensure_temporary_worktree(side)
     resumed_merge = merge_head(Path(side.worktree)) is not None
     paired = _paired_code(record)
@@ -821,6 +824,7 @@ def _run_side(
             "state": "completed",
             "resultHead": side_branch_head(side),
             "crossingReport": outcome.crossing_report,
+            "repairDebt": outcome.repair_debt or side.repairDebt,
         }
     )
     record, updated_side, conflicted = restore_parked_wip(store, record, side_name, updated_side)
@@ -1000,8 +1004,9 @@ def _finish_retained_merge(
     side_name: SyncSide = "code" if record.phase == "code-resolution-required" else "memory"
     side = _retained_side(record)
 
+    paired = _paired_code(record)
     try:
-        result_head = continue_side_merge(side, paired_code=_paired_code(record))
+        result_head = continue_side_merge(side, paired_code=paired)
     except SyncKnowledgeValidationError as error:
         return _knowledge_validation_refused(store, error, record, fetch)
     except SyncGitProofError as error:
@@ -1016,11 +1021,21 @@ def _finish_retained_merge(
             record,
             fetch,
         )
+    # A continued merge is a merge: the debt it carries is knowable only once the resolved tree is
+    # committed, so it is computed here exactly as the automatic path computes it. Without this the
+    # retained side keeps the empty tuple it was parked with, and the answer names no debt while the
+    # resulting pair still reports it (MIK-R198 rule 7).
+    debt = (
+        staged_merge_repair_debt(side, paired)
+        if side_name == "memory" and side.plan == "merge"
+        else ()
+    )
     completed = side.model_copy(
         update={
             "state": "completed",
             "resultHead": result_head,
             "conflictFiles": (),
+            "repairDebt": debt or side.repairDebt,
         }
     )
     record, completed, conflicted = restore_parked_wip(store, record, side_name, completed)
@@ -1133,6 +1148,17 @@ def _reconcile_completed_sides(
             record.memory.plan in {"already-current", "skip"} or _side_live_complete(record.memory)
         )
     ):
+        # An adopted merge is adopted with the debt its committed tree carries: a crash between the
+        # memory merge commit and the journal update must not be the one path that names no debt
+        # while the resulting pair still reports it (MIK-R198 rule 7).
+        # A fast-forward adopts a tree as a merge commits one: with debt still a local copy, an
+        # adoption reading the durable record after the advance must recompute it for both plans
+        # (L191-A3-03).
+        debt = (
+            staged_merge_repair_debt(record.memory, _paired_code(record))
+            if record.memory.plan in {"merge", "fast-forward"} and not record.memory.repairDebt
+            else record.memory.repairDebt
+        )
         side = record.memory.model_copy(
             update={
                 "state": "completed",
@@ -1141,6 +1167,7 @@ def _reconcile_completed_sides(
                     if record.memory.plan == "skip"
                     else side_branch_head(record.memory)
                 ),
+                "repairDebt": debt,
             }
         )
         record, side, conflicted = restore_parked_wip(store, record, "memory", side)

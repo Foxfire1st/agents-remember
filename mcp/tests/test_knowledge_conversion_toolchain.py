@@ -641,6 +641,8 @@ def test_the_converted_check_compares_an_unconverted_head_through_its_converted_
     # Every anchor is read as new; conversion-written debt no base holds refuses at once.
     assert set(_rules(without["findings"])) == {
         "R22.6-anchor-path",
+        # MIK-R198 rule 5: the deleted and moved sources also leave reference anchors stale.
+        "R198.1-reference-anchor",
         "R22.3-unresolved-target",
         "R22.3-sidecar-without-markdown",
         "R04.4-route-unassigned",
@@ -676,7 +678,11 @@ def test_the_converted_check_compares_an_unconverted_head_through_its_converted_
     )
     # MIK-R53 rule 11: the closeout's quality run refuses the carried stale anchors too.
     assert quality["ok"] is False, quality["findings"]
-    assert set(_rules(quality["findings"])) == {"R22.6-carried-stale"}
+    # MIK-R198 rule 5: the same carried anchors also refuse as stale reference anchors.
+    assert set(_rules(quality["findings"])) == {
+        "R22.6-carried-stale",
+        "R198.1-reference-anchor",
+    }
     assert context_check_base(code.root, SimpleNamespace()) is None  # no coordination root: no port
 
     unborn = tmp_path / "unborn-code"
