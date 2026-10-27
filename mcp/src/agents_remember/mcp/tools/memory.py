@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from importlib import import_module
-from typing import Any
+from typing import Any, Literal
 
 from agents_remember.application.memory_quality.answer import (
     quality_poll_answer,
     quality_result_answer,
     quality_start_answer,
+)
+from agents_remember.application.memory_quality.citation_runs import (
+    poll_citation_preview,
+    start_citation_preview,
 )
 from agents_remember.application.memory_quality.controller import (
     poll_memory_quality_request,
@@ -141,16 +145,41 @@ def memory_quality_check_poll_payload(
     return _tool_payload("memory_quality_check", whole, answer=quality_poll_answer(whole, request))
 
 
-def citation_fix_payload(
+def citation_fix_payload(  # noqa: PLR0913 -- mirrors the flat public tool arguments
     config: McpRuntimeConfig,
     repo_id: str,
     *,
     contract_path: str | None = None,
     operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
     dry_run: bool = False,
+    mode: Literal["sync", "start", "poll"] = "sync",
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    if mode != "sync":
+        whole, answer = _citation_run_result(
+            config, repo_id, contract_path, operation_scope, dry_run, mode, run_id
+        )
+    else:
+        if run_id is not None:
+            raise ValueError("run_id is only valid with citation_fix mode=poll")
+        whole = _citation_fix_whole(config, repo_id, contract_path, operation_scope, dry_run)
+        answer = (
+            None
+            if whole.get("status") == "configured-contract-authority-invalid"
+            else _citation_fix_answer(whole)
+        )
+    return _tool_payload("citation_fix", whole, answer=answer)
+
+
+def _citation_fix_whole(
+    config: McpRuntimeConfig,
+    repo_id: str,
+    contract_path: str | None,
+    operation_scope: CitationOperationScope,
+    dry_run: bool,
 ) -> dict[str, Any]:
     try:
-        whole = citation_fix_tool(
+        return citation_fix_tool(
             config,
             repo_id=repo_id,
             contract_path=contract_path,
@@ -158,12 +187,49 @@ def citation_fix_payload(
             operation_scope=operation_scope,
         )
     except ConfiguredContractAuthorityError as error:
-        whole = _citation_authority_refusal(repo_id, contract_path, error)
-    if whole.get("status") == "configured-contract-authority-invalid":
-        answer = None
+        return _citation_authority_refusal(repo_id, contract_path, error)
+
+
+def _citation_run_result(  # noqa: PLR0913, PLR0917 -- flat tool adapter
+    config: McpRuntimeConfig,
+    repo_id: str,
+    contract_path: str | None,
+    selectors: CitationOperationScope,
+    dry_run: bool,
+    mode: str,
+    run_id: str | None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    if mode == "start":
+        if not dry_run or run_id is not None:
+            raise ValueError("citation_fix start requires dry_run=true and no run_id")
+        request = MemoryQualityStartRequest(
+            mode="start", repo_id=repo_id, contract_path=contract_path
+        )
+        whole = start_citation_preview(
+            config,
+            request,
+            selectors,
+            lambda: _citation_fix_whole(config, repo_id, contract_path, selectors, True),
+        )
     else:
+        if (
+            mode != "poll"
+            or not run_id
+            or selectors.document is not None
+            or selectors.documents is not None
+        ):
+            raise ValueError("citation_fix poll requires run_id and no document selectors")
+        request = MemoryQualityPollRequest(
+            mode="poll", repo_id=repo_id, run_id=run_id, contract_path=contract_path
+        )
+        whole = poll_citation_preview(config, request)
+    if whole.get("status") == "completed":
+        if whole.get("nextAction") == "developer-decision":
+            return whole, None
         answer = _citation_fix_answer(whole)
-    return _tool_payload("citation_fix", whole, answer=answer)
+        answer.update(status="completed", runId=whole["runId"])
+        return whole, answer
+    return whole, None
 
 
 def citation_note_revision_payload(  # noqa: PLR0913 -- mirrors the tool's named arguments
@@ -276,7 +342,7 @@ def _citation_fix_answer(full: Mapping[str, Any]) -> dict[str, Any]:
     # A failed run is recovered by working the entries below, then running the
     # tool again.
     answer["nextAction"] = "citation_fix"
-    if full.get("status") == "converted":
+    if full.get("status") in ("converted", "completed"):
         authoring = full.get("authoring")
         refused = authoring.get("refused") if isinstance(authoring, dict) else None
         entries: dict[str, Any] = {

@@ -1,6 +1,6 @@
 import { css } from "../../styled-system/css";
 import { launcherChip, launcherSelect } from "../grammar/viewTabLook";
-import type { RoleAgentOverride, RoleDefaults, RoleFeatureChoice } from "./roleLaunchModel";
+import { matchesChoice, type RoleAgentOverride, type RoleDefaults, type RoleFeatureChoice } from "./roleLaunchModel";
 
 type FeatureValue = boolean | string;
 
@@ -21,7 +21,7 @@ function featureValueText(feature: RoleFeatureChoice, defaultValue?: FeatureValu
   if (feature.type === "toggle") return (defaultValue ?? feature.value) === true ? "On" : "Off";
   const options = feature.options ?? [];
   const current = defaultValue ?? feature.value;
-  return options.find((option) => option.id === String(current))?.label ?? String(current ?? "host default");
+  return options.find((option) => matchesChoice(option, String(current)))?.label ?? String(current ?? "host default");
 }
 
 // The selectable values of a feature: a toggle offers On/Off, a choice its options.
@@ -38,7 +38,7 @@ function chosenFeatureText(
 ): string | undefined {
   if (overrideValue === undefined) return undefined;
   if (feature.type === "toggle") return overrideValue === true || overrideValue === "true" ? "On" : "Off";
-  return choices.find((option) => option.id === String(overrideValue))?.label ?? String(overrideValue);
+  return choices.find((option) => matchesChoice(option, String(overrideValue)))?.label ?? String(overrideValue);
 }
 
 // A permission-bearing feature is read-only: its value is set in the user's settings.
@@ -132,7 +132,7 @@ export function RoleLaunchFeatures({ features, defaults, override, disabled, onC
     <span key={feature.id} className={launcherChip}
       title="Base launch preview; not applied to the stepped-up execution. Permission choices remain set in the user's settings.">
       Base · {feature.label} {featureValueText(feature, defaults.featureValues?.[feature.id] ??
-        (feature.id === "service_tier" ? defaults.serviceTier === "fast" ? "priority" : defaults.serviceTier : undefined))}
+        (feature.id === "service_tier" ? defaults.serviceTier : undefined))}
     </span>
   ));
   const featureChoices = defaults.choices?.featureValues as

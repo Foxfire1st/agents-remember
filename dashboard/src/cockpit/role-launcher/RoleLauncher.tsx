@@ -4,6 +4,7 @@ import type { TaskEntry, TaskDocumentRef } from '../../types/projection';
 import { sameTaskDocumentRef } from '../../data/taskIdentity';
 import { RoleExecutionStatus, RoleReviveControl } from '../RoleExecutionStatus';
 import { RoleLaunchDefaults, RoleLaunchFeatures } from '../RoleLaunchFeatures';
+import { RoleCatalogStatus } from './RoleCatalogStatus';
 import { StepUpControl, StepUpStatus } from './StepUpControl';
 
 import {
@@ -13,6 +14,7 @@ import {
   roleAgentOverrideFor,
   roleDocumentScope,
   masterOptionsForSprint,
+  matchesChoice,
   optionIndex,
   refAtOptionIndex,
   roleNeedsMaster,
@@ -21,11 +23,13 @@ import {
   sprintOptionsForEntries,
   taskOptionsForMaster,
   taskRefIdentity,
+  type CatalogDiscoveryState,
   type RoleAgentChoice,
   type RoleLaunchSelection,
   type LauncherRole,
   type RoleDefaults,
   type RoleFeatureChoice,
+  type RoleModelChoice,
   type RoleScopedExecution,
   type RoleTaskOption,
 } from '../roleLaunchModel';
@@ -37,7 +41,7 @@ import {
   type ResolvedAgentChoice,
 } from './roleLauncherDisplay';
 import { resolveLaunchReadiness, type LaunchReadiness } from './roleLauncherReadiness';
-import { usePruneSeededSelection, usePruneStaleOverride } from './useLauncherSelectionRepair';
+import { usePruneSeededSelection } from './useLauncherSelectionRepair';
 
 const roleLauncherGrid = css({
   display: 'flex',
@@ -559,7 +563,9 @@ function modelDefaultOptionText(
 ): string {
   if (!selectedAgentId) return 'Load agent default';
   if (!choice.selectedAgent) return 'Agent capabilities loading';
-  if (!choice.models.length) return 'No model choices';
+  if (!choice.models.length) return choice.selectedAgent.discovery?.models?.source === 'unknown'
+    ? `${choice.selectedModelId || 'Configured model'} · unchecked`
+    : 'No model choices';
   if (choice.defaultModel) return choice.defaultModel.label + ' · default';
   return selection.agentOverride ? 'Agent default' : 'Role default';
 }
@@ -805,10 +811,11 @@ function failureTestId(
 
 // The service-tier chip text: the tier on the role's own agent, else the provider
 // default. Absent when the role states no tier.
-function serviceTierText(roleDefaults: RoleDefaults, selectedAgentId: string): string | undefined {
+function serviceTierText(roleDefaults: RoleDefaults, selectedAgentId: string, selectedModel?: RoleModelChoice): string | undefined {
   if (!roleDefaults.serviceTier) return undefined;
   if (selectedAgentId !== roleDefaults.agent) return 'Speed: provider default';
-  return 'Speed: ' + (roleDefaults.serviceTier === 'fast' ? 'Fast' : roleDefaults.serviceTier);
+  const tier = selectedModel?.serviceTiers?.find((choice) => matchesChoice(choice, roleDefaults.serviceTier));
+  return 'Speed: ' + (tier?.label ?? roleDefaults.serviceTier);
 }
 
 // The agent-catalog refresh stays offered once the options answered or failed.
@@ -923,12 +930,13 @@ function OptionsRetryButton({
     </button>
   );
 }
-function ServiceTierChip({ roleDefaults, selectedAgentId, execution }: {
+function ServiceTierChip({ roleDefaults, selectedAgentId, selectedModel, execution }: {
+  selectedModel?: RoleModelChoice;
   roleDefaults: RoleDefaults;
   selectedAgentId: string;
   execution: RoleScopedExecution | undefined;
 }) {
-  const tierText = serviceTierText(roleDefaults, selectedAgentId);
+  const tierText = serviceTierText(roleDefaults, selectedAgentId, selectedModel);
   if (!tierText) return null;
   const basePreview = Boolean(execution?.stepUp);
   return (
@@ -954,6 +962,7 @@ type LauncherActionProps = {
   optionsError: string | null;
   executionError: string | null;
   selectedAgent: RoleAgentChoice | undefined;
+  selectedModel?: RoleModelChoice;
   retryRequestId: string | undefined;
   startLabel: string;
   onLaunch: (selection: RoleLaunchSelection) => Promise<void>;
@@ -983,12 +992,13 @@ function LauncherButtons({
   onRefreshOptions,
   onRefreshCatalog,
   onRefreshResult,
+  selectedModel,
 }: LauncherActionProps) {
   const { launchSelection, complete, canRefreshResult } = readiness;
   const retry = retryOffered(readiness, retryRequestId);
   return (
     <div className={roleLauncherActions}>
-      <ServiceTierChip roleDefaults={roleDefaults} selectedAgentId={selectedAgentId} execution={currentScopedExecution} />
+      <ServiceTierChip roleDefaults={roleDefaults} selectedAgentId={selectedAgentId} selectedModel={selectedModel} execution={currentScopedExecution} />
       <button
         className={launcherButton({ selected: true })}
         type="button"
@@ -1058,6 +1068,8 @@ export interface RoleLauncherProps {
   progress?: string;
   roleDefaults: RoleDefaults;
   agents: RoleAgentChoice[];
+  catalogDiscovery?: CatalogDiscoveryState;
+  catalogOrigin?: string;
   selection: RoleLaunchSelection;
   currentScopedExecution?: RoleScopedExecution;
   failureExecution?: RoleScopedExecution;
@@ -1112,19 +1124,11 @@ export function RoleLauncher(props: RoleLauncherProps) {
   });
 
   const choice = resolveAgentChoice(agents, roleDefaults, selection);
-  usePruneStaleOverride({
-    optionsReady,
-    agents,
-    models: choice.models,
-    efforts: choice.efforts,
-    selection,
-    onSelectionChange,
-  });
-
   const readiness = resolveLaunchReadiness({
     selection,
     roleDefaults,
     agents,
+    catalogDiscovery: props.catalogDiscovery,
     currentScopedExecution,
     optionsReady,
     busy,
@@ -1160,6 +1164,8 @@ export function RoleLauncher(props: RoleLauncherProps) {
         retryLocked={retryLocked}
         basePreview={Boolean(currentScopedExecution?.stepUp)}
       />
+      <RoleCatalogStatus catalog={props.catalogDiscovery} agent={choice.selectedAgent} model={choice.selectedModel}
+        loading={props.optionsLoading} origin={props.catalogOrigin} pendingAgents={agents} className={roleLauncherMeta} />
       <LauncherActionBar
         {...props}
         boundRoles={boundRoles}
@@ -1168,6 +1174,7 @@ export function RoleLauncher(props: RoleLauncherProps) {
         currentScopedExecution={currentScopedExecution}
         failureExecution={failureExecution}
         selectedAgent={choice.selectedAgent}
+        selectedModel={choice.selectedModel}
         retryRequestId={retryRequestId}
         startLabel={row.startLabel}
       />

@@ -575,7 +575,13 @@ an earlier build stored: such a gate still refuses the operation it guards, and
 
 ### orchestration.roles, orchestration.rolesPerLevel
 
-Paseo role launches read these choices from the host's running catalog, not a built-in model table:
+Paseo role launches ask the host for these choices at each launcher view and start. If a catalog
+part is unavailable, its last successful answer is read from the shared on-disk store and shown
+with its timestamp. Without either answer, configured choices are passed to the host unchecked.
+Choice names match Paseo's ids or labels without regard to case.
+The launcher shows saved offers while its fresh request runs; Start waits for that request's
+answer. A start refreshes provider and model metadata, then asks only for its chosen model's
+features. A failed part uses its saved answer, and a part with neither answer stays unchecked.
 
 | Role key | Host profile field | Effect on a Paseo launch |
 | --- | --- | --- |
@@ -584,7 +590,7 @@ Paseo role launches read these choices from the host's running catalog, not a bu
 | `effort` | `thinkingOptionId` | Thinking option offered for that model |
 | `mode` | `modeId` | Permission/operating mode offered for that agent; user layer/profile only |
 | `featureValues` | `featureValues` | Boolean for each toggle; option ID for each selection |
-| `serviceTier` | `featureValues.service_tier` | Speed selection; `fast` normalizes to native `priority` |
+| `serviceTier` | `featureValues.service_tier` | Speed selection by Paseo id or label, such as `fast` matching its label `Fast` |
 | `notes` | `notes` (host page: When to use) | User's plain instruction text; user layer/profile only |
 | `extraArgs` | provider options `extraArgs` | Extra command-line arguments for the agent's harness, such as `--chrome` (MIK-R192, below) |
 | `stepUp` | none | One user-layer alternative with the same launch fields and optional `afterTries`; never nested. |

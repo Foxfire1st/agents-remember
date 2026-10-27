@@ -1,7 +1,7 @@
 """Memory-root tools: drift, quality, route index, init, baseline, and carryover."""
 
 from importlib import import_module
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
@@ -59,8 +59,10 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         document: str | None = None,
         documents: list[str] | None = None,
         dry_run: bool = False,
+        mode: Literal["sync", "start", "poll"] = "sync",
+        run_id: str | None = None,
     ) -> dict[str, Any]:
-        """Repair moved citation anchors in a leaf memory worktree. Pass repo_id and contract_path, with documents for a batch or document for one card; preview with dry_run. Renames, deletions and ambiguous anchors remain curator work. Old-format memory is refused: convert before repair. Converted repairs author sidecar references; full lists are in logged detail. Longer explanation: docs/tool-details.md."""
+        """Repair moved citation anchors in a leaf memory worktree. Pass repo_id and contract_path, with documents for a batch or document for one card; preview with dry_run. For a background preview use mode=start and dry_run=true, then mode=poll with its run_id and the same scope. Renames, deletions and ambiguous anchors remain curator work. Old-format memory is refused: convert before repair. Converted repairs author sidecar references; full lists are in logged detail. Longer explanation: docs/tool-details.md."""
         return tools.citation_fix_payload(
             config,
             repo_id,
@@ -72,6 +74,8 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
                 documents=tuple(documents) if documents is not None else None,
             ),
             dry_run=dry_run,
+            mode=mode,
+            run_id=run_id,
         )
 
     @server.tool()

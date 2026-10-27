@@ -220,7 +220,7 @@ def code_tree_from_working_directory(root: Path) -> CodePathSet:
     paths = frozenset(
         path
         for path in result.stdout.split("\0")
-        if path and (root / path).is_file() and not (root / path).is_symlink()
+        if path and not (root / path).is_symlink() and (root / path).is_file()
     )
     return CodePathSet(label=root.as_posix(), paths=paths, root=root)
 

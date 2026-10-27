@@ -5,31 +5,30 @@ import {
   sameRoleDocumentScope,
   sameRoleOptionsScope,
   usesRequestReceipts,
-  type RoleAgentChoice,
-  type RoleAgentInventory,
-  type RoleDefaults,
   type RoleDocumentScope,
   type RoleExecutionReceipt,
   type RoleLaunchSelection,
   type RoleLauncherOptions,
   type RoleOptionsScope,
   type RoleScopedExecution,
+  type SavedRoleCatalog,
   type RoleTasklessActiveRequest,
 } from "./roleLaunchModel";
 import type { ExecutionErrorState } from "./roleChatResult";
 
-// The options the row shows: the loaded value while it still matches the selected
-// scope, and whether its scope is loading.
+// A pending request displays only its disk snapshot, never a previous fresh answer.
+// Settled options must match the selected scope.
 export function resolveOptionsDisplay(
   optionsState: { scope: RoleOptionsScope; value: RoleLauncherOptions } | null,
   currentOptionsScope: RoleOptionsScope,
   optionsLoadingScope: RoleOptionsScope | null,
 ): { options: RoleLauncherOptions | null; optionsLoading: boolean } {
-  const options =
-    optionsState && sameRoleOptionsScope(optionsState.scope, currentOptionsScope) ? optionsState.value : null;
   const optionsLoading = Boolean(
     optionsLoadingScope && sameRoleOptionsScope(optionsLoadingScope, currentOptionsScope),
   );
+  const options = !optionsLoading && optionsState &&
+    sameRoleOptionsScope(optionsState.scope, currentOptionsScope)
+    ? optionsState.value : null;
   return { options, optionsLoading };
 }
 
@@ -163,34 +162,21 @@ export function resolveRetryRequestId(
     : undefined;
 }
 
-// The agents behind the row: the inventory of the loaded catalog origin, else the
-// options answer's agents with the retained inventory behind them.
-function resolveAgents(
-  options: RoleLauncherOptions | null,
-  agentInventory: RoleAgentInventory | null,
-): RoleAgentChoice[] {
-  if (agentInventory && agentInventory.catalogOrigin === options?.catalogOrigin) return agentInventory.agents;
-  return options?.agents ?? agentInventory?.agents ?? [];
-}
-
-// The catalog behind the row: the loaded role defaults (falling back to the cached
-// scope defaults) with the agent inventory of the same catalog origin.
+// Catalog choices are one server response, never a merge with another response.
 export function resolveLauncherCatalog(
   options: RoleLauncherOptions | null,
-  roleDefaultsCache: Record<string, RoleDefaults>,
-  currentDocumentScope: RoleDocumentScope,
-  agentInventory: RoleAgentInventory | null,
   optionsLoading: boolean,
-  roleDefaultsCacheKey: (scope: RoleDocumentScope) => string,
-): {
-  roleDefaults: RoleDefaults;
-  agents: RoleAgentChoice[];
-  optionsReady: boolean;
-} {
-  const roleDefaults = options?.roleDefaults ?? roleDefaultsCache[roleDefaultsCacheKey(currentDocumentScope)] ?? {};
-  const agents = resolveAgents(options, agentInventory);
-  const optionsReady = Boolean(options && !optionsLoading);
-  return { roleDefaults, agents, optionsReady };
+  savedCatalog?: SavedRoleCatalog,
+) {
+  const settledOptions = optionsLoading ? null : options;
+  const catalog = settledOptions ?? savedCatalog;
+  return {
+    roleDefaults: settledOptions?.roleDefaults ?? {},
+    agents: catalog?.agents ?? [],
+    catalogDiscovery: catalog?.catalogDiscovery,
+    catalogOrigin: catalog?.catalogOrigin,
+    optionsReady: Boolean(settledOptions),
+  };
 }
 
 // The execution error behind the selected scope, if any.

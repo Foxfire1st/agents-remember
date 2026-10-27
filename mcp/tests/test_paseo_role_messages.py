@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Any, get_args
 from unittest.mock import patch
 
-from agents_remember.cli import paseo_role_tools, role_held_messages, role_launch_receipts
+from agents_remember.cli import (
+    paseo_role_recipients,
+    paseo_role_tools,
+    role_held_messages,
+    role_launch_receipts,
+)
 from agents_remember.cli.paseo_role_tools import send_role_message, sender_line, starting_agent
 from agents_remember.cli.role_held_messages import HeldMessage
 from agents_remember.models.role_agents import (
@@ -196,7 +201,7 @@ class RoleMessageTests(RoleToolsTestCase):
             self.assertIn("No live curator agent", result["detail"])
         with self.subTest("a selection that cannot be resolved"):
             self.replace(
-                paseo_role_tools,
+                paseo_role_recipients,
                 "resolve_role_launch_context",
                 side_effect=ValueError("worker requires a canonical task selection."),
             )

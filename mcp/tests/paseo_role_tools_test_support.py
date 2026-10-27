@@ -15,6 +15,8 @@ from agents_remember.application.agent_binding import (
     AgentBinding,
 )
 from agents_remember.cli import (
+    paseo_role_caller,
+    paseo_role_recipients,
     paseo_role_tools,
     paseo_role_wait,
     role_held_messages,
@@ -97,7 +99,8 @@ class RoleToolsTestCase(StatusTestCase):
         self.replace(role_held_messages, "bridge_call", self.runtime)
         self.replace(role_retire, "bridge_call", self.runtime)
         self.replace(paseo_role_tools, "resolve_role_launch_context", side_effect=self.context)
-        self.replace(paseo_role_tools, "TaskDocumentTopology", self.topology)
+        self.replace(paseo_role_caller, "TaskDocumentTopology", self.topology)
+        self.replace(paseo_role_recipients, "resolve_role_launch_context", side_effect=self.context)
         self.runtime._agent_send = self.agent_send
         self.runtime._agent_wait = self.agent_wait
         # What each wait call answers, in order; the clock moves by `waitMs` with every call.

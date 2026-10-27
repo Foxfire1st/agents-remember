@@ -23,6 +23,7 @@ from agents_remember.cli import (
 )
 from agents_remember.cli import (
     paseo_bridge,
+    paseo_role_recipients,
     paseo_role_tools,
     role_document_chats,
     role_launch_admission,
@@ -110,6 +111,7 @@ class _FreeSeatWorld(RoleToolsTestCase):
             role_launch_routes,
             role_launch_admission,
             role_launch_preparation,
+            paseo_role_recipients,
             paseo_role_tools,
         ):
             if hasattr(module, "resolve_role_launch_context"):

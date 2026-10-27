@@ -26,6 +26,7 @@ from agents_remember.memory_quality.landing_report import (
 )
 from agents_remember.memory_quality.reference_anchors import census as reference_census
 from agents_remember.memory_quality.reference_state import STALE_REFERENCE_CHECK
+from agents_remember.memory_quality.source_files import QualitySourceFiles
 
 CONVERTED_KNOWLEDGE_CHECK: Final = "knowledge.converted"
 CONVERTED_BASE_RULE: Final = "R24.7-converted-base"
@@ -78,7 +79,7 @@ def _unbuildable_base(problem: str) -> dict[str, Any]:
 
 def converted_knowledge_check(
     memory_root: Path,
-    code_root: Path,
+    code_root: Path | QualitySourceFiles,
     *,
     base: KnowledgeBasePort | None = None,
     landing_base: LandingBasePort | None = None,
@@ -100,7 +101,12 @@ def converted_knowledge_check(
 
     tree = knowledge_tree_from_directory(memory_root)
     bases, problem = _comparison_bases(memory_root, tree, base)
-    code = CodeDirectory(label=code_root.as_posix(), root=code_root)
+    code = (
+        CodeDirectory(label=code_root.as_posix(), root=code_root)
+        if isinstance(code_root, Path)
+        else code_root
+    )
+    code_root = code_root if isinstance(code_root, Path) else code_root.root
     report = validate_tree(tree, bases=bases, code=code)
     findings = [_unbuildable_base(problem)] if problem is not None else []
     refused = [violation.to_document() for violation in report.refusals]
@@ -170,5 +176,22 @@ def converted_knowledge_check(
         "referenceDebtCount": debt,
         "sidecarCount": census["sidecarCount"],
         "unreadableSidecars": census["unreadableSidecars"],
+        **(
+            {
+                "sourceFiles": code.report(),
+                "referenceSourceNotes": [
+                    {
+                        "path": item["sidecar"],
+                        "field": item["field"],
+                        "target": item["path"],
+                        "reason": reason,
+                    }
+                    for item in census["targets"]
+                    if (reason := code.source_note(item["path"])) is not None
+                ],
+            }
+            if isinstance(code, QualitySourceFiles)
+            else {}
+        ),
         **landing_counts,
     }

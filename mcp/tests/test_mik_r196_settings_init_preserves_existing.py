@@ -54,8 +54,16 @@ def _user_settings_in_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pa
 
 
 def _fake_host(monkeypatch: pytest.MonkeyPatch, providers: list[str]) -> None:
-    monkeypatch.setattr(user_settings_init_module, "_runnable_harnesses", lambda _config: providers)
-    monkeypatch.setattr(role_agents_tools, "runnable_harnesses", lambda _config: providers)
+    monkeypatch.setattr(
+        user_settings_init_module,
+        "_runnable_harnesses",
+        lambda _config: [{"id": p, "label": p} for p in providers],
+    )
+    monkeypatch.setattr(
+        role_agents_tools,
+        "runnable_harnesses",
+        lambda _config: [{"id": p, "label": p} for p in providers],
+    )
 
 
 def _write(path: Path, content: dict[str, object], mode: int = 0o640) -> None:
@@ -366,3 +374,21 @@ def test_the_host_block_is_refused_by_name_not_written_into_the_user_file(
     assert answer["code"] == "host-authority-not-in-user-settings"
     assert config.config_path.as_posix() in answer["detail"]
     assert not _user_settings_in_tmp.exists(), "no user settings file is created for a host block"
+
+
+def test_discovery_unknown_passes_value_and_known_names_use_paseo_labels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(tmp_path)
+    request = SettingsInitRequest(roles={"worker": "MY Choice"}, dry_run=True)
+    monkeypatch.setattr(user_settings_init_module, "_runnable_harnesses", lambda _config: None)
+    assert initialize_role_settings(config, request)["roleHarnesses"] == {"worker": "MY Choice"}
+    monkeypatch.setattr(
+        user_settings_init_module,
+        "_runnable_harnesses",
+        lambda _config: [{"id": "native-id", "label": "My Choice"}],
+    )
+    assert initialize_role_settings(config, request)["roleHarnesses"] == {"worker": "native-id"}
+    monkeypatch.setattr(user_settings_init_module, "_runnable_harnesses", lambda _config: [])
+    with pytest.raises(SettingsInitRefused, match="cannot run"):
+        initialize_role_settings(config, request)

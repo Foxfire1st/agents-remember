@@ -36,7 +36,11 @@ from agents_remember.cli.paseo_bridge import (
     PaseoBridgeFailure,
     require_bridge_runtime,
 )
-from agents_remember.cli.paseo_catalog import provider_accepts_tool_servers
+from agents_remember.cli.paseo_catalog import (
+    launcher_catalog_question,
+    provider_accepts_tool_servers,
+)
+from agents_remember.cli.paseo_catalog_snapshot import register_saved_catalog_route
 from agents_remember.cli.paseo_frame import frame_answer
 from agents_remember.cli.paseo_launch import (
     RoleLaunch,
@@ -155,6 +159,7 @@ class _PreparedRoleStart:
 
 
 def register_role_launch_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
+    register_saved_catalog_route(app, config)
     app.add_api_route("/api/role-launch/frame", _bind_frame_endpoint(config), methods=["GET"])
     app.add_api_route(
         "/api/role-launch/options",
@@ -207,12 +212,13 @@ def _bind_result_endpoint(config: McpRuntimeConfig):
     return endpoint
 
 
+@launcher_catalog_question()
 def _role_launch_options_endpoint(
     config: McpRuntimeConfig, request: RoleLauncherOptionsRequest
 ) -> JSONResponse:
     try:
         context = resolve_role_launch_context(config, request)
-        # The catalog is loaded, or taken from its cache, before the launch lock is taken: the
+        # The catalog asks Paseo before the launch lock is taken: the
         # lock is held for the receipts and the one bridge call of the refresh, nothing longer.
         response = _launcher_catalog(config, context, request)
         _acquire_dispatch_lock()
@@ -247,6 +253,7 @@ def _role_launch_options_endpoint(
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+@launcher_catalog_question()
 def _role_launch_dispatch_endpoint(
     config: McpRuntimeConfig,
     request: RoleDispatchRequest,

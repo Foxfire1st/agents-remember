@@ -111,17 +111,17 @@ def test_cross_model_omitted_mode_uses_host_default_without_changing_base(launch
             "orchestration.rolesPerLevel.leaf.worker.stepUp",
         ),
         (
-            {"serviceTier": "fast", "stepUp": {"serviceTier": "priority"}},
+            {"serviceTier": "priority", "stepUp": {"serviceTier": "priority"}},
             {},
             "orchestration.roles.worker.stepUp",
         ),
         (
-            {"featureValues": {"service_tier": "priority"}, "stepUp": {"serviceTier": "fast"}},
+            {"featureValues": {"service_tier": "priority"}, "stepUp": {"serviceTier": "priority"}},
             {},
             "orchestration.roles.worker.stepUp",
         ),
         (
-            {"serviceTier": "fast", "stepUp": {"featureValues": {"service_tier": "priority"}}},
+            {"serviceTier": "priority", "stepUp": {"featureValues": {"service_tier": "priority"}}},
             {},
             "orchestration.roles.worker.stepUp",
         ),
@@ -262,8 +262,9 @@ def test_same_scope_native_tier_step_up_is_not_hidden_by_inherited_alias(launch_
     world = launch_world
     catalog = deepcopy(CATALOG)
     catalog["providers"][0]["models"][0]["features"] = [
-        {"id": "service_tier", "type": "select", "options": [{"id": "priority"}]}
+        {"id": "service_tier", "type": "select", "options": [{"id": "priority", "label": "Fast"}]}
     ]
+    catalog["providers"][0]["models"][0]["serviceTiers"] = [{"id": "priority", "label": "Fast"}]
     world.replace(world.runtime, "_catalog", return_value=catalog)
     path = user_settings_path_for_write()
     # MIK-R137: the user settings file holds the role choices and nothing creates it for a test

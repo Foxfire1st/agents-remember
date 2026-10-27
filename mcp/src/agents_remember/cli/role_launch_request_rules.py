@@ -19,6 +19,7 @@ from agents_remember.cli.paseo_bridge import (
     PaseoBridgeFailure,
 )
 from agents_remember.cli.paseo_catalog import launcher_catalog
+from agents_remember.kernel.primitives.named_choices import named as match_choice
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.role_launcher import RoleAgentOverride, RoleDispatchRequest
@@ -74,10 +75,21 @@ def with_caller_harness(
     if override is not None and override.agent_id:
         return request
     try:
-        offered = [agent["id"] for agent in launcher_catalog(config).agents]
+        catalog = launcher_catalog(config)
+        offered = [agent["id"] for agent in catalog.agents]
     except PaseoBridgeFailure as error:
         raise bridge_http_error(error) from error
-    provider = provider_for_caller(request.caller_harness, offered)
+    selected = (
+        match_choice(catalog.agents, request.caller_harness) if request.caller_harness else None
+    )
+    if catalog.discovery.get("source") == "unknown":
+        provider = request.caller_harness
+    else:
+        provider = (
+            selected["id"]
+            if selected is not None
+            else provider_for_caller(request.caller_harness, offered)
+        )
     if provider is None:
         named = (
             f"the caller named its harness {request.caller_harness!r}"

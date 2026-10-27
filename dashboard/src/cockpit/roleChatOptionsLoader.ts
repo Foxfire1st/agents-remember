@@ -4,23 +4,20 @@ import {
   boundTasklessRequest,
   isTasklessRole,
   isUncertainRoleExecution,
-  mergeRoleAgentInventory,
   readSelectedRoleRequest,
-  roleDefaultsCacheKey,
   roleDocumentScope,
   roleOptionsScope,
   roleRequestKey,
   sameRoleDocumentScope,
   sameRoleOptionsScope,
   usesRequestReceipts,
-  type RoleAgentInventory,
-  type RoleDefaults,
   type RoleDocumentScope,
   type RoleExecutionReceipt,
   type RoleLaunchSelection,
   type RoleLauncherOptions,
   type RoleOptionsScope,
   type RoleTasklessActiveRequest,
+  type SavedRoleCatalog,
 } from "./roleLaunchModel";
 import type { ActiveRequestsRef, ExecutionErrorState, ResultFlowState } from "./roleChatResult";
 
@@ -28,11 +25,10 @@ import type { ActiveRequestsRef, ExecutionErrorState, ResultFlowState } from "./
 const LAUNCH_REREAD_MS = 1500;
 
 export interface OptionsFlowState {
+  savedCatalogState: { scope: RoleOptionsScope; value: SavedRoleCatalog } | null;
   optionsState: { scope: RoleOptionsScope; value: RoleLauncherOptions } | null;
   optionsLoadingScope: RoleOptionsScope | null;
   optionsErrorState: { scope: RoleOptionsScope; message: string } | null;
-  roleDefaultsCache: Record<string, RoleDefaults>;
-  agentInventory: RoleAgentInventory | null;
 }
 
 export type SetExecutionState = (
@@ -143,10 +139,9 @@ function adoptRequestExecutionState(
 }
 
 interface OptionsStores {
+  setSavedCatalogState: (state: OptionsFlowState["savedCatalogState"]) => void;
   setOptionsErrorState: (state: OptionsFlowState["optionsErrorState"]) => void;
   setOptionsState: (state: OptionsFlowState["optionsState"]) => void;
-  setRoleDefaultsCache: (update: (current: Record<string, RoleDefaults>) => Record<string, RoleDefaults>) => void;
-  setAgentInventory: (update: (current: RoleAgentInventory | null) => RoleAgentInventory | null) => void;
 }
 
 // A 200 answers the launch options: the role defaults, the agent catalog, and the
@@ -158,7 +153,6 @@ function applyOptionsSuccess(
   boundSelection: RoleLaunchSelection | undefined,
   value: RoleLauncherOptions,
   requestScope: RoleOptionsScope,
-  documentScope: RoleDocumentScope,
   refreshAgentCatalog: boolean,
   retryOptions: boolean,
 ): void {
@@ -170,18 +164,6 @@ function applyOptionsSuccess(
   stores.setOptionsState({ scope: requestScope, value });
   writers.setExecutionErrorState((current) =>
     refreshAgentCatalog || retryOptions || !current?.sticky ? null : current,
-  );
-  stores.setRoleDefaultsCache((current) => ({
-    ...current,
-    [roleDefaultsCacheKey(documentScope)]: value.roleDefaults,
-  }));
-  stores.setAgentInventory((current) =>
-    mergeRoleAgentInventory(
-      current,
-      value,
-      requestScope.agentId ?? value.roleDefaults.agent,
-      refreshAgentCatalog,
-    ),
   );
   if (usesRequestReceipts(requestScope)) {
     adoptRequestExecutionState(writers, activeRequestsRef, boundSelection, requestScope, value.executions ?? []);
@@ -239,8 +221,7 @@ interface OptionsLoadContext {
   setOptionsLoadingScope: (scope: RoleOptionsScope | null) => void;
   setOptionsErrorState: OptionsStores["setOptionsErrorState"];
   setOptionsState: OptionsStores["setOptionsState"];
-  setRoleDefaultsCache: OptionsStores["setRoleDefaultsCache"];
-  setAgentInventory: OptionsStores["setAgentInventory"];
+  setSavedCatalogState: OptionsStores["setSavedCatalogState"];
   setExecutionState: SetExecutionState;
   setExecutionErrorState: ResultFlowState["setExecutionErrorState"];
   updateActiveRequest: ResultFlowState["updateActiveRequest"];
@@ -249,6 +230,17 @@ interface OptionsLoadContext {
   fetchExecutionResult: (scope: RoleDocumentScope, reportNotFound: boolean, requestId?: string) => Promise<RoleExecutionReceipt | undefined>;
   sentCatalogRefresh: { current: number };
   explicitOptionsRefresh: { current: boolean };
+}
+
+// This snapshot is presentation-only while the fresh options request is pending.
+function readSavedCatalog(ctx: OptionsLoadContext, scope: RoleOptionsScope, signal: AbortSignal, pending: () => boolean): void {
+  void fetch("/api/role-launch/saved-catalog", { signal, cache: "no-store" }).then(async (response) => {
+    if (!response.ok) return;
+    const value = await response.json() as SavedRoleCatalog;
+    if (pending() && !signal.aborted && ctx.isCurrentOptionsScope(scope) && Array.isArray(value.agents)) {
+      ctx.setSavedCatalogState({ scope, value });
+    }
+  }).catch(() => { /* No saved answer is an absent preview; the fresh request still decides. */ });
 }
 
 // One options load for the selected scope: the request with its catalog-refresh mark,
@@ -261,12 +253,14 @@ function runOptionsLoad(ctx: OptionsLoadContext): () => void {
   const refreshAgentCatalog = ctx.catalogRefresh > ctx.sentCatalogRefresh.current;
   if (refreshAgentCatalog) ctx.sentCatalogRefresh.current = ctx.catalogRefresh;
   const controller = new AbortController();
+  let freshPending = true;
+  ctx.setSavedCatalogState(null);
+  readSavedCatalog(ctx, requestScope, controller.signal, () => freshPending);
   const body = buildOptionsBody(ctx.documentScope, requestScope, refreshAgentCatalog);
   const stores: OptionsStores = {
     setOptionsErrorState: ctx.setOptionsErrorState,
     setOptionsState: ctx.setOptionsState,
-    setRoleDefaultsCache: ctx.setRoleDefaultsCache,
-    setAgentInventory: ctx.setAgentInventory,
+    setSavedCatalogState: ctx.setSavedCatalogState,
   };
   const writers: ExecutionWriters = {
     setExecutionState: ctx.setExecutionState,
@@ -287,54 +281,55 @@ function runOptionsLoad(ctx: OptionsLoadContext): () => void {
     signal: controller.signal,
   }).then(async (response) => {
     if (!response.ok) {
+      if (ctx.isCurrentOptionsScope(requestScope)) ctx.setOptionsState(null);
       const value = (await response.json().catch(() => ({}))) as { detail?: unknown; launchInProgress?: unknown };
       applyOptionsRefusal(ctx.setOptionsErrorState, ctx.waitForLaunch, ctx.isCurrentOptionsScope, response, value, requestScope);
       return;
     }
     const value = (await response.json()) as RoleLauncherOptions;
     if (!ctx.isCurrentOptionsScope(requestScope)) return;
-    applyOptionsSuccess(stores, writers, ctx.activeRequestsRef, ctx.boundSelection, value, requestScope, ctx.documentScope, refreshAgentCatalog, retryOptions);
+    applyOptionsSuccess(stores, writers, ctx.activeRequestsRef, ctx.boundSelection, value, requestScope, refreshAgentCatalog, retryOptions);
   }).catch((reason: unknown) => {
+    if (!(reason instanceof DOMException && reason.name === "AbortError") && ctx.isCurrentOptionsScope(requestScope)) ctx.setOptionsState(null);
     failOptionsLoad(ctx.setOptionsErrorState, ctx.isCurrentOptionsScope, requestScope, reason);
   }).finally(() => {
-    if (!controller.signal.aborted && ctx.isCurrentOptionsScope(requestScope)) ctx.setOptionsLoadingScope(null);
+    freshPending = false;
+    if (!controller.signal.aborted && ctx.isCurrentOptionsScope(requestScope)) {
+      ctx.setSavedCatalogState(null);
+      ctx.setOptionsLoadingScope(null);
+    }
   });
-  return () => controller.abort();
+  return () => { freshPending = false; controller.abort(); };
 }
 
 export type { ExecutionErrorState };
 
-// The options stores: the loaded value, its loading and error scopes, the role-default
-// cache, and the agent inventory, with the catalog-refresh bookkeeping beside them.
+// The current response and its loading/error scopes; saved catalog parts are owned by the server.
 function useOptionsStores(): OptionsFlowState & {
   setOptionsState: OptionsStores["setOptionsState"];
+  setSavedCatalogState: OptionsStores["setSavedCatalogState"];
   setOptionsLoadingScope: (scope: RoleOptionsScope | null) => void;
   setOptionsErrorState: OptionsStores["setOptionsErrorState"];
-  setRoleDefaultsCache: OptionsStores["setRoleDefaultsCache"];
-  setAgentInventory: OptionsStores["setAgentInventory"];
   sentCatalogRefresh: { current: number };
   explicitOptionsRefresh: { current: boolean };
   requestCatalogRefresh: (bump: () => void) => void;
   requestExplicitOptionsRefresh: (bump: () => void) => void;
 } {
+  const [savedCatalogState, setSavedCatalogState] = useState<OptionsFlowState["savedCatalogState"]>(null);
   const [optionsState, setOptionsState] = useState<OptionsFlowState["optionsState"]>(null);
   const [optionsLoadingScope, setOptionsLoadingScope] = useState<RoleOptionsScope | null>(null);
   const [optionsErrorState, setOptionsErrorState] = useState<OptionsFlowState["optionsErrorState"]>(null);
-  const [roleDefaultsCache, setRoleDefaultsCache] = useState<Record<string, RoleDefaults>>({});
-  const [agentInventory, setAgentInventory] = useState<RoleAgentInventory | null>(null);
   const sentCatalogRefresh = useRef(0);
   const explicitOptionsRefresh = useRef(false);
   return {
     optionsState,
+    savedCatalogState,
     optionsLoadingScope,
     optionsErrorState,
-    roleDefaultsCache,
-    agentInventory,
     setOptionsState,
+    setSavedCatalogState,
     setOptionsLoadingScope,
     setOptionsErrorState,
-    setRoleDefaultsCache,
-    setAgentInventory,
     sentCatalogRefresh,
     explicitOptionsRefresh,
     requestCatalogRefresh: (bump: () => void) => {
@@ -378,7 +373,7 @@ export function useRoleChatOptionsLoader(args: RoleChatOptionsLoaderArgs): Optio
   requestExplicitOptionsRefresh: () => void;
 } {
   const stores = useOptionsStores();
-  const { optionsState, optionsLoadingScope, optionsErrorState, roleDefaultsCache, agentInventory } = stores;
+  const { optionsState, savedCatalogState, optionsLoadingScope, optionsErrorState } = stores;
   const isCurrentOptionsScope = useCallback(
     (scope: RoleOptionsScope) =>
       sameRoleOptionsScope(roleOptionsScope(args.currentSelectionRef.current), scope),
@@ -404,8 +399,7 @@ export function useRoleChatOptionsLoader(args: RoleChatOptionsLoaderArgs): Optio
     setOptionsLoadingScope: stores.setOptionsLoadingScope,
     setOptionsErrorState: stores.setOptionsErrorState,
     setOptionsState: stores.setOptionsState,
-    setRoleDefaultsCache: stores.setRoleDefaultsCache,
-    setAgentInventory: stores.setAgentInventory,
+    setSavedCatalogState: stores.setSavedCatalogState,
     setExecutionState: args.setExecutionState,
     setExecutionErrorState: args.setExecutionErrorState,
     updateActiveRequest: args.updateActiveRequest,
@@ -414,13 +408,12 @@ export function useRoleChatOptionsLoader(args: RoleChatOptionsLoaderArgs): Optio
     fetchExecutionResult: args.fetchExecutionResult,
     sentCatalogRefresh: stores.sentCatalogRefresh,
     explicitOptionsRefresh: stores.explicitOptionsRefresh,
-  }), [args.active, args.boundSelection, args.selectionComplete, args.documentScope, args.optionsScope, args.optionsRefresh, args.catalogRefresh, args.activeRequestsRef, args.waitForLaunch, isCurrentOptionsScope, stores.setOptionsLoadingScope, stores.setOptionsErrorState, stores.setOptionsState, stores.setRoleDefaultsCache, stores.setAgentInventory, args.setExecutionState, args.setExecutionErrorState, args.updateActiveRequest, args.rememberExecution, args.rememberFailureExecution, args.fetchExecutionResult, stores.sentCatalogRefresh, stores.explicitOptionsRefresh]);
+  }), [args.active, args.boundSelection, args.selectionComplete, args.documentScope, args.optionsScope, args.optionsRefresh, args.catalogRefresh, args.activeRequestsRef, args.waitForLaunch, isCurrentOptionsScope, stores.setOptionsLoadingScope, stores.setOptionsErrorState, stores.setOptionsState, stores.setSavedCatalogState, args.setExecutionState, args.setExecutionErrorState, args.updateActiveRequest, args.rememberExecution, args.rememberFailureExecution, args.fetchExecutionResult, stores.sentCatalogRefresh, stores.explicitOptionsRefresh]);
   return {
     optionsState,
+    savedCatalogState,
     optionsLoadingScope,
     optionsErrorState,
-    roleDefaultsCache,
-    agentInventory,
     isCurrentOptionsScope,
     requestCatalogRefresh,
     requestExplicitOptionsRefresh,

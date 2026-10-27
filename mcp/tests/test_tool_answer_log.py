@@ -12,11 +12,14 @@ import os
 import shutil
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
+from agents_remember.application import tool_answer_log
 from agents_remember.application.tool_answer_log import (
     ENCLOSURE_LOGS_DIRNAME,
     TOOL_LOG_BASENAME_PREFIX,
@@ -49,11 +52,57 @@ from agents_remember.worktrees.modules import cleanup as cleanup_module
 from agents_remember.worktrees.modules.closeout import closeout_changed_paths
 from agents_remember.worktrees.modules.git import worktree_dirty
 from agents_remember.worktrees.worktree_contract import load_contract
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from tool_answer_l110_rows import _server_info_case, _stub_config
 from tool_entry_point_world import EntryPointWorld
 
 
 class ToolAnswerLogTests(unittest.TestCase):
+    def test_concurrent_details_cannot_both_spend_the_same_log_budget(self) -> None:
+        entered, release, competing = Event(), Event(), Event()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            reset_log_budgets()
+            payload = {"body": "x" * 800}
+            results = []
+            original = tool_answer_log.atomic_write_text
+
+            def write(path, text):
+                if "-first-" in path.name:
+                    entered.set()
+                    self.assertTrue(release.wait(HANG_GUARD_SECONDS))
+                original(path, text)
+
+            def detail(name):
+                if name == "second":
+                    competing.set()
+                return tool_answer_log.prepare_call_detail(
+                    tool_answer_log.DetailRequest(
+                        log_dir=root,
+                        budget_bytes=1200,
+                        tool_name=name,
+                        whole_result=payload,
+                        result_digest="digest",
+                        detail_id="probe",
+                    )
+                )
+
+            with (
+                ThreadPoolExecutor(max_workers=2) as pool,
+                mock.patch.object(tool_answer_log, "atomic_write_text", side_effect=write),
+            ):
+                first = pool.submit(detail, "first")
+                try:
+                    self.assertTrue(entered.wait(HANG_GUARD_SECONDS))
+                    second = pool.submit(detail, "second")
+                    self.assertTrue(competing.wait(HANG_GUARD_SECONDS))
+                    self.assertFalse(second.done())
+                finally:
+                    release.set()
+                results.extend((first.result(), second.result()))
+            self.assertEqual(sum(path is not None for path, _, _ in results), 1)
+            self.assertLessEqual(sum(p.stat().st_size for p in root.rglob("*.json")), 1200)
+
     def test_strip_envelope_removes_exactly_the_four(self) -> None:
         stripped = strip_envelope(
             {

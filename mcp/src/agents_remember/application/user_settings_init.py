@@ -31,6 +31,7 @@ from typing import Any
 
 from agents_remember.kernel._agentic_settings_core import KNOWN_ROLES
 from agents_remember.kernel.agentic_settings import load_agentic_settings
+from agents_remember.kernel.primitives.named_choices import named as match_choice
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.primitives.user_settings_location import (
     UserSettingsLocationError,
@@ -136,7 +137,7 @@ def initialize_role_settings(
     config: McpRuntimeConfig,
     request: SettingsInitRequest,
     *,
-    runnable_harnesses: Callable[[McpRuntimeConfig], list[str]] | None = None,
+    runnable_harnesses: Callable[[McpRuntimeConfig], list[dict[str, str]] | None] | None = None,
 ) -> dict[str, Any]:
     """Create the settings file with one harness per role, exclusively, when it is absent.
 
@@ -211,7 +212,7 @@ def _role_rows(data: Mapping[str, Any]) -> dict[str, str]:
 def _validated_choices(
     config: McpRuntimeConfig,
     request: SettingsInitRequest,
-    runnable_harnesses: Callable[[McpRuntimeConfig], list[str]] | None = None,
+    runnable_harnesses: Callable[[McpRuntimeConfig], list[dict[str, str]] | None] | None = None,
 ) -> dict[str, str]:
     """The per-role harness map, refused when it names no role or a harness nobody can run."""
 
@@ -233,17 +234,21 @@ def _validated_choices(
             "Name roles this build publishes; see server_info.",
         )
     allowed = (runnable_harnesses or _runnable_harnesses)(config)
-    refused = sorted({harness for harness in named.values() if harness not in allowed})
+    if allowed is None:
+        return dict(sorted(named.items()))
+    resolved = {role: match_choice(allowed, harness) for role, harness in named.items()}
+    refused = sorted({named[role] for role, choice in resolved.items() if choice is None})
     if refused:
+        offered = ", ".join(row["id"] for row in allowed)
         raise SettingsInitRefused(
             "harness-not-hosted",
-            f"The host cannot run {', '.join(refused)}. It can run: {', '.join(allowed)}.",
+            f"The host cannot run {', '.join(refused)}. It can run: {offered}.",
             "Choose one of the harnesses the host runs, or install its CLI first.",
         )
-    return dict(sorted(named.items()))
+    return {role: choice["id"] for role, choice in sorted(resolved.items()) if choice is not None}
 
 
-def _runnable_harnesses(_config: McpRuntimeConfig) -> list[str]:
+def _runnable_harnesses(_config: McpRuntimeConfig) -> list[dict[str, str]] | None:
     """The fallback reader: this layer owns no host-catalog read (the caller supplies one).
 
     The CLI layer owns the catalog and passes its reader through the MCP tool handler, so the

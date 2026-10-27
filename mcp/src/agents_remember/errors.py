@@ -356,6 +356,10 @@ class CitationCacheError(AgentsRememberError):
     """A citation cache authority, capacity, or lifecycle lease was invalid."""
 
 
+class SourceFileUnavailableError(AgentsRememberError):
+    """A cited source file cannot be read safely within the per-file bound."""
+
+
 class TokenizerVocabularyError(AgentsRememberError):
     """The tiktoken vocabulary a token counter needs is not the one vendored here.
 

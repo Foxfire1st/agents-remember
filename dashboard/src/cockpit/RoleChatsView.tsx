@@ -10,8 +10,8 @@ import { NotesReaderViewer } from '../panels/notes-reader/NotesReaderViewer';
 import { TrayColumnDock } from '../tray/TrayDock';
 import { usePublishShownChat } from '../tray/shownChat';
 import {
-  roleDefaultsCacheKey,
   usesRequestReceipts,
+  sameRoleOptionsScope,
   type LauncherRole,
   type RoleDocumentScope,
   type RoleLaunchSelection,
@@ -174,14 +174,9 @@ function useRoleChatsPresentation(props: RoleChatsViewProps) {
   );
   const execution = chatExecution(props, display);
   const progress = useRoleLaunchProgress(controls.launchRequestId);
-  const catalog = resolveLauncherCatalog(
-    display.options,
-    options.roleDefaultsCache,
-    documentScope,
-    options.agentInventory,
-    display.optionsLoading,
-    roleDefaultsCacheKey,
-  );
+  const savedCatalog = options.savedCatalogState && sameRoleOptionsScope(options.savedCatalogState.scope, optionsScope)
+    ? options.savedCatalogState.value : undefined;
+  const catalog = resolveLauncherCatalog(display.options, display.optionsLoading, savedCatalog);
   const live = {
     active,
     busy: execution.busy,

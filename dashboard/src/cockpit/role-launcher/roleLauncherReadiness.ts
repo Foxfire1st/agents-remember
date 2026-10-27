@@ -4,6 +4,7 @@ import {
   roleDocumentScope,
   sameRoleDocumentScope,
   usesRequestReceipts,
+  type CatalogDiscoveryState,
   type RoleAgentChoice,
   type RoleDefaults,
   type RoleLaunchSelection,
@@ -66,6 +67,7 @@ export function resolveLaunchReadiness(args: {
   selection: RoleLaunchSelection;
   roleDefaults: RoleDefaults;
   agents: RoleAgentChoice[];
+  catalogDiscovery?: CatalogDiscoveryState;
   currentScopedExecution: RoleScopedExecution | undefined;
   optionsReady: boolean;
   busy: boolean;
@@ -85,7 +87,7 @@ export function resolveLaunchReadiness(args: {
     roleDocumentScope(retrySelection),
     roleDocumentScope(launchSelection),
   );
-  const choiceProblem = optionsReady ? launchChoiceProblem(roleDefaults, agents, selection.agentOverride) : null;
+  const choiceProblem = optionsReady ? launchChoiceProblem(roleDefaults, agents, selection.agentOverride, args.catalogDiscovery) : null;
   const canStart = startAllowed(
     choiceProblem,
     selection,

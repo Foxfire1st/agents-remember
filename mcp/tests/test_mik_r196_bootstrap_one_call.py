@@ -28,7 +28,7 @@ from agents_remember.application.user_settings_init import (
     initialize_role_settings,
     role_settings_state,
 )
-from agents_remember.cli import paseo_role_tools as role_tools
+from agents_remember.cli import paseo_role_start as role_tools
 from agents_remember.cli import role_agent_override as overrides
 from agents_remember.cli.dashboard_address import chat_address, dashboard_address
 from agents_remember.cli.role_launch_first_run import SCAFFOLD_ENTRIES, scaffold_present
@@ -277,7 +277,11 @@ def test_a_symlinked_destination_is_never_written(
 
 
 def _fake_host(monkeypatch: pytest.MonkeyPatch, providers: list[str]) -> None:
-    monkeypatch.setattr(user_settings_init_module, "_runnable_harnesses", lambda _config: providers)
+    monkeypatch.setattr(
+        user_settings_init_module,
+        "_runnable_harnesses",
+        lambda _config: [{"id": p, "label": p} for p in providers],
+    )
 
 
 def test_role_settings_write_one_harness_per_role_and_read_back(

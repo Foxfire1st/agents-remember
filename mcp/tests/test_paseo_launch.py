@@ -22,7 +22,6 @@ from agents_remember.cli import (
     role_launch_routes,
     role_launch_workspace,
 )
-from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_launch import (
     RECOVERY_NOTE_LIMIT,
     RoleLaunch,
@@ -226,8 +225,6 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
         self.sprint = resolved_document(self.config, SPRINT_REF, "SPRINT")
         self.master = resolved_document(self.config, MASTER_REF, "MASTER")
         self.leaf = resolved_document(self.config, LEAF_REF, "01_LEAF")
-        forget_launcher_catalogs()
-        self.addCleanup(forget_launcher_catalogs)
         self.enclosures.on_start = self.record_enclosure_in_leaf
         self.resolve_context = self.replace(
             role_launch_routes, "resolve_role_launch_context", side_effect=self.context
@@ -408,13 +405,6 @@ class LaunchRefusalTests(PaseoLaunchTestCase):
             self.assertTrue(str(error.detail).startswith("no Paseo runtime configured: "))
             self.assertEqual(self.runtime.calls, [])
             self.resolve_context.assert_not_called()
-        # The unconfigured case names its own config path, so this fixture's host is still there.
-        with self.subTest("the catalog cannot be loaded for the validation"):
-            self.runtime.fail("catalog", "paseo_daemon_unreachable", "The Paseo daemon is down.")
-            error = self.refused(self.request("worker"))
-            self.assertEqual((error.status_code, error.detail), (409, "The Paseo daemon is down."))
-            self.assertEqual([call[0] for call in self.runtime.calls], ["catalog"])
-            self.assertEqual(self.enclosures.start_calls, [])
         with self.subTest("the selection fails validation"):
             error = self.refused(self.request("worker", agentId="codex", modelId="gpt-z"))
             self.assertEqual(error.status_code, 409)
@@ -429,6 +419,26 @@ class LaunchRefusalTests(PaseoLaunchTestCase):
             self.assertEqual(len(self.enclosures.start_calls), 1)
         self.assertEqual(self.runtime.launch_calls(), [])
         self.assertEqual(list(self.root.rglob("*-native-executions")), [])
+
+    def test_an_unanswered_catalog_passes_configured_choices_to_the_host(self) -> None:
+        self.runtime.fail("catalog", "paseo_daemon_unreachable", "The Paseo daemon is down.")
+        request = self.request("worker")
+        status, body = self.dispatch(request)
+        self.assertEqual((status, body["status"]), (200, "running"))
+        self.assertEqual(
+            [name for name, _ in self.runtime.calls],
+            ["catalog", "catalog", "workspace-open", "agent-create"],
+        )
+        self.assertEqual(self.runtime.calls[0][1]["mode"], "metadata")
+        self.assertEqual(self.runtime.calls[1][1]["mode"], "selected")
+        self.assertEqual(self.runtime.calls[1][1]["selectedModel"], "gpt-a")
+        created = self.runtime.launch_calls()[-1][1]
+        self.assertEqual(
+            (created["provider"], created["model"], created["thinkingOptionId"]),
+            ("codex", "gpt-a", "low"),
+        )
+        self.assertEqual(len(self.enclosures.start_calls), 1)
+        self.assertEqual(self.receipt(request)["status"], "running")
 
 
 class LaunchFeatureValuesTests(unittest.TestCase):

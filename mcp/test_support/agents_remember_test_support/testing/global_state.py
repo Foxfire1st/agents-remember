@@ -174,11 +174,6 @@ PROCESS_MUTABLE_STATES = (
         "Forget a preceding module's in-flight build ledgers between test modules.",
     ),
     _row(
-        "cli.paseo_catalog",
-        "_CATALOGS",
-        "Forget runtime discovery so another module cannot inherit a launcher catalog.",
-    ),
-    _row(
         "cli.role_held_messages",
         "_sweep_walks",
         "Close suspended sweep walks before forgetting them between test modules.",

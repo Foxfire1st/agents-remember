@@ -9,16 +9,19 @@
 // returns a JSON object. Connecting, the deadline, closing and error mapping are shared and live
 // in `main`, `connect` and `failure`.
 //
-//   catalog  {refresh?: boolean}
+//   catalog  {refresh?: boolean, mode?: "full"|"metadata"|"selected",
+//             selectedProvider?: string, selectedModel?: string}
 //            -> {runtime: {serverId, version},
 //                providers: [{id, label, models: [{id, label, description?, isDefault?,
 //                             efforts: [{id, label}], defaultEffort?}], listingError?,
-//                             acceptsToolServers?: false}]}
+//                             acceptsToolServers?: boolean, toolServerError?}], readAt}
 //            The providers the runtime reports as ready and enabled, each with the models and
 //            thinking options the runtime lists for it. `refresh` asks the runtime to rediscover
-//            its providers first. A provider whose model listing fails keeps its row, with no
-//            models and the runtime's error text; so does a provider the runtime is still
-//            discovering when the discovery time is up, provided another provider is ready.
+//            its providers first. Unavailable parts are omitted with a named error; successful
+//            empty arrays remain authoritative empty answers. readAt timestamps this question.
+//            A provider still being discovered keeps its modes and a model-list error.
+//            metadata asks no model features. selected asks only the named provider/model's
+//            features and returns selectedFeatures beside runtime/readAt, without an inventory.
 //            `acceptsToolServers: false` marks a provider whose entry in the runtime's
 //            configuration declares that it takes no tool servers from its host
 //            (`options.supportsMcpServers: false`); the runtime refuses to create an agent with
@@ -389,11 +392,21 @@ async function readCatalog({ api, daemon, deadline }, input) {
   const remaining = deadline - Date.now()
   const discoveryDeadline = deadline - Math.min(LISTING_RESERVE_MS, remaining / 5)
   const listingDeadline = deadline - Math.min(REPLY_RESERVE_MS, remaining / 20)
+  const mode = input.mode ?? 'full'
+  if (!['full', 'metadata', 'selected'].includes(mode)) {
+    throw failure('invalid_catalog_mode', 'Catalog mode must be full, metadata or selected.')
+  }
   const discoveryTimeout = () =>
     failure('paseo_bridge_timeout', 'The Paseo runtime did not finish provider discovery in time.')
   if (input.refresh === true) await within(api.providers.refresh(), discoveryDeadline, discoveryTimeout)
-  // waitForReady answers once no provider is loading. When the discovery time is up first, the
-  // providers that are ready are still returned, as long as there is one.
+  if (mode === 'selected') {
+    const provider = requiredText(input, 'selectedProvider')
+    const model = requiredText(input, 'selectedModel')
+    const selectedFeatures = { provider, model, ...await modelFeatures(api, provider, model, listingDeadline, cwd) }
+    return catalogReply(daemon, { selectedFeatures })
+  }
+  // waitForReady answers once no provider is loading. When the discovery time is up first,
+  // the available snapshot still supplies provider identities and any known modes.
   const settled = await within(
     api.providers.waitForReady({ timeoutMs: Math.max(1, deadline - Date.now()) }),
     discoveryDeadline,
@@ -402,31 +415,49 @@ async function readCatalog({ api, daemon, deadline }, input) {
     if (error !== STILL_LOADING) throw error
     return null
   })
-  const snapshot = settled ?? (await api.providers.snapshot())
-  const enabled = (Array.isArray(snapshot?.entries) ? snapshot.entries : []).filter(
-    (entry) => typeof entry?.provider === 'string' && entry.enabled === true
-  )
-  const ready = enabled.some((entry) => entry.status === 'ready')
-  if (!ready && enabled.some((entry) => entry.status === 'loading')) throw discoveryTimeout()
-  const providers = await Promise.all(
-    enabled
-      .filter((entry) => entry.status === 'ready' || entry.status === 'loading')
-      .map((entry) =>
-        entry.status === 'ready' ? listProvider(api, entry, listingDeadline, cwd) : stillLoading(entry)
-      )
-  )
+  const snapshot = settled ?? (await within(api.providers.snapshot(), listingDeadline, discoveryTimeout))
+  if (!Array.isArray(snapshot?.entries)) {
+    throw failure('paseo_catalog_unavailable', 'The Paseo runtime supplied no provider listing.')
+  }
+  if (snapshot.entries.some((entry) => !nonEmpty(entry?.provider) || typeof entry.enabled !== 'boolean')) {
+    throw failure('paseo_catalog_unavailable', 'The Paseo runtime supplied an invalid provider listing.')
+  }
+  const enabled = snapshot.entries.filter((entry) => entry.enabled === true)
+  // Independent parts share the bounded listing window; a slow support read must not
+  // consume the final reply reserve or discard model answers that already arrived.
+  const [providers, support] = await Promise.all([
+    Promise.all(enabled.map((entry) =>
+      entry.status === 'ready' ? listProvider(api, entry, listingDeadline, cwd, mode === 'full') : stillLoading(entry)
+    )),
+    toolServerSupport(api, listingDeadline)
+  ])
+  // What the runtime reports about tool servers before an agent exists is the provider's entry
+  // in its configuration.
+  return catalogReply(daemon, { providers: providers.map((row) => support.error
+    ? { ...row, toolServerError: support.error }
+    : { ...row, acceptsToolServers: support.providers[row.id]?.options?.supportsMcpServers !== false }) })
+}
+
+function catalogReply(daemon, parts) {
   if (daemon.getConnectionState().status !== 'connected') {
     throw failure('paseo_daemon_unreachable', 'The connection to the Paseo daemon was lost while reading the catalog.')
   }
-  // What the runtime reports about tool servers before an agent exists is the provider's entry
-  // in its configuration.
-  const entries = (await api.config?.get())?.config?.providers ?? {}
   const info = daemon.getLastServerInfoMessage()
   return {
     runtime: { serverId: info.serverId, version: typeof info.version === 'string' ? info.version : null },
-    providers: providers.map((row) =>
-      entries[row.id]?.options?.supportsMcpServers === false ? { ...row, acceptsToolServers: false } : row
-    )
+    readAt: new Date().toISOString(), ...parts
+  }
+}
+
+async function toolServerSupport(api, deadline) {
+  try {
+    const reply = await within(api.config?.get(), deadline, () => new Error('Tool-server support discovery timed out'))
+    if (!reply?.config || typeof reply.config !== 'object') throw new Error('The runtime supplied no configuration')
+    const providers = reply.config.providers ?? {}
+    if (typeof providers !== 'object' || Array.isArray(providers)) throw new Error('The runtime supplied an invalid provider configuration')
+    return { providers }
+  } catch (error) {
+    return { error: text(error?.message ?? error) }
   }
 }
 
@@ -450,59 +481,68 @@ export function daemonConfiguration(reply) {
   return { config, readAt: new Date().toISOString() }
 }
 
-function stillLoading(entry) {
+function providerRow(entry) {
   return {
-    id: entry.provider,
-    label: nonEmpty(entry.label) ?? entry.provider,
-    // The row carries the runtime's modes on every path (L71): a provider that is
-    // still listing reports no models, but its modes are already known.
-    modes: entry.modes ?? [], defaultModeId: entry.defaultModeId ?? null,
-    fetchedAt: entry.fetchedAt ?? null,
-    models: [],
-    listingError: 'the runtime was still listing the models of this provider when the call ended'
+    id: entry.provider, label: nonEmpty(entry.label) ?? entry.provider,
+    ...(Array.isArray(entry.modes)
+      ? { modes: entry.modes, defaultModeId: entry.defaultModeId ?? null }
+      : { modeError: 'The runtime supplied no permission-mode listing' }),
+    fetchedAt: entry.fetchedAt ?? null
   }
 }
 
-async function listProvider(api, entry, deadline, cwd) {
-  const row = {
-    id: entry.provider, label: nonEmpty(entry.label) ?? entry.provider,
-    modes: entry.modes ?? [], defaultModeId: entry.defaultModeId ?? null,
-    fetchedAt: entry.fetchedAt ?? null
+function stillLoading(entry) {
+  return {
+    ...providerRow(entry),
+    listingError: nonEmpty(entry.error) ?? 'the runtime was still listing the models of this provider when the call ended'
   }
+}
+
+async function listProvider(api, entry, deadline, cwd, includeFeatures) {
+  const row = providerRow(entry)
   try {
     const listing = await within(
       api.providers.listModels(entry.provider),
       deadline,
       () => new Error('the runtime did not list the models in time')
     )
-    if (listing?.error) return { ...row, models: [], listingError: text(listing.error) }
-    const models = Array.isArray(listing?.models) ? listing.models : []
-    const projected = await Promise.all(models.filter((model) => nonEmpty(model?.id)).map(async (model) => {
+    if (listing?.error) throw new Error(text(listing.error))
+    if (!Array.isArray(listing?.models)) throw new Error('The runtime supplied no model listing')
+    if (listing.models.some((model) => !nonEmpty(model?.id))) throw new Error('The runtime supplied an invalid model listing')
+    const models = await Promise.all(listing.models.map(async (model) => {
       const result = projectModel(model)
-      try {
-        const features = await within(api.providers.listFeatures({ provider: `${entry.provider}/${model.id}`, cwd }), deadline, () => new Error('Service tier discovery timed out'))
-        if (features.error) throw new Error(features.error)
-        return { ...result, features: features.features, serviceTiers: tierOptions(features.features) }
-      } catch (error) {
-        return { ...result, features: [], featureError: text(error?.message ?? error), serviceTiers: [], serviceTierError: text(error?.message ?? error) }
-      }
+      return includeFeatures
+        ? { ...result, ...await modelFeatures(api, entry.provider, model.id, deadline, cwd) }
+        : result
     }))
-    return { ...row, models: projected }
+    return { ...row, models }
   } catch (error) {
-    return { ...row, models: [], listingError: text(error?.message ?? error) }
+    return { ...row, listingError: text(error?.message ?? error) }
+  }
+}
+
+
+async function modelFeatures(api, provider, model, deadline, cwd) {
+  try {
+    const reply = await within(api.providers.listFeatures({ provider: `${provider}/${model}`, cwd }), deadline, () => new Error('Service tier discovery timed out'))
+    if (reply?.error) throw new Error(text(reply.error))
+    if (!Array.isArray(reply?.features)) throw new Error('The runtime supplied no feature listing')
+    return { features: reply.features, serviceTiers: tierOptions(reply.features) }
+  } catch (error) {
+    return { featureError: text(error?.message ?? error), serviceTierError: text(error?.message ?? error) }
   }
 }
 
 function projectModel(model) {
-  const options = Array.isArray(model.thinkingOptions) ? model.thinkingOptions : []
   return {
     id: model.id,
     label: nonEmpty(model.label) ?? model.id,
     ...(nonEmpty(model.description) ? { description: model.description } : {}),
     ...(model.isDefault === true ? { isDefault: true } : {}),
-    efforts: options
-      .filter((option) => nonEmpty(option?.id))
-      .map((option) => ({ id: option.id, label: nonEmpty(option.label) ?? option.id })),
+    ...(Array.isArray(model.thinkingOptions) ? {
+      efforts: model.thinkingOptions.filter((option) => nonEmpty(option?.id))
+        .map((option) => ({ id: option.id, label: nonEmpty(option.label) ?? option.id }))
+    } : { effortError: 'The runtime supplied no thinking-option listing' }),
     ...(nonEmpty(model.defaultThinkingOptionId) ? { defaultEffort: model.defaultThinkingOptionId } : {})
   }
 }
@@ -679,7 +719,7 @@ function projectUsageEntry(entry) {
   return { ...rest, ...(typeof label === 'string' ? { account: { label } } : {}) }
 }
 
-async function createAgent({ api, daemon }, input) {
+async function createAgent({ api, daemon, deadline }, input) {
   const agentId = requiredText(input, 'agentId')
   const request = agentCreation(input, agentId)
   const serverId = serverIdOf(daemon)
@@ -690,7 +730,7 @@ async function createAgent({ api, daemon }, input) {
   }
   let created
   try {
-    created = await request.create(api, daemon)
+    created = await request.create(api, daemon, deadline)
   } catch (error) {
     // The runtime answered with an error. Whether an agent exists under the id decides what that
     // means: it exists (a repeat that lost its creation record), or the runtime refused the
@@ -888,26 +928,21 @@ function agentCreation(input, agentId) {
     hasToolServers: appliedServers !== null && Object.keys(appliedServers).length > 0,
     kept,
     // The agent is created without a message; `sendFirstMessage` sends `prompt` afterwards.
-    async create(api, daemon) {
+    async create(api, daemon, deadline = Date.now() + DEFAULT_DEADLINE_MS) {
       const workspace = api.workspaces.ref(workspaceId)
       let cwd
+      let applied = kept
       if (featureValues) {
         cwd = (await workspace.refresh())?.workspaceDirectory
         if (!nonEmpty(cwd)) throw new Error(`Workspace ${workspaceId} has no available directory`)
-        const features = await daemon.listProviderFeatures({ provider, cwd, ...(model ? { model } : {}) })
-        if (features.error) throw new Error(features.error)
-        for (const [id, value] of Object.entries(featureValues)) {
-          const feature = features.features?.find((row) => row.id === id)
-          if (!feature || (feature.type === 'toggle' ? typeof value !== 'boolean' :
-              !feature.options?.some((option) => option.id === value))) {
-            throw new Error(`Feature ${id} value ${JSON.stringify(value)} is not offered for ${provider}/${model ?? 'native default'}`)
-          }
-        }
+        applied = { ...kept, featureValues: await creationFeatureValues(
+          daemon, { provider, cwd, ...(model ? { model } : {}) }, featureValues, deadline
+        ) }
       }
       if (model) {
         const handle = await workspace.agents.create({
           ...shared,
-          config: { provider: `${provider}/${model}`, ...kept, ...(providerOptions ? { options: providerOptions } : {}) },
+          config: { provider: `${provider}/${model}`, ...applied, ...(providerOptions ? { options: providerOptions } : {}) },
           title,
           ...(parentAgentId ? { parent: parentAgentId } : {})
         })
@@ -917,12 +952,56 @@ function agentCreation(input, agentId) {
       if (!nonEmpty(cwd)) throw new Error(`Workspace ${workspaceId} has no available directory`)
       return await daemon.createAgent({
         ...shared,
-        config: { provider, cwd, title, ...kept, ...(providerOptions ? { providerOptions } : {}) },
+        config: { provider, cwd, title, ...applied, ...(providerOptions ? { providerOptions } : {}) },
         workspaceId,
         ...(parentAgentId ? { callerAgentId: parentAgentId } : {})
       })
     }
   }
+}
+
+
+// R214: the create boundary uses the resolver's ID-first, then label matching rule.
+// An unavailable listing is no claim about what is offered; leave those values to Paseo.
+async function creationFeatureValues(daemon, selection, values, deadline) {
+  let reply
+  try {
+    const remaining = Math.max(0, deadline - Date.now())
+    const listingDeadline = deadline - Math.min(REPLY_RESERVE_MS, remaining / 20)
+    reply = await within(daemon.listProviderFeatures(selection), listingDeadline,
+      () => new Error('Feature discovery timed out'))
+  } catch {
+    return values
+  }
+  if (reply?.error || !Array.isArray(reply?.features)) return values
+  return Object.fromEntries(Object.entries(values).map(([id, value]) => {
+    const feature = reply.features.find((row) => row?.id === id)
+    if (!feature) throw unofferedFeature(id, value, selection)
+    if (feature.type === 'toggle') {
+      if (typeof value !== 'boolean') throw unofferedFeature(id, value, selection)
+      return [id, value]
+    }
+    if (!Array.isArray(feature.options) || feature.options.some((row) => !nonEmpty(row?.id))) {
+      return [id, value]
+    }
+    const option = namedOption(feature.options, value)
+    if (!option) throw unofferedFeature(id, value, selection)
+    return [id, option.id]
+  }))
+}
+
+function namedOption(options, value) {
+  if (typeof value !== 'string') return null
+  const folded = value.toLowerCase()
+  for (const key of ['id', 'label']) {
+    const found = options.find((option) => typeof option?.[key] === 'string' && option[key].toLowerCase() === folded)
+    if (found) return found
+  }
+  return null
+}
+
+function unofferedFeature(id, value, selection) {
+  return new Error(`Feature ${id} value ${JSON.stringify(value)} is not offered for ${selection.provider}/${selection.model ?? 'native default'}`)
 }
 
 async function getAgent({ api, daemon }, input) {

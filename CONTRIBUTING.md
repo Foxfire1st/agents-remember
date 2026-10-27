@@ -82,7 +82,7 @@ support together. Do not add recursive test runs, repeated collection, repositor
 copies, or synthetic fixture worlds to establish test policy.
 
 The provisional unit budget is 10,000 collected parametrized cases. The separate integration
-budget of 1,000 is declared beside it in `pyproject.toml`. Collection checks these limits without
+budget of 2,000 is declared beside it in `pyproject.toml`. Collection checks these limits without
 starting another collection or scanning source. Combined delivery observes both populations.
 An increase needs an explicit protection/cost tradeoff in the change description: what
 consequential behavior requires it, why existing tests cannot absorb it, and its case, code-size

@@ -27,7 +27,6 @@ from agents_remember.cli import (
 )
 from agents_remember.cli.paseo_catalog import (
     LaunchSelectionRefused,
-    forget_launcher_catalogs,
     resolve_agent_selection,
 )
 from agents_remember.cli.paseo_role_tools import _started
@@ -235,7 +234,6 @@ def test_step_up_catalog_provenance_and_unoffered_choice(tmp_path: Path) -> None
         "stepUp": {"model": "gpt-b", "mode": None},
     }
     selected = select_step_up(defaults, None, reason="Use a different configured model.")
-    forget_launcher_catalogs()
     with patch.object(paseo_catalog, "bridge_call", FakeBridge(CATALOG)):
         agent, options = resolve_agent_selection(config, selected, HARNESS_ORDER, None)
         assert agent == "codex"
@@ -247,7 +245,6 @@ def test_step_up_catalog_provenance_and_unoffered_choice(tmp_path: Path) -> None
             resolve_agent_selection(
                 config, {**selected, "model": "not-offered"}, HARNESS_ORDER, None
             )
-    forget_launcher_catalogs()
 
 
 @pytest.fixture
@@ -256,7 +253,13 @@ def launch_world():
     world.setUp()
     catalog = deepcopy(LAUNCH_CATALOG)
     catalog["providers"][0]["models"].append(
-        {"id": "gpt-b", "label": "Configured alternative", "efforts": []}
+        {
+            "id": "gpt-b",
+            "label": "Configured alternative",
+            "efforts": [],
+            "features": [],
+            "serviceTiers": [],
+        }
     )
     world.replace(world.runtime, "_catalog", return_value=catalog)
     try:

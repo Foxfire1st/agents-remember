@@ -41,6 +41,7 @@ type Reply = { status: number; body: unknown };
 let optionsReplies: Reply[] = [];
 let optionsRequests: Record<string, unknown>[] = [];
 let optionsBarrier: Promise<void> | null = null;
+let savedCatalogReply: Reply | null = null;
 
 function optionsReply(roleDefaults: Record<string, unknown>): Reply {
   return {
@@ -57,10 +58,12 @@ beforeEach(() => {
   optionsReplies = [];
   optionsRequests = [];
   optionsBarrier = null;
+  savedCatalogReply = null;
   sessionStorage.clear();
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/role-launch/saved-catalog') return new Response(JSON.stringify(savedCatalogReply?.body ?? {}), { status: savedCatalogReply?.status ?? 503 });
       if (url !== '/api/role-launch/options')
         return new Response(JSON.stringify({ available: false, frameUrl: null }), { status: 503 });
       optionsRequests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
@@ -397,5 +400,76 @@ describe('R71 speed feature choices', () => {
     expect((requests[1].agentOverride as { featureValues: unknown }).featureValues).toEqual({
       service_tier: 'priority',
     });
+  });
+});
+
+
+describe('R214 fresh launcher views', () => {
+  it('asks again on the next view and replaces a same-origin catalog answer', async () => {
+    optionsReplies = [optionsReply({ agent: 'codex', model: 'gpt-a', available: true })];
+    const first = renderLauncher();
+    await waitFor(() => expect((first.getByRole('button', { name: 'Start role' }) as HTMLButtonElement).disabled).toBe(false));
+    const firstCount = optionsRequests.length;
+    first.unmount();
+    optionsReplies = [{ status: 200, body: { roleDefaults: { agent: 'fresh-provider', available: true }, agents: [{ id: 'fresh-provider', label: 'Fresh Provider', models: [] }], catalogOrigin: 'paseo:1', catalogDiscovery: { source: 'fresh', readAt: '2026-10-26T15:30:00Z' }, executions: [] } }];
+    const second = renderLauncher();
+    await waitFor(() => expect(optionsRequests.length).toBeGreaterThan(firstCount));
+    await waitFor(() => expect((second.getByLabelText('Role agent override') as HTMLSelectElement).textContent).toContain('Fresh Provider'));
+    expect((second.getByLabelText('Role agent override') as HTMLSelectElement).textContent).not.toContain('Codex');
+  });
+});
+
+
+describe('R214 cold saved preview', () => {
+  it('shows the shared disk answer before fresh options settle, then replaces it', async () => {
+    let releaseFresh: (() => void) | undefined;
+    optionsBarrier = new Promise<void>((resolve) => { releaseFresh = resolve; });
+    savedCatalogReply = { status: 200, body: {
+      agents: [{ id: 'saved-agent', label: 'Saved Agent', models: [{ id: 'saved-model', label: 'Saved Model' }] }],
+      catalogDiscovery: { source: 'saved', readAt: '2026-10-26T14:20:00Z' }, catalogOrigin: 'paseo:saved-origin',
+    } };
+    optionsReplies = [{ status: 200, body: {
+      agents: [{ id: 'fresh-agent', label: 'Fresh Agent', models: [] }],
+      roleDefaults: { agent: 'fresh-agent', available: true },
+      catalogDiscovery: { source: 'fresh', readAt: '2026-10-26T16:00:00Z' }, catalogOrigin: 'paseo:fresh-origin', executions: [],
+    } }];
+    const view = renderLauncher();
+    await view.findByText(/Saved Paseo choices.*paseo:saved-origin.*Saved Agent.*Saved Model/);
+    expect(view.getByText(/Agents: saved answer from 2026-10-26T14:20:00Z/)).toBeTruthy();
+    expect(optionsRequests.length).toBeGreaterThan(0);
+    expect((view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => releaseFresh?.());
+    await waitFor(() => expect((view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(view.queryByText(/Saved Paseo choices/)).toBeNull();
+    expect((view.getByLabelText('Role agent override') as HTMLSelectElement).textContent).toContain('Fresh Agent');
+    expect((view.getByLabelText('Role agent override') as HTMLSelectElement).textContent).not.toContain('Saved Agent');
+  });
+});
+
+
+describe('R5 pending launcher provenance', () => {
+  it.each(['agent change', 'same-scope refresh'])('replaces the previous fresh display with the disk snapshot on %s', async (change) => {
+    optionsReplies = [optionsReply({ agent: 'codex', model: 'gpt-a', available: true })];
+    const view = renderLauncher();
+    const start = view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement;
+    await waitFor(() => expect(start.disabled).toBe(false));
+    let releaseFresh: (() => void) | undefined;
+    optionsBarrier = new Promise<void>((resolve) => { releaseFresh = resolve; });
+    savedCatalogReply = { status: 200, body: {
+      agents: [{ id: 'disk', label: 'Disk Agent', models: [] }],
+      catalogDiscovery: { source: 'saved', readAt: '2026-10-26T16:20:00Z' }, catalogOrigin: 'paseo:disk',
+    } };
+    if (change === 'agent change') {
+      fireEvent.change(view.getByLabelText('Role agent override'), { target: { value: 'eve' } });
+    } else {
+      fireEvent.click(view.getByRole('button', { name: 'Refresh role agents' }));
+    }
+    await view.findByText(/Saved Paseo choices.*paseo:disk.*Disk Agent/);
+    expect(view.getByText(/Agents: saved answer from 2026-10-26T16:20:00Z/)).toBeTruthy();
+    expect(view.queryByText(/Saved Paseo choices.*Codex/)).toBeNull();
+    expect(start.disabled).toBe(true);
+    await act(async () => releaseFresh?.());
+    await waitFor(() => expect(start.disabled).toBe(false));
+    expect(view.queryByText(/Saved Paseo choices/)).toBeNull();
   });
 });

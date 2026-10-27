@@ -247,6 +247,14 @@ class _FolderBudgetState:
 
 
 _FOLDER_BUDGETS: dict[str, _FolderBudgetState] = {}
+_BUDGET_THREAD_LOCK = threading.RLock()
+
+
+@contextmanager
+def _serialized_budget() -> Iterator[None]:
+    """Keep shared log accounting atomic when tool handlers run concurrently (R213)."""
+    with _BUDGET_THREAD_LOCK:
+        yield
 
 
 def _budget_state(log_dir: Path, state: _FolderBudgetState | None = None) -> _FolderBudgetState:
@@ -257,6 +265,7 @@ def _budget_state(log_dir: Path, state: _FolderBudgetState | None = None) -> _Fo
     return _FOLDER_BUDGETS.setdefault(key, _FolderBudgetState())
 
 
+@_serialized_budget()
 def reset_log_budgets() -> None:
     """Forget every folder census (tests)."""
     _FOLDER_BUDGETS.clear()
@@ -752,6 +761,7 @@ def _evict_older_days(
     return _current_bytes(state) + need_bytes <= budget_bytes
 
 
+@_serialized_budget()
 def prune_old_tool_logs(
     log_dir: Path,
     keep_days: int,
@@ -881,6 +891,7 @@ class LineRequest:
     line: Mapping[str, Any]
 
 
+@_serialized_budget()
 def prepare_log_folder(
     log_dir: Path,
     keep_days: int,
@@ -916,6 +927,7 @@ def prepare_log_folder(
     return None
 
 
+@_serialized_budget()
 def prepare_call_detail(
     request: DetailRequest,
     *,
@@ -973,6 +985,7 @@ def prepare_call_detail(
     return detail_path.as_posix(), None, None
 
 
+@_serialized_budget()
 def write_diff_report(
     log_dir: Path,
     tool_name: str,
@@ -1031,6 +1044,7 @@ def _call_line_dict(
     }
 
 
+@_serialized_budget()
 def append_call_line(
     request: LineRequest,
     *,
@@ -1115,6 +1129,7 @@ def _serialize_detail(
     return text, None
 
 
+@_serialized_budget()
 def record_tool_call(record: ToolCallRecord) -> ToolLogOutcome:
     """Append one log line (and its detail file) for one call.
 
