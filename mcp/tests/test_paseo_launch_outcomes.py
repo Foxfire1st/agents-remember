@@ -213,10 +213,12 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
                 self.assertIn(reason, str(error.detail))
         self.assertEqual(self.receipt_files(), files)
         self.assertEqual({path: (self.root / path).read_bytes() for path in files}, saved)
-        # The one call a refusal makes is the read of the open execution's agent.
+        # R214 rule 1: each new start asks fresh metadata even when its seat is held.
+        # The holder is only read; no archive or create call accompanies the refusal.
+        metadata = ("catalog", {"cwd": self.config.workspace_root.as_posix(), "mode": "metadata"})
         self.assertEqual(
             self.runtime.calls[calls:],
-            [("agent-state", {"agentId": self.receipt(running)["agentId"]})],
+            [metadata, ("agent-state", {"agentId": self.receipt(running)["agentId"]}), metadata],
         )
         self.assertEqual(len(self.runtime.agents), 1)
 
@@ -243,9 +245,13 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
                 # A start by hand from the launcher follows the same rule, and the
                 # refusal offers the replacing start on this line.
                 self.assertIn("replacesAgentId naming it", str(error.detail))
-                # Nothing was archived or created: one read of the holder, receipt kept.
-                self.assertEqual([call[0] for call in self.runtime.calls], ["agent-state"])
-                self.assertEqual(self.runtime.calls[0][1], {"agentId": old_agent})
+                # R214 rule 1 adds fresh metadata before the holder read; the receipt
+                # is kept and no archive or creation happens.
+                self.assertEqual(
+                    [call[0] for call in self.runtime.calls], ["catalog", "agent-state"]
+                )
+                self.assertEqual(self.runtime.calls[0][1]["mode"], "metadata")
+                self.assertEqual(self.runtime.calls[1][1], {"agentId": old_agent})
                 self.assertIsNone(self.runtime.agents[old_agent]["archivedAt"])
                 self.assertEqual(self.receipt(successor)["requestId"], str(previous.request_id))
                 self.assertEqual(self.receipt(successor)["status"], status)
@@ -268,9 +274,12 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
             self.assertEqual(self.dispatch(rejected)[1]["status"], "rejected")
             self.runtime.calls.clear()
             self.assertEqual(self.dispatch(self.request("orchestrator"))[1]["status"], "running")
+            # R214 rule 1: a new start asks fresh metadata before creating.
             self.assertEqual(
-                [call[0] for call in self.runtime.calls], ["workspace-open", "agent-create"]
+                [call[0] for call in self.runtime.calls],
+                ["catalog", "workspace-open", "agent-create"],
             )
+            self.assertEqual(self.runtime.calls[0][1]["mode"], "metadata")
 
     def test_a_replacing_start_retires_the_holder_and_starts_in_one_call(self) -> None:
         # Rule 9: a start that names the holder retires it first, in the same call,
@@ -291,11 +300,13 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
         # The holder was retired first, in the same call.
         self.assertIsNotNone(self.runtime.agents[old_agent]["archivedAt"])
         self.assertIsNone(self.runtime.agents[new_agent]["archivedAt"])
+        # R214 rule 1 adds the fresh metadata question before the same retirement sequence.
         self.assertEqual(
             [call[0] for call in self.runtime.calls],
-            ["agent-state", "agent-archive", "workspace-open", "agent-create"],
+            ["catalog", "agent-state", "agent-archive", "workspace-open", "agent-create"],
         )
-        self.assertEqual(self.runtime.calls[1][1], {"agentId": old_agent})
+        self.assertEqual(self.runtime.calls[0][1]["mode"], "metadata")
+        self.assertEqual(self.runtime.calls[2][1], {"agentId": old_agent})
         receipt = self.receipt(replacing)
         self.assertEqual(receipt["predecessorReports"]["requestId"], str(previous.request_id))
         artifact = receipt["handoverArtifact"]

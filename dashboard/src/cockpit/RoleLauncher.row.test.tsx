@@ -293,17 +293,17 @@ describe('where a default comes from is hover text', () => {
       'Fast',
     );
     fireEvent.change(view.getByLabelText('Role effort override'), { target: { value: 'low' } });
-    expect(
+    await waitFor(() => expect(
       (view.getByLabelText('Role effort override') as HTMLElement).getAttribute('title'),
-    ).toContain('Low');
+    ).toContain('Low'));
     fireEvent.change(view.getByLabelText('Role model override'), { target: { value: 'gpt-b' } });
-    expect(
+    await waitFor(() => expect(
       (view.getByLabelText('Role model override') as HTMLElement).getAttribute('title'),
-    ).toContain('GPT Bravo model with a very long host label');
+    ).toContain('GPT Bravo model with a very long host label'));
     fireEvent.change(view.getByLabelText('Role agent override'), { target: { value: 'eve' } });
-    expect(
+    await waitFor(() => expect(
       (view.getByLabelText('Role agent override') as HTMLElement).getAttribute('title'),
-    ).toContain('Eve');
+    ).toContain('Eve'));
   });
 
   it('carries the rendered document title in document hovers', async () => {
@@ -367,7 +367,8 @@ describe('service-tier disclosure is a shared chip', () => {
     await waitFor(() => expect(view.getByTestId('role-service-tier')).toBeTruthy());
     const tier = view.getByTestId('role-service-tier');
     expect(tier.className).toBe(launcherChip);
-    expect(tier.textContent).toBe('Speed: Fast');
+    // No service-tier label was supplied in this fixture: preserve the configured name.
+    expect(tier.textContent).toBe('Speed: fast');
     expect(tier.getAttribute('title')).toContain('default agent');
   });
 });

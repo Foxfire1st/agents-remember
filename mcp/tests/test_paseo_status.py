@@ -16,7 +16,6 @@ from agents_remember.cli import (
     role_launch_receipts,
     role_launch_routes,
 )
-from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_status import SUMMARY_LIMIT, AgentReading, status_row
 from agents_remember.models.role_launcher import (
     RoleDispatchRequest,
@@ -511,7 +510,6 @@ class RefreshTests(StatusTestCase):
         self.assertEqual(self.commands().count("agent-state"), 2)
         self.assertFalse(role_launch_routes._DISPATCH_LOCK.locked())
         with self.subTest("the options route loads the catalog before it takes the lock"):
-            forget_launcher_catalogs()
             self.runtime.calls.clear()
             during: list[tuple[str, bool]] = []
             bridge = self.runtime.__call__
@@ -525,16 +523,17 @@ class RefreshTests(StatusTestCase):
             role_launch_routes._role_launch_options_endpoint(self.config, options)
             self.assertEqual(during, [("catalog", False), ("agent-state", True)])
             self.assertFalse(role_launch_routes._DISPATCH_LOCK.locked())
-            # A failed catalog load leaves the lock free as well.
-            forget_launcher_catalogs()
+            # An unanswered catalog uses its saved answer without holding the launch lock.
             self.runtime.fail("catalog", "paseo_daemon_unreachable")
-            with self.assertRaises(HTTPException):
-                role_launch_routes._role_launch_options_endpoint(self.config, options)
+            saved_options = role_launch_routes._role_launch_options_endpoint(self.config, options)
+            saved_payload = json.loads(bytes(saved_options.body))
+            self.assertEqual(saved_payload["catalogDiscovery"]["source"], "saved")
+            self.assertIsNotNone(saved_payload["catalogDiscovery"]["readAt"])
+            self.assertEqual(during[-2:], [("catalog", False), ("agent-state", True)])
             self.assertFalse(role_launch_routes._DISPATCH_LOCK.locked())
-        # While another launch or check holds the lock, a refresh and the options route refuse
-        # and call nothing. Both mark the refusal as a launch in progress, which the launcher
-        # shows as such and not as an error; a Start is refused as before.
-        forget_launcher_catalogs()
+        # While the launch lock is held, a refresh refuses without a bridge call; options
+        # asks its fresh catalog before refusing and never reads the agent under that lock.
+        # Both name launch-in-progress, and a Start remains refused as before.
         self.runtime.calls.clear()
         result = RoleResultRequest.model_validate(
             {"role": "worker", "requestId": request.request_id, **ROLE_REFS["worker"]}
@@ -596,14 +595,27 @@ class RefreshTests(StatusTestCase):
         self.assertEqual(first["execution"]["status"], "completed")
         saved = self.saved(request)
         self.runtime.calls.clear()
-        # The catalog is cached; the daemon is gone.
+        # The fresh question fails; the prior successful answer is available on disk.
         self.runtime.fail("catalog", "paseo_daemon_unreachable")
         self.runtime.fail("agent-state", "paseo_daemon_unreachable", "The daemon is down.")
 
         response = role_launch_routes._role_launch_options_endpoint(self.config, options)
 
         answered = json.loads(bytes(response.body))
-        self.assertEqual(self.commands(), ["agent-state"])
+        self.assertEqual(self.commands(), ["catalog", "agent-state"])
+        self.assertEqual(
+            answered["agents"][0]["models"],
+            [
+                {
+                    **first["agents"][0]["models"][0],
+                    "discovery": answered["agents"][0]["models"][0]["discovery"],
+                }
+            ],
+        )
+        self.assertEqual(answered["catalogDiscovery"]["source"], "saved")
+        self.assertEqual(
+            answered["catalogDiscovery"]["readAt"], first["catalogDiscovery"]["readAt"]
+        )
         self.assertEqual(len(answered["agents"]), 2)
         self.assertIs(answered["execution"]["hostUnreachable"], True)
         self.assertEqual(answered["execution"]["status"], "completed")
@@ -621,7 +633,7 @@ class RefreshTests(StatusTestCase):
 
             self.assertEqual(error.status_code, 409)
             self.assertIn(f"held by agent {old_agent}", str(error.detail))
-            self.assertEqual(self.commands(), ["agent-state"])
+            self.assertEqual(self.commands(), ["catalog", "agent-state"])
             self.assertIsNone(self.runtime.agents[old_agent]["archivedAt"])
             # The refusal changes nothing on disk.
             self.assertEqual(self.receipt(previous)["status"], "running")
@@ -638,7 +650,7 @@ class RefreshTests(StatusTestCase):
                 f"open execution (request {previous.request_id}, status running)",
                 str(error.detail),
             )
-            self.assertEqual(self.commands(), ["agent-state"])
+            self.assertEqual(self.commands(), ["catalog", "agent-state"])
             self.assertEqual(self.receipt(previous)["status"], "running")
 
     def test_a_new_start_is_refused_while_the_execution_s_agent_cannot_be_read(self) -> None:
@@ -660,7 +672,7 @@ class RefreshTests(StatusTestCase):
         self.assertIn(f"agent {self.receipt(previous)['agentId']}", body["detail"])
         self.assertIn("paseo_bridge_timeout: The bridge call ran out of time.", body["detail"])
         # Nothing was archived or created, in the runtime or on disk.
-        self.assertEqual(self.commands(), ["agent-state"])
+        self.assertEqual(self.commands(), ["catalog", "agent-state"])
         self.assertEqual(self.saved(previous), saved)
         self.assertFalse((self.receipt_path(previous).parent / "history").exists())
         self.assertEqual(sorted((bindings / "message-bindings").glob("*.json")), binding_files)
@@ -831,7 +843,7 @@ class ReviveTests(StatusTestCase):
             self.runtime.calls.clear()
             error = self.refused(self.request("worker"))
             self.assertIn(f"held by agent {old_agent}", str(error.detail))
-            self.assertEqual(self.commands(), ["agent-state"])
+            self.assertEqual(self.commands(), ["catalog", "agent-state"])
             self.assertIsNone(self.runtime.agents[old_agent]["archivedAt"])
             payload = self.request("worker").model_dump(
                 mode="json", by_alias=True, exclude_none=True
@@ -844,7 +856,9 @@ class ReviveTests(StatusTestCase):
             self.assertEqual(
                 [command for command, _payload in self.runtime.calls],
                 [
+                    "catalog",
                     "agent-state",
+                    "catalog",
                     "agent-state",
                     "agent-archive",
                     "workspace-open",

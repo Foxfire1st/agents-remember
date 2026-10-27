@@ -40,15 +40,19 @@ from agents_remember.application.memory_quality.knowledge_inputs import (
 from agents_remember.application.memory_quality.knowledge_inputs import (
     without_proof as _without_proof,
 )
+from agents_remember.application.memory_quality.run_answers import (
+    _pair_refusal,
+    _poll_scope_mismatch,
+    _scope_projection,
+    _unfinished_poll_payload,
+)
 from agents_remember.application.memory_quality.runs import (
     QualityRunIdentity,
-    QualityRunSnapshot,
     poll_quality_run,
     start_quality_run,
 )
 from agents_remember.application.memory_scope import (
     MemoryScope,
-    MemoryScopeIdentity,
     resolve_memory_candidate_scope,
     resolve_memory_scope,
     revalidate_memory_candidate_scope,
@@ -212,12 +216,14 @@ def _start_memory_quality_request(
 def _poll_memory_quality_request(
     config: McpRuntimeConfig,
     request: MemoryQualityPollRequest,
+    *,
+    operation: str = "memory_quality_check",
 ) -> dict[str, object]:
-    """Poll one run only through its configured canonical repository."""
+    """Poll one run only through its configured canonical repository and operation."""
 
     repo_id = require_repo(config, request.repo_id).repo_id
     snapshot = poll_quality_run(repo_id, request.run_id)
-    if snapshot is None:
+    if snapshot is None or snapshot.identity.operation != operation:
         return {
             "ok": False,
             "operation": "memory_quality_check",
@@ -283,6 +289,27 @@ def _poll_memory_quality_request(
     return {**result, "status": "completed", "runId": snapshot.run_id}
 
 
+def poll_scoped_run(
+    config: McpRuntimeConfig,
+    request: MemoryQualityPollRequest,
+    *,
+    operation: str,
+) -> dict[str, object]:
+    """Share the check's repository, scope and candidate-pair guards with previews."""
+    result = _poll_memory_quality_request(config, request, operation=operation)
+    if result.get("operation") == "memory_quality_check":
+        result["operation"] = operation
+    if result.get("nextAction") == "memory_quality_check":
+        result["nextAction"] = operation
+        result["nextArgs"] = {
+            "repo_id": request.repo_id,
+            "contract_path": request.contract_path,
+            "mode": "start",
+            "dry_run": True,
+        }
+    return result
+
+
 def _stamped(payload: dict[str, object]) -> dict[str, object]:
     """Name the build that produced this measurement on every memory-quality response (D-33).
 
@@ -322,97 +349,11 @@ def poll_memory_quality_request(
     return _stamped(_poll_memory_quality_request(config, request))
 
 
-def _unfinished_poll_payload(
-    repo_id: str,
-    snapshot: QualityRunSnapshot,
-    scope_identity: MemoryScopeIdentity,
-    request: MemoryQualityPollRequest,
-) -> dict[str, object]:
-    result: dict[str, object] = {
-        "ok": True,
-        "operation": "memory_quality_check",
-        "repoId": repo_id,
-        "status": snapshot.status,
-        "runId": snapshot.run_id,
-        **_scope_projection(scope_identity),
-    }
-    if snapshot.status == "failed":
-        result["error"] = snapshot.error
-        # MIK-R110 rule 4: the failed run names its recovery beside its error.
-        result["code"] = "quality-run-failed"
-        result["nextAction"] = "memory_quality_check"
-        result["nextArgs"] = quality_run_next_args(request, mode="start")
-    return result
-
-
 def _execute_or_refuse(execution: MemoryQualityExecution) -> dict[str, object]:
     try:
         return _execute_memory_quality(execution)
     except MemoryCandidatePairError as error:
         return _pair_refusal(execution.scope.repo_id, error)
-
-
-def _pair_refusal(repo_id: str, error: MemoryCandidatePairError) -> dict[str, object]:
-    result: dict[str, object] = {
-        "ok": False,
-        "operation": "memory_quality_check",
-        "repoId": repo_id,
-        "status": "scope-refused",
-        # MIK-R110 rule 4: the refusal's identity doubles as the answer's code
-        # and its detail as the one-sentence error, beside the next action.
-        "code": error.status,
-        "error": error.detail,
-        **error.response_fields(),
-    }
-    result["status"] = "scope-refused"
-    return result
-
-
-def _scope_projection(identity: MemoryScopeIdentity) -> dict[str, object]:
-    pair = identity.pair_identity
-    if pair is None:
-        return {
-            "scopeAuthority": "official-diagnostic",
-            "acceptanceEligible": False,
-        }
-    return {
-        "scopeAuthority": "leaf-candidate",
-        "acceptanceEligible": True,
-        "contractPath": pair.contractPath,
-        "pairIdentity": pair.model_dump(mode="json"),
-    }
-
-
-def _poll_scope_mismatch(
-    request: MemoryQualityPollRequest,
-    identity: MemoryScopeIdentity,
-) -> dict[str, object] | None:
-    pair = identity.pair_identity
-    requested = request.contract_path
-    if pair is None and requested is None:
-        return None
-    if (
-        pair is not None
-        and requested is not None
-        and Path(requested).resolve() == Path(pair.contractPath).resolve()
-    ):
-        return None
-    contract_path = pair.contractPath if pair is not None else str(requested or "")
-    error = MemoryCandidatePairError(
-        "memory-candidate-pair-poll-scope-mismatch",
-        "poll must repeat the exact scope of the admitted memory-quality run",
-        failure=MemoryCandidatePairFailure(
-            field="contractPath",
-            contract_path=contract_path,
-            expected={"contractPath": None if pair is None else pair.contractPath},
-            observed={"contractPath": requested},
-            next_action="memory_quality_check",
-        ),
-    )
-    return {
-        **_pair_refusal(request.repo_id, error),
-        "runId": request.run_id,
-    }
 
 
 def _resolve_execution(

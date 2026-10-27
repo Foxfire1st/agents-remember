@@ -8,9 +8,11 @@ import json
 import time
 from contextlib import suppress
 from datetime import UTC, datetime
+from functools import partial
 from importlib import import_module
 from typing import Any
 
+from anyio import CancelScope
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Settings as FastMCPSettings
 
@@ -72,6 +74,8 @@ class AgentsRememberMCP(FastMCP):
     # dispatched call is checked against it, so a forged or replaced seat answers by name.
     _explainer_binding: Any | None = None
 
+    _synchronous_write_lock: asyncio.Lock | None = None
+
     async def list_tools(self) -> list[Any]:
         answer = await super().list_tools()
         # MIK-R204 @ v1 rule 3 as amended (80f71dff): the one post-discovery start -- the
@@ -117,10 +121,62 @@ class AgentsRememberMCP(FastMCP):
                 if not_this_seat is not None:
                     return not_this_seat
             try:
-                return await super().call_tool(name, arguments)
+                return await self._dispatch_tool(name, arguments)
             except Exception as error:
                 _log_raised_tool_call(name, arguments, config, error)
                 raise
+
+    async def _dispatch_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        """Keep synchronous writes ordered while their handlers leave the event loop."""
+        tool = self._tool_manager.get_tool(name)
+        if tool is None or tool.is_async:
+            return await super().call_tool(name, arguments)
+        # Metadata was built from the original function; only its execution changes.
+        # A per-call copy avoids mutating registration or the advertised signature.
+        threaded = tool.model_copy(update={"fn": _threaded(tool.fn), "is_async": True})
+        context = self.get_context()
+        if _nonwriting_call(tool, arguments):
+            return await threaded.run(arguments, context=context, convert_result=True)
+        if self._synchronous_write_lock is None:
+            self._synchronous_write_lock = asyncio.Lock()
+        async with self._synchronous_write_lock:
+            return await threaded.run(arguments, context=context, convert_result=True)
+
+
+def _nonwriting_call(tool: Any, arguments: dict[str, Any]) -> bool:
+    """Only advertised reads and explicitly non-writing modes bypass write ordering."""
+    if tool.annotations is not None and tool.annotations.readOnlyHint is True:
+        return True
+    if tool.name == "context_packet":
+        return arguments.get("include_freshness", False) is False
+    if tool.name == "memory_quality_check":
+        request = arguments.get("request")
+        return isinstance(request, dict) and request.get("mode") in ("start", "poll")
+    if tool.name == "citation_fix":
+        return arguments.get("mode") in ("start", "poll") or arguments.get("dry_run") is True
+    return False
+
+
+def _threaded(function: Any) -> Any:
+    async def execute(**arguments: Any) -> Any:
+        # asyncio.to_thread carries the request and tool-log context into the worker.
+        worker = asyncio.create_task(asyncio.to_thread(partial(function, **arguments)))
+        try:
+            return await asyncio.shield(worker)
+        except BaseException:
+            # A thread cannot be cancelled. Keep the write lock until it exits, even
+            # under repeated transport cancellation; a second writer must not race it.
+            with CancelScope(shield=True):
+                while not worker.done():
+                    try:
+                        await asyncio.wait((worker,))
+                    except asyncio.CancelledError:
+                        continue
+            if not worker.cancelled():
+                worker.exception()
+            raise
+
+    return execute
 
 
 def _log_raised_tool_call(

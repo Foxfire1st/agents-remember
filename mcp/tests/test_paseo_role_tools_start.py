@@ -27,11 +27,12 @@ from agents_remember.application.role_launch_context import (
 )
 from agents_remember.cli import (
     paseo_catalog,
-    paseo_role_tools,
+    paseo_role_start,
     role_launch_preparation,
     role_launch_receipts,
     role_launch_routes,
     role_launch_workspace,
+    role_start_answer,
 )
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.paseo_role_tools import (
@@ -221,7 +222,7 @@ class RoleStartTests(RoleToolsTestCase):
                     "_role_defaults",
                     return_value=({"notes": notes}, ("codex",)),
                 ) as defaults,
-                patch.object(paseo_role_tools, "_role_launch_dispatch_endpoint") as dispatch,
+                patch.object(paseo_role_start, "_role_launch_dispatch_endpoint") as dispatch,
             ):
                 result = self.start(caller, "manager")
                 self.assertEqual(result["refusal"], "role-may-not-start-role")
@@ -385,7 +386,7 @@ class RoleStartTests(RoleToolsTestCase):
             ["catalog", "workspace-open", "agent-create"],
         )
         with self.subTest("the process keeps no catalog between calls and frees the launch lock"):
-            self.assertEqual(paseo_catalog._CATALOGS, {})
+            self.assertIsNone(paseo_catalog._OPERATION_CATALOGS.get())
             self.assertFalse(role_launch_routes._DISPATCH_LOCK.locked())
             self.runtime.calls.clear()
             self.assertEqual(
@@ -484,17 +485,6 @@ class RoleStartTests(RoleToolsTestCase):
                 self.assertEqual(self.receipt_files(), [])
                 self.assertEqual(self.runtime.launch_calls(), [])
                 self.assertEqual(self.runtime.agents, {})
-        with self.subTest("the daemon cannot be reached before anything is recorded"):
-            self.runtime.fail("catalog", "paseo_daemon_unreachable", "connection refused")
-            result = self.refusal(self.start(self.architect, "worker"), "host-unreachable")
-            self.assertIn("paseo_daemon_unreachable", result["detail"])
-            self.assertEqual((self.receipt_files(), self.runtime.agents), ([], {}))
-        with self.subTest("the host refuses a call before anything is recorded"):
-            # The host answered, so it is not unreachable; what it refused is in the detail.
-            self.runtime.fail("catalog", "paseo_call_failed", "the catalog is not served")
-            result = self.refusal(self.start(self.architect, "worker"), "launch-refused")
-            self.assertIn("the catalog is not served", result["detail"])
-            self.assertEqual((self.receipt_files(), self.runtime.agents), ([], {}))
         with self.subTest("a second start on an open task-bound execution"):
             first = self.start(self.architect, "worker")
             # While the host cannot say what the open execution's agent is doing, nothing starts.
@@ -509,6 +499,27 @@ class RoleStartTests(RoleToolsTestCase):
                 again["detail"],
             )
             self.assertEqual(list(self.runtime.agents), [first["agentId"]])
+
+    def test_a_start_uses_the_last_answer_when_catalog_discovery_fails(self) -> None:
+        paseo_catalog.launcher_catalog(self.config)
+        cases = (
+            ("worker", "paseo_daemon_unreachable", "connection refused"),
+            ("reviewer", "paseo_call_failed", "the catalog is not served"),
+        )
+        for role, code, detail in cases:
+            with self.subTest(code=code):
+                self.runtime.calls.clear()
+                self.runtime.fail("catalog", code, detail)
+                result = self.start(self.architect, role)
+                self.assertEqual((result["ok"], result["status"]), (True, "running"))
+                commands = [command for command, _payload in self.runtime.calls]
+                # R214 rules 1/2: ask fresh metadata, use its saved answer on failure,
+                # then ask only for the selected model's features before creating once.
+                self.assertEqual(
+                    [p["mode"] for c, p in self.runtime.calls if c == "catalog"],
+                    ["metadata", "selected"],
+                )
+                self.assertEqual(commands.count("agent-create"), 1)
 
     def test_each_launch_status_and_the_same_request_id(self) -> None:
         with self.subTest("no usable answer, then the same request id"):
@@ -556,7 +567,7 @@ class RoleStartTests(RoleToolsTestCase):
                 )
             self.assertEqual(self.receipt(request)["status"], "starting")
             self.replace(
-                paseo_role_tools, "_role_launch_dispatch_endpoint", return_value=JSONResponse({})
+                paseo_role_start, "_role_launch_dispatch_endpoint", return_value=JSONResponse({})
             )
             starting = self.start(self.architect, "manager", request_id=request.request_id)
             self.assertEqual(
@@ -693,9 +704,9 @@ class RoleStartTests(RoleToolsTestCase):
         self.assertFalse(role_launch_routes._DISPATCH_LOCK.locked())
 
     def test_a_start_that_waited_its_time_out_says_to_call_again(self) -> None:
-        self.assertEqual(paseo_role_tools.LOCK_WAIT_SECONDS, 60)
+        self.assertEqual(paseo_role_start.LOCK_WAIT_SECONDS, 60)
         # load-independent: the held dispatch lock must expire and return launch-refused.
-        self.replace(paseo_role_tools, "LOCK_WAIT_SECONDS", 0.5)
+        self.replace(paseo_role_start, "LOCK_WAIT_SECONDS", 0.5)
         self.assertTrue(role_launch_routes._DISPATCH_LOCK.acquire(blocking=False))
         try:
             refused = self.refusal(self.start(self.architect, "curator"), "launch-refused")
@@ -767,7 +778,7 @@ class RoleStartTests(RoleToolsTestCase):
             )
             with self.subTest("the host cannot say whether the agent is still there"):
                 unread = AgentReading(reachable=False, unreachable_reason="connection refused")
-                self.replace(paseo_role_tools, "read_agent", return_value=unread)
+                self.replace(role_start_answer, "read_agent", return_value=unread)
                 result = self.refusal(
                     self.start(self.architect, "investigator", request_id=request_id),
                     "host-unreachable",

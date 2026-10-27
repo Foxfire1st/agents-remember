@@ -27,6 +27,8 @@ from agents_remember.application.role_launch_context import (
 )
 from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.cli import (
+    paseo_catalog,
+    paseo_role_caller,
     paseo_role_tools,
     role_launch_preparation,
     role_launch_receipts,
@@ -41,13 +43,17 @@ from agents_remember.cli.role_launch_preparation import (
 )
 from agents_remember.cli.role_launch_receipts import _message_binding_projection_reference
 from agents_remember.mcp.registration.role_agents import register_role_agent_tools
+from agents_remember.mcp.server import AgentsRememberMCP, _complete_fastmcp_settings
 from agents_remember.mcp.tools import role_agents as role_agent_payloads
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
+from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.types import ToolAnnotations
 from paseo_role_tools_test_support import (
     CALL_REFS,
     OTHER_LEAF,
@@ -356,7 +362,7 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
                 return run
 
             self.replace(
-                paseo_role_tools, "read_agent_binding", lambda _environment=None: self.architect
+                paseo_role_caller, "read_agent_binding", lambda _environment=None: self.architect
             )
             self.replace(role_agent_payloads, "start_role", recorded(paseo_role_tools.start_role))
             self.replace(
@@ -396,6 +402,57 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
         self.addCleanup(environment.stop)
         os.environ.pop(AGENT_ID_VARIABLE, None)
         self.assertIsNone(read_agent_binding())
+
+    def test_fresh_catalog_wait_leaves_registered_reads_responsive(self) -> None:
+        self.unbound()
+        entered, release = threading.Event(), threading.Event()
+
+        def slow_catalog(config: Any, command: str, payload: dict[str, Any]) -> dict[str, Any]:
+            if command == "catalog":
+                entered.set()
+                if not release.wait(HANG_GUARD_SECONDS):
+                    raise AssertionError("the registered read did not release discovery")
+            return self.runtime(config, command, payload)
+
+        self.replace(paseo_catalog, "bridge_call", slow_catalog)
+
+        async def invoke() -> None:
+            _complete_fastmcp_settings()
+            server = AgentsRememberMCP("role-catalog-concurrency")
+            server._agents_remember_config = self.config
+            register_role_agent_tools(server, self.config)
+
+            @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+            def read_call() -> dict[str, str]:
+                return {"answer": "read while discovery waits"}
+
+            async with create_connected_server_and_client_session(server._mcp_server) as client:
+                refs = {
+                    key: ref.model_dump(mode="json") for key, ref in selection_of("worker").items()
+                }
+                start = asyncio.create_task(
+                    client.call_tool(
+                        "role_start", {"role": "worker", "request_id": str(uuid.uuid4()), **refs}
+                    )
+                )
+                try:
+                    self.assertTrue(await asyncio.to_thread(entered.wait, HANG_GUARD_SECONDS))
+                    read = await asyncio.wait_for(
+                        client.call_tool("read_call", {}), HANG_GUARD_SECONDS
+                    )
+                    self.assertFalse(read.isError)
+                    self.assertEqual(
+                        read.structuredContent, {"answer": "read while discovery waits"}
+                    )
+                    self.assertFalse(start.done(), "the read waited for catalog discovery")
+                finally:
+                    release.set()
+                    started = await asyncio.wait_for(start, HANG_GUARD_SECONDS)
+                self.assertFalse(started.isError)
+                assert started.structuredContent is not None
+                self.assertTrue(started.structuredContent["ok"])
+
+        asyncio.run(invoke())
 
     def test_a_chat_without_a_role_starts_an_architect_through_the_registered_tool(self) -> None:
         """MIK-R113 rule 6: no binding and no document reference start a parentless Architect."""

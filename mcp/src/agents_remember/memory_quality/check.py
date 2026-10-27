@@ -16,6 +16,7 @@ from agents_remember.memory_quality.converted_check import (
 )
 from agents_remember.memory_quality.landing_report import LandingBasePort
 from agents_remember.memory_quality.reference_state import is_converted_memory
+from agents_remember.memory_quality.source_files import QualitySourceFiles
 from agents_remember.memory_quality.style.document_shape import (
     diff_markers,
     entity_catalog_alignment,
@@ -125,7 +126,7 @@ def _converted_check(
             raise ValueError(f"{DRIFT_CHECK_NAME} requires drift context")
         return CONVERTED_KNOWLEDGE_CHECK, converted_knowledge_check(
             onboarding_root.parent,
-            drift_context.code_repository_root,
+            QualitySourceFiles(drift_context.code_repository_root),
             base=drift_context.knowledge_base,
             landing_base=drift_context.landing_base,
         )

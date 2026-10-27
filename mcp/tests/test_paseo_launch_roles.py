@@ -198,8 +198,9 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
             self.assertEqual(saved["replayRequest"]["agent"]["agentId"], saved["agentId"])
             self.assertEqual(payload.get("agentId", saved["agentId"]), saved["agentId"])
             self.assertTrue(stored)
-        # Beside receipts, message bindings and the role index a launch writes its artifact:
-        # no harness configuration file, in the folders it uses or in the user's home.
+        # R214 rule 2 also persists the last successful catalog answer with its lock.
+        # Beside that store, receipts, message bindings and the role index, a launch writes
+        # its artifact, with no harness configuration file in its folders or the user's home.
         # The task documents are the fixture's own (resolved_document writes them), and the
         # task-document copies are the launch's publication for the agent (L71): both are
         # enumerated exactly, so an unexpected file still fails this assertion. The two
@@ -221,6 +222,8 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
             f"coordination/tasks/{REPO}/master/01_leaf.md",
             "enclosure-group/task-documents/INDEX.json",
             "enclosure-group/task-documents/master/01_leaf.md",
+            "home/agents-remember/launcher-catalog.json",
+            "home/agents-remember/launcher-catalog.json.lock",
             "home/agents-remember/role-agents.json",
             "home/agents-remember/role-agents.json.lock",
         }

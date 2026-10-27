@@ -647,17 +647,19 @@ describe("launcher bar and the execution's state", () => {
       JSON.stringify({ requestId: REQUEST_ID, pending: true, retryPayload: { role: 'architect' } }),
     );
     const fetch = vi.mocked(globalThis.fetch);
-    fetch.mockImplementationOnce(
-      async () =>
-        new Response(
-          JSON.stringify({
-            roleDefaults: { agent: 'codex', available: true },
-            agents: [{ id: 'codex', label: 'Codex', models: [] }],
-            catalogOrigin: 'paseo:1',
-            executions: [],
-          }),
-        ),
-    );
+    const previousFetch = fetch.getMockImplementation()!;
+    let optionsAnswered = false;
+    fetch.mockImplementation(async (url, init) => {
+      if (url === '/api/role-launch/options' && !optionsAnswered) {
+        optionsAnswered = true;
+        return new Response(JSON.stringify({
+          roleDefaults: { agent: 'codex', available: true },
+          agents: [{ id: 'codex', label: 'Codex', models: [] }],
+          catalogOrigin: 'paseo:1', executions: [],
+        }));
+      }
+      return previousFetch(url, init);
+    });
     const { getByTestId, getByRole } = render(<RoleChatsPane active tasks={[]} />);
     const launcher = getByTestId('role-launcher');
     await waitFor(() =>
@@ -675,7 +677,7 @@ describe("launcher bar and the execution's state", () => {
     expect(launcher.querySelector('[role="alert"]')).toBeNull();
   });
 
-  it('preserves the base controls when a task-bound dispatch and its options read fail', async () => {
+  it('preserves document controls but requires fresh options after a task-bound dispatch and options read fail', async () => {
     const sprint = taskEntry({
       summary: taskSummary({ kind: 'master', form: 'sprint', orchestrates: ['sbx-m1'] }),
       reference: { repository: 'sandbox-app', path: 'sbx-sprint/task.json' },
@@ -707,8 +709,9 @@ describe("launcher bar and the execution's state", () => {
     );
     expect((getByLabelText('Role') as HTMLSelectElement).disabled).toBe(false);
     expect((getByLabelText('AR sprint') as HTMLSelectElement).disabled).toBe(false);
-    expect((getByLabelText('Role agent override') as HTMLSelectElement).disabled).toBe(false);
-    expect((getByRole('button', { name: 'Start role' }) as HTMLButtonElement).disabled).toBe(false);
+    // A transport failure returned no fresh/default fallback answer, so an old view cannot authorize launch.
+    expect((getByLabelText('Role agent override') as HTMLSelectElement).disabled).toBe(true);
+    expect((getByRole('button', { name: 'Start role' }) as HTMLButtonElement).disabled).toBe(true);
     expect(queryByRole('button', { name: 'Retry role launch' })).toBeNull();
     expect(launcher.querySelectorAll('[role="alert"]')).toHaveLength(1);
     expect(launcher.querySelector('[role="alert"]')?.textContent).toContain(

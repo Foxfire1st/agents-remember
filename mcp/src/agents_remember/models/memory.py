@@ -165,6 +165,10 @@ class CitationFixResponse(FlexibleToolResponse):
     operation: Literal["citation_fix"] = "citation_fix"
     repoId: str | None = None
     dryRun: bool | None = None
+    # The same preview result may be delivered by a completed background run.
+    # Keep synchronous status vocabulary unchanged while declaring the run fields.
+    status: str | None = None
+    runId: str | None = None
     # MIK-R110 rule 2: the status. How many documents the call covered, and the counts:
     # rewritten, stale, unreadable, refused. The lists themselves stay in the whole
     # result; the answer keeps the first entries up to the list bound.

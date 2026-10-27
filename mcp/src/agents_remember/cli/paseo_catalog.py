@@ -1,17 +1,12 @@
-"""The launcher's agent, model and effort catalog, taken from the Paseo runtime.
-
-The catalog is whatever the runtime reports through the bridge's ``catalog`` command: its ready and
-enabled providers, each with its models and their thinking options. Agents Remember keeps no model
-table of its own. One catalog is cached per Paseo runtime in this process; it is loaded when the
-cache is empty and rediscovered only on an explicit refresh. Role defaults and launch requests are
-checked against that cached catalog and are never replaced by another value.
-"""
+"""Fresh Paseo launch choices with per-part durable last-answer fallback."""
 
 from __future__ import annotations
 
-import threading
 import uuid
-from dataclasses import asdict, dataclass
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from agents_remember.application.user_settings_init import SettingsInitRefused
@@ -21,19 +16,28 @@ from agents_remember.cli.paseo_bridge import (
     bridge_call,
     require_bridge_runtime,
 )
+from agents_remember.cli.paseo_catalog_features import selected_model_features
+from agents_remember.cli.paseo_catalog_names import (
+    canonical_defaults,
+    canonical_fields,
+    canonical_model_choices,
+)
+from agents_remember.cli.paseo_catalog_names import (
+    part_known as _part_known,
+)
+from agents_remember.cli.paseo_catalog_store import (
+    catalog_store_path,
+    merge_catalog_parts,
+    saved_catalog_parts,
+)
 from agents_remember.cli.role_instructions import launch_choice_metadata
 from agents_remember.cli.role_launch_defaults import extra_args_plan
 from agents_remember.cli.role_step_up import label_step_up_choices
-from agents_remember.kernel._agentic_settings_core import (
-    NON_PERMISSION_FEATURES,
-    native_service_tier,
-)
+from agents_remember.kernel._agentic_settings_core import NON_PERMISSION_FEATURES
 from agents_remember.kernel.agentic_settings import load_agentic_settings
+from agents_remember.kernel.primitives.named_choices import named as _named
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import RoleAgentOverride
-
-_CATALOGS: dict[tuple[str, str, str, str], LauncherCatalog] = {}
-_CATALOG_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -45,45 +49,102 @@ class LauncherCatalog:
     # The providers the runtime reports as not accepting tool servers from their host.
     without_tool_servers: frozenset[str] = frozenset()
 
+    discovery: dict[str, Any] = field(default_factory=lambda: {"source": "fresh", "readAt": None})
+    mode: str = "full"
+    asked: bool = True
+    scope: tuple[str, ...] = ()
+    feature_answers: dict[tuple[str, str], dict[str, Any]] = field(
+        default_factory=dict, compare=False
+    )
+
     def agent(self, agent_id: str) -> dict[str, Any] | None:
-        return next((agent for agent in self.agents if agent["id"] == agent_id), None)
+        return _named(self.agents, agent_id)
 
 
 class LaunchSelectionRefused(ValueError):
-    """The requested agent, model or effort is not one the cached catalog offers."""
+    """The requested agent, model or effort is not one the currently answered catalog offers."""
 
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
 
 
-def launcher_catalog(config: McpRuntimeConfig, *, refresh: bool = False) -> LauncherCatalog:
-    """Return the cached catalog of the configured runtime, discovering it when needed.
+_OPERATION_CATALOGS: ContextVar[dict[tuple[str, ...], LauncherCatalog] | None] = ContextVar(
+    "paseo_operation_catalogs", default=None
+)
 
-    A failed discovery raises :class:`PaseoBridgeFailure` and caches nothing; a catalog cached
-    earlier stays in place.
-    """
 
+@contextmanager
+def launcher_catalog_question() -> Iterator[None]:
+    """Share a start's two questions (metadata, selected features) or a view's one full read."""
+    if _OPERATION_CATALOGS.get() is not None:
+        yield
+        return
+    token = _OPERATION_CATALOGS.set({})
+    try:
+        yield
+    finally:
+        _OPERATION_CATALOGS.reset(token)
+
+
+def launcher_catalog(
+    config: McpRuntimeConfig, *, refresh: bool = False, mode: str = "metadata"
+) -> LauncherCatalog:
+    """Ask Paseo now; only unanswered parts use its durable last successful answer."""
     scope = paseo_catalog_scope(config)
-    with _CATALOG_LOCK:
-        cached = _CATALOGS.get(scope)
-        if cached is not None and not refresh:
+    current = _OPERATION_CATALOGS.get()
+    if not refresh and current is not None and scope in current:
+        cached = current[scope]
+        if mode != "full" or cached.mode == "full":
             return cached
+    catalog = _question_catalog(config, scope, refresh=refresh, mode=mode)
+    if current is not None:
+        current[scope] = catalog
+    return catalog
+
+
+def _question_catalog(
+    config: McpRuntimeConfig, scope: tuple[str, ...], *, refresh: bool, mode: str
+) -> LauncherCatalog:
+    runtime = require_bridge_runtime(config)
+    error = None
+    try:
         reply = bridge_call(
             config,
             "catalog",
-            {"cwd": config.workspace_root.as_posix(), **({"refresh": True} if refresh else {})},
+            {
+                "cwd": config.workspace_root.as_posix(),
+                **({"refresh": True} if refresh else {}),
+                **({"mode": mode} if mode != "full" else {}),
+            },
         )
-        catalog = LauncherCatalog(
-            origin=f"paseo:{uuid.uuid4().hex}",
-            agents=_agents_from_reply(reply),
-            without_tool_servers=_providers_without_tool_servers(reply),
-        )
-        _CATALOGS[scope] = catalog
-        return catalog
+    except PaseoBridgeFailure as failure:
+        reply, error = None, str(failure)
+    merged = merge_catalog_parts(catalog_store_path(runtime.home), scope, reply, error)
+    return LauncherCatalog(
+        origin=f"paseo:{uuid.uuid4().hex}",
+        agents=_agents_from_reply(merged),
+        without_tool_servers=_providers_without_tool_servers(merged),
+        discovery=merged["catalogDiscovery"],
+        mode=mode,
+        scope=scope,
+    )
 
 
-def runnable_harnesses(config: McpRuntimeConfig) -> list[str]:
+def saved_launcher_catalog(config: McpRuntimeConfig) -> LauncherCatalog:
+    """Offer the saved snapshot while a launcher awaits its fresh question; never author it."""
+    runtime = require_bridge_runtime(config)
+    saved = saved_catalog_parts(catalog_store_path(runtime.home), paseo_catalog_scope(config))
+    return LauncherCatalog(
+        origin="paseo:saved",
+        agents=_agents_from_reply(saved),
+        without_tool_servers=_providers_without_tool_servers(saved),
+        discovery=saved["catalogDiscovery"],
+        asked=False,
+    )
+
+
+def runnable_harnesses(config: McpRuntimeConfig) -> list[dict[str, str]] | None:
     """The provider ids the configured host can run, as the catalog answers them now.
 
     The role-settings initializer needs this check; the MCP tool handler supplies this reader so
@@ -98,11 +159,13 @@ def runnable_harnesses(config: McpRuntimeConfig) -> list[str]:
             f"The host's providers cannot be read: {error}",
             "Start the host (runtime_install, then retry) and call again.",
         ) from error
-    return [agent["id"] for agent in catalog.agents]
+    if catalog.discovery.get("source") == "unknown":
+        return None
+    return [{"id": agent["id"], "label": agent["label"]} for agent in catalog.agents]
 
 
 def paseo_catalog_scope(config: McpRuntimeConfig) -> tuple[str, str, str, str]:
-    """The cache key of one Paseo runtime: its install, daemon home, listen address and version."""
+    """The identity of one Paseo runtime: its install, daemon home, listen address and version."""
 
     settings = require_bridge_runtime(config)
     return (
@@ -111,13 +174,6 @@ def paseo_catalog_scope(config: McpRuntimeConfig) -> tuple[str, str, str, str]:
         settings.listen,
         settings.version,
     )
-
-
-def forget_launcher_catalogs() -> None:
-    """Empty the process cache; the next options call or launch discovers the catalog again."""
-
-    with _CATALOG_LOCK:
-        _CATALOGS.clear()
 
 
 def read_host_role(config: McpRuntimeConfig, role: str) -> dict[str, Any]:
@@ -147,9 +203,11 @@ def launcher_options(
     *,
     refresh: bool = False,
 ) -> dict[str, Any]:
-    catalog = launcher_catalog(config, refresh=refresh)
+    catalog = launcher_catalog(config, refresh=refresh, mode="full")
     try:
-        agent_id, options = resolve_agent_selection(config, defaults, harness_order, None)
+        agent_id, options = resolve_agent_selection(
+            config, defaults, harness_order, None, catalog=catalog
+        )
         role_defaults = {
             "agent": agent_id,
             "stepUp": defaults.get("stepUp"),
@@ -173,6 +231,7 @@ def launcher_options(
         "roleDefaults": role_defaults,
         "agents": [dict(agent) for agent in catalog.agents],
         "catalogOrigin": catalog.origin,
+        "catalogDiscovery": catalog.discovery,
     }
 
 
@@ -181,22 +240,26 @@ def resolve_agent_selection(
     defaults: dict[str, Any],
     harness_order: tuple[str, ...],
     override: RoleAgentOverride | None,
+    *,
+    catalog: LauncherCatalog | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Resolve fields by source, keeping lower choices bound to their provider/model."""
-    catalog = launcher_catalog(config)
+    catalog = launcher_catalog(config) if catalog is None or not catalog.asked else catalog
+    defaults = canonical_defaults(catalog.agents, defaults)
     settings_agent = _default_agent(defaults["agent"], harness_order, catalog)
     profile_read = defaults.get("hostRole", {})
-    profile = profile_read.get("profile", {})
+    profile = canonical_fields(
+        catalog.agents, profile_read.get("profile", {}), ("provider", "model", "thinkingOptionId")
+    )
     host_agent = profile.get("provider") or None
-    call = override.model_dump(by_alias=True, exclude_none=True) if override else {}
+    call = canonical_fields(
+        catalog.agents,
+        override.model_dump(by_alias=True, exclude_none=True) if override else {},
+        ("agentId", "modelId", "effortId"),
+    )
     call_features = call.get("featureValues", {})
-    for key in call_features:
-        if key not in NON_PERMISSION_FEATURES:
-            raise LaunchSelectionRefused(
-                "permission_feature_in_start",
-                f"Role {defaults.get('role')}: featureValues.{key} bears on permission; configure it in the user's settings or host profile, not a start call.",
-            )
     agent_id = call.get("agentId") or host_agent or settings_agent
+    agent_id = _canonical_agent_id(catalog, agent_id)
     if agent_id is None:
         raise LaunchSelectionRefused("agent_not_selected", "No agent is selected.")
     choices: dict[str, Any] = {}
@@ -262,6 +325,13 @@ def resolve_agent_selection(
             ),
         ],
     )
+    model_id, effort_id = canonical_model_choices(catalog.agent(agent_id), model_id, effort_id)
+    choices.update(
+        {
+            key: {**choices[key], "value": value}
+            for key, value in (("agent", agent_id), ("model", model_id), ("effort", effort_id))
+        }
+    )
     refusal = _selection_refusal(catalog, agent_id, model_id, effort_id)
     if refusal:
         key = (
@@ -275,8 +345,7 @@ def resolve_agent_selection(
             refusal.code,
             f"Role {defaults.get('role')}: {_choice_source(choices[key], key, defaults.get('role'))}: {refusal}",
         )
-    agent = catalog.agent(agent_id)
-    assert agent is not None
+    agent = catalog.agent(agent_id) or _unknown_agent(agent_id)
     mode = pick(
         "mode",
         [
@@ -296,14 +365,10 @@ def resolve_agent_selection(
         defaults.get("role"),
         host_default=defaults.get("useHostDefaultMode", False),
     )
-    model = (
-        next((row for row in agent["models"] if row["id"] == model_id), None)
-        if model_id
-        else next((row for row in agent["models"] if row.get("isDefault")), None)
-    )
-    settings_features = dict(defaults.get("featureValues", {}))
-    if defaults.get("serviceTier"):
-        settings_features["service_tier"] = native_service_tier(defaults["serviceTier"])
+    model = _model_with_features(config, catalog, agent, (agent_id, model_id))
+    call_features = _canonical_features(call_features, model)
+    _check_permission_features(call_features, defaults.get("role"))
+    settings_features = _settings_features(defaults, model)
     layers = [
         (
             settings_features,
@@ -313,7 +378,7 @@ def resolve_agent_selection(
             defaults.get("fieldOrigins", {}),
         ),
         (
-            profile.get("featureValues") or {},
+            _canonical_features(profile.get("featureValues") or {}, model),
             "host role",
             host_agent,
             host_model,
@@ -334,7 +399,7 @@ def resolve_agent_selection(
         layers,
         agent_id=agent_id,
         model_id=model_id,
-        offered=model.get("features", []) if model else [],
+        model=model,
         role=defaults.get("role"),
     )
     choices["notes"] = _resolve_notes(defaults, profile)
@@ -458,11 +523,8 @@ def _resolve_mode(
     *,
     host_default: bool = False,
 ) -> tuple[str | None, dict[str, Any]]:
-    if agent.get("listingError") or agent.get("modesKnown") is False:
-        raise LaunchSelectionRefused(
-            "modes_unknown",
-            f"Role {role}: modes for {agent['id']} are not known: {agent.get('listingError') or 'the host did not return its mode catalog'}; refresh the host catalog before starting.",
-        )
+    if agent.get("modesKnown") is False:
+        return mode, choice
     modes = agent["modes"]
     if mode is None and host_default:
         mode = agent.get("defaultModeId")
@@ -477,7 +539,11 @@ def _resolve_mode(
             if mode
             else "no named least working mode offered for this agent kind",
         }
-    if mode is not None and not any(row["id"] == mode for row in modes):
+    matched = _named(modes, mode) if mode is not None else None
+    if matched is not None:
+        mode = matched["id"]
+        choice = {**choice, "value": mode}
+    if mode is not None and matched is None:
         raise LaunchSelectionRefused(
             "mode_not_offered",
             f"Role {role}: {_choice_source(choice, 'mode', role)}={mode!r} is not offered for {agent['id']}; offered: {[row['id'] for row in modes]}",
@@ -511,9 +577,10 @@ def _resolve_features(
     *,
     agent_id: str,
     model_id: str | None,
-    offered: list[dict[str, Any]],
+    model: dict[str, Any] | None,
     role: str | None,
 ) -> tuple[dict[str, str | bool], dict[str, Any], list[dict[str, Any]]]:
+    offered = model.get("features", []) if model else []
     omitted: list[dict[str, Any]] = []
     features: dict[str, str | bool] = {}
     feature_sources: dict[str, Any] = {}
@@ -543,18 +610,7 @@ def _resolve_features(
                 "source": source,
                 **({"origin": origin} if origin else {}),
             }
-    for key, value in features.items():
-        definition = next((row for row in offered if row["id"] == key), None)
-        valid = definition is not None and (
-            isinstance(value, bool)
-            if definition["type"] == "toggle"
-            else isinstance(value, str) and any(row["id"] == value for row in definition["options"])
-        )
-        if not valid:
-            raise LaunchSelectionRefused(
-                "service_tier_not_offered" if key == "service_tier" else "feature_not_offered",
-                f"Role {role}: {_choice_source(feature_sources[key], f'featureValues.{key}', role)} ({'service tier' if key == 'service_tier' else 'feature'})={value!r} is not offered for {agent_id}/{model_id or 'native default'}; offered: {[(row['id'], [option['id'] for option in row.get('options', [])]) for row in offered]}",
-            )
+    _validate_features(features, feature_sources, (agent_id, model_id), model, role)
     for definition in offered:
         if definition["id"] not in feature_sources:
             feature_sources[definition["id"]] = {
@@ -595,11 +651,12 @@ def _resolve_notes(defaults: dict[str, Any], profile: dict[str, Any]) -> dict[st
 def provider_accepts_tool_servers(config: McpRuntimeConfig, agent_id: str) -> bool:
     """Whether the runtime reports that this provider takes tool servers from its host.
 
-    The answer is the cached catalog's, the one the launch was validated against. Only an
+    The answer follows the same fresh-question and per-part fallback as launch choices. Only an
     explicit report of the runtime withholds the tool server from a provider.
     """
 
-    return agent_id not in launcher_catalog(config).without_tool_servers
+    agent = launcher_catalog(config).agent(agent_id)
+    return agent is None or agent.get("acceptsToolServers") is not False
 
 
 def _default_agent(
@@ -626,6 +683,8 @@ def _selection_refusal(
         )
     agent = catalog.agent(agent_id)
     if agent is None:
+        if catalog.discovery.get("source") == "unknown":
+            return None
         return LaunchSelectionRefused(
             "agent_not_offered", f"The Paseo runtime does not offer agent {agent_id!r}."
         )
@@ -639,13 +698,15 @@ def _selection_refusal(
 def _model_refusal(
     agent: dict[str, Any], model_id: str, effort_id: str | None
 ) -> LaunchSelectionRefused | None:
-    model = next((item for item in agent["models"] if item["id"] == model_id), None)
+    if agent.get("modelsKnown") is False:
+        return None
+    model = _named(agent["models"], model_id)
     if model is None:
         return LaunchSelectionRefused(
             "model_not_offered",
             f"The Paseo runtime does not offer model {model_id!r} for agent {agent['id']!r}.",
         )
-    if effort_id and not any(effort["id"] == effort_id for effort in model["efforts"]):
+    if effort_id and _part_known(model, "efforts") and _named(model["efforts"], effort_id) is None:
         return LaunchSelectionRefused(
             "effort_not_offered",
             f"The Paseo runtime does not offer effort {effort_id!r} for model {model_id!r}.",
@@ -681,7 +742,10 @@ def _agent_row(provider: Any) -> dict[str, Any]:
         "id": provider["id"],
         "label": provider["label"] if _is_text(provider.get("label")) else provider["id"],
         "models": [_model_row(model) for model in models],
-        "modesKnown": isinstance(provider.get("modes"), list),
+        "modelsKnown": provider.get("modelsKnown", True),
+        "discovery": provider.get("discovery", {}),
+        "acceptsToolServers": provider.get("acceptsToolServers"),
+        "modesKnown": provider.get("modesKnown", isinstance(provider.get("modes"), list)),
         "modes": [dict(mode) for mode in provider.get("modes", [])],
         "defaultModeId": provider.get("defaultModeId"),
         "fetchedAt": provider.get("fetchedAt"),
@@ -705,6 +769,7 @@ def _model_row(model: Any) -> dict[str, Any]:
         **({"description": model["description"]} if _is_text(model.get("description")) else {}),
         **({"isDefault": True} if model.get("isDefault") is True else {}),
         "efforts": [_effort_row(effort) for effort in efforts],
+        "discovery": model.get("discovery", {}),
         "serviceTiers": [_effort_row(tier) for tier in tiers],
         "features": [
             {**feature, "permissionBearing": feature["id"] not in NON_PERMISSION_FEATURES}
@@ -768,3 +833,107 @@ def settings_role_launch(
         "useHostDefaultMode": True,
     }
     return resolve_agent_selection(config, defaults, settings.harness_ids, None)
+
+
+def _unknown_agent(agent_id: str) -> dict[str, Any]:
+    return {"id": agent_id, "models": [], "modelsKnown": False, "modes": [], "modesKnown": False}
+
+
+def _validate_features(
+    features: dict[str, str | bool],
+    sources: dict[str, Any],
+    selection: tuple[str, str | None],
+    model: dict[str, Any] | None,
+    role: str | None,
+) -> None:
+    offered = model.get("features", []) if model else []
+    for key, value in features.items():
+        if not _part_known(model, "serviceTiers" if key == "service_tier" else "features"):
+            continue
+        valid, resolved = _feature_choice(_named(offered, key), value)
+        if not valid:
+            agent_id, model_id = selection
+            raise LaunchSelectionRefused(
+                "service_tier_not_offered" if key == "service_tier" else "feature_not_offered",
+                f"Role {role}: {_choice_source(sources[key], f'featureValues.{key}', role)} ({'service tier' if key == 'service_tier' else 'feature'})={value!r} is not offered for {agent_id}/{model_id or 'native default'}; offered: {[(row['id'], [option['id'] for option in row.get('options', [])]) for row in offered]}",
+            )
+        features[key] = resolved
+        sources[key]["value"] = resolved
+
+
+def _feature_choice(
+    definition: dict[str, Any] | None, value: str | bool
+) -> tuple[bool, str | bool]:
+    if definition is None:
+        return False, value
+    if definition["type"] == "toggle":
+        return isinstance(value, bool), value
+    option = _named(definition.get("options", []), value) if isinstance(value, str) else None
+    return option is not None, option["id"] if option else value
+
+
+def _settings_features(defaults: dict[str, Any], model: dict[str, Any] | None) -> dict[str, Any]:
+    features = _canonical_features(defaults.get("featureValues", {}), model)
+    tier = defaults.get("serviceTier")
+    other = features.get("service_tier")
+    if tier and other and _part_known(model, "serviceTiers"):
+        definition = _named(model.get("features", []), "service_tier") if model else None
+        first = _feature_choice(definition, tier)
+        second = _feature_choice(definition, other)
+        if not first[0] or not second[0]:
+            key = "serviceTier" if not first[0] else "featureValues.service_tier"
+            raise LaunchSelectionRefused(
+                "service_tier_not_offered",
+                f"{_settings_choice_source(defaults, key)} is not offered by Paseo",
+            )
+        if first[1] != second[1]:
+            raise LaunchSelectionRefused(
+                "conflicting_service_tier",
+                f"{_settings_choice_source(defaults, 'serviceTier')} and "
+                f"{_settings_choice_source(defaults, 'featureValues.service_tier')} name different Paseo choices",
+            )
+    if tier:
+        features["service_tier"] = tier
+    return features
+
+
+def _canonical_agent_id(catalog: LauncherCatalog, value: str | None) -> str | None:
+    matched = catalog.agent(value) if value else None
+    return matched["id"] if matched is not None else value
+
+
+def _canonical_features(values: dict[str, Any], model: dict[str, Any] | None) -> dict[str, Any]:
+    offered = model.get("features", []) if model else []
+    return {
+        (row["id"] if (row := _named(offered, key)) is not None else key): value
+        for key, value in values.items()
+    }
+
+
+def _check_permission_features(features: dict[str, Any], role: str | None) -> None:
+    for key in features:
+        if key not in NON_PERMISSION_FEATURES:
+            raise LaunchSelectionRefused(
+                "permission_feature_in_start",
+                f"Role {role}: featureValues.{key} bears on permission; configure it in the user's settings or host profile, not a start call.",
+            )
+
+
+def _settings_choice_source(defaults: dict[str, Any], key: str) -> str:
+    choice = {"source": "our settings", **_choice_origin("our settings", key, defaults, {})}
+    return _choice_source(choice, key, defaults.get("role"))
+
+
+def _model_with_features(
+    config: McpRuntimeConfig,
+    catalog: LauncherCatalog,
+    agent: dict[str, Any],
+    target: tuple[str, str | None],
+) -> dict[str, Any] | None:
+    model_id = target[1]
+    model = (
+        next((row for row in agent["models"] if row["id"] == model_id), None)
+        if model_id
+        else next((row for row in agent["models"] if row.get("isDefault")), None)
+    )
+    return selected_model_features(config, catalog, target, model, bridge_call)

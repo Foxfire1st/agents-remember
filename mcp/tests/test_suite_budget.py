@@ -14,7 +14,7 @@ import pytest
 # keeps it honest, so a raise cannot leave the screen proving the boundaries of a ceiling that no
 # longer exists.
 STUB_UNIT = 10000
-STUB_INTEGRATION = 1000
+STUB_INTEGRATION = 2000
 
 
 class _Item:

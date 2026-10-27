@@ -387,7 +387,7 @@ def _launcher_catalog(
     context: RoleLaunchContext,
     request: RoleLauncherOptionsRequest,
 ) -> dict[str, Any]:
-    """Role defaults plus the Paseo runtime's cached catalog; only an explicit refresh rediscovers."""
+    """Role defaults plus fresh full offers; Refresh also rediscovers the providers."""
 
     defaults, harness_order = _role_defaults(config, context)
     return launcher_options(config, defaults, harness_order, refresh=request.refresh_catalog)

@@ -146,9 +146,9 @@ class GlobalStateLeakDetectionTests(unittest.TestCase):
         )
 
     def test_resets_touch_only_loaded_modules_and_forget_a_later_loaded_cache(self) -> None:
-        owner = "agents_remember.cli.paseo_catalog"
+        owner = "agents_remember.application.tool_answer_log"
         fake = ModuleType(owner)
-        fake.__dict__["_CATALOGS"] = {"previous module": object()}
+        fake.__dict__["_FOLDER_BUDGETS"] = {"previous module": object()}
         with mock.patch.dict(sys.modules):
             sys.modules.pop(owner, None)
             before = set(sys.modules)
@@ -156,7 +156,7 @@ class GlobalStateLeakDetectionTests(unittest.TestCase):
             self.assertEqual(set(sys.modules), before)
             sys.modules[owner] = fake
             reset_process_mutable_state()
-            self.assertEqual(fake._CATALOGS, {})
+            self.assertEqual(fake._FOLDER_BUDGETS, {})
 
     def test_every_reset_row_runs_its_declared_cleanup_for_a_loaded_owner(self) -> None:
         # Ambient's actual heartbeat is exercised separately; all other registered reset

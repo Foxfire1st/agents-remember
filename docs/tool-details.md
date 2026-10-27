@@ -145,6 +145,19 @@ detail file. On converted memory it authors the cards' citation rows into sideca
 references and re-records moved anchors; document selection scopes the run to those
 cards.
 
+For a long preview, use `mode="start", dry_run=true` with the same `repo_id`,
+`contract_path` and document selection. It returns a `runId` immediately. Poll with
+`mode="poll", run_id=<runId>` and the same repository and contract, without document
+selectors. A poll returns `running`, `completed` or `failed`; a completed answer is
+the synchronous preview answer with `status` and `runId` added. Background previews
+share the memory check's bounded run registry, capacity and scope/pair checks. They
+never apply repairs. The default `mode="sync"` and synchronous writes are unchanged.
+
+Long synchronous calls run outside the server's event loop, so reads and polls can
+answer while they run. Synchronous operations that may write still run one at a
+time, in admission order; cancelling a request does not release that ordering until
+its worker has stopped. Existing asynchronous handlers retain their own ordering.
+
 
 ## `citation_note_revision`
 
@@ -259,6 +272,19 @@ acceptance. A saturated unique start returns `capacity-reached` without launchin
 A poll returns the identical pair-bound result; `run-not-found` means the run was evicted,
 belongs to another repository, or the server restarted, so submit a new start request
 with the original contract path for a candidate run.
+
+The synchronous converted check uses Git's tracked and non-ignored untracked
+source files. Its `sourceFiles` listing reports indexed and skipped counts and names
+each skipped file with its reason, even when no claim cites it. Inspection
+reads at most 4 MiB plus one byte per file without retaining uncited bodies
+or following symbolic links.
+A readable citation into an ignored or binary file still verifies its
+content; `referenceSourceNotes` names the listing reason on that anchor.
+Onboarding path rules govern per-file notes, not citation source selection:
+a readable file excluded by those rules is checked normally, without a remark.
+A citation into an oversized file, link or otherwise unreadable path produces
+a finding naming why it could not be read. Uncited build output and binaries
+do not fail the check, and there is no source-file count limit. The retired whole-repository citation index is not rebuilt.
 
 
 ## `retire_child`

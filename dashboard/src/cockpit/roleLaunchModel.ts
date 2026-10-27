@@ -32,7 +32,14 @@ export interface RoleEffortChoice {
   label: string;
 }
 
+export interface CatalogDiscoveryState {
+  source: 'fresh' | 'saved' | 'unknown';
+  readAt: string | null;
+  error?: string;
+}
+
 export interface RoleModelChoice {
+  discovery?: { efforts?: CatalogDiscoveryState; features?: CatalogDiscoveryState; serviceTiers?: CatalogDiscoveryState };
   id: string;
   label: string;
   efforts?: RoleEffortChoice[];
@@ -56,6 +63,10 @@ export const EMPTY_ROLE_MODELS: RoleModelChoice[] = [];
 export const EMPTY_ROLE_EFFORTS: RoleEffortChoice[] = [];
 
 export interface RoleAgentChoice {
+  discovery?: { models?: CatalogDiscoveryState; modes?: CatalogDiscoveryState; acceptsToolServers?: CatalogDiscoveryState };
+  modelsKnown?: boolean;
+  modesKnown?: boolean;
+  acceptsToolServers?: boolean;
   id: string;
   label: string;
   models: RoleModelChoice[];
@@ -132,6 +143,7 @@ export interface RoleOptionsScope extends RoleDocumentScope {
 }
 
 export interface RoleLauncherOptions {
+  catalogDiscovery?: CatalogDiscoveryState;
   roleDefaults: RoleDefaults;
   agents: RoleAgentChoice[];
   execution?: RoleScopedExecution | null;
@@ -139,10 +151,7 @@ export interface RoleLauncherOptions {
   catalogOrigin?: string;
 }
 
-export interface RoleAgentInventory {
-  catalogOrigin: string;
-  agents: RoleAgentChoice[];
-}
+export type SavedRoleCatalog = Pick<RoleLauncherOptions, 'agents' | 'catalogDiscovery' | 'catalogOrigin'>;
 
 /** The host fields of an execution: the agent the host runs for it (`kind: "paseo-agent"`). */
 export interface RoleExecutionHost {
@@ -376,35 +385,6 @@ export function launchSelectionComplete(selection: RoleLaunchSelection): boolean
   );
 }
 
-export function roleDefaultsCacheKey(scope: RoleDocumentScope): string {
-  const effectiveRef = scope.taskDocumentRef ?? scope.masterDocumentRef ?? scope.sprintDocumentRef;
-  return scope.role + '::' + (effectiveRef?.repository ?? 'projects');
-}
-
-export function mergeRoleAgentInventory(
-  previous: RoleAgentInventory | null,
-  options: RoleLauncherOptions,
-  selectedAgentId: string | undefined,
-  refresh: boolean,
-): RoleAgentInventory {
-  const catalogOrigin = options.catalogOrigin ?? previous?.catalogOrigin ?? 'active-runtime';
-  if (!previous || previous.catalogOrigin !== catalogOrigin || refresh) {
-    return { catalogOrigin, agents: options.agents };
-  }
-  const previousById = new Map(previous.agents.map((agent) => [agent.id, agent]));
-  return {
-    catalogOrigin,
-    agents: options.agents.map((agent) => {
-      const cached = previousById.get(agent.id);
-      const models =
-        agent.id === selectedAgentId || agent.models.length > 0
-          ? agent.models
-          : (cached?.models ?? []);
-      return { ...agent, models };
-    }),
-  };
-}
-
 export function sameOptionalTaskDocumentRef(
   left: TaskDocumentRef | undefined,
   right: TaskDocumentRef | undefined,
@@ -455,13 +435,16 @@ export function launchChoiceProblem(
   defaults: RoleDefaults,
   agents: RoleAgentChoice[],
   override: RoleAgentOverride | undefined,
+  catalogDiscovery?: CatalogDiscoveryState,
 ): string | null {
+  if (catalogDiscovery?.source === 'unknown') return null;
   if (!override) return unofferedRoleDefault(defaults);
   const agentId = override.agentId ?? defaults.agent;
-  const agent = agents.find((choice) => choice.id === agentId);
+  const agent = agents.find((choice) => matchesChoice(choice, agentId));
   if (!agent) return unofferedAgent(agentId);
-  const modelId = override.modelId || roleValue(agentId === defaults.agent, defaults.model);
-  const onRoleModel = agentId === defaults.agent && modelId === roleValue(true, defaults.model);
+  const onRoleAgent = matchesChoice(agent, defaults.agent);
+  const modelId = override.modelId || roleValue(onRoleAgent, defaults.model);
+  const onRoleModel = onRoleAgent && sameConfiguredModel(agent, modelId, defaults.model);
   return (
     unofferedModelOrEffort(
       agent,
@@ -471,11 +454,28 @@ export function launchChoiceProblem(
     unofferedServiceTier(
       agent,
       modelId,
-      typeof override.featureValues?.service_tier === 'string'
-        ? override.featureValues.service_tier
-        : roleValue(agentId === defaults.agent, defaults.serviceTier),
+      selectedServiceTier(override, roleValue(onRoleAgent, defaults.serviceTier)),
     )
   );
+}
+
+function sameConfiguredModel(agent: RoleAgentChoice, selected: string | undefined, configured: string | undefined): boolean {
+  const model = agent.models.find((row) => matchesChoice(row, configured));
+  return selected === configured || Boolean(model && matchesChoice(model, selected));
+}
+
+function selectedServiceTier(override: RoleAgentOverride, configured: string | undefined): string | undefined {
+  const selected = override.featureValues?.service_tier;
+  return typeof selected === 'string' ? selected : configured;
+}
+
+function unknownModels(agent: RoleAgentChoice): boolean {
+  return agent.discovery?.models?.source === 'unknown' || agent.modelsKnown === false;
+}
+
+export function matchesChoice(choice: { id: string; label: string }, value: string | undefined): boolean {
+  const name = value?.toLowerCase();
+  return name !== undefined && (choice.id.toLowerCase() === name || choice.label.toLowerCase() === name);
 }
 
 function unofferedAgent(agentId: string | undefined): string {
@@ -489,18 +489,17 @@ function unofferedServiceTier(
 ): string | null {
   if (!tier) return null;
   const model = modelId
-    ? agent.models.find((row) => row.id === modelId)
+    ? agent.models.find((row) => matchesChoice(row, modelId))
     : agent.models.find((row) => row.isDefault);
-  const native = tier === 'fast' ? 'priority' : tier;
-  return model?.serviceTiers?.some((row) => row.id === native)
+  if (unknownModels(agent) || unknownServiceTiers(model)) return null;
+  return model?.serviceTiers?.some((row) => matchesChoice(row, tier))
     ? null
-    : 'Service tier ' +
-        tier +
-        ' is not offered for ' +
-        agent.label +
-        '/' +
-        (modelId ?? 'native default') +
-        (model?.serviceTierError ? ': ' + model.serviceTierError : '.');
+    : serviceTierProblem(agent.label, modelId, tier, model?.serviceTierError);
+}
+
+function serviceTierProblem(agent: string, model: string | undefined, tier: string, error: string | undefined): string {
+  return 'Service tier ' + tier + ' is not offered for ' + agent + '/' +
+    (model ?? 'native default') + (error ? ': ' + error : '.');
 }
 
 /** A role default that applies; the backend sends an unset default as null, read here as unset. */
@@ -525,16 +524,22 @@ function unofferedModelOrEffort(
   modelId: string | undefined,
   effortId: string | undefined,
 ): string | null {
+  if (unknownModels(agent)) return null;
   if (!modelId) return effortId ? 'Effort ' + effortId + ' needs a model; pick a model.' : null;
-  const model = agent.models.find((choice) => choice.id === modelId);
+  const model = agent.models.find((choice) => matchesChoice(choice, modelId));
   if (!model)
     return 'Model ' + modelId + ' is not offered for ' + agent.label + '; pick a model it offers.';
-  if (effortId && !(model.efforts ?? []).some((choice) => choice.id === effortId)) {
-    return (
-      'Effort ' + effortId + ' is not offered for ' + model.label + '; pick an effort it offers.'
-    );
-  }
-  return null;
+  return unofferedEffort(model, effortId);
+}
+
+function unknownServiceTiers(model: RoleModelChoice | undefined): boolean {
+  return !model || model.discovery?.serviceTiers?.source === 'unknown';
+}
+
+function unofferedEffort(model: RoleModelChoice, effortId: string | undefined): string | null {
+  if (!effortId || model.discovery?.efforts?.source === 'unknown') return null;
+  if ((model.efforts ?? []).some((choice) => matchesChoice(choice, effortId))) return null;
+  return 'Effort ' + effortId + ' is not offered for ' + model.label + '; pick an effort it offers.';
 }
 
 export function roleAgentOverrideFor(

@@ -1,6 +1,7 @@
 import {
   EMPTY_ROLE_EFFORTS,
   EMPTY_ROLE_MODELS,
+  matchesChoice,
   type RoleAgentChoice,
   type RoleDefaults,
   type RoleEffortChoice,
@@ -26,8 +27,8 @@ function resolveAgent(
   selection: RoleLaunchSelection,
 ): Pick<ResolvedAgentChoice, "selectedAgentId" | "selectedAgent" | "models" | "selectedAgentLabel"> {
   const selectedAgentId = selection.agentOverride?.agentId ?? roleDefaults.agent ?? "";
-  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
-  const selectedAgentLabel = agents.find((agent) => agent.id === roleDefaults.agent)?.label ?? roleDefaults.agent;
+  const selectedAgent = agents.find((agent) => matchesChoice(agent, selectedAgentId));
+  const selectedAgentLabel = agents.find((agent) => matchesChoice(agent, roleDefaults.agent))?.label ?? roleDefaults.agent;
   return { selectedAgentId, selectedAgent, models: selectedAgent?.models ?? EMPTY_ROLE_MODELS, selectedAgentLabel };
 }
 
@@ -36,9 +37,9 @@ function resolveModel(
   roleDefaults: RoleDefaults,
   selection: RoleLaunchSelection,
 ): Pick<ResolvedAgentChoice, "defaultModel" | "selectedModelId" | "selectedModel"> {
-  const defaultModel = models.find((model) => model.id === roleDefaults.model);
-  const selectedModelId = selection.agentOverride?.modelId ?? defaultModel?.id ?? "";
-  return { defaultModel, selectedModelId, selectedModel: models.find((model) => model.id === selectedModelId) };
+  const defaultModel = models.find((model) => matchesChoice(model, roleDefaults.model));
+  const selectedModelId = selection.agentOverride?.modelId ?? defaultModel?.id ?? roleDefaults.model ?? "";
+  return { defaultModel, selectedModelId, selectedModel: models.find((model) => matchesChoice(model, selectedModelId)) };
 }
 
 function resolveEffort(
@@ -47,7 +48,7 @@ function resolveEffort(
 ): Pick<ResolvedAgentChoice, "efforts" | "defaultEffort"> {
   const efforts = selectedModel?.efforts ?? EMPTY_ROLE_EFFORTS;
   const defaultEffort = efforts.find(
-    (effort) => effort.id === (roleDefaults.effort ?? selectedModel?.defaultEffort),
+    (effort) => matchesChoice(effort, roleDefaults.effort ?? selectedModel?.defaultEffort),
   );
   return { efforts, defaultEffort };
 }
@@ -80,6 +81,11 @@ export function displayedAgentLabel(
   return selectedAgentLabel ? selectedAgentLabel + " · default" : "Role default";
 }
 
+function unavailableModelsLabel(choice: ResolvedAgentChoice): string {
+  if (choice.selectedAgent?.discovery?.models?.source === "unknown") return `${choice.selectedModelId || "Configured model"} · unchecked`;
+  return "No model choices";
+}
+
 export function displayedModelLabel(
   selection: RoleLaunchSelection,
   choice: ResolvedAgentChoice,
@@ -90,7 +96,7 @@ export function displayedModelLabel(
   }
   if (!choice.selectedAgentId) return "Load agent default";
   if (!choice.selectedAgent) return "Agent capabilities loading";
-  if (!choice.models.length) return "No model choices";
+  if (!choice.models.length) return unavailableModelsLabel(choice);
   if (choice.defaultModel) return choice.defaultModel.label + " · default";
   return selection.agentOverride ? "Agent default" : "Role default";
 }

@@ -45,9 +45,10 @@ describe("L150-CODE-04: options success writes failure reference only", () => {
     const parked: { answer: (value: Response) => void }[] = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Promise<Response>((answer) => {
-        parked.push({ answer });
-      })),
+      vi.fn(async (url: string) => {
+        if (url === "/api/role-launch/saved-catalog") return new Response("{}", { status: 503 });
+        return new Promise<Response>((answer) => { parked.push({ answer }); });
+      }),
     );
     const args = loaderArgs();
     renderHook((props: { args: RoleChatOptionsLoaderArgs }) => useRoleChatOptionsLoader(props.args), {

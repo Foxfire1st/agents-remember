@@ -407,6 +407,8 @@ FORMER_ROUTES = (
 ROUTES = {
     "/api/role-launch/frame": {"GET"},
     "/api/role-launch/options": {"POST"},
+    # R214 rules 1/2: the waiting view reads the durable last answer independently.
+    "/api/role-launch/saved-catalog": {"GET"},
     "/api/role-launch/dispatch": {"POST"},
     "/api/role-launch/result": {"POST"},
     "/api/role-launch/report": {"POST"},
@@ -434,7 +436,7 @@ class FormerRouteTests(unittest.TestCase):
             transcript_root=root / "coordination" / "logs" / "mcp",
         )
 
-    def test_the_launcher_registers_its_ten_routes_and_answers_404_on_the_former_paths(
+    def test_the_launcher_registers_its_eleven_routes_and_answers_404_on_the_former_paths(
         self,
     ) -> None:
         app = FastAPI()

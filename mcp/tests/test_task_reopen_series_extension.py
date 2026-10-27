@@ -77,28 +77,11 @@ LEAF_SLUG = "l2"
 CODE_MESSAGE = "260918-TSIP-L9: the extension leaf's code"
 MEMORY_MESSAGE = "260918-TSIP-L9: the extension leaf's memory"
 
-# ---------------------------------------------------------------------------------------
-# This module drives a whole master lifecycle in-process, so the unit population is where it
-# runs -- and the unit population is over its declared rail. That is not this module's defect and
-# it is not this module's edit to make: the budget surface is `260918-TSIP-L7`'s (the raise to
-# 3000/600), `260918-TSIP-L13`'s (the developer's second ruling, 4000/1000),
-# `260928-MIK-L146`'s (the developer's word D226, 5000/1000) and `260928-MIK-L193`'s (the
-# developer's word D460, unit lane 6000 -> 10000 with the 1000 integration rail unchanged).
-# Named, counted,
-# with the owner and the rule -- repaired => remove the entry in the same change; never delete the
-# constant, never widen it (the `ENVELOPE_LOSING_RAISERS` shape in `test_tool_entry_point_sweep.py`).
-#
-# It is a *tolerance*, not an acceptance: when the base already carries the ruled rail, the case
-# below is a plain assertion that the declaration is at least the ruling. While the raise is
-# still in flight it reports that fact instead of failing on someone else's pending edit.
-# ---------------------------------------------------------------------------------------
+# The current approved rails are pinned independently of the declaration.
+# Both the declaration and its boundary fixture must follow a deliberate raise;
+# a lower historical pair is no longer a tolerated pending state on this tree.
 RULED_UNIT_BUDGET = 10000
-RULED_INTEGRATION_BUDGET = 1000
-BUDGET_RAIL_PENDING = (
-    "260928-MIK-L193",
-    "the declared pair is below the developer's ruled 10000/1000; the ceiling raise has not landed "
-    "on this base and `mcp/tests/test_suite_budget.py` is red for it",
-)
+RULED_INTEGRATION_BUDGET = 2000
 
 
 class _World:
@@ -366,20 +349,9 @@ class SeriesExtensionRouteTests(unittest.TestCase):
             )
 
     def test_the_declared_case_rails_carry_the_developer_ruling(self) -> None:
-        """The ruling arm: true in the RAISED landing order only, and it says so when it is not."""
+        """The declaration must carry the current approved pair without a pending-raise skip."""
 
         declared = _declared_case_rails()
-        below = {
-            name: (declared[name], ruled)
-            for name, ruled in (
-                ("unit_case_budget", RULED_UNIT_BUDGET),
-                ("integration_case_budget", RULED_INTEGRATION_BUDGET),
-            )
-            if declared[name] < ruled
-        }
-        if below:
-            owner, why = BUDGET_RAIL_PENDING
-            self.skipTest(f"{owner}: {why}; declared (observed, ruled) = {below!r}")
         self.assertEqual(
             declared,
             {

@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -32,6 +33,9 @@ class QualityRunIdentity:
     checks: tuple[str, ...]
     detail_limit: int
     publish_curator_report: bool
+    operation: str = "memory_quality_check"
+    document: str | None = None
+    documents: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -116,7 +120,7 @@ def poll_quality_run(repo_id: str, run_id: str) -> QualityRunSnapshot | None:
             status=run.status,
             run_id=run.run_id,
             identity=run.identity,
-            result=None if run.result is None else dict(run.result),
+            result=None if run.result is None else deepcopy(run.result),
             error=run.error,
         )
 
@@ -136,7 +140,7 @@ def _complete_quality_run(
     with _lock:
         run.status = "completed"
         run.completed_at = time.monotonic()
-        run.result = result
+        run.result = deepcopy(result)
 
 
 def _prune_terminal_locked() -> None:

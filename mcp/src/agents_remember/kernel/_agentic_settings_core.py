@@ -221,19 +221,12 @@ KNOWN_ROLE_KNOB_FIELDS = KNOWN_ROLE_LAUNCH_FIELDS | {"stepUp"}
 NON_PERMISSION_FEATURES = frozenset({"service_tier", "fast_mode"})
 
 
-def native_service_tier(value: str) -> str:
-    return "priority" if value == "fast" else value
-
-
-def role_feature_values(knobs: RoleKnobs, source: str) -> dict[str, str | bool]:
+def role_feature_values(knobs: RoleKnobs, _source: str) -> dict[str, str | bool]:
     values = dict(knobs.feature_values)
     if knobs.service_tier:
-        tier = native_service_tier(knobs.service_tier)
-        if "service_tier" in values and values["service_tier"] != tier:
-            raise AgenticSettingsError(
-                f"{source}: serviceTier and featureValues.service_tier conflict after alias normalization"
-            )
-        values["service_tier"] = tier
+        # Choice ids and labels are resolved by the fresh Paseo catalog at launch.
+        # Settings parsing cannot decide that two different spellings conflict.
+        values["service_tier"] = knobs.service_tier
     return values
 
 
@@ -363,11 +356,11 @@ def require_distinct_step_up(knobs: RoleKnobs, spawn_harness: str | None = None)
         knobs.service_tier if "service_tier" not in choices.feature_values else None
     )
     if tier:
-        selected_features["service_tier"] = native_service_tier(tier)
+        selected_features["service_tier"] = tier
     if selected_features != base_features:
         return
     raise AgenticSettingsError(
-        f"{step.key} must name choices different from the effective role's own after alias normalization: {step.source}"
+        f"{step.key} must name choices different from the effective role's own: {step.source}"
     )
 
 

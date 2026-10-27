@@ -24,7 +24,6 @@ from agents_remember.cli import (
     role_launch_routes,
 )
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
-from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_launch import RoleLaunch, build_launch_call
 from agents_remember.cli.role_handover_projection import (
     PROJECTION_FIELDS,
@@ -728,7 +727,6 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
                 response = role_launch_routes._role_launch_dispatch_endpoint(config, request)
                 return response.status_code, json.loads(bytes(response.body))
 
-            forget_launcher_catalogs()
             bind_worktree_services(build_default_worktree_services())
             try:
                 with (
@@ -756,7 +754,6 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
                     third_status, third = dispatch()
             finally:
                 reset_worktree_services()
-                forget_launcher_catalogs()
 
         self.assertEqual((first_status, first["status"], first["canRetry"]), (202, "unknown", True))
         # The edit changes what a compilation of this request yields ...

@@ -32,6 +32,8 @@ CATALOG: dict[str, Any] = {
                 {
                     "id": "gpt-a",
                     "label": "GPT A",
+                    "features": [],
+                    "serviceTiers": [],
                     "efforts": [{"id": "low", "label": "Low"}, {"id": "high", "label": "High"}],
                 }
             ],

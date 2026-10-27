@@ -24,7 +24,6 @@ from agents_remember.cli import (
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import (
     LaunchSelectionRefused,
-    forget_launcher_catalogs,
     resolve_agent_selection,
 )
 from agents_remember.cli.paseo_launch import RoleLaunch, build_launch_call
@@ -287,8 +286,18 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
                 }
             )
         )
-        with self.assertRaisesRegex(AgenticSettingsError, "conflict"):
-            load_agentic_settings(self.config.coordination_root, repository)
+        # Parsing preserves both spellings; only the live Paseo catalog can compare their ids.
+        conflicting = load_agentic_settings(
+            self.config.coordination_root, repository
+        ).resolved_role_knobs("worker")
+        with self.assertRaisesRegex(LaunchSelectionRefused, "different Paseo"):
+            self.select(
+                {
+                    **self.role,
+                    "serviceTier": conflicting.service_tier,
+                    "featureValues": dict(conflicting.feature_values),
+                }
+            )
 
     def test_r71_profile_exact_name_first_order_and_unavailable_reason(self) -> None:
         profiles = [
@@ -501,16 +510,14 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
         role_reports.collect_execution_reports(receipt)
         self.assertEqual((canonical / "later.md").read_text(), "later evidence")
 
-    def test_r71_unknown_modes_refuse_and_fully_listed_empty_modes_remain_distinct(self) -> None:
+    def test_r71_unknown_modes_pass_through_and_known_empty_remains_distinct(self) -> None:
         row = {"id": "codex", "models": [], "listingError": "still loading"}
         for stated in (None, "auto"):
-            with (
-                self.subTest(stated=stated),
-                self.assertRaisesRegex(LaunchSelectionRefused, "codex.*still loading"),
-            ):
-                paseo_catalog._resolve_mode(
+            with self.subTest(stated=stated):
+                mode, _choice = paseo_catalog._resolve_mode(
                     stated, {"source": "our settings"}, paseo_catalog._agent_row(row), "worker"
                 )
+                self.assertEqual(mode, stated)
         mode, choice = paseo_catalog._resolve_mode(
             None, {}, paseo_catalog._agent_row({"id": "codex", "models": [], "modes": []}), "worker"
         )
@@ -957,10 +964,8 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
         self.assertNotIn("hermes", settings.harness_ids)
         catalog = copy.deepcopy(CATALOG)
         catalog["providers"].append({"id": "hermes", "label": "Hermes", "models": [], "modes": []})
-        forget_launcher_catalogs()
         self.bridge(catalog)
         self.assertEqual(self.select({**defaults("hermes"), "role": "worker"})[0], "hermes")
-        forget_launcher_catalogs()
         self.bridge(CATALOG)
         with self.assertRaisesRegex(LaunchSelectionRefused, "hermes"):
             self.select({**defaults("hermes"), "role": "worker"})

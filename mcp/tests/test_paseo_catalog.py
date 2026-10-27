@@ -17,7 +17,6 @@ from agents_remember.cli import (
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import (
     LaunchSelectionRefused,
-    forget_launcher_catalogs,
     launcher_options,
     resolve_agent_selection,
 )
@@ -52,11 +51,15 @@ def _legacy_options_projection(reply):
         for key, value in reply["roleDefaults"].items()
         if key in {"agent", "model", "effort", "serviceTier", "available"}
     }
+    reply.pop("catalogDiscovery", None)
     for agent in reply["agents"]:
+        for key in ("discovery", "modelsKnown", "acceptsToolServers"):
+            agent.pop(key, None)
         for key in ("modes", "modesKnown", "defaultModeId", "fetchedAt"):
             agent.pop(key, None)
         for model in agent["models"]:
             model.pop("features", None)
+            model.pop("discovery", None)
     return reply
 
 
@@ -145,8 +148,6 @@ class PaseoCatalogTestCase(unittest.TestCase):
         self.config = runtime_config(self.root)
         self.config.workspace_root.mkdir()
         self.config.coordination_root.mkdir(exist_ok=True)
-        forget_launcher_catalogs()
-        self.addCleanup(forget_launcher_catalogs)
 
     def bridge(self, *answers: dict[str, Any] | PaseoBridgeFailure) -> FakeBridge:
         fake = FakeBridge(*(answers or (CATALOG,)))
@@ -212,59 +213,22 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
         self.assertEqual(model_less, {"id": "eve", "label": "Eve", "models": []})
         self.assertEqual(failed["listingError"], "auth missing")
         self.assertEqual(
-            bridge.calls, [("catalog", {"cwd": self.config.workspace_root.as_posix()})]
+            bridge.calls, [("catalog", {"cwd": self.config.workspace_root.as_posix()})] * 2
         )
 
-    def test_catalog_is_cached_per_runtime_and_only_a_refresh_rediscovers(self) -> None:
+    def test_each_view_and_start_asks_fresh_and_refresh_rescans(self) -> None:
         bridge = self.bridge()
         first = self.options(defaults())
-        other_role = self.options(defaults("eve"), role="manager")
-        other_agent = self.options(defaults(), agentId="eve")
-        self.assertEqual(
-            bridge.calls, [("catalog", {"cwd": self.config.workspace_root.as_posix()})]
-        )
-        self.assertEqual(first["catalogOrigin"], other_role["catalogOrigin"])
-        self.assertEqual(first["catalogOrigin"], other_agent["catalogOrigin"])
-        self.assertEqual(other_agent["agents"], first["agents"])
-
+        second = self.options(defaults())
+        self.assertEqual(len(bridge.calls), 2)
+        self.assertNotEqual(first["catalogOrigin"], second["catalogOrigin"])
         _requested_launch_values(self.config, defaults(), HARNESS_ORDER, None)
-        self.assertEqual(len(bridge.calls), 1, "a launch re-read a catalog that was cached")
-
-        refreshed = self.options(defaults(), refreshCatalog=True)
+        self.assertEqual(len(bridge.calls), 4)
         self.assertEqual(
-            bridge.calls[1:],
-            [("catalog", {"cwd": self.config.workspace_root.as_posix(), "refresh": True})],
+            [payload["mode"] for _, payload in bridge.calls[-2:]], ["metadata", "selected"]
         )
-        self.assertNotEqual(refreshed["catalogOrigin"], first["catalogOrigin"])
-        self.assertEqual(self.options(defaults())["catalogOrigin"], refreshed["catalogOrigin"])
-
-        # Each runtime is the authority file its own config names, so each catalog is its own.
-        other_runtimes = {
-            "listen": (self.root / "listen-runtime", {"listen": "127.0.0.1:6834"}),
-            "home": (self.root / "home-runtime", {"home": (self.root / "other-home").as_posix()}),
-            "installPrefix": (
-                self.root / "prefix-runtime",
-                {"installPrefix": (self.root / "other-prefix").as_posix()},
-            ),
-        }
-        origins = {refreshed["catalogOrigin"]}
-        for calls, (differs, (folder, overrides)) in enumerate(other_runtimes.items(), start=3):
-            other_runtime = runtime_config(folder, **overrides)
-            with self.subTest(f"a runtime with another {differs} has its own catalog"):
-                elsewhere = self.options(defaults(), config=other_runtime)
-                self.assertEqual(len(bridge.calls), calls)
-                self.assertNotIn(elsewhere["catalogOrigin"], origins)
-                origins.add(elsewhere["catalogOrigin"])
-        self.assertEqual(self.options(defaults())["catalogOrigin"], refreshed["catalogOrigin"])
-        self.assertEqual(len(bridge.calls), 5)
-
-        forget_launcher_catalogs()
-        _requested_launch_values(self.config, defaults(), HARNESS_ORDER, None)
-        self.assertEqual(
-            bridge.calls[5:],
-            [("catalog", {"cwd": self.config.workspace_root.as_posix()})],
-            "a launch must load an empty cache",
-        )
+        self.options(defaults(), refreshCatalog=True)
+        self.assertTrue(bridge.calls[-1][1]["refresh"])
 
     def test_an_unoffered_default_is_flagged_and_never_replaced(self) -> None:
         self.bridge()
@@ -272,7 +236,7 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
             "agent, model and effort offered": (defaults("codex", "gpt-a", "high"), True),
             "agent only": (defaults("codex"), True),
             "model-less provider": (defaults("eve"), True),
-            "provider whose listing failed": (defaults("pi"), False),
+            "provider whose listing failed": (defaults("pi"), True),
             "agent not offered": (defaults("claude", "opus"), False),
             "model not offered": (defaults("codex", "gpt-z"), False),
             "effort not offered": (defaults("codex", "gpt-a", "max"), False),
@@ -311,92 +275,28 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
                 },
             )
 
-    def test_a_partial_catalog_is_kept_and_a_failed_discovery_caches_nothing(self) -> None:
-        unreachable = PaseoBridgeFailure("paseo_daemon_unreachable", "cannot be reached")
-        repaired = copy.deepcopy(CATALOG)
-        repaired["providers"][2] = {
-            "id": "pi",
-            "label": "Pi",
-            "modes": [],
-            "models": [{"id": "pi-1", "label": "Pi 1", "efforts": []}],
-        }
-        bridge = self.bridge(unreachable, CATALOG, unreachable, repaired)
+    def test_whole_failure_uses_previous_success_without_erasing_it(self) -> None:
+        bridge = self.bridge(CATALOG, PaseoBridgeFailure("paseo_daemon_unreachable", "unreachable"))
+        first = self.options(defaults())
+        second = self.options(defaults())
+        self.assertEqual(first["agents"][:2], second["agents"][:2])
+        self.assertEqual(first["agents"][2]["models"], second["agents"][2]["models"])
+        self.assertEqual(len(bridge.calls), 2)
 
-        with self.assertRaises(PaseoBridgeFailure):
-            _legacy_options_fields(self.config, defaults(), HARNESS_ORDER)
-        partial = _legacy_options_fields(self.config, defaults(), HARNESS_ORDER)
-        self.assertEqual(len(bridge.calls), 2, "the failed discovery must not have been cached")
-        self.assertEqual(partial["agents"][2]["listingError"], "auth missing")
-        again = _legacy_options_fields(self.config, defaults("pi"), HARNESS_ORDER)
-        self.assertEqual(len(bridge.calls), 2, "a failed listing is cached until a refresh")
-        self.assertEqual(again["agents"][2], partial["agents"][2])
-        self.assertFalse(again["roleDefaults"]["available"])
-
-        with self.assertRaises(PaseoBridgeFailure):
-            _legacy_options_fields(self.config, defaults(), HARNESS_ORDER, refresh=True)
-        kept = _legacy_options_fields(self.config, defaults(), HARNESS_ORDER)
-        self.assertEqual(kept["catalogOrigin"], partial["catalogOrigin"])
-        self.assertEqual(len(bridge.calls), 3)
-
-        refreshed = _legacy_options_fields(self.config, defaults(), HARNESS_ORDER, refresh=True)
-        self.assertNotIn("listingError", refreshed["agents"][2])
-        self.assertEqual(refreshed["agents"][2]["models"][0]["id"], "pi-1")
-
-    def test_an_unreadable_catalog_is_a_named_failure_and_is_not_cached(self) -> None:
-        unreadable: tuple[dict[str, Any], ...] = (
-            {},
-            {"providers": "codex"},
-            {"providers": [{"label": "No id", "models": []}]},
-            {"providers": [{"id": "codex", "models": None}]},
-            {"providers": [{"id": "codex", "models": [{"label": "No id", "efforts": []}]}]},
-            {"providers": [{"id": "codex", "models": [{"id": "gpt-a"}]}]},
-            {"providers": [{"id": "codex", "models": [{"id": "gpt-a", "efforts": [{}]}]}]},
+    def test_an_unreadable_catalog_leaves_configured_choices_unchecked(self) -> None:
+        self.bridge({})
+        result = _legacy_options_fields(
+            self.config, defaults("codex", "gpt-a", "high"), HARNESS_ORDER
         )
-        bridge = self.bridge(*unreadable, CATALOG)
-        for reply in unreadable:
-            with self.subTest(reply=reply), self.assertRaises(PaseoBridgeFailure) as raised:
-                _legacy_options_fields(self.config, defaults(), HARNESS_ORDER)
-            self.assertEqual(raised.exception.code, "paseo_bridge_invalid_reply")
-        self.assertEqual(
-            _legacy_options_fields(self.config, defaults(), HARNESS_ORDER)["agents"][0]["id"],
-            "codex",
-        )
-        self.assertEqual(len(bridge.calls), len(unreadable) + 1)
+        self.assertTrue(result["roleDefaults"]["available"])
 
-    def test_route_errors_name_not_configured_and_unreachable_apart(self) -> None:
-        failures = {
-            "paseo_daemon_unreachable": (502, "The Paseo daemon at ws://127.0.0.1:6833/ws cannot"),
-            "paseo_bridge_timeout": (504, "did not end within 60 seconds"),
-            "paseo_bridge_invalid_reply": (502, "returned an unreadable reply"),
-        }
-        for code, (status, text) in failures.items():
-            forget_launcher_catalogs()
-            self.bridge(PaseoBridgeFailure(code, f"{text} (details)"))
-            with self.subTest(code), self.assertRaises(HTTPException) as raised:
-                self.options(defaults())
-            self.assertEqual(raised.exception.status_code, status)
-            self.assertIn(text, raised.exception.detail)
-
-        with self.subTest("no Paseo runtime configured"):
-            bridge = self.bridge()
-            unconfigured = runtime_config(self.root / "unconfigured", listen=None)
-            with self.assertRaises(HTTPException) as raised:
-                self.options(defaults(), config=unconfigured)
-            self.assertEqual(raised.exception.status_code, 503)
-            self.assertTrue(raised.exception.detail.startswith("no Paseo runtime configured: "))
-            self.assertEqual(bridge.calls, [])
-
-        with self.subTest("a cached catalog answers while the daemon is unreachable"):
-            forget_launcher_catalogs()
-            bridge = self.bridge(
-                CATALOG, PaseoBridgeFailure("paseo_daemon_unreachable", "cannot be reached")
-            )
-            cached = self.options(defaults())
-            self.assertEqual(self.options(defaults(), role="manager")["agents"], cached["agents"])
-            self.assertEqual(len(bridge.calls), 1)
-            with self.assertRaises(HTTPException) as raised:
-                self.options(defaults(), refreshCatalog=True)
-            self.assertEqual(raised.exception.status_code, 502)
+    def test_not_configured_runtime_still_names_the_missing_authority(self) -> None:
+        bridge = self.bridge()
+        unconfigured = runtime_config(self.root / "unconfigured", listen=None)
+        with self.assertRaises(HTTPException) as raised:
+            self.options(defaults(), config=unconfigured)
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(bridge.calls, [])
 
 
 class LaunchValidationTests(PaseoCatalogTestCase):
@@ -425,7 +325,6 @@ class LaunchValidationTests(PaseoCatalogTestCase):
                 )
 
         refused: dict[str, tuple[dict[str, str | None], RoleAgentOverride | None]] = {
-            "modes_unknown": (role, RoleAgentOverride(agentId="pi")),
             "agent_not_selected": (defaults(None), None),
             "agent_not_offered": (role, RoleAgentOverride(agentId="claude")),
             "model_not_offered": (role, RoleAgentOverride(agentId="codex", modelId="gpt-z")),
@@ -453,12 +352,11 @@ class LaunchValidationTests(PaseoCatalogTestCase):
             ):
                 _requested_launch_values(self.config, role_defaults, HARNESS_ORDER, None)
             self.assertEqual(raised.exception.code, "effort_not_offered")
-        with self.subTest("model on a model-less provider"):
-            with self.assertRaises(LaunchSelectionRefused) as raised:
-                _requested_launch_values(
-                    self.config, role, HARNESS_ORDER, RoleAgentOverride(agentId="pi", modelId="x")
-                )
-            self.assertEqual(raised.exception.code, "model_not_offered")
+        with self.subTest("model listing unavailable passes the configured model"):
+            agent, options = _requested_launch_values(
+                self.config, role, HARNESS_ORDER, RoleAgentOverride(agentId="pi", modelId="x")
+            )
+            self.assertEqual((agent, options), ("pi", {"model": "x"}))
 
         with (
             patch.object(

@@ -317,8 +317,21 @@ minversion = "9.0"
 #     unbounded, and `test_suite_budget.py` still proves both failure directions -- over-unit and
 #     over-integration -- at whatever pair is declared.  Only the number moved.
 #   * integration is NOT raised: measured 944 collected against 1000, unchanged by this leaf.
+# 2026-10-26 -- integration 1000 -> 2000. The source-file regression
+# protects the reported repository shapes and distinct listing/citation
+# behavior. Base 993 plus this leaf's four collected cases is 997; the
+# parallel leaf's seven net cases produce 1004 on the combined line.
+# No case moves to the unit lane. The original 16-case version measured
+# 18.56s and independently 20.15s; real-overlap fixture grouping retained
+# all 16 scenarios as four cases plus 14 subtests, measured at 19.70s.
+# Two link-class regressions add two subtests during repair, keeping four
+# cases/16 subtests: v2 27.47s, v3 38.20s. Original module 304/11614;
+# grouped 322/12797, v2 repaired 383/15236, v3 repaired 386/15263
+# (lines/bytes). These runs measure the stated shapes, not a speedup.
+# No new support file or whole-suite runtime claim. Both over-budget
+# refusal directions remain enforced; only the declared rail moves.
 unit_case_budget = 10000
-integration_case_budget = 1000
+integration_case_budget = 2000
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this
 # key to build its pytest step, so the wrapper no longer carries a second copy that can

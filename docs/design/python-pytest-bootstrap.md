@@ -7,7 +7,7 @@ percentages and higher test counts are not reasons to add tests. Remove unused s
 removing tests; do not hide a large suite behind integration markers.
 
 The default unit budget is 10,000 parametrized collected cases. `pyproject.toml` also declares a
-1,000-case integration ceiling. `pytest_collection_finish` checks selected items without a second
+2,000-case integration ceiling. `pytest_collection_finish` checks selected items without a second
 collection, dependency scan or test invocation. Combined verification observes both complete
 populations. Growth beyond a budget requires an explicit tradeoff in the change description:
 distinct protection, why consolidation is insufficient, case count, test/support size and

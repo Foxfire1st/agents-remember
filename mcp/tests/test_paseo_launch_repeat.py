@@ -308,7 +308,9 @@ class ReplacedExecutionTests(RepeatTestCase):
             self.runtime.calls.clear()
             second = self.request("worker")
             self.assertEqual(self.dispatch(second)[1]["status"], "running")
-            self.assertEqual(self.runtime.calls[0], ("agent-archive", {"agentId": old_agent}))
+            # R214 rule 1: fresh metadata precedes the unchanged retirement action.
+            self.assertEqual(self.runtime.calls[0][1]["mode"], "metadata")
+            self.assertEqual(self.runtime.calls[1], ("agent-archive", {"agentId": old_agent}))
             self.assertIsNotNone(self.runtime.agents[old_agent]["archivedAt"])
         with self.subTest("the newest archived receipt of this selection, and no other, is read"):
             newest = self.close_execution(second, "stopped")
@@ -329,8 +331,10 @@ class ReplacedExecutionTests(RepeatTestCase):
             self.runtime.calls.clear()
             third = self.request("worker")
             self.assertEqual(self.dispatch(third)[1]["status"], "running")
+            # R214 rule 1: ask fresh metadata, then retire exactly the prior holder.
+            self.assertEqual(self.runtime.calls[0][1]["mode"], "metadata")
             self.assertEqual(
-                self.runtime.calls[0],
+                self.runtime.calls[1],
                 ("agent-archive", {"agentId": newest["execution"]["agentId"]}),
             )
         with self.subTest("an agent still to be archived survives a receipt moved to the history"):
@@ -342,7 +346,9 @@ class ReplacedExecutionTests(RepeatTestCase):
             self.runtime.agents[old_agent]["archivedAt"] = None
             self.runtime.calls.clear()
             self.assertEqual(self.dispatch(self.request("worker"))[1]["status"], "running")
-            self.assertEqual(self.runtime.calls[0], ("agent-archive", {"agentId": old_agent}))
+            # R214 rule 1: fresh metadata precedes the unchanged retirement action.
+            self.assertEqual(self.runtime.calls[0][1]["mode"], "metadata")
+            self.assertEqual(self.runtime.calls[1], ("agent-archive", {"agentId": old_agent}))
         with self.subTest("a taskless role and a first start archive nothing"):
             self.runtime.calls.clear()
             self.dispatch(self.request("architect"))
@@ -388,7 +394,9 @@ class ReplacedExecutionTests(RepeatTestCase):
             self.runtime.calls.clear()
             again = self.request("manager")
             self.assertEqual(self.dispatch(again)[1]["status"], "running")
-            self.assertEqual(self.runtime.calls[0], ("agent-archive", {"agentId": lost}))
+            # R214 rule 1: fresh metadata precedes the unchanged retirement action.
+            self.assertEqual(self.runtime.calls[0][1]["mode"], "metadata")
+            self.assertEqual(self.runtime.calls[1], ("agent-archive", {"agentId": lost}))
             self.assertIsNotNone(self.runtime.agents[lost]["archivedAt"])
             self.assertNotEqual(self.receipt(again)["agentId"], lost)
         with self.subTest("a taskless role is told to archive the agent by hand"):
@@ -842,27 +850,47 @@ class ServiceTierReplayTests(RepeatTestCase):
             ("gpt-a", "auto"),
         )
 
-    def test_r71_still_loading_mode_catalog_refuses_before_any_agent_or_workspace_creation(
-        self,
-    ) -> None:
-        request = self.request("worker")
+    def test_r214_still_loading_model_catalog_passes_unknown_selection_to_paseo(self) -> None:
+        # R214 rule 3 supersedes R71's still-loading refusal: an unanswered model
+        # inventory is unknown, so both the original native default and a configured
+        # model pass through to Paseo unchecked.
         catalog = {"providers": [{"id": "codex", "models": [], "listingError": "still loading"}]}
-        with (
-            patch.object(self.runtime, "_catalog", return_value=catalog),
-            patch.object(
-                launch.role_launch_preparation,
-                "_role_defaults",
-                return_value=(
-                    {"agent": "codex", "model": None, "effort": None, "role": "worker"},
-                    ("codex",),
-                ),
-            ),
-        ):
-            error = self.refused(request)
-        self.assertIn("codex", str(error.detail))
-        self.assertIn("still loading", str(error.detail))
-        self.assertFalse(self.runtime.agents)
-        self.assertFalse(self.runtime.launch_calls())
+        for model in (None, "gpt-a"):
+            with self.subTest(model=model):
+                self.free_seat_for("worker")
+                self.runtime.calls.clear()
+                request = self.request("worker")
+                with (
+                    patch.object(self.runtime, "_catalog", return_value=catalog),
+                    patch.object(
+                        launch.role_launch_preparation,
+                        "_role_defaults",
+                        return_value=(
+                            {"agent": "codex", "model": model, "effort": None, "role": "worker"},
+                            ("codex",),
+                        ),
+                    ),
+                ):
+                    status, public = self.dispatch(request)
+                self.assertEqual((status, public["status"]), (200, "running"))
+                launches = self.runtime.launch_calls()
+                self.assertEqual(
+                    [command for command, _ in launches],
+                    (["agent-archive"] if model is not None else [])
+                    + ["workspace-open", "agent-create"],
+                )
+                created = launches[-1]
+                self.assertEqual(created[1]["provider"], "codex")
+                self.assertEqual(created[1].get("model"), model)
+                self.assertEqual(public["execution"]["agentId"], created[1]["agentId"])
+                self.assertEqual(
+                    [
+                        agent_id
+                        for agent_id, row in self.runtime.agents.items()
+                        if not row["archivedAt"]
+                    ],
+                    [created[1]["agentId"]],
+                )
 
     def test_r71_old_override_digest_reconciles_without_an_empty_feature_map(self) -> None:
         request = self.request("worker", agentId="codex", modelId="gpt-a")

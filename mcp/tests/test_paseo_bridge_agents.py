@@ -16,8 +16,9 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from agents_remember.cli import paseo_bridge
-from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
+from agents_remember.cli import paseo_bridge, paseo_catalog
+from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call, require_bridge_runtime
+from agents_remember.cli.paseo_catalog_store import catalog_store_path
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -105,7 +106,13 @@ export class DaemonClient {
   async close() { this.state = { status: 'disposed' } }
   getConnectionState() { return scenario.connectionLost ? { status: 'disconnected' } : this.state }
   getLastServerInfoMessage() { return { serverId: scenario.serverId, version: this.config.appVersion } }
-  async listProviderFeatures(options) { record({ via: 'features', options }); return { features: scenario.features ?? [{ type: 'select', id: 'service_tier', options: [{ id: 'default', label: 'Normal' }, { id: 'priority', label: 'Fast' }] }] } }
+  async listProviderFeatures(options) {
+    record({ via: 'features', options })
+    if (scenario.creationFeatureError) throw new Error(scenario.creationFeatureError)
+    if (scenario.hangCreationFeatures) return new Promise(() => {})
+    if (Object.hasOwn(scenario, 'creationFeatureReply')) return scenario.creationFeatureReply
+    return { features: scenario.features ?? [{ type: 'select', id: 'service_tier', options: [{ id: 'default', label: 'Normal' }, { id: 'priority', label: 'Fast' }] }] }
+  }
   async createAgent(options) { return create('daemon', options, options.workspaceId, options.config.cwd) }
   async addProject(cwd) {
     record({ via: 'addProject', cwd })
@@ -343,6 +350,123 @@ class AgentCommandScriptTests(unittest.TestCase):
         # The refusal still precedes any create: the one recorded call is the feature
         # discovery the validation reads (fc2f4bb6, Fast service tier per role).
         self.assertFalse(any(row["via"] in {"public", "daemon", "send"} for row in self.recorded()))
+
+    def test_create_matches_option_ids_then_labels_without_case(self) -> None:
+        options = [
+            {"id": "label-collision", "label": "priority"},
+            {"id": "priority", "label": "Fast"},
+            {"id": "ultrafast", "label": "Ultrafast"},
+        ]
+        for model in ("gpt-6.1-sol", None):
+            for value, expected in (
+                ("fast", "priority"),
+                ("Fast", "priority"),
+                ("ULTRAFAST", "ultrafast"),
+                ("PRIORITY", "priority"),
+            ):
+                with self.subTest(model=model, value=value):
+                    payload = self._feature_create_payload(value, model)
+                    self.call(
+                        "agent-create",
+                        payload,
+                        features=[{"id": "service_tier", "type": "select", "options": options}],
+                    )
+                    created = next(
+                        row for row in self.recorded() if row["via"] in {"public", "daemon"}
+                    )
+                    self.assertEqual(
+                        created["options"]["config"]["featureValues"], {"service_tier": expected}
+                    )
+
+    def test_create_passes_unknown_feature_parts_through(self) -> None:
+        scenarios = [
+            {"creationFeatureError": "listing failed"},
+            {"creationFeatureReply": {"error": "listing refused"}},
+            {"creationFeatureReply": {}},
+            {"creationFeatureReply": {"features": [{"id": "service_tier", "type": "select"}]}},
+            {"hangCreationFeatures": True},
+        ]
+        for model in ("gpt-6.1-sol", None):
+            for scenario in scenarios:
+                with (
+                    self.subTest(model=model, scenario=scenario),
+                    patch.object(paseo_bridge, "_SCRIPT_DEADLINE_MS", 1000),
+                ):
+                    self.call(
+                        "agent-create", self._feature_create_payload("fast", model), **scenario
+                    )
+                    created = next(
+                        row for row in self.recorded() if row["via"] in {"public", "daemon"}
+                    )
+                    self.assertEqual(
+                        created["options"]["config"]["featureValues"], {"service_tier": "fast"}
+                    )
+        # A successful, explicitly empty part remains authoritative, not unknown.
+        for features in ([], [{"id": "service_tier", "type": "select", "options": []}]):
+            with (
+                self.subTest(features=features),
+                self.assertRaisesRegex(PaseoBridgeFailure, "not offered"),
+            ):
+                self.call(
+                    "agent-create",
+                    self._feature_create_payload("fast", "gpt-6.1-sol"),
+                    features=features,
+                )
+
+    def test_discovery_timeout_without_saved_answer_sends_fast_as_priority_to_paseo_create(
+        self,
+    ) -> None:
+        saved = catalog_store_path(require_bridge_runtime(self.config).home)
+        for value in ("fast", "Fast"):
+            with self.subTest(setting=value):
+                self.assertFalse(saved.exists())
+                with patch.object(
+                    paseo_catalog,
+                    "bridge_call",
+                    side_effect=PaseoBridgeFailure("paseo_bridge_timeout", "discovery timed out"),
+                ) as discovery:
+                    catalog = paseo_catalog.launcher_catalog(self.config)
+                    provider, options = paseo_catalog.resolve_agent_selection(
+                        self.config,
+                        {"agent": "codex", "model": "gpt-6.1-sol", "serviceTier": value},
+                        (),
+                        None,
+                        catalog=catalog,
+                    )
+                self.assertTrue(discovery.called)
+                self.assertEqual(catalog.discovery["source"], "unknown")
+                self.assertFalse(saved.exists())
+                self.assertEqual(options["featureValues"], {"service_tier": value})
+                payload = self._feature_create_payload(value, options["model"])
+                payload.update(provider=provider, featureValues=options["featureValues"])
+                self.call(
+                    "agent-create",
+                    payload,
+                    features=[
+                        {
+                            "id": "service_tier",
+                            "type": "select",
+                            "options": [{"id": "priority", "label": "Fast"}],
+                        }
+                    ],
+                )
+                created = next(row for row in self.recorded() if row["via"] in {"public", "daemon"})
+                self.assertEqual(
+                    created["options"]["config"]["featureValues"], {"service_tier": "priority"}
+                )
+
+    @staticmethod
+    def _feature_create_payload(value: str, model: str | None) -> dict[str, Any]:
+        return {
+            "agentId": AGENT_ID,
+            "idempotencyKey": "ar-role-launch:r3",
+            "workspaceId": "wks_fake",
+            "provider": "codex",
+            "title": "Worker",
+            "labels": {},
+            "featureValues": {"service_tier": value},
+            **({"model": model} if model is not None else {}),
+        }
 
     def failure(self, command: str, payload: dict[str, Any], **scenario: Any) -> PaseoBridgeFailure:
         with self.assertRaises(PaseoBridgeFailure) as raised:
@@ -858,7 +982,7 @@ class AgentCommandScriptTests(unittest.TestCase):
     def test_catalog_marks_the_providers_the_runtime_reports_as_taking_no_tool_servers(
         self,
     ) -> None:
-        ready = {"status": "ready", "enabled": True}
+        ready = {"status": "ready", "enabled": True, "modes": []}
         entries = [
             {"provider": "codex", "label": "Codex", **ready},
             {"provider": "hermes", "label": "Hermes", **ready},
@@ -890,6 +1014,7 @@ class AgentCommandScriptTests(unittest.TestCase):
                     "defaultModeId": None,
                     "fetchedAt": None,
                     "models": [],
+                    "acceptsToolServers": True,
                 },
                 {
                     "id": "hermes",
@@ -898,6 +1023,7 @@ class AgentCommandScriptTests(unittest.TestCase):
                     "defaultModeId": None,
                     "fetchedAt": None,
                     "models": [],
+                    "acceptsToolServers": True,
                 },
                 {
                     "id": "eve",
@@ -913,9 +1039,12 @@ class AgentCommandScriptTests(unittest.TestCase):
         self.assertNotIn("not passed on", json.dumps(reply))
         accepted = {"options": {"supportsMcpServers": True}}
         reply = self.call("catalog", {}, entries=entries, providerEntries={"eve": accepted})
-        self.assertTrue(all("acceptsToolServers" not in row for row in reply["providers"]))
-        refused = self.failure("catalog", {}, entries=entries, configError="config unavailable")
-        self.assertEqual((refused.code, str(refused)), ("paseo_call_failed", "config unavailable"))
+        self.assertTrue(all(row["acceptsToolServers"] for row in reply["providers"]))
+        partial = self.call("catalog", {}, entries=entries, configError="config unavailable")
+        for row in partial["providers"]:
+            self.assertNotIn("acceptsToolServers", row)
+            self.assertEqual(row["toolServerError"], "config unavailable")
+            self.assertEqual(row["models"], [])
 
 
 if __name__ == "__main__":

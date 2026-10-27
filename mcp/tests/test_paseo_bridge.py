@@ -523,31 +523,37 @@ class BridgeScriptTests(unittest.TestCase):
 
         self.assertEqual(reply["runtime"], {"serverId": SERVER_ID, "version": PASEO_VERSION})
         providers = {row["id"]: row for row in reply["providers"]}
-        self.assertEqual(list(providers), ["codex", "eve", "pi", "hermes", "claude", "slow"])
+        self.assertEqual(
+            list(providers), ["codex", "eve", "pi", "hermes", "claude", "copilot", "muse", "slow"]
+        )
         self.assertEqual(
             providers["slow"],
             {
                 "id": "slow",
                 "label": "Slow",
-                # The catalog row carries the runtime's modes (L71): a fake entry
-                # without them reads back the empty defaults.
-                "modes": [],
-                "defaultModeId": None,
+                # R214: missing modes and an unfinished listing remain unknown,
+                # rather than asserting that the provider offers nothing.
+                "modeError": "The runtime supplied no permission-mode listing",
                 "fetchedAt": None,
-                "models": [],
                 "listingError": (
                     "the runtime was still listing the models of this provider when the call ended"
                 ),
+                "toolServerError": "The runtime supplied no configuration",
             },
         )
+        for name in ("copilot", "muse"):
+            with self.subTest(unavailable_provider=name):
+                self.assertEqual(
+                    providers[name], {**providers["slow"], "id": name, "label": name.title()}
+                )
         self.assertEqual(
             providers["codex"],
             {
                 "id": "codex",
                 "label": "Codex",
-                "modes": [],
-                "defaultModeId": None,
+                "modeError": "The runtime supplied no permission-mode listing",
                 "fetchedAt": None,
+                "toolServerError": "The runtime supplied no configuration",
                 "models": [
                     {
                         "id": "gpt-a",
@@ -563,7 +569,7 @@ class BridgeScriptTests(unittest.TestCase):
                     {
                         "id": "gpt-b",
                         "label": "gpt-b",
-                        "efforts": [],
+                        "effortError": "The runtime supplied no thinking-option listing",
                         "features": [],
                         "serviceTiers": [],
                     },
@@ -582,10 +588,10 @@ class BridgeScriptTests(unittest.TestCase):
             {
                 "id": "eve",
                 "label": "Eve",
-                "modes": [],
-                "defaultModeId": None,
+                "modeError": "The runtime supplied no permission-mode listing",
                 "fetchedAt": None,
                 "models": [],
+                "toolServerError": "The runtime supplied no configuration",
             },
         )
         self.assertEqual(
@@ -596,7 +602,11 @@ class BridgeScriptTests(unittest.TestCase):
                 "claude": "the runtime did not list the models in time",
             },
         )
-        self.assertTrue(all(providers[name]["models"] == [] for name in ("pi", "hermes", "claude")))
+        # A successful empty listing above stays empty; failed listings carry no
+        # models field, so callers can keep their last successful answer.
+        for name in ("pi", "hermes", "claude"):
+            with self.subTest(failed_listing=name):
+                self.assertNotIn("models", providers[name])
 
         refreshed = self.call(
             "catalog",
@@ -635,17 +645,25 @@ class BridgeScriptTests(unittest.TestCase):
                 "catalog",
                 {**healthy, "connect": "hang"},
             ),
-            "no provider ready when the discovery time is up": (
-                "paseo_bridge_timeout",
-                "catalog",
-                {**healthy, "entries": nothing_ready},
-            ),
             "unknown command": ("unsupported_bridge_command", "workspaces", healthy),
         }
         for label, (code, command, scenario) in cases.items():
             with self.subTest(label):
                 self.assertEqual(self.refusal(command, **scenario), code)
                 # The script's own budget (1.5 s here) ends the call, not the 60-second stop.
+        with self.subTest("no provider ready when the discovery time is up"):
+            # R214 supersedes the old whole-call refusal: the snapshot still
+            # identifies the enabled provider, while its models are unknown.
+            reply = self.call(
+                "catalog", {"cwd": "/work/folder"}, **{**healthy, "entries": nothing_ready}
+            )
+            self.assertEqual(reply["runtime"], {"serverId": SERVER_ID, "version": PASEO_VERSION})
+            self.assertEqual([row["id"] for row in reply["providers"]], ["codex"])
+            self.assertNotIn("models", reply["providers"][0])
+            self.assertEqual(
+                reply["providers"][0]["listingError"],
+                "the runtime was still listing the models of this provider when the call ended",
+            )
         with self.subTest("a refresh the runtime never answers"):
             with self.assertRaises(PaseoBridgeFailure) as raised:
                 self.call(

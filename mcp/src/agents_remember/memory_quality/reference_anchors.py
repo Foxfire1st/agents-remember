@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
+from agents_remember.errors import SourceFileUnavailableError
+
 # The validator package's ``__init__`` imports this module's rule module, so a module-scope import
 # of its submodules would be a cycle: ``reference_anchors`` could not be imported before the
 # validator. The three runtime helpers are therefore imported where they are used, and the tree
@@ -166,7 +168,23 @@ def observe(
     kind = target.kind
     locator = anchor.locator.model_dump()
     recorded, recorded_content = anchor.blob, anchor.content
-    data = source.read(path)
+    try:
+        data = source.read(path)
+    except SourceFileUnavailableError as error:
+        return AnchorObservation(
+            sidecar,
+            field,
+            kind,
+            path,
+            render_locator(locator),
+            recorded,
+            None,
+            recorded_content,
+            None,
+            "not-indexed",
+            REPAIR_JUDGMENT,
+            str(error),
+        )
     if data is None:
         return AnchorObservation(
             sidecar,
