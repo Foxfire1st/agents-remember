@@ -43,8 +43,8 @@ computation did not read at all is not (:func:`moved_inputs`).
 When the lookup runs and finds no claimant it records all opened documents and its JSON listing;
 this is evidence of absence, not a computation that never performed the lookup.
 
-**Bounds.** At most :data:`CAPACITY` views are kept, least recently used first out, and none is
-served after :data:`MAX_AGE_SECONDS`. The memo lives in the process that serves the reviewer: a
+**Bounds.** At most :data:`CAPACITY` views are kept, least recently used first out. A kept view
+is reused while every read behind it re-observes identical, at any age; only size evicts. The memo lives in the process that serves the reviewer: a
 restart empties it, nothing is written to disk for it (MIK-R25 forbids review copies), and it is
 not the gate's memo, whose key and rules are unchanged. It is a working surface, never a record.
 
@@ -56,7 +56,6 @@ is kept anywhere on the server.
 from __future__ import annotations
 
 import subprocess
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -85,7 +84,6 @@ if TYPE_CHECKING:
 __all__ = [
     "CAPACITY",
     "LEAF_VIEW_MEMO",
-    "MAX_AGE_SECONDS",
     "LeafViewKey",
     "LeafViewParts",
     "leaf_view_key",
@@ -95,7 +93,6 @@ __all__ = [
 ]
 
 CAPACITY: Final = 4
-MAX_AGE_SECONDS: Final = gate_memo.MAX_AGE_SECONDS
 
 
 @dataclass(frozen=True)
@@ -120,9 +117,8 @@ class LeafViewParts:
 
 @dataclass(frozen=True)
 class _Kept:
-    """One kept view: when it was computed, and the files outside the trees it read, as read."""
+    """One kept view and the files outside the trees it read, as read."""
 
-    at: float
     parts: LeafViewParts
     reads: tuple[tuple[str, str], ...]
 
@@ -171,15 +167,13 @@ def leaf_view_key(contract: WorktreeContract, trees: ReviewTrees) -> LeafViewKey
     )
 
 
-def remembered(key: LeafViewKey, *, now: float | None = None) -> LeafViewParts | None:
-    """The parts kept for ``key`` if they are young enough and every recorded file reads the same."""
+def remembered(key: LeafViewKey) -> LeafViewParts | None:
+    """The parts kept for ``key`` while every recorded file reads the same."""
 
     held = LEAF_VIEW_MEMO.get(key)
     if held is None:
         return None
     kept = held[0]
-    if (time.monotonic() if now is None else now) - kept.at > MAX_AGE_SECONDS:
-        return None
     if not kept.still_read_the_same():
         return None  # a file outside the trees changed since: compute again
     replay_reads(dict(kept.reads))
@@ -224,4 +218,4 @@ def remember(key: LeafViewKey, parts: LeafViewParts, reads: dict[str, str]) -> N
         or moved_inputs(key, reads)
     ):
         return
-    LEAF_VIEW_MEMO.put(key, _Kept(time.monotonic(), parts, tuple(sorted(reads.items()))))
+    LEAF_VIEW_MEMO.put(key, _Kept(parts, tuple(sorted(reads.items()))))

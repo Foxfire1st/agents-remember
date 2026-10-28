@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from agents_remember.kernel import git_command
+from agents_remember.kernel import git_command, recorded_reads
 from agents_remember.serving import changeset_cache, changeset_generation, changeset_reads
 from agents_remember.serving.changeset import (
     ChangesetFileRef,
@@ -17,7 +18,12 @@ from agents_remember.serving.changeset import (
     leaf_file_diff,
     register_changeset_routes,
 )
-from agents_remember.serving.changeset_cache import ChangesetCache, RepositoryRead, cached_read
+from agents_remember.serving.changeset_cache import (
+    ChangesetCache,
+    ContentRead,
+    RepositoryRead,
+    cached_read,
+)
 from agents_remember.serving.changeset_generation import identity
 from agents_remember.worktrees.modules.git import changed_worktree_paths, stage_tree
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
@@ -454,7 +460,12 @@ def test_working_view_freshness_comes_from_git_status_with_no_worktree_walk(worl
     assert first.status_code == 200
     assert walks == []
     # Contract discovery lists the enclosures directory; no part of the worktree is walked.
-    assert not any(path.is_relative_to(fixture.code_repo) for path in scans)
+    # The object census witness lists the store's top and pack directories, one level each.
+    store = fixture.code_repo / ".git" / "objects"
+    assert {path for path in scans if path.is_relative_to(fixture.code_repo)} <= {
+        store,
+        store / "pack",
+    }
     worktree_identities = [
         path
         for path in identities
@@ -869,3 +880,55 @@ def test_the_request_object_memo_is_bounded(tmp_path, monkeypatch):
         for index in range(6):
             read.object_revision(tmp_path / f"root-{index}", tolerate_additions=False)
         assert len(read.objects) <= cache.capacity
+
+
+# --- a content input's stamp, held against the file's stat ------------------------------------------
+
+
+def _coarse_timestamps(monkeypatch: pytest.MonkeyPatch, at_ns: int) -> None:
+    """A filesystem whose timestamps do not move within one tick: every stat answers ``at_ns``.
+
+    A rewrite of the same size then keeps the file's whole stat, and only Git's racy rule -- a file
+    stamped within :data:`~agents_remember.kernel.recorded_reads.RACY_NS` of its read is read again
+    -- can tell the new bytes from the held ones.
+    """
+
+    real = recorded_reads._stat_of
+
+    def coarse(path: Path) -> tuple[int, int, int, int, int, int]:
+        dev, ino, size, mode, _mtime, _ctime = real(path)
+        return (dev, ino, size, mode, at_ns, at_ns)
+
+    monkeypatch.setattr(recorded_reads, "_stat_of", coarse)
+
+
+def test_a_content_change_inside_the_racy_window_moves_its_stamp_though_its_stat_holds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = ContentRead(tmp_path / "worklist.json")
+    source.path.write_text('{"open": 1}')
+    _coarse_timestamps(monkeypatch, time.time_ns())  # written now: inside the racy window
+    cache = ChangesetCache()
+    before = cache.snapshot(source)
+    source.path.write_text('{"open": 2}')  # the same size, the same stat
+    assert cache.snapshot(source) != before, "a rewrite inside the racy window kept its old stamp"
+
+
+def test_an_unchanged_settled_content_input_is_stamped_without_reading_it_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = ContentRead(tmp_path / "worklist.json")
+    source.path.write_bytes(b"x" * 4096)
+    _coarse_timestamps(monkeypatch, time.time_ns() - 10 * recorded_reads.RACY_NS)  # long settled
+    read = Path.read_bytes
+    reads: list[Path] = []
+
+    def counted(path: Path) -> bytes:
+        reads.append(path)
+        return read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", counted)
+    cache = ChangesetCache()
+    first = cache.snapshot(source)
+    assert cache.snapshot(source) == first
+    assert reads.count(source.path) == 1, "an unchanged, settled input was read and hashed again"

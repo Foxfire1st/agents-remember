@@ -20,6 +20,7 @@ from agents_remember.application.review_final_output_receipt import (
     select_review_comparison,
 )
 from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.recorded_reads import observed_text
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.review_external_movement import (
     ExternalGitMovement,
@@ -783,14 +784,14 @@ def _worktree_branch(worktree: Path) -> str:
         if dotgit.is_dir():
             head = dotgit / "HEAD"
         else:
-            text = dotgit.read_text(encoding="utf-8").strip()
+            text = observed_text(dotgit).strip()  # both reads are inputs of the answer (D570)
             if not text.startswith("gitdir: "):
                 raise OSError(f"unknown .git pointer in {worktree}")
             gitdir = Path(text[len("gitdir: ") :].strip())
             if not gitdir.is_absolute():
                 raise OSError(f"relative administrative directory in {worktree}")
             head = gitdir / "HEAD"
-        content = head.read_text(encoding="utf-8").strip()
+        content = observed_text(head).strip()
     except OSError:
         return current_branch(worktree)
     if content.startswith("ref: "):

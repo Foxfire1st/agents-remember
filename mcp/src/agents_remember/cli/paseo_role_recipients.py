@@ -20,12 +20,12 @@ from agents_remember.cli.paseo_role_caller import _host_unreachable
 from agents_remember.cli.paseo_status import read_agent
 from agents_remember.cli.role_launch_preparation import ROLE_START_TOOL
 from agents_remember.cli.role_launch_receipts import (
-    EXECUTIONS_DIRECTORY,
     _read_receipt,
     _receipt_path,
     _taskless_execution_receipts,
 )
 from agents_remember.cli.role_message_delivery import _Recipient, _Refused
+from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_agents import RoleMessageCall
 from agents_remember.models.role_identity import LEAF_ROLES, TASKLESS_ROLES

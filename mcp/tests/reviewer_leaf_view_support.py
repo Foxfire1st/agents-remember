@@ -133,7 +133,7 @@ def measured_answers(*args, **kwargs):
     })
     return result
 facts.worklist_answers = measured_answers
-answer = child._run(json.load(sys.stdin))
+answer = child._run(json.loads(sys.stdin.readline()))
 Path(OBSERVATIONS).write_text(json.dumps({
     'before_facts': before_facts, 'new_in_facts': new_in_facts, 'total': counts,
     'reused_entries': reused_entries, 'reused_paths': reused_paths,
@@ -143,7 +143,7 @@ Path(OBSERVATIONS).write_text(json.dumps({
                      and not owner.paths and not owner.pairing for owner in owners),
     'error': answer['error'],
 }))
-json.dump(answer, sys.stdout)
+print(json.dumps(answer), flush=True)
 """.replace("OBSERVATIONS", repr(str(observations)))
     with _child_script(script):
         result = read_review_trees(config, query)

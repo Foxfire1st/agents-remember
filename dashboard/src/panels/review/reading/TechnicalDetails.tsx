@@ -7,7 +7,7 @@
 // cards on the page (MIK-R86 rule 19's provenance class). Nothing a reader needs is only here: the
 // chip's popover carries the states, each subject's meta line names an abnormal family read by a
 // chip, and its slot carries its facts.
-import { css } from '../../../../styled-system/css';
+import { css, cx } from '../../../../styled-system/css';
 import type { ReviewFailure, ReviewOrigin, ReviewPayload, ReviewSelectorKind } from '../../../data/review';
 import type { ReviewDeliveredComparison, ReviewTreeComparison, ReviewTreeEntry } from '../../../data/reviewTrees';
 import { movementRecord } from '../ReviewMovement';
@@ -15,12 +15,25 @@ import { ReviewRecordIdentities } from '../ReviewRecordPanes';
 import { DeliveredFacts, ScopeRecords, type SubjectReadState } from '../ReviewScopeHeader';
 import { familyStateWords } from '../stateWords';
 
+// A disclosure, not a section: it sits directly under the reader's page as one line of small mono,
+// closed, and only what it opens costs height (F5 c — it used to start 2.2rem below the page with a
+// rule of its own).
 const details = css({
-  marginBlock: '2.2rem 1rem',
+  marginBlock: '0.35rem 0',
   borderTopWidth: '1px',
   borderTopStyle: 'solid',
   borderTopColor: 'grid',
-  paddingTop: '0.6rem',
+  paddingTop: '0.2rem',
+  fontFamily: 'mono',
+  fontSize: '0.68rem',
+  lineHeight: 1.3,
+  '& > summary': {
+    cursor: 'pointer',
+    color: 'muted',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
   '& pre': {
     background: 'bgPanel',
     borderWidth: '1px',
@@ -37,7 +50,29 @@ const details = css({
   '& h4': { fontSize: '0.72rem', color: 'cyan', margin: '0.9rem 0 0.3rem', fontWeight: 600 },
 });
 
+const frameDetails = css({
+  flex: '0 0 auto',
+  margin: 0,
+  padding: 0,
+  border: 0,
+  '& > summary': { padding: '0 0.3rem' },
+});
+const framePanel = css({
+  position: 'absolute',
+  top: '100%',
+  insetInline: 0,
+  zIndex: 10,
+  maxHeight: '70vh',
+  overflow: 'auto',
+  whiteSpace: 'normal',
+  padding: '0.6rem',
+  background: 'bgPanel',
+  border: '1px solid',
+  borderColor: 'grid',
+});
+
 export interface TechnicalDetailsProps {
+  placement?: 'footer' | 'frame';
   repo: string;
   master: string;
   leaf: string;
@@ -182,33 +217,39 @@ function rawRecord(comparison: ReviewTreeComparison | null, frame: ReviewPayload
   };
 }
 
-export function TechnicalDetails(props: TechnicalDetailsProps) {
+function DetailRecords(props: TechnicalDetailsProps) {
   const { comparison, frame, shown, status } = props;
   const foreign = recordsOf(comparison, props.latest);
-  const record = rawRecord(comparison, frame, foreign);
-  // The paging controls are the reader's controls, so they stand above the closed disclosure, which
-  // holds identifiers and provenance only (INV-P4Z520).
-  return (
-    <>
-      {props.paging}
-      <details className={details} data-disclosure="provenance" data-testid="review-details">
-        <summary>
-          Technical details · raw records of comparison #{comparison?.number ?? '…'}
-          {foreign ? ` · movement and limitations of #${props.latest}` : ''}
-        </summary>
-        <pre data-testid="review-movement-facts">{JSON.stringify(record, null, 2)}</pre>
-        <h4>Task and subject identifiers</h4>
-        <p data-testid="review-subject">
-          {props.repo} · {props.master} · {props.leaf} · {subjectLabel(props.subject, props.instead)}
-        </p>
-        {frame ? (
-          <ScopeRecords payload={frame} repo={props.repo} master={props.master} leaf={props.leaf} status={status} />
-        ) : null}
-        <DeliveredFacts delivered={props.delivered} />
-        {shown && status === null && props.subject && props.instead === null ? <SubjectProvenance payload={shown} /> : null}
-        {shown ? <ReviewRecordIdentities payload={shown} /> : null}
-        <EntryIdentifiers entries={props.entries} />
-      </details>
-    </>
-  );
+  return <>
+    <pre data-testid="review-movement-facts">{JSON.stringify(rawRecord(comparison, frame, foreign), null, 2)}</pre>
+    <h4>Task and subject identifiers</h4>
+    <p data-testid="review-subject">
+      {props.repo} · {props.master} · {props.leaf} · {subjectLabel(props.subject, props.instead)}
+    </p>
+    {frame ? <ScopeRecords payload={frame} repo={props.repo} master={props.master} leaf={props.leaf} status={status} /> : null}
+    <DeliveredFacts delivered={props.delivered} />
+    {shown && status === null && props.subject && props.instead === null ? <SubjectProvenance payload={shown} /> : null}
+    {shown ? <ReviewRecordIdentities payload={shown} /> : null}
+    <EntryIdentifiers entries={props.entries} />
+  </>;
+}
+
+function DetailSummary(props: TechnicalDetailsProps) {
+  if (props.placement === 'frame') return <>Technical details</>;
+  return <>Technical details · raw records of comparison #{props.comparison?.number ?? '…'}
+    {recordsOf(props.comparison, props.latest) ? ` · movement and limitations of #${props.latest}` : ''}</>;
+}
+
+export function TechnicalDetails(props: TechnicalDetailsProps) {
+  const inFrame = props.placement === 'frame';
+  return <>
+    {inFrame ? null : props.paging}
+    <details className={cx(details, inFrame && frameDetails)} data-disclosure="provenance" data-testid="review-details">
+      <summary><DetailSummary {...props} /></summary>
+      <div className={inFrame ? framePanel : undefined}>
+        {inFrame ? props.paging : null}
+        <DetailRecords {...props} />
+      </div>
+    </details>
+  </>;
 }

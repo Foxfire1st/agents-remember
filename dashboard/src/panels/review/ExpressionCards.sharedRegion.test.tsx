@@ -12,7 +12,7 @@ import { changeSetModel } from './changeSetOrder';
 import { l181Answer, l181Inputs } from './changeSetOrder.test-utils';
 import { blockElement } from './reading/blockDom';
 import { ReadingContext, type ReadingContextValue } from './reading/readingContext';
-import { SubjectGroupSection } from './reading/SubjectSection';
+import { SubjectSection } from './reading/SubjectSection';
 
 const TRIPLE = ['RLZ-EC5NRM', 'RLZ-ZA95M4', 'RLZ-ZT2RRK'];
 const comparison = l181Answer.comparison!;
@@ -38,9 +38,7 @@ function draw(selected: string | null = null) {
   };
   return render(
     <ReadingContext.Provider value={value}>
-      {model.groups.map((group) => (
-        <SubjectGroupSection key={group.key} group={group} labelUnlisted={false} />
-      ))}
+      <SubjectSection node={model.subjects[0]} />
     </ReadingContext.Provider>,
   );
 }

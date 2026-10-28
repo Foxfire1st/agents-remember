@@ -37,6 +37,7 @@ from agents_remember.application.task_docs.task_retirement_shared import (
     hook_failed,
     hook_remainder,
 )
+from agents_remember.canvas.explainer_paths import seat_counter_path
 from agents_remember.errors import CodeObjectRetentionError
 from agents_remember.worktrees.modules import finalize
 from agents_remember.worktrees.services import (
@@ -789,7 +790,12 @@ def test_nothing_is_deleted_when_the_cache_receipt_cannot_be_written(task: Task)
 def test_interrupted_external_explainer_deletion_replays_as_already_absent(
     task: Task,
 ) -> None:
-    """MIK-R186 rule 9: interrupted deletion of external explainer workspace/counter attributes alreadyAbsent."""
+    """MIK-R186 rule 9: interrupted deletion of external explainer artifacts attributes alreadyAbsent.
+
+    MIK-R211 v5 rule 12: a workspace an older Retire left with its ``retired.json`` is not a
+    finished removal any more -- the retirement step removes it completely, before the sweep -- and
+    the side files the old layout kept beside it are the sweep's, replayed as already absent.
+    """
 
     explainer_root = task.root / "coordination" / "explainer" / REPO / MASTER
     workspace = explainer_root / LEAF
@@ -797,6 +803,8 @@ def test_interrupted_external_explainer_deletion_replays_as_already_absent(
     (workspace / "retired.json").write_text('{"receipt": "r1"}\n', encoding="utf-8")
     counter = explainer_root / f"{LEAF}.generation"
     counter.write_text("1\n", encoding="utf-8")
+    lock = explainer_root / f"{LEAF}.lock"
+    lock.write_text("", encoding="utf-8")
     with (
         mock.patch.object(
             review_artifact_receipts.ReceiptLedger, "finish", side_effect=KeyboardInterrupt
@@ -804,11 +812,15 @@ def test_interrupted_external_explainer_deletion_replays_as_already_absent(
         pytest.raises(KeyboardInterrupt),
     ):
         task.archive(explainer_root=explainer_root)
-    assert not workspace.exists() and not counter.exists()
+    assert not workspace.exists() and not counter.exists() and not lock.exists()
+    assert sorted(explainer_root.iterdir()) == []
     retry = task.archive(explainer_root=explainer_root)
     absent = {
         (entry["artifact"], entry["kind"], entry.get("interrupted", False))
         for entry in retry["alreadyAbsent"]
     }
-    assert (workspace.as_posix(), "explainerArtifacts", True) in absent
-    assert (counter.as_posix(), "explainerArtifacts", True) in absent
+    # The old counter moved to the task's explainer records on first read, and went from there.
+    moved = seat_counter_path(workspace)
+    assert moved.name == "seat-generation" and not moved.exists()
+    assert (moved.as_posix(), "explainerArtifacts", True) in absent
+    assert (lock.as_posix(), "explainerArtifacts", True) in absent

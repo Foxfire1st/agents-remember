@@ -34,6 +34,13 @@ afterEach(() => { cleanup(); dispose?.(); vi.unstubAllGlobals(); });
 // The family label the shown answer carries: Technical details' provenance names each family read
 // with its own label (MIK-R89 v2 rule 6, amended 9dde2b09).
 const familyRead = (view: ReturnType<typeof render>) => view.getByTestId('review-subject-provenance').textContent;
+// A selected family shows its members' overview (MIK-R211 v4 rule 10); its own read has answered
+// once Technical details carry that read's provenance and no read is pending.
+const familyShown = (view: ReturnType<typeof render>, id: string) => {
+  expect(view.getByTestId('review-family-overview').dataset.family).toBe(id);
+  expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined();
+  expect(view.getByTestId('review-subject-provenance')).toBeTruthy();
+};
 
 it('reconciles an explicit subject and entry read before the first native readiness baseline', async () => {
   // Consumer schedule, not native timing proof: hold the first SSE baseline until both HTTP
@@ -59,7 +66,7 @@ it('reconciles an explicit subject and entry read before the first native readin
   const reviews = () => urls.filter((url) => url.pathname === '/api/review/intent');
   const summaries = () => urls.filter(entrySummary);
   await waitFor(() => {
-    expect(view.getByTestId('review-center-family').dataset.family).toBe(selected.family_id);
+    familyShown(view, selected.family_id);
     expect(view.getByTestId('open-intent-review').textContent).toContain('+1 −0');
   });
   expect(reviews()).toHaveLength(1);
@@ -102,13 +109,13 @@ it('refreshes the actual selected review and mounted entry once, without resurre
   }));
   const view = render(<IntentEntryRevalidation shown={true}><DocChangeSetBar kind="leaf" entry={entry} onOpen={() => undefined} /><ReviewSurface {...target} selectorKind="family" selectorId={families[0].family_id} onBack={() => undefined} /></IntentEntryRevalidation>);
   const reviews = () => urls.filter((url) => url.pathname === '/api/review/intent');
-  await waitFor(() => expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id));
+  await waitFor(() => familyShown(view, families[0].family_id));
   expect(view.getByTestId('open-intent-review').textContent).toContain('+1 −0');
   act(() => publishReviewMemory({ ...target, revision: 'baseline' }));
   await waitFor(() => expect(reviews()).toHaveLength(2));
-  await waitFor(() => expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id));
+  await waitFor(() => familyShown(view, families[0].family_id));
   fireEvent.click(view.getAllByTestId('review-family-open').find((button) => button.dataset.subjectId === families[1].family_id)!);
-  await waitFor(() => expect(view.getByTestId('review-center-family').dataset.family).toBe(families[1].family_id));
+  await waitFor(() => familyShown(view, families[1].family_id));
   changed = true;
   act(() => { publishReviewMemory({ ...target, master: 'other', revision: 'ignored' }); publishReviewMemory({ ...target, revision: 'next' }); });
   await waitFor(() => expect(view.getByTestId('open-intent-review').textContent).toContain('+2 −0'));
@@ -191,10 +198,10 @@ function changedBody(label: string, digest: string) {
 
 it('never lets an earlier memory revision replace a newer visible answer', async () => {
   const { view, reviews, pending, hold } = deferredSurface();
-  await view.findByTestId('review-center-family');
+  await waitFor(() => familyShown(view, families[0].family_id));
   act(() => publishReviewMemory({ ...target, revision: 'baseline' }));
   await waitFor(() => expect(reviews).toHaveLength(2));
-  await view.findByTestId('review-center-family');
+  await waitFor(() => familyShown(view, families[0].family_id));
   hold();
   act(() => publishReviewMemory({ ...target, revision: 'first-edit' }));
   await waitFor(() => expect(pending).toHaveLength(1));
@@ -211,10 +218,10 @@ it('never lets an earlier memory revision replace a newer visible answer', async
 
 it('retains the labeled coherent generation when a memory-triggered read fails and recovers on the next edit', async () => {
   const { view, reviews, pending, hold } = deferredSurface();
-  await view.findByTestId('review-center-family');
+  await waitFor(() => familyShown(view, families[0].family_id));
   act(() => publishReviewMemory({ ...target, revision: 'baseline' }));
   await waitFor(() => expect(reviews).toHaveLength(2));
-  await view.findByTestId('review-center-family');
+  await waitFor(() => familyShown(view, families[0].family_id));
   hold();
   act(() => publishReviewMemory({ ...target, revision: 'failed-edit' }));
   await waitFor(() => expect(pending).toHaveLength(1));

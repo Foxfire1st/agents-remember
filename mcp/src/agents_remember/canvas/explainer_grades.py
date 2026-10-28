@@ -11,9 +11,10 @@ A grade is the explainer's judgment, never a recorded fact, and it is stored as 
   does not. Staleness is that comparison, made against one target comparison
   (:mod:`agents_remember.canvas.explainer_parts`).
 
-The bounds are the packet's: at most :data:`MAX_CATEGORIES` live categories per leaf, at most
-:data:`MAX_REFERENCES` references in one call, and 160 characters for a reason. A refusal names the
-values it refused rather than silently dropping them.
+No count or length bounds what the explainer grades (MIK-R211 v4 rule 3, D567): any number of
+categories and references, and a reason or meaning of any length. Only a category's and a grade's
+own name, which are labels, stay within :data:`MAX_GRADE_CHARACTERS`. A refusal names the values it
+refused rather than silently dropping them.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from pydantic import ConfigDict, Field
 
 from agents_remember.canvas.explainer_state import ExplainerRefused
 from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.kernel.recorded_reads import observed_text, record_read
 from agents_remember.memory.knowledge.durable_evidence import durable_reports_root
 from agents_remember.models.knowledge.base import KnowledgeModel
 from agents_remember.models.knowledge.review_frame import FrameBinding
@@ -34,10 +36,8 @@ from agents_remember.models.knowledge.review_frame import FrameBinding
 __all__ = [
     "GRADES_DIRECTORY",
     "GRADES_NAME",
-    "MAX_CATEGORIES",
     "MAX_FINGERPRINT_CHARACTERS",
     "MAX_GRADE_CHARACTERS",
-    "MAX_REFERENCES",
     "Category",
     "Grade",
     "GradeStore",
@@ -50,8 +50,8 @@ __all__ = [
 GRADES_DIRECTORY = "review-grades"
 GRADES_NAME = "grades.json"
 GRADES_SCHEMA = "ar-review-grades/v1"
-MAX_CATEGORIES = 12
-MAX_REFERENCES = 200
+#: The length of a category's or a grade's own name: a label, not a text (MIK-R211 v4 rule 3 keeps
+#: ids and labels).
 MAX_GRADE_CHARACTERS = 160
 MAX_FINGERPRINT_CHARACTERS = 2048
 
@@ -60,7 +60,7 @@ class ScalePoint(KnowledgeModel):
     """One named grade of a category's scale, highest first."""
 
     grade: str = Field(min_length=1, max_length=MAX_GRADE_CHARACTERS)
-    meaning: str = Field(min_length=1, max_length=MAX_GRADE_CHARACTERS)
+    meaning: str = Field(min_length=1)
 
 
 class Category(KnowledgeModel):
@@ -68,7 +68,7 @@ class Category(KnowledgeModel):
 
     name: str = Field(min_length=1, max_length=MAX_GRADE_CHARACTERS)
     scale: tuple[ScalePoint, ...] = Field(min_length=2, max_length=5)
-    meaning: str = Field(default="", max_length=MAX_GRADE_CHARACTERS)
+    meaning: str = ""
 
 
 class Grade(KnowledgeModel):
@@ -77,7 +77,7 @@ class Grade(KnowledgeModel):
     reference: str = Field(min_length=1, max_length=4096)
     category: str = Field(min_length=1, max_length=MAX_GRADE_CHARACTERS)
     grade: str = Field(min_length=1, max_length=MAX_GRADE_CHARACTERS)
-    reason: str = Field(min_length=1, max_length=MAX_GRADE_CHARACTERS)
+    reason: str = Field(min_length=1)
     fingerprint: str = Field(min_length=1, max_length=MAX_FINGERPRINT_CHARACTERS)
     binding: FrameBinding
     made_at: str = Field(min_length=1, max_length=64)
@@ -115,9 +115,10 @@ def read_grades(path: Path, *, leaf_id: str) -> Grades:
     """
 
     if not path.is_file():
+        record_read(path)  # no store is an input too (D570)
         return Grades(leaf_id=leaf_id)
     try:
-        return Grades.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        return Grades.model_validate(json.loads(observed_text(path)))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ExplainerRefused(
             "grades-unreadable", f"the grade store at {path} cannot be read: {error}"
@@ -152,11 +153,8 @@ class GradeStore:
         if len({point.grade for point in scale}) != len(scale):
             raise ExplainerRefused("category-scale", "each grade of a scale is named once")
         cleaned_meaning = meaning.strip()
-        if len(cleaned_meaning) > MAX_GRADE_CHARACTERS or "\n" in meaning or "\r" in meaning:
-            raise ExplainerRefused(
-                "category-meaning",
-                f"a category meaning is one line of at most {MAX_GRADE_CHARACTERS} characters",
-            )
+        if "\n" in meaning or "\r" in meaning:
+            raise ExplainerRefused("category-meaning", "a category meaning is one line")
         grades = self.load()
         existing = grades.category(name)
         if existing is not None:
@@ -166,12 +164,6 @@ class GradeStore:
                 "category-exists",
                 f"the category {name!r} already has another scale or meaning; remove it before "
                 "defining it again, because a grade means what its scale and category say",
-            )
-        if len(grades.categories) >= MAX_CATEGORIES:
-            raise ExplainerRefused(
-                "category-limit",
-                f"the leaf holds {len(grades.categories)} live categories, its admitted "
-                f"{MAX_CATEGORIES}; remove one first",
             )
         updated = grades.model_copy(
             update={
@@ -214,15 +206,8 @@ class GradeStore:
 
         if not references:
             raise ExplainerRefused("grade-empty", "a grade names at least one block")
-        if len(references) > MAX_REFERENCES:
-            raise ExplainerRefused(
-                "grade-limit",
-                f"a grade names at most {MAX_REFERENCES} references, not {len(references)}",
-            )
-        if not reason or not reason.strip() or len(reason) > MAX_GRADE_CHARACTERS:
-            raise ExplainerRefused(
-                "grade-reason", f"a reason is 1 to {MAX_GRADE_CHARACTERS} characters"
-            )
+        if not reason or not reason.strip():
+            raise ExplainerRefused("grade-reason", "a grade gives its reason")
         if "\n" in reason or "\r" in reason:
             raise ExplainerRefused(
                 "grade-reason", "a grade reason is one line and may not contain a newline"

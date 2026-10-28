@@ -235,7 +235,8 @@ function useTaskReports(
     setReports(null);
     setReportsFailed(false);
     if (!docPath) return () => {};
-    void listTaskReports(repo, master, docPath).then(
+    const controller = new AbortController();
+    void listTaskReports(repo, master, docPath, "", controller.signal).then(
       (data) => {
         if (!live) return;
         // A payload without report rows is unreadable: the record says the
@@ -252,6 +253,7 @@ function useTaskReports(
     );
     return () => {
       live = false;
+      controller.abort();
     };
   }, [repo, master, docPath]);
   return { reports, reportsFailed };
@@ -273,7 +275,8 @@ function useResolvedNotes(repo: string, master: string, references: string[]) {
     let live = true;
     setResolved(new Map());
     setFailed(false);
-    void resolveNoteReferences(repo, master, listNow()).then(
+    const controller = new AbortController();
+    void resolveNoteReferences(repo, master, listNow(), "", controller.signal).then(
       (resolutions) => {
         if (live) setResolved(resolutions);
       },
@@ -283,6 +286,7 @@ function useResolvedNotes(repo: string, master: string, references: string[]) {
     );
     return () => {
       live = false;
+      controller.abort();
     };
   }, [repo, master, referencesKey]);
   return { resolved, failed };
@@ -297,7 +301,8 @@ function useNotesFolderTotal(repo: string, master: string) {
     let live = true;
     setTopCount(null);
     setFailed(false);
-    void listFolder(repo, master, '').then(
+    const controller = new AbortController();
+    void listFolder(repo, master, '', 0, '', controller.signal).then(
       (folder) => {
         if (!live) return;
         setTopCount(folder.exists ? folder.total : null);
@@ -308,6 +313,7 @@ function useNotesFolderTotal(repo: string, master: string) {
     );
     return () => {
       live = false;
+      controller.abort();
     };
   }, [repo, master]);
   return { topCount, failed };

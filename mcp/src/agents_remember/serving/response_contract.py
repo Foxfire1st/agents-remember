@@ -574,6 +574,17 @@ class MasterNetGeneration(WireResponse):
     digest: str
 
 
+class MasterCounters(WireResponse):
+    """The series counter projection; complete counts without file presentation data."""
+
+    master: str
+    leaves: list[LeafSummary]
+    counters: ChangeSetCounters
+    generation: MasterNetGeneration | None = None
+    currentness: Literal["current", "superseded", "unmeasured"] = "unmeasured"
+    scope: Literal["integrated"] = "integrated"
+
+
 class MasterChangeSet(WireResponse):
     """``GET /api/changeset/master``: the NET series diff, plus the per-leaf breakdown."""
 

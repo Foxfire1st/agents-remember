@@ -7,6 +7,7 @@ import { css, cx } from '../../styled-system/css';
 import { SidebarToggle } from '../grammar/SidebarToggle';
 import type { ChangeSetTarget } from '../panels/changeset/ChangeSetViewer';
 import { ReviewSurface } from '../panels/review/ReviewSurface';
+import { ReviewShownContext } from '../panels/review/reviewShown';
 import { rail, reviewChatClose, reviewChatColumn, RIGHT_RAIL_ID, takeoverBody, viewport } from './layout';
 import type { ReviewChatColumn, ReviewChatControl } from './reviewChat';
 
@@ -24,10 +25,13 @@ export function ReviewMain({
   target,
   chat,
   onBack,
+  hidden = false,
 }: {
   target: ChangeSetTarget;
   chat: ReviewChatControl;
   onBack: () => void;
+  // Another bottom tab is on screen: the review stays mounted, hidden, and comes back as left (D575).
+  hidden?: boolean;
 }) {
   // A review target may carry a subject's selector or none at all: the task-context entry opens the
   // review on the task, and the surface asks for exactly what it was handed. It may also name the
@@ -35,17 +39,24 @@ export function ReviewMain({
   // surface then asks for that leaf's recorded comparison rather than for a live candidate there
   // is none of.
   return (
-    <main className={cx(viewport, takeoverBody, stackedPage, 'viewport')} data-view="intent-review">
-      <ReviewSurface
-        repo={target.repo}
-        master={target.master ?? ''}
-        leaf={target.leaf ?? ''}
-        selectorKind={target.review?.selectorKind}
-        selectorId={target.review?.selectorId}
-        history={target.review?.historical ? 'recorded' : undefined}
-        onBack={onBack}
-        chat={chat}
-      />
+    <main
+      className={cx(viewport, takeoverBody, stackedPage, 'viewport')}
+      data-view="intent-review"
+      style={hidden ? { display: 'none' } : undefined}
+      aria-hidden={hidden || undefined}
+    >
+      <ReviewShownContext.Provider value={!hidden}>
+        <ReviewSurface
+          repo={target.repo}
+          master={target.master ?? ''}
+          leaf={target.leaf ?? ''}
+          selectorKind={target.review?.selectorKind}
+          selectorId={target.review?.selectorId}
+          history={target.review?.historical ? 'recorded' : undefined}
+          onBack={onBack}
+          chat={chat}
+        />
+      </ReviewShownContext.Provider>
     </main>
   );
 }

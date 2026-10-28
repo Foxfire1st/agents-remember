@@ -68,6 +68,78 @@ describe('reading the state answer', () => {
     });
   });
 
+  it('reads a failed build’s reason from the server’s own `error`, and marks the step it stopped at', () => {
+    // `explainer_service.py` keeps a stopped build as `{"state": "failed", "failedStep": …,
+    // "error": str(error)}`, and `serving/explainer.py` answers it under `build`. Reading only
+    // `reason` made every real failure say "no reason was given".
+    const reason = 'the host could not read the memory tree: permission denied';
+    const read = parseExplainerState({
+      seat: { state: 'missing' },
+      build: {
+        state: 'failed',
+        requestId: 'req-1',
+        step: 'checkout-code',
+        percent: 20,
+        steps: [
+          { name: 'workspace', percent: 5 },
+          { name: 'checkout-code', percent: 20 },
+        ],
+        failedStep: 'checkout-code',
+        error: reason,
+      },
+    });
+    if (read.kind !== 'state') throw new Error('not a state');
+    expect(read.value.build).toMatchObject({
+      state: 'failed',
+      failedStep: 'checkout-code',
+      reason,
+      attempt: 'req-1',
+    });
+    // The server's step rows carry no state of their own: the one it stopped at is marked failed,
+    // and the step it reached before that one reads done.
+    expect(read.value.build?.steps.map((step) => step.state)).toEqual(['done', 'failed']);
+  });
+
+  it('collapses the server’s progress log to one row per step, at its last word', () => {
+    // The shape the server really writes: a row per progress tick, the same step many times.
+    const read = parseExplainerState({
+      build: {
+        state: 'running',
+        requestId: 'worker-201-c',
+        step: 'checkout-code',
+        steps: [
+          { name: 'workspace', percent: 10 },
+          { name: 'binding', percent: 20 },
+          { name: 'checkout-code', state: 'running', percent: 20 },
+          { name: 'checkout-code', state: 'running', percent: 20 },
+          { name: 'checkout-code', state: 'done', percent: 45 },
+        ],
+        percent: 35,
+      },
+    });
+    if (read.kind !== 'state') throw new Error('not a state');
+    expect(read.value.build?.steps.map((step) => step.name)).toEqual([
+      'workspace',
+      'binding',
+      'checkout-code',
+    ]);
+    // The last record of the step wins, with the server's own percentage kept.
+    expect(read.value.build?.steps[2].percent).toBe(45);
+    expect(read.value.build?.percent).toBe(35);
+  });
+
+  it('reads the same words when the failure is carried as `building`', () => {
+    const read = parseExplainerState({
+      building: { state: 'failed', step: 'seat', error: 'no Paseo host answered' },
+    });
+    if (read.kind !== 'state') throw new Error('not a state');
+    expect(read.value.build).toMatchObject({
+      state: 'failed',
+      failedStep: 'seat',
+      reason: 'no Paseo host answered',
+    });
+  });
+
   it('reads a build carried as `building` with its steps', () => {
     const read = parseExplainerState({
       seat: { state: 'closed' },

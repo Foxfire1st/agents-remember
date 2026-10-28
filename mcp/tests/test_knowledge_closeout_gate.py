@@ -1228,9 +1228,12 @@ def test_the_gate_memo_reuses_a_verdict_only_for_the_identical_inputs(
     heads = (git(world.memory, "rev-parse", name) for name in ("main", "HEAD"))
     key = memo.memo_key(world.contract, answered, *heads)
     assert key is not None and memo.remembered(key) is not None  # the passing verdict is kept
-    # load-independent: late is passed as the injected now value to exercise memo expiry.
-    late = time.monotonic() + memo.MAX_AGE_SECONDS + 1
-    assert memo.remembered(key, now=late) is None  # and never older than one run's span
+    # load-independent: the clock is moved past the old fifteen-minute bound, never waited on.
+    later = time.monotonic() + 15 * 60 + 1
+    with mock.patch.object(time, "monotonic", return_value=later):
+        # D570: identity is the only test; a verdict whose reads re-observe identical is served
+        # at any age, and only the memo's size evicts it.
+        assert memo.remembered(key) is not None
 
 
 # --------------------------------------------------------------------------------------------------

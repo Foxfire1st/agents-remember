@@ -14,7 +14,7 @@ media type come from the owner that admitted the bytes -- never from the request
 **The trusted API** (``/api/canvas/...``) is the dashboard's own surface. It opens a session, carries
 the page's requests to the host protocol, and offers the review panel the saved-first state it
 draws. Reads start nothing: :func:`frame_state` reopens the retained revision and reports staleness,
-attempts and the applied policy, and no code path here starts a model except :func:`generate`, which
+attempts and the applied policy. No code path here starts a model. The explainer workspace
 demands an explicit activation and sits behind the cross-origin write guard.
 
 A refusal is a typed answer with its reason, never a silent no-op: the panel and a reviewer both need
@@ -23,19 +23,16 @@ to know *why* a page did not open, did not publish or was refused.
 
 from __future__ import annotations
 
-import hashlib
+import re
 from collections import OrderedDict
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from importlib import resources
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
-from agents_remember.application.review_evidence_adapter import prepare_evidence
 from agents_remember.application.review_frame_store import (
     FrameRefused,
     FrameScope,
@@ -46,26 +43,21 @@ from agents_remember.application.review_frame_store import (
     reopen_frame,
     revision_manifest,
 )
-from agents_remember.application.review_tree_comparison import ReviewTrees, TreeKnowledge
 from agents_remember.canvas.document import bound_document
 from agents_remember.canvas.evidence import resolve_evidence_reference
-from agents_remember.canvas.paths import PathRefused, design_text_source, task_root
+from agents_remember.canvas.paths import PathRefused, task_root
 from agents_remember.canvas.policy import (
     CONTAINER_REQUIRED,
     LIMITS,
-    IsolationProof,
+    ORIGIN_ARRANGEMENT,
     asset_headers,
     document_headers,
     frame_sandbox,
-    load_isolation_proof,
-    policy_digest,
-    scripts_enabled,
 )
 from agents_remember.canvas.presenter import (
     Presenter,
     PresenterRefused,
     PresenterRunner,
-    presenter_launch,
 )
 from agents_remember.canvas.protocol import (
     AcceptedMessage,
@@ -76,7 +68,6 @@ from agents_remember.canvas.protocol import (
 from agents_remember.canvas.sessions import CanvasSession, SessionBinding, SessionRegistry
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.knowledge.review_evidence import EvidenceMap
 from agents_remember.models.knowledge.review_frame import FrameLimits
 from agents_remember.serving.review_trees import ReviewTreesPort, ReviewTreesQuery
 
@@ -95,7 +86,6 @@ CANVAS_FRAME_PREFIX = "/canvas"
 CANVAS_PAGE_PREFIX = f"{CANVAS_FRAME_PREFIX}/page"
 
 #: How long the panel's focus text may be, and the question a page may ask.
-MAX_FOCUS_CHARS = 2000
 MAX_QUESTION_CHARS = 1024
 #: One protocol request is bounded by the protocol's own envelope ceiling; the route reads at most one
 #: byte past it so the parser can refuse `oversized` without the server buffering a hostile body
@@ -103,6 +93,13 @@ MAX_QUESTION_CHARS = 1024
 MAX_REQUEST_BYTES = 4096
 
 _COMPARISON_OWNER = "agents_remember.application.review_tree_comparison"
+
+#: The shape a forwarded host may take before it is used in a document policy: ``host`` or
+#: ``host:port``, IPv6 in brackets. A scheme, a path, a comma-separated chain or whitespace means a
+#: value this service did not expect, and the request's own host stands instead (F5).
+_FORWARDED_HOST = re.compile(
+    r"(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(?::[0-9]{1,5})?"
+)
 
 
 @dataclass
@@ -112,9 +109,7 @@ class CanvasHosts:
     config: McpRuntimeConfig
     sessions: SessionRegistry
     review_trees: ReviewTreesPort | None = None
-    evidence: Callable[[ReviewTreesQuery, str, str], Any] | None = None
     runner: PresenterRunner | None = None
-    proof: IsolationProof | None = None
     limits: FrameLimits | None = None
     pinned_sessions: set[str] = field(default_factory=set)
     session_slots: dict[str, str] = field(default_factory=dict)
@@ -166,42 +161,36 @@ def _presenter(hosts: CanvasHosts, scope: FrameScope, leaf_id: str) -> Presenter
 
 
 def _origin(request: Request) -> str:
+    """The browser-facing origin of a frame document: what the page is loaded from, not the proxy's.
+
+    A dev proxy in front of this service requests the document with its own ``Host`` (that is what
+    makes the request admissible at all, ``write_guard.host_refusal``) and tells us the origin the
+    browser is really on through ``X-Forwarded-Host``. The document policy is built from that
+    origin, so a page loaded from ``localhost:5195`` may load its own ``styles.css`` from
+    ``localhost:5195`` instead of being refused as foreign by a policy that names the proxy target.
+    The forwarded value is used only in the ``host[:port]`` shape: anything carrying a scheme, a
+    path, or whitespace is ignored and the request's own host stands (MIK-R211 v2, F5).
+    """
+
     host = request.headers.get("host") or f"{request.url.hostname}:{request.url.port or 80}"
-    return f"{request.url.scheme}://{host}"
+    scheme = request.url.scheme
+    forwarded_host = request.headers.get("x-forwarded-host", "").strip()
+    if _FORWARDED_HOST.fullmatch(forwarded_host):
+        host = forwarded_host
+        forwarded_proto = request.headers.get("x-forwarded-proto", "").strip().lower()
+        if forwarded_proto in {"http", "https"}:
+            scheme = forwarded_proto
+    return f"{scheme}://{host}"
 
 
-def _scripts(hosts: CanvasHosts) -> bool:
-    return scripts_enabled(hosts.proof) if hosts.proof is not None else False
+def _policy_view() -> dict[str, Any]:
+    """The policy the served pages run under. Scripts are part of it, not a separate decision."""
 
-
-def _policy_view(hosts: CanvasHosts) -> dict[str, Any]:
-    proof = hosts.proof
     return {
-        "policyDigest": policy_digest(),
-        "originArrangement": "opaque-sandbox-v1",
-        "scripts": _scripts(hosts),
-        "proof": {
-            "state": "absent" if proof is None else proof.state,
-            "browser": None if proof is None else proof.browser,
-            "browserVersion": None if proof is None else proof.browser_version,
-            "observed": [] if proof is None else list(proof.observed),
-            "failedChecks": [] if proof is None else list(proof.failed_checks),
-            "detail": "" if proof is None else proof.detail,
-        },
+        "originArrangement": ORIGIN_ARRANGEMENT,
+        "scripts": True,
         "limits": LIMITS,
         "containerRequired": list(CONTAINER_REQUIRED),
-    }
-
-
-def _design_view(hosts: CanvasHosts, repository_id: str) -> dict[str, Any]:
-    source, text = design_text_source(hosts.config, repository_id)
-    if text is None:
-        return {"source": source, "available": False, "words": 0, "sha256": None}
-    return {
-        "source": source,
-        "available": True,
-        "words": len(text.split()),
-        "sha256": hashlib.sha256(text.encode()).hexdigest(),
     }
 
 
@@ -222,55 +211,6 @@ async def _body(request: Request) -> dict[str, Any]:
     except (ValueError, UnicodeDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
-
-
-def _trees(result: Any) -> ReviewTrees:
-    """Build the adapter's own view from the review-trees port's answer, inventing nothing."""
-
-    record = result.comparison
-    sides = result.knowledge_sides
-    if record is None or len(sides) != 2:
-        raise PresenterRefused(
-            "evidence-source-unavailable",
-            f"the comparison owner answered {result.state!r} without two knowledge sides; no "
-            "admitted packet can be prepared from it",
-        )
-    return ReviewTrees(
-        record,
-        None,
-        Path(record.memory_candidate.repository),
-        TreeKnowledge(sides[0], None),
-        TreeKnowledge(sides[1], None),
-        code_sides=result.code_sides,
-    )
-
-
-def _evidence(
-    hosts: CanvasHosts, query: ReviewTreesQuery, *, question: str, focus: str
-) -> tuple[Any, Any]:
-    """Prepare one admitted R102 packet through the landed owners, or refuse by name."""
-
-    if hosts.evidence is not None:
-        return hosts.evidence(query, focus, question), None
-    if hosts.review_trees is None:
-        raise PresenterRefused(
-            "evidence-source-unavailable",
-            "the composition root wires no review-trees port, so no comparison can be admitted",
-        )
-    result = hosts.review_trees(query)
-    if result.state != "trees":
-        detail = None if result.refusal is None else result.refusal.detail
-        raise PresenterRefused(
-            "evidence-source-unavailable",
-            f"the comparison owner answered {result.state!r}: {detail or 'no tree comparison'}",
-        )
-    prepared = prepare_evidence(
-        _trees(result),
-        scope=focus,
-        question=question,
-        evidence_map=EvidenceMap(coverage=focus),
-    )
-    return prepared.packet, prepared
 
 
 def frame_state(hosts: CanvasHosts, request: Request) -> JSONResponse:
@@ -316,11 +256,7 @@ def frame_state(hosts: CanvasHosts, request: Request) -> JSONResponse:
             "opening": opening.model_dump(),
             "staleness": staleness,
             "presenter": presenter.opening(),
-            "launch": presenter_launch(
-                hosts.config, repository_id=params["repository_id"]
-            ).model_dump(),
-            "design": _design_view(hosts, params["repository_id"]),
-            "policy": _policy_view(hosts),
+            "policy": _policy_view(),
             "sessions": [
                 {
                     "revision": session.revision,
@@ -330,106 +266,6 @@ def frame_state(hosts: CanvasHosts, request: Request) -> JSONResponse:
                 for session in hosts.sessions.sessions()
             ],
         }
-    )
-
-
-@dataclass(frozen=True)
-class StartInput:
-    """The three facts one explicit start must carry before any evidence is admitted."""
-
-    request_id: str
-    focus: str
-    question: str
-
-
-def _start_input(body: dict[str, Any]) -> StartInput | JSONResponse:
-    """Validate the start's own fields. An absent activation is a refused start, not a default."""
-
-    allowed = {
-        "requestId",
-        "focus",
-        "activation",
-        "question",
-        "regenerate",
-        "baseRevision",
-        "comparison",
-        "comparisonNumber",
-        "history",
-    }
-    if set(body) - allowed:
-        return _refusal(
-            "launch-override-refused",
-            "launch choices/permissions come only from L71 user settings; unsupported fields: "
-            + ", ".join(sorted(set(body) - allowed)),
-            status=400,
-        )
-    request_id = body.get("requestId")
-    focus = body.get("focus")
-    if body.get("activation") != "explicit":
-        return _refusal(
-            "not-activated",
-            "authoring starts only from the explicit Generate control; a mount, a reload or a "
-            "status read starts no model",
-            status=400,
-        )
-    if not isinstance(request_id, str) or not request_id.strip():
-        return _refusal("request-required", "a generation names its request identity", status=400)
-    if not isinstance(focus, str) or not 0 < len(focus) <= MAX_FOCUS_CHARS:
-        return _refusal("focus-required", "the explanation names its focus", status=400)
-    question = body.get("question")
-    return StartInput(
-        request_id=request_id,
-        focus=focus,
-        question=question if isinstance(question, str) and question else focus,
-    )
-
-
-def generate(hosts: CanvasHosts, request: Request, body: dict[str, Any]) -> JSONResponse:
-    """The one explicit authoring start. Every other path is read-only."""
-
-    params = request.path_params
-    try:
-        scope = _frame_scope(
-            hosts, params["repository_id"], params["master"], params["leaf_id"], params["frame_id"]
-        )
-    except (PathRefused, FrameRefused, ValueError) as error:
-        return _refusal("frame-unavailable", str(error), status=404)
-    start = _start_input(body)
-    if isinstance(start, JSONResponse):
-        return start
-    regenerate_from = None
-    if body.get("regenerate") is True:
-        opening = reopen_frame(scope)
-        regenerate_from = opening.revision if opening.state == "ready" else None
-        if regenerate_from is None:
-            return _refusal(
-                "retained-assets-unavailable",
-                "no ready revision exists to regenerate from; a page is generated, not "
-                "regenerated, when nothing is retained",
-            )
-    try:
-        packet, _prepared = _evidence(
-            hosts,
-            ReviewTreesQuery(
-                repository_id=params["repository_id"],
-                master=params["master"],
-                leaf_id=params["leaf_id"],
-            ),
-            question=start.question,
-            focus=start.focus,
-        )
-        attempt = _presenter(hosts, scope, params["leaf_id"]).start(
-            caller=str(body.get("caller") or "dashboard"),
-            request_id=start.request_id,
-            activation="explicit",
-            evidence=packet,
-            focus=start.focus,
-            regenerate_from=regenerate_from,
-        )
-    except PresenterRefused as refusal:
-        return _refusal(refusal.reason, refusal.detail)
-    return JSONResponse(
-        {"state": "ok", "repository": params["repository_id"], "attempt": attempt.model_dump()}
     )
 
 
@@ -489,8 +325,6 @@ def _attempt_act(
             else presenter.cancel(attempt_id, reason=str(body.get("reason") or "cancelled"))
         )
         return attempt.model_dump()
-    if operation == "replace":
-        return _replace_presenter(presenter, attempt_id, body)
     if operation == "say":
         text = body.get("text")
         if not isinstance(text, str) or not text.strip():
@@ -510,15 +344,6 @@ def _attempt_act(
             }
         )
     return _refusal("unknown-operation", f"{operation!r} is not an operation", status=404)
-
-
-def _replace_presenter(presenter: Presenter, attempt_id: str, body: dict[str, Any]) -> Any:
-    request_id = body.get("requestId")
-    if not isinstance(request_id, str) or not request_id.strip():
-        return _refusal("request-required", "replacement names its request identity", status=400)
-    return presenter.replace(
-        attempt_id, request_id=request_id, reason=str(body.get("reason") or "explicit replacement")
-    ).model_dump()
 
 
 def _resolve_open_revision(
@@ -617,7 +442,6 @@ def open_session(
             comparison=manifest.binding.comparison_reference,
             evidence_digest=manifest.evidence_digest(),
             entrypoint=manifest.entrypoint.path,
-            scripts=_scripts(hosts),
         )
     )
     if pinned:
@@ -630,8 +454,8 @@ def open_session(
             "revision": session.revision,
             "comparison": session.comparison,
             "entrypoint": session.entrypoint,
-            "scripts": session.scripts,
-            "sandbox": frame_sandbox(scripts=session.scripts),
+            "scripts": True,
+            "sandbox": frame_sandbox(),
             "pageUrl": f"{CANVAS_PAGE_PREFIX}/{session.session}/",
             "displaced": [item.session for item in displaced],
             "limits": {
@@ -661,9 +485,7 @@ def page(hosts: CanvasHosts, request: Request) -> Response:
     return Response(
         content=bound_document(payload, session),
         media_type="text/html",
-        headers=document_headers(
-            _origin(request), session=session.session, scripts=session.scripts
-        ),
+        headers=document_headers(_origin(request), session=session.session),
     )
 
 
@@ -972,21 +794,16 @@ def canvas_hosts(
     config: McpRuntimeConfig,
     *,
     review_trees: ReviewTreesPort | None = None,
-    evidence: Callable[[ReviewTreesQuery, str, str], Any] | None = None,
     runner: PresenterRunner | None = None,
     limits: FrameLimits | None = None,
 ) -> CanvasHosts:
-    """Compose the host: one session registry, the shipped proof, and the given ports."""
+    """Compose the host: one session registry and the given ports."""
 
-    bundle = resources.files("agents_remember").joinpath("package_data", "canvas")
-    proof_root = Path(str(bundle))
     return CanvasHosts(
         config=config,
         sessions=SessionRegistry(),
         review_trees=review_trees,
-        evidence=evidence,
         runner=runner,
-        proof=load_isolation_proof(proof_root),
         limits=limits,
     )
 
@@ -997,12 +814,6 @@ def register_canvas_routes(app: FastAPI, hosts: CanvasHosts) -> None:
     @app.get(f"{CANVAS_API_PREFIX}/frames/{{repository_id}}/{{master}}/{{leaf_id}}/{{frame_id}}")
     def _frame_state(request: Request) -> JSONResponse:
         return frame_state(hosts, request)
-
-    @app.post(
-        f"{CANVAS_API_PREFIX}/frames/{{repository_id}}/{{master}}/{{leaf_id}}/{{frame_id}}/generate"
-    )
-    async def _generate(request: Request) -> JSONResponse:
-        return generate(hosts, request, await _body(request))
 
     @app.post(
         f"{CANVAS_API_PREFIX}/attempts/{{repository_id}}/{{master}}/{{leaf_id}}/{{frame_id}}"

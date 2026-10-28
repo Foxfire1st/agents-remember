@@ -14,6 +14,8 @@ import {
   pageReads,
   PLACE,
   renderPage,
+  selectInvariant,
+  waitForOpening,
   serveSelectedAnswer,
   servePage,
   stubIntersection,
@@ -39,8 +41,12 @@ afterEach(() => {
 });
 
 async function opened() {
+  await waitForOpening();
+}
+
+async function openedInvariant() {
+  await selectInvariant();
   await waitFor(() => expect(screen.getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-  await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
 }
 
 const subjectSection = () =>
@@ -66,7 +72,7 @@ function watchScroll(node: HTMLElement): number[] {
 const firstChanged = () => (l181Answer.entries ?? []).find((entry) => entry.change === 'changed')!;
 
 describe('a selection', () => {
-  it('reads its subject once, reuses the cards, and scrolls the column once after the read', async () => {
+  it('reads only its subject and cards, and scrolls the column once after the read', async () => {
     stubIntersection();
     const served = servePage(isSelectionRead);
     renderPage();
@@ -74,16 +80,15 @@ describe('a selection', () => {
     const before = pageReads(served.asked).length;
     const scroller = document.querySelector<HTMLElement>('[data-review-scroller]')!;
     const sets = watchScroll(scroller);
+    await selectInvariant();
     vi.spyOn(subjectSection(), 'getBoundingClientRect').mockReturnValue(rect(900));
-    fireEvent.click(within(subjectSection()).getByTestId('review-subject-select'));
     await waitFor(() => expect(screen.getByTestId('review-subject-slot').dataset.slotState).toBe('pending'));
     expect(sets).toEqual([]);
     await act(async () => served.release());
     await waitFor(() => expect(screen.getByTestId('review-subject-slot').dataset.slotState).toBe('answered'));
     const reads = pageReads(served.asked).slice(before);
-    expect(reads.map((url) => `${url.pathname}?${url.searchParams.get('selectorId')}`)).toEqual([
-      `/api/review/intent?${L181_SUBJECT}`,
-    ]);
+    expect(reads.filter(isSelectionRead).map((url) => url.searchParams.get('selectorId'))).toEqual([L181_SUBJECT]);
+    expect(reads.filter((url) => url.searchParams.has('invariants')).map((url) => url.searchParams.get('invariants'))).toEqual([L181_SUBJECT]);
     expect(sets).toHaveLength(1);
     expect(sets[0]).toBeGreaterThan(800);
     expect(subjectSection().dataset.selected).toBe('true');
@@ -97,8 +102,8 @@ describe('a selection', () => {
     await opened();
     const scroller = document.querySelector<HTMLElement>('[data-review-scroller]')!;
     const sets = watchScroll(scroller);
+    await selectInvariant();
     vi.spyOn(subjectSection(), 'getBoundingClientRect').mockReturnValue(rect(900));
-    fireEvent.click(within(subjectSection()).getByTestId('review-subject-select'));
     fireEvent.wheel(scroller, { deltaY: 120 });
     await act(async () => served.release());
     await waitFor(() => expect(screen.getByTestId('review-subject-slot').dataset.slotState).toBe('answered'));
@@ -109,7 +114,7 @@ describe('a selection', () => {
     stubIntersection();
     servePage();
     renderPage();
-    await opened();
+    await openedInvariant();
     const column = screen.getByTestId('review-tree-column');
     const scroll = screen.getByTestId('review-tree-scroll');
     const sets = watchScroll(scroll);
@@ -128,7 +133,7 @@ describe('the URL', () => {
     stubIntersection();
     const block = blockIdentityOf(firstChanged(), l181Answer.comparison!);
     window.history.replaceState(null, '', `/${HASH}&sel=${encodeURIComponent(formatSelection({ kind: 'block', block }))}`);
-    servePage();
+    const { asked } = servePage();
     renderPage();
     await opened();
     await waitFor(() =>
@@ -137,6 +142,57 @@ describe('the URL', () => {
     const selected = screen.getAllByTestId('review-expression-card').find((card) => card.dataset.selected === 'true')!;
     expect(selected.dataset.entries?.split(',')).toContain(firstChanged().id);
     expect(screen.queryByTestId('review-selection-outside')).toBeNull();
+    const ownerReads = pageReads(asked).filter((url) => url.searchParams.has('entry'));
+    expect(ownerReads).toHaveLength(1);
+    expect(ownerReads[0].searchParams.get('entry')).toBe(firstChanged().id);
+    expect(ownerReads[0].searchParams.get('entry_side')).toBe(block.side);
+    expect(pageReads(asked).filter((url) => url.searchParams.has('invariants'))).toHaveLength(0);
+  });
+
+  it('restores the selected area with browser back and forward without remounting the tree', async () => {
+    stubIntersection();
+    servePage();
+    renderPage();
+    await openedInvariant();
+    const tree = screen.getByTestId('review-tree-column');
+    fireEvent.click(screen.getByTestId('review-tree-lane'));
+    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.selected).toBe('true'));
+    expect(screen.queryAllByTestId('review-expression-card')).toHaveLength(0);
+
+    act(() => window.history.back());
+    await waitFor(() => expect(subjectSection()?.dataset.selected).toBe('true'));
+    expect(screen.getByTestId('review-tree-column')).toBe(tree);
+    expect(screen.queryByTestId('review-lane-section')).toBeNull();
+    expect(new URLSearchParams(window.location.hash.split('?')[1]).get('sel')).toBe(`s:invariant:${L181_SUBJECT}`);
+
+    act(() => window.history.forward());
+    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.selected).toBe('true'));
+    expect(screen.queryAllByTestId('review-expression-card')).toHaveLength(0);
+    expect(screen.getByTestId('review-tree-column')).toBe(tree);
+  });
+
+  it('restores both the comparison and its selection when traversing history', async () => {
+    stubIntersection();
+    const { asked } = servePage();
+    renderPage();
+    await openedInvariant();
+    fireEvent.click(screen.getByTestId('review-comparison-button'));
+    const older = await screen.findAllByTestId('review-comparison-option');
+    fireEvent.click(older.find((option) => option.dataset.number === '7')!);
+    await waitFor(() => expect(screen.getByTestId('review-comparison-button').textContent).toContain('#7'));
+    await waitFor(() => expect(new URLSearchParams(window.location.hash.split('?')[1]).get('comparison')).toBe('7'));
+    expect(screen.queryAllByTestId('review-expression-card')).toHaveLength(0);
+
+    act(() => window.history.back());
+    await waitFor(() => expect(screen.getByTestId('review-comparison-button').textContent).toContain('#8'));
+    await waitFor(() => expect(subjectSection()?.dataset.selected).toBe('true'));
+    expect(screen.getAllByTestId('review-expression-card')).toHaveLength(13);
+    expect(new URLSearchParams(window.location.hash.split('?')[1]).get('comparison')).toBeNull();
+
+    act(() => window.history.forward());
+    await waitFor(() => expect(screen.getByTestId('review-comparison-button').textContent).toContain('#7'));
+    await waitFor(() => expect(screen.queryAllByTestId('review-expression-card')).toHaveLength(0));
+    expect(pageReads(asked).some((url) => url.searchParams.get('comparison') === '7')).toBe(true);
   });
 
   it.each([
@@ -177,7 +233,7 @@ describe('the URL', () => {
     renderPage();
     await opened();
     await waitFor(() => expect(screen.getByTestId('review-selection-outside').textContent).toContain('comparison #8'));
-    expect(screen.getAllByTestId('review-expression-card').some((card) => card.dataset.selected === 'true')).toBe(false);
+    expect(screen.queryAllByTestId('review-expression-card').some((card) => card.dataset.selected === 'true')).toBe(false);
   });
 
   // Rule 13: a lane hunk is named by its span through the file's diff; the span is checked against the
@@ -227,9 +283,9 @@ describe('a choice made while the link waits', () => {
     stubIntersection();
     const block = named(blockIdentityOf(firstChanged(), l181Answer.comparison!));
     window.history.replaceState(null, '', `/${HASH}&sel=${encodeURIComponent(formatSelection({ kind: 'block', block }))}`);
-    const served = servePage((url) => url.searchParams.has('invariants'));
+    const served = servePage((url) => url.searchParams.has('entry'));
     renderPage();
-    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+    await opened();
     const scroller = document.querySelector<HTMLElement>('[data-review-scroller]')!;
     let landings = 0;
     scroller.addEventListener('review-product-scroll', () => (landings += 1));
@@ -237,10 +293,11 @@ describe('a choice made while the link waits', () => {
     await waitFor(() => expect(screen.getByTestId('review-tree-lane').getAttribute('aria-current')).toBe('true'));
     await waitFor(() => expect(landings).toBe(1));
     await act(async () => served.release());
-    await waitFor(() => expect(screen.getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(screen.queryAllByTestId('review-expression-card')).toHaveLength(0);
     // The URL holds the reader's choice: a restore that still waited would hold it until it answered.
     await waitFor(() => expect(new URLSearchParams(window.location.hash.split('?')[1]).get('sel')).toBe('l:'));
-    expect(screen.getAllByTestId('review-expression-card').some((card) => card.dataset.selected === 'true')).toBe(false);
+    expect(screen.queryAllByTestId('review-expression-card').some((card) => card.dataset.selected === 'true')).toBe(false);
     expect(screen.getByTestId('review-tree-lane').getAttribute('aria-current')).toBe('true');
     expect(screen.queryByTestId('review-selection-outside')).toBeNull();
     expect(landings).toBe(1);
@@ -252,7 +309,7 @@ describe('the keys', () => {
     stubIntersection();
     servePage();
     renderPage();
-    await opened();
+    await openedInvariant();
     const scroller = document.querySelector<HTMLElement>('[data-review-scroller]')!;
     const cards = () => screen.getAllByTestId('review-expression-card');
     const selectedIndex = () => cards().findIndex((card) => card.dataset.selected === 'true');
@@ -264,11 +321,11 @@ describe('the keys', () => {
     await waitFor(() => expect(selectedIndex()).toBe(0));
   });
 
-  it('walks the blocks with j from a cold page whose focus is on body, never in a text field', async () => {
+  it('walks the selected invariant blocks with j when focus is on body, never in a text field', async () => {
     stubIntersection();
     servePage();
     renderPage();
-    await opened();
+    await openedInvariant();
     const cards = () => screen.getAllByTestId('review-expression-card');
     const selectedIndex = () => cards().findIndex((card) => card.dataset.selected === 'true');
     // The keys act in their keydown handler, and `fireEvent` flushes what they set: a key that acted
@@ -288,7 +345,7 @@ describe('the keys', () => {
     servePage();
     const toggle = vi.fn();
     renderPage({ chat: { open: false, toggle } });
-    await opened();
+    await openedInvariant();
     fireEvent.keyDown(screen.getByTestId('review-family-filter'), { key: '[' });
     expect(screen.getByTestId('review-tree-column').dataset.open).toBe('true');
     fireEvent.keyDown(document.body, { key: '[' });
@@ -323,7 +380,7 @@ describe('what the selected view names', () => {
       ]);
     });
     renderPage();
-    await opened();
+    await openedInvariant();
     fireEvent.click(within(subjectSection()).getByTestId('review-subject-select'));
     await waitFor(() => expect(screen.getByTestId('review-subject-slot').dataset.slotState).toBe('answered'));
     const crumb = screen.getByTestId('review-crumb').textContent ?? '';
@@ -367,7 +424,7 @@ describe('the selected invariant reads content first', () => {
       answer = payload;
     });
     renderPage();
-    await opened();
+    await openedInvariant();
     fireEvent.click(within(subjectSection()).getByTestId('review-subject-select'));
     await waitFor(() => expect(screen.getByTestId('review-subject-slot').dataset.slotState).toBe('answered'));
     const section = subjectSection();

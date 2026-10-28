@@ -41,7 +41,7 @@ it('shows effect badges on the subject rows in the changed and the all tree view
   serve();
   const view = mount('family', subject.family);
   const tree = await view.findByTestId('review-tree');
-  await view.findByTestId('review-center-family');
+  await view.findByTestId('review-family-overview');
   const rows = () => Array.from(tree.querySelectorAll<HTMLElement>('[data-testid="review-family-member-open"]'));
   const badges = () => rows().map((node) => node.dataset.meaning);
   // Four steps collapse to first, ellipsis, last; two join with an arrow.
@@ -269,9 +269,19 @@ it('prints the governing row effect in the worklist panel', async () => {
       onBack={() => undefined}
     />,
   );
-  const familyBlock = await familyView.findByTestId('review-subject-worklist');
+  // A family opens its members' overview (MIK-R211 v4 rule 10); its worklist items are the
+  // Worklist view's, which prints each item's governing row effect the same way.
+  await familyView.findByTestId('review-family-overview');
+  fireEvent.click(familyView.getByTestId('review-tree-worklist'));
+  const familyBlock = familyView.getByTestId('review-worklist-view');
   await waitFor(() =>
-    expect(familyBlock.textContent).toContain('answered by ROW-N46VKD · effect not recorded'),
+    expect(
+      within(familyBlock)
+        .getAllByTestId('review-worklist-item')
+        .filter((item) => item.dataset.subject === 'FAM-7B6N3Y4Q')
+        .map((item) => item.textContent)
+        .join('\n'),
+    ).toContain('answered by ROW-N46VKD · effect not recorded'),
   );
   familyView.unmount();
 });
@@ -292,15 +302,19 @@ it('selecting a subject issues no request but its own review', async () => {
   const seen = asked.length;
   fireEvent.click(node);
   await waitFor(() => expect(intents()).toHaveLength(2));
-  // The new subject's review travels alone (MIK-R89 v2 W4): no second catalogue,
-  // summary, leaf-wide, lane or card read. Only the in-view marks of a card read a file.
+  // The new subject's review travels with its own cards only (MIK-R211 v4 rule 10): no second
+  // catalogue, summary, leaf-wide or lane read, and no other subject's cards. Only the in-view marks
+  // of a card read a file.
   expect(entries()).toHaveLength(1);
-  const fresh = asked
+  const fresh = () => asked
     .slice(seen)
-    .filter((url) => url.pathname.startsWith('/api/review/') && !url.searchParams.has('file'));
-  expect(fresh.map((url) => `${url.pathname}?${url.searchParams.get('selectorId')}`)).toEqual([
+    .filter((url) => url.pathname.startsWith('/api/review/') && !url.searchParams.has('file'))
+    .map((url) => `${url.pathname}?${url.searchParams.get('selectorId') ?? url.searchParams.get('invariants')}`);
+  await waitFor(() => expect(fresh()).toHaveLength(2));
+  expect(fresh().sort()).toEqual([
     `/api/review/intent?${subject.invariant2}`,
-  ]);
+    `/api/review/trees?${subject.invariant2}`,
+  ].sort());
   const block = await view.findByTestId('review-recorded-steps');
   await waitFor(() => expect(block.textContent).toContain('ROW-F11118'));
   expect(block.textContent).toContain('ROW-F11119');

@@ -21,6 +21,7 @@ import {
   R6R_ID,
   R6R_TITLE,
   SHARED,
+  captured,
   clickedSecondFamily,
   families,
   familyBlock,
@@ -33,16 +34,17 @@ import {
   selectedName,
   selectedNode,
   settled,
-  slotOf,
   step,
   triageStatus,
+  world,
 } from './walk.test-utils';
 
 installWorld();
 
 it('lists the seven changes first, selects each and the second family by its row with one read each, and keeps the first family', async () => {
   const view = open(R6R);
-  await view.findAllByTestId('review-change-badge', undefined);
+  // The family opens its members' overview, not its review center (MIK-R211 v4 rule 10).
+  await waitFor(() => expect(view.getByTestId('review-family-overview').dataset.family).toBe(R6R_ID));
   const workspace = view.getByTestId('review-workspace');
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   const rows = within(familyBlock(view, R6R_ID)).getAllByTestId('review-family-member-open');
@@ -62,7 +64,7 @@ it('lists the seven changes first, selects each and the second family by its row
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   expect(keptTags(view)).toEqual([]);
 
-  // The second family's own row opens its family review; the first family stays, whole, tagged as
+  // The second family's own row opens its family overview; the first family stays, whole, tagged as
   // kept and last read for the shared member.
   const before = reviewCount();
   await clickedSecondFamily(view);
@@ -91,7 +93,7 @@ it('lists the seven changes first, selects each and the second family by its row
 
 it('keeps the first family when its second family is clicked, and its shared member row selects it under the first family', async () => {
   const view = open(R6R);
-  await view.findAllByTestId('review-change-badge', undefined);
+  await waitFor(() => expect(view.getByTestId('review-family-overview').dataset.family).toBe(R6R_ID));
   const sharedRow = within(familyBlock(view, R6R_ID))
     .getAllByTestId('review-family-member-open')
     .find(
@@ -138,14 +140,13 @@ it('tags a kept family, describes the subject it was read for, and reads one ans
   expect(within(ownRow).queryByTestId('review-family-kept')).toBeNull();
   expect(view.queryByTestId('review-family-filter-scope')).toBeNull();
   expect(view.queryByText('Family context details')).toBeNull();
-  // The selected family's slot shows its review and nothing of the kept family.
-  const slot = slotOf(view);
-  expect(within(slot).getByTestId('review-center-family').dataset.family).toBe(HBJ_ID);
-  // The family's own name is its heading's; the read's label is in Technical details (MIK-R89 v2
-  // rule 6, amended 9dde2b09).
+  // The selected family's overview (MIK-R211 v4 rule 10) shows it and nothing of the kept family.
+  const overview = view.getByTestId('review-family-overview');
+  expect(overview.dataset.family).toBe(HBJ_ID);
+  // The read's label is in Technical details (MIK-R89 v2 rule 6, amended 9dde2b09).
   expect(view.getByTestId('review-subject-provenance').textContent).toContain(HBJ_TITLE);
-  expect(slot.textContent).not.toContain(R6R_TITLE);
-  expect(slot.querySelectorAll(`[data-family="${R6R_ID}"]`)).toHaveLength(0);
+  expect(overview.textContent).not.toContain(R6R_TITLE);
+  expect(overview.querySelectorAll(`[data-family="${R6R_ID}"]`)).toHaveLength(0);
   expect(view.getByTestId('review-center-column').querySelector('[data-testid="review-family-kept"]')).toBeNull();
   expect(tree.contains(tag)).toBe(true);
 });
@@ -159,27 +160,38 @@ it('keeps one outline row for every family and selecting one does not reset the 
   const row = within(familyBlock(view, R6R_ID)).getByTestId('review-family-open');
   fireEvent.click(row);
   await waitFor(
-    () => expect(view.getByTestId('review-center-family').dataset.family).toBe(R6R_ID),
+    () => expect(view.getByTestId('review-family-overview').dataset.family).toBe(R6R_ID),
   );
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   expect(keptTags(view)).toHaveLength(1);
 });
 
 it('lets a filter hide kept families with the others and restores them when it is cleared', async () => {
+  // A filter reads the complete location inventory first (MIK-R211 v4 rule 10; useReviewSearch.ts).
+  // This capture predates `entry_inventory`: an explicitly synthetic ready, empty inventory stands in
+  // for it, as these answers carry no code locations.
+  const trees = captured<object>('walkReal.trees.captured.json');
+  world.tree = (url) =>
+    url.pathname.endsWith('/trees') && url.searchParams.get('view') !== 'overview' &&
+    !['lane', 'file', 'invariants'].some((key) => url.searchParams.has(key))
+      ? { ...trees, entry_inventory: { state: 'ready', entries: [] } }
+      : undefined;
   const view = open(SHARED);
   await clickedSecondFamily(view);
   const filter = view.getByTestId('review-family-filter');
   fireEvent.change(filter, { target: { value: 'Comparison-bound' } });
-  expect(families(view)).toEqual([HBJ_ID]);
+  await waitFor(() => expect(families(view)).toEqual([HBJ_ID]));
   fireEvent.change(filter, { target: { value: '' } });
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   expect(memberOccurrences(familyBlock(view, R6R_ID)).size).toBe(24);
   expect(familyBlock(view, R6R_ID).dataset.familyKept).toBe('true');
-  // The filter is the tree's alone (W12): the column still holds both families' headings.
+  // The filter is the tree's alone (W12): the column keeps the selected family's overview, whole,
+  // while the tree hides that family.
   const column = view.getByTestId('review-center-column');
-  fireEvent.change(filter, { target: { value: 'Comparison-bound' } });
-  expect(within(column).getAllByTestId('review-family-heading').map((node) => node.dataset.family)).toEqual([
-    R6R_ID,
-    HBJ_ID,
-  ]);
+  const members = () => within(column).getAllByTestId('review-member-summary').map((node) => node.dataset.subject);
+  const shown = members();
+  fireEvent.change(filter, { target: { value: R6R_TITLE } });
+  await waitFor(() => expect(families(view)).toEqual([R6R_ID]));
+  expect(within(column).getAllByTestId('review-family-heading').map((node) => node.dataset.family)).toEqual([HBJ_ID]);
+  expect(members()).toEqual(shown);
 });

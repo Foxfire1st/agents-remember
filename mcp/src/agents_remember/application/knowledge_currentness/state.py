@@ -32,7 +32,9 @@ from agents_remember.application.knowledge_currentness.observe import (
     ObservationKey,
     observe_entry,
     open_code_tree,
+    prefetch_observed_blobs,
 )
+from agents_remember.kernel.read_cancellation import raise_if_read_cancelled
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge_index import KnowledgeIndex
 
@@ -167,17 +169,20 @@ def invariant_currentness(
     """
 
     code = open_code_tree(code_tree)
-    family_members = {
-        family: index.family(family).value.members
-        for family in sorted(set(families))
-        if _is_record(index, family, "family")
-    }
-    wanted = set(invariants).union(*family_members.values())
+    inputs = index.currentness_inputs(invariants, families).value
+    family_members = inputs.families
     evaluated: dict[str, InvariantCurrentness] = {}
-    for invariant in sorted(wanted):
-        if not _is_record(index, invariant, "invariant"):
-            continue
-        knowledge = index.invariant(invariant).value
+    prefetch_observed_blobs(
+        (
+            entry
+            for knowledge in inputs.entries.values()
+            for entry in (*knowledge.realizations, *knowledge.proofs)
+        ),
+        code,
+    )
+    for invariant, knowledge in inputs.entries.items():
+        # One safe point per invariant: a read whose askers left stops here (D569 mean 4).
+        raise_if_read_cancelled()
         observations = tuple(
             observe_entry(entry, code, cache=cache)
             for entry in (*knowledge.realizations, *knowledge.proofs)
@@ -202,8 +207,3 @@ def invariant_currentness(
             for family, members in family_members.items()
         ),
     )
-
-
-def _is_record(index: KnowledgeIndex, record_id: str, kind: str) -> bool:
-    record = index.record(record_id).value
-    return record is not None and record.kind == kind

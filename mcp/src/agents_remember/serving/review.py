@@ -21,11 +21,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from re import Pattern
 from re import compile as re_compile
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import JSONResponse, Response
 
 from agents_remember.errors import AuthorityError
@@ -49,6 +50,7 @@ from agents_remember.models.knowledge.review_source_content import (
     ReviewSourceContentRequest,
     ReviewSourceContentResult,
 )
+from agents_remember.serving.read_disconnect import read_while_connected
 
 __all__ = [
     "KNOWLEDGE_REVIEW_ENTRIES_ROUTE",
@@ -644,8 +646,8 @@ def register_review_routes(
     del config
 
     @app.get(KNOWLEDGE_REVIEW_ENTRIES_ROUTE)
-    def api_review_intent_entries(
-        repo: str, master: str, leaf: str, comparison: int | None = None
+    async def api_review_intent_entries(
+        connection: Request, repo: str, master: str, leaf: str, comparison: int | None = None
     ) -> Response:
         if entries_port is None:
             return JSONResponse(_UNWIRED_ENTRIES, status_code=503)
@@ -655,9 +657,9 @@ def register_review_routes(
         # (MIK-R89 v2 rule 10); a number the leaf did not record is the owner's own refusal (404).
         if comparison is not None and comparison < 0:
             return JSONResponse(_negative_comparison(comparison), status_code=400)
-        result = entries_port(repo, master, leaf, comparison)
-        return JSONResponse(
-            _json(result), status_code=200 if result.state == "entries" else _status_for(result)
+        # A read whose client went away stops computing (D569 mean 4).
+        return await read_while_connected(
+            connection, partial(_entries_response, entries_port, repo, master, leaf, comparison)
         )
 
     @app.get(KNOWLEDGE_REVIEW_SOURCE_CONTENT_ROUTE)
@@ -665,7 +667,8 @@ def register_review_routes(
         return _source_content_response(source_content_port, ref)
 
     @app.get(KNOWLEDGE_REVIEW_ROUTE)
-    def api_review_intent(
+    async def api_review_intent(  # noqa: PLR0913, PLR0917 -- the connection is watched (D569)
+        connection: Request,
         repo: str,
         master: str,
         leaf: str,
@@ -709,10 +712,27 @@ def register_review_routes(
                 },
                 status_code=400,
             )
-        result = _port_outcome(port, request)
-        if isinstance(result, Response):
-            return result
-        return JSONResponse(_json(result), status_code=_status_for(result))
+        return await read_while_connected(connection, partial(_review_response, port, request))
+
+
+def _entries_response(
+    port: KnowledgeReviewEntriesPort, repo: str, master: str, leaf: str, comparison: int | None
+) -> Response:
+    """One entry catalogue's port call and serialization, run on the read's worker thread."""
+
+    result = port(repo, master, leaf, comparison)
+    return JSONResponse(
+        _json(result), status_code=200 if result.state == "entries" else _status_for(result)
+    )
+
+
+def _review_response(port: KnowledgeReviewPort, request: ReviewSurfaceRequest) -> Response:
+    """One review's whole port call and serialization, run on the read's worker thread."""
+
+    result = _port_outcome(port, request)
+    if isinstance(result, Response):
+        return result
+    return JSONResponse(_json(result), status_code=_status_for(result))
 
 
 def _negative_comparison(comparison: int) -> dict[str, Any]:

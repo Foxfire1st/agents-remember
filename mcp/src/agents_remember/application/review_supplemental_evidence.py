@@ -8,8 +8,8 @@ and binds the bytes actually examined:
   path must resolve inside the task's own admitted roots (``requirements/`` and ``notes/``), must not
   be a symlink, and may not escape the task. The receipt's canonical source is the resolved relative
   path, so a caller cannot receipt one document's bytes under another document's name.
-* **the bytes are the evidence.** The digest and size are of exactly what was read, up to a stated
-  bound; a larger source is refused with the bound rather than silently truncated.
+* **the bytes are the evidence.** The digest and size are of exactly what was read, and the
+  source is read whole: no size refuses or truncates it (MIK-R211 v4 rule 1).
 * **a change is a new input.** :func:`reread_supplemental` re-resolves the *same* canonical source;
   changed bytes answer a successor receipt, a lost source answers ``unavailable``, and the earlier
   receipt keeps the digest it captured. Nothing is rewritten in place.
@@ -21,13 +21,18 @@ import hashlib
 import json
 from pathlib import Path
 
+from agents_remember.kernel.recorded_reads import (
+    ABSENT,
+    bytes_identity,
+    observed_resolve,
+    record_read,
+)
 from agents_remember.models.knowledge.review_evidence import SupplementalReceipt
 from agents_remember.models.knowledge.review_evidence_read import SupplementalRead
 
 __all__ = [
     "ADMITTED_ROOTS",
     "LEAF_DOCUMENT_ROOT",
-    "MAX_SUPPLEMENTAL_BYTES",
     "admit_supplemental",
     "capture_supplemental",
     "packet_version_stale",
@@ -38,7 +43,6 @@ ADMITTED_ROOTS: tuple[str, ...] = ("requirements", "notes")
 #: The leaf's own task document is admitted by its exact names at the task root -- never the root
 #: itself, and never another leaf's document (MIK-R102 v2 item 2).
 LEAF_DOCUMENT_ROOT = "task"
-MAX_SUPPLEMENTAL_BYTES = 1024 * 1024
 
 _UNREADABLE = (
     "the source was not read: no bytes were examined, so this receipt establishes nothing and its "
@@ -46,7 +50,7 @@ _UNREADABLE = (
 )
 
 
-def admit_supplemental(  # noqa: PLR0911 - one refusal per way a source can fail admission
+def admit_supplemental(
     task_root: Path, relative: str, *, leaf_document: str | None = None
 ) -> SupplementalRead:
     """Resolve one admitted task source to its exact bytes, or the refusal it earns (rule 6).
@@ -70,18 +74,10 @@ def admit_supplemental(  # noqa: PLR0911 - one refusal per way a source can fail
         )
     base = Path(task_root).resolve()
     unresolved = base / relative
-    if _through_a_link(base, unresolved):
-        return SupplementalRead(
-            state="refused",
-            canonical_source=relative,
-            admitted_root=relative.split("/", 1)[0],
-            detail=(
-                f"the requested source {relative!r} passes through a symlink; a receipt binds the "
-                "task's own bytes and follows no link"
-            ),
-            refusal_code="foreign-source",
-        )
-    target = unresolved.resolve()
+    # A link that stays inside the task root is inside it (MIK-R211 v4 rule 2): the source resolves,
+    # and its receipt binds the file it resolves to under that file's own canonical path. Only a
+    # target that leaves the root, or lands outside the admitted roots, is refused below.
+    target = observed_resolve(unresolved)
     if not target.is_relative_to(base):
         return SupplementalRead(
             state="refused",
@@ -108,31 +104,22 @@ def admit_supplemental(  # noqa: PLR0911 - one refusal per way a source can fail
             ),
             refusal_code="foreign-source",
         )
-    # The bound is enforced by the read itself: one byte beyond the ceiling is read, so a source
-    # that grows between any earlier measurement and this read is refused on the bytes examined.
+    # The source is read whole, and the receipt binds the bytes this read examined: no size refuses
+    # it (MIK-R211 v4 rule 1), and a source that grew since any earlier look is bound as it is now.
     try:
         with target.open("rb") as stream:
-            payload = stream.read(MAX_SUPPLEMENTAL_BYTES + 1)
+            payload = stream.read()
     except OSError as failure:
+        gone = isinstance(failure, FileNotFoundError)  # a source that is gone is a fact too
+        record_read(target, ABSENT if gone else f"unreadable ({type(failure).__name__})")
         return SupplementalRead(
             state="unavailable",
             canonical_source=canonical,
             admitted_root=root,
             detail=f"{_UNREADABLE}: {canonical} could not be read ({failure})",
         )
-    if len(payload) > MAX_SUPPLEMENTAL_BYTES:
-        return SupplementalRead(
-            state="refused",
-            canonical_source=canonical,
-            admitted_root=root,
-            byte_size=len(payload),
-            detail=(
-                f"the requested source {canonical!r} is at least {len(payload)} byte(s), beyond the "
-                f"admitted {MAX_SUPPLEMENTAL_BYTES}; it is refused rather than truncated, because a "
-                "receipt of a prefix would bind bytes this read did not examine"
-            ),
-            refusal_code="read-beyond-limit",
-        )
+    # The bytes admitted are an input of whatever answer reads them (D570).
+    record_read(target, bytes_identity(payload))
     return SupplementalRead(
         state="present",
         canonical_source=canonical,
@@ -141,21 +128,6 @@ def admit_supplemental(  # noqa: PLR0911 - one refusal per way a source can fail
         byte_size=len(payload),
         detail=f"admitted {canonical} from the task's own {root}/ root, {len(payload)} byte(s)",
     )
-
-
-def _through_a_link(base: Path, target: Path) -> bool:
-    """Whether any component of ``target`` below ``base`` is a symlink."""
-
-    probe = base
-    try:
-        relative = target.relative_to(base)
-    except ValueError:
-        return True
-    for part in relative.parts:
-        probe = probe / part
-        if probe.is_symlink():
-            return True
-    return False
 
 
 def capture_supplemental(  # noqa: PLR0913 - one source's own identity and receipt fields

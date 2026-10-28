@@ -840,6 +840,7 @@ def test_a_code_object_that_is_unavailable_is_named_and_keeps_the_item_findings(
         world.memory, memory_commit, (world.memory_base,), world.code, code_commit, world.code_base
     )
     observe.OBSERVATIONS.clear()
+    code_objects.SYMBOL_SPANS.clear()  # symbol answers kept by blob would skip the patched parse
     no_grammar = GrammarUnavailableError("the Python grammar wheel is not installed")
     with mock.patch.object(extents, "definitions", side_effect=no_grammar):
         findings = net_stale_entries(request)

@@ -223,7 +223,11 @@ describe('one served task entry across row, page and counts', () => {
     };
     const view = render(<TaskReader {...props} bodyState="loading" />);
     expect(view.getByText('Master objective')).toBeTruthy();
-    expect(requests.some((url) => url.startsWith('/api/changeset/'))).toBe(false);
+    // F8: a master's lean counter loads independently of its body: exactly one counter read for this
+    // master, and no other change-set read starts.
+    expect(requests.filter((url) => url.startsWith('/api/changeset/'))).toEqual([
+      '/api/changeset/master/counters?repo=repo&master=master&includeLeaves=false',
+    ]);
     view.rerender(<TaskReader {...props} bodyState="available" />);
     await waitFor(() =>
       expect(view.getByTestId('changeset-state').getAttribute('data-review-state')).toBe('loading'),

@@ -9,6 +9,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import NamedTuple
 
+from agents_remember.kernel.coordination_context.task_folders import canonical_task_folder_steps
+
 # Where this line keeps its receipts, under a task's or the coordination root's notes/reports.
 EXECUTIONS_DIRECTORY = "paseo-native-executions"
 
@@ -16,10 +18,22 @@ ENUMERATION_BUDGET = 256
 MAX_HELD_FOLDER_WALKS = 64
 MAX_HELD_FOLDER_STORES = 64
 SKIPPED_RECEIPT_DIRS = frozenset({"history", "message-bindings"})
-RECEIPT_ROOT_DEPTH = 5
 # D1-D4: arbitrary nested directories under a receipt root are not retained without limit.
 # Beyond 16 open levels the branch is shed and the observation is explicitly incomplete.
 RECEIPT_WALK_DEPTH = 16
+
+
+def receipt_holder(root: Path, directory_name: str = EXECUTIONS_DIRECTORY) -> Path:
+    """The holder checked by both receipt discovery and its input watchers."""
+    return root / "notes" / "reports" / directory_name
+
+
+def receipt_holder_chain(root: Path) -> tuple[Path, ...]:
+    """Discovery parents, including absent candidates, from root through its holder."""
+    chain = [root]
+    for part in receipt_holder(root).relative_to(root).parts:
+        chain.append(chain[-1] / part)
+    return tuple(chain)
 
 
 class DirectoryWalk:
@@ -67,26 +81,40 @@ def file_stamp(path: Path) -> tuple[int, int, int] | None:
     return None
 
 
-def _receipt_steps(root: Path, depth: int = 0) -> Generator[str | None, None, bool]:
+def receipt_steps(
+    root: Path,
+    depth: int = 0,
+    *,
+    on_directory: Callable[[Path, int], None] | None = None,
+    on_error: Callable[[OSError], None] | None = None,
+) -> Generator[str | None, None, bool]:
     """Every entry, including directories/non-JSON files, consumes a traversal step."""
-
     if depth >= RECEIPT_WALK_DEPTH:
         yield None
         return False
+    if on_directory is not None:
+        on_directory(root, depth)
     complete = True
     try:
         with os.scandir(root) as entries:
             for entry in entries:
                 try:
                     directory = entry.is_dir(follow_symlinks=False)
-                except OSError:
+                except OSError as error:
+                    if on_error is not None:
+                        on_error(error)
                     yield None
                     continue
                 if directory:
                     yield None
                     if entry.name not in SKIPPED_RECEIPT_DIRS:
                         complete = (
-                            yield from _receipt_steps(Path(entry.path), depth + 1)
+                            yield from receipt_steps(
+                                Path(entry.path),
+                                depth + 1,
+                                on_directory=on_directory,
+                                on_error=on_error,
+                            )
                         ) and complete
                 else:
                     yield entry.path if entry.name.endswith(".json") else None
@@ -95,26 +123,23 @@ def _receipt_steps(root: Path, depth: int = 0) -> Generator[str | None, None, bo
     return complete
 
 
-def _root_steps(tasks: Path, directory_name: str, depth: int = 0) -> Generator[str | None]:
-    """A depth-bounded task traversal; even an empty directory costs a bounded step."""
-
-    holder = tasks / "notes" / "reports" / directory_name
-    found = holder.is_dir()
-    yield holder.as_posix() if found else None
-    if found or depth >= RECEIPT_ROOT_DEPTH:
-        return
-    try:
-        with os.scandir(tasks) as entries:
-            for entry in entries:
-                child = False
-                if not entry.name.startswith(".") and entry.name not in SKIPPED_RECEIPT_DIRS:
-                    with suppress(OSError):
-                        child = entry.is_dir(follow_symlinks=False)
-                yield None
-                if child:
-                    yield from _root_steps(Path(entry.path), directory_name, depth + 1)
-    except FileNotFoundError:
-        return
+def task_receipt_steps(
+    tasks_root: Path,
+    *,
+    on_directory: Callable[[Path, int], None] | None = None,
+    on_error: Callable[[OSError], None] | None = None,
+) -> Generator[str | None]:
+    """Only the live canonical task holders used by the receipt writer (D561)."""
+    for folder in canonical_task_folder_steps(
+        tasks_root,
+        on_directory=on_directory,
+        on_error=on_error,
+    ):
+        if folder is None:
+            yield None
+        else:
+            holder = receipt_holder(folder)
+            yield holder.as_posix() if holder.is_dir() else None
 
 
 class _StepWalk:
@@ -158,7 +183,7 @@ class _StepWalk:
 class ReceiptWalk(_StepWalk):
     def __init__(self, root: Path) -> None:
         self.root = root
-        super().__init__(_receipt_steps(root))
+        super().__init__(receipt_steps(root))
 
     def take(self, budget: int, *, entry_budget: int = ENUMERATION_BUDGET) -> list[str]:
         """At most ``budget`` receipts and ``entry_budget`` traversal steps.
@@ -174,9 +199,9 @@ class ReceiptWalk(_StepWalk):
 class ReceiptRootWalk(_StepWalk):
     def __init__(self, root: Path) -> None:
         def steps() -> Generator[str | None]:
-            top = root / "notes" / "reports" / EXECUTIONS_DIRECTORY
+            top = receipt_holder(root)
             yield top.as_posix() if top.is_dir() else None
-            yield from _root_steps(root / "tasks", EXECUTIONS_DIRECTORY)
+            yield from task_receipt_steps(root / "tasks")
 
         super().__init__(steps())
 

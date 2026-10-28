@@ -224,14 +224,11 @@ def bindings(path: str, lines: Sequence[str]) -> dict[str, list[Binding]]:
     tree = Parser(language(grammar)).parse("\n".join(lines).encode("utf-8"))
     reader = _python_names if grammar == PYTHON else _script_names
     wrappers = PYTHON_WRAPPERS if grammar == PYTHON else SCRIPT_WRAPPERS
+    test_file = grammar != PYTHON and test_cases.is_test_file(path)
     found: dict[str, list[Binding]] = {}
     for node in _walk(tree.root_node):
         names = [] if node.has_error else reader(node)
-        cases = (
-            test_cases.case_names(node)
-            if grammar != PYTHON and test_cases.is_test_file(path)
-            else ()
-        )
+        cases = test_cases.case_names(node) if test_file else ()
         names.extend(cases)
         if not names:
             continue

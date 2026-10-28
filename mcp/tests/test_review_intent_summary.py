@@ -26,10 +26,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
+import apsw
 import pytest
+from agents_remember.application import review_intent_summary as summary_module
+from agents_remember.application import review_worklist_answers as worklist_module
 from agents_remember.application.knowledge_currentness.observe import open_code_tree
 from agents_remember.application.knowledge_gate.gate import GateTrees, item_verdicts
 from agents_remember.application.knowledge_gate.predicates import GateContext, item_verdict
@@ -44,6 +47,12 @@ from agents_remember.application.review_intent_summary import (
     intent_summary_of,
 )
 from agents_remember.cli.dashboard_review_summary import review_intent_summary_port
+from agents_remember.memory.knowledge.connection import open_read_only_database
+from agents_remember.memory.knowledge.read_queries import (
+    fetch_identity_rows,
+    fetch_revision_ids,
+    fetch_revision_populations,
+)
 from agents_remember.memory.knowledge_index.projection import INDEX_REPOSITORY_ID
 from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTree
 from agents_remember.models.knowledge.authorship import Authorship
@@ -324,6 +333,97 @@ def _shared_base(directory: Path) -> _SharedBase:
     """``A`` (shared by two families), ``B``, ``D`` (realized once), ``F1 {A, B}``, ``F2 {A, D}``."""
 
     return _SharedBase(directory)
+
+
+@pytest.mark.parametrize(
+    "tables",
+    [
+        ("invariant", "invariant_revision", "invariant_id"),
+        ("family", "family_revision", "family_id"),
+    ],
+)
+def test_revision_populations_preserve_results_in_one_statement(tmp_path, tables):
+    path = tmp_path / "populations.sqlite"
+    _build_side(path, invariants=_BASE_INVARIANTS, family_specs=_BASE_FAMILIES, claims=_BASE_CLAIMS)
+    connection = open_read_only_database(path)
+    try:
+        identity_table, revision_table, identity_column = tables
+        expected = {
+            identity: fetch_revision_ids(
+                connection, REPOSITORY_ID, revision_table, identity_column, identity
+            )
+            for identity in fetch_identity_rows(
+                connection, REPOSITORY_ID, identity_table, identity_column, "display_label"
+            )
+        }
+        statements = []
+
+        def trace(cursor, statement, bindings):
+            statements.append(statement)
+            return True
+
+        connection.set_exec_trace(trace)
+        actual = summary_module._populations(connection, REPOSITORY_ID, tables)
+        assert actual == expected
+        assert list(actual) == sorted(expected)
+        assert len(statements) == 1
+        statements.clear()
+        assert summary_module._populations(connection, "other-namespace", tables) == {}
+        assert len(statements) == 1
+    finally:
+        connection.close()
+
+
+def test_revision_population_keeps_empty_identities_and_every_retained_revision():
+    # Text records have one revision. Exercise the reader's nullable join boundary without
+    # constructing a second writer for derived index tables.
+    class JoinedRows:
+        def execute(self, _statement, _parameters):
+            return [("empty", None), ("populated", "r1"), ("populated", "r2")]
+
+    assert fetch_revision_populations(
+        cast(apsw.Connection, JoinedRows()),
+        REPOSITORY_ID,
+        "invariant",
+        "invariant_revision",
+        "invariant_id",
+    ) == {"empty": (), "populated": ("r1", "r2")}
+
+
+def test_empty_unexplained_worklist_skips_candidate_gate_only_after_binding_checks(
+    tmp_path, monkeypatch
+):
+    world = build_world(tmp_path)
+    resolved = resolve_review_candidate(world.config, TREE_REPO, TREE_MASTER, TREE_LEAF)
+    assert isinstance(resolved, ReviewCandidateResolution), resolved
+    assert resolved.trees is not None
+    contract = load_contract(world.contract())
+    record = resolved.trees.record
+    pairing = {
+        "base": {"tree": record.code_base.tree},
+        "candidate": {"tree": record.code_candidate.tree},
+        "memoryBase": {"tree": record.memory_base.tree, "commit": record.memory_base.commit},
+        "memoryCandidate": {"tree": record.memory_candidate.tree},
+    }
+    document = {"state": "complete", "pairing": pairing, "items": []}
+    monkeypatch.setattr(worklist_module, "read_leaf_worklist", lambda path: document)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("an empty unexplained worklist must not open the candidate gate")
+
+    monkeypatch.setattr(worklist_module, "worklist_answers", forbidden)
+    for items in ([], [{"id": "intent-only", "kind": "invariant"}]):
+        document["items"] = items
+        assert worklist_module.stored_unexplained_open(contract, resolved.trees) == 0
+    document["state"] = "incomplete"
+    assert worklist_module.stored_unexplained_open(contract, resolved.trees) is None
+    document["state"] = "complete"
+    pairing["candidate"]["tree"] = "f" * 40
+    assert worklist_module.stored_unexplained_open(contract, resolved.trees) is None
+    pairing["candidate"]["tree"] = record.code_candidate.tree
+    document["items"] = [{"id": "unexplained", "kind": "unexplained_file"}]
+    with pytest.raises(AssertionError, match="must not open"):
+        worklist_module.stored_unexplained_open(contract, resolved.trees)
 
 
 def test_counts_statement_and_guarantee_heads_and_keeps_other_changes_apart(

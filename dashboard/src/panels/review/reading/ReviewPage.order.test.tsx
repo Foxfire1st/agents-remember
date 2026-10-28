@@ -6,12 +6,13 @@
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { resetCardCachesForTests } from '../../../data/reviewTrees';
 import type { ReviewTreesResult } from '../../../data/reviewTrees';
 import { blockIdentityOf, formatSelection } from '../blockIdentity';
 import { l181Answer } from '../changeSetOrder.test-utils';
 import { treeOrderStore } from '../triageOrderPreference';
 import { treeViewStore } from '../triageViewPreference';
-import { L181_SUBJECT, PLACE, renderPage, servePage, stubIntersection } from './reviewPage.test-utils';
+import { L181_SUBJECT, PLACE, renderPage, selectInvariant, servePage, stubIntersection, waitForOpening } from './reviewPage.test-utils';
 
 const HASH = `#review?${new URLSearchParams({ repo: PLACE.repo, master: PLACE.master, leaf: PLACE.leaf })}`;
 // Captured: RLZ-EC5NRM, RLZ-ZA95M4 and RLZ-ZT2RRK all name turn_ended.ts L750–795 → L1697–1817.
@@ -26,6 +27,7 @@ beforeEach(() => {
   window.localStorage.clear();
   window.history.replaceState(null, '', `/${HASH}`);
   reset();
+  resetCardCachesForTests();
 });
 
 afterEach(() => {
@@ -41,8 +43,7 @@ const cards = () => screen.getAllByTestId('review-expression-card');
 const selectedCards = () => cards().filter((card) => card.dataset.selected === 'true');
 
 async function opened() {
-  await waitFor(() => expect(cards().length).toBeGreaterThan(0));
-  await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+  await waitForOpening();
 }
 
 // Read 4 (the leaf-wide trees answer) with a synthetic currentness (call after `servePage`): the
@@ -55,7 +56,7 @@ function serveCurrentness() {
     vi.fn(async (address: string | URL, init?: RequestInit) => {
       const response = await served(address, init);
       const url = new URL(String(address), 'http://localhost');
-      const leafWide = url.pathname === '/api/review/trees' && !['invariants', 'lane', 'file'].some((name) => url.searchParams.has(name));
+      const leafWide = url.pathname === '/api/review/trees' && !['invariants', 'entry', 'lane', 'file'].some((name) => url.searchParams.has(name));
       if (!leafWide) return response;
       const body = (await response.json()) as ReviewTreesResult;
       body.currentness = {
@@ -72,7 +73,7 @@ function serveCurrentness() {
 }
 
 describe('Memory currentness (e9b9d515)', () => {
-  it('puts an unrealized subject without entries before current entries, in the tree and the column', async () => {
+  it('orders the inventory by currentness and opens each selected subject alone', async () => {
     stubIntersection();
     treeViewStore.getState().setView('all');
     treeOrderStore.getState().setOrder('currentness');
@@ -80,13 +81,17 @@ describe('Memory currentness (e9b9d515)', () => {
     serveCurrentness();
     renderPage();
     await opened();
-    await waitFor(() => expect(columnOrder()).toEqual(['synthetic-unchanged-0', L181_SUBJECT, 'synthetic-unchanged-z']));
-    expect(treeOrder()).toEqual(columnOrder());
+    await waitFor(() => expect(treeOrder()).toEqual(['synthetic-unchanged-0', L181_SUBJECT, 'synthetic-unchanged-z']));
+    expect(screen.queryAllByTestId('review-subject-section')).toHaveLength(0);
     expect(screen.getAllByTestId('review-family-member-open').map((row) => row.getAttribute('aria-label')?.split(' ').at(-1))).toEqual([
       'unrealized',
       'current',
       'measured',
     ]);
+    for (const id of treeOrder()) {
+      await selectInvariant(id!);
+      expect(columnOrder()).toEqual([id]);
+    }
   });
 });
 
@@ -99,7 +104,7 @@ describe('the region three entries share', () => {
     servePage();
     renderPage();
     await opened();
-    expect(cards()).toHaveLength(13);
+    await waitFor(() => expect(cards()).toHaveLength(13));
     expect(screen.getAllByTestId('review-tree-location')).toHaveLength(13);
     await waitFor(() => expect(selectedCards().map((card) => card.dataset.entries)).toEqual([TRIPLE]));
     const current = screen.getAllByTestId('review-tree-location').filter((row) => row.getAttribute('aria-current') === 'true');
@@ -112,6 +117,8 @@ describe('the region three entries share', () => {
     servePage();
     renderPage();
     await opened();
+    await selectInvariant();
+    await waitFor(() => expect(cards()).toHaveLength(13));
     const scroller = document.querySelector<HTMLElement>('[data-review-scroller]')!;
     fireEvent.keyDown(scroller, { key: 'j', code: 'KeyJ' });
     await waitFor(() => expect(selectedCards().map((card) => card.dataset.entries)).toEqual([TRIPLE]));
@@ -128,6 +135,8 @@ describe('the keys from a subject without changed blocks', () => {
     servePage();
     renderPage();
     await opened();
+    await selectInvariant();
+    await waitFor(() => expect(cards()).toHaveLength(13));
     // All: INV-1ZKP4R with its blocks, then the synthetic INV-0SYNTH, which has none.
     const row = screen.getAllByTestId('review-family-member-open').find((one) => one.dataset.subjectId === 'synthetic-unchanged-0')!;
     fireEvent.click(row);

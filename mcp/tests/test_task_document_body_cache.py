@@ -28,10 +28,16 @@ from test_observer_projection import FRESH
 from test_task_document_body_lookup import _corpus, _write
 
 
+async def _ready() -> None:
+    """The readiness gate the routes await; this fake projector has always published."""
+
+
 def _runtime(root: Path, **bounds: int) -> _ServingRuntime:
     return _ServingRuntime(
         config=cast(Any, SimpleNamespace(coordination_root=root)),
-        projector=cast(Any, SimpleNamespace(current=lambda: (1, object()))),
+        # The sync routes wait on the projector's readiness gate before they serve
+        # (`_wait_for_projection`); this fake is always ready.
+        projector=cast(Any, SimpleNamespace(current=lambda: (1, object()), wait_ready=_ready)),
         clock=lambda: FRESH,
         build=cast(Any, None),
         interval=0.1,

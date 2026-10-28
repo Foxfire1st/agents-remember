@@ -2,7 +2,7 @@
 // (reviewPage.test-utils.tsx), as the sandbox measured it (E7 on A2-F1, dev2 to dev5): the reader
 // selects INV-1ZKP4R while its cards are still being read and scrolls on; the subject's slot then
 // fills (or fails), its cards land, and lane files are read once in view. The reader's line is the
-// first settled block at the top of the column's view, under its sticky head; the pointer plays no
+// first settled block at the top of the column's view; the pointer plays no
 // part. Reads that land above the line or at it, and the browser's clamp, leave the line within 1 px;
 // corrections never add up to a drift (dev2 b); a clamp is no new place, within a gesture too (dev2 c,
 // dev5 E7 at 1920); a header's ⊕ at the line stays clear of the head, and one brought into view with
@@ -35,8 +35,9 @@ import {
   L181_SUBJECT,
   LANE_PATH,
   renderPage,
+  selectInvariant,
+  waitForOpening,
   servePage,
-  stubInViewAtFirstPaint,
   stubIntersection,
 } from './reviewPage.test-utils';
 
@@ -77,18 +78,29 @@ afterEach(() => {
 const subjectSection = () =>
   screen.getAllByTestId('review-subject-section').find((node) => node.dataset.subject === L181_SUBJECT)!;
 const slotState = () => screen.getByTestId('review-subject-slot').dataset.slotState;
+const hasSkeleton = (node: Element) => heldSkeleton.split(' ').every((name) => node.classList.contains(name));
 const topOf = (testid: string) => screen.getByTestId(testid).getBoundingClientRect().top;
 
-// The page opened with its cards read and its lane listed, the column laid out.
+// The page opened on the explicitly selected invariant, with its cards read and column laid out.
 async function openedPage(extra: [string, number][] = []) {
   stubIntersection();
   const layout = mockLayout(extra);
   servePage();
   renderPage();
-  await waitFor(() => expect(within(subjectSection()).getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-  await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+  await openInvariant();
   layout.attach(column());
   return layout;
+}
+
+async function openInvariant() {
+  await selectInvariant();
+  await waitFor(() => expect(within(subjectSection()).getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
+}
+
+async function openLane() {
+  await waitForOpening();
+  fireEvent.click(screen.getByTestId('review-tree-lane'));
+  await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
 }
 
 // The lane lists these files in place of its one composed file (call after `servePage`).
@@ -170,26 +182,26 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
       servePage();
       const reads = holdReads();
       renderPage();
+      await selectInvariant();
       await waitFor(() => expect(within(subjectSection()).getByTestId('review-subject-cards-reading')).toBeTruthy());
-      await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
       layout.attach(column());
-      fireEvent.click(within(subjectSection()).getByTestId('review-subject-select'));
       await waitFor(() => expect(slotState()).toBe('pending'));
-      // The heading, the pending slot and the cards being read are above the reader's line; the lane
-      // section is the first block below it.
+      // The heading, pending slot and cards being read are above the reader's line; the
+      // details section is the first settled block below it.
       scrollTo(40);
-      const lane = topOf('review-lane-section');
+      const lane = topOf('review-details');
       expect(lane).toBe(158);
 
       await act(async () => reads.release('subject', failure?.()));
       await waitFor(() => expect(slotState()).toBe(state));
-      expect(Math.abs(topOf('review-lane-section') - lane)).toBeLessThanOrEqual(1);
+      expect(Math.abs(topOf('review-details') - lane)).toBeLessThanOrEqual(1);
 
       await act(async () => reads.release('cards'));
       await waitFor(() => expect(within(subjectSection()).getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-      expect(Math.abs(topOf('review-lane-section') - lane)).toBeLessThanOrEqual(1);
+      expect(Math.abs(topOf('review-details') - lane)).toBeLessThanOrEqual(1);
 
-      // The lane file waits for its read above the reader's line; Technical details is the line.
+      // Selecting the lane mounts its file; its read must also preserve the settled details below.
+      await openLane();
       const file = screen.getByTestId('review-lane-file');
       scrollTo(column().scrollTop + file.getBoundingClientRect().bottom - COLUMN_TOP - 10);
       const details = topOf('review-details');
@@ -204,8 +216,8 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
   // each leave the whole-pixel scroll 0.37 px short; re-taking the line after each added them up.
   it('keeps the line within 1 px of its target through many fractional corrections', async () => {
     await openedPage();
-    const file = screen.getByTestId('review-lane-file');
-    // The lane file is the line, 10 px under the column's top.
+    const file = screen.getAllByTestId('review-expression-card').at(-1)!;
+    // The final card is the line, 10 px under the column's top.
     scrollTo(column().scrollTop + file.getBoundingClientRect().top - COLUMN_TOP - 10);
     const target = file.getBoundingClientRect().top;
     expect(target).toBe(COLUMN_TOP + 10);
@@ -224,7 +236,7 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
   // stay. When the content grows again, the spacer goes.
   it('holds a clamp off when content below the line shrinks, and lets the spacer go as the content grows again', async () => {
     await openedPage();
-    const file = screen.getByTestId('review-lane-file');
+    const file = screen.getAllByTestId('review-expression-card').at(-1)!;
     const details = screen.getByTestId('review-details');
     scrollTo(column().scrollTop + file.getBoundingClientRect().top - COLUMN_TOP - 10);
     const target = file.getBoundingClientRect().top;
@@ -289,11 +301,8 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
     const layout = mockLayout();
     servePage();
     renderPage();
-    await waitFor(() => expect(within(subjectSection()).getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+    await openLane();
     layout.attach(column());
-    fireEvent.click(within(subjectSection()).getByTestId('review-subject-select'));
-    await waitFor(() => expect(slotState()).toBe('answered'));
     const file = screen.getByTestId('review-lane-file');
     const header = file.firstElementChild!;
     const add = within(header as HTMLElement).getByRole('button', { name: /AR tray/ });
@@ -316,11 +325,8 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
     const layout = mockLayout();
     servePage();
     renderPage();
-    await waitFor(() => expect(within(subjectSection()).getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+    await openLane();
     layout.attach(column());
-    fireEvent.click(within(subjectSection()).getByTestId('review-subject-select'));
-    await waitFor(() => expect(slotState()).toBe('answered'));
     const file = screen.getByTestId('review-lane-file');
     const waiting = within(file).getByTestId('review-lane-file-waiting');
     // The waiting line at 90–111, across the column's top; Technical details from 111.
@@ -342,20 +348,20 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
   // of the head, at every step: the pointer takes no line, and a correction puts the line's block back
   // at its target, which is below the head. Taking the line under the moving pointer lifted the ⊕
   // 1,236 px out of view.
-  it("keeps a lane ⊕ at the top line clear of the sticky head while the pointer crosses to it and reads land", async () => {
+  it("keeps a lane ⊕ at the top of the column while the pointer crosses to it and reads land", async () => {
     const intersection = stubIntersection();
-    const layout = mockLayout([['[data-reading-head]', 44]]);
+    const layout = mockLayout();
     servePage();
     const above = LANE_PATH.replace('added.ts', 'above.ts');
     const below = LANE_PATH.replace('added.ts', 'below.ts');
     serveLaneFiles([above, LANE_PATH, below]);
     renderPage();
-    await waitFor(() => expect(within(subjectSection()).getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
+    await openLane();
     await waitFor(() => expect(screen.getAllByTestId('review-lane-file')).toHaveLength(3));
     layout.attach(column());
     const files = screen.getAllByTestId('review-lane-file');
-    const head = column().querySelector('[data-reading-head]')!.getBoundingClientRect().bottom;
-    expect(head).toBe(COLUMN_TOP + 44);
+    const head = COLUMN_TOP;
+    expect(column().querySelector('[data-reading-head]')).toBeNull();
     act(() => {
       scrollColumnTo(column(), files[1]);
     });
@@ -384,37 +390,26 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
     stays();
   });
 
-  // dev5 R188: Playwright's hover retries ended with its `scrollIntoView({ block: 'start' })` on the
-  // lane ⊕, which left it under the sticky head; a keyboard user tabbing to the ⊕, or find-in-page, is
-  // the same case. The column's scroll padding is the head's measured height, so the ⊕ comes in at the
-  // head's bottom. The browser's scrollIntoView is modelled here: the block's top goes to the column's
-  // top plus the column's scroll padding, which its class sets to `var(--reading-head-height)`.
-  it("brings a lane ⊕ into view with block 'start' below the sticky head, not under it", async () => {
-    const layout = mockLayout([['[data-reading-head]', 44]]);
+  // With the controls outside the scroller, a block-start scroll lands at its unobscured top.
+  it("brings a lane ⊕ into view at the column top without a sticky-header offset", async () => {
+    const layout = mockLayout();
     stubIntersection();
     servePage();
     renderPage();
-    await waitFor(() => expect(within(subjectSection()).getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+    await openLane();
     layout.attach(column());
-    const padded = css({ scrollPaddingTop: 'var(--reading-head-height, 0px)' });
     vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) {
-      const node = column();
-      const padding = node.classList.contains(padded) ? parseFloat(node.style.getPropertyValue('--reading-head-height')) || 0 : 0;
-      node.scrollTop = node.scrollTop + this.getBoundingClientRect().top - COLUMN_TOP - padding;
+      column().scrollTop += this.getBoundingClientRect().top - COLUMN_TOP;
     });
-    const head = column().querySelector('[data-reading-head]')!.getBoundingClientRect().bottom;
-    expect(head).toBe(COLUMN_TOP + 44);
+    expect(column().querySelector('[data-reading-head]')).toBeNull();
     const add = within(screen.getByTestId('review-lane-file').firstElementChild as HTMLElement).getByRole('button', {
       name: /AR tray/,
     });
-
     act(() => add.scrollIntoView({ block: 'start' }));
     await settle();
     expect(column().scrollTop).toBeGreaterThan(0);
-    expect(add.getBoundingClientRect().top).toBeGreaterThanOrEqual(head);
-    expect(add.getBoundingClientRect().top).toBe(head);
-    expect(column().style.getPropertyValue('--reading-head-height')).toBe('44px');
+    expect(add.getBoundingClientRect().top).toBe(COLUMN_TOP);
+    expect(column().style.getPropertyValue('--reading-head-height')).toBe('');
   });
 
   // A waiting lane file draws its header, the hunk rows its read will draw (one per hunk the lane read
@@ -426,8 +421,7 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
     const layout = mockLayout([['[data-testid="review-lane-hunks"]', 26]]);
     servePage();
     renderPage();
-    await waitFor(() => expect(within(subjectSection()).getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+    await openLane();
     layout.attach(column());
     const file = screen.getByTestId('review-lane-file');
     const list = within(file).getByTestId('review-lane-hunks');
@@ -475,8 +469,7 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
     ]);
     servePage();
     renderPage();
-    await waitFor(() => expect(within(subjectSection()).getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+    await openLane();
     layout.attach(column());
     const file = screen.getByTestId('review-lane-file');
     const waiting = file.getBoundingClientRect().height;
@@ -515,8 +508,7 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
     ]);
     servePage();
     renderPage();
-    await waitFor(() => expect(within(subjectSection()).getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+    await openLane();
     layout.attach(column());
     const file = screen.getByTestId('review-lane-file');
     const waiting = file.getBoundingClientRect().height;
@@ -529,7 +521,7 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
       if (file.dataset.laneRead !== 'ready') return true;
       layout.fresh();
       const drawn = file.querySelector('.cm-editor') !== null;
-      reads.push({ drawn, height: layout.rectOf(file).height, skeleton: held.classList.contains(heldSkeleton) });
+      reads.push({ drawn, height: layout.rectOf(file).height, skeleton: hasSkeleton(held) });
       return !drawn;
     });
 
@@ -562,12 +554,11 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
     ]);
     const { release } = servePage((url) => url.pathname === '/api/changeset/file-diff');
     renderPage();
-    await waitFor(() => expect(within(subjectSection()).getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+    await openLane();
     layout.attach(column());
     const file = screen.getByTestId('review-lane-file');
     const skeleton = within(file).getByTestId('review-lane-file-waiting');
-    expect(skeleton.classList.contains(heldSkeleton)).toBe(true);
+    expect(hasSkeleton(skeleton)).toBe(true);
     expect(skeleton.classList.contains(css({ height: '5rem' }))).toBe(true);
     expect(file.textContent).not.toContain('Read when in view');
     expect(within(file).getAllByTestId('review-lane-hunk-reserved')).toHaveLength(1);
@@ -604,16 +595,16 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
     const held = () => column().querySelector<HTMLElement>('[data-reading-spacer]')?.style.height ?? '';
     scrollTo(column().scrollHeight - VIEWPORT);
     await gestureOver();
-    // The lane section is the first block under the column's top: the line.
-    const lane = topOf('review-lane-section');
-    expect(lane).toBeGreaterThanOrEqual(COLUMN_TOP);
+    // Technical details is the first settled block starting under the column top: the line.
+    const target = topOf('review-details');
+    expect(target).toBeGreaterThanOrEqual(COLUMN_TOP);
     expect(column().scrollTop).toBe(column().scrollHeight - VIEWPORT);
 
     await act(async () => {
       card.style.height = '300px';
     });
     await settle();
-    expect(Math.abs(topOf('review-lane-section') - lane)).toBeLessThanOrEqual(1);
+    expect(Math.abs(topOf('review-details') - target)).toBeLessThanOrEqual(1);
     expect(held()).toBe('');
 
     const at = column().scrollTop;
@@ -621,7 +612,7 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
       details.style.height = '385px';
     });
     await settle();
-    expect(Math.abs(topOf('review-lane-section') - lane)).toBeLessThanOrEqual(1);
+    expect(Math.abs(topOf('review-details') - target)).toBeLessThanOrEqual(1);
     expect(column().scrollTop).toBe(at);
     expect(held()).toBe('15px');
 
@@ -629,7 +620,7 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
       details.style.height = '1500px';
     });
     await settle();
-    expect(Math.abs(topOf('review-lane-section') - lane)).toBeLessThanOrEqual(1);
+    expect(Math.abs(topOf('review-details') - target)).toBeLessThanOrEqual(1);
     expect(held()).toBe('');
   });
 
@@ -648,8 +639,7 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
     stubIntersection();
     servePage();
     renderPage();
-    await waitFor(() => expect(within(subjectSection()).getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+    await openInvariant();
     layout.attach(column());
     const cards = screen.getAllByTestId('review-expression-card');
     const at = cards.findIndex((card, index) => index > 0 && card.querySelector('[data-testid="review-card-excerpt"]'));
@@ -666,7 +656,7 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
     const lines = () => [...pane.querySelectorAll<HTMLElement>('[data-test-line]')];
     scrollTo(column().scrollTop + lines()[9].getBoundingClientRect().top - COLUMN_TOP);
     expect(lines()[9].getBoundingClientRect().top).toBe(COLUMN_TOP);
-    const next = within(card.parentElement!).queryAllByTestId('review-expression-card')[at + 1] ?? screen.getByTestId('review-lane-section');
+    const next = within(card.parentElement!).queryAllByTestId('review-expression-card')[at + 1] ?? screen.getByTestId('review-details');
     const nextTop = next.getBoundingClientRect().top;
     await gestureOver();
 
@@ -830,8 +820,7 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
     servePage();
     serveCardMarks();
     renderPage();
-    await waitFor(() => expect(within(subjectSection()).getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+    await openInvariant();
     layout.attach(column());
     const card = screen
       .getAllByTestId('review-expression-card')
@@ -843,7 +832,7 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
     scrollTo(column().scrollTop + excerpt.getBoundingClientRect().top - COLUMN_TOP);
     await gestureOver();
     expect(excerpt.getBoundingClientRect()).toMatchObject({ top: COLUMN_TOP, height: 200 });
-    const below = card.nextElementSibling ?? screen.getByTestId('review-lane-section');
+    const below = card.nextElementSibling ?? screen.getByTestId('review-details');
     const belowTop = below.getBoundingClientRect().top;
     const reads: { held: boolean; top: number; height: number; below: number }[] = [];
     // Every layout read from the card's coming into view until its pane has drawn its mark.
@@ -908,8 +897,7 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
       }),
     );
     renderPage();
-    await waitFor(() => expect(within(subjectSection()).getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+    await openInvariant();
     layout.attach(column());
     const card = screen
       .getAllByTestId('review-expression-card')
@@ -1021,7 +1009,7 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
 
   // Ruling 8450399b part 1 (the trace on A3-F1: +173.6 px at 1920, +148.8 px at 1440): the page's first
   // scroll is the reader's first move, so it opens the read gate (readGate.ts, the window's capture
-  // listener), and the cards seen at the opening, now far above the view, start their marks reads. Each
+  // listener). The selected invariant's cards are revealed above the view as their marks reads start. Each
   // excerpt's marks state holds one row from its first render on, so the "intent marks loading…" line,
   // and what the read resolves to, change no card's height, and the reader's line holds within 1 px. A
   // browser runs the microtasks between one listener of an event it dispatches and the next (React's
@@ -1030,7 +1018,7 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
   // column's part. Here a card's rationale lines are 100 px, its pane 200, its marks state 22.
   it("keeps the line through the first scroll's marks reads above it: no card grows while they wait or land", async () => {
     stubResizeObserver();
-    stubInViewAtFirstPaint();
+    const intersection = stubIntersection();
     const layout = mockLayout([
       ['[data-testid="review-expression-card"]', null],
       ['[data-testid="review-card-rationales"]', 100],
@@ -1054,19 +1042,18 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
       }),
     );
     renderPage();
-    await waitFor(() => expect(within(subjectSection()).getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+    await openInvariant();
     layout.attach(column());
     await settle();
     const cards = screen.getAllByTestId('review-expression-card');
     const heights = () => cards.map((card) => card.getBoundingClientRect().height);
-    // Seen at the opening, no card has asked for its marks: they wait for the reader's first move.
+    // The selected cards have not been observed in view, so no marks read has started.
     expect(cards.every((card) => card.dataset.inView === 'false')).toBe(true);
     expect(held).toHaveLength(0);
     const opened = heights();
 
-    // The reader's first scroll puts the lane's heading at the column's top, every card above it.
-    const heading = screen.getByTestId('review-lane-section').querySelector('h3')!;
+    // The reader's first scroll puts Technical details at the column top, with every card above it.
+    const heading = screen.getByTestId('review-details');
     column().scrollTop = column().scrollTop + heading.getBoundingClientRect().top - COLUMN_TOP;
     const target = heading.getBoundingClientRect().top;
     expect(target).toBe(COLUMN_TOP);
@@ -1074,6 +1061,7 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
       document.dispatchEvent(new Event('scroll'));
     });
     fireEvent.scroll(column());
+    act(() => cards.forEach((card) => intersection.show(card)));
     await settle();
     // The cards above the line ask for their marks, and the reads wait.
     for (let turn = 0; turn < 50 && held.length === 0; turn += 1) await settle();
@@ -1110,13 +1098,14 @@ describe('the page never moves under the reader (rule 9, E7)', () => {
     servePage();
     const reads = holdReads();
     renderPage();
-    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+    await selectInvariant();
     layout.attach(column());
-    fireEvent.click(within(subjectSection()).getByTestId('review-subject-select'));
     await waitFor(() => expect(slotState()).toBe('pending'));
     const skeleton = within(screen.getByTestId('review-subject-slot')).getByTestId('review-subject-slot-skeleton');
-    expect(skeleton.classList.contains(heldSkeleton)).toBe(true);
+    expect(hasSkeleton(skeleton)).toBe(true);
     expect(skeleton.classList.contains(css({ height: '12rem' }))).toBe(true);
+    expect(skeleton.classList.contains(css({ animation: 'pulseSlow 2.4s ease-in-out infinite' }))).toBe(true);
+    expect(skeleton.classList.contains(css({ _motionReduce: { animation: 'none' } }))).toBe(true);
     expect(skeleton.getAttribute('aria-hidden')).toBe('true');
 
     await act(async () => reads.release('subject'));

@@ -61,29 +61,10 @@ READ_ONLY_TOOLS: frozenset[str] = frozenset(
     }
 )
 
-# MIK-R186 @ v2 rule 3: the explainer's reads, served on this same server when a launch binds it
-# as an explainer seat. Every one of them only reads the environment, the retained pages, the
-# reference folder, the six Git subcommands or the bound knowledge tree.
-EXPLAINER_READ_ONLY_TOOLS: frozenset[str] = frozenset(
-    {
-        "assets",
-        "carry_kit",
-        "documentation",
-        "git_cat_file",
-        "git_diff",
-        "git_log",
-        "git_ls_tree",
-        "git_rev_parse",
-        "git_show",
-        "inputs",
-        "list",
-        "read",
-        "read_input",
-        "render",
-        "search",
-        "source",
-    }
-)
+# MIK-R211 v5 rule 3: of the explainer's own four tools, served on this same server when a launch
+# binds it as an explainer seat, render is marked as it always was; it writes only its own run folder
+# and the task's next revision through the frame store's own lock.
+EXPLAINER_READ_ONLY_TOOLS: frozenset[str] = frozenset({"render"})
 
 # Every other registered tool writes something somewhere the rule names, so
 # a harness that asks before a call that may write holds it for approval.
@@ -145,15 +126,12 @@ MUTATING_TOOLS: frozenset[str] = frozenset(
     }
 )
 
-# The explainer's writers (MIK-R186 @ v2 rule 3): a category, a grade, a removed category, an
-# asset into drafts/, a rendered file and the architect's report all write.
+# The explainer's writers (MIK-R186 @ v2 rule 3): a category, a grade and a removed category write.
 EXPLAINER_MUTATING_TOOLS: frozenset[str] = frozenset(
     {
         "define_category",
         "grade",
         "remove_category",
-        "report_to_architect",
-        "write_asset",
     }
 )
 

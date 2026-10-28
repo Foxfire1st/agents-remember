@@ -10,7 +10,6 @@ import {
   changeSetModel,
   filterTree,
   laneFileMatches,
-  lineChanges,
   lineCounts,
   type ChangeSetInputs,
   type ChangeSetModel,
@@ -74,36 +73,42 @@ describe('L181 #8: one subject, its locations and its two groups', () => {
     expect(new Set(subject.changed.slice(0, 3).map((node) => node.range))).toEqual(new Set(['L1697–1817']));
   });
 
-  it('counts a location row\'s lines from its two excerpts, else shows its span (W10)', () => {
-    const byId = new Map(subject.changed.map((node) => [node.entry.id, node]));
-    expect(byId.get('RLZ-C1JYFW')?.reason).toMatch(/^present · \+\d+ −\d+$/);
-    expect(lineChanges(['a', 'b', 'c'], ['a', 'x', 'c', 'd'])).toEqual({ added: 2, removed: 1 });
+  it('shows the producer line measurement rather than deriving it from bounded excerpts', () => {
+    const entries = l181Entries().map((entry) => entry.id === 'RLZ-C1JYFW'
+      ? { ...entry, line_changes: { added: 2, removed: 1 } } : entry);
+    const result = model(l181Inputs({ cards: cardsOf(l181Answer, entries) }));
+    const location = result.subjects[0].changed.find((node) => node.entry.id === 'RLZ-C1JYFW')!;
+    expect(location.reason).toBe('present · +2 −1');
   });
 
-  it('counts a side with no file as no lines: an added file\'s lines are all added (MIK-R86 v2 rule 2)', () => {
-    const byId = new Map(subject.changed.map((node) => [node.entry.id, node]));
-    // Captured: no file on the before side of either, so L60–94 and L16–74 are every line added.
+  it('uses producer measurements for added files without inferring counts from their excerpt', () => {
+    const entries = l181Entries().map((entry) => {
+      if (entry.id === 'RLZ-M930WX') return { ...entry, line_changes: { added: 35, removed: 0 } };
+      if (entry.id === 'PRF-6MFPDJ') return { ...entry, line_changes: { added: 59, removed: 0 } };
+      return entry;
+    });
+    const result = model(l181Inputs({ cards: cardsOf(l181Answer, entries) }));
+    const byId = new Map(result.subjects[0].changed.map((node) => [node.entry.id, node]));
     expect(byId.get('RLZ-M930WX')?.reason).toBe('persist · +35 −0');
     expect(byId.get('PRF-6MFPDJ')?.reason).toBe('proof · +59 −0');
   });
 
-  it('counts a removed file\'s lines as removed, and keeps the range where a side\'s text is not known', () => {
+  it('keeps exact producer counts for a long truncated excerpt and uses the range when counts are absent', () => {
     const comparison = l181Answer.comparison!;
     const entry = l181Entries().find((one) => one.id === 'RLZ-C1JYFW')!;
     const counts = (changed: ReviewTreeEntry) => lineCounts(changed, blockIdentityOf(changed, comparison));
-    // Synthetic: the captured entry's after side is a file that is gone; the block names the before side.
-    const removed: ReviewTreeEntry = {
+    const truncated: ReviewTreeEntry = {
       ...entry,
-      before: { ...entry.before, recorded: true },
-      after: { recorded: false, state: 'absent', path: entry.after.path },
+      after: { ...entry.after, end_line: 4000, excerpt: 'only the bounded beginning', excerpt_truncated: true },
+      line_changes: { added: 3200, removed: 2400 },
     };
-    const before = entry.before.excerpt!.replace(/\n$/, '').split('\n').length;
-    expect(counts(removed)).toBe(`+0 −${before}`);
-    // Not known is not empty: an unresolved side, an excerpt not read, a cut excerpt keep the range.
+    expect(counts(truncated)).toBe('+3200 −2400');
+    const unmeasured = { ...truncated };
+    delete unmeasured.line_changes;
+    expect(counts(unmeasured)).toBe('L1473–4000');
     const unresolved: ReviewTreeEntry = { ...entry, before: { ...entry.before, state: 'unresolved', excerpt: undefined } };
     const unread: ReviewTreeEntry = { ...entry, before: { ...entry.before, excerpt: undefined } };
-    const cut: ReviewTreeEntry = { ...removed, before: { ...removed.before, excerpt_truncated: true } };
-    expect([counts(unresolved), counts(unread), counts(cut)]).toEqual(['L1473–1477', 'L1473–1477', 'L737–740']);
+    expect([counts(unresolved), counts(unread)]).toEqual(['L1473–1477', 'L1473–1477']);
   });
 });
 
@@ -261,6 +266,190 @@ it('Memory currentness ranks an unrealized subject without entries before curren
     ['INV-ZSYNTH', 'not measured', 0],
   ]);
   expect(treeIds(sorted)).toEqual(ids(sorted));
+});
+
+describe('per-invariant card coverage', () => {
+  const outline = l104Inputs().outline!;
+  const entries = l104Entries();
+  const firstId = l104Selector('INV-9ZKYWQ');
+  const secondId = l104Selector('INV-EWGTN0');
+  const partial = (loaded: string[], pending: string[] = [], failures: Record<string, string> = {}) => ({
+    ...cardsOf(l104Answer, entries.filter((entry) => loaded.includes(entry.invariant_key))),
+    coverage: { loaded, pending, failures },
+  });
+  const subject = (result: ChangeSetModel, id: string) => result.subjects.find((node) => node.row.selectorId === id)!;
+
+  it('distinguishes a loaded empty subject from unread, pending and failed subjects', () => {
+    const emptyId = 'synthetic-empty';
+    const input = l104Inputs({
+      outline: { ...outline, invariants: [
+        ...outline.invariants,
+        { selector_id: emptyId, id: 'INV-EMPTY', summary: 'No recorded locations', change: 'added', meaning: { state: 'none', labels: [] } },
+      ] },
+      cards: partial([firstId, emptyId], [secondId], { [l104Selector('INV-N7SK8E')]: 'This invariant could not be read' }),
+    });
+    const result = model(input);
+    expect(subject(result, firstId).cards).toBe('ready');
+    expect(subject(result, firstId).changed.length).toBeGreaterThan(0);
+    expect(subject(result, emptyId)).toMatchObject({ cards: 'ready', changed: [] });
+    expect(subject(result, secondId).cards).toBe('reading');
+    expect(subject(result, l104Selector('INV-N7SK8E'))).toMatchObject({ cards: 'unavailable', reason: 'This invariant could not be read' });
+    expect(subject(result, l104Selector('INV-ESF2CT'))).toMatchObject({ cards: 'unread', reason: 'clarify · … loc.' });
+    expect(result.counts).toMatchObject({ changedLocations: undefined, changedFiles: undefined, folded: undefined });
+  });
+
+  it('publishes aggregate counts only after all shown invariants have answered', () => {
+    const shownIds = outline.invariants.map((row) => row.selector_id);
+    const complete = model(l104Inputs({ cards: partial(shownIds) }));
+    const legacy = model(l104Inputs());
+    expect(complete.counts).toEqual(legacy.counts);
+    const incomplete = model(l104Inputs({ cards: partial(shownIds.slice(1)) }));
+    expect(incomplete.counts).toMatchObject({ changedLocations: undefined, changedFiles: undefined, folded: undefined });
+  });
+
+  it('requires coverage of shown subjects, including a selected unchanged subject, without requiring hidden rows', () => {
+    const cards = { ...cardsOf(l181Answer), coverage: { loaded: [L181_SUBJECT], pending: [], failures: {} } };
+    expect(model(l181Inputs({ cards })).counts.changedLocations).toBe(15);
+    const selected = changeSetModel(l181Inputs({ cards }), 'priority', 'changed', {
+      selection: { kind: 'subject', subject: { kind: 'invariant', id: 'synthetic-unchanged-0' } },
+    });
+    expect(selected.counts.changedLocations).toBeUndefined();
+    expect(selected.subjects.find((node) => node.row.selectorId === 'synthetic-unchanged-0')?.cards).toBe('unread');
+  });
+
+  it.each<ReviewSort>(['priority', 'currentness', 'judgment:risk'])(
+    'keeps %s subject and family order stable as individual cards arrive', (sort) => {
+      const family = { selector_id: 'family', id: 'FAM-TEST', title: 'One family', change: 'unchanged' as const,
+        members: [firstId, secondId].map((selector_id) => ({ selector_id, id: selector_id === firstId ? 'INV-9ZKYWQ' : 'INV-EWGTN0', membership: 'both' as const })) };
+      const options = { categories: [{ name: 'risk', scale: [] }], outline: { ...outline, families: [family] }, currentness: { after: { invariants: [
+        { id: 'INV-9ZKYWQ', state: 'current' as const, entries: [] },
+        { id: 'INV-EWGTN0', state: 'stale' as const, entries: [] },
+      ] } } };
+      const empty = model(l104Inputs({ ...options, cards: partial([]) }), sort);
+      const one = model(l104Inputs({ ...options, cards: partial([firstId]) }), sort);
+      const all = model(l104Inputs({ ...options, cards: partial(outline.invariants.map((row) => row.selector_id)) }), sort);
+      expect(all.sort).toBe(sort);
+      expect(ids(one)).toEqual(ids(empty));
+      expect(ids(all)).toEqual(ids(empty));
+      expect(all.groups.map((group) => group.key)).toEqual(empty.groups.map((group) => group.key));
+    },
+  );
+
+  it('does not let a visited stale excerpt change the currentness order based on the comparison summary', () => {
+    const staleEntries = entries.map((entry) => entry.invariant_key === firstId
+      ? { ...entry, after: { ...entry.after, currentness: 'stale' as const } } : entry);
+    const cards = { ...cardsOf(l104Answer, staleEntries.filter((entry) => entry.invariant_key === firstId)), coverage: { loaded: [firstId], pending: [], failures: {} } };
+    const currentness = { after: { invariants: [
+      { id: 'INV-9ZKYWQ', state: 'current' as const, entries: [] },
+      { id: 'INV-EWGTN0', state: 'unrealized' as const, entries: [] },
+    ] } };
+    const result = model(l104Inputs({ currentness, cards }), 'currentness');
+    expect(ids(result)[0]).toBe('INV-EWGTN0');
+    expect(subject(result, firstId).currentness).toBe('stale');
+  });
+
+  it('keeps memory sorts actionable and applies them only after all shown values are loaded', () => {
+    const memory = { state: 'available' as const, tree: 'd4eb8510' };
+    const input = (loaded: string[], pending: string[] = []) => l104Inputs({ cards: { ...partial(loaded, pending), memory } });
+    const unread = model(input([firstId]), 'incoming-links');
+    expect(unread.sort).toBe('priority');
+    expect(unread.requested).toBe('incoming-links');
+    expect(unread.sorts.find((option) => option.sort === 'incoming-links')).toMatchObject({ available: true, reason: 'Loads location values for this comparison' });
+    const reading = model(input([firstId], [secondId]), 'incoming-links');
+    expect(reading.sorts.find((option) => option.sort === 'incoming-links')).toMatchObject({ available: true, reason: 'Reading memory values for the shown invariants' });
+    const complete = model(input(outline.invariants.map((row) => row.selector_id)), 'incoming-links');
+    expect(complete.sort).toBe('incoming-links');
+  });
+
+  it('keeps a real memory-value failure disabled even with partial coverage', () => {
+    const cards = { ...partial([firstId]), memory: { state: 'unavailable' as const, tree: 'd4eb8510', reason: 'This tree is not indexed' } };
+    const result = model(l104Inputs({ cards }), 'incoming-links');
+    expect(result.sort).toBe('priority');
+    expect(result.sorts.find((option) => option.sort === 'incoming-links')).toMatchObject({ available: false, reason: 'This tree is not indexed' });
+  });
+});
+
+describe('complete location inventory before detail reads', () => {
+  const inventory = l104Entries().map((source) => {
+    const entry = structuredClone(source);
+    delete entry.memory;
+    for (const side of [entry.before, entry.after]) {
+      delete side.excerpt;
+      delete side.excerpt_truncated;
+      delete side.facet;
+      delete side.rationale;
+      delete side.content;
+    }
+    return entry;
+  });
+  const emptyDetails = { ...cardsOf(l104Answer, []), coverage: { loaded: [], pending: [], failures: {} } };
+
+  it('preserves every sidebar location and aggregate count without loading any invariant details', () => {
+    const result = model(l104Inputs({ inventory, comparison: l104Answer.comparison!, cards: emptyDetails }));
+    const full = model(l104Inputs());
+    expect(result.counts).toEqual(full.counts);
+    expect(ids(result)).toEqual(ids(full));
+    expect(result.subjects.map((node) => [node.row.id, node.changed.length, node.unchanged.length, node.notComparable.length]))
+      .toEqual(full.subjects.map((node) => [node.row.id, node.changed.length, node.unchanged.length, node.notComparable.length]));
+    expect(result.subjects.every((node) => node.cards === 'unread' && node.locationsKnown)).toBe(true);
+    expect(result.subjects[0].reason).toBe(full.subjects[0].reason);
+    expect(result.blocks.map((node) => node.key)).toEqual(full.blocks.map((node) => node.key));
+    expect(result.blocks.every((node) => node.entry.before.excerpt === undefined && node.entry.after.excerpt === undefined)).toBe(true);
+  });
+
+  it('replaces metadata by entry ID when detail arrives without duplicating counts or changing the tree order', () => {
+    const selected = l104Selector('INV-9ZKYWQ');
+    const entries = l104Entries().filter((entry) => entry.invariant_key === selected);
+    const cards = { ...cardsOf(l104Answer, entries), coverage: { loaded: [selected], pending: [], failures: {} } };
+    const before = model(l104Inputs({ inventory, cards: emptyDetails }));
+    const after = model(l104Inputs({ inventory, cards }));
+    expect(after.counts).toEqual(before.counts);
+    expect(ids(after)).toEqual(ids(before));
+    expect(after.blocks.map((node) => node.key)).toEqual(before.blocks.map((node) => node.key));
+    expect(after.subjects.find((node) => node.row.selectorId === selected)?.cards).toBe('ready');
+    const node = after.subjects.find((subject) => subject.row.selectorId === selected)!;
+    const detailed = [...node.changed, ...node.unchanged, ...node.notComparable]
+      .find((location) => location.entry.id === entries[0].id)!;
+    expect(detailed.entry).toEqual(entries[0]);
+    expect(detailed.entry.after.excerpt).toBeDefined();
+  });
+
+  it('shows complete metadata while a detail request fails or is still pending', () => {
+    const pending = model(l104Inputs({ inventory, comparison: l104Answer.comparison!, cards: { state: 'reading' } }));
+    const failed = model(l104Inputs({ inventory, comparison: l104Answer.comparison!, cards: { state: 'unavailable', reason: 'Detail read failed' } }));
+    expect(pending.counts).toEqual(model(l104Inputs()).counts);
+    expect(failed.counts).toEqual(pending.counts);
+    expect(pending.subjects.every((node) => node.cards === 'reading' && node.locationsKnown)).toBe(true);
+    expect(failed.subjects.every((node) => node.cards === 'unavailable' && node.locationsKnown)).toBe(true);
+  });
+
+  it('does not treat the complete inventory as complete memory-sort values', () => {
+    const result = model(l104Inputs({ inventory, cards: emptyDetails }), 'incoming-links');
+    expect(result.sort).toBe('priority');
+    expect(result.requested).toBe('incoming-links');
+    expect(result.sorts.find((option) => option.sort === 'incoming-links')?.available).toBe(true);
+  });
+
+  it('exposes inventory failure without presenting unknown global counts as zero', () => {
+    const result = model(l104Inputs({ inventoryProblem: 'Inventory could not be read', cards: emptyDetails }));
+    expect(result.locations).toBe('unavailable');
+    expect(result.counts.changedLocations).toBeUndefined();
+    expect(result.subjects.every((node) => !node.locationsKnown)).toBe(true);
+  });
+
+  it('keeps a block-selected unchanged invariant visible using inventory before details arrive', () => {
+    const entry = inventory[0];
+    const source = l104Inputs();
+    const outline: ReviewOutline = {
+      ...source.outline!,
+      invariants: source.outline!.invariants.map((row) => ({ ...row, change: 'unchanged' })),
+    };
+    const result = changeSetModel({ ...source, outline, inventory, cards: emptyDetails }, 'priority', 'changed', {
+      selection: { kind: 'block', block: blockIdentityOf(entry, l104Answer.comparison!) },
+    });
+    expect(result.shownInvariantIds).toEqual([entry.invariant_key]);
+    expect(result.subjects[0].cards).toBe('unread');
+  });
 });
 
 describe('one order for the tree and the column', () => {

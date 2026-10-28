@@ -23,7 +23,10 @@ import type { ReviewCatalogueRead } from '../../data/useReviewCatalogue';
 import { carriedPage, FAMILY_SIDES } from '../../data/review';
 import type { DiffMode } from '../changeset/DiffPane';
 import { FamilyReviewCenter, type CenterPart } from './FamilyReviewCenter';
-import type { FamilySelection, WalkedTree } from './FamilyTree';
+import { GuaranteeChangeBadge } from './ChangeBadges';
+import { MeaningBlock } from './MeaningEffects';
+import { SubjectJudgment } from './SubjectJudgment';
+import { emptyRosterSentence, type FamilySelection, type WalkedTree } from './FamilyTree';
 import { InvariantTargetState, useInvariantTargetState } from './MarkerTargetState';
 import type { ReviewNavigationState, ReviewSubject } from './ReviewNavigation';
 import { ReviewMainFacts } from './ReviewRecordPanes';
@@ -40,7 +43,11 @@ const muted = css({ color: 'muted', fontSize: '0.75rem', margin: '0.35rem 0' });
 const slotBox = css({ marginBlock: '0.8rem 0.4rem', display: 'grid', gap: '0.6rem', minWidth: 0 });
 // The selected subject's answer before its first read (D383): no read of the opening gives its size,
 // so skeleton lines stand at a default height, about a statement and its judgment.
-const firstReadSkeleton = css({ height: '12rem' });
+const firstReadSkeleton = css({
+  height: '12rem',
+  animation: 'pulseSlow 2.4s ease-in-out infinite',
+  _motionReduce: { animation: 'none' },
+});
 const statusBox = css({
   borderWidth: '1px',
   borderStyle: 'solid',
@@ -188,10 +195,12 @@ export interface LocationFacts {
   proofs: Readonly<Record<string, number>>;
 }
 
-// Where the slot is drawn: under the subject's heading (`content`), after its code (`after-code`), or
-// whole where no code follows; with its section's locations for the meta line.
+// Where the slot is drawn: under the subject's heading (`content`), after its code (`after-code`),
+// whole where no code follows, or in a family overview (`state`): the family read's own state, its
+// guarantee change and its facts, without its members' detail (MIK-R211 rule 10); with its section's
+// locations for the meta line.
 interface SlotPlace {
-  part: CenterPart;
+  part: CenterPart | 'state';
   locations?: LocationFacts;
 }
 
@@ -490,6 +499,32 @@ function SlotWaiting({ props, meta }: { props: SelectedSlotProps; meta: React.Re
   );
 }
 
+// A family overview's slot: the family read's pending state or failure, then its guarantee change
+// (with an unknown change's reason), its recorded steps and judgment, and the read's facts. A read is
+// never shown nowhere, and the family's own record stays reachable (MIK-R211 rule 10).
+function FamilyState({ props, answered }: { props: SelectedSlotProps; answered: boolean }) {
+  const { shown } = props;
+  if (!answered || !shown) return <SlotWaiting props={props} meta={null} />;
+  const family = shown.family_context?.entries.find((entry) => entry.family_id === props.subject?.id);
+  return (
+    <div className={slotBox} data-testid="review-subject-slot" data-slot-state="answered">
+      {family ? <GuaranteeChangeBadge kinds={family.change_kinds} /> : null}
+      {props.subject ? <MeaningBlock payload={shown} record={props.subject.id} /> : null}
+      {props.subject ? (
+        <div data-testid="review-family-judgment">
+          <SubjectJudgment payload={shown} subject={props.subject} />
+        </div>
+      ) : null}
+      {family && FAMILY_SIDES.every((side) => family[side].members.length === 0) ? (
+        <p className={muted} data-testid="review-center-family-empty">
+          {emptyRosterSentence(family)}
+        </p>
+      ) : null}
+      <SlotFacts payload={shown} laneRead={props.laneRead} />
+    </div>
+  );
+}
+
 // The selected subject's slot: under its heading its meta line and its content, and after its code
 // the rest of its read (SlotPlaceContext); whole where no code follows.
 export function SelectedSlot(props: SelectedSlotProps) {
@@ -513,6 +548,7 @@ export function SelectedSlot(props: SelectedSlotProps) {
     ) : null;
   if (place.part === 'after-code') return <SlotAfterCode props={props} center={center} />;
   const answered = !props.older && !props.reading && shown !== null;
+  if (place.part === 'state') return <FamilyState props={props} answered={answered} />;
   const meta = props.subject ? (
     <SubjectMeta
       subject={props.subject}

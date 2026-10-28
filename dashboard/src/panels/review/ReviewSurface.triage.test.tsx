@@ -136,23 +136,17 @@ function mountFamily() {
   );
 }
 
-// The tree lists one row per invariant while the centre lists one row per member revision, so the
-// comparison runs at invariant granularity: tree rows carry their invariant, centre revisions resolve
-// to theirs through the served family context.
+// The tree and the centre both list one row per invariant: the centre is the selected family's
+// overview of its members (MIK-R211 v4 rule 10), each row carrying its invariant.
 function orders(view: ReturnType<typeof render>) {
-  const invariantOf = new Map(
-    (['before', 'after'] as const).flatMap((side) =>
-      family.payload!.family_context!.entries[0][side].members.map(
-        (row) => [row.invariant_revision_id, row.invariant_id] as const,
-      ),
-    ),
-  );
   const tree = () => [
     ...new Set(view.getAllByTestId('review-family-member-open').map((one) => (one as HTMLElement).dataset.subjectId)),
   ];
   const centre = () => [
     ...new Set(
-      view.getAllByTestId('review-center-open-member').map((one) => invariantOf.get(one.dataset.revision!)),
+      within(view.getByTestId('review-family-overview'))
+        .getAllByTestId('review-member-summary')
+        .map((one) => one.dataset.subject),
     ),
   ];
   return { tree, centre };
@@ -160,7 +154,7 @@ function orders(view: ReturnType<typeof render>) {
 
 it("lists the centre's members in the tree's displayed order, under every sort", async () => {
   const view = mountFamily();
-  await view.findAllByTestId('review-change-badge', undefined);
+  await view.findAllByTestId('review-member-summary', undefined);
   const { tree, centre } = orders(view);
   for (const order of ['priority', 'authored'] as const) {
     await act(async () => treeOrderStore.getState().setOrder(order));
@@ -183,7 +177,7 @@ it("lists the centre's members in the model's order when a recorded effect outra
   member.meaning = last.meaning;
   serve(outline);
   const view = mountFamily();
-  await view.findAllByTestId('review-change-badge', undefined);
+  await view.findAllByTestId('review-member-summary', undefined);
   const { tree, centre } = orders(view);
   await waitFor(() => expect(tree()[0]).toBe(last.selector_id));
   expect(centre()).toEqual(tree());
@@ -193,12 +187,15 @@ it('selects the next changed member from the tree and keeps family context, focu
   // The member order of the centre is the case above's; this one walks the tree in the authored order.
   treeOrderStore.getState().setOrder('authored');
   const view = mountFamily();
-  await view.findAllByTestId('review-change-badge', undefined);
+  await view.findAllByTestId('review-member-summary', undefined);
   const workspace = view.getByTestId('review-workspace');
   expect(view.getByTestId('review-surface').dataset.kbzone).toBe('review');
-  // The family context is on screen, still badged: since MIK-R86 the breakdown by kind lives in
-  // the family review (rule 10), not in the sidebar.
-  expect(view.getByTestId('review-family-breakdown').textContent).toContain('of 9');
+  // The family context is on screen, still badged: the family's overview lists its nine members,
+  // each with its change mark (MIK-R211 v4 rule 10), not the sidebar.
+  expect(view.getByTestId('review-family-counts').textContent).toContain('9 invariants');
+  const marks = view.getAllByTestId('review-member-summary').map((row) => row.querySelector('[data-change]'));
+  expect(marks).toHaveLength(9);
+  expect(marks.every((mark) => mark !== null)).toBe(true);
 
   fireEvent.click(node(view.container, 'INV-AAAAAA'));
   // The revised member's subject is read, as a click would read it.

@@ -34,6 +34,7 @@ from agents_remember.application.knowledge_worklist.leaf import (
 from agents_remember.application.reviewer_worklist_child import isolated_leaf_worklist
 from agents_remember.kernel import reviewer_worklist_process as process_owner
 from agents_remember.kernel.git_command import DIFF_PREFIX_OPTIONS, PARSED_DIFF_OPTIONS
+from agents_remember.kernel.read_cancellation import BuildToken, ReadCancelled, cancellable_read
 from agents_remember.kernel.recorded_reads import (
     recorded_reads,
 )
@@ -196,18 +197,18 @@ def test_real_child_transport_failures_are_explicit_uncached_and_recoverable(wor
     cases = (
         "sys.stdout.write('{')",
         "sys.exit(7)",
-        "answer['request'] = 'other'; json.dump(answer, sys.stdout)",
-        "answer['source'] = {**answer['source'], 'sourceDigest': 'other'}; json.dump(answer, sys.stdout)",
-        "answer['module'] = '/another/package.py'; json.dump(answer, sys.stdout)",
-        "answer['reads'] = {'/missing': 'bad identity'}; json.dump(answer, sys.stdout)",
-        "answer['reads'] = {'resolve:relative': 'resolved:/target'}; json.dump(answer, sys.stdout)",
-        "answer['reads'] = {'resolve:/locator': 'sha256:' + '0' * 64}; json.dump(answer, sys.stdout)",
-        "answer['reads'] = {'exists:/locator': 'resolved:/target'}; json.dump(answer, sys.stdout)",
-        "answer['reads'] = {'resolve:/locator': 'resolved:relative'}; json.dump(answer, sys.stdout)",
-        "answer['reads'] = {'resolve:/locator': 'resolved:/bad\\0path'}; json.dump(answer, sys.stdout)",
-        "answer['document'] = {'schema': 'knowledge-worklist/v1', 'state': 'complete', 'pairing': {}, 'items': [], 'incomplete': []}; json.dump(answer, sys.stdout)",
+        "answer['request'] = 'other'; print(json.dumps(answer), flush=True)",
+        "answer['source'] = {**answer['source'], 'sourceDigest': 'other'}; print(json.dumps(answer), flush=True)",
+        "answer['module'] = '/another/package.py'; print(json.dumps(answer), flush=True)",
+        "answer['reads'] = {'/missing': 'bad identity'}; print(json.dumps(answer), flush=True)",
+        "answer['reads'] = {'resolve:relative': 'resolved:/target'}; print(json.dumps(answer), flush=True)",
+        "answer['reads'] = {'resolve:/locator': 'sha256:' + '0' * 64}; print(json.dumps(answer), flush=True)",
+        "answer['reads'] = {'exists:/locator': 'resolved:/target'}; print(json.dumps(answer), flush=True)",
+        "answer['reads'] = {'resolve:/locator': 'resolved:relative'}; print(json.dumps(answer), flush=True)",
+        "answer['reads'] = {'resolve:/locator': 'resolved:/bad\\0path'}; print(json.dumps(answer), flush=True)",
+        "answer['document'] = {'schema': 'knowledge-worklist/v1', 'state': 'complete', 'pairing': {}, 'items': [], 'incomplete': []}; print(json.dumps(answer), flush=True)",
         "sys.stderr.write('x' * 262144); sys.stdout.write('invalid JSON')",
-        "answer['document'] = {'schema': 'knowledge-worklist/v1', 'state': 'incomplete', 'pairing': {}, 'items': [], 'incomplete': [{'input': 'run', 'detail': float('nan')}]}; json.dump(answer, sys.stdout)",
+        "answer['document'] = {'schema': 'knowledge-worklist/v1', 'state': 'incomplete', 'pairing': {}, 'items': [], 'incomplete': [{'input': 'run', 'detail': float('nan')}]}; print(json.dumps(answer), flush=True)",
     )
     for fault in cases:
         with _child_script(_REPLY + fault) as children:
@@ -236,9 +237,9 @@ def test_real_child_transport_failures_are_explicit_uncached_and_recoverable(wor
         script = f"""
 import json, sys
 from agents_remember.application import reviewer_worklist_child as child
-answer = child._run(json.load(sys.stdin))
+answer = child._run(json.loads(sys.stdin.readline()))
 answer['document']['items'][0]['facts']['numeric_control'] = 'NUMBER'
-sys.stdout.write(json.dumps(answer).replace('"NUMBER"', {number!r}))
+print(json.dumps(answer).replace('"NUMBER"', {number!r}), flush=True)
 """
         review_leaf_view_memo.LEAF_VIEW_MEMO.clear()
         with _child_script(script) as children:
@@ -394,10 +395,10 @@ def _source() -> dict[str, Any]:
     )
 
 
-def _ask(owner: Any, payload: dict[str, Any], answers: list[Any], errors: list[Exception]) -> None:
+def _ask(owner: Any, payload: dict[str, Any], answers: list[Any], errors: list[Any]) -> None:
     try:
         answers.append(owner.compute(payload, _source()))
-    except Exception as error:
+    except (Exception, ReadCancelled) as error:
         errors.append(error)
 
 
@@ -407,7 +408,7 @@ def test_identical_requests_share_one_child_and_others_wait_for_one_of_two_slots
     same: list[Any] = []
     other: list[Any] = []
     errors: list[Exception] = []
-    with held_child_script(_child_script, _REPLY, "json.dump(answer, sys.stdout)") as (
+    with held_child_script(_child_script, _REPLY, "print(json.dumps(answer), flush=True)") as (
         children,
         release,
     ):
@@ -472,16 +473,17 @@ def test_overload_is_refused_only_past_the_waiting_bound_or_the_deadline_and_say
 def test_a_cancelled_requester_leaves_the_shared_child_to_the_others_and_the_last_reaps_it() -> (
     None
 ):
+    """A requester that leaves never takes an answer; a stale build waits for its child instead."""
     owner = process_owner.ReviewerWorklistProcesses()
     answers: list[Any] = []
-    errors: list[Exception] = []
+    errors: list[BaseException] = []
     leaving = threading.Event()
 
     def impatient() -> None:
         with process_owner.worklist_request(leaving):
             _ask(owner, {"tree": "a"}, [], errors)
 
-    with held_child_script(_child_script, _REPLY, "json.dump(answer, sys.stdout)") as (
+    with held_child_script(_child_script, _REPLY, "print(json.dumps(answer), flush=True)") as (
         children,
         release,
     ):
@@ -498,7 +500,8 @@ def test_a_cancelled_requester_leaves_the_shared_child_to_the_others_and_the_las
         release()
         second.join(timeout=HANG_GUARD_SECONDS)
     assert len(answers) == 1 and len(children) == 1  # the other requester still got its answer
-    assert [str(error) for error in errors] == ["reviewer worklist computation was cancelled"]
+    # The requester that left is told it was cancelled, never a worklist failure (D569 mean 4).
+    assert [type(error) for error in errors] == [ReadCancelled]
 
     sole = threading.Event()
     with _child_script("import threading; threading.Event().wait()") as children:
@@ -516,6 +519,48 @@ def test_a_cancelled_requester_leaves_the_shared_child_to_the_others_and_the_las
         assert children and children[0].poll() is not None  # reaped before the request returned
     assert not owner._active
 
+    _a_superseded_build_waits_for_its_child(owner)
+
+
+def _a_superseded_build_waits_for_its_child(owner: Any) -> None:
+    """A superseded build is stale (D569): it waits for its child, which lands instead of being
+    killed; only a stopped build reaps it."""
+    answers: list[Any] = []
+    errors: list[BaseException] = []
+    stale = BuildToken()
+
+    def building(token: BuildToken, answered: list[Any]) -> None:
+        with cancellable_read(token):
+            _ask(owner, {"tree": "a"}, answered, errors)
+
+    with held_child_script(_child_script, _REPLY, "print(json.dumps(answer), flush=True)") as (
+        children,
+        release,
+    ):
+        thread = threading.Thread(target=building, args=(stale, answers))
+        thread.start()
+        wait_until(lambda: owner._waiting == 1 and len(children) == 1, "the build's child")
+        stale.mark_stale()  # a newer change superseded the build while its child computes
+        # load-independent: under load this can only pass falsely, never fail falsely
+        thread.join(timeout=0.3)
+        assert thread.is_alive(), "the stale build left its child"
+        release()
+        thread.join(timeout=HANG_GUARD_SECONDS)
+    # The child's answer reached the stale build: the child landed instead of being killed.
+    assert len(answers) == 1 and not errors and len(children) == 1
+
+    stopped = BuildToken()
+    with _child_script("import threading; threading.Event().wait()") as children:
+        thread = threading.Thread(target=building, args=(stopped, []))
+        thread.start()
+        wait_until(lambda: bool(children), "the stopped build's child")
+        stopped.mark_stale()
+        stopped.stop()  # the dashboard shuts down
+        thread.join(timeout=HANG_GUARD_SECONDS)
+        assert children[0].poll() is not None  # reaped before the build returned
+    assert [type(error) for error in errors] == [ReadCancelled]
+    assert not owner._active
+
 
 def test_build_mismatch_asks_for_a_dashboard_restart(world: World) -> None:  # noqa: F811
     world.edit()
@@ -523,7 +568,7 @@ def test_build_mismatch_asks_for_a_dashboard_restart(world: World) -> None:  # n
     for script in (
         f"import sys; sys.exit({process_owner.EXIT_BUILD_MISMATCH})",
         _REPLY + "answer['source'] = {**answer['source'], 'sourceDigest': 'other'}; "
-        "json.dump(answer, sys.stdout)",
+        "print(json.dumps(answer), flush=True)",
     ):
         with _child_script(script):
             answer = ports.trees(_query())
@@ -886,14 +931,14 @@ def test_a_pin_another_reader_made_or_is_making_is_the_answer_not_a_refusal(
 def test_a_request_arriving_while_a_cancelled_flight_is_reaped_starts_its_own_computation() -> None:
     owner = process_owner.ReviewerWorklistProcesses()
     answers: list[Any] = []
-    errors: list[Exception] = []
+    errors: list[BaseException] = []
     leaving = threading.Event()
 
     def impatient() -> None:
         with process_owner.worklist_request(leaving):
             _ask(owner, {"tree": "a"}, [], errors)
 
-    with held_child_script(_child_script, _REPLY, "json.dump(answer, sys.stdout)") as (
+    with held_child_script(_child_script, _REPLY, "print(json.dumps(answer), flush=True)") as (
         children,
         release,
     ):
@@ -927,7 +972,7 @@ def test_a_request_arriving_while_a_cancelled_flight_is_reaped_starts_its_own_co
             first.join(timeout=HANG_GUARD_SECONDS)
             second.join(timeout=HANG_GUARD_SECONDS)
     assert len(answers) == 1, errors  # the newcomer was answered, not told "cancelled"
-    assert [str(error) for error in errors] == ["reviewer worklist computation was cancelled"]
+    assert [type(error) for error in errors] == [ReadCancelled]  # only the one that left
     assert len(children) == 2 and not owner._active and not owner._flights
 
 
@@ -936,7 +981,7 @@ def test_twelve_identical_concurrent_reads_share_one_child_without_a_refusal() -
     owner = process_owner.ReviewerWorklistProcesses()
     answers: list[Any] = []
     errors: list[Exception] = []
-    with held_child_script(_child_script, _REPLY, "json.dump(answer, sys.stdout)") as (
+    with held_child_script(_child_script, _REPLY, "print(json.dumps(answer), flush=True)") as (
         children,
         release,
     ):
@@ -1035,7 +1080,7 @@ def _prove_computation_bound() -> None:
         )
 
     with (
-        _child_script(_REPLY + "json.dump(answer, sys.stdout)") as children,
+        _child_script(_REPLY + "print(json.dumps(answer), flush=True)") as children,
         mock.patch.object(owner, "_collect", held),
     ):
         try:

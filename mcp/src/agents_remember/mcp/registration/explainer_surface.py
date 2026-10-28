@@ -1,14 +1,14 @@
-"""The explainer's surface on the normal AR task server (MIK-R186 @ v2 rule 3).
+"""The explainer's four tools on the normal AR task server (MIK-R186 @ v2 rule 3, MIK-R211 v5 rule 3).
 
-There is one server, not two. The normal `agents-remember-task` build is what serves an explainer seat,
-and what makes it an explainer seat is the **launch-owned binding**: the seat launch writes it into the
-server process's environment, and the server selects this surface from that binding before it registers
-anything. Nothing else -- a tool argument, repository text, a workspace marker -- can select it, and an
-invalid binding refuses service rather than falling back to the ordinary roster.
+There is one server, not two. The normal `agents-remember-task` build serves an explainer seat with AR's
+general tools, as a task agent has them, and what adds the explainer's own four (`render`,
+`define_category`, `remove_category`, `grade`) is the **launch-owned binding**: the seat launch writes it
+into the server process's environment. Nothing else -- a tool argument, repository text, a workspace
+marker -- can select it, and an invalid binding refuses service rather than serving an unbound seat.
 
-The tool bodies are not copied here: :func:`agents_remember.canvas.explainer_server.register_bound_explainer_tools`
-registers the existing implementations on the instance the launch already built, so a shared reader or
-writer keeps one copy in the product.
+The tool bodies are not copied here:
+:func:`agents_remember.mcp.registration.explainer_tools.register_bound_explainer_tools` registers the
+implementations on the instance the launch already built.
 """
 
 from __future__ import annotations
@@ -182,14 +182,8 @@ def binds_explainer() -> bool:
 def register_explainer_surface(
     server: FastMCP, config: McpRuntimeConfig, binding: ExplainerBinding
 ) -> None:
-    """Register the explainer's 22 tools on the normal server, for this leaf and no other."""
+    """Register the explainer's four tools on the normal server, for this leaf and no other."""
 
-    repositories: dict[str, Any] = getattr(config, "repositories", {}) or {}
-    entry = repositories.get(binding.repository)
-    code_repository = (
-        Path(entry.path) if entry is not None and getattr(entry, "path", None) else None
-    )
-    memory_repository = _memory_repository(config, binding.repository)
     coordination_root = Path(config.coordination_root)
     canonical_task = coordination_root / "tasks" / binding.repository / binding.task
     resolved_task_root = (
@@ -197,66 +191,11 @@ def register_explainer_surface(
         if canonical_task.is_dir()
         else explainer_task_root(config, binding.repository, binding.task)
     )
-    # The production delivery sender is resolved on the first report, never at registration:
-    # discovery must stay light (MIK-R204), and the sender's bridge half must not load here.
     register_bound_explainer_tools(
         server,
         workspace=binding.workspace,
         seat=binding.seat,
-        inputs=ExplainerInputs(
-            task_root=resolved_task_root,
-            coordination_root=coordination_root,
-            code_repository=code_repository,
-            memory_repository=memory_repository,
-            sender=_deferred_report_sender(config),
-        ),
-    )
-
-
-def _deferred_report_sender(config: McpRuntimeConfig) -> Any:
-    """A sender that binds the delivery owner's production sender on its first call.
-
-    The sender's implementation is the ``cli`` half's; this registration layer may not import
-    ``cli`` (``layers.toml``: ``mcp`` ranks below it), so the delivery owner
-    (:func:`agents_remember.canvas.explainer_server.production_report_sender`) resolves it. The
-    import stays deferred, so the registration fast path pays for neither the canvas server nor
-    the bridge, host and serving modules a report needs.
-    """
-
-    resolved: Any = None
-
-    def send_report(architect: str, text: str) -> str:
-        nonlocal resolved
-        if resolved is None:
-            from agents_remember.canvas.explainer_server import (  # noqa: PLC0415
-                production_report_sender,
-            )
-
-            resolved = production_report_sender(config)
-        return resolved(architect, text)
-
-    return send_report
-
-
-def _memory_repository(config: McpRuntimeConfig, repository_id: str) -> Path | None:
-    """The memory side of the bound repository, when this installation keeps one beside the code."""
-
-    repositories: dict[str, Any] = getattr(config, "repositories", {}) or {}
-    entry = repositories.get(repository_id)
-    for attribute in ("memory_root", "memory_path", "memory_repository"):
-        value = getattr(entry, attribute, None) if entry is not None else None
-        if value:
-            return Path(value)
-    return None
-
-
-def refuse_unexposed(name: str) -> ExplainerRefused:
-    """The dispatch refusal: a bound explainer server answers its 22 tools and nothing else."""
-
-    return ExplainerRefused(
-        "explainer-tool-not-exposed",
-        f"{name!r} is not on this explainer's surface; a bound seat may call "
-        f"{', '.join(EXPLAINER_SURFACE)} and nothing else",
+        inputs=ExplainerInputs(task_root=resolved_task_root),
     )
 
 
@@ -267,6 +206,5 @@ __all__ = [
     "ExplainerBinding",
     "binds_explainer",
     "read_explainer_binding",
-    "refuse_unexposed",
     "register_explainer_surface",
 ]

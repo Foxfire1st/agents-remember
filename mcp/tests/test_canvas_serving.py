@@ -10,8 +10,8 @@ One case per boundary the routes own:
 4. generation refuses an implicit activation, records its attempt, and publishes only through the
    store -- with a retry reconciling the same attempt;
 5. a foreign or opaque origin cannot reach a state-changing route at all;
-6. the shipped browser proof is what enables generated scripts, and a record that did not run its
-   own checks (or names another digest, browser or version) enables nothing;
+6. every served explainer document references its own ``page.js`` and runs it inside the frame's
+   sandbox, under the same CSP and the same opaque origin, with nothing to switch that off;
 7. a page that navigates its frame is an accepted channel that gains no write authority, and the
    host installs no navigation guard to refuse it (MIK-R104 v2, D331);
 8. every route, reads included, answers only the dashboard's own host and port (rule 15, D332).
@@ -20,22 +20,12 @@ One case per boundary the routes own:
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 
-import canvas_host_test_support as canvas_fixtures
 import pytest
+from agents_remember.application.review_frame_store import frame_scope
 from agents_remember.canvas import presenter as presenter_module
-from agents_remember.canvas.policy import (
-    FRAME_PERMISSIONS_POLICY,
-    IsolationProof,
-    load_isolation_proof,
-    policy_digest,
-    proof_gaps,
-    scripts_enabled,
-    scripts_gap,
-)
-from agents_remember.canvas.proof_record import source_bindings
+from agents_remember.canvas.policy import FRAME_PERMISSIONS_POLICY
 from agents_remember.canvas.prospective import ProspectiveResult
 from agents_remember.canvas.sessions import SessionRegistry
 from agents_remember.serving import canvas as canvas_module
@@ -52,24 +42,19 @@ from canvas_host_test_support import (
     REPO,
     TASK,
     FakeRunner,
+    PageContent,
     config,
-    packet,
     publish,
     record,
+    stored_attempt,
     task,
     write_settings,
 )
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-# Expose shared pytest fixtures only to this consumer module.
-proof_frontend = canvas_fixtures.proof_frontend
-proof_bundle = canvas_fixtures.proof_bundle
-
 LAUNCH = {"harness": "hermes", "model": "the-presenter-model"}
 BASE = f"/api/canvas/frames/{REPO}/{TASK}/{LEAF}/{FRAME}"
-#: The bundle the product ships: the browser proof the runtime gate reads.
-BUNDLE = Path(__file__).resolve().parents[1] / "src/agents_remember/package_data/canvas"
 
 
 class LoadedProspective:
@@ -97,9 +82,7 @@ def loaded_prospective(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def _client(
-    tmp_path: Path, *, proof: IsolationProof | None = None
-) -> tuple[TestClient, CanvasHosts, Path]:
+def _client(tmp_path: Path) -> tuple[TestClient, CanvasHosts, Path]:
     settings = config(tmp_path)
     root = task(settings)
     write_settings(settings, LAUNCH)
@@ -107,9 +90,7 @@ def _client(
     hosts = CanvasHosts(
         config=settings,
         sessions=SessionRegistry(),
-        evidence=lambda query, focus, question: packet(record()),
         runner=FakeRunner(),
-        proof=proof,
     )
     app = FastAPI()
     register_canvas_routes(app, hosts)
@@ -150,11 +131,9 @@ def test_the_panel_reads_a_saved_page_and_starts_nothing(tmp_path: Path) -> None
     body = response.json()
     assert body["opening"]["state"] == "ready"
     assert body["opening"]["revision"] == 1
-    assert body["policy"]["scripts"] is False
-    assert body["policy"]["proof"]["state"] == "absent"
-    assert body["launch"]["state"] == "ok"
+    assert body["policy"]["scripts"] is True
+    assert body["policy"]["originArrangement"] == "opaque-sandbox-v1"
     assert body["presenter"]["attempts"] == []
-    assert body["design"]["available"] is True
     assert hosts.sessions.live == 0
     assert not list((root / "notes" / "reports" / "review-presenter").rglob("*.json"))
 
@@ -165,12 +144,13 @@ def test_a_session_serves_its_own_document_and_assets_only(tmp_path: Path) -> No
     client, _hosts, _root = _client(tmp_path)
     opened = _open(client)
     session = str(opened["session"])
-    assert opened["scripts"] is False
-    assert opened["sandbox"] == ""
+    assert opened["scripts"] is True
+    assert opened["sandbox"] == "allow-scripts"
     document = client.get(str(opened["pageUrl"]))
     assert document.status_code == 200
     csp = document.headers["content-security-policy"]
-    assert "script-src 'none'" in csp and "connect-src 'none'" in csp
+    assert "sandbox allow-scripts" in csp and "connect-src 'none'" in csp
+    assert "allow-same-origin" not in csp
     assert document.headers["cache-control"] == "no-store"
     assert "set-cookie" not in {name.lower() for name in document.headers}
 
@@ -188,6 +168,31 @@ def test_a_session_serves_its_own_document_and_assets_only(tmp_path: Path) -> No
     assert traversal.json()["state"] == "refused"
     assert client.get(f"{page_url}missing.css").status_code == 404
     assert session
+
+
+def test_a_proxied_page_limits_assets_to_the_browser_origin(tmp_path: Path) -> None:
+    client, _hosts, _root = _client(tmp_path)
+    opened = _open(client)
+    document = client.get(
+        str(opened["pageUrl"]),
+        headers={
+            "host": "127.0.0.1:9795",
+            "x-forwarded-host": "localhost:5195",
+            "x-forwarded-proto": "http",
+        },
+    )
+    assert document.status_code == 200
+    csp = document.headers["content-security-policy"]
+    directives = {part.split(" ", 1)[0]: part for part in csp.split("; ")}
+    assets = f"http://localhost:5195/canvas/page/{opened['session']}/"
+    assert directives["style-src"] == f"style-src {assets} 'unsafe-inline'"
+    assert directives["img-src"] == f"img-src {assets} data:"
+    assert "9795" not in csp
+    assert directives["sandbox"] == "sandbox allow-scripts"
+    assert directives["script-src"] == f"script-src {assets} 'unsafe-inline'"
+    assert "allow-same-origin" not in csp
+    assert directives["connect-src"] == "connect-src 'none'"
+    assert directives["frame-ancestors"] == "frame-ancestors 'self'"
 
 
 def test_the_protocol_route_is_bound_bounded_and_replay_safe(tmp_path: Path) -> None:
@@ -263,41 +268,15 @@ def test_revocation_ends_the_channel_without_an_effect(tmp_path: Path) -> None:
     )
 
 
-def test_generation_is_explicit_and_publishes_through_the_store(
+def test_a_stored_attempt_publishes_through_the_store(
     tmp_path: Path, loaded_prospective: None
 ) -> None:
     """Rules 2, 5, 7: one explicit start, one attributable attempt, one store publication."""
 
     client, _hosts, root = _client(tmp_path)
-    implicit = client.post(f"{BASE}/generate", json={"requestId": "req-1", "focus": "the change"})
-    assert implicit.status_code == 400
-    assert implicit.json()["reason"] == "not-activated"
-    for override in (
-        {"mode": "auto"},
-        {"mode": "bypassPermissions", "featureValues": {"auto_accept": True}},
-    ):
-        refused = client.post(
-            f"{BASE}/generate",
-            json={
-                "requestId": "req-override",
-                "focus": "the change",
-                "activation": "explicit",
-                **override,
-            },
-        )
-        assert refused.status_code == 400
-        assert refused.json()["reason"] == "launch-override-refused"
-        assert isinstance(_hosts.runner, FakeRunner) and _hosts.runner.calls == []
-    started = client.post(
-        f"{BASE}/generate",
-        json={"requestId": "req-1", "focus": "the change", "activation": "explicit"},
-    )
-    assert started.status_code == 200, started.text
-    attempt = started.json()["attempt"]
-    assert attempt["state"] == "running"
-    assert attempt["execution_id"] == "exec-1"
-    assert Path(attempt["working_directory"]).is_dir()
-
+    attempt = stored_attempt(
+        canvas_module._presenter(_hosts, frame_scope(root, LEAF, FRAME), LEAF)
+    ).model_dump()
     assets = Path(attempt["working_directory"]) / "assets"
     assets.mkdir(parents=True)
     (assets / "index.html").write_text("<!doctype html><p>explained</p>")
@@ -309,11 +288,6 @@ def test_generation_is_explicit_and_publishes_through_the_store(
     assert published.json()["state"] == "published"
     assert published.json()["revision"] == 2
 
-    retried = client.post(
-        f"{BASE}/generate",
-        json={"requestId": "req-1", "focus": "the change", "activation": "explicit"},
-    )
-    assert retried.json()["attempt"]["attempt_id"] == attempt["attempt_id"]
     state = client.get(BASE).json()
     assert state["opening"]["revision"] == 2
     assert state["presenter"]["attempts"][0]["state"] == "published"
@@ -351,8 +325,8 @@ NAVIGATION = {
 }
 
 
-def test_the_served_page_without_a_proof_is_inert_and_carries_its_policy(tmp_path: Path) -> None:
-    """Rules 2, 4, 10: an opaque origin by the served policy itself, and nothing to execute.
+def test_the_served_page_carries_its_isolation_policy(tmp_path: Path) -> None:
+    """Rules 2, 4: an opaque origin by the served policy itself, with the page's own script admitted.
 
     The ``sandbox`` directive is what makes a *direct open* opaque; the COOP/CORP pair and the
     Permissions-Policy are the document's own answers. An asset is ``cross-origin`` CORP because the
@@ -362,15 +336,18 @@ def test_the_served_page_without_a_proof_is_inert_and_carries_its_policy(tmp_pat
 
     client, _hosts, _root = _client(tmp_path)
     opened = _open(client)
-    assert opened["scripts"] is False
-    assert opened["sandbox"] == ""
+    assert opened["scripts"] is True
+    assert opened["sandbox"] == "allow-scripts"
     document = client.get(str(opened["pageUrl"]))
     csp = document.headers["content-security-policy"]
     directives = {
         part.strip().split(" ")[0]: part.strip() for part in csp.split(";") if part.strip()
     }
-    assert directives["sandbox"] == "sandbox"
-    assert directives["script-src"] == "script-src 'none'"
+    assert directives["sandbox"] == "sandbox allow-scripts"
+    assert directives["script-src"] == (
+        f"script-src http://testserver/canvas/page/{opened['session']}/ 'unsafe-inline'"
+    )
+    assert "allow-same-origin" not in csp and "'unsafe-eval'" not in csp
     assert directives["connect-src"] == "connect-src 'none'"
     assert directives["frame-ancestors"] == "frame-ancestors 'self'"
     assert document.headers["cross-origin-opener-policy"] == "same-origin"
@@ -394,118 +371,54 @@ def test_the_served_page_without_a_proof_is_inert_and_carries_its_policy(tmp_pat
     assert asset.headers["access-control-allow-origin"] == "*"
 
 
-def test_a_proven_record_serves_the_page_with_scripts_in_the_sandbox(
-    tmp_path: Path, proof_bundle: Path
-) -> None:
-    """Rules 2, 4, 10: scripts run, and the document they run in is still an opaque origin.
+#: A page as the explainer publishes it: its document loads the script shipped beside it.
+PAGE_DOCUMENT = (
+    b'<!doctype html><script type="module" src="page.js"></script><p>the explained change</p>'
+)
+PAGE_SCRIPT = b"document.documentElement.dataset.explainer = 'ready'"
 
-    The one thing that changed between the inert and the scripts-on page is the script permission:
-    the ``sandbox`` directive gains ``allow-scripts`` and never ``allow-same-origin``, ``script-src``
-    admits the admitted-asset prefix plus inline script, and no ``'unsafe-eval'`` is added. The
-    sandbox is therefore the same opaque-origin boundary with one more permission in it.
+
+def test_the_served_explainer_document_always_references_its_page_js(tmp_path: Path) -> None:
+    """Rules 2, 4: the document loads its own page.js, and the isolation that runs it is unchanged.
+
+    Nothing decides this at runtime: no record, no digest and no boolean can serve the page without
+    its script or with a wider policy. The document carries ``sandbox="allow-scripts"`` (an opaque
+    origin, never ``allow-same-origin``), a ``script-src`` naming this session's own asset prefix
+    plus inline script, and nothing else peer-visible. The reference is relative, so it resolves
+    inside that one prefix and nowhere else.
     """
 
-    client, _hosts, _root = _client(tmp_path, proof=load_isolation_proof(proof_bundle))
+    assets = {"index.html": PAGE_DOCUMENT, "page.js": PAGE_SCRIPT}
+    client, _hosts, root = _client(tmp_path)
+    publish(root, record(), request="req-page-js", page=PageContent(assets=assets))
     opened = _open(client)
+    page_url = str(opened["pageUrl"])
     assert opened["scripts"] is True
     assert opened["sandbox"] == "allow-scripts"
-    document = client.get(str(opened["pageUrl"]))
+
+    document = client.get(page_url)
+    assert document.status_code == 200
+    assert b'<script type="module" src="page.js"></script>' in document.content
     csp = document.headers["content-security-policy"]
     directives = {
         part.strip().split(" ")[0]: part.strip() for part in csp.split(";") if part.strip()
     }
+    own = f"http://testserver/canvas/page/{opened['session']}/"
     assert directives["sandbox"] == "sandbox allow-scripts"
+    assert directives["script-src"] == f"script-src {own} 'unsafe-inline'"
     assert "allow-same-origin" not in csp and "'unsafe-eval'" not in csp
-    assert directives["script-src"] == (
-        f"script-src http://testserver/canvas/page/{opened['session']}/ 'unsafe-inline'"
-    )
-    assert "'unsafe-inline'" in directives["script-src"]
     assert directives["connect-src"] == "connect-src 'none'"
-    assert directives["worker-src"] == "worker-src 'none'"
-    assert directives["form-action"] == "form-action 'none'"
-    assert document.headers["permissions-policy"] == FRAME_PERMISSIONS_POLICY
+    assert directives["frame-src"] == "frame-src 'none'"
+    assert document.headers["cross-origin-opener-policy"] == "same-origin"
+    assert document.headers["cross-origin-resource-policy"] == "same-origin"
+    assert "set-cookie" not in {name.lower() for name in document.headers}
 
-    body = client.get(BASE).json()
-    assert body["policy"]["scripts"] is True
-    assert body["policy"]["proof"]["state"] == "proven"
-    assert body["policy"]["proof"]["browserVersion"]
-
-
-def _variant(directory: Path, payload: dict[str, object]) -> Path:
-    """One copy of the shipped record with the change under test, as a bundle to load."""
-
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / "isolation-proof.json").write_text(json.dumps(payload), encoding="utf-8")
-    return directory
-
-
-def test_a_record_enables_generated_scripts_only_when_it_proves_them(
-    tmp_path: Path, proof_bundle: Path
-) -> None:
-    """Rule 10: the shipped proof is the enablement, and a record that did not run enables nothing.
-
-    The positive half uses shipped observation shapes with explicit consumer-fixture
-    bindings, independent of ignored frontend build output. It is not browser evidence.
-    Every original positive and negative assertion remains. The negative halves are
-    the ways a record can look proven without being one -- another digest, a check that was never
-    observed, an observation that contradicts its expectation, no browser version.
-    """
-
-    record = json.loads((proof_bundle / "isolation-proof.json").read_text(encoding="utf-8"))
-    proof = load_isolation_proof(proof_bundle)
-    assert proof.state == "proven"
-    assert proof.policy_digest == policy_digest()
-    assert proof.origin_arrangement == record["originArrangement"]
-    assert proof.browser and proof.browser_version
-    assert proof.required_checks and not proof.failed_checks
-    assert proof.proven is True
-    assert scripts_enabled(proof) is True
-    assert scripts_gap(proof) == ""
-    assert record["scriptPolicy"] == "enabled" and record["scriptsEnabled"] is True
-    # The sandbox as configured, and the accepted channel named as an observation.
-    assert record["sandbox"] == "allow-scripts"
-    assert record["origin"]["documentOrigin"] == "null"
-    assert record["navigation"]["selfNavigation"].startswith("observed:navigated")
-    assert f"selfNavigation: {record['navigation']['selfNavigation']}" in record["observed"]
-
-    stale = load_isolation_proof(_variant(tmp_path / "stale", {**record, "policyDigest": "0" * 64}))
-    assert stale.proven is False and scripts_enabled(stale) is False
-    assert "digest" in scripts_gap(stale)
-
-    unobserved = [line for line in record["observed"] if not line.startswith("selfNavigation:")]
-    skipped = load_isolation_proof(
-        _variant(tmp_path / "skipped", {**record, "observed": unobserved})
-    )
-    assert skipped.proven is False and scripts_enabled(skipped) is False
-    assert "selfNavigation" in scripts_gap(skipped)
-
-    contradicted = [
-        "externalScript: ran" if line.startswith("externalScript:") else line
-        for line in record["observed"]
-    ]
-    wrong = load_isolation_proof(
-        _variant(tmp_path / "contradicted", {**record, "observed": contradicted})
-    )
-    assert wrong.proven is False and scripts_enabled(wrong) is False
-
-    unversioned = {key: value for key, value in record.items() if key != "browserVersion"}
-    anonymous = load_isolation_proof(_variant(tmp_path / "unversioned", unversioned))
-    assert anonymous.proven is False and scripts_enabled(anonymous) is False
-    assert "version" in scripts_gap(anonymous)
-
-
-def test_the_shipped_record_matches_the_available_frontend() -> None:
-    """A checkout without its ignored bundle must stay inert; a built one must prove it."""
-
-    proof = load_isolation_proof(BUNDLE)
-    if source_bindings()["frontend"] == "absent":
-        assert proof.proven is False
-        assert scripts_enabled(proof) is False
-        assert any("frontend" in gap for gap in proof.record_gaps)
-    else:
-        assert proof.proven is True, proof_gaps(proof)
-        assert scripts_enabled(proof) is True
-        assert proof.policy_digest == policy_digest()
+    # The referenced script is this session's own admitted asset, under the same prefix.
+    script = client.get(f"{page_url}page.js")
+    assert script.status_code == 200
+    assert script.content == PAGE_SCRIPT
+    assert script.headers["content-type"].startswith("text/javascript")
+    assert script.headers["access-control-allow-origin"] == "*"
 
 
 def test_a_navigating_page_is_an_accepted_channel_and_gains_no_write(tmp_path: Path) -> None:

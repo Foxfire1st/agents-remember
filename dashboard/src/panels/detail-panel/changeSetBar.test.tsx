@@ -168,17 +168,17 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
     const buttons = await findAllByTestId('open-changeset');
     expect(buttons).toHaveLength(1);
     expect(buttons[0].textContent).toContain('series');
+    await waitFor(() => expect(buttons[0].textContent).toContain('+0 −0'));
     fireEvent.click(buttons[0]);
     expect(onOpenChangeSet).toHaveBeenCalledWith({
       repo: 'agents-remember',
       master: '260628_operations-integration',
+      generation: { codeBase: 'b0', codeTip: 'b0', memoryBase: 'm0', memoryTip: 'm0', digest: 'e'.repeat(64) },
     });
   });
 
   it("carries the master net's leaf attribution beside its total (R33.2)", async () => {
-    // The delivered defect: this read asked for `includeLeaves: false`, so the master's net total
-    // stood alone — a number with no leaf to attribute it to. The read now asks for the breakdown and
-    // the control prints it beside the total, which is where the reviewer decides what to open.
+    // Net totals arrive first. The later pinned breakdown must still attribute the same generation.
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => {
@@ -209,7 +209,9 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
         }
         return new Response(
           JSON.stringify({
-            leaves: [
+            master: new URLSearchParams(url.split('?', 2)[1]).get('master'),
+            generation: { codeBase: 'b0', codeTip: 't2', memoryBase: '', memoryTip: '', digest: 'ab'.repeat(32) },
+            leaves: url.includes('includeLeaves=false') ? [] : [
               {
                 leafId: '260921-ICR-L1',
                 state: 'committed',
@@ -314,6 +316,8 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
         }
         return new Response(
           JSON.stringify({
+            master: new URLSearchParams(url.split('?', 2)[1]).get('master'),
+            leaves: [],
             counters: {
               code: { files: 0, insertions: 0, deletions: 0 },
               memory: { files: 0, insertions: 0, deletions: 0 },
@@ -543,6 +547,10 @@ const MASTER_NET_REASON =
   'substitutes no branch tip for either';
 const OTHER_MASTER = '260921_other-master';
 const MEASURED_COUNTERS = {
+  master: MASTER_NET,
+  leaves: [],
+  generation: { codeBase: 'b0', codeTip: 't2', memoryBase: '', memoryTip: '', digest: 'ab'.repeat(32) },
+  currentness: 'current',
   counters: {
     code: { files: 3, insertions: 7, deletions: 2 },
     memory: { files: 1, insertions: 0, deletions: 0 },
@@ -717,7 +725,7 @@ describe("the counter read's refusal (L32/D01)", () => {
               );
           });
         }
-        return routeAnswer(200, 'OK', MEASURED_COUNTERS);
+        return routeAnswer(200, 'OK', { ...MEASURED_COUNTERS, master: asked });
       }),
     );
 

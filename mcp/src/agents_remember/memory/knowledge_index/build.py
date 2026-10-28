@@ -13,12 +13,22 @@ owner) and for a second file claiming an ID already indexed: the index cannot an
 without choosing, so it names the file and says it is incomplete. Integrity beyond that -- whether
 IDs resolve, markers match references, routes cover members -- is the validator's (MIK-R22); this
 module derives nothing it cannot read off recorded fields.
+
+**Parsed documents kept by their bytes (D569).** A document's model is a function of its exact
+bytes, and the models are frozen. Inside :func:`kept_document_parses` -- the reviewer worklist
+child, which parses both memory trees of every comparison -- each parsed document is kept per
+process by the SHA-256 of its bytes (:data:`DOCUMENT_PARSES`), so a comparison after a one-blob
+change parses only the documents whose bytes changed. A file that fails is never kept: its problem
+is found again each time. Every placement check on the parsed document still runs per file.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,6 +37,7 @@ from typing import Any, NamedTuple
 import apsw
 
 from agents_remember.memory.knowledge.connection import create_or_validate_schema
+from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge_index import projection
 from agents_remember.memory.knowledge_index.schema import INDEX_DDL, INDEX_FORMAT
 from agents_remember.memory.knowledge_index.tree import MemoryTreeSnapshot
@@ -36,8 +47,8 @@ from agents_remember.models.knowledge_files.documents import (
     ONBOARDING_ROOT,
     RECORD_DIRECTORIES,
     file_sidecar_path,
+    history_document,
     parse_document_text,
-    parse_history_document,
     route_sidecar_path,
     split_record_filename,
 )
@@ -56,6 +67,7 @@ from agents_remember.models.knowledge_files.shapes import (
     ROUTE_TARGET_PREFIX,
     Anchor,
     AnchorTarget,
+    FileModel,
     IdTarget,
     Link,
     Reference,
@@ -124,6 +136,41 @@ class BuildReport:
     history_row_count: int
 
 
+DOCUMENT_PARSES: BoundedMemo[bytes, FileModel] = BoundedMemo(65_536)
+"""A document's bytes' SHA-256 -> its parsed, frozen model (used in :func:`kept_document_parses`)."""
+
+_KEEPING: ContextVar[bool] = ContextVar("kept_document_parses", default=False)
+
+
+@contextmanager
+def kept_document_parses() -> Iterator[None]:
+    """Within the block, :func:`parse_tree` keeps and reuses parsed documents by their bytes."""
+
+    token = _KEEPING.set(True)
+    try:
+        yield
+    finally:
+        _KEEPING.reset(token)
+
+
+def _reader(data: bytes) -> Callable[[str], FileModel]:
+    """How one file's text becomes its model: parsed, or the model its exact bytes were parsed to."""
+
+    if not _KEEPING.get():
+        return parse_document_text
+
+    def read(text: str) -> FileModel:
+        key = hashlib.sha256(data).digest()
+        remembered = DOCUMENT_PARSES.get(key)
+        if remembered is not None:
+            return remembered[0]
+        document = parse_document_text(text)
+        DOCUMENT_PARSES.put(key, document)
+        return document
+
+    return read
+
+
 def parse_tree(snapshot: MemoryTreeSnapshot) -> ParsedTree:
     """Parse every indexed JSON file of ``snapshot``; a file that fails is a problem, not an error.
 
@@ -135,8 +182,9 @@ def parse_tree(snapshot: MemoryTreeSnapshot) -> ParsedTree:
     for path in sorted(snapshot.files):
         if path.endswith(".md"):
             continue
+        data = snapshot.files[path]
         try:
-            _parse_file(parsed, path, snapshot.files[path].decode("utf-8"))
+            _parse_file(parsed, path, data.decode("utf-8"), _reader(data))
         except (UnicodeDecodeError, ValueError) as error:
             parsed.problems.append((path, _first_line(error)))
     return parsed
@@ -177,26 +225,34 @@ def build_index(snapshot: MemoryTreeSnapshot, destination: Path) -> BuildReport:
 # --------------------------------------------------------------------------------------------------
 
 
-def _parse_file(parsed: ParsedTree, path: str, text: str) -> None:
+def _parse_file(
+    parsed: ParsedTree, path: str, text: str, read: Callable[[str], FileModel] = parse_document_text
+) -> None:
     if path == LAYOUT_MARKER_PATH:
-        document = parse_document_text(text)
+        document = read(text)
         if not isinstance(document, LayoutMarker):
             raise ValueError(f"{LAYOUT_MARKER_PATH} is not the layout marker")
         parsed.layout = document
         return
     parts = path.split("/")
     if parts[0] == KNOWLEDGE_ROOT:
-        _parse_knowledge_file(parsed, path, parts, text)
+        _parse_knowledge_file(parsed, path, parts, text, read)
     elif parts[0] == ONBOARDING_ROOT:
-        _parse_onboarding_file(parsed, path, text)
+        _parse_onboarding_file(parsed, path, text, read)
 
 
-def _parse_knowledge_file(parsed: ParsedTree, path: str, parts: list[str], text: str) -> None:
+def _parse_knowledge_file(
+    parsed: ParsedTree,
+    path: str,
+    parts: list[str],
+    text: str,
+    read: Callable[[str], FileModel] = parse_document_text,
+) -> None:
     if len(parts) != 3:
         raise ValueError("not a knowledge file location: knowledge/<kind-dir>/<file>.json")
     directory, filename = parts[1], parts[2]
     if directory == _HISTORY_DIRECTORY:
-        history = parse_history_document(path, text)
+        history = history_document(path, read(text))
         parsed.history_files[path] = history
         owned = [one for one in parsed.history_files.values() if one.owner_id == history.owner_id]
         merged = merged_leaf_history(owned)
@@ -207,7 +263,7 @@ def _parse_knowledge_file(parsed: ParsedTree, path: str, parts: list[str], text:
     if kind is None:
         raise ValueError(f"knowledge/{directory}/ is not a record directory")
     record_id, _slug, _extension = split_record_filename(filename)
-    record = parse_document_text(text)
+    record = read(text)
     if not isinstance(record, RECORD_MODELS[kind]):
         raise ValueError(f"a file under knowledge/{directory}/ holds an ar-{kind} record")
     if record.id != record_id:
@@ -218,8 +274,10 @@ def _parse_knowledge_file(parsed: ParsedTree, path: str, parts: list[str], text:
     parsed.records[record.id] = IndexedRecord(path=path, record=record)
 
 
-def _parse_onboarding_file(parsed: ParsedTree, path: str, text: str) -> None:
-    document = parse_document_text(text)
+def _parse_onboarding_file(
+    parsed: ParsedTree, path: str, text: str, read: Callable[[str], FileModel] = parse_document_text
+) -> None:
+    document = read(text)
     if isinstance(document, FileSidecar):
         if file_sidecar_path(document.path) != path:
             raise ValueError(

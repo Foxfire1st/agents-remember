@@ -80,7 +80,6 @@ from agents_remember.cli.role_launch_preparation import (
     prepare_role_handover,
 )
 from agents_remember.cli.role_launch_receipts import (
-    EXECUTIONS_DIRECTORY,
     RECEIPT_SCHEMA,
     _archived_receipt_for_selection,
     _create_receipt,
@@ -113,6 +112,7 @@ from agents_remember.cli.role_step_up_runtime import (
     bind_step_up_predecessor,
     successor_prompt,
 )
+from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_agents import RoleStartSetCall
 from agents_remember.models.role_identity import LEAF_ROLES, TASKLESS_ROLES, canonical_role

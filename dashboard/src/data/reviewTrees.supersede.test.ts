@@ -59,6 +59,7 @@ describe('a leaf-wide read that a newer selection supersedes', () => {
       { initialProps: { leaf: 'first' } },
     );
     expect(result.current).toEqual({ phase: 'loading' });
+    await waitFor(() => expect(signals).toHaveLength(1));
     rerender({ leaf: 'second' });
     await waitFor(() => expect(result.current).toEqual({ phase: 'not-converted' }));
     expect(leaves).toEqual(['first', 'second']);
@@ -66,7 +67,7 @@ describe('a leaf-wide read that a newer selection supersedes', () => {
     expect(signals[1].aborted).toBe(false);
   });
 
-  it('aborts the request when the view goes away', () => {
+  it('aborts the request when the view goes away', async () => {
     const signals: AbortSignal[] = [];
     vi.stubGlobal(
       'fetch',
@@ -76,6 +77,7 @@ describe('a leaf-wide read that a newer selection supersedes', () => {
       }),
     );
     const { unmount } = renderHook(() => useReviewTrees('r', 'm', 'l', { comparison: 1 }));
+    await waitFor(() => expect(signals).toHaveLength(1));
     expect(signals[0].aborted).toBe(false);
     unmount();
     expect(signals[0].aborted).toBe(true);

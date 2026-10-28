@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from agents_remember.canvas.explainer_paths import seat_counter_path
+from agents_remember.canvas.explainer_state import seat_for_workspace
 from agents_remember.cli import developer_delivery, developer_message_files
 from agents_remember.cli.dashboard import serving_collaborators
 from agents_remember.cli.developer_message_files import (
@@ -48,12 +50,14 @@ from agents_remember.memory.knowledge_index import text_uuid
 from agents_remember.serving.app import create_app
 from agents_remember.serving.paseo.provider_limits import provider_limits_path
 from agents_remember.serving.projector import ProjectionCadence
+from agents_remember.tasks import TaskDocument, write_task_doc
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from paseo_launch_test_support import SERVER_ID
 from paseo_role_tools_test_support import ARCHIVED_AT
 from pydantic import TypeAdapter
 from test_paseo_launch import LEAF_REF, REPO
+from test_paseo_role_messages import _explainer_binding
 from test_paseo_role_tools import RoleToolsTestCase
 
 PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(64))
@@ -440,6 +444,30 @@ class DeveloperSendTests(RoleToolsTestCase):
                 (unknown["state"], unknown["reason"], unknown["messageFile"]),
                 ("refused", "recipient-not-found", None),
             )
+        with self.subTest("a live explainer seat resolves; its line names the leaf and the seat"):
+            # The tray's second recipient class (the Manager's 15:33Z ruling): a leaf explainer is
+            # no AR role and has no launch record, but its environment names its current seat.
+            seat = self._explainer_seat()
+            raised = self.send(seat, text="raise it with the architect")
+            self.assertEqual(raised["state"], "delivered")
+            filed = Path(raised["messageFile"]).read_text()
+            for line in (
+                "recipientRole: explainer",
+                f"recipientAgentId: {seat}",
+                "recipientTask: 01_LEAF",
+            ):
+                self.assertIn(line, filed)
+            (delivered,) = self.received(seat)
+            self.assertTrue(delivered.startswith("From developer · 01_LEAF\nraise it"))
+            self.assertIn(f"Message file: {raised['messageFile']}", delivered)
+            # Role recipients resolve exactly as before: the role seat is still its launch record.
+            self.assertIn("recipientRole: worker", Path(served["messageFile"]).read_text())
+            # A closed explainer seat is refused by name; the role path's resume never runs for it.
+            self.runtime.agents[seat].update(status="closed")
+            self.runtime.calls.clear()
+            closed = self.send(seat, text="after its close")
+            self.assertEqual((closed["state"], closed["reason"]), ("refused", "recipient-closed"))
+            self.assertNotIn("agent-resume", [command for command, _payload in self.runtime.calls])
         with self.subTest("a closed session is resumed, then sent to; nothing is started"):
             self.runtime.agents[worker].update(status="closed")
             self.runtime.calls.clear()
@@ -447,6 +475,29 @@ class DeveloperSendTests(RoleToolsTestCase):
             self.assertEqual((resumed["state"], resumed.get("resumed")), ("delivered", True))
             self.assertIn("agent-resume", [command for command, _payload in self.runtime.calls])
             self.assertNotIn("agent-create", [command for command, _payload in self.runtime.calls])
+
+    def _explainer_seat(self) -> str:
+        """A leaf explainer's environment, its counter and its live seat in the host."""
+
+        master = self.master.document.model_dump(mode="json", by_alias=True, exclude_none=True)
+        leaf_row = {"number": "01_LEAF", "name": "Leaf", "file": self.leaf.path.name}
+        write_task_doc(
+            self.master.path.parent, TaskDocument.model_validate({**master, "subTasks": [leaf_row]})
+        )
+        workspace = self.config.coordination_root / "explainer" / REPO / "master" / "01_LEAF"
+        workspace.mkdir(parents=True)
+        _explainer_binding(workspace, 5)
+        counter = seat_counter_path(workspace)
+        counter.parent.mkdir(parents=True, exist_ok=True)
+        counter.write_text("1\n")
+        seat = seat_for_workspace(workspace, 1)
+        self.runtime.agents[seat] = {
+            "id": seat,
+            "provider": "claude",
+            "status": "idle",
+            "archivedAt": None,
+        }
+        return seat
 
     def test_each_reference_kind_has_a_written_form_that_opens_with_its_call(self) -> None:
         roots = FormRoots(self.config)

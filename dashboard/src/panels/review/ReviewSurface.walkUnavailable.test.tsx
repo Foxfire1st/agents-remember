@@ -6,7 +6,7 @@
 // heading into view. A reader who scrolled while it was pending is not moved, and focus the reader
 // moved elsewhere stays there. The selection is made from the tree or from the column (`j`/`k`
 // select blocks since rule 11, and these answers carry none).
-import { act, fireEvent, within } from '@testing-library/react';
+import { act, fireEvent, waitFor, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import type { ReviewResult } from '../../data/review';
 import {
@@ -20,8 +20,10 @@ import {
   familyBlock,
   installWorld,
   open,
+  overviewMember,
   reviewCount,
   selectedNode,
+  settled,
   subjectOf,
   subjectOfLabel,
   world,
@@ -67,6 +69,13 @@ it.each(cases)(
   async ({ stacked, outcome, activation }) => {
     const view = open(SHARED);
     await clickedSecondFamily(view);
+    // The column's control for the target is its member row in its family's overview (MIK-R211 v4
+    // rule 10), so the column case opens that family first.
+    if (activation === 'column') {
+      fireEvent.click(within(familyBlock(view, R6R_ID)).getByTestId('review-family-open'));
+      await waitFor(() => expect(view.getByTestId('review-family-overview').dataset.family).toBe(R6R_ID));
+      await settled(view);
+    }
     const previous = world.answer;
     world.answer = (url, asked) =>
       asked === subjectOf(TARGET)
@@ -78,7 +87,7 @@ it.each(cases)(
     const row = targetRow(view);
     const reads = reviewCount();
     // A pointer moves focus to the control it activates.
-    const control = activation === 'column' ? within(targetSection(view)).getByTestId('review-subject-select') : row;
+    const control = activation === 'column' ? overviewMember(view, subjectOfLabel('INV-2E8MG43K')) : row;
     await viewport(stacked, async (scrolled) => {
       control.focus();
       fireEvent.click(control);

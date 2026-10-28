@@ -24,11 +24,9 @@ from agents_remember.cli import paseo_explainer_host as host_module
 from agents_remember.cli.paseo_explainer_host import PaseoExplainerHost
 from agents_remember.kernel.primitives.runtime_config import RepositoryScope
 from agents_remember.mcp.registration.explainer_tools import register_bound_explainer_tools
-from agents_remember.serving.explainer import (
-    ExplainerWiring,
-    explainer_composition,
-    register_explainer_routes,
-)
+from agents_remember.serving.explainer import ExplainerWiring, explainer_composition
+from agents_remember.serving.explainer_routes import register_explainer_routes
+from agents_remember_test_support.testing.prepared_comparison import prepared_from_port
 from agents_remember_test_support.testing.review_git_trees import (
     CODE_FILE,
     INVARIANT,
@@ -146,12 +144,7 @@ def _record_grade(world: Any, agent_id: str, binding_label: str) -> dict[str, An
         server,
         workspace=workspace,
         seat=agent_id,
-        inputs=ExplainerInputs(
-            task_root=world.task_root,
-            coordination_root=world.config.coordination_root,
-            code_repository=world.code,
-            memory_repository=world.memory,
-        ),
+        inputs=ExplainerInputs(task_root=world.task_root),
     )
     defined = _tool_answer(
         server, "define_category", {"name": "risk", "scale": SCALE, "binding": binding_label}
@@ -197,7 +190,11 @@ def test_the_explainer_end_to_end_open_request_grade_retire(
     composition = explainer_composition(
         world.config,
         port,
-        wiring=ExplainerWiring(host=host, application=explainer_application_ports()),
+        wiring=ExplainerWiring(
+            host=host,
+            application=explainer_application_ports(),
+            comparison_prepare=prepared_from_port(port),
+        ),
     )
     app = FastAPI()
     register_explainer_routes(app, composition)
@@ -254,8 +251,8 @@ def test_the_explainer_end_to_end_open_request_grade_retire(
     )
 
     after_retire = client.get(f"{BASE}/state").json()
-    assert after_retire["retired"] is True
-    assert after_retire["seat"]["state"] == "retired"
-    # The environment's live content is gone; only the retired marker remains in the folder.
+    assert after_retire["retired"] is False and after_retire["seat"]["state"] == "missing"
+    # MIK-R211 v5 rule 12: the folder is gone completely, and the grade stays with the task.
     workspace = leaf_workspace(world.config, REPOSITORY, MASTER, LEAF)
-    assert not (workspace / "binding.json").exists() and not (workspace / "instructions").exists()
+    assert not workspace.exists() and list(workspace.parent.iterdir()) == []
+    assert grades_path(world.task_root, LEAF).is_file()

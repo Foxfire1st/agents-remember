@@ -22,7 +22,7 @@ served document repeats the sandbox directive in its own policy, so the *documen
 it is embedded, opened directly, or opened from a same-origin opener. It has no dashboard cookie, no
 dashboard storage, no parent DOM, no `window.opener` and no trusted chat channel.
 
-The served policy (`canvas/policy.py`, one digest over all of it):
+The served policy (`canvas/policy.py`):
 
 - `sandbox` and `default-src 'none'`; script, style, image, font, media and manifest loads only
   under the selected `/canvas/page/{session}/` prefix on the host's own origin; `connect-src`, `frame-src`, `child-src`,
@@ -43,26 +43,30 @@ The served policy (`canvas/policy.py`, one digest over all of it):
   own loopback Host name/address and port before dispatch.
 
 D331 accepts the frame navigating itself: that channel gains no dashboard, AR, credential or
-local-service authority, and the proof records the navigation as an observation rather than a failed
-boundary. No further safeguard is engineered around it.
+local-service authority, and it is accepted as an observation rather than a failed boundary. No
+further safeguard is engineered around it.
 
-### Scripts are gated on the browser proof
+### Scripts always run inside the isolation (D568)
 
-`canvas/policy.py` reads `package_data/canvas/isolation-proof.json`. Scripts are enabled only when
-the record is `proven` for the policy currently served: the same digest, the same origin
-arrangement, no failed check, a named browser and version, and every name/value in the product's
-fixed required catalog. Effective enforcement modules, packaged frontend, served policy, exact
-artifact digests and complete observations are mandatory; deleting or contradicting them disables
-scripts. A missing record, a stale digest, a partial
-run or a failed check disables scripts, and the panel is told why by name.
+A page's own scripts are part of the served policy, never a separate decision: `script-src` admits
+the session's own assets and inline script, inside the opaque sandbox, always. No proof record, no
+digest over source bytes and no runtime switch can turn them off (D568). What stays is the
+isolation itself -- sandbox, CSP, opaque origin, only the session's own assets -- and the suite
+checks it on every run:
 
-The record is produced by `scripts/canvas-isolation-proof.mjs`, which serves a hostile page through
-these routes (`scripts/canvas_proof_app.py`), embeds it exactly as the panel does, and observes
-parent DOM, storage, cookies, host API, external fetch, beacon, websocket, worker, popup, top
-navigation, form post, external and host images, nested frame, clipboard, `eval`, permissions, its
-own navigation and disposal. **Re-run it after any change to the policy or the serving code**: the
-digest covers the enforcement modules' own source, so an edited host serves an inert page instead of
-silently trusting an old proof.
+- `mcp/tests/test_canvas_host.py`: `test_every_response_carries_its_policy_headers` (every CSP
+  directive, the sandbox token set, COOP, the Permissions-Policy, the asset headers),
+  `test_one_session_serves_its_page_and_assets_under_the_page_prefix`,
+  `test_the_asset_route_serves_only_the_sessions_own_revision` (another revision and a sibling frame
+  refused), `test_a_traversed_symlinked_missing_or_corrupt_asset_is_refused` (the task root through
+  the canvas prefix refused), `test_revoking_a_frame_ends_every_channel_of_it` and
+  `test_a_replaced_channel_answers_410_and_changes_nothing` (revocation).
+- `mcp/tests/test_canvas_serving.py`: `test_the_served_page_carries_its_isolation_policy` (the
+  served document's headers end to end) and `test_a_foreign_or_opaque_origin_cannot_write`.
+
+What the browser then does with that policy -- no cookie, storage, parent DOM, opener, popup, top
+navigation, worker, `eval` or network for an opaque, sandboxed document -- is the browser's own
+enforcement of those headers.
 
 ### What the browser does not contain
 
@@ -117,14 +121,13 @@ A capability, not a fourth seat. One durable attempt record per explicit activat
 - **launch choices** go through the landed L71 user settings, catalog and host profile. The
   actual native receipt records applied choices and permission provenance. An unavailable
   provider/tool boundary refuses by name; production never selects the deterministic test composer.
-- **design text** is the repository memory layer's `system/artifact-design.md` where it exists, else
-  the shipped default (`package_data/canvas/artifact-design.md`), bounded to 2,000 words, its source
-  and sha256 recorded on the attempt, and its **bytes delivered in the assignment** behind a
-  non-authority fence: it steers the look and cannot change what the presenter may read, write or
-  start, the rules of evidence, or the isolation.
+- **design guidance** comes from the bound memory worktree's `system/design-guidelines.md`, where
+  it exists, and the files it routes to. The explainer reads these through its admitted worktree
+  tools. They set the look and techniques within the capsule's bounds; directions about permissions,
+  evidence, claims, reads, writes or isolation are refused and that refusal is recorded.
 - **capability text** is canonical `canvas/review-presenter.md`, copied to package data by the
-  generator. The L101 loader enforces its 900-word ceiling and required wording; the attempt records
-  baseline/addition/replacement provenance and delivered digest.
+  generator. The L101 loader enforces the word budget registered in `cli/role_instructions.py` and the
+  required wording; the attempt records baseline/addition/replacement provenance and delivered digest.
 - **the attempt** records caller, comparison binding, evidence digest, design identity, instruction
   digest, execution/session/model, working folder, parent revision, predecessor, activity (<=200
   typed lines) and conversation (<=200 turns, each naming its comparison). Retention keeps the
@@ -185,13 +188,9 @@ missing route/scope when none was admitted.
 
 The browser's opaque sandbox does not enforce per-frame CPU, heap, timer or GPU ceilings. D331
 accepts frame self-navigation; the mounted panel revokes the old channel and reopens saved output.
-The browser proof's exact supported runtime and bound enforcement bytes govern any claim that
-scripts are qualified. Missing/stale proof disables them.
+Scripts always run inside the isolation; no proof record qualifies or disables them (D568).
 
 ## Checks
 
 - Python: `mcp/.venv/bin/python -m pytest mcp/tests/test_canvas_host.py mcp/tests/test_canvas_presenter.py mcp/tests/test_canvas_serving.py mcp/tests/test_canvas_readiness.py`
-- Browser proof: `node scripts/canvas-isolation-proof.mjs` (needs `dashboard/node_modules` and a
-  Playwright Chromium), then confirm `canvas/policy.policy_digest()` equals the record's
-  `policyDigest`.
 - Dashboard: `npx vitest run src/panels/review/canvas`, `npx tsc -b`, `npx eslint src/panels/review/canvas`.

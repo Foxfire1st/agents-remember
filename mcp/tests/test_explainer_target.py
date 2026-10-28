@@ -31,7 +31,6 @@ from agents_remember.application.review_evidence_packet import (
     build_evidence_packet,
     planned_reference,
 )
-from agents_remember.application.review_evidence_read import DEFAULT_READ_LIMITS
 from agents_remember.canvas.explainer_grades import (
     Grade,
     Grades,
@@ -868,7 +867,6 @@ def _manifest(world: World, claims, part_map=PART_MAP) -> FrameManifest:
         memory_before=SideState("available", index_state="complete"),
         memory_after=SideState("available", index_state="complete"),
         evidence_map=EvidenceMap(coverage="the selected change"),
-        limits=DEFAULT_READ_LIMITS,
         supplemental=receipts,
         claims=tuple(claims),
         recorded_at=AT,
@@ -1419,7 +1417,6 @@ def _planned_manifest(world: World, binding: FrameBinding) -> FrameManifest:
         memory_before=SideState("available", index_state="complete"),
         memory_after=SideState("available", index_state="complete"),
         evidence_map=EvidenceMap(coverage="the intended change"),
-        limits=DEFAULT_READ_LIMITS,
         claims=claims,
         recorded_at=AT,
     )

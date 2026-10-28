@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
@@ -24,6 +25,42 @@ def spans(path: str, source: str) -> dict[str, list[tuple[int, int]]]:
 
 
 class TestCaseDefinitionTests(unittest.TestCase):
+    def test_test_file_eligibility_is_once_per_parse_and_preserves_bindings(self) -> None:
+        lines = [
+            "function helper() {}",
+            'it("preserved case", () => {',
+            "  const value = 1;",
+            "});",
+        ]
+        ordinary = {
+            "helper": [grammars.Binding((1, 1), 1)],
+            "value": [grammars.Binding((3, 3), 3)],
+        }
+        for suffix in ("ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"):
+            for is_test in (True, False):
+                path = f"review{'.test' if is_test else ''}.{suffix}"
+                expected = dict(ordinary)
+                if is_test:
+                    expected["preserved case"] = [grammars.Binding((2, 4), 2, test_case=True)]
+                with (
+                    self.subTest(path=path),
+                    mock.patch.object(
+                        grammars.test_cases, "is_test_file", wraps=grammars.test_cases.is_test_file
+                    ) as eligible,
+                ):
+                    self.assertEqual(grammars.bindings(path, lines), expected)
+                    eligible.assert_called_once_with(path)
+                    # A second parse checks its own eligibility; no cross-call cache is added.
+                    self.assertEqual(grammars.bindings(path, lines), expected)
+                    self.assertEqual(eligible.call_args_list, [mock.call(path), mock.call(path)])
+        with mock.patch.object(grammars.test_cases, "is_test_file") as eligible:
+            self.assertEqual(
+                grammars.bindings("review.test.py", ["def helper():", "    return 1"]),
+                {"helper": [grammars.Binding((1, 2), 1)]},
+            )
+            self.assertEqual(grammars.bindings("review.test.txt", lines), {})
+            eligible.assert_not_called()
+
     def test_nested_test_titles_bind_qualified_and_unique_bare_names(self) -> None:
         source = """describe('review fixes', () => {
   describe("loaded.cards", () => {

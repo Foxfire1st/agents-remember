@@ -1,4 +1,4 @@
-"""The moved watcher's native lifetime in ``serving/change_watcher.py`` (MIK-R186 rule 7).
+"""The moved watcher's native lifetime in ``serving/explainer_move_watch.py`` (MIK-R186 rule 7).
 
 The pure measurements live in :mod:`test_explainer_watcher`; these cases protect what the watch
 around them promises:
@@ -28,7 +28,7 @@ import pytest
 from agents_remember.application.review_evidence_packet import comparison_reference
 from agents_remember.application.review_planned_comparison import explainer_application_ports
 from agents_remember.application.review_tree_comparison import comparison_directory
-from agents_remember.canvas.explainer_paths import GENERATION_SUFFIX, leaf_workspace
+from agents_remember.canvas.explainer_paths import leaf_workspace, seat_counter_path
 from agents_remember.canvas.explainer_state import (
     ExplainerBinding,
     write_binding,
@@ -40,8 +40,8 @@ from agents_remember.models.knowledge.review_trees import (
     ReviewTreeComparisonRecord,
     ReviewTreeSide,
 )
-from agents_remember.serving import change_watcher
-from agents_remember.serving.change_watcher import MoveNoticeWatch, WatchOptions
+from agents_remember.serving import explainer_move_watch
+from agents_remember.serving.explainer_move_watch import MoveNoticeWatch, WatchOptions
 from agents_remember.serving.explainer_watcher import (
     CapturedComparison,
     ComparisonMeasurement,
@@ -126,7 +126,7 @@ def _environment(config: McpRuntimeConfig, binding: ExplainerBinding) -> Path:
 
 
 def _generation(config: McpRuntimeConfig, number: int = 1) -> None:
-    counter = config.coordination_root / "explainer" / REPO / TASK / f"{LEAF}{GENERATION_SUFFIX}"
+    counter = seat_counter_path(leaf_workspace(config, REPO, TASK, LEAF))
     counter.parent.mkdir(parents=True, exist_ok=True)
     counter.write_text(f"{number}\n", encoding="utf-8")
 
@@ -226,7 +226,7 @@ def test_the_native_turn_end_loop_runs_the_workers_turn_end_without_writes_or_me
             return [WORKER]
         return []
 
-    monkeypatch.setattr(change_watcher, "turn_ended_agents", _turns)
+    monkeypatch.setattr(explainer_move_watch, "turn_ended_agents", _turns)
 
     asyncio.run(_drive_run_loop(watch, released))
 
@@ -369,3 +369,155 @@ def _subscriber_notices(
             loop.run_until_complete(task)
         loop.close()
     return seen
+
+
+# --- a leaf's role seats, named by their task document (D569 mean 3) ----------------------------
+
+
+def _leaf_document(task_root: Path, name: str) -> None:
+    """The leaf's task document, named by its slug while its id is the leaf id."""
+
+    document = {
+        "id": LEAF,
+        "slug": name,
+        "title": "leaf",
+        "kind": "subTask",
+        "status": "inProgress",
+        "repo": REPO,
+        "createdAt": "2026-10-22T08:00",
+        "master": "task.md",
+        "steps": [{"id": "S1", "title": "do the thing", "status": "pending"}],
+    }
+    (task_root / f"{name}.json").write_text(json.dumps(document), encoding="utf-8")
+
+
+def _role_receipt(task_root: Path, agent: str, role: str, document: str) -> None:
+    """A launch's receipt, naming its leaf by the task document the seat was started on."""
+
+    receipt = task_root / "notes" / "reports" / "paseo-native-executions" / f"{role}-{agent}.json"
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    receipt.write_text(
+        json.dumps(
+            {
+                "agentId": agent,
+                "role": role,
+                "selection": {
+                    "role": role,
+                    "taskDocumentRef": {"repository": REPO, "path": f"{TASK}/{document}.json"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_a_seat_started_on_the_leafs_task_document_is_a_seat_of_the_leaf_named_by_its_id(
+    tmp_path: Path,
+) -> None:
+    """The watcher names a leaf by its id and a receipt names it by its document: both are one leaf.
+
+    Before, a receipt was matched by the leaf id against the document's file name only, so a
+    Worker started on ``183_the-leaf.json`` was never a seat of ``260928-MIK-L183``.
+    """
+
+    config = _config(tmp_path)
+    task_root = _task_root(tmp_path)
+    _environment(config, _binding(_record(7)))
+    _generation(config)
+    _leaf_document(task_root, "183_the-leaf")
+    _role_receipt(task_root, "worker-by-document", "worker", "183_the-leaf")
+    watch = _watch(config, FakeOwner(_record(1, code_candidate="e" * 40)))
+
+    assert watch.seats().get("worker-by-document") == _selection()
+
+    # The document is renamed: the kept name is observed to differ and is looked up again.
+    (task_root / "183_the-leaf.json").rename(task_root / "183_renamed.json")
+    _role_receipt(task_root, "worker-by-document", "worker", "183_renamed")
+    assert watch.seats().get("worker-by-document") == _selection()
+
+
+def test_the_seats_of_one_leaf_ending_together_capture_and_publish_once(tmp_path: Path) -> None:
+    """One event per capture, not one per receipt: three seats of the leaf end in one look."""
+
+    config = _config(tmp_path)
+    task_root = _task_root(tmp_path)
+    _environment(config, _binding(_record(7)))
+    _generation(config)
+    _leaf_document(task_root, "183_the-leaf")
+    seats = {"worker-seat": "worker", "reviewer-seat": "reviewer", "curator-seat": "curator"}
+    for agent, role in seats.items():
+        _role_receipt(task_root, agent, role, "183_the-leaf")
+    owner = FakeOwner(_record(1, code_candidate="e" * 40))
+    channel = MoveNoticeChannel()
+    watch = _watch(config, owner, channel=channel)
+
+    published = watch.after_turn_ends(list(seats))
+
+    assert owner.calls == 1
+    assert len(published) == 1
+
+
+def _recorded(task_root: Path, record: ReviewTreeComparisonRecord) -> None:
+    directory = comparison_directory(task_root, LEAF)
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{record.number}.json").write_text(record.model_dump_json(), encoding="utf-8")
+
+
+def test_a_turn_end_publishes_only_when_its_capture_is_a_new_comparison_number(
+    tmp_path: Path,
+) -> None:
+    """Identical trees publish nothing, so a turn end that changed nothing renews no page.
+
+    The capture holds the trees the leaf's latest record holds: the review would reuse that number,
+    so no event goes out and no subscriber is renewed. Trees the latest record does not hold are a
+    new number, and exactly one event goes out.
+    """
+
+    config = _config(tmp_path)
+    task_root = _task_root(tmp_path)
+    _environment(config, _binding(_record(7)))
+    _generation(config)
+    _worker_receipt(task_root)
+    captured = _record(1, code_candidate="e" * 40)
+    _recorded(task_root, _record(9, code_candidate="e" * 40))  # the latest holds the same trees
+    owner = FakeOwner(captured)
+    channel = MoveNoticeChannel()
+    watch = _watch(config, owner, channel=channel)
+
+    assert watch.after_turn_ends([WORKER]) == []
+    assert owner.calls == 1, "the turn end still captured and compared"
+    assert channel.latest(_selection()) is None, "no event: identical trees renew nothing"
+
+    _recorded(task_root, _record(10, code_candidate="f" * 40))  # the latest now holds other trees
+    published = watch.after_turn_ends([WORKER])
+    assert len(published) == 1
+    assert channel.latest(_selection()) == published[0]
+
+
+def test_a_page_opening_its_stream_is_sent_the_held_notice_and_nothing_is_captured(
+    tmp_path: Path,
+) -> None:
+    """Opening or reopening a stream never runs a capture (D569): only real change sources do.
+
+    The notice a turn end published is what the opening page is sent; a leaf with no environment
+    is not captured for a baseline either, its next turn end compares with its latest record.
+    """
+
+    config = _config(tmp_path)
+    task_root = _task_root(tmp_path)
+    _environment(config, _binding(_record(7)))
+    _generation(config)
+    _worker_receipt(task_root)
+    owner = FakeOwner(_record(1, code_candidate="e" * 40))
+    channel = MoveNoticeChannel()
+    watch = _watch(config, owner, channel=channel)
+    published = watch.after_turn_ends([WORKER])
+    assert owner.calls == 1 and len(published) == 1
+
+    assert watch.page_opened(_selection()) == published[0]
+    assert watch.page_opened(_selection()) == published[0]
+    assert owner.calls == 1, "opening and reopening the stream captured nothing"
+
+    other = LeafSelection(REPO, TASK, "260928-MIK-L999")
+    assert watch.page_opened(other) is None
+    assert owner.calls == 1

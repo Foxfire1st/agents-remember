@@ -34,6 +34,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from agents_remember.cli.developer_explainer_seats import EXPLAINER_RECIPIENT
 from agents_remember.cli.investigator_receipts import investigator_message_capacity
 from agents_remember.cli.paseo_role_tools import (
     _archived,
@@ -156,6 +157,14 @@ def _deliver(delivery: DeveloperDelivery) -> dict[str, Any]:
         with investigator_message_capacity(config, delivery.receipt):
             sent = _send(config, delivery.payload)
             if sent.get("refused") == "closed":
+                if delivery.receipt.get("role") == EXPLAINER_RECIPIENT:
+                    # An explainer seat is resumed by its leaf's own service, never as a role.
+                    raise _Refused(
+                        "recipient-closed",
+                        f"The explainer seat {delivery.agent_id} is closed.",
+                        "Open the leaf's review page; its explainer control resumes the seat.",
+                        recipientAgentId=delivery.agent_id,
+                    )
                 _resume(config, _Recipient(delivery.agent_id, delivery.receipt))
                 resumed = True
                 tool_server = delivery.receipt.get("toolServer")

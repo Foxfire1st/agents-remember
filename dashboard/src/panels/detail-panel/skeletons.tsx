@@ -723,7 +723,9 @@ export function ReaderHead({
   kind: 'master' | 'leaf';
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
 }) {
-  if (bodyState === 'loading') return null;
+  // A master's series counter uses the served entry identity, not the document body.
+  // Keep leaf and sprint controls behind their existing body boundary.
+  if (bodyState === 'loading' && (kind !== 'master' || entry.summary?.form !== 'master')) return null;
   return (
     <div className={headTools}>
       <DocChangeSetBar kind={kind} entry={entry} onOpen={onOpenChangeSet} />

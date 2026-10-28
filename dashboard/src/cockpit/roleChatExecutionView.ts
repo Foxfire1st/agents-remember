@@ -5,6 +5,7 @@ import {
   sameRoleDocumentScope,
   sameRoleOptionsScope,
   usesRequestReceipts,
+  type RoleDefaults,
   type RoleDocumentScope,
   type RoleExecutionReceipt,
   type RoleLaunchSelection,
@@ -162,20 +163,36 @@ export function resolveRetryRequestId(
     : undefined;
 }
 
-// Catalog choices are one server response, never a merge with another response.
+// The answer on show with the role defaults beside it: the settled answer with its own, else
+// Paseo's saved answer with the defaults this page last settled for the scope, else nothing.
+function shownCatalog(
+  settledOptions: RoleLauncherOptions | null,
+  savedCatalog: SavedRoleCatalog | undefined,
+  rememberedDefaults: RoleDefaults | undefined,
+): { catalog?: SavedRoleCatalog; roleDefaults: RoleDefaults; savedShown: boolean } {
+  if (settledOptions) return { catalog: settledOptions, roleDefaults: settledOptions.roleDefaults, savedShown: false };
+  if (savedCatalog) return { catalog: savedCatalog, roleDefaults: rememberedDefaults ?? {}, savedShown: true };
+  return { roleDefaults: {}, savedShown: false };
+}
+
+// Catalog choices are one server response, never a merge with another response. While a fresh
+// answer is on its way, Paseo's saved answer is offered as it is, whole and selectable (MIK-R215
+// rules 4 and 5); with no defaults known for the scope none are shown, and a start sends the
+// role's own unchecked.
 export function resolveLauncherCatalog(
   options: RoleLauncherOptions | null,
   optionsLoading: boolean,
   savedCatalog?: SavedRoleCatalog,
+  rememberedDefaults?: RoleDefaults,
 ) {
-  const settledOptions = optionsLoading ? null : options;
-  const catalog = settledOptions ?? savedCatalog;
+  const shown = shownCatalog(optionsLoading ? null : options, savedCatalog, rememberedDefaults);
   return {
-    roleDefaults: settledOptions?.roleDefaults ?? {},
-    agents: catalog?.agents ?? [],
-    catalogDiscovery: catalog?.catalogDiscovery,
-    catalogOrigin: catalog?.catalogOrigin,
-    optionsReady: Boolean(settledOptions),
+    roleDefaults: shown.roleDefaults,
+    agents: shown.catalog?.agents ?? [],
+    catalogDiscovery: shown.catalog?.catalogDiscovery,
+    catalogOrigin: shown.catalog?.catalogOrigin,
+    optionsReady: Boolean(shown.catalog),
+    savedShown: shown.savedShown,
   };
 }
 

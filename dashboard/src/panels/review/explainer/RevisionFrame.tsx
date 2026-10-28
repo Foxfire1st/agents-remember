@@ -11,9 +11,11 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 
 import { css } from '../../../../styled-system/css';
 import { trayStore } from '../../../tray/trayStore';
+import { useShouldAnimate } from '../../engine-room/useShouldAnimate';
 import type { TrayPickInput } from '../../../tray/types';
 import {
   CanvasRefusal,
@@ -22,11 +24,7 @@ import {
   type EvidenceDestination,
 } from '../canvas/canvasApi';
 import { useDocumentPresence } from '../canvas/canvasDocument';
-import {
-  admitFrameMessage,
-  forwardedBody,
-  MAX_FORWARD_IN_FLIGHT,
-} from '../canvas/canvasHooks';
+import { admitFrameMessage, forwardedBody, MAX_FORWARD_IN_FLIGHT } from '../canvas/canvasHooks';
 import {
   closeRevisionPage,
   openRevisionPage,
@@ -35,32 +33,79 @@ import {
   type ExplainerTarget,
 } from './explainerApi';
 
+// The frame owns the free height of its column: the header is one dense line and the document takes
+// everything below it. A fixed height (it was 34rem) left the rest of a tall column empty, which read
+// as a flat canvas with dead space under it (F5 b).
 const shell = css({
   display: 'grid',
-  gap: '0.35rem',
+  gridTemplateRows: 'auto minmax(0, 1fr)',
+  gap: '0',
   minWidth: 0,
+  minHeight: 0,
+  // The page takes the window's height minus the reader's own chrome (tabs, the frame's one header
+  // row, the pager line) and grows with the window, so a tall screen is not 34rem of page and then
+  // dead space (F5 b).
+  height: 'max(20rem, calc(100dvh - 11rem))',
   borderWidth: '1px',
   borderStyle: 'solid',
   borderColor: 'grid',
   borderRadius: '3px',
   background: 'bgPanel',
   overflow: 'hidden',
+  '&:fullscreen': { width: '100vw', height: '100dvh' },
 });
 
+// One row for everything the reader does not need above the page: its caption, the claim legend, the
+// controls that belong to this frame. It never wraps, so it cannot grow into a second line (F5 c).
 const label = css({
+  position: 'relative',
   display: 'flex',
-  gap: '0.5rem',
-  alignItems: 'baseline',
-  padding: '0.3rem 0.5rem',
+  gap: '0.45rem',
+  alignItems: 'center',
+  minWidth: 0,
+  padding: '0.15rem 0.4rem',
   borderBottomWidth: '1px',
   borderBottomStyle: 'solid',
   borderBottomColor: 'grid',
   fontFamily: 'mono',
-  fontSize: '0.72rem',
+  fontSize: '0.68rem',
+  lineHeight: 1.25,
   color: 'muted',
+  whiteSpace: 'nowrap',
+  '& details': { margin: 0, padding: 0, border: 0 },
+  '& details > summary': { margin: 0, padding: 0, fontSize: 'inherit', lineHeight: 'inherit' },
 });
 
-const page = css({ width: '100%', height: '34rem', border: '0', display: 'block' });
+const captionText = css({
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+});
+
+const spacer = css({ flex: '1 1 auto', minWidth: 0 });
+
+const frameButton = css({
+  flex: '0 0 auto',
+  fontFamily: 'mono',
+  fontSize: '0.66rem',
+  lineHeight: 1.2,
+  padding: '0 0.3rem',
+  color: 'cyan',
+  background: 'transparent',
+  borderWidth: '1px',
+  borderStyle: 'solid',
+  borderColor: 'grid',
+  borderRadius: '2px',
+  cursor: 'pointer',
+});
+
+const page = css({
+  width: '100%',
+  height: '100%',
+  minHeight: '18rem',
+  border: '0',
+  display: 'block',
+});
 const note = css({ padding: '0.5rem', fontFamily: 'mono', fontSize: '0.72rem', color: 'muted' });
 
 const MAX_STALE_PARTS = 32;
@@ -211,7 +256,11 @@ function checkIdentityMismatch(
   if (data.protocolVersion !== undefined && data.protocolVersion !== 1) return 'wrong-version';
   if (data.session !== undefined && data.session !== session.session) return 'foreign-session';
   if (data.revision !== undefined && data.revision !== session.revision) return 'stale-revision';
-  if (data.comparison !== undefined && session.comparison && data.comparison !== session.comparison) {
+  if (
+    data.comparison !== undefined &&
+    session.comparison &&
+    data.comparison !== session.comparison
+  ) {
     return 'foreign-comparison';
   }
   return null;
@@ -272,12 +321,8 @@ interface Channel {
   session: CanvasSession;
 }
 
-const keyOf = (
-  target: ExplainerTarget,
-  revision: number,
-  slot: string,
-  generation: number,
-) => [target.repository, target.master, target.leaf, revision, slot, generation].join('\u001f');
+const keyOf = (target: ExplainerTarget, revision: number, slot: string, generation: number) =>
+  [target.repository, target.master, target.leaf, revision, slot, generation].join('\u001f');
 
 function useRevisionChannel(
   target: ExplainerTarget,
@@ -377,6 +422,12 @@ export interface RevisionFrameProps {
   explainerAgentId?: string | null;
   /** Where the page's own evidence operation goes; the review page's selection owner decides. */
   onEvidence?: (destination: EvidenceDestination) => void;
+  /**
+   * The reader's small metal, in the same line as the caption: the claim legend, or the sentence that
+   * says this revision carries no claim map. It shares the header row so it cannot take a row of its
+   * own above the page (F5 c).
+   */
+  meta?: ReactNode;
   testId?: string;
 }
 
@@ -492,8 +543,16 @@ function useRevisionFrameProtocol(params: {
   onReady: () => void;
   setLastRefusal: (refusal: string | null) => void;
 }): void {
-  const { session, frameRef, target, revision, explainerAgentId, onEvidence, onReady, setLastRefusal } =
-    params;
+  const {
+    session,
+    frameRef,
+    target,
+    revision,
+    explainerAgentId,
+    onEvidence,
+    onReady,
+    setLastRefusal,
+  } = params;
   useLayoutEffect(() => {
     if (!session) return undefined;
     const live = { current: true };
@@ -636,10 +695,130 @@ function useStalePartsMessenger(
 
   useEffect(() => {
     if (!session || stalePartIds === undefined) return;
-    if (stalePartIds.length > 0 || sentNonEmptyStale.current || frameReady.current) sendStaleParts();
+    if (stalePartIds.length > 0 || sentNonEmptyStale.current || frameReady.current)
+      sendStaleParts();
   }, [session, stalePartIds, sendStaleParts]);
 
   return { staleStats, onReady, markNotReady };
+}
+
+/** The same bound document receives the current effects policy after load and on changes. */
+function useFrameBinding(
+  session: CanvasSession | null,
+  frameRef: React.RefObject<HTMLIFrameElement | null>,
+) {
+  const effects = useShouldAnimate();
+  const loadedSession = useRef<string | null>(null);
+  const send = useCallback(() => {
+    if (!session || loadedSession.current !== session.session) return;
+    frameRef.current?.contentWindow?.postMessage(
+      {
+        schema: 'ar-canvas-binding/v1',
+        protocolVersion: 1,
+        session: session.session,
+        revision: session.revision,
+        comparison: session.comparison,
+        effects,
+      },
+      '*',
+    );
+  }, [session, frameRef, effects]);
+  const loaded = useCallback(() => {
+    loadedSession.current = session?.session ?? null;
+    send();
+  }, [session, send]);
+  const departed = useCallback(() => {
+    loadedSession.current = null;
+  }, []);
+  useEffect(() => {
+    send();
+  }, [send]);
+  return { loaded, departed };
+}
+
+function useRevisionDocument(
+  session: CanvasSession | null,
+  frameRef: React.RefObject<HTMLIFrameElement | null>,
+  reopen: () => void,
+  markNotReady: () => void,
+) {
+  const [navigated, setNavigated] = useState(false);
+  const loads = useRef<Record<string, number>>({});
+  const { loaded, departed } = useFrameBinding(session, frameRef);
+  const onDeparture = useCallback(() => {
+    departed();
+    markNotReady();
+    setNavigated(true);
+    reopen();
+  }, [departed, markNotReady, reopen]);
+  const inspectDocument = useDocumentPresence(session, frameRef, onDeparture);
+  const onFrameLoad = useCallback(() => {
+    const id = session?.session;
+    if (!id) return;
+    const count = (loads.current[id] ?? 0) + 1;
+    loads.current[id] = count;
+    if (count < 2) {
+      loaded();
+      inspectDocument();
+    } else onDeparture();
+  }, [session, loaded, inspectDocument, onDeparture]);
+  return { navigated, onFrameLoad };
+}
+
+function useFrameFullscreen() {
+  const shellRef = useRef<HTMLElement | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  // D230: one control, on the frame it acts on. The frame's own `sandbox` and
+  // `fullscreen=()` policy do not bind the parent, so the parent puts its own container in full
+  // screen; Esc leaves it through the browser's default handling of the same API (F5 d).
+  const toggleFullscreen = useCallback(() => {
+    const element = shellRef.current;
+    if (!element) return;
+    if (document.fullscreenElement === element) {
+      void document.exitFullscreen?.();
+      return;
+    }
+    void element.requestFullscreen?.();
+  }, []);
+
+  useEffect(() => {
+    const sync = () => setFullscreen(document.fullscreenElement === shellRef.current);
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
+
+  return { shellRef, fullscreen, toggleFullscreen };
+}
+
+function FrameHeader({
+  caption,
+  meta,
+  fullscreen,
+  toggleFullscreen,
+}: {
+  caption: string;
+  meta?: ReactNode;
+  fullscreen: boolean;
+  toggleFullscreen: () => void;
+}) {
+  return (
+    <div className={label} data-testid="explanation-frame-header">
+      <span className={captionText} data-testid="explanation-frame-caption">
+        {caption}
+      </span>
+      {meta}
+      <span className={spacer} aria-hidden="true" />
+      <button
+        type="button"
+        className={frameButton}
+        data-testid="explanation-frame-fullscreen"
+        aria-pressed={fullscreen}
+        onClick={toggleFullscreen}
+      >
+        {fullscreen ? 'esc to leave full screen' : 'full screen'}
+      </button>
+    </div>
+  );
 }
 
 export function RevisionFrame({
@@ -653,13 +832,13 @@ export function RevisionFrame({
   staleTotal,
   explainerAgentId,
   onEvidence,
+  meta,
   testId,
 }: RevisionFrameProps) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const { shellRef, fullscreen, toggleFullscreen } = useFrameFullscreen();
   const { session, problem, reopen } = useRevisionChannel(target, revision, binding, compareSlot);
-  const [navigated, setNavigated] = useState(false);
   const [lastRefusal, setLastRefusal] = useState<string | null>(null);
-  const loads = useRef<Record<string, number>>({});
   const { staleStats, onReady, markNotReady } = useStalePartsMessenger(
     session,
     frameRef,
@@ -668,21 +847,7 @@ export function RevisionFrame({
     staleTotal,
   );
 
-  const onDeparture = useCallback(() => {
-    markNotReady();
-    setNavigated(true);
-    reopen();
-  }, [markNotReady, reopen]);
-  const inspectDocument = useDocumentPresence(session, frameRef, onDeparture);
-
-  const onFrameLoad = useCallback(() => {
-    const id = session?.session;
-    if (!id) return;
-    const count = (loads.current[id] ?? 0) + 1;
-    loads.current[id] = count;
-    if (count < 2) inspectDocument();
-    else onDeparture();
-  }, [session, inspectDocument, onDeparture]);
+  const { navigated, onFrameLoad } = useRevisionDocument(session, frameRef, reopen, markNotReady);
 
   useRevisionFrameProtocol({
     session,
@@ -697,6 +862,7 @@ export function RevisionFrame({
 
   return (
     <section
+      ref={shellRef}
       className={shell}
       data-testid={testId ?? 'explanation-frame-slot'}
       data-revision={revision}
@@ -705,10 +871,16 @@ export function RevisionFrame({
       data-stale-truncated={staleStats.truncated}
       data-last-refusal={lastRefusal ?? undefined}
     >
-      <p className={label} data-testid="explanation-frame-caption">{caption}</p>
+      <FrameHeader
+        caption={caption}
+        meta={meta}
+        fullscreen={fullscreen}
+        toggleFullscreen={toggleFullscreen}
+      />
       {navigated ? (
         <p className={note} data-testid="explanation-frame-navigated">
-          The frame loaded a new document, so its previous channel was revoked and the saved page is shown again.
+          The frame loaded a new document, so its previous channel was revoked and the saved page is
+          shown again.
         </p>
       ) : null}
       <RevisionFrameBody

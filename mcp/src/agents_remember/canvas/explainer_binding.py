@@ -16,16 +16,17 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from agents_remember.canvas.explainer_paths import (
     EXPLAINER_DIRECTORY,
-    GENERATION_SUFFIX,
     explainer_task_root,
     guard_explainer_path,
+    seat_counter_path,
 )
 from agents_remember.canvas.explainer_state import (
     AGENT_MARKER,
     ExplainerRefused,
     ExplainerStateError,
-    agent_id,
     generation,
+    seat_for_workspace,
+    seat_ids_for,
 )
 from agents_remember.canvas.paths import PathRefused, path_segment
 
@@ -47,30 +48,13 @@ EXPLAINER_WORKSPACE_ENV = "AR_EXPLAINER_WORKSPACE"
 #: The capability word a binding must carry to be an explainer binding at all.
 EXPLAINER_CAPABILITY = "explainer"
 
-#: Exactly the tools such a binding may discover or call: registration and dispatch both check this list.
+#: The explainer's own four tools (MIK-R211 v5 rule 3, D603, D607): what no harness tool can do. A
+#: bound seat also has AR's general tools, as a task agent has them; nothing else is refused.
 EXPLAINER_SURFACE: tuple[str, ...] = (
-    "assets",
-    "carry_kit",
     "define_category",
-    "documentation",
-    "git_cat_file",
-    "git_diff",
-    "git_log",
-    "git_ls_tree",
-    "git_rev_parse",
-    "git_show",
     "grade",
-    "inputs",
-    "knowledge_read",
-    "list",
-    "read",
-    "read_input",
     "remove_category",
     "render",
-    "report_to_architect",
-    "search",
-    "source",
-    "write_asset",
 )
 
 _REQUIRED_FIELDS = (
@@ -188,9 +172,8 @@ def _check_workspace(
 
 def _check_disk_records(binding: ExplainerLaunchBinding) -> None:
     workspace = binding.workspace
-    leaf = binding.leaf
     gen_num = binding.generation
-    counter_file = workspace.parent / f"{leaf}{GENERATION_SUFFIX}"
+    counter_file = seat_counter_path(workspace)
     gen_json_file = workspace / "generation.json"
     binding_file = workspace / "binding.json"
     has_counter = counter_file.exists() or counter_file.is_symlink()
@@ -251,10 +234,12 @@ def _check_json_record(path: Path, binding: ExplainerLaunchBinding, *, require_a
         if "task_id" in nested and str(nested.get("task_id")) != binding.task:
             raise _refused(f"binding.json task_id {nested.get('task_id')!r} != {binding.task!r}")
     if require_agent and not any(k in payload for k in ("agentId", "seatId", "agent", "seat")):
-        expected_agent = agent_id(path.parent, binding.generation)
-        if binding.agent != expected_agent:
+        # Any id this generation named is its seat: the un-attempted one a binding written before
+        # attempts existed carries, or the attempt that made the seat since (MIK-R211 v2 rule 6).
+        named = seat_ids_for(path.parent, binding.generation)
+        if binding.agent not in named:
             raise _refused(
-                f"binding agent {binding.agent!r} does not match derived workspace seat {expected_agent!r}"
+                f"binding agent {binding.agent!r} does not match a seat this generation named {named[0]!r}"
             )
 
 
@@ -296,7 +281,7 @@ def validate_explainer_binding(
 def require_current_seat(workspace: Path, seat: str | None) -> str:
     """The identity one process carries must be this environment's current seat (rule 5).
 
-    The seat's id is derived from the workspace and the generation and never stored, so a process
+    The seat's id is derived from the workspace, generation and recorded attempt, so a process
     presenting anything else is not this leaf's explainer -- a stale generation, a marker pointing at
     another workspace, or no identity at all.
     """
@@ -312,12 +297,12 @@ def require_current_seat(workspace: Path, seat: str | None) -> str:
             "the server was built without a caller identity; only the leaf's explainer may call "
             "this tool, and its id comes from its own process environment",
         )
-    counter = workspace.parent / f"{workspace.name}{GENERATION_SUFFIX}"
+    counter = seat_counter_path(workspace)
     try:
         current = generation(counter)
+        expected = seat_for_workspace(workspace, current)
     except ExplainerStateError as error:
         raise ExplainerRefused("seat-unreadable", str(error)) from error
-    expected = agent_id(workspace, current)
     if seat != expected:
         raise ExplainerRefused(
             "not-this-explainer",
@@ -351,9 +336,10 @@ def require_launched_seat(binding: LaunchedSeat) -> str:
             "foreign-workspace",
             f"this server serves {binding.workspace}, not the marked {marker}",
         )
-    counter = binding.workspace.parent / f"{binding.leaf}{GENERATION_SUFFIX}"
+    counter = seat_counter_path(binding.workspace)
     try:
         current = generation(counter)
+        expected = seat_for_workspace(binding.workspace, current) if current else None
     except ExplainerStateError as error:
         raise ExplainerRefused("seat-unreadable", str(error)) from error
     if current and current != binding.generation:
@@ -362,10 +348,10 @@ def require_launched_seat(binding: LaunchedSeat) -> str:
             f"generation {current} is this leaf's seat and this server was launched for generation "
             f"{binding.generation} ({binding.agent}); the leaf's current seat is another process",
         )
-    if current and agent_id(binding.workspace, current) != binding.agent:
+    if current and expected != binding.agent:
         raise ExplainerRefused(
             "not-this-explainer",
-            f"generation {current} derives {agent_id(binding.workspace, current)} and this server "
+            f"generation {current} derives {expected} and this server "
             f"was launched for {binding.agent}",
         )
     return binding.agent

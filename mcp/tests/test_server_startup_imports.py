@@ -14,7 +14,8 @@ Three valid launches are covered, because they are three different paths into th
 
 * **ordinary** -- no binding at all;
 * **ordinary-role-bound** -- a real ordinary role binding, built by the product's own type;
-* **explainer** -- a valid explainer binding, which selects the 22-tool surface.
+* **explainer** -- a valid explainer binding, which adds the explainer's four tools to the general ones
+  (MIK-R211 v5 rule 3).
 
 A fourth launch carries a binding that names another capability: it must be **refused**, and a refused
 launch answers nothing. A positive control runs last: a child that eagerly imports an implementation
@@ -34,6 +35,7 @@ from typing import Any
 import anyio
 import pytest
 from agents_remember.application.agent_binding import AgentBinding, read_agent_binding
+from agents_remember.canvas.explainer_binding import EXPLAINER_SURFACE
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.mcp.server import create_server
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -42,6 +44,9 @@ from agents_remember.serving.build_info import process_serving_build, runtime_so
 REPO = "agents-remember"
 TASK = "260928_import-guard"
 LEAF = "260928-MIK-L999"
+#: Every launch serves AR's general tools; an explainer binding adds its own four (MIK-R211 v5 rule 3).
+GENERAL_TOOLS = 44
+EXPLAINER_TOOLS = GENERAL_TOOLS + len(EXPLAINER_SURFACE)
 
 INITIALIZE = {
     "jsonrpc": "2.0",
@@ -327,7 +332,7 @@ def test_discovery_loads_no_implementation_module(tmp_path: Path, mode: str) -> 
 
     tools, modules, timings = report["tools"], report["modules"], report["timings"]
     assert isinstance(tools, list) and isinstance(modules, list) and isinstance(timings, dict)
-    expected = 22 if mode == "explainer" else 44
+    expected = EXPLAINER_TOOLS if mode == "explainer" else GENERAL_TOOLS
     assert len(tools) == expected, f"{mode}: {len(tools)} tools, expected {expected}"
     found = _forbidden_loaded(modules)
     # A machine-readable line on the passing path too: a run that prints nothing is a failed launch, and
@@ -394,7 +399,11 @@ def test_the_real_command_answers_initialize_and_tools_list(tmp_path: Path) -> N
     point itself is covered, for all three valid launches. Both response times are reported.
     """
 
-    for mode, expected in (("ordinary", 44), ("ordinary-role-bound", 44), ("explainer", 22)):
+    for mode, expected in (
+        ("ordinary", GENERAL_TOOLS),
+        ("ordinary-role-bound", GENERAL_TOOLS),
+        ("explainer", EXPLAINER_TOOLS),
+    ):
         _root, settings, env = _world(tmp_path / mode, mode=mode)
         started = time.monotonic()
         process = subprocess.Popen(
@@ -436,10 +445,11 @@ def test_the_real_command_answers_initialize_and_tools_list(tmp_path: Path) -> N
             )
 
 
-def test_first_call_preserves_immutable_boot_identity_and_refuses_unexposed_explainer_dispatch(
+def test_first_call_preserves_immutable_boot_identity_and_an_explainer_seat_calls_general_tools(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """MIK-R204 rules 1-5 and Expected Evidence 3-4: first-call lazy loading, immutable boot identity, and explainer dispatch refusal."""
+    """MIK-R204 rules 1-5: first-call lazy loading and immutable boot identity; MIK-R211 v5 rule 3:
+    an explainer-bound server serves and answers AR's general tools, refusing none for the binding."""
 
     root, settings, _env = _world(tmp_path / "ordinary", mode="ordinary")
     config = load_config(str(settings))
@@ -467,13 +477,14 @@ def test_first_call_preserves_immutable_boot_identity_and_refuses_unexposed_expl
     assert refresh_refusal["state"] == "refused"
     assert refresh_refusal["refusalCode"] == "argument-removed"
 
-    # Explainer-bound server: direct call to an unexposed ordinary tool refuses by name without broadening discovery.
+    # Explainer-bound server: the general tools and the four, and a general tool answers as it does
+    # for any seat (no confinement, nothing refused for being the explainer).
     _exp_root, exp_settings, exp_env = _world(tmp_path / "explainer", mode="explainer")
     monkeypatch.setenv("AR_EXPLAINER_BINDING", exp_env["AR_EXPLAINER_BINDING"])
     exp_server = create_server(load_config(str(exp_settings)))
     exp_tools = [tool.name for tool in anyio.run(exp_server.list_tools)]
-    assert len(exp_tools) == 22
-    assert "server_info" not in exp_tools
-    with pytest.raises(Exception, match="tool-not-exposed"):
-        anyio.run(exp_server.call_tool, "server_info", {})
+    assert len(exp_tools) == EXPLAINER_TOOLS
+    assert "server_info" in exp_tools and set(EXPLAINER_SURFACE) <= set(exp_tools)
+    _, exp_info = anyio.run(exp_server.call_tool, "server_info", {})
+    assert exp_info["ok"] is True
     assert root.is_dir()

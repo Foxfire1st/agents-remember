@@ -29,6 +29,7 @@ from typing import Any
 
 from agents_remember.cli import role_launch_receipts, role_launch_routes
 from agents_remember.cli.dashboard import serving_collaborators
+from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.models.role_launcher import RoleLauncherOptionsRequest
 from agents_remember.serving.app import create_app
@@ -499,8 +500,7 @@ class PreviousLineReceiptTests(PaseoLaunchTestCase):
         """The same address in that line's folder: its layout below the folder was the same."""
 
         parts = [
-            "orca-native-executions" if part == role_launch_receipts.EXECUTIONS_DIRECTORY else part
-            for part in own.parts
+            "orca-native-executions" if part == EXECUTIONS_DIRECTORY else part for part in own.parts
         ]
         self.assertNotEqual(parts, list(own.parts))
         return Path(*parts)
@@ -511,10 +511,7 @@ class PreviousLineReceiptTests(PaseoLaunchTestCase):
         architect, worker = self.request("architect"), self.request("worker")
         reports = self.leaf.path.parent / "notes" / "reports"
         folder = self.previous_line_address(
-            self.config.coordination_root
-            / "notes"
-            / "reports"
-            / role_launch_receipts.EXECUTIONS_DIRECTORY
+            self.config.coordination_root / "notes" / "reports" / EXECUTIONS_DIRECTORY
         )
         # An open execution of that line at each address this line would read in its own folder.
         open_execution = {

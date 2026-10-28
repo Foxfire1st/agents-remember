@@ -7,9 +7,9 @@
 // (FAM-4V4GSQCS) and INV-413DC8XE (no family) both lie, and deletes `list_notes`'s docstring line,
 // where three ranges lie. Explicit synthetic catalogue and family-question adapters open the page on
 // the initial family. A card has no Full file of its own (MIK-R89 v2 rule 4), so the marks are the
-// ones the cards' excerpts draw. Marker targets use untouched served answers. The page's
-// cards are its opening card read, which starts once the leaf-wide read has answered (MIK-R89 v2
-// rule 2), so the leaf-wide read answers here. Only
+// ones the cards' excerpts draw. Marker targets use untouched served answers. A card is its
+// selected invariant's own read, which starts once the leaf-wide read has answered (MIK-R211 v4
+// rule 10), so the leaf-wide read answers here. Only
 // `fetch` is stubbed: `ReviewSurface` and everything under it is the real component tree.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -42,6 +42,31 @@ const initialFamily = syntheticMarkerFamilyReview(invariant);
 const NOTES = 'mcp/src/agents_remember/serving/notes.py';
 const [edit] = file.file_classification.hunks;
 const Z66 = edit.links.find((link) => link.invariant === 'INV-Z66EMHMH')!;
+// The deleted docstring line of `list_notes` (line 210, no after line) lies in one shared range whose
+// entries belong to INV-EJW15DXA (RLZ-7RNSV7PG) and INV-ZJS1XY4R (RLZ-9YY9Y1E1), both of
+// FAM-4V4GSQCS, and to INV-SMYSQKTJ (no family).
+const deletion = file.file_classification.hunks[1];
+const owner = (invariant: string) => deletion.links.find((link) => link.invariant === invariant)!;
+const LIST_NOTES_OWNERS = [owner('INV-EJW15DXA'), owner('INV-ZJS1XY4R')];
+// Explicitly synthetic answers, not captures: those owners were never read by invariant selector.
+// The captured INV-Z66EMHMH answer is re-addressed to each owner's record and recorded revision;
+// its family context is the same family's capture. The cards, the classification and the catalogue
+// stay the untouched served answers.
+const ownerAnswers = new Map(
+  LIST_NOTES_OWNERS.map((link) => {
+    const answer = structuredClone(invariant);
+    Object.assign(answer.payload!.knowledge.revision_selection!, {
+      record_id: link.invariant_key,
+      before_revision_id: link.invariant_revision_key,
+      after_revision_id: link.invariant_revision_key,
+      before_heads: [link.invariant_revision_key],
+      after_heads: [link.invariant_revision_key],
+      before_retained: [link.invariant_revision_key],
+      after_retained: [link.invariant_revision_key],
+    });
+    return [link.invariant_key, answer] as const;
+  }),
+);
 
 afterEach(() => {
   cleanup();
@@ -64,7 +89,8 @@ function answer(url: URL): unknown {
   if (selector === null) return task;
   if (selector === initialFamily.payload!.knowledge.revision_selection!.record_id)
     return initialFamily;
-  return selector === Z66.invariant_key ? invariant : null;
+  if (selector === Z66.invariant_key) return invariant;
+  return ownerAnswers.get(selector) ?? null;
 }
 
 function serve() {
@@ -106,6 +132,23 @@ async function openNotesCard(view: ReturnType<typeof open>) {
     return one!;
   });
 }
+// MIK-R211 v4 rule 10: the family opens its overview, and a card is its invariant's own detail. The
+// reader opens a member from the overview.
+async function openMember(view: ReturnType<typeof open>, key: string) {
+  const row = await waitFor(() => {
+    const found = within(view.getByTestId('review-family-overview'))
+      .getAllByTestId('review-member-summary')
+      .find((node) => node.dataset.subject === key);
+    expect(found).toBeTruthy();
+    return found!;
+  });
+  fireEvent.click(row.querySelector('button')!);
+}
+// INV-Z66EMHMH's changed range holds the line 124 edit.
+async function openZ66(view: ReturnType<typeof open>) {
+  await openMember(view, Z66.invariant_key);
+  return openNotesCard(view);
+}
 // The marks the cards' excerpts draw, by hunk (the first card that draws a hunk, in column order).
 async function marksOf(view: ReturnType<typeof open>, count: number) {
   const marks = () => view.queryAllByTestId('review-hunk-mark');
@@ -118,17 +161,35 @@ async function marksOf(view: ReturnType<typeof open>, count: number) {
 it("marks each card excerpt's hunks, one marker per hunk, from the one classification", async () => {
   serve();
   const view = open();
-  await openNotesCard(view);
-  const marks = await marksOf(view, 2);
-  // The edit inside _confined_stat meets two recorded ranges; the deleted docstring line three,
-  // matched on the before side only (it changes no after line).
-  // In line order: the diff is unified below a 1,080 px content box (MIK-R89 v2 rule 4).
+  await openZ66(view);
+  const marks = await marksOf(view, 1);
+  // The edit inside _confined_stat meets two recorded ranges. The deleted docstring line lies only in
+  // other invariants' ranges, whose cards are their own details (below); INV-Z66EMHMH's unchanged
+  // range holds none.
   expect(
     Object.values(marks).map((mark) => [mark.dataset.hunk, mark.textContent, mark.dataset.after]),
-  ).toEqual([
-    ['124:1:124:1', '2 intents', 'L124'],
-    ['210:1:209:0', '3 intents', 'none (after L209)'],
-  ]);
+  ).toEqual([['124:1:124:1', '2 intents', 'L124']]);
+  expect(within(await openNotesCard(view)).getAllByTestId('review-hunk-mark')).toHaveLength(1);
+  // The deleted docstring line, matched on the before side only (it changes no after line), on each
+  // owner's own card of the shared list_notes range: one card per entry (W1), each with its marker.
+  for (const link of LIST_NOTES_OWNERS) {
+    fireEvent.click(
+      view.getAllByTestId('review-family-open').find((node) => node.dataset.family === Z66.families[0].family_key)!,
+    );
+    await openMember(view, link.invariant_key);
+    const card = await waitFor(() => {
+      const cards = view.queryAllByTestId('review-expression-card');
+      expect(cards.map((node) => node.dataset.entries)).toEqual([link.id]);
+      expect(within(cards[0]).queryAllByTestId('review-hunk-mark')).toHaveLength(1);
+      return cards[0];
+    });
+    expect(
+      within(card).getAllByTestId('review-hunk-mark').map((mark) => [mark.dataset.hunk, mark.textContent, mark.dataset.after]),
+    ).toEqual([['210:1:209:0', '3 intents', 'none (after L209)']]);
+    expect(
+      within(card).getAllByTestId('review-hunk-mark').map((mark) => `${mark.dataset.hunk} ${mark.textContent}`),
+    ).toEqual(['210:1:209:0 3 intents']);
+  }
   // One classification of notes.py, at the review's comparison. The lane section reads its own
   // files once they are in view (jsdom has no IntersectionObserver: everything is in view).
   const reads = requested.filter((url) => url.searchParams.get('file'));
@@ -141,8 +202,8 @@ it('selects the tree position a marker names, and returns to the hunk with focus
   const scrolled = vi.fn();
   Element.prototype.scrollIntoView = scrolled;
   const view = open();
-  await openNotesCard(view);
-  const marks = await marksOf(view, 2);
+  await openZ66(view);
+  const marks = await marksOf(view, 1);
   fireEvent.click(marks['124:1:124:1']);
   const panel = view.getByTestId('review-hunk-mark-panel');
   expect(
@@ -177,9 +238,10 @@ it('selects the tree position a marker names, and returns to the hunk with focus
   // The way back is visible.
   const back = view.getByTestId('review-marker-return');
   // The target's cards mark the hunks their excerpts draw (the rulings round, Q4): the changed
-  // _confined_stat range holds the line 124 edit, each entry of the shared list_notes range (one
-  // card per entry, W1) the line 210 deletion; an unchanged range holds none. The file's one
-  // classification serves them all.
+  // _confined_stat range holds the line 124 edit; an unchanged range holds none. The shared
+  // list_notes range belongs to other invariants, whose cards are their own details (MIK-R211 v4
+  // rule 10; its marks are asserted on each owner in the test above). The file's one classification
+  // serves them all.
   const card = (entries: string) =>
     view.getAllByTestId('review-expression-card').find((node) => node.dataset.entries === entries)!;
   await waitFor(() =>
@@ -190,15 +252,14 @@ it('selects the tree position a marker names, and returns to the hunk with focus
       .queryAllByTestId('review-hunk-mark')
       .map((mark) => `${mark.dataset.hunk} ${mark.textContent}`);
   expect(excerptMarks('RLZ-7X2C4VRQ')).toEqual(['124:1:124:1 2 intents']);
-  await waitFor(() => expect(excerptMarks('RLZ-7RNSV7PG')).toEqual(['210:1:209:0 3 intents']));
-  await waitFor(() => expect(excerptMarks('RLZ-9YY9Y1E1')).toEqual(['210:1:209:0 3 intents']));
+  expect(view.getAllByTestId('review-expression-card').map((node) => node.dataset.entries)).toEqual(['RLZ-7X2C4VRQ']);
   // The unchanged range is a line of the subject's closed group, never a card (MIK-R89 v2 rule 5).
   expect(view.queryAllByTestId('review-expression-card').some((node) => node.dataset.entries === 'RLZ-5KCQCHVQ')).toBe(false);
   expect([back.textContent, back.dataset.returnPath]).toEqual(['← Back to notes.py', NOTES]);
 
   // The diff layout follows the column's width (MIK-R89 v2 rule 4): the return has none to restore.
   fireEvent.click(back);
-  const again = await marksOf(view, 2);
+  const again = await marksOf(view, 1);
   const origin = again['124:1:124:1'];
   await waitFor(() => expect(document.activeElement).toBe(origin));
   expect(origin.getAttribute('aria-expanded')).toBe('true');
@@ -214,8 +275,8 @@ it('releases a held marker return on j and selects the next block', async () => 
   treeOrderStore.getState().setOrder('priority');
   serve();
   const view = open();
-  await openNotesCard(view);
-  const marks = await marksOf(view, 2);
+  await openZ66(view);
+  const marks = await marksOf(view, 1);
   fireEvent.click(marks['124:1:124:1']);
   fireEvent.click(within(view.getByTestId('review-hunk-mark-panel'))
     .getAllByTestId('review-hunk-mark-occurrence')[0]);
@@ -234,7 +295,7 @@ it('releases a held marker return on j and selects the next block', async () => 
   });
   await act(async () => { vi.advanceTimersToNextFrame(); });
   expect(document.activeElement).toBe(held);
-  // The return put the family back; from a family `j` selects the column's first block
+  // The return put the origin back; from its subject `j` selects the column's first block
   // (MIK-R89 v2 rule 11; changeTraversal.ts), whose tree location then holds the selection and focus.
   const first = view.getAllByTestId('review-expression-card')[0];
   fireEvent.keyDown(held, { key: 'j', code: 'KeyJ' });

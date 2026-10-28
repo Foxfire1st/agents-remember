@@ -25,7 +25,7 @@ from __future__ import annotations
 import os
 import sys
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
@@ -95,6 +95,19 @@ TOOL_SERVER_NOT_SUPPORTED = "tool server not applied: not supported by provider"
 ROLE_IDENTITY_READ_TOOLS = ("server_info",)
 
 
+def preapproval_policy(provider: str, server: str, tools: Sequence[str]) -> dict[str, Any] | None:
+    """The provider's own grant of ``tools`` on ``server`` (MIK-R71 rule 22), or ``None``.
+
+    Installed host applyClaudeToolPolicy grants by exact tool name and retains all other tools.
+    Codex's enabled_tools side effect prevents this same grant, so it gets none. Every launch that
+    grants tools asks here, so no other launch code names a harness.
+    """
+
+    if provider != "claude":
+        return None
+    return {"preapproved": [{"kind": "mcp", "server": server, "tool": name} for name in tools]}
+
+
 @dataclass(frozen=True, slots=True)
 class LaunchOutcome:
     """What one run of a stored launch call established.
@@ -125,7 +138,8 @@ class StartingAgent:
     ``subject`` is the id of the most specific task document of its binding, or ``Projects``.
     The three refs are the starter's own task references: the return address of the started
     agent names the parent's role with these references (MIK-R117 rule 10), so a return still
-    reaches the role after the starter is replaced.
+    reaches the role after the starter is replaced. ``identity`` is empty for every role; a leaf
+    explainer's names the binding and the revision it speaks from (MIK-R211 v5, D607).
     """
 
     agent_id: str
@@ -134,6 +148,7 @@ class StartingAgent:
     sprint_ref: TaskDocumentRef | None = None
     master_ref: TaskDocumentRef | None = None
     task_ref: TaskDocumentRef | None = None
+    identity: str = ""
 
 
 def mint_agent_id() -> str:
@@ -422,15 +437,9 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
         agent["mcpServers"] = {
             TOOL_SERVER_NAME: tool_server_definition(launch.settings_file, agent_binding(launch))
         }
-        if launch.provider == "claude":
-            # Installed host applyClaudeToolPolicy grants by exact tool name and retains
-            # all other tools. Codex's enabled_tools side effect prevents this same grant.
-            agent["toolPolicy"] = {
-                "preapproved": [
-                    {"kind": "mcp", "server": TOOL_SERVER_NAME, "tool": name}
-                    for name in ROLE_IDENTITY_READ_TOOLS
-                ]
-            }
+        policy = preapproval_policy(launch.provider, TOOL_SERVER_NAME, ROLE_IDENTITY_READ_TOOLS)
+        if policy is not None:
+            agent["toolPolicy"] = policy
     if launch.parent_agent_id:
         agent["parentAgentId"] = launch.parent_agent_id
     if launch.session_options.get("model"):

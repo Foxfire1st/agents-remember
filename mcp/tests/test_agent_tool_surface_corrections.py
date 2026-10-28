@@ -171,6 +171,25 @@ def test_a_contract_at_a_canonical_place_naming_another_path_is_refused(named: s
     _require_named_place(cast(Any, SimpleNamespace(contract_path=found)), found)
 
 
+def test_a_contract_whose_cell_spells_where_it_was_read_is_taken_without_resolving() -> None:
+    found = Path("/coordination/tasks/demo/live-task/enclosures/leaf-l1/series-contract.md")
+
+    with patch.object(Path, "resolve", side_effect=AssertionError("resolved a path")):
+        _require_named_place(cast(Any, SimpleNamespace(contract_path=found)), found)
+
+
+def test_a_contract_whose_cell_names_its_file_through_a_link_is_still_taken(
+    tmp_path: Path,
+) -> None:
+    found = tmp_path / "coordination/tasks/demo/live-task/enclosures/leaf-l1/series-contract.md"
+    found.parent.mkdir(parents=True)
+    found.write_text("contract")
+    (tmp_path / "alias").symlink_to(tmp_path / "coordination")
+    linked = tmp_path / "alias/tasks/demo/live-task/enclosures/leaf-l1/series-contract.md"
+
+    _require_named_place(cast(Any, SimpleNamespace(contract_path=linked)), found)
+
+
 def test_a_contract_outside_the_canonical_places_is_not_checked() -> None:
     found = Path("/coordination/tasks/demo/live-task/notes/evidence/series-contract.md")
     away = SimpleNamespace(contract_path=Path("/somewhere/else/series-contract.md"))

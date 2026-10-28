@@ -48,7 +48,6 @@ class SessionBinding:
     comparison: str
     evidence_digest: str
     entrypoint: str
-    scripts: bool
 
 
 @dataclass(frozen=True)
@@ -64,7 +63,6 @@ class CanvasSession:
     comparison: str
     evidence_digest: str
     entrypoint: str
-    scripts: bool
     created_at: float
     expires_at: float
     budget: RequestLedger = field(default_factory=RequestLedger)
@@ -114,7 +112,6 @@ class SessionRegistry:
             comparison=binding.comparison,
             evidence_digest=binding.evidence_digest,
             entrypoint=binding.entrypoint,
-            scripts=binding.scripts,
             created_at=now,
             expires_at=now + self._ttl,
         )

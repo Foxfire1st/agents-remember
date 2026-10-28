@@ -8,36 +8,26 @@ One module for the paths, because each one is a decision:
   so a closed workspace removes no page (:mod:`agents_remember.application.review_frame_store`);
 * a **presenter working folder** is ordered as the task folders are -- repository, task, leaf, page,
   attempt -- and is the only place a presenter may write; it is outside the task, memory and code;
-* the **design text** is the repository memory layer's ``system/artifact-design.md`` where it
-  exists, else the default shipped with the product.
 
 Every one of those paths is checked *physically* before the caller reads or writes through it: a
 symlinked component below the authority root, or a target that resolves outside it, is refused
-rather than followed (MIK-R105 rules 4, 5, 17). The design text is sized before it is read, so an
-oversized or single-token file costs a refusal rather than an unbounded read.
+rather than followed (MIK-R105 rules 4, 5, 17).
 """
 
 from __future__ import annotations
 
-import os
-from importlib import resources
 from pathlib import Path
-from typing import Literal
 
-from agents_remember.canvas.presenter_files import create_directory, open_binary
+from agents_remember.canvas.presenter_files import create_directory
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.durable_evidence import durable_reports_root
 
 __all__ = [
-    "DEFAULT_DESIGN_TEXT_PATH",
-    "MAX_DESIGN_BYTES",
     "PRESENTER_DIRECTORY",
     "PRESENTER_WORK_DIRECTORY",
     "TASK_SEGMENT",
-    "DesignTextTooLarge",
     "PathRefused",
-    "design_text_source",
     "ensure_directory",
     "guard_path",
     "make_directory",
@@ -51,26 +41,10 @@ __all__ = [
 PRESENTER_DIRECTORY = "review-presenter"
 PRESENTER_WORK_DIRECTORY = "presenter"
 TASK_SEGMENT = "tasks"
-DEFAULT_DESIGN_TEXT_PATH = ("package_data", "canvas", "artifact-design.md")
-#: The bounded read for one design text. The word rule (2,000) still governs what is admitted; this
-#: ceiling only stops a huge or single-token file from being read whole before that rule can run.
-MAX_DESIGN_BYTES = 64 * 1024
 
 
 class PathRefused(ValueError):
     """A path was asked for outside the admitted authority."""
-
-
-class DesignTextTooLarge(PathRefused):
-    """The design text exceeds its byte read bound; no byte of it was read."""
-
-    def __init__(self, source: str, size: int, limit: int) -> None:
-        self.source = source
-        self.size = size
-        self.limit = limit
-        super().__init__(
-            f"the {source} design text is {size} bytes, beyond the {limit}-byte read bound"
-        )
 
 
 def path_segment(value: str, *, name: str) -> str:
@@ -176,61 +150,3 @@ def presenter_working_root(  # noqa: PLR0913 - one folder's own ordering segment
         / path_segment(attempt_id, name="attempt")
     )
     return guard_path(config.coordination_root, path, label="presenter working folder")
-
-
-def _read_design(path: Path, source: str) -> str | None:
-    """Read one design text within its byte ceiling; ``None`` means it could not be read."""
-
-    try:
-        with open_binary(path) as handle:
-            size = os.fstat(handle.fileno()).st_size
-            if size > MAX_DESIGN_BYTES:
-                raise DesignTextTooLarge(source, size, MAX_DESIGN_BYTES)
-            payload = handle.read(MAX_DESIGN_BYTES + 1)
-    except OSError:
-        return None
-    if len(payload) > MAX_DESIGN_BYTES:
-        raise DesignTextTooLarge(source, len(payload), MAX_DESIGN_BYTES)
-    try:
-        return payload.decode("utf-8")
-    except UnicodeDecodeError:
-        return None
-
-
-def design_text_source(
-    config: McpRuntimeConfig, repository_id: str
-) -> tuple[Literal["repository", "default"], str | None]:
-    """The design text in force: ``("repository", text)`` or ``("default", text)``.
-
-    The repository's own text replaces the default whole. ``None`` means the file exists but could
-    not be read, which the caller refuses by name rather than silently substituting the default.
-    A symlinked or escaping repository text is refused before its bytes are read, and an oversized
-    one raises :class:`DesignTextTooLarge` on its size alone.
-    """
-
-    present, repository_text = _repository_design_text(config, repository_id)
-    if present:
-        return "repository", repository_text
-    bundle = resources.files("agents_remember").joinpath(*DEFAULT_DESIGN_TEXT_PATH)
-    with resources.as_file(bundle) as path:
-        return "default", _read_design(path, "default")
-
-
-def _repository_design_text(
-    config: McpRuntimeConfig, repository_id: str
-) -> tuple[bool, str | None]:
-    """``(present, text)`` for the repository's own text; present-but-unreadable stays present."""
-
-    scope = config.repositories.get(repository_id)
-    if scope is None or scope.memory_root is None:
-        return False, None
-    memory_root = Path(scope.memory_root)
-    candidate = memory_root / "system" / "artifact-design.md"
-    if candidate.is_symlink():
-        raise PathRefused(
-            f"the repository design text {candidate} is a symlink; it is held, not followed"
-        )
-    if not candidate.is_file():
-        return False, None
-    guard_path(memory_root, candidate, label="design text")
-    return True, _read_design(candidate, "repository")

@@ -19,6 +19,7 @@ import {
 } from './client';
 import { canRetire, retireConfirmation, type RetireConfirmation } from './model';
 import { registerExplainerTarget } from './request';
+import { useRetireReceipt } from './retireReceipt';
 
 const MAX_SEAT_CACHE = 64;
 
@@ -163,7 +164,7 @@ export function ExplainerTaskDocumentControl({
   const target = useMemo(() => ({ repository, master, leaf }), [repository, master, leaf]);
   const seat = useColdExplainerSeat(target);
   const [open, setOpen] = useState(false);
-  const [receipt, setReceipt] = useState<ExplainerRetireAnswer | null>(null);
+  const [receipt, setReceipt] = useRetireReceipt(seat);
   const [problem, setProblem] = useState<string | null>(null);
   const receiptIdRef = useRef<string | null>(null);
   const retire = useCallback(async () => {
@@ -195,7 +196,7 @@ export function ExplainerTaskDocumentControl({
       seat: null,
       retiredAt: authoritative.retiredAt ?? '',
     });
-  }, [target]);
+  }, [target, setReceipt]);
 
   if (!hasSeat(seat) && !receipt && !problem) return null;
   return (

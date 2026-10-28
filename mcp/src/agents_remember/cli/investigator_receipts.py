@@ -19,6 +19,7 @@ from agents_remember.application.role_launch_context import (
     resolve_role_launch_context,
     selection_binding,
 )
+from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_identity import canonical_role, role_spellings
@@ -45,7 +46,6 @@ def matches_selection(receipt: dict[str, Any], selection: RoleSelection) -> bool
 
 
 def _directories(config: McpRuntimeConfig, selection: RoleSelection) -> tuple[Path, ...]:
-    from agents_remember.cli.role_launch_receipts import EXECUTIONS_DIRECTORY  # noqa: PLC0415
 
     task = resolve_role_launch_context(config, selection).effective_task
     root = (
@@ -58,10 +58,7 @@ def _directories(config: McpRuntimeConfig, selection: RoleSelection) -> tuple[Pa
 
 
 def _earlier_singletons(config: McpRuntimeConfig, selection: RoleSelection) -> tuple[Path, ...]:
-    from agents_remember.cli.role_launch_receipts import (  # noqa: PLC0415
-        EXECUTIONS_DIRECTORY,
-        digest,
-    )
+    from agents_remember.cli.role_launch_receipts import digest  # noqa: PLC0415
 
     if selection.sprint_document_ref is not None:
         return ()

@@ -52,7 +52,7 @@ function outside(facts: RestoreFacts, why: string): Restored {
   return { state: 'outside', reason: `The link's selection is not part of comparison${number}: ${why} It opens unselected.` };
 }
 
-function knownSubjects(catalogue: ReviewCatalogueRead): Set<string> {
+export function knownSubjects(catalogue: ReviewCatalogueRead): Set<string> {
   const ids = new Set<string>();
   for (const row of catalogue.outline?.invariants ?? []) ids.add(`invariant:${row.selector_id}`);
   for (const row of catalogue.outline?.families ?? []) ids.add(`family:${row.selector_id}`);

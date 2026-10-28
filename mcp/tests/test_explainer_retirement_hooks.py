@@ -50,7 +50,6 @@ from agents_remember.canvas.explainer_state import (
     RetireReceipt,
     agent_id,
     read_receipt,
-    retired,
     write_binding,
     write_receipt,
 )
@@ -155,7 +154,7 @@ def build_environment(
     """One built environment of one task, ready to be retired (no host, no processes)."""
 
     workspace = explainer_task_folder(configuration.coordination_root, REPO, task) / leaf
-    for name in ("instructions", "scratch", "drafts"):
+    for name in ("instructions", "scratch", "drafts", "state"):
         (workspace / name).mkdir(parents=True, exist_ok=True)
     binding = FrameBinding.from_packet(packet(comparison(7)).comparison)
     write_binding(
@@ -167,7 +166,9 @@ def build_environment(
             packet_digest="sha256:" + "0" * 64,
         ),
     )
-    generation_path(configuration, REPO, task, leaf).write_text(f"{generation}\n")
+    counter = generation_path(configuration, REPO, task, leaf)
+    counter.parent.mkdir(parents=True, exist_ok=True)
+    counter.write_text(f"{generation}\n")
     return workspace
 
 
@@ -249,12 +250,18 @@ def test_master_retirement_retires_and_reclaims_every_environment(world: World) 
     assert not grades.exists() and not grades.parent.exists()
     assert not other_grades.exists()
     assert not retire_receipts_root(world.task_root, LEAF).exists()
-    # The lock is kept: a lock is never removed.
-    assert lock.is_file()
-    assert [item["state"] for item in report["explainerArtifacts"]] == ["deleted"] * 8
+    # The lock lies inside the workspace (MIK-R211 v5 rule 12): it goes with it, and nothing stays.
+    assert not lock.exists()
+    assert list(world.explainer_root.iterdir()) == []
+    # The retire removed each workspace and the frames took each counter: grades and receipts stay.
+    assert [item["kind"] for item in report["explainerArtifacts"]] == [
+        "grades",
+        "retire-receipts",
+    ] * 2
+    assert {item["state"] for item in report["explainerArtifacts"]} == {"deleted"}
 
 
-def test_a_failed_retire_keeps_the_folder_counter_receipt_and_grades(world: World) -> None:
+def test_a_failed_retire_keeps_the_folder_receipt_and_grades(world: World) -> None:
     workspace = environment(world)
     grades = seeded_grades(world)
 
@@ -267,11 +274,12 @@ def test_a_failed_retire_keeps_the_folder_counter_receipt_and_grades(world: Worl
     assert [entry["state"] for entry in report["environments"]] == ["pending"]
     assert hook_failed(report)
     assert workspace.is_dir() and (workspace / "instructions").is_dir()
-    assert generation_path(world.settings, REPO, TASK, LEAF).exists()
     assert grades.is_file()
     receipts = retire_receipts_root(world.task_root, LEAF)
     kept = [read_receipt(receipts, path.stem) for path in receipts.glob("*.json")]
-    assert [item.state for item in kept if item is not None] == ["pending"]
+    # The counter lies beside the task's revisions and went with its frames; the pending receipt
+    # names the seat and the generation the retry ends.
+    assert [(item.state, item.generation) for item in kept if item is not None] == [("pending", 1)]
     assert {item["state"] for item in report["explainerArtifacts"]} == {"kept"}
 
 
@@ -335,7 +343,7 @@ def test_an_interrupted_external_deletion_is_attributed_already_absent_from_exac
                     "explainerArtifacts": [
                         artifact(workspace, "workspace"),
                         artifact(counter, "generation"),
-                        artifact(grades, "grades"),
+                        artifact(grades.parent, "grades"),
                         artifact(outside_keep, "grades"),
                     ],
                 },
@@ -354,9 +362,9 @@ def test_an_interrupted_external_deletion_is_attributed_already_absent_from_exac
     assert absent[str(workspace)]["interrupted"] is True
     assert absent[str(workspace)]["kind"] == "explainerArtifacts"
     assert absent[str(counter)]["interrupted"] is True
-    # The still-present grades file is not claimed gone, and a path outside the confinement is
-    # never attributed: it fails the admission, so it reads as still there.
-    assert str(grades) not in absent
+    # The still-present grades are not claimed gone (this attempt deletes them), and a path outside
+    # the confinement is never attributed: it fails the admission, so it reads as still there.
+    assert str(grades.parent) not in absent
     assert str(outside_keep) not in absent
     assert outside_keep.read_text() == "mine"
     assert not hook_failed(report)
@@ -394,7 +402,7 @@ def test_a_symlink_inside_a_workspace_holds_the_leaf_and_what_lies_behind_it(
     assert any("symlink" in entry["detail"] for entry in report["failures"])
 
 
-def test_retire_alone_keeps_grades_and_receipts(world: World) -> None:
+def test_retire_alone_removes_the_workspace_and_keeps_grades_and_receipts(world: World) -> None:
     workspace = environment(world)
     grades = seeded_grades(world)
     receipts = retire_receipts_root(world.task_root, LEAF)
@@ -409,8 +417,8 @@ def test_retire_alone_keeps_grades_and_receipts(world: World) -> None:
     )
 
     assert outcome.receipt.state == "finished"
-    assert retired(workspace) is not None
-    assert not (workspace / "instructions").exists()
+    assert not workspace.exists()
+    assert sorted(path.name for path in world.explainer_root.iterdir()) == []
     assert grades.is_file()
     assert read_receipt(receipts, "retire-1") is not None
 
@@ -418,15 +426,22 @@ def test_retire_alone_keeps_grades_and_receipts(world: World) -> None:
 def test_a_leaf_finalize_cleanup_does_not_retire(world: World) -> None:
     workspace = environment(world)
     grades = seeded_grades(world)
+    counter = generation_path(world.settings, REPO, TASK, LEAF)
+    revision = counter.parent / "revisions" / "1" / "index.html"
+    revision.parent.mkdir(parents=True)
+    revision.write_text("<p>revision 1</p>\n")
 
     document = cleanup_review_artifacts(world.cleanup_request())
 
     assert document["environments"] == []
     assert document["explainerArtifacts"] == []
     assert (workspace / "instructions").is_dir()
-    assert generation_path(world.settings, REPO, TASK, LEAF).exists()
     assert grades.is_file()
     assert not retire_receipts_root(world.task_root, LEAF).exists()
+    # A finalize is never more destructive than a removal: the explainer's published revisions and
+    # the seat counter beside them stay with the task (Manager ruling 20261027T144320Z (2)).
+    assert counter.read_text() == "1\n"
+    assert revision.read_text() == "<p>revision 1</p>\n"
 
 
 def test_the_cleanup_port_does_not_retire(world: World) -> None:
@@ -524,18 +539,34 @@ def test_the_previews_name_the_environments(world: World) -> None:
 def test_the_archive_reports_the_environments_in_its_receipt(world: World) -> None:
     workspace = environment(world)
     seeded_grades(world)
+    counter = generation_path(world.settings, REPO, TASK, LEAF)
+    for number in (1, 2):
+        revision = counter.parent / "revisions" / str(number) / "index.html"
+        revision.parent.mkdir(parents=True)
+        revision.write_text(f"<p>revision {number}</p>\n")
 
     report = archive_hook(world.request(), world.task_root)
 
     receipts = world.task_root / "notes" / "reports" / "review-artifact-cleanup.json"
     recorded = receipts.read_text()
     assert agent_id(workspace, 1) in recorded
+    # R103 v2: the receipt names what the archive took of the explainer, and why a reopen is gone.
+    [named] = json.loads(recorded)["explainerRecords"]
+    assert {key: named[key] for key in ("leaf", "revisions", "seatCounter", "generation")} == {
+        "leaf": LEAF,
+        "revisions": [1, 2],
+        "seatCounter": counter.as_posix(),
+        "generation": 1,
+    }
+    assert named["state"] == "reclaimed"
+    assert "cannot be reopened" in named["reopen"] and "revisions 1, 2" in named["reopen"]
+    assert not counter.exists() and not counter.parent.exists()
+    # The retire removed the workspace and the task's frames took its counter beside them.
     assert [entry["kind"] for entry in report["explainerArtifacts"]] == [
-        "workspace",
-        "generation",
         "grades",
         "retire-receipts",
     ]
+    assert list(world.explainer_root.iterdir()) == []
 
 
 def _leaf_ref() -> TaskDocumentRef:

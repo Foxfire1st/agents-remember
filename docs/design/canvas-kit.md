@@ -133,13 +133,10 @@ bundle; each bundle carrying the symbols it claims; a page assembled from Shiki 
 `agents_remember.canvas.readiness.check_page` with no network references and no template; a plain
 page with no kit at all still passing; and the exact reference set inside the Motion Canvas bundle.
 
-The opt-in browser witness is reproducible with
-`node scripts/canvas-kit-proof.mjs <result.json>`. It publishes an explicit model-free fixture through
-R103, performs prospective loading, then opens the selected immutable revision through the actual
-opaque host session and CSP. Its JSON records highlighted/morphed token counts, rendered pixel
-samples, loaded local assets, carried notice digests, errors and outside requests. The PNG is visual
-inspection evidence; it does not replace those checks. This does not claim a model used every kit
-entry or prove every feature of the libraries.
+There is no separate opt-in browser witness any more. `scripts/canvas-kit-proof.mjs` ran on the
+isolation proof's fixture server, and both went with the isolation proof (D568, removed in L201).
+What checks a kit page in a browser now is the render path itself: the prospective browser load
+opens the exact selected assets in Chromium before anything is published (see below).
 
 ## Known limits
 
@@ -151,12 +148,10 @@ entry or prove every feature of the libraries.
   includes the selected entry's attribution, dependency licences and provenance. The existing
   `text/plain` type admits upstream `LICENSE` basenames unchanged. The host serves those files
   only through that revision's session prefix, with the same integrity checks as other assets.
-- **The current runtime witness is scoped.** `node scripts/canvas-kit-proof.mjs <result.json>`
-  runs all four entries in a real opaque canvas session after readiness and prospective load:
-  highlighted/morphed code, a Motion Canvas scene, OpenGenerativeUI styles and an ar-video drawing.
-  It checks the carried notices by HTTP status and digest and records browser errors and foreign
-  requests. It uses a model-free authored fixture; it is not a presenter authoring run or proof
-  of every library feature. Motion Canvas's stage render is awaited before its buffer is painted.
+- **No standalone runtime witness.** The model-free four-entry kit witness
+  (`scripts/canvas-kit-proof.mjs`) was removed with the isolation proof set (D568). A kit page is
+  exercised in a browser only by the prospective load of the page that uses it; nothing proves
+  every feature of the libraries.
 - **Rebuilding is manual.** The manifest records the exact esbuild command and entry for each
   bundle, but no npm dependency was added to the repo: the bundles were built once at admission
   from `npm pack`ed tarballs. A future re-pin is a re-run of the same commands, and the manifest

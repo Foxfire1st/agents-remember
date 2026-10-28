@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ExplainerBuild, ExplainerState } from './client';
+import { parseExplainerState } from './client';
 import type { TrayPick, TraySeat } from '../tray/types';
 import {
   agentMenu,
@@ -12,6 +13,7 @@ import {
   buildPercent,
   canRetire,
   canSend,
+  END_TO_END_LINE,
   changeSetPick,
   columnSelection,
   firstRequestLine,
@@ -142,11 +144,13 @@ describe('the first request’s form (rule 3)', () => {
     );
   });
 
-  it('refuses Send with nothing to send', () => {
+  it('sends an empty request as the end-to-end review, never as nothing to send', () => {
     const references = formReferences([pick('p1', 'INV-1')], () => 'invariant');
     expect(canSend(references, '')).toBe(true);
-    expect(canSend([], '  ')).toBe(false);
+    expect(canSend([], '  ')).toBe(true);
     expect(canSend([], 'what changed?')).toBe(true);
+    // The form's line says what an empty Send asks for (the developer's F1).
+    expect(firstRequestLine([], '')).toBe(END_TO_END_LINE);
   });
 
   it('pre-fills the stale parts of a Regenerate with no seat', () => {
@@ -185,6 +189,17 @@ describe('the build’s panel (rule 4.1)', () => {
     expect(buildPercent(build(steps))).toBe(50);
   });
 
+  it('prefers the server’s own percentages when its record carries them', () => {
+    // A running build writes `percent` on itself and on each progress row; those are the numbers the
+    // bar must show, not a share this side computes.
+    const running = build([{ name: 'Snapshot the code', state: 'running', percent: 35 }], {
+      percent: 90,
+    });
+    expect(buildPercent(running)).toBe(90);
+    expect(stepPercent(running.steps[0])).toBe(35);
+    expect(stepDetail(running.steps[0])).toBe('35%');
+  });
+
   it('names the failed step and its reason, and no other build has one', () => {
     expect(buildFailure(build(steps))).toBeNull();
     const failed = build(
@@ -199,6 +214,27 @@ describe('the build’s panel (rule 4.1)', () => {
       step: 'Copy the memory snapshot, read-only',
       reason: 'no space left on device',
     });
+  });
+
+  it('names the server’s own sentence for a failed `/state` build, never “no reason was given”', () => {
+    // The shape `explainer_service.py` keeps and `serving/explainer.py` answers: the reason is
+    // `error`. This is the exact payload that made the build box say "no reason was given".
+    const reason = 'the host could not read the memory tree: permission denied';
+    const read = parseExplainerState({
+      seat: { state: 'missing' },
+      build: {
+        state: 'failed',
+        step: 'checkout-code',
+        steps: [{ name: 'checkout-code', percent: 20 }],
+        failedStep: 'checkout-code',
+        error: reason,
+      },
+    });
+    const parsed = read.kind === 'state' ? read.value.build : null;
+    expect(parsed).not.toBeNull();
+    if (!parsed) return;
+    expect(buildFailure(parsed)).toEqual({ step: 'checkout-code', reason });
+    expect(buildFailure(parsed)?.reason).not.toBe('no reason was given');
   });
 });
 
@@ -215,20 +251,26 @@ describe('later requests (rule 5)', () => {
 describe('Retire (rule 7)', () => {
   it('names what ends and what stays', () => {
     const words = retireConfirmation('L181', state({ seat: 'live', workspaceId: '/coord/explainer/repo/L181' }));
-    expect(words.headline).toBe('Retire the explainer of L181?');
+    expect(words.headline).toBe('Remove the explainer of L181?');
     expect(words.ends).toHaveLength(3);
-    expect(words.ends[0]).toContain('The seat');
-    expect(words.ends[1]).toContain('AR_EXPLAINER_WORKSPACE');
-    expect(words.ends[2]).toContain('/coord/explainer/repo/L181');
+    expect(words.ends[0]).toContain('archived in Paseo');
+    expect(words.ends[0]).toContain('AR_EXPLAINER_WORKSPACE');
+    expect(words.ends[1]).toContain('/coord/explainer/repo/L181');
+    expect(words.ends[1]).toContain('deleted completely');
+    expect(words.ends[2]).toContain('never published is discarded');
     expect(words.stays).toHaveLength(2);
-    expect(words.stays[0]).toContain('from a retired explainer');
+    expect(words.stays[0]).toContain('published revision');
     expect(words.stays[1]).toContain('grades');
   });
 
-  it('offers Retire only while a seat exists', () => {
+  it('offers removal for a seat in any state while anything of it is on disk', () => {
     expect(canRetire(state({ seat: 'live' }))).toBe(true);
     expect(canRetire(state({ seat: 'closed' }))).toBe(true);
-    expect(canRetire(state({ retiredAt: '2026-10-19T15:12:00Z' }))).toBe(false);
+    // An archived or missing chat whose workspace is still bound is removed too (MIK-R211 v5 rule 12).
+    expect(canRetire(state({ seat: 'missing', binding: { kind: 'recorded', comparison: 8, label: '#8' } }))).toBe(
+      true,
+    );
+    expect(canRetire(state({ seat: 'missing' }))).toBe(false);
     expect(canRetire(null)).toBe(false);
   });
 });
@@ -268,5 +310,22 @@ describe('the header’s agent menu (rule 1)', () => {
     expect(rows.map((row) => row.agentId)).toEqual(['a-exp', 'a-wrk-own', 'a-rev-own']);
     expect(rows.find((row) => row.agentId === 'a-wrk-own')?.current).toBe(true);
     expect(rows.find((row) => row.agentId === 'a-exp')?.current).toBe(false);
+  });
+});
+
+
+describe('terminal build detail and reason code', () => {
+  it.each(['build', 'building'] as const)('preserves both fields in %s and shows the authored detail', (field) => {
+    const reason = 'evidence-source-unavailable';
+    const error = 'The memory repository could not be opened at its recorded path.';
+    const read = parseExplainerState({
+      seat: { state: 'missing' },
+      [field]: { state: 'failed', requestId: 'failed-before-create', failedStep: 'comparison', reason, error },
+    });
+    expect(read.kind).toBe('state');
+    if (read.kind !== 'state' || !read.value.build) throw new Error('missing failed build');
+    expect(read.value.build.reason).toBe(reason);
+    expect(read.value.build.error).toBe(error);
+    expect(buildFailure(read.value.build)).toEqual({ step: 'comparison', reason: error });
   });
 });

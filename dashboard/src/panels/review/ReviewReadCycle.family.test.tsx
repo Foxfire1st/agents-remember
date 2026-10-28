@@ -222,6 +222,45 @@ function mountCycle() {
   };
 }
 
+it('starts one selected review request during StrictMode effect replay', async () => {
+  const fetch = vi.fn(async () => response(first));
+  vi.stubGlobal('fetch', fetch);
+  const cache = new ReviewReadCache();
+  const view = renderHook(() => useReviewReadCycle({ ...target, instead: null, selection: undefined, cache }), {
+    reactStrictMode: true,
+  });
+  await waitFor(() => expect(view.result.current.read.phase).toBe('reviewed'));
+  expect(fetch).toHaveBeenCalledOnce();
+});
+
+it('cancels rapid selected reads and refreshes without admitting their late answers', async () => {
+  const pending: { signal: AbortSignal; finish: (answer: Response) => void }[] = [];
+  vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) =>
+    new Promise<Response>((finish) => pending.push({ signal: init!.signal!, finish })),
+  ));
+  const cache = new ReviewReadCache();
+  const view = renderHook(({ selectorId }) =>
+    useReviewReadCycle({ ...target, selectorId, instead: null, selection: undefined, cache }),
+  { initialProps: { selectorId: target.selectorId } });
+  await waitFor(() => expect(pending).toHaveLength(1));
+  view.rerender({ selectorId: 'another-subject' });
+  await waitFor(() => expect(pending).toHaveLength(2));
+  expect(pending[0].signal.aborted).toBe(true);
+  act(() => view.result.current.refresh());
+  await waitFor(() => expect(pending).toHaveLength(3));
+  expect(pending[1].signal.aborted).toBe(true);
+  await act(async () => {
+    pending[0].finish(response(first));
+    pending[1].finish(response(first));
+  });
+  expect(view.result.current.read.phase).toBe('loading');
+  expect(cache.sizes.reviews).toBe(0);
+  await act(async () => pending[2].finish(response(first)));
+  expect(view.result.current.read.phase).toBe('reviewed');
+  view.unmount();
+  expect(pending[2].signal.aborted).toBe(true);
+});
+
 it('retains exact content and claim identities while before and after walks advance independently', async () => {
   const view = mountCycle();
   await waitFor(() => expect(view.result.current.read.phase).toBe('reviewed'));

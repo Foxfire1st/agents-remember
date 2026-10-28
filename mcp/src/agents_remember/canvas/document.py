@@ -17,8 +17,11 @@ _DOCTYPE = re.compile(rb"\A(?:\xef\xbb\xbf)?(?:\s|<!--.*?-->)*<!doctype\s[^>]*>"
 
 
 def bound_document(payload: bytes, session: CanvasSession) -> bytes:
-    if not session.scripts:
-        return payload
+    """The document a page receives: the admitted bytes plus the binding bootstrap.
+
+    The bootstrap is installed before the page's own scripts, on every served document: the page
+    runs inside the isolation the policy serves, so there is no document that runs without it.
+    """
     binding = json.dumps(
         {
             "schema": "ar-canvas-binding/v1",

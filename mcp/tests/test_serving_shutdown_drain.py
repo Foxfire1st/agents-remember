@@ -69,6 +69,7 @@ import agents_remember.serving._app_lifespan as lifespan_module
 from agents_remember.providers.metrics import ProviderMetricsStore
 from agents_remember.serving._app_common import _ServingRuntime
 from agents_remember.serving._app_lifespan import _serving_lifespan
+from agents_remember.serving.stream_shutdown import StreamShutdown
 from fastapi import FastAPI
 
 _REAL_SLEEP = asyncio.sleep
@@ -186,10 +187,15 @@ class _ServingFixture:
         self.runtime = cast(
             _ServingRuntime,
             SimpleNamespace(
+                launcher_catalog_prepare=None,
+                stream_shutdown=StreamShutdown(),
                 config=SimpleNamespace(coordination_root=root),
                 observer_root=root,
-                projector=SimpleNamespace(prime=mock.AsyncMock(), run=_parked_forever),
+                projector=SimpleNamespace(
+                    close_readiness=mock.Mock(), prime=mock.AsyncMock(), run=_parked_forever
+                ),
                 review_trees_shutdown=self.review_trees_shutdown,
+                master_preparation=None,
                 clock=self.clock.now,
                 background_ledger=None,
                 # The merged runtime carries the explainer's application port (MIK-R186); this

@@ -22,13 +22,15 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 from agents_remember.application.review_frame_store import frame_scope, reopen_frame
-from agents_remember.canvas import prospective
+from agents_remember.canvas import presenter_tools, prospective
+from agents_remember.canvas.explainer_answer_bounds import answer_tokens
 from agents_remember.canvas.presenter import Presenter, PresenterRefused
 from agents_remember.canvas.prospective import (
     BrowserProspectiveLoad,
@@ -36,6 +38,7 @@ from agents_remember.canvas.prospective import (
     StaticProspectiveLoad,
     default_load_script,
 )
+from agents_remember.mcp.registration.explainer_tools import render_answer
 from canvas_host_test_support import (
     AT,
     FRAME,
@@ -46,6 +49,7 @@ from canvas_host_test_support import (
     config,
     packet,
     record,
+    stored_attempt,
     task,
     write_settings,
 )
@@ -89,13 +93,7 @@ def _presenter(settings, *, prospective) -> Presenter:
 
 
 def _start(presenter: Presenter, *, request: str):
-    attempt = presenter.start(
-        caller="dashboard",
-        request_id=request,
-        activation="explicit",
-        evidence=packet(record()),
-        focus="the change to src/app.py",
-    )
+    attempt = stored_attempt(presenter, evidence=packet(record()), request=request)
     assets = Path(attempt.working_directory) / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     (assets / "index.html").write_bytes(PAGE)
@@ -279,15 +277,21 @@ def test_a_self_contradicting_load_is_downgraded_to_failed(tmp_path: Path) -> No
 
 @pytest.mark.skipif(os.name == "nt", reason="the fake node relies on a POSIX shebang")
 def test_an_unreadable_child_answer_is_unavailable_and_carries_stderr(tmp_path: Path) -> None:
-    """No JSON means no evidence: the result keeps the child's own stderr for the reader."""
+    """No JSON means no evidence: the result keeps the child's own stderr and stdout, whole.
+
+    MIK-R211 v5 rule 11: the render report holds them whole; the reply's budget, not a cut of the
+    record, decides what the agent sees inline.
+    """
 
     result = _load_with(
         tmp_path,
-        "sys.stderr.write('Error: browser closed unexpectedly\\n')\nprint('not json')\n",
+        "sys.stderr.write('Error: browser closed unexpectedly\\n' + 'x' * 1000 + '\\nlast line\\n')\n"
+        "print('not json ' + 'y' * 500 + ' end-of-stdout')\n",
     )
     assert result.state == "unavailable"
     assert "no readable result" in result.errors[0]
     assert "browser closed unexpectedly" in result.errors[0]
+    assert "last line" in result.errors[0] and "end-of-stdout" in result.errors[0]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the fake node relies on a POSIX shebang")
@@ -397,7 +401,230 @@ def test_rendered_reference_inventory_is_checked_against_the_actual_packet(tmp_p
     assert failed_claim.state == "failed"
     assert failed_claim.unresolved_references == ("code-candidate:src/app.py",)
 
+    # MIK-R211 v5 rule 2: every rendered reference is read and checked, however many and however
+    # long; the inventory is never cut to a count (the browser side once kept 401, this side 400).
+    many = {
+        **CLEAN,
+        "evidenceReferences": ["code-candidate:src/app.py"] * 450,
+        "claimIds": ["c-present"] * 450,
+    }
+    counted = _load_with(tmp_path, f"import json\nprint(json.dumps({many!r}))\n")
+    assert counted.state == "loaded"
+    assert (len(counted.evidence_references), len(counted.claim_ids)) == (450, 450)
+    long_reference = "code-candidate:" + "a" * 600
+    long_answer = {**CLEAN, "evidenceReferences": [long_reference]}
+    long_result = _load_with(tmp_path, f"import json\nprint(json.dumps({long_answer!r}))\n")
+    assert long_result.state == "failed"  # read and checked against the packet, not unreadable
+    assert long_result.unresolved_references == (long_reference,)
+
     script_text = default_load_script().read_text(encoding="utf-8")
     assert "claimIds" in script_text
     assert 'querySelectorAll("[data-evidence]")' in script_text
     assert 'querySelectorAll("[data-evidence-claim]")' in script_text
+    assert "401" not in script_text  # the browser keeps every reference it sees
+
+
+def test_interactive_observations_never_change_the_reduced_motion_gate(tmp_path: Path) -> None:
+    """D565/D518: full-motion errors remain report-only, including runner failures."""
+    script = tmp_path / "runner.mjs"
+    script.write_text("// the fake node chooses the observation by invocation mode\n")
+    interactive = {
+        "reportOnly": True,
+        "state": "observed",
+        "passes": [{"width": 390, "errors": ["pageerror: full-motion script failed"]}],
+    }
+    seen = tmp_path / "interactive-argv.json"
+    node = _fake_node(
+        tmp_path,
+        "import json\n"
+        f"if '--interactive-dir' in sys.argv: json.dump(sys.argv, open({str(seen)!r}, 'w'))\n"
+        f"print(json.dumps({interactive!r} if '--interactive-dir' in sys.argv else {CLEAN!r}))",
+    )
+    loader = BrowserProspectiveLoad(
+        script=script, node=node, interactive_directory=tmp_path / "pictures"
+    )
+    result = loader.load(
+        assets={"index.html": PAGE}, entrypoint="index.html", packet=packet(record())
+    )
+    assert result.loaded
+    assert result.errors == ()
+    assert result.interactive == interactive
+    # The observation has no clock of its own: it is told the load's own limit and stops only
+    # before it (the Manager's 15:43Z ruling; five passes measured at 74-120 s on L183 and L191).
+    argv = json.loads(seen.read_text())
+    assert argv[argv.index("--time-limit") + 1] == "180", argv
+    # Publication consumes the same result; diagnostic failures are not refusal inputs.
+    settings, scope = _arising(tmp_path / "publication")
+    presenter = _presenter(settings, prospective=StubLoad(result))
+    attempt = _start(presenter, request="interactive-is-not-a-gate")
+    assert presenter.publish(attempt.attempt_id, entrypoint="index.html").published
+    assert reopen_frame(scope).revision == 1
+
+    node = _fake_node(
+        tmp_path,
+        f"import json\nprint('bad report' if '--interactive-dir' in sys.argv else json.dumps({CLEAN!r}))",
+    )
+    result = BrowserProspectiveLoad(
+        script=script, node=node, interactive_directory=tmp_path / "pictures"
+    ).load(assets={"index.html": PAGE}, entrypoint="index.html", packet=packet(record()))
+    assert result.loaded
+    assert result.interactive is not None
+    assert result.interactive["state"] == "unavailable"
+    assert "unvisited" in str(result.interactive["coverage"])
+
+
+def test_interactive_runner_failure_does_not_erase_successful_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Even a diagnostic timeout is kept outside the publication result."""
+    real_run = subprocess.run
+
+    def run(command, **kwargs):
+        if "--interactive-dir" in command:
+            raise subprocess.TimeoutExpired(command, 1)
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(prospective.subprocess, "run", run)
+    loader = _child(tmp_path, f"import json\nprint(json.dumps({CLEAN!r}))")
+    loader._interactive_directory = tmp_path / "pictures"
+    result = loader.load(
+        assets={"index.html": PAGE}, entrypoint="index.html", packet=packet(record())
+    )
+    assert result.loaded
+    assert result.interactive is not None
+    assert "did not finish" in str(result.interactive["errors"])
+
+
+@pytest.mark.parametrize("picture_size", [16, 2 * 1024 * 1024 + 1])
+def test_each_render_keeps_its_pictures_whole_in_its_own_run_folder_and_resumes_what_it_left(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, picture_size: int
+) -> None:
+    """MIK-R211 v5 rules 11-12: each render writes renders/run-NNN/ -- page.png and interactions/,
+    every picture whole -- and returns no picture; the report names the files. A run whose
+    interaction observation ran out of time names what it left unvisited, and the next render of
+    the same draft is handed that report to resume; a changed draft is observed afresh."""
+
+    seen: list[object] = []
+
+    class Browser:
+        def __init__(self, *, screenshot, interactive_directory):
+            self.picture = screenshot
+            self.interactive = interactive_directory
+
+        def resuming(self, report):
+            seen.append(None if report is None else json.loads(report.read_text(encoding="utf-8")))
+            return self
+
+        def load(self, **_kwargs):
+            self.picture.write_bytes(b"d" * picture_size)
+            self.interactive.mkdir()
+            (self.interactive / "1280-click-initial.png").write_bytes(b"p" * picture_size)
+            (self.interactive / "390-initial.png").write_bytes(b"q" * 7)
+            left = [{"pass": "390-keyboard", "controls": 4, "started": True}]
+            return ProspectiveResult(
+                state="loaded",
+                kind="browser",
+                interactive={"reportOnly": True, "passes": [], "unvisited": left},
+            )
+
+    monkeypatch.setattr(presenter_tools, "BrowserProspectiveLoad", Browser)
+    drafts = tmp_path / "drafts"
+    drafts.mkdir()
+    authoring = presenter_tools.AuthoringTools(
+        drafts, host=tmp_path / "instructions", grants={"working": str(drafts), "inputs": {}}
+    )
+    runs = []
+    for assets in ({"index.html": PAGE}, {"index.html": PAGE}, {"index.html": PAGE + b" "}):
+        report = authoring.render(packet=packet(record()), assets=assets)
+        authoring.keep_report(report)
+        assert report["state"] == "loaded" and report["pictureError"] is None
+        interactive = report["interactive"]
+        assert "pictures" not in interactive  # one folder named, not each picture
+        assert interactive["pictureCount"] == 2 and interactive["picturesComplete"] is True
+        runs.append(report["run"])
+        run = tmp_path / report["run"]
+        assert report["picture"] == f"{report['run']}/page.png"
+        assert (run / "page.png").read_bytes() == b"d" * picture_size
+        assert interactive["pictureFolder"] == f"{report['run']}/interactions"
+        assert (run / "interactions" / "1280-click-initial.png").read_bytes() == (
+            b"p" * picture_size
+        )
+        assert report["reportPath"] == f"{report['run']}/report.json"
+    assert runs == ["renders/run-001", "renders/run-002", "renders/run-003"]
+    assert not list((drafts / "assets").iterdir())  # nothing enters the published assets
+    assert not (drafts / "host").exists()
+    # The first run is fresh; the second, on the same draft, resumes the first; a changed draft is not.
+    assert seen[0] is None and seen[2] is None
+    assert isinstance(seen[1], dict) and seen[1]["run"] == "renders/run-001/interactions"
+    assert seen[1]["unvisited"] == [{"pass": "390-keyboard", "controls": 4, "started": True}]
+
+
+def test_the_render_reply_fits_1000_tokens_in_total_and_names_what_moved() -> None:
+    """D597 and MIK-R211 v5 rule 11: the whole answer is at most 1,000 tokens, identity included.
+    The summary and whole errors fill what the identity items leave; what does not fit is named
+    with the report file holding it; the totals stay the run's; no picture is in the answer."""
+
+    identity = {
+        "state": "loaded",
+        "run": "renders/run-003",
+        "reportPath": "renders/run-003/report.json",
+        "picture": "renders/run-003/page.png",
+        "publication": {
+            "state": "published",
+            "revision": 4,
+            "coverage": "2 of 5 passes",
+            "partMap": [{"part": "p"}],
+        },
+        "interactive": {"pictureFolder": "renders/run-003/interactions", "pictureCount": 335},
+        "readiness": {"ready": True, "failed": [], "notes": []},
+    }
+    errors = [f"load: failure {index:02d} " + "y" * 300 for index in range(30)]
+    summary = {
+        "passes": 5,
+        "passesIncomplete": 0,
+        "controlsVisited": 12,
+        "controlsFailed": 2,
+        "checksPassed": 4,
+        "checksFailed": 1,
+        "errors": 30,
+    }
+    # Errors overflow: the summary fits, then whole errors until the bound, and the rest is named.
+    reply = render_answer({**identity, "allErrors": errors, "summary": summary})
+    # The publication says the revision's coverage, never the part map (MIK-R211 v5, 15:43Z).
+    assert reply["publication"] == {
+        "state": "published",
+        "revision": 4,
+        "coverage": "2 of 5 passes",
+    }
+    assert reply["summary"] == summary  # the report's own counts, copied
+    assert reply["errorsTotal"] == 30 and reply["errors"] == errors[: len(reply["errors"])]
+    assert reply["moved"] == [
+        {
+            "part": "errors",
+            "shown": len(reply["errors"]),
+            "total": 30,
+            "to": "renders/run-003/report.json",
+        }
+    ]
+    assert (
+        answer_tokens(reply)
+        <= 1000
+        < answer_tokens({**reply, "errors": errors[: len(reply["errors"]) + 1]})
+    )
+    # The summary alone past the bound: it moves, named, and the totals and identity stay.
+    wide = {f"count-{index:04d}": index for index in range(400)}
+    reply = render_answer({**identity, "allErrors": errors[:2], "summary": wide})
+    assert answer_tokens({"summary": wide}) > 1000
+    assert "summary" not in reply and {"part": "summary", "to": reply["report"]} in reply["moved"]
+    assert reply["errorsTotal"] == 2 and reply["errors"] == errors[:2]
+    for kept in (reply, render_answer({**identity, "allErrors": errors, "summary": wide})):
+        assert answer_tokens(kept) <= 1000
+        assert kept["run"] == "renders/run-003/" and kept["report"] == "renders/run-003/report.json"
+        assert kept["picture"] == "renders/run-003/page.png"
+        assert kept["interactions"] == {"folder": "renders/run-003/interactions", "count": 335}
+        assert kept["publication"] == {
+            "state": "published",
+            "revision": 4,
+            "coverage": "2 of 5 passes",
+        }
+    assert "readiness" not in reply and "allErrors" not in reply  # the rest stays in the file

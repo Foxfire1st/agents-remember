@@ -236,7 +236,7 @@ strand accepted operation evidence.
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `explainer_control` | Update or retire one leaf's explainer, or claim a master as its architect. `claim` is open to any hosted architect seat, writes the master-to-architect record and moves that master's held reports to the claiming seat. `update` and `retire` are accepted only from the seat that record names; any other caller is refused `not-this-masters-architect` and claims first. A refused action is a typed answer, never a server error. | `action` (`update`, `retire`, `claim`), `repo_id`, `task_name`, `leaf_id` for the two leaf actions, `receipt_id` for a `retire` |
+| `explainer_control` | Update or retire one leaf's explainer, or claim a master as its architect. `retire` archives the explainer's chat in Paseo and removes its workspace completely -- Git worktrees removed and pruned, the leaf's folder deleted -- for a seat in any state (live, closed, archived, missing); the task's published revisions, grades and receipts stay. `claim` is open to any hosted architect seat, writes the master-to-architect record and nothing else. `update` and `retire` are accepted only from the seat that record names; any other caller is refused `not-this-masters-architect` and claims first. A refused action is a typed answer, never a server error. | `action` (`update`, `retire`, `claim`), `repo_id`, `task_name`, `leaf_id` for the two leaf actions, `receipt_id` for a `retire` |
 
 The developer's own presses do not pass through this tool: the page's Update and Retire call the
 dashboard's routes, and master retirement and sprint archive retire every environment through their

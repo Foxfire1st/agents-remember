@@ -84,10 +84,20 @@ function checkEntryIdentities(
   expect(root.querySelector('[data-testid="review-expression-card"] details')).toBeNull();
 }
 
-// The page reads the cards of its shown subjects once (MIK-R89 v2 rule 2, read 5); a selection reads
-// no cards of its own (W4). The served set for that read is l86.test-utils' `cards` reply.
+// A selected invariant reads its own cards; a family's overview reads none (MIK-R211 v4 rule 10). The
+// served set for that read is l86.test-utils' `cards` reply.
 const readCards = (requests: URL[]) =>
   requests.filter((url) => url.pathname === '/api/review/trees' && url.searchParams.has('invariants'));
+
+// Where a record's worklist items are read: an invariant's own panel after its code, and for a family,
+// whose overview's slot draws its read's steps, judgment and facts but no worklist panel (MIK-R211 v4
+// rule 10; FamilyState), the Worklist view.
+async function worklistOf(view: ReturnType<typeof mount>, kind: 'family' | 'invariant') {
+  if (kind === 'invariant') return view.findByTestId('review-subject-worklist');
+  await view.findByTestId('review-family-overview');
+  fireEvent.click(view.getByTestId('review-tree-worklist'));
+  return view.getByTestId('review-worklist-view');
+}
 
 it.each(['family', 'invariant'] as const)(
   'F02/F07 joins the actual %s record and preserves every entry side identity',
@@ -95,27 +105,26 @@ it.each(['family', 'invariant'] as const)(
     const requests = replaceReplies();
     const view = mount(kind);
     const canonical = kind === 'family' ? 'FAM-2HBJREC2' : 'INV-1XKX9ERN';
-    const block = await view.findByTestId('review-subject-worklist');
+    const block = await worklistOf(view, kind);
     const expected = trees.worklist!.items.filter((item) => item.subject === canonical);
     expect(expected).toHaveLength(kind === 'family' ? 1 : 2);
-    await waitFor(() =>
-      expect(within(block).getAllByTestId('review-worklist-item')).toHaveLength(expected.length),
-    );
-    expect(
+    const items = () =>
       within(block)
-        .getAllByTestId('review-worklist-item')
-        .map((one) => one.dataset.kind),
-    ).toEqual(expected.map((one) => one.kind));
-    expect(
-      within(block)
-        .getAllByTestId('review-worklist-item')
-        .every((one) => one.dataset.subject === canonical),
-    ).toBe(true);
+        .queryAllByTestId('review-worklist-item')
+        .filter((one) => kind === 'invariant' || one.dataset.subject === canonical);
+    await waitFor(() => expect(items()).toHaveLength(expected.length));
+    expect(items().map((one) => one.dataset.kind)).toEqual(expected.map((one) => one.kind));
+    expect(items().every((one) => one.dataset.subject === canonical)).toBe(true);
     noFalseAbsence(block);
     const identities = await view.findByTestId('review-entry-identifiers');
     expect(identities).toBeTruthy();
-    // One card read, for the page's shown subjects whichever subject is selected; its answer here is
-    // the captured family-set body.
+    if (kind === 'family') {
+      // The family's overview reads no member's cards, so no entry identity is listed.
+      expect(readCards(requests)).toHaveLength(0);
+      expect(identities.querySelectorAll(':scope > ul > [data-entry]')).toHaveLength(0);
+      return;
+    }
+    // One card read, for the selected invariant; its answer here is the captured family-set body.
     await waitFor(() => expect(readCards(requests)).toHaveLength(1));
     const entries = familyCards.entries!;
     await waitFor(() =>

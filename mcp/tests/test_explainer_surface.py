@@ -1,13 +1,14 @@
-"""MIK-R186 @ v2 rule 3: one server, bound at launch, serving only the explainer's tools.
+"""MIK-R186 @ v2 rule 3 and MIK-R211 v5 rule 3: one server, bound at launch, with the explainer's four.
 
-The binding is the launch's, written into the server process's environment. These cases hold the three
-things the requirement actually asks for, in one process and without a seat:
+The binding is the launch's, written into the server process's environment. These cases hold what the
+requirement asks for, in one process and without a seat:
 
-* a bound server **advertises** exactly the explainer's surface, and an ordinary server is unchanged;
-* a bound server **dispatches** only that surface -- naming an AR tool directly refuses by name, which is
-  the half discovery cannot show;
-* an invalid binding **refuses service** as `explainer-binding-invalid` instead of falling through to the
-  ordinary roster, so a forged or stale launch cannot become unrestricted AR access.
+* a bound server **advertises** AR's general tools, as a task agent has them, and exactly the explainer's
+  four tools (`render`, `define_category`, `remove_category`, `grade`), and an ordinary server is unchanged;
+* a bound server **refuses nothing for being the explainer**: AR's general tools answer the seat as they
+  answer any agent;
+* an invalid binding **refuses service** as `explainer-binding-invalid` instead of serving an unbound
+  seat, so a forged or stale launch cannot become another leaf's explainer.
 
 What these do not show, and must not be read as showing: that a real seat's launch writes this binding, or
 that a harness attaches to it. That is the launch's own evidence.
@@ -18,8 +19,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import sys
-import types
 from pathlib import Path
 from typing import Any
 
@@ -30,11 +29,10 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, R
 from agents_remember.mcp.registration.explainer_surface import (
     EXPLAINER_BINDING_ENV,
     EXPLAINER_SURFACE,
-    ExplainerBinding,
     read_explainer_binding,
-    register_explainer_surface,
 )
 from agents_remember.mcp.server import create_server
+from agents_remember.mcp.tools import PUBLIC_TOOLS
 
 REPO = "agents-remember"
 TASK = "260928_maintained-invariant-knowledge"
@@ -84,33 +82,32 @@ def _advertised(server: Any) -> tuple[str, ...]:
     return tuple(sorted(tool.name for tool in asyncio.run(server.list_tools())))
 
 
-def test_a_bound_server_advertises_the_explainers_surface_and_nothing_else(
+def test_a_bound_server_advertises_ars_general_tools_and_exactly_the_explainers_four(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The requirement's first half: discovery is the 22 tools, in both directions."""
+    """Evidence 11: the registered explainer tools are exactly rule 3's four, beside AR's general tools."""
 
     config, workspace = _world(tmp_path)
     monkeypatch.setenv(EXPLAINER_BINDING_ENV, json.dumps(_binding(workspace)))
 
     server = create_server(config)
 
-    assert _advertised(server) == EXPLAINER_SURFACE
-    assert len(EXPLAINER_SURFACE) == 22
+    assert EXPLAINER_SURFACE == ("define_category", "grade", "remove_category", "render")
+    assert set(EXPLAINER_SURFACE).isdisjoint(PUBLIC_TOOLS)
+    assert _advertised(server) == tuple(sorted({*PUBLIC_TOOLS, *EXPLAINER_SURFACE}))
 
 
-def test_a_bound_server_refuses_a_tool_outside_its_surface_by_name(
+def test_a_bound_server_refuses_nothing_for_being_the_explainer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The second half: naming an AR tool directly is refused, not merely absent from discovery."""
+    """MIK-R211 v5 rule 3: no confinement -- AR's general tools answer the seat as they answer anyone."""
 
     config, workspace = _world(tmp_path)
     monkeypatch.setenv(EXPLAINER_BINDING_ENV, json.dumps(_binding(workspace)))
     server = create_server(config)
 
-    for name in ("worktree_start", "role_message", "knowledge_write", "explainer_control"):
-        with pytest.raises(ExplainerRefused) as refused:
-            asyncio.run(server.call_tool(name, {}))
-        assert refused.value.reason == "explainer-tool-not-exposed", name
+    answer = _answer(server, "server_info")
+    assert answer.get("refusal") not in {"explainer-tool-not-exposed", "not-this-explainer"}
 
 
 @pytest.mark.parametrize(
@@ -162,8 +159,8 @@ def test_an_ordinary_server_keeps_the_full_roster(
     advertised = _advertised(server)
     assert len(advertised) > len(EXPLAINER_SURFACE)
     assert "worktree_start" in advertised and "role_message" in advertised
-    # The explainer's surface is not silently advertised on an ordinary server either: it is the
-    # architect's `explainer_control` that belongs there, not the seat's 22 tools.
+    # The explainer's four are not advertised on an ordinary server: it is the architect's
+    # `explainer_control` that belongs there, not the seat's own tools.
     assert not set(EXPLAINER_SURFACE) <= set(advertised)
 
 
@@ -193,7 +190,7 @@ def test_a_lost_binding_on_a_launched_explainer_seat_refuses_rather_than_taking_
     An ordinary seat has neither the binding nor this capability's launch marker, and that absence is
     deliberate -- it is the ordinary branch. An explainer seat is launched with both, so a **missing**
     binding beside a present marker means the binding was lost, and a lost binding hands the seat the
-    whole 42-tool roster if absence is allowed to decide. It refuses instead.
+    general roster without its binding if absence is allowed to decide. It refuses instead.
     """
 
     config, workspace = _world(tmp_path)
@@ -239,9 +236,9 @@ def test_only_a_seat_with_neither_marker_nor_binding_takes_the_ordinary_branch(
 # -- MIK-R186 @ v2 rule 3 sentences 3-4 and Expected Evidence 7 (a forged seat) -----------------------
 #
 # The launch writes the seat into two places: the binding in this process's environment, and the id the
-# harness puts in PASEO_AGENT_ID for every process of that seat. These cases hold that *every* tool of
-# the bound server -- not only the grade and report bodies -- answers a forged or replaced seat by name,
-# and that the seat the server was launched for is served.
+# harness puts in PASEO_AGENT_ID for every process of that seat. These cases hold that each of the
+# explainer's four tools -- not only the grade bodies -- answers a forged or replaced seat by name, and
+# that the seat the server was launched for is served.
 
 
 def _seated_world(tmp_path: Path) -> tuple[McpRuntimeConfig, Path, str]:
@@ -257,6 +254,8 @@ def _answer(server: Any, name: str) -> dict[str, Any]:
     """One tool call's answer as data: the transport hands a tool's dict back as its JSON text."""
 
     answer = asyncio.run(server.call_tool(name, {}))
+    if isinstance(answer, tuple):  # (content blocks, structured body) on a dict return
+        answer = answer[0]
     if isinstance(answer, list):
         assert len(answer) == 1, answer
         answer = json.loads(answer[0].text)
@@ -267,7 +266,7 @@ def _answer(server: Any, name: str) -> dict[str, Any]:
 def test_every_tool_of_the_bound_server_answers_a_forged_seat_by_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The caller is the seat the server was launched for, on all 22 tools and not only on grade."""
+    """The caller is the seat the server was launched for, on each of the four and not only on grade."""
 
     config, workspace, seat = _seated_world(tmp_path)
     monkeypatch.setenv(
@@ -293,7 +292,7 @@ def test_the_seat_the_server_was_launched_for_is_served(
     monkeypatch.setenv("PASEO_AGENT_ID", seat)
     server = create_server(config)
 
-    answer = _answer(server, "inputs")
+    answer = _answer(server, "render")
 
     assert answer.get("refusal") != "not-this-explainer"
 
@@ -311,7 +310,7 @@ def test_a_new_generation_refuses_the_old_servers_calls(
     server = create_server(config)
     (workspace.parent / f"{LEAF}{GENERATION_SUFFIX}").write_text("2", encoding="utf-8")
 
-    answer = _answer(server, "list")
+    answer = _answer(server, "render")
 
     assert answer.get("refusal") == "not-this-explainer"
     assert "generation 2" in answer["detail"]
@@ -332,67 +331,9 @@ def test_a_marker_pointing_at_another_environment_refuses(
     monkeypatch.setenv("AR_EXPLAINER_WORKSPACE", str(somewhere_else))
     server = create_server(config)
 
-    answer = _answer(server, "list")
+    answer = _answer(server, "render")
 
     assert answer.get("refusal") == "foreign-workspace"
-
-
-def test_the_production_surface_wires_the_delivery_sender(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The registered production tools get the real report sender (MIK-R189 rule 7 step 4).
-
-    The launch-built surface (not the tests' own compositions) must hand the bound tools the
-    production sender, or `report_to_architect` keeps the server's bare bridge fallback and no
-    report reaches a recorded architect through the R190 limit/busy hold. Registration itself
-    stays light (MIK-R204): the ``cli`` half resolves on the first report, not at discovery.
-    """
-
-    captured: dict[str, Any] = {}
-
-    def _capture(*args: object, **kwargs: Any) -> None:
-        captured.update(kwargs)
-
-    monkeypatch.setattr(
-        "agents_remember.mcp.registration.explainer_surface.register_bound_explainer_tools",
-        _capture,
-    )
-
-    config, workspace = _world(tmp_path)
-    binding = ExplainerBinding(
-        agent=SEAT,
-        request="req-1",
-        repository=REPO,
-        task=TASK,
-        leaf=LEAF,
-        workspace=workspace,
-        generation=1,
-        seat=SEAT,
-    )
-    register_explainer_surface(_server_stub(), config, binding)
-
-    inputs = captured.get("inputs")
-    assert inputs is not None
-    assert inputs.sender is not None
-    assert callable(inputs.sender)
-    # The cli half resolves on the first report, not at registration: a stub stands in for the
-    # production factory and the sender is proven to be the one the stub produced.
-    host_module = "agents_remember.cli.paseo_explainer_host"
-    stub = types.SimpleNamespace()
-    sentinel_state = "sentinel-reported"
-    calls: list[tuple[str, str]] = []
-
-    def _factory(cfg: object) -> Any:
-        def _send(architect: str, text: str) -> str:
-            calls.append((architect, text))
-            return sentinel_state
-
-        return _send
-
-    stub.explainer_report_sender = _factory
-    monkeypatch.setitem(sys.modules, host_module, stub)
-    assert inputs.sender("arch-1", "the perspective") == sentinel_state
-    assert calls == [("arch-1", "the perspective")]
 
 
 def _server_stub() -> Any:

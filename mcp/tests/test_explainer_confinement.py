@@ -1,7 +1,7 @@
 """Physical confinement of every explainer metadata write (MIK-R186 rule 2; S07).
 
 Every writer of the environment's durable facts -- the binding, the generation counter, the
-retired marker, the request ledger and the seat lock -- must check the *physical* confinement of
+request ledger and the seat lock -- must check the *physical* confinement of
 its target before writing: every component below the task's explainer folder must be a real
 directory, with no symlink on the way, and the target must resolve inside the folder. A planted
 ancestor link (a symlinked task folder, workspace, counter, ledger or lock) is held and reported,
@@ -25,14 +25,12 @@ from agents_remember.canvas.explainer_paths import (
     generation_path,
     leaf_workspace,
     lock_path,
-    remove_workspace_contents,
+    remove_workspace,
 )
 from agents_remember.canvas.explainer_service import LeafScope
 from agents_remember.canvas.explainer_state import (
     ExplainerBinding,
-    clear_retired,
     ledger_path,
-    mark_retired,
     raise_generation,
     read_binding,
     record_request,
@@ -57,7 +55,7 @@ NOW = "2026-10-22T08:00:00+00:00"
 def _binding() -> ExplainerBinding:
     return ExplainerBinding(
         binding=FrameBinding.from_packet(packet(record(7)).comparison),
-        snapshot="snapshot-1",
+        snapshot="trees",
         prepared_at=NOW,
         packet_digest="sha256:" + "0" * 64,
     )
@@ -80,7 +78,9 @@ def _assert_untouched(path: Path, content: bytes) -> None:
     assert path.read_bytes() == content
 
 
-def test_every_metadata_writer_refuses_a_planted_task_folder_ancestor_link(tmp_path: Path) -> None:
+def test_every_metadata_writer_refuses_a_planted_task_folder_ancestor_link(
+    tmp_path: Path,
+) -> None:
     """The task's explainer folder as a symlink refuses every writer, with zero outside effects."""
 
     runtime, workspace = _workspace(tmp_path)
@@ -88,11 +88,9 @@ def test_every_metadata_writer_refuses_a_planted_task_folder_ancestor_link(tmp_p
     (outside / "counter").write_text("3\n")
     (outside / "ledger.json").write_text('{"schema": "x", "requests": {}}')
     (outside / "binding.json").write_text("outside\n")
-    (outside / "retired.json").write_text("outside\n")
     counter_outside = (outside / "counter").read_bytes()
     ledger_outside = (outside / "ledger.json").read_bytes()
     binding_outside = (outside / "binding.json").read_bytes()
-    retired_outside = (outside / "retired.json").read_bytes()
 
     gen_file = generation_path(runtime, REPO, TASK, LEAF)
     ledger = ledger_path(runtime, REPO, TASK, LEAF)
@@ -103,8 +101,6 @@ def test_every_metadata_writer_refuses_a_planted_task_folder_ancestor_link(tmp_p
 
     writers = [
         lambda: write_binding(workspace, _binding()),
-        lambda: mark_retired(workspace, "receipt-1", at=NOW),
-        lambda: clear_retired(workspace),
         lambda: raise_generation(gen_file),
         lambda: restore_generation(gen_file, 2),
         lambda: record_request(ledger, LEAF, "r1", {"generation": 1}),
@@ -116,35 +112,28 @@ def test_every_metadata_writer_refuses_a_planted_task_folder_ancestor_link(tmp_p
     _assert_untouched(outside / "counter", counter_outside)
     _assert_untouched(outside / "ledger.json", ledger_outside)
     _assert_untouched(outside / "binding.json", binding_outside)
-    _assert_untouched(outside / "retired.json", retired_outside)
-    assert (outside / "retired.json").read_bytes() == retired_outside
     # Nothing else appeared behind the link: the writers wrote no file anywhere outside.
     assert {path.name for path in outside.iterdir()} == {
         "counter",
         "ledger.json",
         "binding.json",
-        "retired.json",
     }
 
 
-def test_binding_and_marker_writers_refuse_a_planted_workspace_link(tmp_path: Path) -> None:
-    """A symlinked workspace refuses the binding and marker writers before any byte is written."""
+def test_the_binding_writer_refuses_a_planted_workspace_link(
+    tmp_path: Path,
+) -> None:
+    """A symlinked workspace refuses the binding writer before any byte is written."""
 
     _runtime, workspace = _workspace(tmp_path)
     outside = _outside(tmp_path)
     (outside / "binding.json").write_text("outside\n")
-    (outside / "retired.json").write_text("outside\n")
     workspace.rmdir()
     workspace.symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(PathRefused):
         write_binding(workspace, _binding())
-    with pytest.raises(PathRefused):
-        mark_retired(workspace, "receipt-1", at=NOW)
-    with pytest.raises(PathRefused):
-        clear_retired(workspace)
     assert (outside / "binding.json").read_text() == "outside\n"
-    assert (outside / "retired.json").read_text() == "outside\n"
 
 
 def test_the_generation_writers_refuse_a_planted_counter_link(tmp_path: Path) -> None:
@@ -180,17 +169,14 @@ def test_the_ledger_writers_refuse_a_planted_ledger_link(tmp_path: Path) -> None
         record_request(ledger, LEAF, "r1", {"generation": 1})
     with pytest.raises(PathRefused):
         write_inflight_create(ledger, {"generation": 1})
-    assert target.read_text() == '{"schema": "x", "requests": {}}'
-
-    # The same for the leaf-less shared ledger the guard names beside it.
-    shared = ledger.parent / "requests.json"
-    shared.symlink_to(target)
-    with pytest.raises(PathRefused):
-        record_request(ledger, LEAF, "r1", {"generation": 1})
+    # The ledger is the leaf's own ``state/requests.json`` (MIK-R211 v5 rule 12): no shared one.
+    assert ledger.name == "requests.json" and ledger.parent.name == "state"
     assert target.read_text() == '{"schema": "x", "requests": {}}'
 
 
-def test_the_seat_lock_refuses_a_planted_lock_link_before_locking(tmp_path: Path) -> None:
+def test_the_seat_lock_refuses_a_planted_lock_link_before_locking(
+    tmp_path: Path,
+) -> None:
     """The service's lock step admits the lock file physically before the kernel opens it."""
 
     runtime, _ws = _workspace(tmp_path)
@@ -223,15 +209,14 @@ def test_workspace_removal_holds_a_nested_link_instead_of_rmtree_following_it(
     (workspace / "drafts").mkdir()
     (workspace / "drafts" / "draft.txt").write_text("draft\n")
 
-    held = remove_workspace_contents(workspace, root=workspace.parent)
+    held = remove_workspace(workspace, root=workspace.parent)
 
     assert any(str(nested) in line for line in held)
     assert nested.is_symlink()
     assert (outside / "keep.txt").read_text() == "keep\n"
-    # What is not behind a link is still removed; the folder holding the link is held with it.
-    assert not (workspace / "drafts").exists()
-    assert not (workspace / "instructions").exists()
-    assert (workspace / "scratch").is_dir()
+    # The whole folder is held with the link: a removal is complete or it does not happen.
+    assert (workspace / "drafts" / "draft.txt").read_text() == "draft\n"
+    assert (workspace / "instructions").is_dir()
 
 
 # -- S10: an Update faulted in any pre-bind write leaves one coherent generation --------------------
@@ -284,30 +269,34 @@ def _inputs(code: Path, memory: Path, number: int) -> EnvironmentInputs:
     )
 
 
-def test_an_update_faulted_in_a_pre_bind_write_leaves_the_old_generation_coherent(
+def test_a_second_checkout_failure_leaves_no_binding_and_retry_recovers(
     tmp_path: Path,
 ) -> None:
-    """S10: a snapshot write faulted mid-Update leaves the old binding, snapshot and instructions
-    intact, and the partial next snapshot is removed."""
-
+    """A mixed pair is never served under the old binding after an in-place Update fails."""
     code = _repository(tmp_path, "code", {"a.py": "1\n"})
     memory = _repository(tmp_path, "memory", {"m.md": "m\n"})
     runtime = config(tmp_path)
     ref = EnvironmentRef(config=runtime, repository_id=REPO, task=TASK, leaf_id=LEAF)
     build = build_environment(EnvironmentRun(ref=ref, inputs=_inputs(code, memory, 7), now=NOW))
-    workspace = leaf_workspace(runtime, REPO, TASK, LEAF)
-    old_binding = build.binding
-    old_evidence = (workspace / "instructions" / "evidence.json").read_bytes()
-    (code / "a.py").write_text("2\n")
-    _git(code, "add", "-A")
-    _git(code, "commit", "-q", "-m", "two")
+    workspace = build.workspace
+    old_evidence = (workspace / "instructions/evidence.json").read_bytes()
+    for repository, name, body in (
+        (code, "a.py", "2\n"),
+        (memory, "m.md", "new memory\n"),
+    ):
+        (repository / name).write_text(body)
+        _git(repository, "add", "-A")
+        _git(repository, "commit", "-qm", "two")
+    original = explainer_workspace.checkout_tree
+
+    def fail_memory(repository, tree, destination, *, root):
+        assert read_binding(workspace) is None
+        if destination.name == "memory":
+            raise OSError("memory checkout fault")
+        return original(repository, tree, destination, root=root)
 
     with (
-        mock.patch.object(
-            explainer_workspace,
-            "write_snapshot",
-            side_effect=OSError("the tree cannot be written"),
-        ),
+        mock.patch.object(explainer_workspace, "checkout_tree", side_effect=fail_memory),
         pytest.raises(OSError),
     ):
         update_environment(
@@ -315,19 +304,18 @@ def test_an_update_faulted_in_a_pre_bind_write_leaves_the_old_generation_coheren
                 ref=ref,
                 inputs=_inputs(code, memory, 8),
                 now=NOW,
-                previous=old_binding,
+                previous=build.binding,
             )
         )
-
-    assert read_binding(workspace) == old_binding
-    assert (workspace / "instructions" / "evidence.json").read_bytes() == old_evidence
-    assert (workspace / old_binding.snapshot).is_dir()
-    assert not (workspace / "snapshot-2").exists()
-    # The next Update runs the same faulted step again and answers a coherent new generation.
-    update = update_environment(
-        EnvironmentRun(ref=ref, inputs=_inputs(code, memory, 8), now=NOW, previous=old_binding)
+    assert read_binding(workspace) is None
+    assert (workspace / "trees/code/a.py").read_text() == "2\n"
+    assert (workspace / "trees/memory/m.md").read_text() == "m\n"
+    assert (workspace / "instructions/evidence.json").read_bytes() == old_evidence
+    recovered = update_environment(
+        EnvironmentRun(ref=ref, inputs=_inputs(code, memory, 8), now=NOW)
     )
-    assert not update.current
-    assert update.binding.snapshot == "snapshot-2"
-    assert (workspace / "snapshot-2" / "code" / "a.py").read_text() == "2\n"
-    assert not (workspace / old_binding.snapshot).exists()
+    assert recovered.previous_number is None
+    assert read_binding(workspace) == recovered.binding
+    assert recovered.binding.binding.comparison_number == 8
+    assert (workspace / "trees/memory/m.md").read_text() == "new memory\n"
+    assert not list(workspace.glob("snapshot-*"))

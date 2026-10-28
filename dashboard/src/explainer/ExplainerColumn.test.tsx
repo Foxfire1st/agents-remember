@@ -317,6 +317,43 @@ describe('on Send (rule 4)', () => {
     expect(server.last('POST', BUILD)?.body?.requestId).toBe(firstRequestId);
   });
 
+  it('shows the server’s own reason for a build that stopped in `/state`, in the build box and the form', async () => {
+    // A failed build stays under `/state` as `{state: "failed", failedStep, error}`. The box names
+    // it, and his request form names the same sentence — never "no reason was given" (MIK-R211 rule 3).
+    const reason = 'the host could not read the memory tree: permission denied';
+    const server = backend({
+      [STATE]: {
+        body: explainerState({
+          seat: 'missing',
+          build: {
+            state: 'failed',
+            requestId: 'req-1',
+            step: 'checkout-code',
+            steps: [{ name: 'workspace' }, { name: 'checkout-code' }],
+            failedStep: 'checkout-code',
+            error: reason,
+          },
+        }),
+      },
+    });
+    const panel = view();
+    const box = await panel.findByTestId('explainer-build-failure');
+    expect(box.textContent).toContain(reason);
+    expect(box.textContent).not.toContain('no reason was given');
+    expect(box.dataset.step).toBe('checkout-code');
+    expect(steps(panel).map((step) => step.state)).toEqual(['done', 'failed']);
+    // Nothing claims the request will "go out" once the build has stopped.
+    expect(panel.queryByTestId('explainer-build-waiting')).toBeNull();
+
+    // The same sentence reaches the first-request form, so a new Send knows why the last one failed.
+    act(() => askFirstRequest(ADDRESS));
+    const form = await panel.findByTestId('explainer-first-request');
+    const failure = await panel.findByTestId('explainer-send-failure');
+    expect(form.contains(failure)).toBe(true);
+    expect(failure.textContent).toContain(reason);
+    expect(server.posts()).toEqual([]);
+  });
+
   it('composes reference-only requests when message is empty and surfaces held delivery', async () => {
     const server = backend({
       [STATE]: { body: explainerState() },
@@ -362,7 +399,7 @@ describe('on Send (rule 4)', () => {
     expect((await panel.findByTestId('explainer-held-notice')).textContent).toContain('rate-limited');
   });
 
-  it('never posts a second build for a second press while the first runs', async () => {
+  it('sends an empty request as the end-to-end review, and never posts a second build', async () => {
     const server = backend({
       [STATE]: [{ body: explainerState() }, { body: running }],
       [BUILD]: { status: 202, body: { attempt: 'a1', state: running } },
@@ -371,9 +408,15 @@ describe('on Send (rule 4)', () => {
     await waitFor(() => expect(panel.getByTestId('explainer-placeholder')).toBeTruthy());
     fireEvent.click(panel.getByTestId('explainer-explain'));
     const send = await panel.findByTestId('explainer-send');
-    // A Send with nothing to send is refused by the form itself.
-    expect((send as HTMLButtonElement).disabled).toBe(true);
-    expect(server.posts()).toEqual([]);
+    // An empty Send is the end-to-end review, not nothing to send: the form lets it go, and the
+    // route composes the ask (MIK-R211 v2 rule 5, the developer's F1).
+    expect((send as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(send);
+    await waitFor(() => expect(server.posts()).toHaveLength(1));
+    expect((server.last('POST', BUILD)?.body?.message as string) ?? '').toBe('');
+    // While the first build runs, a second press posts nothing.
+    fireEvent.click(send);
+    expect(server.posts()).toHaveLength(1);
   });
 });
 
@@ -422,12 +465,12 @@ describe('Retire (rule 7)', () => {
     await waitFor(() => expect(panel.getByTestId('explainer-column').dataset.phase).toBe('live'));
     fireEvent.click(panel.getByTestId('explainer-retire'));
     const confirm = await panel.findByTestId('explainer-retire-confirm');
-    expect(confirm.textContent).toContain('Retire the explainer of L181?');
+    expect(confirm.textContent).toContain('Remove the explainer of L181?');
     const ends = panel.getByTestId('explainer-retire-ends').textContent ?? '';
     const stays = panel.getByTestId('explainer-retire-stays').textContent ?? '';
     expect(ends).toContain('The seat');
     expect(ends).toContain('AR_EXPLAINER_WORKSPACE');
-    expect(stays).toContain('from a retired explainer');
+    expect(stays).toContain('published revision');
     expect(stays).toContain('grades');
     fireEvent.click(panel.getByTestId('explainer-retire-confirm-send'));
     expect(server.count('POST', RETIRE)).toBe(1);
@@ -438,6 +481,34 @@ describe('Retire (rule 7)', () => {
     const placeholder = await panel.findByTestId('explainer-placeholder');
     expect(placeholder).toBeTruthy();
     expect(panel.getByTestId('explainer-placeholder-headline').textContent).toMatch(/retired at \d\d:\d\d/);
+  });
+
+  it('clears the retired generation receipt when the next live seat starts', async () => {
+    const retired = explainerState({ generation: 1, retiredAt: '2026-10-19T15:12:00Z' });
+    const live = explainerState({ seat: 'live', agentId: 'a-exp-next', workspaceId: 'wks-next', generation: 2 });
+    const server = backend({
+      [STATE]: [
+        { body: explainerState({ seat: 'live', agentId: 'a-exp', workspaceId: 'wks', generation: 1 }) },
+        { body: retired },
+        { body: live },
+      ],
+      [RETIRE]: { body: { receipt: {
+        receiptId: 'r1', agentId: 'a-exp', generation: 1, state: 'finished', step: 'finished',
+        endedByMarker: 0, endedByTree: 0, remaining: [], detail: '',
+      }, state: retired } },
+      [BUILD]: { status: 202, body: { attempt: 'a2', state: live } },
+    });
+    const panel = view();
+    await waitFor(() => expect(panel.getByTestId('explainer-column').dataset.phase).toBe('live'));
+    fireEvent.click(panel.getByTestId('explainer-retire'));
+    fireEvent.click(await panel.findByTestId('explainer-retire-confirm-send'));
+    await panel.findByTestId('explainer-retire-receipt');
+    await panel.findByTestId('explainer-placeholder');
+    fireEvent.click(panel.getByTestId('explainer-explain'));
+    fireEvent.click(await panel.findByTestId('explainer-send'));
+    await waitFor(() => expect(server.count('POST', BUILD)).toBe(1));
+    await waitFor(() => expect(panel.getByTestId('explainer-column').dataset.phase).toBe('live'));
+    expect(panel.queryByTestId('explainer-retire-receipt')).toBeNull();
   });
 
   it('is offered only while a seat exists', async () => {

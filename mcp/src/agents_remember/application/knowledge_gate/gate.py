@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Final
@@ -76,6 +77,7 @@ from agents_remember.kernel.git_command import (
 )
 from agents_remember.kernel.recorded_reads import recorded_reads, replay_reads
 from agents_remember.memory.conversion.base import pinned_version
+from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge_index import MemoryTreeError, git_tree_snapshot
 from agents_remember.memory_quality.knowledge_validator import (
     KnowledgeTree,
@@ -117,6 +119,7 @@ ITEM_OPEN: Final = "knowledge-item-open"
 RUN_INCOMPLETE: Final = "knowledge-worklist-incomplete"
 VALIDATOR: Final = "knowledge-validator"
 _REFUSAL_LINES: Final = 40
+_CANDIDATE_PARSES: BoundedMemo[tuple[str, str], KnowledgeSide] = BoundedMemo(8)
 
 
 @dataclass(frozen=True)
@@ -426,7 +429,13 @@ def _candidate(
         return _held_candidate(trees, owner, knowledge, code)
     try:
         snapshot = git_tree_snapshot(trees.memory_repository, trees.memory_tree)
-        candidate = KnowledgeSide.from_snapshot("K_C", snapshot)
+        key = (snapshot.location, snapshot.key)
+        held = _CANDIDATE_PARSES.get(key)
+        if held is not None and held[0].files == snapshot.files:
+            candidate = deepcopy(held[0])
+        else:
+            candidate = KnowledgeSide.from_snapshot("K_C", snapshot)
+            _CANDIDATE_PARSES.put(key, deepcopy(candidate))
     except (KnowledgeSideUnreadable, MemoryTreeError, OSError, ValueError) as error:
         return _unreadable("K_C", error)
     except subprocess.SubprocessError as error:

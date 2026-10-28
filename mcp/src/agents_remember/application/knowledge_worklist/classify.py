@@ -34,11 +34,12 @@ record file differs.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Hashable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Final, Literal
 
 from agents_remember.application.knowledge_worklist.code import (
+    CodeReadError,
     CodeTrees,
     Hunk,
     Resolved,
@@ -137,6 +138,9 @@ class Classifier:
     base: KnowledgeSide
     renames: Mapping[str, str]
     _done: dict[str, Classification] = field(default_factory=dict)
+    _resolved: dict[Hashable, Resolved | None] = field(default_factory=dict)
+    """Each resolution of this run, by its exact inputs: :meth:`prepare` and the classification
+    ask the same ones (a failed resolution is not kept and raises again)."""
 
     def classified(self) -> tuple[Classification, ...]:
         """Every entry classified so far, by scope or to decide a re-anchor."""
@@ -149,6 +153,58 @@ class Classifier:
             found = self._classify(self.base.entries[entry_id])
             self._done[entry_id] = found
         return found
+
+    def prepare(self, entry_ids: Iterable[str]) -> None:
+        """Read ahead what classifying these entries reads, and search ahead for their binders.
+
+        The entries' blobs are read in batches. A symbol name that may not bind once at C (its
+        path absent or renamed at C, or not one binding there) is searched for in C, side by side,
+        as :meth:`CodeTrees.unique_binder` searches. These are the same questions the
+        classification asks, answered by the same functions; anything not answered here is asked
+        there, so no class depends on this (D569).
+        """
+
+        entries = [
+            indexed
+            for entry_id in entry_ids
+            if entry_id not in self._done and (indexed := self.base.entries.get(entry_id))
+        ]
+        # The blobs the entries resolve in, read in batches rather than one ``cat-file`` each.
+        self.code.warm(indexed.path for indexed in entries)
+        symbols = [
+            (indexed, locator)
+            for indexed in entries
+            if (locator := indexed.entry.anchor.locator.to_document()).get("kind") == "symbol"
+        ]
+        if not symbols:
+            return
+        try:
+            self.code.base()
+            self.code.candidate()
+        except CodeReadError:
+            return  # the classification meets the unreadable tree itself
+        self.code.prepare_binders(
+            {
+                str(locator["name"])
+                for indexed, locator in symbols
+                if self._seeks_binder(indexed.path, locator, indexed.entry.anchor)
+            }
+        )
+
+    def _seeks_binder(self, path: str, locator: Mapping[str, Any], anchor: Anchor) -> bool:
+        """Whether :meth:`_classify_anchor` reaches ``moved_or_absent`` for this symbol anchor,
+        decided by the same resolutions in the same order (they are kept for it)."""
+
+        base_blob = self.code.base().get(path)
+        candidate_blob = self.code.candidate().get(path)
+        try:
+            at_base = self._resolve(path, locator, anchor.blob, base_blob, side="base")
+            at_candidate = self._resolve(path, locator, anchor.blob, candidate_blob)
+        except CodeReadError:
+            return False  # the classification meets the failure itself
+        if anchor.blob != base_blob and (at_base is None or at_base.content != anchor.content):
+            return False
+        return candidate_blob is None or path in self.renames or at_candidate is None
 
     def classify_anchor(self, key: str, anchor: Anchor) -> Classification:
         """A ``reconsider_on`` link's anchor, classified like an entry (MIK-R14 rule 1).
@@ -222,7 +278,16 @@ class Classifier:
         *,
         side: str = "candidate",
     ) -> Resolved | None:
-        return None if blob is None else self.code.resolve(path, locator, recorded, blob, side=side)
+        if blob is None:
+            return None
+        try:
+            key: Hashable = (path, tuple(sorted(locator.items())), recorded, blob, side)
+            hash(key)
+        except TypeError:
+            return self.code.resolve(path, locator, recorded, blob, side=side)
+        if key not in self._resolved:
+            self._resolved[key] = self.code.resolve(path, locator, recorded, blob, side=side)
+        return self._resolved[key]
 
     def _hits(
         self,

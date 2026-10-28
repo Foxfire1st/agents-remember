@@ -132,7 +132,7 @@ export function useReadingValue(props: PageProps, layout: DiffMode): ReadingCont
   const { workspace } = reads;
   const { changeSet, selection, select } = page;
   const context = useCodeContext();
-  const worklist = matchingTreeRead(changeSet.leafTrees, changeSet.number)?.worklist;
+  const worklist = matchingTreeRead(changeSet.leafTrees, changeSet.number)?.worklist_summary ?? matchingTreeRead(changeSet.leafTrees, changeSet.number)?.worklist;
   const planning = useMemo(() => planningMarks(worklist), [worklist]);
   const familyMembers = useMemo(() => familyMembersOf(changeSet.model), [changeSet.model]);
   // The slot sits under the subject the selection reads (a block's invariant); under an older
@@ -201,7 +201,7 @@ function changedTotal(summary: IntentSummaryRead): number | '…' | 'unavailable
 
 function worklistCount(read: ReviewTreesRead | null, number: number | undefined): string {
   if (read === null || read.phase === 'loading') return '…';
-  return worklistAnswer(matchingTreeRead(read, number)?.worklist) ?? 'not available';
+  return worklistAnswer(matchingTreeRead(read, number)?.worklist_summary ?? matchingTreeRead(read, number)?.worklist) ?? 'not available';
 }
 
 export function PageTree({ props, traversal }: { props: PageProps; traversal: string }) {
@@ -220,6 +220,8 @@ export function PageTree({ props, traversal }: { props: PageProps; traversal: st
       onSelect={(next) => page.select(next, { keepTree: true })}
       onOpenGroup={page.openGroup}
       query={workspace.query}
+      queryPending={changeSet.searching}
+      queryProblem={changeSet.searchProblem}
       onQuery={workspace.setQuery}
       changedFiles={total}
       allChanges={total}
@@ -230,6 +232,7 @@ export function PageTree({ props, traversal }: { props: PageProps; traversal: st
       onOpenWorklist={() => workspace.setWorklist(!workspace.worklist)}
       status={status}
       codeFacts={{ count: codeChangesCount(navigation.catalogue.outline, changeSet.leafTrees, changeSet.number), comparison: changeSet.number }}
+      stale={changeSet.stale}
     />
   );
 }

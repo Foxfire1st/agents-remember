@@ -37,7 +37,6 @@ from agents_remember.application.review_evidence_packet import (
     intended_source_root,
     planned_reference,
 )
-from agents_remember.application.review_evidence_read import DEFAULT_READ_LIMITS
 from agents_remember.application.review_planned_comparison import explainer_application_ports
 from agents_remember.application.review_tree_comparison import (
     ReviewTrees,
@@ -68,9 +67,10 @@ from agents_remember.serving.explainer import (
     ExplainerWiring,
     _SendRequest,
     explainer_composition,
-    register_explainer_routes,
 )
+from agents_remember.serving.explainer_routes import register_explainer_routes
 from agents_remember.serving.review_trees import ReviewTreesQuery
+from agents_remember_test_support.testing.prepared_comparison import prepared_from_port
 from agents_remember_test_support.testing.review_git_trees import CODE_FILE, build_world
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -262,7 +262,6 @@ def test_a_packet_level_check_refuses_the_same_claim() -> None:
         memory_before=_side("available", index_state="complete"),
         memory_after=_side("available", index_state="complete"),
         evidence_map=EvidenceMap(coverage="the planned change set"),
-        limits=_limits(),
         supplemental=(receipt,),
         claims=(_claim("recorded-fact", _receipt_basis(receipt)),),
         recorded_at="planned-master-tip",
@@ -422,7 +421,6 @@ def test_duplicate_receipt_ids_or_sources_and_inconsistent_basis_states_are_refu
                 memory_before=_side("available", index_state="complete"),
                 memory_after=_side("available", index_state="complete"),
                 evidence_map=EvidenceMap(coverage="the planned change set"),
-                limits=_limits(),
                 supplemental=bad_pair,
                 recorded_at="planned-master-tip",
             )
@@ -456,7 +454,6 @@ def test_duplicate_receipt_ids_or_sources_and_inconsistent_basis_states_are_refu
                 memory_before=_side("available", index_state="complete"),
                 memory_after=_side("available", index_state="complete"),
                 evidence_map=EvidenceMap(coverage="the planned change set"),
-                limits=_limits(),
                 supplemental=(unread,),
                 claims=(_claim(classification, _receipt_basis(unread)),),
                 recorded_at="planned-master-tip",
@@ -484,7 +481,6 @@ def test_duplicate_receipt_ids_or_sources_and_inconsistent_basis_states_are_refu
         memory_before=_side("available", index_state="complete"),
         memory_after=_side("available", index_state="complete"),
         evidence_map=EvidenceMap(coverage="the planned change set"),
-        limits=_limits(),
         supplemental=(json_rec, md_rec),
         claims=(
             _claim("intended", _receipt_basis(json_rec), claim_id="c-json"),
@@ -503,10 +499,6 @@ def test_duplicate_receipt_ids_or_sources_and_inconsistent_basis_states_are_refu
 
 def _side(state: str, index_state: str | None = None) -> SideState:
     return SideState(state, index_state=index_state)
-
-
-def _limits() -> Any:
-    return DEFAULT_READ_LIMITS
 
 
 def _record(*, tree: str, memory_tree: str) -> ReviewTreeComparisonRecord:
@@ -600,7 +592,11 @@ def _real_composition(world: Any, host: _RecordingHost) -> Any:
     composed = explainer_composition(
         world.config,
         port,
-        wiring=ExplainerWiring(host=host, application=explainer_application_ports()),
+        wiring=ExplainerWiring(
+            host=host,
+            application=explainer_application_ports(),
+            comparison_prepare=prepared_from_port(port),
+        ),
     )
     app = FastAPI()
     register_explainer_routes(app, composed)

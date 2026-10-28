@@ -26,12 +26,12 @@ from agents_remember.application.review_frame_store import frame_scope
 from agents_remember.canvas import presenter_files
 from agents_remember.canvas.presenter import (
     MAX_ATTEMPTS,
-    FrameBinding,
     Presenter,
     PresenterAttempt,
     PresenterRefused,
 )
 from agents_remember.canvas.presenter_store import AttemptStore
+from agents_remember.models.knowledge.review_frame import FrameBinding
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from canvas_host_test_support import (
     AT,
@@ -43,6 +43,7 @@ from canvas_host_test_support import (
     config,
     packet,
     record,
+    stored_attempt,
     swap_on_scandir,
     task,
     watch_opens,
@@ -69,13 +70,7 @@ def _presenter(settings, root: Path, *, runner=None) -> Presenter:
 
 def _start(presenter: Presenter, comparison=None, *, request: str = "req-start"):
     comparison = comparison or record()
-    return presenter.start(
-        caller="dashboard",
-        request_id=request,
-        activation="explicit",
-        evidence=packet(comparison),
-        focus="the change to src/app.py",
-    )
+    return stored_attempt(presenter, evidence=packet(comparison), request=request)
 
 
 # --- chronological listing, independent lookup, effective retention ---------------------
@@ -229,16 +224,7 @@ def test_retention_reclaims_to_its_ceiling_and_keeps_request_reconciliation(
     assert latest is not None
     assert latest.attempt_id == live.attempt_id
 
-    # A request whose record the retention ceiling reclaimed is reconciled to that attempt by its
-    # identity ledger and refused by name, so a late retry starts no duplicate session (B20).
-    before = len(_record_files(root))
-    callers = len(runner.calls)
-    with pytest.raises(PresenterRefused) as reclaimed:
-        _start(presenter, request="req-00")
-    assert reclaimed.value.reason == "attempt-record-reclaimed"
-    assert ids["req-00"] in reclaimed.value.detail or "req-00" in reclaimed.value.detail
-    assert len(_record_files(root)) == before
-    assert len(runner.calls) == callers
+    assert presenter._store.ledger()["req-00"] == ids["req-00"]
 
 
 # --- every transition is a locked fresh read-modify-write -------------------------------

@@ -10,7 +10,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import type { ReviewOutline } from '../../data/review';
 import { changeSetModel, type ChangeSetInputs, type SubjectNode } from './changeSetOrder';
-import { l181Inputs } from './changeSetOrder.test-utils';
+import { cardsOf, l181Answer, l181Entries, l181Inputs } from './changeSetOrder.test-utils';
+import { measured } from './lineChanges.test-utils';
 import type { TreeLane } from './ReviewDestinations';
 import type { ReviewSelection } from './reviewSelection';
 import { ReviewTree } from './tree/ReviewTree';
@@ -179,9 +180,12 @@ it('keeps a walked family with its kept tag in Changed', () => {
   expect(within(family).getByTestId('review-family-kept').textContent).toBe('kept');
 });
 
+// L181's card read with the producer's line measurement, which the capture predates (W10).
+const measuredL181 = () => l181Inputs({ cards: cardsOf(l181Answer, measured(l181Entries())) });
+
 it('lists the changed locations under a subject and opens a group in the reading column only', () => {
   const onOpenGroup = vi.fn();
-  const view = render(<Harness inputs={l181Inputs()} onOpenGroup={onOpenGroup} />);
+  const view = render(<Harness inputs={measuredL181()} onOpenGroup={onOpenGroup} />);
   expect(view.getByRole('button', { name: /^INV-1ZKP4R .*weaken · 15 loc\.$/ })).toBeTruthy();
   // 15 changed entries at 13 regions: one row per region (captured: the turn_ended.ts triple).
   expect(view.getAllByTestId('review-tree-location')).toHaveLength(13);
@@ -296,7 +300,7 @@ it('moves focus between rows, pinned rows included, with the arrow keys', () => 
 // text, so colour is not their only carrier; other reasons stay as they are.
 it('draws the line counts of location and lane-file rows in mint and alarm red, signs kept', () => {
   const counted: TreeLane = { ...lane, files: [{ ...lane.files[0], reason: '+16 −4' }, lane.files[1]] };
-  const view = render(<Harness inputs={l181Inputs()} laneRows={counted} />);
+  const view = render(<Harness inputs={measuredL181()} laneRows={counted} />);
   const counts = (row: HTMLElement) =>
     [...row.querySelectorAll('span')].filter((span) => /^[+−]\d+$/.test(span.textContent ?? ''));
   const locations = view.getAllByTestId('review-tree-location');
@@ -321,6 +325,31 @@ it('draws the line counts of location and lane-file rows in mint and alarm red, 
   expect(file.getAttribute('aria-label')).toBe('dashboard/src/a.ts +16 −4');
   expect(counts(unknown)).toHaveLength(0);
   expect(unknown.textContent).toBe('b.ts1 of 3 hunks unknown');
+});
+
+// MIK-R211 v1 rule 5: the sidebar renders as before L183. The grade a location row carries sits in
+// the row's existing trailing cell, so every row of the real tree keeps its three cells — the caret,
+// the name that gives way, and the reason (or grade chip beside it) whole at the right — and a graded
+// row changes no other row's columns.
+it('keeps every row of the tree three cells wide when a location carries a grade', () => {
+  const plain = changeSetModel(l181Inputs(), 'priority', 'changed', { selection: null });
+  const entry = plain.groups.flatMap((group) => group.subjects.flatMap((subject) => subject.changed))[0]
+    .card.entries[0].id;
+  const graded = l181Inputs({
+    categories: [{ name: 'confidence', scale: [{ grade: 'high' }] }],
+    grades: [{ reference: entry, category: 'confidence', grade: 'high', reason: 'one guard', stale: false }],
+  });
+  const view = render(<Harness inputs={graded} />);
+  const rows = [...view.container.querySelectorAll<HTMLElement>('[data-tree-node]')].filter((row) =>
+    row.className.includes(styles.row),
+  );
+  expect(rows.length).toBeGreaterThan(4);
+  expect(rows.map((row) => row.children.length)).toEqual(rows.map(() => 3));
+  const chips = view.getAllByTestId('review-judgment-chip');
+  expect(chips).toHaveLength(1);
+  // The one chip is a child of its row's trailing cell, never a cell of its own.
+  expect(chips[0].parentElement).toBe(chips[0].closest<HTMLElement>('[data-tree-node]')?.lastElementChild);
+  expect(chips[0].parentElement?.className).toBe(styles.reasonCell);
 });
 
 // MIK-R89 v2 rule 1 as amended by d9a1ec8f item 4 (mockup app.js:241-255): the Sort popup draws the

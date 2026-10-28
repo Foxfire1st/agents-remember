@@ -108,9 +108,10 @@ export function useReviewCatalogue(
     let mounted = true;
     const seq = ++reads.current;
     const live = () => mounted && reads.current === seq;
+    const controller = new AbortController();
     const boundGeneration = observed.current;
     setRead({ loading: true, comparisonKey, targetKey, generation: boundGeneration });
-    void intentReviewEntries(repo, master, leaf, '', number).then(
+    void intentReviewEntries(repo, master, leaf, '', number, controller.signal).then(
       (result) => {
         if (live())
           setRead({
@@ -133,6 +134,7 @@ export function useReviewCatalogue(
     );
     return () => {
       mounted = false;
+      controller.abort();
     };
   }, [repo, master, leaf, number, nonce, targetKey, comparisonKey]);
   const refresh = () => {

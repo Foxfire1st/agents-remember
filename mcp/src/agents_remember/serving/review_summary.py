@@ -22,6 +22,7 @@ refusal -- still a 200, so the summary keeps its one status set.
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -31,6 +32,7 @@ from agents_remember.models.knowledge.review_intent_summary import ReviewIntentS
 from agents_remember.models.knowledge.review_refusal import ReviewRefusal
 from agents_remember.serving.changeset_cache import ChangesetCache
 from agents_remember.serving.intent_summary_cache import IntentSummaryCache, ReviewIntentSummaryPort
+from agents_remember.serving.read_disconnect import read_while_connected
 
 __all__ = [
     "KNOWLEDGE_REVIEW_SUMMARY_ROUTE",
@@ -62,14 +64,17 @@ def register_review_summary_route(
         KNOWLEDGE_REVIEW_SUMMARY_ROUTE,
         responses={304: {"description": "Summary unchanged; ETag only, no body"}},
     )
-    def api_review_intent_summary(
+    async def api_review_intent_summary(
         request: Request, repo: str, master: str, leaf: str, comparison: int | None = None
     ) -> Response:
         if reader is None:
             return JSONResponse(_UNWIRED_SUMMARY, status_code=503)
         if comparison is not None and comparison < 0:
             return JSONResponse(_negative_comparison(repo, master, leaf, comparison))
-        return reader.response(request, repo, master, leaf, comparison)
+        # A read whose client went away stops computing and keeps nothing (D569 mean 4).
+        return await read_while_connected(
+            request, partial(reader.response, request, repo, master, leaf, comparison)
+        )
 
 
 def _negative_comparison(repo: str, master: str, leaf: str, comparison: int) -> dict[str, Any]:

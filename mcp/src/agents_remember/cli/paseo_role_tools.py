@@ -55,8 +55,9 @@ from agents_remember.cli.paseo_bridge import (
 from agents_remember.cli.paseo_catalog import runnable_harnesses
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.paseo_role_caller import (
-    _caller,
+    EXPLAINER_SENDER,
     _host_unreachable,
+    _message_caller,
     role_message_limit,
     sender_line,
     starting_agent,
@@ -255,23 +256,10 @@ def send_role_message(
     recipient: _Recipient | None = None
     filed: dict[str, Any] | None = None
     try:
-        binding = _caller(config, environment)
+        binding = _message_caller(config, environment)
         limit = role_message_limit(config, binding)
         _refuse_over_limit(call, limit)
-        selection = RoleSelection.model_validate(
-            dict(
-                role=binding.role,
-                sprintDocumentRef=binding.sprint_ref,
-                masterDocumentRef=binding.master_ref,
-                taskDocumentRef=binding.task_ref,
-            )
-        )
-        own_path = _receipt_path(
-            config,
-            selection,
-            uuid.UUID(binding.request_id) if binding.role in TASKLESS_ROLES else None,
-        )
-        own_receipt = _read_receipt(own_path)
+        own_path, own_receipt = _own_receipt(config, binding)
         sender = starting_agent(config, binding)
         try:
             recipient = _resolve_recipient(config, call, binding)
@@ -308,16 +296,39 @@ def send_role_message(
     return result
 
 
+def _own_receipt(
+    config: McpRuntimeConfig, binding: AgentBinding
+) -> tuple[Path | None, dict[str, Any] | None]:
+    """The sender's own execution receipt and its path; a leaf explainer has neither (D607)."""
+
+    if binding.role == EXPLAINER_SENDER:
+        return None, None
+    selection = RoleSelection.model_validate(
+        dict(
+            role=binding.role,
+            sprintDocumentRef=binding.sprint_ref,
+            masterDocumentRef=binding.master_ref,
+            taskDocumentRef=binding.task_ref,
+        )
+    )
+    own_path = _receipt_path(
+        config,
+        selection,
+        uuid.UUID(binding.request_id) if binding.role in TASKLESS_ROLES else None,
+    )
+    return own_path, _read_receipt(own_path)
+
+
 def _collect_own_reports(
     config: McpRuntimeConfig,
     binding: AgentBinding,
-    own_path: Path,
+    own_path: Path | None,
     own_receipt: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     """Collect the sender's execution reports; failures ride along, never abort."""
 
     _ = config
-    if not own_receipt or own_receipt.get("agentId") != binding.agent_id:
+    if own_path is None or not own_receipt or own_receipt.get("agentId") != binding.agent_id:
         return None
     try:
         collection = collect_execution_reports(own_receipt)

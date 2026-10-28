@@ -1,4 +1,4 @@
-"""The presenter's additional read grant uses R102's exact-tree, bounded source reader.
+"""The presenter's additional read grant uses R102's exact-tree source reader, in full.
 
 The packet is the authority. The author chooses a side and relative path, never a repository,
 revision or current checkout. The caller admits this packet for its own repository/task/leaf;
@@ -13,7 +13,11 @@ from agents_remember.models.knowledge.review_evidence import EvidencePacket
 from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
 
 
-def source(packet: EvidencePacket, side: str, path: str, *, start: int, end: int) -> dict:
+def source(
+    packet: EvidencePacket, side: str, path: str, *, start: int, end: int | None = None
+) -> dict:
+    """One path at one of the packet's sides, from line ``start`` to ``end`` or the file's end."""
+
     binding = packet.comparison
     record = ReviewTreeComparisonRecord.model_validate(
         {

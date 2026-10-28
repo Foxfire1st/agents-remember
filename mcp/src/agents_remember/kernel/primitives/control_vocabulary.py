@@ -14,8 +14,6 @@ from typing import Final
 EXECUTIONS_DIRECTORY: Final = "paseo-native-executions"
 #: The schema name every execution receipt of this line carries.
 RECEIPT_SCHEMA: Final = "ar-role-execution/v1"
-#: The report log one master's architect reads.
-REPORT_LOG_NAME: Final = "reports.jsonl"
 #: The held-message store's schema name.
 HELD_STORE_SCHEMA: Final = "ar-held-messages/v1"
 #: The reason a hold names when the provider limit is what waits.
@@ -32,6 +30,5 @@ __all__ = [
     "HELD_STORE_SCHEMA",
     "PROVIDER_LIMIT_REASON",
     "RECEIPT_SCHEMA",
-    "REPORT_LOG_NAME",
     "SEND_OUTCOME_UNKNOWN",
 ]

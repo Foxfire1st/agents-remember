@@ -97,7 +97,7 @@ it("names the leaf by its short id, so the title fits, and lets a record label g
   expect(label.textContent).toBe('Intent review · L181');
   expect(label.getAttribute('title')).toBe('260928-MIK-L181');
   expect(classes(view.getByTestId('review-history'))).toEqual(expect.arrayContaining(['flex-sh_100', 'min-w_9ch']));
-  expect(classes(view.getByTestId('review-title')).some((name) => name.startsWith('flex-sh_'))).toBe(false);
+  expect(classes(view.getByTestId('review-title'))).toEqual(expect.arrayContaining(['flex-sh_3', 'max-w_14rem']));
   view.unmount();
   const other = render(<ReviewHeader leaf="synthetic-leaf" onBack={() => undefined} />);
   const plain = other.getByTestId('review-title').parentElement!.querySelector('b')!;

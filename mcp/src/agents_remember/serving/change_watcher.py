@@ -14,7 +14,7 @@ The authoritative input list (R1), derived reader-by-reader from
 ==============================================  =================================================
 watched root                                    readers it feeds
 ==============================================  =================================================
-``<coord>/tasks``                               native task sources, contracts and engine facts
+``TaskInputPlan`` shallow directories           native task sources, contracts and engine facts
 ``activity_directory(config)``                  native host activity publication
 ``<obs>/workspace``                             attention dismissals
 ``<obs>/drift``                                 read_drift_snapshots
@@ -83,21 +83,14 @@ import asyncio
 import contextlib
 import logging
 import os
-import threading
+import stat
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import time as _wall_now
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from agents_remember.canvas.explainer_paths import (
-    GENERATION_SUFFIX,
-    leaf_workspace,
-)
-from agents_remember.canvas.explainer_state import (
-    generation,
-    read_binding,
-)
+from agents_remember.controlplane.held_store_discovery import receipt_holder_chain
 from agents_remember.kernel.file_lock import lock_path_for
 from agents_remember.kernel.own_writes import OWN_WRITES
 from agents_remember.observer.store import WORKSPACE_CURSOR_FILE, WORKSPACE_LOCK_FILE
@@ -107,31 +100,28 @@ from agents_remember.serving.background_accounting import (
     measured,
     offload,
 )
-from agents_remember.serving.explainer_watcher import (
-    CapturedComparison,
-    ComparisonMeasurement,
-    GitComparisonOwner,
-    LeafSelection,
-    MovedNotice,
-    MoveNoticeChannel,
-    WatcherApplicationPorts,
-    is_planned,
-    leaf_seats,
-    measure_notice,
-    notices,
-    unexplained_turn_notice,
+from agents_remember.serving.projections.host_activity import activity_directory
+from agents_remember.serving.projections.paths import (
+    drift_snapshot_dir,
+    observer_logs_root,
 )
-from agents_remember.serving.projections.host_activity import activity_directory, turn_ended_agents
-from agents_remember.serving.projections.paths import drift_snapshot_dir, observer_logs_root
 from agents_remember.serving.projections.projection_inputs import (
     ALL_PROJECTION_DOMAINS,
     HEALING_PROJECTION_DOMAINS,
     ProjectionDomain,
 )
-from agents_remember.serving.projections.projection_store import LATEST_METRICS, LATEST_STATE
+from agents_remember.serving.projections.projection_store import (
+    LATEST_METRICS,
+    LATEST_STATE,
+)
+from agents_remember.serving.projections.task_input_plan import (
+    TaskInputPlan,
+    task_input_plan,
+)
+from agents_remember.serving.series_preparation_events import offer_series_changes
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable
 
     from watchfiles import Change
 
@@ -272,19 +262,19 @@ def is_held_receipt(path: Path) -> bool:
     )
 
 
-def shallow_projection_input_roots(config: McpRuntimeConfig) -> frozenset[Path]:
+def _fixed_shallow_roots(config: McpRuntimeConfig) -> frozenset[Path]:
     """The roots watched **without** recursion (L190-R1-F10).
 
     These two parents are bounded directories (one small store file each) whose subtrees are
     not: recursing into them would register the product's scratch trees and the lifecycle
-    archives with the kernel watcher. The rest of :func:`projection_input_roots` stays
+    archives with the kernel watcher. The rest of :func:`projection_watch_plan` stays
     recursive, as it always was.
     """
 
     return frozenset({attention_controlplane_root(config), attention_held_root(config)})
 
 
-def projection_input_roots(config: McpRuntimeConfig) -> list[Path]:
+def _fixed_projection_roots(config: McpRuntimeConfig) -> list[Path]:
     """The currently-existing watch roots, derived from what ``project_and_write`` reads.
 
     Only existing input roots are returned (``watchfiles`` refuses missing paths); dirs
@@ -294,13 +284,12 @@ def projection_input_roots(config: McpRuntimeConfig) -> list[Path]:
     coordination_root = config.coordination_root
     observer = observer_logs_root(coordination_root)
     candidates: list[Path] = [
-        coordination_root / "tasks",
         observer / "workspace",
         drift_snapshot_dir(coordination_root),
         coordination_root / "temp" / "worktree-start",
         coordination_root / "temp" / "tool-reports",
         # L190-R1-F10: the native attention stores, on their real paths. The two parents are
-        # partitioned out to the shallow lane by :func:`shallow_projection_input_roots`.
+        # partitioned out to the shallow lane by the plan's shallow set.
         attention_activation_root(config),
         attention_controlplane_root(config),
         attention_held_root(config),
@@ -322,6 +311,77 @@ def projection_input_roots(config: McpRuntimeConfig) -> list[Path]:
     # watcher (permission-denied on the container data dir) and would have re-projected on every
     # WAL write.
     return [path for path in candidates if path.exists()]
+
+
+@dataclass(frozen=True)
+class ProjectionWatchPlan:
+    task_inputs: TaskInputPlan
+    receipt_chain: tuple[Path, ...]
+    roots: tuple[Path, ...]
+    shallow: frozenset[Path]
+    task_directories: frozenset[Path] = field(init=False, compare=False, repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "task_directories",
+            frozenset(node.path for node in self.task_inputs.directories),
+        )
+
+    def topology_candidate(self, path: Path) -> bool:
+        return self.task_inputs.topology_candidate(path) or path in self.receipt_chain
+
+    def topology_change(self, path: Path, *, is_directory: bool) -> bool:
+        return self.task_inputs.topology_change(path, is_directory=is_directory) or (
+            path in self.receipt_chain and (is_directory or path in self.roots)
+        )
+
+    def admits_file(self, path: Path) -> bool:
+        if path.parent in self.task_directories:
+            return self.task_inputs.accepts_file(path)
+        # These are only discovery parents. Actual holder data retains its recursive root.
+        return path.parent not in self.receipt_chain[:-1]
+
+
+def projection_watch_plan(config: McpRuntimeConfig) -> ProjectionWatchPlan:
+    tasks = task_input_plan(config.coordination_root / "tasks", include_series_refs=True)
+    if not tasks.complete:
+        raise OSError("task input discovery incomplete: " + "; ".join(tasks.errors))
+    chain = receipt_holder_chain(config.coordination_root)
+    discovery = tuple(path for path in chain[:-1] if path.is_dir())
+    roots = set(_fixed_projection_roots(config)) | set(tasks.shallow_dirs) | set(discovery)
+    shallow = _fixed_shallow_roots(config) | frozenset(tasks.shallow_dirs) | frozenset(discovery)
+    return ProjectionWatchPlan(tasks, chain, tuple(sorted(roots)), shallow)
+
+
+def _judge_planned_changes(changes: set[tuple[Change, str]], plan: ProjectionWatchPlan):
+    semantic: set[tuple[Change, str]] = set()
+    topology = False
+    replace_watch = False
+    for change, raw in changes:
+        path = Path(raw)
+        if plan.topology_candidate(path):
+            try:
+                directory = stat.S_ISDIR(path.stat().st_mode)
+            except FileNotFoundError:
+                directory = False
+            except OSError:
+                # Failed classification requests the authoritative off-loop re-derive.
+                topology = True
+                replace_watch = True
+                continue
+            if (
+                not directory or _native_kind(change) != "modified" or path not in plan.roots
+            ) and plan.topology_change(path, is_directory=directory):
+                topology = True
+                replace_watch |= directory or path in plan.roots
+            # Directory topology never enters a supposedly complete file sample.
+            if directory or path in plan.roots:
+                continue
+        if plan.admits_file(path) and is_projection_input_event(raw):
+            semantic.add((change, raw))
+    paths, deferred, overflow = _judge_input_changes(semantic)
+    return paths, deferred, overflow, topology, replace_watch
 
 
 def is_projection_input_event(path: str) -> bool:
@@ -484,6 +544,8 @@ class ChangeWatch(Protocol):
     Mirrors ``LandingStateRefresh``: the projector owns the task lifecycle, tests inject
     fakes, and :class:`ProjectionInputWatcher` is the live implementation.
     """
+
+    def bind_series_changed(self, callback: Callable[[str, str], bool]) -> None: ...
 
     async def run(self, pacer: WakeTarget) -> None: ...
 
@@ -849,6 +911,9 @@ class _LaneContext:
     failures: list[BaseException]
     registration: _WatchRegistration
     reconcile: bool
+    plan: ProjectionWatchPlan
+    replan: asyncio.Event
+    replace_watch: asyncio.Event
 
 
 class ProjectionInputWatcher:
@@ -867,7 +932,9 @@ class ProjectionInputWatcher:
         *,
         refresh_seconds: float = WATCH_REFRESH_SECONDS,
         ledger: BackgroundLedger | None = None,
+        series_changed: Callable[[str, str], bool] | None = None,
     ) -> None:
+        self._series_changed = series_changed
         self._config = config
         self._refresh_seconds = refresh_seconds
         self._ledger = ledger
@@ -888,17 +955,17 @@ class ProjectionInputWatcher:
                 # Root derivation sits INSIDE the retry guard: a transient stat/glob failure
                 # must follow the same loud degrade-and-retry path as a watch failure -- not
                 # escape run() and kill the task for good (losing the periodic self-heal).
-                roots = await offload(
-                    OWNER_PROJECTION, self._ledger, projection_input_roots, self._config
+                plan = await offload(
+                    OWNER_PROJECTION, self._ledger, projection_watch_plan, self._config
                 )
-                if not roots:
+                if not plan.roots:
                     # A fresh/empty coordination tree: nothing to watch yet. Not an error --
                     # fixed-interval pacing until the first input dir appears.
                     pacer.set_watcher_healthy(False)
                     await asyncio.sleep(self._refresh_seconds)
                     continue
                 # Returns when the root set changed (restart with the fresh set).
-                await self._watch_once(roots, pacer, reconcile=established_before)
+                await self._watch_once(plan, pacer, reconcile=established_before)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -911,7 +978,9 @@ class ProjectionInputWatcher:
                 await asyncio.sleep(self._refresh_seconds)
             established_before = True
 
-    async def _watch_once(self, roots: list[Path], pacer: WakeTarget, *, reconcile: bool) -> None:
+    async def _watch_once(
+        self, plan: ProjectionWatchPlan, pacer: WakeTarget, *, reconcile: bool
+    ) -> None:
         """One watch generation over a fixed root set; returns when the set moved.
 
         The generation runs up to two lanes over the same stop event (L190-R1-F10): the
@@ -924,17 +993,21 @@ class ProjectionInputWatcher:
         stop = asyncio.Event()
         failure: list[BaseException] = []
         root_failure: list[BaseException] = []
-        shallow = shallow_projection_input_roots(self._config)
-        recursive_roots = [path for path in roots if path not in shallow]
-        shallow_roots = [path for path in roots if path in shallow]
-        refresher = asyncio.create_task(self._supervise_roots(roots, stop, root_failure))
+        recursive_roots = [path for path in plan.roots if path not in plan.shallow]
+        shallow_roots = [path for path in plan.roots if path in plan.shallow]
+        replan = asyncio.Event()
+        replace_watch = asyncio.Event()
         context = _LaneContext(
             pacer=pacer,
             stop=stop,
             failures=failure,
             registration=_WatchRegistration(),
             reconcile=reconcile,
+            plan=plan,
+            replan=replan,
+            replace_watch=replace_watch,
         )
+        refresher = asyncio.create_task(self._supervise_roots(context, root_failure))
         lanes = [
             asyncio.create_task(
                 self._watch_lane(group, recursive=recursive, label=label, context=context)
@@ -992,7 +1065,7 @@ class ProjectionInputWatcher:
         try:
             async for changes in watchfiles.awatch(
                 *roots,
-                watch_filter=self._watch_filter(),
+                watch_filter=self._watch_filter(context.plan),
                 debounce=_AWATCH_DEBOUNCE_MS,
                 step=_AWATCH_STEP_MS,
                 stop_event=context.stop,
@@ -1006,7 +1079,12 @@ class ProjectionInputWatcher:
                 yield_on_timeout=True,
             ):
                 # The first batch from either lane is what proves detection is live.
+                initial = not context.registration.established
                 context.registration.establish(context.pacer, context.reconcile)
+                if initial:
+                    offer_series_changes(
+                        self._series_changed, context.plan.task_inputs.series_masters
+                    )
                 if changes or deferred:
                     # Our own files never wake our own projector (MIK-R81 rule 3): drop
                     # the echo of a file this process wrote itself. An outside write to
@@ -1015,7 +1093,7 @@ class ProjectionInputWatcher:
                     # refresh (MIK-R81 rule 5). The native kind travels into the echo
                     # decision: arrivals never ride a directory voucher and a delete
                     # is never a write echo (F07).
-                    deferred = await self._consume_input_changes(changes | deferred, context.pacer)
+                    deferred = await self._consume_input_changes(changes | deferred, context)
             if not context.stop.is_set():
                 context.failures.append(
                     RuntimeError(f"native projection watch ended unexpectedly ({label})")
@@ -1028,11 +1106,24 @@ class ProjectionInputWatcher:
             context.stop.set()
 
     async def _consume_input_changes(
-        self, changes: set[tuple[Change, str]], pacer: WakeTarget
+        self, changes: set[tuple[Change, str]], context: _LaneContext
     ) -> set[tuple[Change, str]]:
-        paths, deferred, overflow = await offload(
-            OWNER_PROJECTION, self._ledger, _judge_input_changes, changes
+        offer_series_changes(
+            self._series_changed,
+            context.plan.task_inputs.series_for_paths(raw for _, raw in changes),
         )
+        paths, deferred, overflow, topology, replace_watch = await offload(
+            OWNER_PROJECTION,
+            self._ledger,
+            _judge_planned_changes,
+            changes,
+            context.plan,
+        )
+        if replace_watch:
+            context.replace_watch.set()
+        if topology:
+            context.replan.set()
+        pacer = context.pacer
         with measured(OWNER_PROJECTION, self._ledger):
             if overflow:
                 pacer.notify_change(ALL_PROJECTION_DOMAINS)
@@ -1041,26 +1132,37 @@ class ProjectionInputWatcher:
                 pacer.notify_change(domains, frozenset(paths))
         return deferred
 
-    def _watch_filter(self) -> Callable[[Change, str], bool]:
+    def bind_series_changed(self, callback: Callable[[str, str], bool]) -> None:
+        self._series_changed = callback
+
+    def _watch_filter(self, plan: ProjectionWatchPlan) -> Callable[[Change, str], bool]:
         assert watchfiles is not None
         default = watchfiles.DefaultFilter()
 
         def _filter(change: Change, path: str) -> bool:
-            return default(change, path) and is_projection_input_event(path)
+            candidate = Path(path)
+            if not (default(change, path) or plan.task_inputs.series_event(candidate)):
+                return False
+            if plan.topology_candidate(candidate) and (
+                _native_kind(change) != "modified" or candidate not in plan.roots
+            ):
+                return True
+            return plan.admits_file(candidate) and is_projection_input_event(path)
 
         return _filter
 
-    async def _supervise_roots(
-        self, current: list[Path], stop: asyncio.Event, failure: list[BaseException]
-    ) -> None:
+    async def _supervise_roots(self, context: _LaneContext, failure: list[BaseException]) -> None:
         """Run the root refresh, routing its death into the outage path (F10).
 
         A roots-changed stop returns normally through ``stop``. Any other failure is
         recorded and stops the watch too, so the generation ends loudly instead of
         staying live on possibly-obsolete roots.
         """
+        stop = context.stop
         try:
-            await self._stop_when_roots_change(current, stop)
+            await self._stop_when_roots_change(
+                context.plan, stop, context.replan, context.replace_watch, context.pacer
+            )
             if not stop.is_set():
                 failure.append(RuntimeError("watch-root refresher ended unexpectedly"))
                 stop.set()
@@ -1073,218 +1175,25 @@ class ProjectionInputWatcher:
             failure.append(exc)
             stop.set()
 
-    async def _stop_when_roots_change(self, current: list[Path], stop: asyncio.Event) -> None:
+    async def _stop_when_roots_change(
+        self,
+        current: ProjectionWatchPlan,
+        stop: asyncio.Event,
+        replan: asyncio.Event,
+        replace_watch: asyncio.Event,
+        pacer: WakeTarget,
+    ) -> None:
         """Re-derive the root set periodically; stop the watch (to restart) when it moved."""
         while True:
-            await asyncio.sleep(self._refresh_seconds)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(replan.wait(), self._refresh_seconds)
+            replan.clear()
+            force_replacement = replace_watch.is_set()
+            replace_watch.clear()
             fresh = await offload(
-                OWNER_PROJECTION, self._ledger, projection_input_roots, self._config
+                OWNER_PROJECTION, self._ledger, projection_watch_plan, self._config
             )
-            if fresh != current:
+            if force_replacement or fresh != current:
+                pacer.set_watcher_healthy(False)
                 stop.set()
                 return
-
-
-# --- the moved watcher (MIK-R186 rule 7) -----------------------------------------------------------
-
-#: How often the turn-end reader looks when its loop runs; the host writes one publication.
-MOVE_NOTICE_TICK_SECONDS = 3.0
-#: One review page opens (or reconnects) more than once; one capture serves that short window.
-PAGE_OPEN_COOLDOWN_SECONDS = 5.0
-
-#: The one watch per coordination root: the route compares and publishes, the turn-end loop reads.
-_WATCHES: dict[tuple[str, int], MoveNoticeWatch] = {}
-
-
-def move_notice_watch(config: McpRuntimeConfig, ports: WatcherApplicationPorts) -> MoveNoticeWatch:
-    """The process's watch for this coordination root and composition, made once to be shared."""
-
-    key = (str(config.coordination_root), id(ports))
-    watch = _WATCHES.get(key)
-    if watch is None:
-        watch = MoveNoticeWatch(config, ports)
-        _WATCHES[key] = watch
-    return watch
-
-
-@dataclass(frozen=True)
-class WatchOptions:
-    """What a watch may replace: its capture owner and counter, its channel, its cooldown."""
-
-    measurement: ComparisonMeasurement = field(default_factory=ComparisonMeasurement)
-    channel: MoveNoticeChannel | None = None
-    cooldown: float = PAGE_OPEN_COOLDOWN_SECONDS
-
-
-class MoveNoticeWatch:
-    """Show that a leaf moved past its explainer's binding, and wake nothing (MIK-R186 rule 7).
-
-    Two triggers, one comparison. A review page opening or refreshing calls :meth:`page_opened`;
-    :meth:`run` reads the host's turn ends with :func:`turn_ended_agents` and calls
-    :meth:`after_turn_ends`. A ``planning`` leaf is checked only when the page opens: its planned
-    binding is compared with the master line's two tips, and nothing is captured.
-
-    The watch sends no message, writes no held store and makes no host call. Its only effects are
-    the comparison owner's capture (Git objects, no pin and no record) and one notice on the
-    in-process channel.
-    """
-
-    def __init__(
-        self,
-        config: McpRuntimeConfig,
-        ports: WatcherApplicationPorts,
-        *,
-        options: WatchOptions | None = None,
-    ) -> None:
-        options = options or WatchOptions()
-        self._config = config
-        self._ports = ports
-        self._owner = options.measurement.owner
-        self._counter = options.measurement.counter
-        self._channel = options.channel or notices
-        self._cooldown = max(options.cooldown, 0.0)
-        self._seen: dict[str, str] = {}
-        self._checked: dict[tuple[str, str, str], float] = {}
-        self._unexplained_baselines: dict[tuple[str, str, str], Any] = {}
-        self._guard = threading.Lock()
-
-    @property
-    def channel(self) -> MoveNoticeChannel:
-        """The one channel this watch publishes to; the stream route reads the same one."""
-
-        return self._channel
-
-    def clear(self, selection: LeafSelection | None = None) -> None:
-        """Forget cached notice state and broadcast a cleared notice to open streams."""
-
-        with self._guard:
-            if selection is None:
-                self._checked.clear()
-            else:
-                self._checked.pop(selection.as_key(), None)
-        self._channel.clear(selection)
-
-    def page_opened(self, selection: LeafSelection) -> MovedNotice | None:
-        """The page's own read: compare now, and let the stream carry the notice."""
-
-        key = selection.as_key()
-        now = time.monotonic()
-        current_key = self._current_binding_key(selection)
-        if current_key is None:
-            with self._guard:
-                self._checked.pop(key, None)
-            self._channel.clear(selection, broadcast=False)
-            if self._channel.has_subscribers(selection):
-                captured = (self._owner or GitComparisonOwner(self._config, self._ports)).capture(
-                    selection
-                )
-                if isinstance(captured, CapturedComparison):
-                    with self._guard:
-                        self._unexplained_baselines[key] = captured.record
-            return None
-        with self._guard:
-            last = self._checked.get(key)
-            if last is not None and self._cooldown and now - last < self._cooldown:
-                cached = self._channel.latest(selection, binding_key=current_key)
-                if cached is not None:
-                    return cached
-            self._checked[key] = now
-        return self.check(selection)
-
-    def check(self, selection: LeafSelection) -> MovedNotice | None:
-        """Compare one environment with its leaf's state and publish a notice when it moved."""
-
-        try:
-            with self._guard:
-                outcome, notice, bkey = measure_notice(
-                    self._config,
-                    selection,
-                    self._ports,
-                    measurement=ComparisonMeasurement(owner=self._owner, counter=self._counter),
-                )
-        except Exception:  # a page or a turn end is never broken by the watcher's own read
-            logger.exception("the moved watcher failed to compare %s", selection.leaf_id)
-            return None
-        if outcome == "moved" and notice is not None:
-            self._channel.publish(selection, notice, binding_key=bkey)
-            return notice
-        if outcome == "clean":
-            with self._guard:
-                self._checked.pop(selection.as_key(), None)
-            self._channel.clear(selection)
-        return None
-
-    def after_turn_ends(self, ended: Iterable[str]) -> list[MovedNotice]:
-        """The turn-end trigger: each ended seat of a leaf, never a planning one."""
-
-        published: list[MovedNotice] = []
-        seats = self.seats()
-        for agent in ended:
-            selection = seats.get(agent)
-            if selection is None or self._planning(selection):
-                continue
-            if self._current_binding_key(selection) is not None:
-                notice = self.check(selection)
-            else:
-                notice = unexplained_turn_notice(
-                    self._config,
-                    selection,
-                    self._unexplained_baselines,
-                    self._ports,
-                    measurement=ComparisonMeasurement(owner=self._owner, counter=self._counter),
-                )
-                if notice is not None:
-                    self._channel.publish(selection, notice)
-            if notice is not None:
-                published.append(notice)
-        return published
-
-    def seats(self) -> dict[str, LeafSelection]:
-        """Every leaf with an environment or open stream, by its explainer and leaf-role seat ids."""
-
-        return leaf_seats(
-            self._config,
-            self._ports,
-            active_streams=lambda sel: (
-                self._channel.has_subscribers(sel) or sel.as_key() in self._unexplained_baselines
-            ),
-        )
-
-    async def run(self, *, tick: float = MOVE_NOTICE_TICK_SECONDS) -> None:
-        """Read the host's turn ends forever; one failed tick never ends the watch."""
-
-        while True:
-            try:
-                ended = await asyncio.to_thread(turn_ended_agents, self._config, self._seen)
-                if ended:
-                    await asyncio.to_thread(self.after_turn_ends, ended)
-            except Exception:  # a watcher must never take the dashboard down with it
-                logger.exception("the moved watcher's turn-end read failed; retrying next tick")
-            await asyncio.sleep(tick)
-
-    def _current_binding_key(self, selection: LeafSelection) -> str | None:
-        try:
-            workspace = leaf_workspace(
-                self._config, selection.repository_id, selection.master, selection.leaf_id
-            )
-            binding = read_binding(workspace)
-            number = generation(workspace.parent / (selection.leaf_id + GENERATION_SUFFIX))
-        except Exception:
-            return None
-        if binding is None:
-            return None
-        held = binding.binding
-        return (
-            f"{number}:{held.comparison_owner}:{held.comparison_reference}:"
-            f"{held.four_tree_digest}:{binding.snapshot}"
-        )
-
-    def _planning(self, selection: LeafSelection) -> bool:
-        try:
-            workspace = leaf_workspace(
-                self._config, selection.repository_id, selection.master, selection.leaf_id
-            )
-            binding = read_binding(workspace)
-        except Exception:  # an unreadable environment is not a planning one to skip
-            return False
-        return binding is not None and is_planned(binding)

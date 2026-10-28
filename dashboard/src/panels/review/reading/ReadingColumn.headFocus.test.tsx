@@ -1,10 +1,5 @@
-// Showing or hiding the tree keeps the reader's line (MIK-R89 v2 rule 9; ruling 8450399b). The sticky
-// head stands inside the column it heads, and Chrome scrolls a sticky element into view at its place
-// in the flow, the column's top: a keyboard focus on the head's tree toggle, a script focus or a
-// scroll into view moved the column to 0 (scratch harness, before-BE-e.log). The head and its parts
-// take a scroll area that runs past the column's end, so such a scroll finds them in view and moves
-// nothing. jsdom does not scroll on focus: this case pins the declaration; the browser measures it.
-import { cleanup, screen, waitFor } from '@testing-library/react';
+// The review controls live outside the reading scroller. Focusing them cannot scroll its content.
+import { act, cleanup, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { renderPage, servePage, stubIntersection } from './reviewPage.test-utils';
@@ -14,12 +9,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("gives the sticky head and its parts a scroll area past the column's end", async () => {
+it("keeps focusable header controls outside the reading scroller", async () => {
   stubIntersection();
   servePage();
   renderPage();
   await waitFor(() => expect(screen.getByTestId('review-tree-toggle')).toBeTruthy());
-  const head = document.querySelector<HTMLElement>('[data-reading-head]')!;
-  expect(head.contains(screen.getByTestId('review-tree-toggle'))).toBe(true);
-  expect([...head.classList]).toEqual(expect.arrayContaining(['scr-mb_1000000px', '[&_*]:scr-mb_1000000px']));
+  const column = screen.getByTestId('review-center-column');
+  const toolbar = screen.getByTestId('review-top-line');
+  expect(column.querySelector('[data-reading-head]')).toBeNull();
+  column.scrollTop = 125;
+  for (const id of ['review-tree-toggle', 'review-code-context']) {
+    const control = screen.getByTestId(id);
+    expect(toolbar.contains(control)).toBe(true);
+    expect(column.contains(control)).toBe(false);
+    const button = control.matches('button') ? control : control.querySelector<HTMLElement>('button')!;
+    act(() => button.focus());
+    expect(document.activeElement).toBe(button);
+    expect(column.scrollTop).toBe(125);
+  }
 });

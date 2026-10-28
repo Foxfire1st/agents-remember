@@ -1,24 +1,22 @@
-"""Where one leaf's explainer environment lives (MIK-R186 rules 1, 2, 9).
+"""Where one leaf's explainer environment lives (MIK-R186 rules 1, 2, 9; MIK-R211 v5 rule 12).
 
-One environment per leaf, outside every worktree, memory repository and task folder:
+One environment per leaf, outside every worktree, memory repository and task folder, and everything
+of it inside one folder, so removing it is one folder delete plus the Git worktree prune (D605):
 
-``<coordination>/explainer/<repository>/<task>/``
-    the task's one folder, which holds the leaf's workspace, its seat-generation counter and its
-    one lock, all as siblings;
+``<coordination>/explainer/<repository>/<task>/<leaf>/``
+    the workspace: ``binding.json``, ``state/``, ``instructions/``, ``reference/``, ``kit/``,
+    ``revisions/<n>/``, ``trees/code/``, ``trees/memory/``, ``drafts/assets/``, ``renders/`` and
+    ``scratch/``. Nothing of the leaf lies beside the folder;
 
-``<leaf>/``
-    the workspace itself: ``instructions/``, ``scratch/``, ``drafts/``, ``snapshot-<n>/code/``,
-    ``snapshot-<n>/memory/`` and ``binding.json`` (MIK-R186 rule 2);
+``<leaf>/state/``
+    the side files: the request ledger, the seat attempts and the leaf's one lock. Grades, the
+    build, Update and Retire are written under that lock, and no other file lock is taken while it
+    is held (MIK-R186 rule 2's lock order);
 
-``<leaf>.generation``
-    the seat-generation counter. It only grows, and nothing removes it before master retirement;
-
-``<leaf>.lock``
-    the one lock of the leaf. Grades, the build, Update and Retire are written under it, and no
-    other file lock is taken while it is held (MIK-R186 rule 2's lock order);
-
-``<leaf>/retired.json``
-    the marker a finished Retire leaves behind, naming its receipt.
+``<task>/notes/reports/review-frames/<leaf>/explainer/seat-generation``
+    the seat-generation counter, kept with the task's explainer records beside ``revisions/`` and
+    not in the workspace: removing the workspace never resets it, so a reopened explainer never
+    takes an archived chat's id (MIK-R211 v5 rule 12).
 
 Every path below the task's folder is admitted physically before it is read, written or removed: a
 symlinked component, or a target that resolves outside the folder, is held and reported, never
@@ -37,15 +35,15 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from agents_remember.canvas.explainer_worktrees import remove_checkout
 from agents_remember.canvas.paths import PathRefused, guard_path, path_segment
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.durable_evidence import durable_reports_root
+from agents_remember.tasks.task_paths import slugify
 
 #: The frame a leaf's explanation pages live in (MIK-R103): one lineage per leaf.
 EXPLAINER_FRAME = "explainer"
-#: The highest revision number a read of the leaf's revisions looks at (MIK-R103 retention).
-MAX_LISTED_REVISIONS = 32
 
 __all__ = [
     "BINDING_NAME",
@@ -54,17 +52,24 @@ __all__ = [
     "EXPLAINER_FRAME",
     "GENERATION_SUFFIX",
     "INSTRUCTIONS_DIRECTORY",
+    "KIT_DIRECTORY",
+    "LOCK_NAME",
     "LOCK_RESOURCE",
     "LOCK_SUFFIX",
-    "MAX_LISTED_REVISIONS",
-    "RETIRED_NAME",
+    "REFERENCE_DIRECTORY",
+    "RENDERS_DIRECTORY",
     "RETIRE_RECEIPTS_DIRECTORY",
+    "REVISIONS_DIRECTORY",
     "SCRATCH_DIRECTORY",
-    "SNAPSHOT_PREFIX",
+    "SEAT_COUNTER_NAME",
+    "STATE_DIRECTORY",
     "binding_path",
     "cleanup_workspace_tree",
     "compose_request_message",
+    "copy_folder",
+    "copy_revision",
     "ensure_leaf_workspace",
+    "explained_task",
     "explainer_base",
     "explainer_records_root",
     "explainer_roots",
@@ -78,16 +83,15 @@ __all__ = [
     "leaf_lock_resource",
     "leaf_workspace",
     "lock_path",
-    "make_writable_tree",
     "read_workspace_id",
     "receipt_id_segment",
     "receipt_path",
     "reference_path_of",
-    "remove_workspace_contents",
+    "remove_workspace",
     "repository_path",
     "retire_receipts_root",
-    "retired_marker",
-    "snapshot_folder",
+    "seat_counter_path",
+    "state_directory",
 ]
 
 EXPLAINER_DIRECTORY = "explainer"
@@ -99,11 +103,20 @@ LOCK_SUFFIX = ".lock"
 #: the seat's own grade writers name the same resource, because they hold the same file (MIK-R187 rule 6).
 LOCK_RESOURCE = "explainer leaf"
 BINDING_NAME = "binding.json"
-RETIRED_NAME = "retired.json"
 INSTRUCTIONS_DIRECTORY = "instructions"
 SCRATCH_DIRECTORY = "scratch"
 DRAFTS_DIRECTORY = "drafts"
-SNAPSHOT_PREFIX = "snapshot-"
+#: MIK-R211 v5 rule 12's layout (D605): everything of one explained leaf lives inside its folder.
+STATE_DIRECTORY = "state"
+REFERENCE_DIRECTORY = "reference"
+KIT_DIRECTORY = "kit"
+REVISIONS_DIRECTORY = "revisions"
+RENDERS_DIRECTORY = "renders"
+#: The lock's file name inside ``state/`` and the task-side seat counter's (MIK-R211 v5 rule 12).
+LOCK_NAME = "leaf"
+SEAT_COUNTER_NAME = "seat-generation"
+#: The task's frame area, as ``application/review_frame_store.py`` names it.
+FRAMES_DIRECTORY = "review-frames"
 
 
 def explainer_base(config: McpRuntimeConfig) -> Path:
@@ -209,6 +222,41 @@ def guard_explainer_path(
     return target_path
 
 
+def copy_folder(source: Path, destination: Path, *, root: Path) -> int:
+    """Copy one folder's files into ``destination`` as plain writable files; answer how many.
+
+    Modes are not carried: a published revision may be read-only in the task, and its copy in the
+    workspace is the explainer's to change (MIK-R211 v5 rule 3). A symlink is not followed.
+    """
+
+    copied = 0
+    for item in sorted(source.rglob("*")):
+        if item.is_symlink() or not item.is_file():
+            continue
+        target = destination / item.relative_to(source)
+        guard_explainer_path(target, root=root, label="explainer copied document")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(item, target)
+        copied += 1
+    return copied
+
+
+def copy_revision(source: Path, workspace: Path, number: int) -> int:
+    """Copy the task's published revision ``number`` into the workspace's ``revisions/<n>/``.
+
+    The task stays the source of truth: a build copies every published revision from it, and a
+    publication copies the revision it has just made (the Manager's 16:40Z ruling), so the
+    workspace's revisions/ never states less than is published. A copy already under that number
+    is replaced whole, so the folder holds the published bytes and nothing else.
+    """
+
+    destination = workspace / REVISIONS_DIRECTORY / str(number)
+    guard_explainer_path(destination, root=workspace.parent, label="explainer revision copy")
+    if destination.is_dir() and not destination.is_symlink():
+        shutil.rmtree(destination)
+    return copy_folder(source, destination, root=workspace.parent)
+
+
 def leaf_workspace(config: McpRuntimeConfig, repository_id: str, task: str, leaf_id: str) -> Path:
     """``<leaf>/`` -- the workspace, and the only folder the explainer may write."""
 
@@ -220,63 +268,95 @@ def leaf_workspace(config: McpRuntimeConfig, repository_id: str, task: str, leaf
 
 
 def generation_path(config: McpRuntimeConfig, repository_id: str, task: str, leaf_id: str) -> Path:
-    """``<leaf>.generation`` -- the seat-generation counter, a sibling of the workspace."""
+    """The leaf's seat-generation counter, kept with the task's records (MIK-R211 v5 rule 12)."""
 
-    root = explainer_task_root(config, repository_id, task)
-    target = root / (path_segment(leaf_id, name="leaf") + GENERATION_SUFFIX)
-    if root.exists() or root.is_symlink():
-        guard_explainer_path(target, root=config.coordination_root, label="explainer generation")
-    return target
+    return seat_counter_path(leaf_workspace(config, repository_id, task, leaf_id))
+
+
+def seat_counter_path(workspace: Path) -> Path:
+    """Where the counter a workspace's seat ids are derived from lies: with the task, not the workspace.
+
+    The workspace is ``<coordination>/explainer/<repository>/<task>/<leaf>``, so the task it explains
+    is ``<coordination>/tasks/<repository>/<task>``; its explainer records lie beside ``revisions/``
+    in the leaf's frame area. A counter the workspace's old layout left beside the folder
+    (``<leaf>.generation``) is moved there the first time it is read, so no generation is reused. A
+    world with no such task folder keeps the counter beside the workspace, where it always was.
+    """
+
+    legacy = workspace.with_name(workspace.name + GENERATION_SUFFIX)
+    task = explained_task(workspace)
+    if task is None:
+        return legacy
+    counter = (
+        durable_reports_root(task)
+        / FRAMES_DIRECTORY
+        / slugify(workspace.name)
+        / EXPLAINER_FRAME
+        / SEAT_COUNTER_NAME
+    )
+    guard_explainer_path(counter, root=task, label="explainer seat counter")
+    if not counter.exists() and legacy.is_file() and not legacy.is_symlink():
+        counter.parent.mkdir(parents=True, exist_ok=True)
+        guard_explainer_path(counter, root=task, label="explainer seat counter")
+        counter.write_bytes(legacy.read_bytes())
+        legacy.unlink()
+    return counter
+
+
+def explained_task(workspace: Path) -> Path | None:
+    """The task folder a workspace explains, or ``None`` when it is not where the layout puts it.
+
+    ``<coordination>/explainer/<repository>/<task>/<leaf>`` explains
+    ``<coordination>/tasks/<repository>/<task>``.
+    """
+
+    parents = workspace.parents
+    if len(parents) < 4 or parents[2].name != EXPLAINER_DIRECTORY:
+        return None
+    task = parents[3] / "tasks" / parents[1].name / parents[0].name
+    return task if task.is_dir() and not task.is_symlink() else None
+
+
+def state_directory(workspace: Path) -> Path:
+    """``<leaf>/state/`` -- the ledger, the seat attempts and the lock (MIK-R211 v5 rule 12)."""
+
+    return workspace / STATE_DIRECTORY
 
 
 def lock_path(config: McpRuntimeConfig, repository_id: str, task: str, leaf_id: str) -> Path:
-    """``<leaf>.lock`` -- the leaf's one lock."""
+    """``<leaf>/state/leaf.lock`` -- the leaf's one lock."""
 
-    root = explainer_task_root(config, repository_id, task)
-    target = root / (path_segment(leaf_id, name="leaf") + LOCK_SUFFIX)
-    if root.exists() or root.is_symlink():
-        guard_explainer_path(target, root=config.coordination_root, label="explainer lock")
-    return target
+    return leaf_lock_path(leaf_workspace(config, repository_id, task, leaf_id))
 
 
 def leaf_lock_path(workspace: Path) -> Path:
-    """The physical ``<leaf>.lock`` file on disk for ``workspace`` (MIK-R186 rule 2)."""
+    """The physical lock file on disk for ``workspace`` (MIK-R186 rule 2)."""
 
-    base = leaf_lock_resource(workspace)
-    return base.with_name(path_segment(base.name, name="leaf") + LOCK_SUFFIX)
+    return leaf_lock_resource(workspace).with_name(LOCK_NAME + LOCK_SUFFIX)
 
 
 def leaf_lock_resource(workspace_or_lock: Path) -> Path:
-    """The canonical lock resource ``<leaf>`` passed to :func:`exclusive_file_lock`.
+    """The canonical lock resource ``<leaf>/state/leaf`` passed to :func:`exclusive_file_lock`.
 
-    ``exclusive_file_lock`` appends ``.lock`` to the resource path it receives; normalizing both
-    ``<leaf>`` and ``<leaf>.lock`` to ``<leaf>`` guarantees every caller locks ``<leaf>.lock`` on
-    disk with no ``.lock.lock`` doubling (MIK-R186 rule 2, MIK-R187 rule 6).
+    ``exclusive_file_lock`` appends ``.lock`` to the resource path it receives. A workspace, its
+    lock file and a lock path of the old sibling layout (``<leaf>.lock``) all name the same
+    resource, so the build, Update, Retire and the seat's grade writer hold one file (MIK-R186 rule
+    2, MIK-R187 rule 6).
     """
 
     target = Path(workspace_or_lock)
+    if target.name == LOCK_NAME + LOCK_SUFFIX and target.parent.name == STATE_DIRECTORY:
+        return target.with_name(LOCK_NAME)
     if target.name.endswith(LOCK_SUFFIX):
         stem = target.name[: -len(LOCK_SUFFIX)]
-        return target.with_name(path_segment(stem, name="leaf"))
-    return target.with_name(path_segment(target.name, name="leaf"))
+        target = target.with_name(path_segment(stem, name="leaf"))
+    return target.with_name(path_segment(target.name, name="leaf")) / STATE_DIRECTORY / LOCK_NAME
 
 
 def binding_path(workspace: Path) -> Path:
     """``binding.json`` -- what the environment is bound to (MIK-R186 rule 4)."""
 
     return workspace / BINDING_NAME
-
-
-def retired_marker(workspace: Path) -> Path:
-    """``retired.json`` -- what a finished Retire leaves in the leaf's folder (rule 8)."""
-
-    return workspace / RETIRED_NAME
-
-
-def snapshot_folder(workspace: Path, number: int) -> Path:
-    """``snapshot-<n>/`` -- one binding's read-only copy of the two candidate trees."""
-
-    return workspace / f"{SNAPSHOT_PREFIX}{number}"
 
 
 def explainer_records_root(task: Path) -> Path:
@@ -333,7 +413,7 @@ def ensure_leaf_workspace(
     guard_explainer_path(workspace, root=config.coordination_root, label="explainer workspace")
     workspace.mkdir(exist_ok=True)
     guard_explainer_path(workspace, root=config.coordination_root, label="explainer workspace")
-    for name in (INSTRUCTIONS_DIRECTORY, SCRATCH_DIRECTORY, DRAFTS_DIRECTORY):
+    for name in (STATE_DIRECTORY, INSTRUCTIONS_DIRECTORY, SCRATCH_DIRECTORY, DRAFTS_DIRECTORY):
         folder = workspace / name
         guard_explainer_path(folder, root=config.coordination_root, label=f"explainer {name}")
         folder.mkdir(exist_ok=True)
@@ -351,24 +431,6 @@ def first_nested_symlink(directory: Path) -> Path | None:
             if candidate.is_symlink():
                 return candidate
     return None
-
-
-def make_writable_tree(directory: Path) -> None:
-    """Ensure non-symlink directories under ``directory`` are writable for removal.
-
-    Regular files are intentionally not chmodded so hard-linked snapshot inodes remain read-only.
-    """
-
-    for root_dir, dirs, _files in os.walk(directory, followlinks=False):
-        base = Path(root_dir)
-        with suppress(OSError):
-            if not base.is_symlink():
-                base.chmod(0o700)
-        for name in dirs:
-            entry = base / name
-            if not entry.is_symlink():
-                with suppress(OSError):
-                    entry.chmod(0o700)
 
 
 def _format_pick_item(item: Mapping[str, Any] | str) -> str | None:
@@ -414,7 +476,10 @@ def compose_request_message(
         pick_lines = [line for item in picks if (line := _format_pick_item(item)) is not None]
         if pick_lines:
             sections.append("Attached references:\n" + "\n".join(pick_lines))
-    for title, items in (("Stale parts", stale_part_ids), ("Stale grades", stale_grades)):
+    for title, items in (
+        ("Stale parts", stale_part_ids),
+        ("Stale grades", stale_grades),
+    ):
         sec = _format_list_section(title, items)
         if sec is not None:
             sections.append(sec)
@@ -446,53 +511,51 @@ def reference_path_of(reference: str) -> str | None:
     return None
 
 
+def _remove_checkout_pair(workspace: Path, *, root: Path) -> None:
+    trees = workspace / "trees"
+    guard_explainer_path(trees, root=root, label="explainer trees")
+    for side in ("code", "memory"):
+        remove_checkout(trees / side, root=root)
+    if trees.exists():
+        trees.rmdir()
+
+
 def cleanup_workspace_tree(workspace: Path, *, root: Path | None = None) -> None:
-    """Remove an unconfirmed or failed build workspace if it contains no symlinks."""
+    """Clean an unconfirmed workspace, unregistering its Git worktrees before files."""
 
-    if (
-        not workspace.exists()
-        or workspace.is_symlink()
-        or first_nested_symlink(workspace) is not None
-    ):
+    if not workspace.exists():
         return
-    with suppress(PathRefused, OSError):
-        guard_explainer_path(workspace, root=root or workspace.parent, label="explainer workspace")
-        make_writable_tree(workspace)
-        shutil.rmtree(workspace)
+    authority = root or workspace.parent
+    guard_explainer_path(workspace, root=authority, label="explainer workspace")
+    _remove_checkout_pair(workspace, root=authority)
+    if first_nested_symlink(workspace) is not None:
+        return
+    shutil.rmtree(workspace)
 
 
-def remove_workspace_contents(workspace: Path, *, root: Path) -> list[str]:
-    """Remove everything but the marker; a symlink or nested symlink is held and reported."""
+def remove_workspace(workspace: Path, *, root: Path) -> list[str]:
+    """Remove the leaf's whole folder: its Git worktrees through Git first, then every file in it.
 
-    held: list[str] = []
+    Nothing is kept -- no marker, no lock, no ledger -- because a removed workspace leaves no residue
+    under the explainer folder (MIK-R211 v5 rule 12). A symlink anywhere inside is held and named,
+    and then nothing is removed, because a link is never followed out of the folder.
+    """
+
+    if not workspace.exists() and not workspace.is_symlink():
+        return []
     try:
         guard_explainer_path(workspace, root=root, label="explainer workspace")
-    except PathRefused as refused:
+        _remove_checkout_pair(workspace, root=root)
+    except (PathRefused, OSError, ValueError) as refused:
         return [str(refused)]
-    marker = retired_marker(workspace)
-    for child in sorted(workspace.iterdir(), key=lambda item: item.name):
-        if child == marker:
-            continue
-        try:
-            guard(root, child, label="explainer entry")
-        except PathRefused as refused:
-            held.append(str(refused))
-            continue
-        if child.is_symlink():
-            held.append(f"{child} is a symlink; it is held, not followed")
-            continue
-        if child.is_dir():
-            nested = first_nested_symlink(child)
-            if nested is not None:
-                held.append(f"{nested} is a symlink; it is held, not followed")
-                continue
-            make_writable_tree(child)
-            shutil.rmtree(child)
-        else:
-            with suppress(OSError):
-                child.chmod(0o600)
-            child.unlink()
-    return held
+    nested = first_nested_symlink(workspace)
+    if nested is not None:
+        return [f"{nested} is a symlink; it is held, not followed"]
+    try:
+        shutil.rmtree(workspace)
+    except OSError as refused:
+        return [str(refused)]
+    return []
 
 
 def read_workspace_id(workspace: Path) -> str:

@@ -126,10 +126,15 @@ export const laneRowAttrs = (key: string) => ({ [BLOCK_STOP]: key });
 
 // A held block (D382: a block that has shown content keeps its last known height while it is drawn
 // again): the held box, at its held height, shows skeleton lines where what it holds is not drawn,
-// and its content, on the page's background, covers them where it is.
+// and its content, on the page's background, covers them where it is. Short, quiet lines suggest
+// a statement and its details without filling a wide reader with solid stripes.
 export const heldSkeleton = css({
+  '--skeleton-line': 'color-mix(in srgb, token(colors.grid) 65%, transparent)',
   backgroundImage:
-    'repeating-linear-gradient(to bottom, transparent 0 0.45rem, token(colors.grid) 0.45rem 0.95rem, transparent 0.95rem 1.4rem)',
+    'linear-gradient(var(--skeleton-line), var(--skeleton-line)), linear-gradient(var(--skeleton-line), var(--skeleton-line)), linear-gradient(var(--skeleton-line), var(--skeleton-line)), linear-gradient(var(--skeleton-line), var(--skeleton-line)), linear-gradient(var(--skeleton-line), var(--skeleton-line)), linear-gradient(var(--skeleton-line), var(--skeleton-line))',
+  backgroundSize: 'min(26rem, 62%) 0.35rem, min(38rem, 92%) 0.35rem, min(31rem, 76%) 0.35rem, min(18rem, 44%) 0.35rem, min(35rem, 84%) 0.35rem, min(27rem, 65%) 0.35rem',
+  backgroundPosition: '0 0.5rem, 0 1.5rem, 0 2.5rem, 0 4.5rem, 0 5.5rem, 0 6.5rem',
+  backgroundRepeat: 'no-repeat',
 });
 
 export const heldContent = css({ display: 'flow-root', background: 'bg' });

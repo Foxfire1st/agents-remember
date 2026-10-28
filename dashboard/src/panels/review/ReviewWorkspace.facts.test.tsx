@@ -100,7 +100,12 @@ async function popoverRows(view: View): Promise<Record<string, string>> {
   const popover = await view.findByTestId('review-status-popover');
   expect(popover.textContent).not.toContain('synthetic-identity');
   const rows = within(popover).getAllByTestId('review-status-row') as HTMLTableRowElement[];
-  return Object.fromEntries(rows.map((row) => [row.cells[0].textContent, row.cells[1].textContent]));
+  const read = Object.fromEntries(rows.map((row) => [row.cells[0].textContent, row.cells[1].textContent]));
+  // The chip toggles its popover: close it, so the next reading opens it rather than relying on an
+  // unrelated focus move (a selection's answer landing focus on its tree row) to have closed it.
+  fireEvent.keyDown(popover, { key: 'Escape' });
+  await waitFor(() => expect(view.queryByTestId('review-status-popover')).toBeNull());
+  return read;
 }
 
 // The raw record, once, inside the closed provenance disclosure at the bottom of the column.

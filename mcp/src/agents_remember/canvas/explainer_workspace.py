@@ -1,19 +1,22 @@
 """Building, updating and removing one leaf's explainer environment (MIK-R186 rules 1, 2, 6, 8).
 
-The environment is the explainer's whole world: a read-only copy of the two bound candidate trees,
+The environment is the explainer's whole world: two ordinary detached Git worktrees at the bound candidate trees,
 the evidence packet and the grants, the capsule it was started with, and scratch and draft folders
 it may write. This module owns the bytes:
 
-* **build** writes the workspace, a fresh snapshot, ``instructions/`` and -- last of all --
+* **build** checks out the two worktrees, then writes ``instructions/`` and -- last of all --
   ``binding.json``. A failure before the last step leaves no binding, so nothing claims an
   environment that is not there;
-* **update** writes exactly the same things for the next binding, binds it last, and then removes
-  the snapshot it replaced. A turn that spanned the swap may read either snapshot; every answer
-  names the binding it was made at (:mod:`agents_remember.canvas.protocol`), so a grade or a
-  publish made at the old number is refused rather than silently relabelled;
+* **update** moves those same worktrees with Git checkout and binds last. While either tree is
+  moving, no binding is served; a failed update remains unbound until a successful rebuild.
 * **retire** records the seat's process tree *before* it archives anything, ends every process by
-  both counts, and removes the workspace while leaving a ``retired.json`` marker and a receipt in
-  the task's records.
+  both counts, and removes the workspace completely -- its Git worktrees removed and pruned, its
+  folder deleted -- leaving only a receipt in the task's records (MIK-R211 v5 rule 12).
+
+A build also copies in what the explainer needs, the way a task agent's workspace gets it (MIK-R211
+v5 rule 3): the task's reference notes for the leaf (``reference/``), the pinned library files
+(``kit/``), and every published revision of the leaf (``revisions/<n>/``), as plain writable folders.
+The draft starts as a copy of the latest of them.
 
 Nothing here talks to the host, reads a comparison or prepares a packet: the caller hands those in,
 so the same code is exercised without a host. Every write and every removal is admitted against the
@@ -25,9 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shutil
-import stat
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -36,42 +37,56 @@ from typing import Any
 
 from agents_remember.canvas.explainer_paths import (
     DRAFTS_DIRECTORY,
+    EXPLAINER_FRAME,
+    FRAMES_DIRECTORY,
     INSTRUCTIONS_DIRECTORY,
+    KIT_DIRECTORY,
+    REFERENCE_DIRECTORY,
+    REVISIONS_DIRECTORY,
     SCRATCH_DIRECTORY,
-    cleanup_workspace_tree,
+    copy_folder,
+    copy_revision,
     ensure_leaf_workspace,
     first_nested_symlink,
     guard,
     guard_explainer_path,
     leaf_workspace,
-    make_writable_tree,
     receipt_id_segment,
-    remove_workspace_contents,
-    snapshot_folder,
+    remove_workspace,
+    repository_path,
 )
 from agents_remember.canvas.explainer_state import (
     ExplainerBinding,
     ExplainerRefused,
-    ExplainerStateError,
     PlannedIdentity,
     RetireReceipt,
-    agent_id,
-    clear_retired,
     end_processes,
     find_pending_receipt,
-    mark_retired,
     process_tree,
-    read_binding,
     same_binding,
+    seat_for_workspace,
     write_binding,
     write_receipt,
 )
-from agents_remember.canvas.paths import PathRefused
+from agents_remember.canvas.explainer_worktrees import (
+    CheckoutTotals,
+    checkout_tree,
+    prune_worktrees,
+)
+from agents_remember.canvas.kit import (
+    KIT_CONTRACT_PREFIX,
+    KIT_MANIFEST_NAME,
+    KIT_ROOT,
+    kit_assets,
+    kit_files,
+)
+from agents_remember.canvas.paths import PathRefused, task_root
 from agents_remember.kernel.atomic_write import atomic_write_bytes, atomic_write_text
-from agents_remember.kernel.git_command import read_git_blobs_bytes, run_git_bytes
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.memory.knowledge.durable_evidence import durable_reports_root
 from agents_remember.models.knowledge.review_evidence import EvidencePacket
 from agents_remember.models.knowledge.review_frame import FrameBinding
+from agents_remember.tasks.task_paths import slugify
 
 __all__ = [
     "EnvironmentBuild",
@@ -83,57 +98,19 @@ __all__ = [
     "RetirePlace",
     "RetireRequest",
     "RetireStart",
-    "SnapshotTotals",
-    "SnapshotWrite",
     "build_environment",
-    "count_tree",
-    "next_snapshot_number",
     "plan_retire",
-    "remove_snapshot",
-    "remove_workspace_contents",
     "resume_retire",
     "retire_environment",
     "retire_workspace",
     "settle_retire",
     "update_environment",
-    "write_snapshot",
 ]
 
-SNAPSHOT_MANIFEST = ".snapshot.json"
 ASSIGNMENT_NAME = "assignment.txt"
 ASSIGNMENT_MD_NAME = "assignment.md"
 EVIDENCE_NAME = "evidence.json"
 GRANTS_NAME = "grants.json"
-MAX_SNAPSHOT_FILE_BYTES = 256 * 1024 * 1024
-MAX_SNAPSHOT_BATCH_BYTES = 4 * 1024 * 1024
-
-
-class SnapshotTooLarge(ExplainerRefused):
-    """One file is beyond the admitted size; no byte of it was written."""
-
-
-@dataclass(frozen=True)
-class SnapshotTotals:
-    """What one snapshot write did, per tree, as counts a page can show (rule 10)."""
-
-    folder: str
-    files: int = 0
-    written: int = 0
-    linked: int = 0
-    removed: int = 0
-    bytes: int = 0
-    symlinks: int = 0
-
-    def as_record(self) -> dict[str, Any]:
-        return {
-            "folder": self.folder,
-            "files": self.files,
-            "written": self.written,
-            "linked": self.linked,
-            "removed": self.removed,
-            "bytes": self.bytes,
-            "symlinks": self.symlinks,
-        }
 
 
 @dataclass(frozen=True)
@@ -156,7 +133,6 @@ class EnvironmentRun:
     previous: ExplainerBinding | None = None
     preparation: Callable[[Path], tuple[EvidencePacket, bytes]] | None = None
     progress: Callable[[str, Mapping[str, Any]], None] | None = None
-    in_turn: Callable[[], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -183,6 +159,8 @@ class RetirePlace:
     receipts_root: Path
     now: str
     archive_session: Callable[[str], None] | None = None
+    #: The repositories whose worktree registrations the removal prunes (MIK-R211 v5 rule 12).
+    repositories: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -211,21 +189,19 @@ class EnvironmentInputs:
 
 @dataclass(frozen=True)
 class EnvironmentBuild:
-    """One build's answer: the binding it made, its snapshot and the steps it took."""
+    """One build's answer: the binding it made, its checkouts and the steps it took."""
 
     workspace: Path
     binding: ExplainerBinding
-    snapshot: SnapshotTotals
     steps: tuple[str, ...] = ()
-    code: SnapshotTotals | None = None
-    memory: SnapshotTotals | None = None
+    code: CheckoutTotals | None = None
+    memory: CheckoutTotals | None = None
     built: bool = True
 
     def as_record(self) -> dict[str, Any]:
         return {
             "workspace": str(self.workspace),
             "binding": self.binding.model_dump(by_alias=True),
-            "snapshot": self.snapshot.as_record(),
             "steps": list(self.steps),
             "code": None if self.code is None else self.code.as_record(),
             "memory": None if self.memory is None else self.memory.as_record(),
@@ -241,9 +217,8 @@ class EnvironmentUpdate:
     binding: ExplainerBinding
     previous_number: int | None
     current: bool
-    snapshot: SnapshotTotals | None = None
-    code: SnapshotTotals | None = None
-    memory: SnapshotTotals | None = None
+    code: CheckoutTotals | None = None
+    memory: CheckoutTotals | None = None
     steps: tuple[str, ...] = ()
     #: The review blocks the comparison moved between n and n+1 (rule 6 step 3).
     blocks_changed: int | None = None
@@ -277,7 +252,6 @@ class EnvironmentUpdate:
             "binding": self.binding.model_dump(by_alias=True),
             "previousNumber": self.previous_number,
             "current": self.current,
-            "snapshot": None if self.snapshot is None else self.snapshot.as_record(),
             "code": None if self.code is None else self.code.as_record(),
             "memory": None if self.memory is None else self.memory.as_record(),
             "steps": list(self.steps),
@@ -320,393 +294,150 @@ class _Progress:
             self.sink(name, facts)
 
 
-def count_tree(repository: Path, tree: str) -> int:
-    """How many blobs one tree holds, by ``git ls-tree -r`` (rule 11's own measure)."""
-
-    return len(_tree_entries(repository, tree))
-
-
-def _tree_entries(repository: Path, tree: str) -> list[tuple[str, str, int, str]]:
-    """``(path, blob, size, mode)`` for every blob of one tree, NUL-delimited (MIK-R186 rule 2)."""
-
-    result = run_git_bytes(repository, ["ls-tree", "-r", "-l", "-z", tree])
-    if result.returncode:
-        stderr = result.stderr.decode("utf-8", errors="replace").strip()
-        raise ExplainerRefused(
-            "evidence-source-unavailable",
-            f"the tree {tree} of {repository} cannot be listed: {stderr}",
-        )
-    entries: list[tuple[str, str, int, str]] = []
-    for raw_record in result.stdout.split(b"\x00"):
-        if not raw_record:
-            continue
-        meta_bytes, sep, path_bytes = raw_record.partition(b"\t")
-        if not sep:
-            continue
-        parts = meta_bytes.decode("ascii", errors="replace").split()
-        if len(parts) < 4:
-            continue
-        mode, kind, blob, size = parts[0], parts[1], parts[2], parts[3]
-        if kind != "blob":
-            continue
-        path = path_bytes.decode("utf-8", errors="surrogateescape")
-        if mode == "120000":
-            entries.append((path, blob, -1, mode))
-            continue
-        entries.append((path, blob, int(size) if size.isdigit() else 0, mode))
-    return entries
-
-
-def _safe_bound_snapshot_number(workspace: Path) -> int | None:
-    with suppress(ExplainerStateError):
-        bound = read_binding(workspace)
-        if bound is not None and bound.snapshot.startswith("snapshot-"):
-            suffix = bound.snapshot.removeprefix("snapshot-")
-            if suffix.isdigit():
-                return int(suffix)
-    return None
-
-
-def next_snapshot_number(workspace: Path) -> int:
-    """One past the highest bound ``snapshot-<n>``, after reclaiming interrupted orphans."""
-
-    if not workspace.is_dir():
-        return 1
-    bound_number = _safe_bound_snapshot_number(workspace)
-    highest = 0
-    for child in sorted(workspace.iterdir(), key=lambda item: item.name):
-        name = child.name
-        if not name.startswith("snapshot-"):
-            continue
-        suffix = name.removeprefix("snapshot-")
-        if not suffix.isdigit():
-            continue
-        num = int(suffix)
-        if bound_number is None or num > bound_number:
-            with suppress(PathRefused, OSError):
-                remove_snapshot(child, root=workspace.parent)
-            continue
-        highest = max(highest, num)
-    return highest + 1
-
-
-@dataclass(frozen=True)
-class SnapshotWrite:
-    """One tree to write into one snapshot folder, and what to link from."""
-
-    repository: Path
-    tree: str
-    destination: Path
-    root: Path
-    previous: Path | None = None
-    progress: Callable[[int, int], None] | None = None
-
-
-def write_snapshot(request: SnapshotWrite) -> SnapshotTotals:
-    """Write one tree's blobs below ``destination``, hard-linking unchanged files from ``previous``."""
-
-    repository, tree, destination = request.repository, request.tree, request.destination
-    root, previous = request.root, request.previous
-    entries = _tree_entries(repository, tree)
-    if not entries:
-        raise ExplainerRefused(
-            "evidence-source-unavailable", f"the tree {tree} of {repository} holds no file"
-        )
-    for relative, _blob, size, _mode in entries:
-        if size > MAX_SNAPSHOT_FILE_BYTES:
-            raise SnapshotTooLarge(
-                "evidence-source-unavailable",
-                f"{relative} is {size} bytes, beyond the {MAX_SNAPSHOT_FILE_BYTES}-byte ceiling",
-            )
-    guard_explainer_path(destination, root=root, label="snapshot folder")
-    if destination.exists():
-        _empty_directory(destination, root=root)
-    destination.mkdir(parents=True, exist_ok=True)
-    guard_explainer_path(destination, root=root, label="snapshot folder")
-    previous_index = _read_snapshot_manifest(previous)
-    written = _Written()
-    manifest: dict[str, dict[str, Any]] = {}
-    _write_snapshot_batches(
-        request=request,
-        entries=entries,
-        previous_index=previous_index,
-        written=written,
-        manifest=manifest,
-    )
-    manifest_target = destination / SNAPSHOT_MANIFEST
-    guard_explainer_path(manifest_target, root=root, label="snapshot manifest")
-    if manifest_target.exists():
-        manifest_target.chmod(0o600)
-    atomic_write_text(
-        manifest_target,
-        json.dumps({"tree": tree, "files": manifest}, sort_keys=True) + "\n",
-    )
-    manifest_target.chmod(0o444)
-    removed = len(set(previous_index) - set(manifest)) if previous_index else 0
-    return SnapshotTotals(
-        folder=destination.name,
-        files=len(manifest),
-        written=written.written,
-        linked=written.linked,
-        removed=removed,
-        bytes=written.total_bytes,
-        symlinks=written.symlinks,
-    )
-
-
-def _write_snapshot_batches(
-    *,
-    request: SnapshotWrite,
-    entries: list[tuple[str, str, int, str]],
-    previous_index: dict[str, dict[str, Any]],
-    written: _Written,
-    manifest: dict[str, dict[str, Any]],
-) -> None:
-    total = len(entries)
-    batch: list[tuple[int, str, str, int, str, Path | None]] = []
-    batch_bytes = 0
-    for index, (relative, blob, size, mode) in enumerate(entries, start=1):
-        if size < 0:
-            written.symlinks += 1
-            if request.progress is not None and (index % 200 == 0 or index == total):
-                request.progress(index, total)
-            continue
-        source = _linkable(request.previous, previous_index, relative, blob, size)
-        batch.append((index, relative, blob, size, mode, source))
-        if source is None:
-            batch_bytes += max(1, size)
-        if batch_bytes >= MAX_SNAPSHOT_BATCH_BYTES or index == total:
-            _flush_snapshot_batch(request, batch, total, written, manifest)
-            batch = []
-            batch_bytes = 0
-    if batch:
-        _flush_snapshot_batch(request, batch, total, written, manifest)
-
-
-def _flush_snapshot_batch(
-    request: SnapshotWrite,
-    batch: list[tuple[int, str, str, int, str, Path | None]],
-    total: int,
-    written: _Written,
-    manifest: dict[str, dict[str, Any]],
-) -> None:
-    needed_blobs = [blob for _idx, _rel, blob, _sz, _mode, src in batch if src is None]
-    blobs = read_git_blobs_bytes(request.repository, needed_blobs) if needed_blobs else {}
-    for index, relative, blob, size, mode, source in batch:
-        target = request.destination / relative
-        if source is not None and _place_linked(source, target, root=request.root, mode=mode):
-            written.linked += 1
-            written.total_bytes += size
-            manifest[relative] = {"blob": blob, "bytes": size}
-        else:
-            payload = _payload(blobs, relative, blob, size, request.tree)
-            _place_written(target, payload, root=request.root, mode=mode)
-            written.written += 1
-            written.total_bytes += len(payload)
-            manifest[relative] = {"blob": blob, "bytes": len(payload)}
-        if request.progress is not None and (index % 200 == 0 or index == total):
-            request.progress(index, total)
-
-
-@dataclass
-class _Written:
-    """The running counts of one snapshot write."""
-
-    written: int = 0
-    linked: int = 0
-    total_bytes: int = 0
-    symlinks: int = 0
-
-
-def _payload(blobs: dict[str, bytes], relative: str, blob: str, size: int, tree: str) -> bytes:
-    """One file's admitted bytes, refusing a blob the tree's own size contradicts."""
-
-    if size > MAX_SNAPSHOT_FILE_BYTES:
-        raise SnapshotTooLarge(
-            "evidence-source-unavailable",
-            f"{relative} is {size} bytes, beyond the {MAX_SNAPSHOT_FILE_BYTES}-byte ceiling",
-        )
-    payload = blobs.get(blob)
-    if payload is None:
-        raise ExplainerRefused(
-            "evidence-source-unavailable", f"the blob of {relative} at {tree} could not be read"
-        )
-    if len(payload) != size:
-        raise ExplainerRefused(
-            "evidence-source-unavailable",
-            f"{relative} reads {len(payload)} bytes where the tree says {size}",
-        )
-    return payload
-
-
-def _linkable(
-    previous: Path | None,
-    index: dict[str, dict[str, Any]],
-    relative: str,
-    blob: str,
-    size: int,
-) -> Path | None:
-    """The previous snapshot's file for this path when it holds the same blob, else ``None``."""
-
-    if previous is None or index.get(relative, {}).get("blob") != blob:
-        return None
-    candidate = previous / relative
-    if candidate.is_file() and not candidate.is_symlink():
-        with suppress(OSError):
-            if candidate.stat().st_size == size:
-                return candidate
-    return None
-
-
-def _readonly_mode(mode: str) -> int:
-    return 0o555 if mode == "100755" else 0o444
-
-
-def _place_linked(source: Path, target: Path, *, root: Path, mode: str) -> bool:
-    file_mode = _readonly_mode(mode)
-    guard_explainer_path(target, root=root, label="snapshot file")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    guard_explainer_path(target, root=root, label="snapshot file")
-    try:
-        st_mode = source.lstat().st_mode
-        if not stat.S_ISREG(st_mode):
-            return False
-        if (st_mode & 0o222) != 0:
-            os.chmod(source, file_mode)
-        if target.exists() or target.is_symlink():
-            target.unlink()
-        os.link(source, target)
-        if (target.lstat().st_mode & 0o222) != 0:
-            os.chmod(target, file_mode)
-        return True
-    except OSError:
-        return False
-
-
-def _place_written(target: Path, payload: bytes, *, root: Path, mode: str) -> None:
-    file_mode = _readonly_mode(mode)
-    guard_explainer_path(target, root=root, label="snapshot file")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    guard_explainer_path(target, root=root, label="snapshot file")
-    if target.exists() and not target.is_symlink():
-        with suppress(OSError):
-            target.chmod(0o600)
-    atomic_write_bytes(target, payload)
-    os.chmod(target, file_mode)
-
-
-def _read_snapshot_manifest(folder: Path | None) -> dict[str, dict[str, Any]]:
-    if folder is None:
-        return {}
-    manifest = folder / SNAPSHOT_MANIFEST
-    if not manifest.is_file():
-        return {}
-    try:
-        payload = json.loads(manifest.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return {}
-    files = payload.get("files")
-    return files if isinstance(files, dict) else {}
-
-
 def _empty_directory(directory: Path, *, root: Path) -> None:
-    """Remove a snapshot folder's contents, refusing to follow a symlink inside it."""
+    """Clear an owned instructions staging directory without following links."""
 
     for child in directory.iterdir():
-        guard(root, child, label="snapshot entry")
-        if child.is_symlink():
-            raise PathRefused(f"the snapshot holds the symlink {child}; it is held, not followed")
+        guard(root, child, label="instructions entry")
+        if child.is_symlink() or (child.is_dir() and first_nested_symlink(child) is not None):
+            raise PathRefused(f"the instructions hold a symlink at {child}")
         if child.is_dir():
-            nested = first_nested_symlink(child)
-            if nested is not None:
-                raise PathRefused(
-                    f"the snapshot holds the symlink {nested}; it is held, not followed"
-                )
-            make_writable_tree(child)
             shutil.rmtree(child)
         else:
-            with suppress(OSError):
-                child.chmod(0o600)
             child.unlink()
 
 
-def remove_snapshot(folder: Path, *, root: Path) -> bool:
-    """Remove one old snapshot; a symlinked one is held rather than followed."""
+def _checkout_inputs(
+    run: EnvironmentRun, workspace: Path, reporter: _Progress
+) -> tuple[CheckoutTotals, CheckoutTotals]:
+    destination = workspace / "trees"
+    guard_explainer_path(destination, root=workspace.parent, label="explainer trees")
+    destination.mkdir(exist_ok=True)
+    results: list[CheckoutTotals] = []
+    for side, repository, tree in (
+        ("code", run.inputs.code_repository, run.inputs.binding.code_candidate_tree),
+        (
+            "memory",
+            run.inputs.memory_repository,
+            run.inputs.binding.memory_candidate_tree,
+        ),
+    ):
+        reporter.step(f"checkout-{side}", state="running")
+        checked = checkout_tree(repository, tree, destination / side, root=workspace.parent)
+        reporter.step(f"checkout-{side}", state="done", **checked.as_record())
+        results.append(checked)
+    return results[0], results[1]
 
-    guard(root, folder, label="snapshot folder")
-    if not folder.exists() and not folder.is_symlink():
-        return False
-    if folder.is_symlink():
-        raise PathRefused(f"the snapshot {folder} is a symlink; it is held, not followed")
-    nested = first_nested_symlink(folder)
-    if nested is not None:
-        raise PathRefused(f"the snapshot holds the symlink {nested}; it is held, not followed")
-    make_writable_tree(folder)
-    shutil.rmtree(folder)
-    return True
+
+def _environment_binding(run: EnvironmentRun, packet_bytes: bytes) -> ExplainerBinding:
+    return ExplainerBinding(
+        binding=run.inputs.binding,
+        planned=run.inputs.planned,
+        prepared_at=run.now,
+        packet_digest=_digest(packet_bytes),
+        record_digest=run.inputs.record_digest,
+    )
+
+
+def _published_revisions(task: Path, leaf_id: str) -> list[tuple[int, Path]]:
+    """The leaf's published revisions in the task, oldest first: one folder per revision."""
+
+    folder = (
+        durable_reports_root(task)
+        / FRAMES_DIRECTORY
+        / slugify(leaf_id)
+        / EXPLAINER_FRAME
+        / REVISIONS_DIRECTORY
+    )
+    if not folder.is_dir() or folder.is_symlink():
+        return []
+    return sorted(
+        (int(item.name), item)
+        for item in folder.iterdir()
+        if item.is_dir() and not item.is_symlink() and item.name.isdecimal()
+    )
+
+
+def _copy_kit(workspace: Path, *, root: Path) -> int:
+    """Write every pinned library file into ``kit/``, verified against the kit's own manifest."""
+
+    destination = workspace / KIT_DIRECTORY
+    carried = kit_assets(tuple(kit_files()))
+    for contract_path, body in carried.items():
+        target = destination / contract_path.removeprefix(KIT_CONTRACT_PREFIX)
+        guard_explainer_path(target, root=root, label="explainer kit")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_bytes(target, body)
+    manifest = destination / KIT_MANIFEST_NAME
+    guard_explainer_path(manifest, root=root, label="explainer kit")
+    atomic_write_bytes(manifest, (KIT_ROOT / KIT_MANIFEST_NAME).read_bytes())
+    return len(carried)
+
+
+def _copy_documents(ref: EnvironmentRef, workspace: Path, reporter: _Progress) -> None:
+    """Copy in what the explainer needs, as a task agent's documents are (MIK-R211 v5 rule 3).
+
+    The task's reference notes for the leaf, the kit files and every published revision are plain
+    folder copies. The draft starts as a copy of the latest revision when it holds nothing yet, so a
+    new revision starts from the published one rather than from an empty page.
+    """
+
+    root = workspace.parent
+    kit = _copy_kit(workspace, root=root)
+    try:
+        task = task_root(ref.config, ref.repository_id, ref.task)
+    except PathRefused:
+        reporter.step("documents", reference=0, kit=kit, revisions=0)
+        return
+    reference = task / "notes" / "reference" / ref.leaf_id
+    notes = (
+        copy_folder(reference, workspace / REFERENCE_DIRECTORY, root=root)
+        if reference.is_dir() and not reference.is_symlink()
+        else 0
+    )
+    revisions = _published_revisions(task, ref.leaf_id)
+    for number, folder in revisions:
+        copy_revision(folder, workspace, number)
+    draft = workspace / DRAFTS_DIRECTORY / "assets"
+    started = False
+    if revisions and not any(item.is_file() for item in draft.rglob("*")):
+        latest = workspace / REVISIONS_DIRECTORY / str(revisions[-1][0]) / "assets"
+        copy_folder(latest, draft, root=root)
+        started = True
+    reporter.step(
+        "documents",
+        reference=notes,
+        kit=kit,
+        revisions=len(revisions),
+        draftFrom=revisions[-1][0] if started else None,
+    )
 
 
 def build_environment(run: EnvironmentRun) -> EnvironmentBuild:
-    """Build one leaf's environment, then bind it last (rules 1, 2, 4, 10)."""
+    """Create two plain Git worktrees and publish their binding last (L201 F9)."""
 
     reporter = _Progress(run.progress)
-    ref, inputs = run.ref, run.inputs
+    ref = run.ref
     workspace = ensure_leaf_workspace(ref.config, ref.repository_id, ref.task, ref.leaf_id)
-    root = workspace.parent
     reporter.step("workspace", path=str(workspace))
-    clear_retired(workspace)
+    # A failed attempt may have left useful worktrees; moving them again is Git's job.
+    guard_explainer_path(workspace / "binding.json", root=workspace.parent, label="binding")
+    (workspace / "binding.json").unlink(missing_ok=True)
     try:
-        number = next_snapshot_number(workspace)
-        destination = snapshot_folder(workspace, number)
-        guard_explainer_path(destination, root=root, label="snapshot folder")
-        destination.mkdir()
-        reporter.step("binding", owner=inputs.binding.comparison_owner, number=number)
-
-        def code_progress(done: int, total: int) -> None:
-            reporter.step("snapshot-code", done=done, total=total)
-
-        code = write_snapshot(
-            SnapshotWrite(
-                repository=inputs.code_repository,
-                tree=inputs.binding.code_candidate_tree,
-                destination=destination / "code",
-                root=root,
-                progress=code_progress,
-            )
-        )
-        reporter.step("snapshot-code", done=code.files, total=code.files)
-        memory = write_snapshot(
-            SnapshotWrite(
-                repository=inputs.memory_repository,
-                tree=inputs.binding.memory_candidate_tree,
-                destination=destination / "memory",
-                root=root,
-            )
-        )
-        reporter.step("snapshot-memory", done=memory.files, total=memory.files)
+        code, memory = _checkout_inputs(run, workspace, reporter)
         packet_bytes = _stage_and_commit_instructions(
-            workspace=workspace,
-            run=run,
-            snapshot_name=destination.name,
-            reporter=reporter,
+            workspace=workspace, run=run, snapshot_name="trees", reporter=reporter
         )
-        binding = ExplainerBinding(
-            binding=inputs.binding,
-            planned=inputs.planned,
-            snapshot=destination.name,
-            prepared_at=run.now,
-            packet_digest=_digest(packet_bytes),
-            record_digest=inputs.record_digest,
-        )
+        _copy_documents(ref, workspace, reporter)
+        binding = _environment_binding(run, packet_bytes)
         write_binding(workspace, binding)
-        reporter.step("bound", snapshot=destination.name)
+        reporter.step("bound", trees="trees")
     except BaseException:
-        cleanup_workspace_tree(workspace, root=root)
+        (workspace / "binding.json").unlink(missing_ok=True)
         raise
     return EnvironmentBuild(
         workspace=workspace,
         binding=binding,
-        snapshot=code,
         steps=tuple(reporter.steps),
         code=code,
         memory=memory,
@@ -714,20 +445,15 @@ def build_environment(run: EnvironmentRun) -> EnvironmentBuild:
 
 
 def update_environment(run: EnvironmentRun) -> EnvironmentUpdate:
-    """Rebind one environment to the next comparison, writing the new binding last (rule 6)."""
+    """Move the same two worktrees, then bind; a failed update stays unbound."""
 
-    ref, inputs = run.ref, run.inputs
     previous = run.previous
-    if previous is None:
-        raise ExplainerRefused("explainer-missing", "an Update needs the binding it replaces")
+    ref = run.ref
     reporter = _Progress(run.progress)
     workspace = leaf_workspace(ref.config, ref.repository_id, ref.task, ref.leaf_id)
-    root = workspace.parent
     if not workspace.is_dir():
-        raise ExplainerRefused(
-            "explainer-missing", f"the leaf {ref.leaf_id} has no environment at {workspace}"
-        )
-    if same_binding(previous.binding, inputs.binding):
+        raise ExplainerRefused("explainer-missing", f"no environment at {workspace}")
+    if previous is not None and same_binding(previous.binding, run.inputs.binding):
         reporter.step("current", number=previous.binding.comparison_number)
         return EnvironmentUpdate(
             workspace=workspace,
@@ -736,105 +462,28 @@ def update_environment(run: EnvironmentRun) -> EnvironmentUpdate:
             current=True,
             steps=tuple(reporter.steps),
         )
-    old_snapshot = workspace / previous.snapshot
-    number = next_snapshot_number(workspace)
-    destination = snapshot_folder(workspace, number)
-    guard_explainer_path(destination, root=root, label="snapshot folder")
-    destination.mkdir()
-    reporter.step("snapshot", number=number)
+    guard_explainer_path(workspace / "binding.json", root=workspace.parent, label="binding")
+    (workspace / "binding.json").unlink(missing_ok=True)
     try:
-        code = write_snapshot(
-            SnapshotWrite(
-                repository=inputs.code_repository,
-                tree=inputs.binding.code_candidate_tree,
-                destination=destination / "code",
-                root=root,
-                previous=old_snapshot / "code",
-            )
-        )
-        memory = write_snapshot(
-            SnapshotWrite(
-                repository=inputs.memory_repository,
-                tree=inputs.binding.memory_candidate_tree,
-                destination=destination / "memory",
-                root=root,
-                previous=old_snapshot / "memory",
-            )
-        )
-        reporter.step("snapshot", code=code.as_record(), memory=memory.as_record())
+        code, memory = _checkout_inputs(run, workspace, reporter)
         packet_bytes = _stage_and_commit_instructions(
-            workspace=workspace,
-            run=run,
-            snapshot_name=destination.name,
-            reporter=None,
-            bind_with=lambda digest: write_binding(
-                workspace,
-                ExplainerBinding(
-                    binding=inputs.binding,
-                    planned=inputs.planned,
-                    snapshot=destination.name,
-                    prepared_at=run.now,
-                    packet_digest=digest,
-                    record_digest=inputs.record_digest,
-                ),
-            ),
+            workspace=workspace, run=run, snapshot_name="trees", reporter=reporter
         )
-        reporter.step("instructions")
-        binding = ExplainerBinding(
-            binding=inputs.binding,
-            planned=inputs.planned,
-            snapshot=destination.name,
-            prepared_at=run.now,
-            packet_digest=_digest(packet_bytes),
-            record_digest=inputs.record_digest,
-        )
-        reporter.step("bound", snapshot=destination.name)
+        binding = _environment_binding(run, packet_bytes)
+        write_binding(workspace, binding)
+        reporter.step("bound", trees="trees")
     except BaseException:
-        with suppress(PathRefused, OSError):
-            remove_snapshot(destination, root=root)
+        (workspace / "binding.json").unlink(missing_ok=True)
         raise
-    _reclaim_replaced_snapshots(workspace, destination, old_snapshot, run.in_turn, reporter)
     return EnvironmentUpdate(
         workspace=workspace,
         binding=binding,
-        previous_number=previous.binding.comparison_number,
+        previous_number=None if previous is None else previous.binding.comparison_number,
         current=False,
-        snapshot=code,
         code=code,
         memory=memory,
         steps=tuple(reporter.steps),
     )
-
-
-def _reclaim_replaced_snapshots(
-    workspace: Path,
-    destination: Path,
-    old_snapshot: Path,
-    in_turn: Callable[[], bool] | None,
-    reporter: _Progress,
-) -> None:
-    root = workspace.parent
-    turn_active = False
-    if in_turn is not None:
-        try:
-            turn_active = bool(in_turn())
-        except Exception:
-            turn_active = True
-    if turn_active:
-        if old_snapshot.exists():
-            reporter.step("snapshot-kept-in-turn", folder=old_snapshot.name)
-        return
-    for child in sorted(workspace.iterdir(), key=lambda item: item.name):
-        if child == destination or not child.name.startswith("snapshot-"):
-            continue
-        suffix = child.name.removeprefix("snapshot-")
-        if not suffix.isdigit():
-            continue
-        try:
-            remove_snapshot(child, root=root)
-            reporter.step("snapshot-removed", folder=child.name)
-        except PathRefused as held:
-            reporter.step("snapshot-held", detail=str(held))
 
 
 def _backup_live_instructions(live_folder: Path, root: Path) -> dict[str, bytes]:
@@ -958,7 +607,7 @@ def _write_capsule(
         guard_explainer_path(path, root=workspace.parent, label="explainer instructions file")
     atomic_write_text(assignment_target, inputs.capsule)
     atomic_write_text(assignment_md_target, inputs.capsule)
-    chosen_snapshot = snapshot_name if snapshot_name is not None else _snapshot_name(workspace)
+    chosen_snapshot = "trees" if snapshot_name is None else snapshot_name
     grants: dict[str, Any] = {
         "schema": "ar-explainer-grants/v1",
         "workspace": str(workspace),
@@ -976,17 +625,6 @@ def _write_capsule(
     atomic_write_text(grants_target, json.dumps(grants, indent=2) + "\n")
 
 
-def _snapshot_name(workspace: Path) -> str | None:
-    highest: tuple[int, str] | None = None
-    for child in workspace.iterdir():
-        if not child.is_dir() or not child.name.startswith("snapshot-"):
-            continue
-        suffix = child.name.removeprefix("snapshot-")
-        if suffix.isdigit() and (highest is None or int(suffix) > highest[0]):
-            highest = (int(suffix), child.name)
-    return None if highest is None else highest[1]
-
-
 def _digest(payload: bytes) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
@@ -999,9 +637,19 @@ def plan_retire(ref: EnvironmentRef, *, generation: int) -> dict[str, Any]:
         "leaf": ref.leaf_id,
         "workspace": str(workspace),
         "exists": workspace.is_dir(),
-        "agentId": agent_id(workspace, generation),
+        "agentId": seat_for_workspace(workspace, generation),
         "generation": generation,
     }
+
+
+def _repositories(ref: EnvironmentRef) -> tuple[Path, ...]:
+    """The code and memory repositories whose worktrees an environment of ``ref`` registered."""
+
+    found: list[Path] = []
+    for memory in (False, True):
+        with suppress(PathRefused):
+            found.append(repository_path(ref.config, ref.repository_id, memory=memory))
+    return tuple(found)
 
 
 def retire_environment(request: RetireRequest) -> RetireOutcome:
@@ -1015,6 +663,7 @@ def retire_environment(request: RetireRequest) -> RetireOutcome:
         receipts_root=request.receipts_root,
         now=request.now,
         archive_session=request.archive_session,
+        repositories=_repositories(ref),
     )
     existing = find_pending_receipt(request.receipts_root, admitted_id)
     if existing is not None:
@@ -1025,10 +674,9 @@ def retire_environment(request: RetireRequest) -> RetireOutcome:
                 detail="the environment was already retired",
             )
         return resume_retire(place, existing)
-    if not workspace.is_dir():
-        raise ExplainerRefused(
-            "explainer-missing", f"the leaf {ref.leaf_id} has no environment at {workspace}"
-        )
+    # A seat in any state is removed: live, closed, archived, or with no workspace left on disk. A
+    # missing workspace still has its chat archived and its worktree registrations pruned, because
+    # a folder deleted by hand leaves both behind (MIK-R211 v5 rule 12).
     return retire_workspace(
         RetireStart(
             place=place,
@@ -1048,7 +696,7 @@ def retire_workspace(start: RetireStart) -> RetireOutcome:
     if existing is not None and existing.state != "finished":
         return resume_retire(place, existing)
     workspace = place.workspace
-    seat = agent_id(workspace, start.generation)
+    seat = seat_for_workspace(workspace, start.generation)
     tree = process_tree(workspace, seat)
     receipt = RetireReceipt(
         receipt_id=admitted_id,
@@ -1105,7 +753,11 @@ def settle_retire(place: RetirePlace, receipt: RetireReceipt) -> RetireOutcome:
     except Exception as error:
         return _pending_outcome(place, receipt, step="end-processes", detail=str(error))
     receipt = receipt.model_copy(
-        update={"ended_by_marker": by_marker, "ended_by_tree": by_tree, "remaining": remaining}
+        update={
+            "ended_by_marker": by_marker,
+            "ended_by_tree": by_tree,
+            "remaining": remaining,
+        }
     )
     if remaining:
         return _pending_outcome(
@@ -1115,19 +767,19 @@ def settle_retire(place: RetirePlace, receipt: RetireReceipt) -> RetireOutcome:
             detail=f"process(es) {list(remaining)} still answer alive",
         )
     try:
-        held = (
-            remove_workspace_contents(workspace, root=workspace.parent)
-            if workspace.is_dir()
-            else []
-        )
+        held = remove_workspace(workspace, root=workspace.parent)
+        for repository in place.repositories:
+            prune_worktrees(repository)
     except Exception as error:
         return _pending_outcome(place, receipt, step="workspace-remove", detail=str(error))
     if held:
         return _pending_outcome(
-            place, receipt, step="workspace-held", detail="; ".join(held), held=tuple(held)
+            place,
+            receipt,
+            step="workspace-held",
+            detail="; ".join(held),
+            held=tuple(held),
         )
-    if workspace.is_dir():
-        mark_retired(workspace, receipt.receipt_id, at=place.now)
     finished = receipt.model_copy(
         update={
             "state": "finished",
@@ -1135,7 +787,10 @@ def settle_retire(place: RetirePlace, receipt: RetireReceipt) -> RetireOutcome:
             "remaining": (),
             "held": (),
             "finished_at": place.now,
-            "detail": "the workspace was removed; pages and grades stay with the task",
+            "detail": (
+                "the chat was archived and the workspace removed completely, its Git worktrees "
+                "pruned; the published revisions and grades stay with the task"
+            ),
         }
     )
     write_receipt(place.receipts_root, finished)

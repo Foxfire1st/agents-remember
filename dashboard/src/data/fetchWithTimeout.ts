@@ -19,7 +19,10 @@ export async function fetchWithTimeout(
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await fetch(url, {
+      ...init,
+      signal: init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal,
+    });
   } finally {
     window.clearTimeout(timer);
   }

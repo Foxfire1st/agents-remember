@@ -255,6 +255,13 @@ export function stubCounters(reviewSummary?: unknown) {
         return answer({ reports: [], total: 0, explorer: null });
       }
       return answer({
+        ...(url.startsWith('/api/changeset/master') ? {
+          master: queryOf(url).get('master'),
+          leaves: [],
+          generation: { codeBase: 'b0', codeTip: 'b0', memoryBase: 'm0', memoryTip: 'm0', digest: 'e'.repeat(64) },
+          currentness: 'current',
+          scope: 'integrated',
+        } : {}),
         counters: {
           code: { files: 0, insertions: 0, deletions: 0 },
           memory: { files: 0, insertions: 0, deletions: 0 },

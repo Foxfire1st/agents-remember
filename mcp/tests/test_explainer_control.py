@@ -4,7 +4,7 @@ MIK-R186 rule 6 gives the architect Update and Retire over a leaf's explainer; M
 ``claim``, the record's second writer, and the Manager start's writer. Every case here runs on a
 temporary coordination root with a fake host and no network: the seat service is composed for real
 (the composition root's own function) and the two calls it makes are recorded, so what is under
-test is the caller check, the record, and the report move.
+test is the caller check and the record.
 """
 
 from __future__ import annotations
@@ -33,15 +33,13 @@ from agents_remember.application.master_architect_record import (
 from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.canvas.explainer_paths import leaf_workspace
 from agents_remember.canvas.explainer_state import ExplainerBinding, PlannedIdentity
-from agents_remember.cli.paseo_bridge import SEND_OUTCOME_UNKNOWN, PaseoBridgeFailure
 from agents_remember.cli.paseo_launch import StartingAgent
-from agents_remember.cli.role_held_messages import MAX_HELD_PER_RECIPIENT
 from agents_remember.cli.role_launch_receipts import (
-    EXECUTIONS_DIRECTORY,
     RECEIPT_SCHEMA,
     _receipt_path,
 )
 from agents_remember.cli.role_launch_routes import remember_master_architect
+from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.tools import explainer_control as control
@@ -184,13 +182,12 @@ class _World(unittest.TestCase):
         call: ExplainerControlCall,
         *,
         environment: dict[str, str] | None = None,
-        send: Any = None,
     ) -> dict[str, Any]:
         with (
             mock.patch.object(control, "_explainer_host", lambda config: self.host),
             tool_call_context("explainer_control", {"action": call.action}, config=self.config),
         ):
-            return explainer_control_payload(self.config, call, environment=environment, send=send)
+            return explainer_control_payload(self.config, call, environment=environment)
 
     # -- records and held stores --------------------------------------------------------
 
@@ -255,8 +252,13 @@ class ClaimTests(_World):
         self.assertEqual(answer["code"], NOT_AN_ARCHITECT)
         self.assertFalse(self.record_file().exists())
 
-    def test_a_claim_moves_one_held_report_to_the_claiming_seat(self) -> None:
-        # The record names the previous seat, whose store still holds this master's report.
+    def test_a_claim_moves_no_report_and_leaves_the_previous_seats_store_as_it_was(self) -> None:
+        """MIK-R211 v5 rule 3 (D607): the explainer reports with role_message like every agent.
+
+        It holds no report of its own, so a claim writes the record and moves nothing: a row the
+        previous seat's store holds stays there, untouched, and nothing is sent.
+        """
+
         write_record(
             self.record_file(),
             architect_agent_id=OTHER_ARCHITECT,
@@ -286,337 +288,17 @@ class ClaimTests(_World):
             "reason": "recipient-busy",
         }
         store = self.write_held_store(previous_folder, OTHER_ARCHITECT, [row])
-        sent: list[tuple[str, str, str]] = []
+        before = store.read_bytes()
 
         answer = self.run_call(
             ExplainerControlCall(action="claim", repo_id=REPO, task_name=MASTER),
             environment=self.architect_environment(ARCHITECT),
-            send=lambda agent_id, text, message_id: (
-                sent.append((agent_id, text, message_id)) or True
-            ),
         )
 
+        self.assertTrue(answer["ok"])
         self.assertEqual(read_record_architect(self.record_file()), ARCHITECT)
-        self.assertEqual(self.held_rows(store), [])
-        self.assertEqual(sent, [(ARCHITECT, row["text"], row["id"])])
-        self.assertEqual(answer["claim"]["found"], 1)
-        self.assertEqual(answer["claim"]["withdrawn"], [row["id"]])
-        self.assertEqual(answer["claim"]["sent"], 1)
-        self.assertEqual(answer["claim"]["held"], 0)
-        log_path = (
-            self.config.coordination_root
-            / "notes"
-            / "reports"
-            / "developer-messages"
-            / REPO
-            / MASTER
-            / "reports.jsonl"
-        )
-        logged = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
-        self.assertEqual(logged[-1]["reportId"], row["id"])
-        self.assertEqual(logged[-1]["state"], "reported")
-        self.assertEqual(logged[-1]["architect"], ARCHITECT)
-
-    def _setup_claim_pair(self) -> tuple[Path, Path, Path]:
-        write_record(
-            self.record_file(),
-            architect_agent_id=OTHER_ARCHITECT,
-            act=MANAGER_START,
-            at="2026-10-22T08:00:00+00:00",
-        )
-        previous_folder = self.root / "workspace" / "previous-architect"
-        claimer_folder = self.root / "workspace" / "claimer-architect"
-        previous_folder.mkdir(parents=True, exist_ok=True)
-        claimer_folder.mkdir(parents=True, exist_ok=True)
-        for aid, folder in ((OTHER_ARCHITECT, previous_folder), (ARCHITECT, claimer_folder)):
-            self.write_receipt(
-                self.config.coordination_root
-                / "notes"
-                / "reports"
-                / EXECUTIONS_DIRECTORY
-                / "architect"
-                / "sessions"
-                / f"{aid}.json",
-                agentId=aid,
-                role="architect",
-                workspace={"path": str(folder)},
-            )
-        log_dir = (
-            self.config.coordination_root
-            / "notes"
-            / "reports"
-            / "developer-messages"
-            / REPO
-            / MASTER
-        )
-        log_dir.mkdir(parents=True, exist_ok=True)
-        return previous_folder, claimer_folder, log_dir / "reports.jsonl"
-
-    @staticmethod
-    def _make_report_row(report_id: str, file_path: Path | None = None) -> dict[str, Any]:
-        footer = (
-            f"\n\nMessage file: {file_path.as_posix()} (SHA-256 {'a' * 64})" if file_path else ""
-        )
-        return {
-            "id": report_id,
-            "senderLine": f"From explainer · {MASTER} · agent {EXPLAINER}",
-            "senderAgentId": EXPLAINER,
-            "text": f"From explainer · {MASTER} · agent {EXPLAINER}\n\nthe report{footer}",
-            "takenAt": "2026-10-22T09:00:00+00:00",
-            "reason": "recipient-busy",
-        }
-
-    def test_claim_respects_provider_limit_timeout_and_full_or_unavailable_destination(
-        self,
-    ) -> None:
-        previous_folder, claimer_folder, log_path = self._setup_claim_pair()
-        limited_id, already_unknown_id = str(uuid.uuid4()), str(uuid.uuid4())
-        log_path.write_text(
-            "\n".join(
-                [
-                    json.dumps(
-                        {
-                            "messageId": "m-1",
-                            "reportId": limited_id,
-                            "sha256": "a" * 64,
-                            "state": "held",
-                            "architect": OTHER_ARCHITECT,
-                            "at": "2026-10-22T09:00:00+00:00",
-                        }
-                    ),
-                    json.dumps(
-                        {
-                            "messageId": "m-2",
-                            "reportId": already_unknown_id,
-                            "sha256": "b" * 64,
-                            "state": "sent, outcome unknown",
-                            "architect": OTHER_ARCHITECT,
-                            "at": "2026-10-22T09:00:00+00:00",
-                        }
-                    ),
-                ]
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        self.write_held_store(
-            previous_folder,
-            OTHER_ARCHITECT,
-            [self._make_report_row(limited_id), self._make_report_row(already_unknown_id)],
-        )
-        sender_calls: list[str] = []
-        with mock.patch.object(
-            control,
-            "provider_limit_hold",
-            return_value={
-                "heldReason": "provider-limit",
-                "limitedUntil": "2026-10-22T12:00:00+00:00",
-            },
-            create=True,
-        ):
-            limited_ans = self.run_call(
-                ExplainerControlCall(action="claim", repo_id=REPO, task_name=MASTER),
-                environment=self.architect_environment(ARCHITECT),
-                send=lambda _a, _t, mid: sender_calls.append(mid) or True,
-            )
-        self.assertEqual(sender_calls, [])
-        self.assertEqual(limited_ans["claim"]["found"], 1)
-        self.assertEqual(limited_ans["claim"]["held"], 1)
-        self.assertEqual(limited_ans["claim"]["sent"], 0)
-        claimer_rows = self.held_rows(self.held_store(claimer_folder, ARCHITECT))
-        self.assertEqual(len(claimer_rows), 1)
-        self.assertEqual(claimer_rows[0]["id"], limited_id)
-        self.assertEqual(claimer_rows[0]["reason"], "provider-limit")
-
-        # 2) Timeout / SEND_OUTCOME_UNKNOWN records unknown, is not held or tray-copied, and retry
-        #    never resends it.
-        timeout_id = str(uuid.uuid4())
-        write_record(
-            self.record_file(),
-            architect_agent_id=OTHER_ARCHITECT,
-            act=MANAGER_START,
-            at="2026-10-22T09:30:00+00:00",
-        )
-        log_path.write_text(
-            json.dumps(
-                {
-                    "messageId": "m-3",
-                    "reportId": timeout_id,
-                    "sha256": "c" * 64,
-                    "state": "held",
-                    "architect": OTHER_ARCHITECT,
-                    "at": "2026-10-22T09:30:00+00:00",
-                }
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        self.write_held_store(previous_folder, OTHER_ARCHITECT, [self._make_report_row(timeout_id)])
-        self.write_held_store(claimer_folder, ARCHITECT, [])
-
-        def timeout_sender(_a: str, _t: str, _mid: str) -> bool:
-            raise PaseoBridgeFailure(SEND_OUTCOME_UNKNOWN, "bridge timed out")
-
-        timeout_ans = self.run_call(
-            ExplainerControlCall(action="claim", repo_id=REPO, task_name=MASTER),
-            environment=self.architect_environment(ARCHITECT),
-            send=timeout_sender,
-        )
-        self.assertEqual(timeout_ans["claim"]["sent"], 0)
-        self.assertEqual(timeout_ans["claim"]["held"], 0)
-        self.assertEqual(timeout_ans["claim"]["unknown"], 1)
-        self.assertEqual(self.held_rows(self.held_store(claimer_folder, ARCHITECT)), [])
-        last_line = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
-        self.assertEqual(last_line["state"], "sent, outcome unknown")
-        self.write_held_store(previous_folder, OTHER_ARCHITECT, [self._make_report_row(timeout_id)])
-        retry_calls: list[str] = []
-        self.run_call(
-            ExplainerControlCall(action="claim", repo_id=REPO, task_name=MASTER),
-            environment=self.architect_environment(ARCHITECT),
-            send=lambda _a, _t, mid: retry_calls.append(mid) or True,
-        )
-        self.assertEqual(retry_calls, [])
-
-        # 3) Full destination held store falls back to tray (`not reported`) without falsely
-        #    incrementing `held`.
-        full_id = str(uuid.uuid4())
-        report_file = self.root / "report-for-tray.md"
-        report_file.write_text("report body\n", encoding="utf-8")
-        write_record(
-            self.record_file(),
-            architect_agent_id=OTHER_ARCHITECT,
-            act=MANAGER_START,
-            at="2026-10-22T10:00:00+00:00",
-        )
-        log_path.write_text(
-            json.dumps(
-                {
-                    "messageId": "m-4",
-                    "reportId": full_id,
-                    "sha256": "d" * 64,
-                    "state": "held",
-                    "file": report_file.as_posix(),
-                    "architect": OTHER_ARCHITECT,
-                    "at": "2026-10-22T10:00:00+00:00",
-                }
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        self.write_held_store(
-            previous_folder, OTHER_ARCHITECT, [self._make_report_row(full_id, report_file)]
-        )
-        self.write_held_store(
-            claimer_folder,
-            ARCHITECT,
-            [self._make_report_row(str(uuid.uuid4())) for _ in range(MAX_HELD_PER_RECIPIENT)],
-        )
-        full_ans = self.run_call(
-            ExplainerControlCall(action="claim", repo_id=REPO, task_name=MASTER),
-            environment=self.architect_environment(ARCHITECT),
-            send=lambda _a, _t, _mid: False,
-        )
-        self.assertEqual(full_ans["claim"]["sent"], 0)
-        self.assertEqual(full_ans["claim"]["held"], 0)
-        self.assertEqual(full_ans["claim"]["notReported"], 1)
-        self.assertTrue((self.root / "report-for-tray.undelivered.md").is_file())
-        last_full_line = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
-        self.assertEqual(last_full_line["state"], "not reported")
-
-    def _setup_claim_without_claimer_workspace(self) -> tuple[Path, Path]:
-        """The previous seat holds reports; the claiming seat has no launch receipt at all."""
-        write_record(
-            self.record_file(),
-            architect_agent_id=OTHER_ARCHITECT,
-            act=MANAGER_START,
-            at="2026-10-22T08:00:00+00:00",
-        )
-        previous_folder = self.root / "workspace" / "previous-architect"
-        previous_folder.mkdir(parents=True, exist_ok=True)
-        self.write_receipt(
-            self.config.coordination_root
-            / "notes"
-            / "reports"
-            / EXECUTIONS_DIRECTORY
-            / "architect"
-            / "sessions"
-            / f"{OTHER_ARCHITECT}.json",
-            agentId=OTHER_ARCHITECT,
-            role="architect",
-            workspace={"path": str(previous_folder)},
-        )
-        log_path = (
-            self.config.coordination_root
-            / "notes"
-            / "reports"
-            / "developer-messages"
-            / REPO
-            / MASTER
-            / "reports.jsonl"
-        )
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        return previous_folder, log_path
-
-    def test_claim_with_an_unavailable_destination_falls_back_to_the_tray(self) -> None:
-        # The claiming seat has no launch receipt and no workspace: its destination cannot take a
-        # held report, so the withdrawn report goes back to the tray as `not reported`, with the
-        # reports.jsonl row naming the transition, and nothing is re-held anywhere.
-        previous_folder, log_path = self._setup_claim_without_claimer_workspace()
-        unavailable_id = str(uuid.uuid4())
-        report_file = self.root / "report-unavailable.md"
-        report_file.write_text("report body\n", encoding="utf-8")
-        log_path.write_text(
-            json.dumps(
-                {
-                    "messageId": "m-5",
-                    "reportId": unavailable_id,
-                    "sha256": "e" * 64,
-                    "state": "held",
-                    "file": report_file.as_posix(),
-                    "architect": OTHER_ARCHITECT,
-                    "at": "2026-10-22T11:00:00+00:00",
-                }
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        self.write_held_store(
-            previous_folder, OTHER_ARCHITECT, [self._make_report_row(unavailable_id, report_file)]
-        )
-        answer = self.run_call(
-            ExplainerControlCall(action="claim", repo_id=REPO, task_name=MASTER),
-            environment=self.architect_environment(ARCHITECT),
-            send=lambda _a, _t, _mid: False,
-        )
-        self.assertEqual(answer["claim"]["sent"], 0)
-        self.assertEqual(answer["claim"]["held"], 0)
-        self.assertEqual(answer["claim"]["notReported"], 1)
-        self.assertTrue((self.root / "report-unavailable.undelivered.md").is_file())
-        last_line = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
-        self.assertEqual(last_line["reportId"], unavailable_id)
-        self.assertEqual(last_line["state"], "not reported")
-        self.assertIn("destination-unavailable", last_line.get("refusal") or "")
-
-    def test_claim_restores_custody_when_no_report_file_exists(self) -> None:
-        # With no report file on disk and no claiming workspace, the withdrawn row is restored to
-        # the previous seat's store and logs `held`, so a retry can still move the report.
-        previous_folder, log_path = self._setup_claim_without_claimer_workspace()
-        orphan_id = str(uuid.uuid4())
-        self.write_held_store(previous_folder, OTHER_ARCHITECT, [self._make_report_row(orphan_id)])
-        answer = self.run_call(
-            ExplainerControlCall(action="claim", repo_id=REPO, task_name=MASTER),
-            environment=self.architect_environment(ARCHITECT),
-            send=lambda _a, _t, _mid: False,
-        )
-        self.assertEqual(answer["claim"]["sent"], 0)
-        self.assertEqual(answer["claim"]["held"], 0)
-        self.assertEqual(answer["claim"]["notReported"], 1)
-        restored = self.held_rows(self.held_store(previous_folder, OTHER_ARCHITECT))
-        self.assertEqual([row["id"] for row in restored], [orphan_id])
-        last_line = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
-        self.assertEqual(last_line["reportId"], orphan_id)
-        self.assertEqual(last_line["state"], "held")
-        self.assertEqual(last_line["architect"], OTHER_ARCHITECT)
+        self.assertNotIn("claim", answer)
+        self.assertEqual(store.read_bytes(), before)
 
 
 class SeatActionTests(_World):
@@ -769,9 +451,9 @@ class SeatActionTests(_World):
     def test_the_named_seat_reaches_the_real_seat_service(self) -> None:
         """The accepted caller is answered by the seat service itself, composed as the page is.
 
-        No workspace exists for this leaf, so the service's own refusal comes back -- and the fake
-        host was asked about the seat it names, which is what proves the composition is the real
-        one and not a second wiring of it.
+        No workspace exists for this leaf, so the service's own refusal comes back, by the name
+        and the leaf it gives -- before any lock or host call, because a removed workspace leaves
+        no folder and the lock would make one (MIK-R211 v5 rule 12).
         """
 
         self.named(ARCHITECT)
@@ -783,8 +465,10 @@ class SeatActionTests(_World):
         )
 
         self.assertFalse(answer["ok"])
-        self.assertEqual(answer["reason"], "leaf-unavailable")
-        self.assertTrue(self.host.asked)
+        self.assertEqual(answer["reason"], "explainer-missing")
+        self.assertIn(LEAF, answer["detail"])
+        self.assertFalse(self.host.asked)
+        self.assertFalse(leaf_workspace(self.config, REPO, MASTER, LEAF).exists())
 
 
 class RealCompositionTests(_World):

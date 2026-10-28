@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -29,7 +30,10 @@ from agents_remember.serving.projections.projection_inputs import (
     HEALING_PROJECTION_DOMAINS,
     ProjectionDomain,
 )
-from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS, async_wait_until
+from agents_remember_test_support.testing.waits import (
+    HANG_GUARD_SECONDS,
+    async_wait_until,
+)
 
 
 def _config(tmp: Path) -> McpRuntimeConfig:
@@ -46,16 +50,16 @@ class _DeathMatrix:
 
     def __init__(self, added: Path) -> None:
         self.added = added
-        self.real_roots = watcher_module.projection_input_roots
+        self.real_roots = watcher_module.projection_watch_plan
         self.derivations = 0
         self.awatch_entries: list[list[Path]] = []
         self.failed_once = False
 
-    def growing_roots(self, cfg: McpRuntimeConfig) -> list[Path]:
+    def growing_roots(self, cfg: McpRuntimeConfig) -> watcher_module.ProjectionWatchPlan:
         self.derivations += 1
         roots = self.real_roots(cfg)
         if self.derivations > 2 and self.added.exists():
-            return [*roots, self.added]
+            return replace(roots, roots=(*roots.roots, self.added))
         return roots
 
     async def flaky_awatch(self, *roots: Path, **kwargs: object):
@@ -100,26 +104,27 @@ class _CommonFailureMatrix:
         self.recovered = asyncio.Event()
         self.retry_stamps: list[float | None] = []
         self.registered_roots: list[tuple[Path, ...]] = []
-        self.real_roots = watcher_module.projection_input_roots
+        self.real_roots = watcher_module.projection_watch_plan
         self.real_sleep = asyncio.sleep
         self.attempts = {"discovery": 0, "native": 0, "refresh": 0}
+        self.native_generations: set[asyncio.Event] = set()
         self.clock = watcher_module.time.monotonic()
         self.runner: asyncio.Task[None] | None = None
         # MIK-R199 removed logs/providers/{status,setup} from the watched roots (no surviving
         # projection reader reads them), so the root this matrix makes appear late is one
-        # projection_input_roots still returns: the drift snapshot directory, whose reader is
+        # projection_watch_plan still returns: the drift snapshot directory, whose reader is
         # the drift projection. The property is unchanged -- a root that does not exist during
         # the outage, appears while the watcher is down, and is registered on the next attempt.
         self.new_root = drift_snapshot_dir(root)
         self.new_root_file = self.new_root / "repo__main.json"
 
-    def roots(self, cfg: McpRuntimeConfig) -> list[Path]:
+    def roots(self, cfg: McpRuntimeConfig) -> watcher_module.ProjectionWatchPlan:
         self.attempts["discovery"] += 1
         if self.fault == "discovery" and self.attempts["discovery"] <= 2:
             raise OSError("root discovery failure")
         return self.real_roots(cfg)
 
-    async def refresh(self, _current: list[Path], stop: asyncio.Event) -> None:
+    async def refresh(self, _current, stop: asyncio.Event, _replan, _replace_watch, _pacer) -> None:
         self.attempts["refresh"] += 1
         if self.fault in ("refresh", "cancel", "return") and self.attempts["refresh"] <= 2:
             if self.fault == "cancel":
@@ -130,7 +135,9 @@ class _CommonFailureMatrix:
         await stop.wait()
 
     async def native(self, *paths: Path, stop_event: asyncio.Event, **kwargs: object):
-        self.attempts["native"] += 1
+        if stop_event not in self.native_generations:
+            self.native_generations.add(stop_event)
+            self.attempts["native"] += 1
         self.registered_roots.append(paths)
         self.case.assertTrue(kwargs["yield_on_timeout"])
         self.case.assertFalse(kwargs["force_polling"])
@@ -172,7 +179,7 @@ class _CommonFailureMatrix:
 
     async def run(self) -> None:
         with (
-            mock.patch.object(watcher_module, "projection_input_roots", self.roots),
+            mock.patch.object(watcher_module, "projection_watch_plan", self.roots),
             mock.patch.object(self.watcher, "_stop_when_roots_change", self.refresh),
             mock.patch.object(watcher_module.watchfiles, "awatch", self.native),
             mock.patch.object(watcher_module.asyncio, "sleep", self.retry_sleep),
@@ -188,7 +195,7 @@ class _CommonFailureMatrix:
                 self.case.assertEqual(self.retry_stamps[0], self.retry_stamps[1])
                 self.case.assertTrue(self.pacer.watcher_healthy)
                 self.case.assertIsNone(self.pacer.watcher_down_since)
-                self.case.assertIn(self.new_root, self.registered_roots[-1])
+                self.case.assertTrue(any(self.new_root in lane for lane in self.registered_roots))
                 self.case.assertIn(str(self.new_root_file), self.pacer._pending_distinct_set)
                 self.case.assertIn(
                     watcher_module.ProjectionDomain.TASKS, self.pacer._pending_domains
@@ -203,11 +210,20 @@ class RefresherDeathBesideLiveWatchTests(unittest.IsolatedAsyncioTestCase):
     async def test_common_failure_matrix_keeps_down_since_and_default_thirty_second_retry(
         self,
     ) -> None:
-        for fault in ("discovery", "registration", "iteration", "refresh", "cancel", "return"):
+        for fault in (
+            "discovery",
+            "registration",
+            "iteration",
+            "refresh",
+            "cancel",
+            "return",
+        ):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 await _CommonFailureMatrix(Path(tmp), fault, self).run()
 
-    async def test_refresher_death_beside_live_watch_reconciles_and_raises(self) -> None:
+    async def test_refresher_death_beside_live_watch_reconciles_and_raises(
+        self,
+    ) -> None:
         """The refresher dying beside an established watch reconciles, then raises.
 
         The death is recorded, the native watch stops, the refresher drains, then the
@@ -221,9 +237,11 @@ class RefresherDeathBesideLiveWatchTests(unittest.IsolatedAsyncioTestCase):
             pacer = _WakeTrace()
             watcher = ProjectionInputWatcher(config, refresh_seconds=0.01)
             derived = 0
-            real_roots = watcher_module.projection_input_roots
+            real_roots = watcher_module.projection_watch_plan
 
-            def dying_roots(cfg: McpRuntimeConfig) -> list[Path]:
+            def dying_roots(
+                cfg: McpRuntimeConfig,
+            ) -> watcher_module.ProjectionWatchPlan:
                 nonlocal derived
                 derived += 1
                 if derived > 1:
@@ -237,12 +255,12 @@ class RefresherDeathBesideLiveWatchTests(unittest.IsolatedAsyncioTestCase):
                 yield set()
 
             with (
-                mock.patch.object(watcher_module, "projection_input_roots", dying_roots),
+                mock.patch.object(watcher_module, "projection_watch_plan", dying_roots),
                 mock.patch.object(watcher_module.watchfiles, "awatch", idle_awatch),
             ):
                 async with asyncio.timeout(HANG_GUARD_SECONDS):
                     with self.assertRaisesRegex(OSError, "live watch"):
-                        await watcher._watch_once([root / "tasks"], pacer, reconcile=False)
+                        await watcher._watch_once(real_roots(config), pacer, reconcile=False)
             self.assertGreaterEqual(derived, 2)
             self.assertIn(True, pacer.health)
             notified = pacer.notifications
@@ -270,7 +288,7 @@ class RefresherDeathBesideLiveWatchTests(unittest.IsolatedAsyncioTestCase):
             pacer = ChangePacer(interval=1, heartbeat=15)
             watcher = ProjectionInputWatcher(config, refresh_seconds=0.05)
             with (
-                mock.patch.object(watcher_module, "projection_input_roots", matrix.growing_roots),
+                mock.patch.object(watcher_module, "projection_watch_plan", matrix.growing_roots),
                 mock.patch.object(watcher_module.watchfiles, "awatch", matrix.flaky_awatch),
             ):
                 task = asyncio.create_task(watcher.run(pacer))

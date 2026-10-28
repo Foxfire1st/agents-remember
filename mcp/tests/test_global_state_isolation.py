@@ -94,7 +94,15 @@ def _owned_plain(module: ModuleType, state: ProcessMutableState) -> Any:
     return value
 
 
+def _owned_watch(module: ModuleType, state: ProcessMutableState) -> Any:
+    del state
+    watch = mock.Mock()
+    module.__dict__["held_watch"] = watch  # the reset empties the dict in place
+    return {"process": watch}
+
+
 _OWNED_STATE_BUILDERS = {
+    "_reset_process_worktree_watch": _owned_watch,
     "_clear": _owned_cleared,
     "_clear_cache": _owned_cached,
     "_finish_quality_runs": _owned_quality,
@@ -113,6 +121,53 @@ def _module_with_owned_state(state: ProcessMutableState) -> tuple[ModuleType, An
     value = _OWNED_STATE_BUILDERS.get(action, _owned_plain)(module, state)
     setattr(module, state.attribute, value)
     return module, tuple(value) if action == "_stop_spawned" else value
+
+
+def _assert_cleanup(
+    test: unittest.TestCase,
+    state: ProcessMutableState,
+    module: ModuleType,
+    previous: Any,
+    value: Any,
+) -> None:
+    """One reset row's declared cleanup, observed on its loaded owner."""
+    assert state.reset is not None
+    action = state.reset.__name__
+    if action == "_clear_cache":
+        value.cache_clear.assert_called_once_with()
+    elif action == "_stop_spawned":
+        previous[0].terminate.assert_called_once_with()
+        previous[0].wait.assert_called_once()
+        test.assertEqual(value, [])
+    elif action == "_reset_compact_content":
+        test.assertIs(value, False)
+        test.assertIs(
+            sys.modules[state.module]._fm._convert_to_content,
+            module.original_callable,
+        )
+    elif action == "_reset_extension":
+        test.assertIs(value, False)
+        test.assertIs(
+            sys.modules[state.module].ServerSession.__init__,
+            module.original_callable,
+        )
+    elif action == "_reset_background_pool":
+        previous.shutdown.assert_called_once_with(wait=True)
+        test.assertIsNone(sys.modules[state.module]._BackgroundPool.executor)
+    elif action == "_clear_binding":
+        test.assertIsNone(value)
+    elif action == "_reset_build_watchdog":
+        # The watchdog row's contract is the reference, not a container: a loaded
+        # owner may hold a thread or a placeholder, and either way it is cleared.
+        test.assertIsNone(value)
+    elif action in {"_reset_sweep_cursor", "_reset_tool_writer"}:
+        resetter = {
+            "_reset_sweep_cursor": "_reset_sweep_cursor",
+            "_reset_tool_writer": "reset_tool_writer",
+        }[action]
+        getattr(module, resetter).assert_called_once_with()
+    else:
+        test.assertEqual(value, {})
 
 
 class GlobalStateLeakDetectionTests(unittest.TestCase):
@@ -158,6 +213,14 @@ class GlobalStateLeakDetectionTests(unittest.TestCase):
             reset_process_mutable_state()
             self.assertEqual(fake._FOLDER_BUDGETS, {})
 
+    def test_the_process_watch_reset_shuts_its_watch_down_and_forgets_it(self) -> None:
+        (state,) = [one for one in PROCESS_MUTABLE_STATES if one.name.endswith("._PROCESS_WATCH")]
+        module, _ = _module_with_owned_state(state)
+        with mock.patch.dict(sys.modules, {state.module: module}):
+            reset_process_mutable_state()
+        self.assertEqual(getattr(module, state.attribute), {})
+        module.held_watch.shutdown.assert_called_once_with()
+
     def test_every_reset_row_runs_its_declared_cleanup_for_a_loaded_owner(self) -> None:
         # Ambient's actual heartbeat is exercised separately; all other registered reset
         # owners get deterministic local state so every row participates in this proof.
@@ -177,38 +240,7 @@ class GlobalStateLeakDetectionTests(unittest.TestCase):
                     module, previous = modules[state.name]
                     value = getattr(sys.modules[state.module], state.attribute)
                     assert state.reset is not None
-                    action = state.reset.__name__
-                    if action == "_clear_cache":
-                        value.cache_clear.assert_called_once_with()
-                    elif action == "_stop_spawned":
-                        previous[0].terminate.assert_called_once_with()
-                        previous[0].wait.assert_called_once()
-                        self.assertEqual(value, [])
-                    elif action == "_reset_compact_content":
-                        self.assertIs(value, False)
-                        self.assertIs(
-                            sys.modules[state.module]._fm._convert_to_content,
-                            module.original_callable,
-                        )
-                    elif action == "_reset_extension":
-                        self.assertIs(value, False)
-                        self.assertIs(
-                            sys.modules[state.module].ServerSession.__init__,
-                            module.original_callable,
-                        )
-                    elif action == "_reset_background_pool":
-                        previous.shutdown.assert_called_once_with(wait=True)
-                        self.assertIsNone(sys.modules[state.module]._BackgroundPool.executor)
-                    elif action == "_clear_binding":
-                        self.assertIsNone(value)
-                    elif action in {"_reset_sweep_cursor", "_reset_tool_writer"}:
-                        resetter = {
-                            "_reset_sweep_cursor": "_reset_sweep_cursor",
-                            "_reset_tool_writer": "reset_tool_writer",
-                        }[action]
-                        getattr(module, resetter).assert_called_once_with()
-                    else:
-                        self.assertEqual(value, {})
+                    _assert_cleanup(self, state, module, previous, value)
 
     def test_background_pool_reset_closes_the_old_executor_and_allows_a_fresh_one(self) -> None:
         state = next(

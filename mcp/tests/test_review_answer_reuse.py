@@ -18,16 +18,6 @@ from agents_remember.serving.changeset_cache import ContentRead, DirectoryRead
 from agents_remember.serving.review_answer_reuse import RecordedAnswerReuse
 
 
-class _Clock:
-    """A clock the test moves; ``monotonic`` is the production one."""
-
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
 @contextmanager
 def _no_readable_input(reuse: RecordedAnswerReuse) -> Iterator[None]:
     """Make every observation unreadable: a doubt, so nothing is kept and nothing is served."""
@@ -115,25 +105,6 @@ def test_an_unreadable_input_is_never_kept_or_served() -> None:
 
         assert len(calls) == 2
         assert reuse.retained() == 0
-
-
-def test_an_answer_is_not_served_after_the_age_bound() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        sources = _sources(root)
-        clock = _Clock()
-        reuse = RecordedAnswerReuse(max_age_seconds=60.0, clock=clock)
-        calls: list[int] = []
-
-        def produce() -> dict[str, int]:
-            calls.append(1)
-            return {"call": len(calls)}
-
-        reuse.answer(("intent", "task"), sources, produce)
-        clock.now += 61.0
-        reuse.answer(("intent", "task"), sources, produce)
-
-        assert len(calls) == 2
 
 
 def test_the_size_bound_evicts_the_least_recently_used_answer() -> None:

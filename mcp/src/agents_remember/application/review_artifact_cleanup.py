@@ -89,12 +89,14 @@ from agents_remember.application.review_comparison_reclamation import (
 from agents_remember.application.review_frame_store import reclaim_task_frames
 from agents_remember.canvas.explainer_archive import (
     ArchiveRun,
-    environments,
     guard_problem,
     host_seat_archive,
+    reclaimable_environments,
     remove_environment,
     retire_environments,
 )
+from agents_remember.canvas.explainer_paths import EXPLAINER_FRAME
+from agents_remember.canvas.explainer_reopen import reclaimed_explainers
 from agents_remember.errors import CodeObjectRetentionError, ComparisonReclamationError
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge.durable_evidence import durable_reports_root
@@ -127,6 +129,7 @@ class _Report:
     frame_revisions: list[dict[str, Any]] = field(default_factory=list)
     environments: list[dict[str, Any]] = field(default_factory=list)
     explainer_artifacts: list[dict[str, Any]] = field(default_factory=list)
+    explainer_records: list[dict[str, Any]] = field(default_factory=list)
     failures: list[dict[str, str]] = field(default_factory=list)
     held_refs: set[str] = field(default_factory=set)
     confinement: _Confinement | None = None
@@ -161,6 +164,7 @@ class _Report:
             "frameRevisions": self.frame_revisions,
             "environments": self.environments,
             "explainerArtifacts": self.explainer_artifacts,
+            "explainerRecords": self.explainer_records,
             "failures": self.failures,
             "alreadyAbsent": [],
         }
@@ -277,7 +281,21 @@ def _sweep(
     report.confinement = confined
     _delete_dataset_copies(confined, report)
     _delete_ar_caches(confined, report)
-    _delete_frames(confined, report)
+    # A leaf finalize names no explainer folder; it keeps the explainer's revisions and its seat
+    # counter, as a removal does (Manager ruling 20261027T144320Z (2)).
+    if request.explainer_root is None:
+        kept = frozenset({EXPLAINER_FRAME})
+    else:
+        # R103 v2: an archive names what it takes of each explainer, and why no reopen follows.
+        kept = frozenset()
+        leaves = [
+            item.leaf
+            for item in reclaimable_environments(request.explainer_root, confined.task_root)[0]
+        ]
+        report.explainer_records = reclaimed_explainers(
+            confined.task_root, leaves, dry_run=report.dry_run
+        )
+    _delete_frames(confined, report, keep=kept)
     _delete_explainer_artifacts(request, confined, report)
     return report
 
@@ -304,7 +322,7 @@ def _delete_explainer_artifacts(
     root = request.explainer_root
     if root is None:
         return
-    found, held = environments(root, confined.task_root)
+    found, held = reclaimable_environments(root, confined.task_root)
     report.failures.extend(held)
     admit = _explainer_admit(root, confined)
     for environment in found:
@@ -328,7 +346,9 @@ def _explainer_admit(root: Path, confined: _Confinement) -> Any:
     return admit
 
 
-def _delete_frames(confined: _Confinement, report: _Report) -> None:
+def _delete_frames(
+    confined: _Confinement, report: _Report, *, keep: frozenset[str] = frozenset()
+) -> None:
     """Reclaim the archived task's published frames, with the receipt that explains the loss (R103).
 
     A frame is a page the task owns, so it ends with the task's other attachments. The store's own
@@ -336,7 +356,7 @@ def _delete_frames(confined: _Confinement, report: _Report) -> None:
     into the archive record, including every target it could not delete.
     """
 
-    outcome = reclaim_task_frames(confined.task_root, dry_run=report.dry_run)
+    outcome = reclaim_task_frames(confined.task_root, dry_run=report.dry_run, keep=keep)
     for entry in outcome["would_remove"] if report.dry_run else outcome["removed"]:
         report.frame_revisions.append(entry)
     for failure in outcome["failed"]:

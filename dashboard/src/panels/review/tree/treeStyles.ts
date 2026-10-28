@@ -123,10 +123,12 @@ export const scroller = css({
 export const list = css({ listStyle: 'none', margin: 0, padding: 0, minWidth: 0 });
 // The tree's rows end with the mockup's 0.6rem before the pinned block (styles.css:144).
 export const branches = css({ paddingBottom: '0.6rem' });
-// One line per row (D48; INV-PKFP2R): a caret, the ellipsized name and one reason.
+// One line per row (D48; INV-PKFP2R): a caret, the ellipsized name and one trailing cell (the reason,
+// with a graded location's grade chip). The name takes what is left, so the trailing cell is whole
+// (MIK-R211 v1 rule 5: the sidebar renders as before L183).
 export const row = css({
   display: 'grid',
-  gridTemplateColumns: '0.9rem auto minmax(0, 1fr) auto',
+  gridTemplateColumns: '0.9rem minmax(0, 1fr) auto',
   gap: '0.35rem',
   alignItems: 'baseline',
   width: '100%',
@@ -155,12 +157,23 @@ export const grandchild = css({ paddingLeft: '2.3rem', fontSize: '0.74rem' });
 export const caret = css({ color: 'muted', fontSize: '0.7rem' });
 export const name = css({ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 });
 export const id = css({ color: 'muted', marginRight: '0.45rem' });
+// The mark of an invariant the latest move changed, until its detail is read again (D576).
+export const stale = css({ color: 'amber', marginRight: '0.35rem' });
 export const dim = css({
   color: 'muted',
   marginLeft: '0.4rem',
   '@container tree (max-width: 320px)': { display: 'none' },
 });
 export const reason = css({ color: 'muted', fontSize: '0.7rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' });
+// A graded location row's trailing cell: the grade chip beside the reason on the row's one line
+// (MIK-R211 v1 rule 5). The row keeps its three grid cells either way, so the chip never widens a
+// column of its own, and both ends stay whole.
+export const reasonCell = css({
+  display: 'flex',
+  alignItems: 'baseline',
+  gap: '0.35rem',
+  minWidth: 0,
+});
 // A row's line counts (MIK-R89 v2 rule 1 as amended by 719ade09; mockup styles.css:95-96): "+a" in
 // the theme's mint, "−r" in its alarm red. The signs stay in the text.
 export const ins = css({ color: 'mint' });

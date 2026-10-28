@@ -1,39 +1,31 @@
-"""The explainer's routes: the review page's build, Update, Retire and state (MIK-R186, MIK-R106 v2).
+"""Compose explainer dependencies and assemble reads bound to the selected comparison.
 
-Transport only: a caller names the task context (repository, master, leaf), the route calls the
-seat service the composition root wires, and every refusal is a typed 409 (MIK-R185 v2 rule 3).
-Reads here start no model (MIK-R106 v2 rule 10).
+The HTTP handlers live in :mod:`agents_remember.serving.explainer_routes`. Reads here start
+no model (MIK-R106 v2 rule 10).
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import uuid
 from collections.abc import Callable, Sequence
-from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import Any, Protocol
 
-from fastapi import FastAPI, Request
+from fastapi import Request
 from fastapi.responses import JSONResponse
-from starlette.concurrency import run_in_threadpool
 
 from agents_remember.canvas.explainer_capsule import capability_text
 from agents_remember.canvas.explainer_grades import grades_path, read_grades
 from agents_remember.canvas.explainer_paths import (
     EXPLAINER_FRAME,
     leaf_workspace,
-    receipt_id_segment,
-    repository_path,
 )
-from agents_remember.canvas.explainer_planned_read import planned_payload
-from agents_remember.canvas.explainer_server import page_revision
+from agents_remember.canvas.explainer_reopen import absent_task_refusal
 from agents_remember.canvas.explainer_service import (
     BoundComparison,
-    CancelOutcome,
     ExplainerDeps,
     ExplainerHost,
     ExplainerRefused,
@@ -41,12 +33,6 @@ from agents_remember.canvas.explainer_service import (
     LeafFacts,
     LeafScope,
     PreparedPacket,
-    SeatOutcome,
-    build_seat,
-    cancel_seat,
-    retire_seat,
-    seat_state,
-    update_seat,
 )
 from agents_remember.canvas.explainer_staleness import (
     BlockFingerprint,
@@ -56,12 +42,12 @@ from agents_remember.canvas.explainer_staleness import (
     stale_grade_references,
 )
 from agents_remember.canvas.explainer_staleness_read import screen_target, staleness_read
-from agents_remember.canvas.explainer_state import PlannedIdentity, read_binding
+from agents_remember.canvas.explainer_state import read_binding
 from agents_remember.canvas.explainer_target import ExplainerTargetReads
-from agents_remember.canvas.paths import PathRefused
+from agents_remember.canvas.paths import TASK_SEGMENT, PathRefused, path_segment
 from agents_remember.canvas.paths import task_root as leaf_task_root
-from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.memory.knowledge.durable_evidence import durable_reports_root
 from agents_remember.models.knowledge.review_evidence import EvidenceMap, SupplementalReceipt
 from agents_remember.models.knowledge.review_frame import (
     COMPARISON_OWNER,
@@ -69,18 +55,26 @@ from agents_remember.models.knowledge.review_frame import (
     FrameBinding,
     FrameManifest,
     comparison_reference,
+    coverage_summary,
     planned_reference,
 )
 from agents_remember.models.knowledge.review_refusal import ReviewRefusal
 from agents_remember.models.knowledge.review_trees import (
     ReviewCodeSide,
-    ReviewKnowledgeSide,
     ReviewTreeComparisonRecord,
     ReviewTrees,
-    ReviewTreesResult,
-    TreeKnowledge,
 )
-from agents_remember.serving.change_watcher import move_notice_watch
+from agents_remember.serving.explainer_comparison import (
+    _SEND_SELECTION,
+    ComparisonPreparationPort,
+    _comparison,
+    _ComparisonMoved,
+    _planned,
+    _recorded,
+    _resolve_contract_for,
+    _SendRequest,
+)
+from agents_remember.serving.explainer_move_watch import move_notice_watch
 from agents_remember.serving.explainer_watcher import (
     CapturedComparison,
     GitComparisonOwner,
@@ -89,16 +83,13 @@ from agents_remember.serving.explainer_watcher import (
     blocks_changed,
     notice_for,
 )
-from agents_remember.serving.review_trees import ReviewTreesPort, ReviewTreesQuery
+from agents_remember.serving.review_trees import ReviewTreesPort
 from agents_remember.tasks.planned_comparison import (
     agreed_revision_number,
-    compose_explainer_send_message,
     leaf_document,
     leaf_document_stem,
     manifest_claims,
     manifest_parts,
-    master_is_organizational,
-    planned_comparison,
     resolve_master_contract,
     retained_revision_numbers,
     revision_kind_of,
@@ -106,10 +97,9 @@ from agents_remember.tasks.planned_comparison import (
     serialize_frame_binding,
     serialize_grades_and_categories,
 )
+from agents_remember.tasks.task_paths import CLEANUP_REPORT_NAME
 from agents_remember.worktrees.worktree_contract import (
-    ContractError,
     WorktreeContract,
-    load_contract,
 )
 
 
@@ -183,11 +173,16 @@ class ExplainerApplicationPorts:
 
 __all__ = [
     "EXPLAINER_API_PREFIX",
+    "_SEND_SELECTION",
     "ExplainerApplicationPorts",
     "ExplainerComposition",
+    "_ComparisonMoved",
+    "_SendRequest",
+    "_planned",
+    "_recorded",
+    "_resolve_contract_for",
     "explainer_composition",
     "leaf_document",
-    "register_explainer_routes",
 ]
 
 EXPLAINER_API_PREFIX = "/api/explainer"
@@ -201,28 +196,12 @@ UNWIRED_DETAIL = (
 _VALID_HISTORIES = frozenset({"live", "recorded", "planned"})
 
 
-@dataclass(frozen=True)
-class _SendRequest:
-    message: str
-    request_id: str
-    comparison_number: int | None = None
-    history: str | None = None
-    planned: bool = False
-
-
-class _ComparisonMoved(ExplainerRefused):
-    def __init__(self, *, requested: int, current: int | None) -> None:
-        self.requested = requested
-        self.current = current
-        current_label = f"#{current}" if current is not None else "new state"
-        super().__init__(
-            "comparison-moved",
-            f"requested comparison #{requested}, but the leaf's current comparison is "
-            f"{current_label}; refresh the form and Send again",
-        )
-
-
-_SEND_SELECTION: ContextVar[_SendRequest | None] = ContextVar("_SEND_SELECTION", default=None)
+#: Keep one staleness answer by its question while every read it made holds (D570): the question,
+#: the computation, and which answers are such a function at all.
+type StaleAnswersPort = Callable[
+    [tuple[object, ...], Callable[[], dict[str, Any]], Callable[[dict[str, Any]], bool]],
+    dict[str, Any],
+]
 
 
 @dataclass(frozen=True)
@@ -234,6 +213,7 @@ class ExplainerComposition:
     application: ExplainerApplicationPorts | None = None
     review_trees: ReviewTreesPort | None = None
     task_root_for: Callable[[LeafScope], Path] | None = None
+    stale_answers: StaleAnswersPort | None = None
 
     def contract(self, scope: LeafScope) -> Path | None:
         if self.contract_reader is not None:
@@ -276,13 +256,41 @@ async def _body(request: Request) -> dict[str, Any]:
 
 
 def _master_archived(task_root: Path) -> bool:
-    record = task_root / "notes" / "reports" / "master-retirement.json"
-    return record.is_file() or ("0_archive" in task_root.parts)
+    # The lexical check first: a root under 0_archive/ is archived, and nothing in it is opened.
+    if "0_archive" in task_root.parts:
+        return True
+    return (task_root / "notes" / "reports" / "master-retirement.json").is_file()
+
+
+def _explainer_task_root(config: McpRuntimeConfig, scope: LeafScope) -> Path:
+    """The default resolver, as the explainer's build and send read it.
+
+    A master with no folder at ``tasks/<repository>/<master>`` is refused with the plain fact and
+    the place a reader can check if it was archived (R103 v2). Nothing under ``0_archive`` is
+    looked at; the shared resolver keeps its own text for every other caller.
+    """
+
+    master = path_segment(scope.task, name="task")
+    try:
+        return leaf_task_root(config, scope.repository_id, master)
+    except PathRefused as refused:
+        tasks = config.coordination_root / TASK_SEGMENT / scope.repository_id
+        raise ExplainerRefused(
+            "task-unavailable", absent_task_refusal(tasks, scope.repository_id, master)
+        ) from refused
 
 
 def _facts(task_root_for: Callable[[LeafScope], Path]) -> Callable[[LeafScope], LeafFacts]:
     def read(scope: LeafScope) -> LeafFacts:
         root = task_root_for(scope)
+        if _master_archived(root):
+            # Refused by name before the leaf's document is read: the archive's receipt is named
+            # by where the archive files it, and nothing under the archived task is opened.
+            return LeafFacts(
+                status="",
+                archived=True,
+                archive_receipt=durable_reports_root(root) / CLEANUP_REPORT_NAME,
+            )
         document = leaf_document(root, scope.leaf_id)
         if document is None:
             raise ExplainerRefused(
@@ -297,295 +305,9 @@ def _facts(task_root_for: Callable[[LeafScope], Path]) -> Callable[[LeafScope], 
                 agreed_revision = revision.get("sha256")
         return LeafFacts(
             status=str(document.get("status") or ""),
-            archived=_master_archived(root),
+            archived=False,
             agreed_revision=agreed_revision,
         )
-
-    return read
-
-
-def _trees_of(result: ReviewTreesResult) -> ReviewTrees:
-    record = result.comparison
-    sides = result.knowledge_sides
-    if record is None or len(sides) != 2:
-        raise ExplainerRefused(
-            "evidence-source-unavailable",
-            f"the comparison owner answered {result.state!r} without two knowledge sides; no "
-            "admitted packet can be prepared from it",
-        )
-    return ReviewTrees(
-        record,
-        None,
-        Path(record.memory_candidate.repository),
-        TreeKnowledge(sides[0], None),
-        TreeKnowledge(sides[1], None),
-        code_sides=result.code_sides,
-    )
-
-
-def _is_closed_leaf(
-    config: McpRuntimeConfig, scope: LeafScope, application: ExplainerApplicationPorts
-) -> bool:
-    contract = application.recorded_leaf_contract(
-        config, scope.repository_id, scope.task, scope.leaf_id
-    )
-    if contract is None:
-        return False
-    worktree = contract.code_worktree
-    return worktree is None or not worktree.exists()
-
-
-def _check_requested_number(
-    port: ReviewTreesPort,
-    scope: LeafScope,
-    result: ReviewTreesResult,
-    *,
-    requested: int,
-    recorded: bool,
-) -> None:
-    if result.state == "trees" and result.comparison is not None:
-        current = result.latest if result.latest is not None else result.comparison.number
-        if result.comparison.number != requested or current != requested:
-            raise _ComparisonMoved(requested=requested, current=current)
-        return
-    current_res = port(
-        ReviewTreesQuery(
-            repository_id=scope.repository_id,
-            master=scope.task,
-            leaf_id=scope.leaf_id,
-            number=None,
-            recorded=recorded,
-        )
-    )
-    if current_res.state == "trees" and current_res.comparison is not None:
-        current = (
-            current_res.latest if current_res.latest is not None else current_res.comparison.number
-        )
-        if current != requested:
-            raise _ComparisonMoved(requested=requested, current=current)
-
-
-def _recorded(
-    config: McpRuntimeConfig,
-    port: ReviewTreesPort,
-    scope: LeafScope,
-    application: ExplainerApplicationPorts,
-    *,
-    selection: _SendRequest | None = None,
-) -> tuple[ReviewTreeComparisonRecord, ReviewTrees]:
-    history = None if selection is None else selection.history
-    requested = None if selection is None else selection.comparison_number
-    recorded = (
-        history == "recorded"
-        if history is not None
-        else _is_closed_leaf(config, scope, application)
-    )
-    result = port(
-        ReviewTreesQuery(
-            repository_id=scope.repository_id,
-            master=scope.task,
-            leaf_id=scope.leaf_id,
-            number=requested,
-            recorded=recorded,
-        )
-    )
-    if requested is not None:
-        _check_requested_number(port, scope, result, requested=requested, recorded=recorded)
-    if result.state != "trees" or result.comparison is None:
-        detail = None if result.refusal is None else result.refusal.detail
-        raise ExplainerRefused(
-            "evidence-source-unavailable",
-            f"the comparison owner answered {result.state!r}: {detail or 'no tree comparison'}",
-        )
-    return result.comparison, _trees_of(result)
-
-
-def _planned(
-    config: McpRuntimeConfig,
-    contract: Path,
-    scope: LeafScope,
-    application: ExplainerApplicationPorts,
-) -> tuple[ReviewTreeComparisonRecord, ReviewTrees]:
-    """The planned comparison at the master line's two tip commits (MIK-R186 rule 4, MIK-R189 rule 4).
-
-    The line comes from the canonical series contract reader and the master's canonical execution
-    nature: an atomic master's line is its integration (work) branch, which previously landed leaves
-    advanced, and an organizational master's is the sprint integration branch the contract records
-    as its source branch. The line's own tip wins when it diverges from the fork base; the base
-    engages only while the line names no commit at all, and nothing substitutes the repository's
-    HEAD.
-    """
-
-    code_repository = repository_path(config, scope.repository_id)
-    memory_repository = repository_path(config, scope.repository_id, memory=True)
-    organizational = master_is_organizational(
-        config.coordination_root, scope.repository_id, scope.task
-    )
-    try:
-        parsed = load_contract(contract)
-    except (ContractError, OSError) as error:
-        raise ExplainerRefused(
-            "planned-comparison-unavailable",
-            f"the master line's series contract cannot be read: {error}",
-        ) from error
-    code_commit = _line_tip_commit(
-        code_repository, *_master_line_branches(parsed, organizational, memory=False)
-    )
-    if code_commit is None:
-        raise ExplainerRefused(
-            "evidence-source-unavailable",
-            f"the master line's code branches name no commit in {code_repository}",
-        )
-    memory_commit = _line_tip_commit(
-        memory_repository, *_master_line_branches(parsed, organizational, memory=True)
-    )
-    if memory_commit is None:
-        raise ExplainerRefused(
-            "evidence-source-unavailable",
-            f"the master line's memory branches name no commit in {memory_repository}",
-        )
-    record = planned_comparison(
-        task_id=scope.task,
-        leaf_id=scope.leaf_id,
-        code_repository=str(code_repository),
-        code_commit=code_commit,
-        code_tree=_rev_parse(code_repository, f"{code_commit}^{{tree}}"),
-        memory_repository=str(memory_repository),
-        memory_commit=memory_commit,
-        memory_tree=_rev_parse(memory_repository, f"{memory_commit}^{{tree}}"),
-    )
-    missing_memory = application.missing_tree(memory_repository, record.memory_candidate.tree)
-    sides = tuple(
-        ReviewKnowledgeSide(
-            side=side,
-            state="available" if missing_memory is None else "unavailable-history",
-            tree=record.memory_candidate.tree,
-            index_state="complete" if missing_memory is None else None,
-            detail=missing_memory,
-        )
-        for side in ("before", "after")
-    )
-    trees = ReviewTrees(
-        record,
-        None,
-        memory_repository,
-        TreeKnowledge(sides[0], None),
-        TreeKnowledge(sides[1], None),
-        code_sides=application.code_sides(record),
-    )
-    return record, trees
-
-
-def _rev_parse(repository: Path, ref: str) -> str:
-    result = run_git(repository, ["rev-parse", ref])
-    if result.returncode != 0:
-        raise ExplainerRefused(
-            "evidence-source-unavailable",
-            f"the master line's {ref!r} cannot be read in {repository}: {result.stderr.strip()}",
-        )
-    return result.stdout.strip()
-
-
-def _master_line_branches(
-    parsed: WorktreeContract, organizational: bool, *, memory: bool
-) -> tuple[str, str]:
-    """One side's master-line branch and its fork base, from the canonical contract.
-
-    An atomic master's line is the work branch (the integration line), and an organizational
-    master's is the source branch (the sprint's integration branch), by the same separation the
-    worktree lifecycle writes and the landed net comparison reads.
-    """
-
-    if memory:
-        if organizational:
-            return parsed.memory_source_branch, parsed.memory_work_branch
-        return parsed.memory_work_branch, parsed.memory_source_branch
-    if organizational:
-        return parsed.code_source_branch, parsed.code_work_branch
-    return parsed.code_work_branch, parsed.code_source_branch
-
-
-def _line_tip_commit(repository: Path, line: str, base: str) -> str | None:
-    """The named line's tip commit, or the fork base while the line names no commit at all.
-
-    The first name that resolves wins: a line that exists is followed even when the base has
-    advanced past it, and the base is read only for a master whose line holds nothing yet (an
-    atomic master before its first landing). No branch name resolves, so the repository's own HEAD
-    is never substituted for the contract's line.
-    """
-
-    for branch in (line, base):
-        if not branch:
-            continue
-        try:
-            result = run_git(repository, ["rev-parse", "--verify", "--quiet", branch])
-        except (OSError, RuntimeError):
-            continue
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    return None
-
-
-def _resolve_contract_for(
-    config: McpRuntimeConfig,
-    scope: LeafScope,
-    contract_for: Callable[[LeafScope], Path | None] | None,
-) -> Path | None:
-    if contract_for is not None:
-        return contract_for(scope)
-    return resolve_master_contract(config.coordination_root, scope.repository_id, scope.task)
-
-
-def _comparison(
-    config: McpRuntimeConfig,
-    port: ReviewTreesPort,
-    contract_for: Callable[[LeafScope], Path | None] | None,
-    application: ExplainerApplicationPorts,
-) -> Callable[[LeafScope, LeafFacts], BoundComparison]:
-    def read(scope: LeafScope, facts: LeafFacts) -> BoundComparison:
-        selection = _SEND_SELECTION.get()
-        if selection is not None and selection.history == "planned" and not facts.planned:
-            raise ExplainerRefused(
-                "not-a-planning-leaf",
-                f"leaf {scope.leaf_id} is not planning; its page binds a recorded comparison",
-            )
-        if facts.planned:
-            if selection is not None and selection.history in {"live", "recorded"}:
-                raise ExplainerRefused(
-                    "comparison-unavailable",
-                    f"leaf {scope.leaf_id} is planning and has no {selection.history} comparison",
-                )
-            contract = _resolve_contract_for(config, scope, contract_for)
-            if contract is None:
-                raise ExplainerRefused(
-                    "planned-comparison-unavailable",
-                    "a planning leaf binds the master line's tips, and no series contract was "
-                    "supplied to read them from",
-                )
-            record, trees = _planned(config, contract, scope, application)
-            binding = FrameBinding.from_record(
-                record,
-                comparison_owner=PLANNED_OWNER,
-                comparison_reference=planned_reference(scope.task, scope.leaf_id),
-            )
-            planned = PlannedIdentity(
-                code_tip=record.code_candidate.commit or record.code_candidate.tree,
-                memory_tip=record.memory_candidate.commit or record.memory_candidate.tree,
-                code_tree=record.code_candidate.tree,
-                memory_tree=record.memory_candidate.tree,
-            )
-            return BoundComparison(
-                binding=binding, planned=planned, record_digest=None, record=trees
-            )
-        record, trees = _recorded(config, port, scope, application, selection=selection)
-        binding = FrameBinding.from_record(
-            record,
-            comparison_owner=COMPARISON_OWNER,
-            comparison_reference=comparison_reference(record),
-        )
-        record_bytes = record.model_dump_json(by_alias=True).encode("utf-8")
-        digest = "sha256:" + hashlib.sha256(record_bytes).hexdigest()
-        return BoundComparison(binding=binding, record_digest=digest, record=trees)
 
     return read
 
@@ -601,48 +323,14 @@ class _ReadPlumbing:
     task_root_for: Callable[[LeafScope], Path]
 
 
-def _prepared_trees(
-    plumbing: _ReadPlumbing, scope: LeafScope, bound: BoundComparison
-) -> ReviewTrees:
-    application = plumbing.application
-    config = plumbing.config
-    if bound.binding.comparison_owner == PLANNED_OWNER:
-        contract = _resolve_contract_for(config, scope, plumbing.contract_for)
-        if contract is None:
-            if isinstance(bound.record, ReviewTrees):
-                return bound.record
-            raise ExplainerRefused(
-                "planned-comparison-unavailable",
-                "a planned packet needs the master line's tips",
-            )
-        record, trees = _planned(config, contract, scope, application)
-        rechecked = FrameBinding.from_record(
-            record,
-            comparison_owner=PLANNED_OWNER,
-            comparison_reference=planned_reference(scope.task, scope.leaf_id),
+def _prepared_trees(bound: BoundComparison) -> ReviewTrees:
+    if not isinstance(bound.record, ReviewTrees):
+        raise ExplainerRefused(
+            "evidence-source-unavailable", "the bound comparison has no prepared trees"
         )
-        if not bound.binding.same_comparison(rechecked):
-            raise ExplainerRefused(
-                "binding-moved",
-                "the master line's tips moved while the planned environment was being prepared; "
-                "retry to bind the new tips",
-            )
-        return bound.record if isinstance(bound.record, ReviewTrees) else trees
-    if isinstance(bound.record, ReviewTrees):
-        return bound.record
-    selection = _SEND_SELECTION.get()
-    record, trees = _recorded(
-        config, plumbing.review_trees, scope, application, selection=selection
-    )
-    if selection is not None and not bound.binding.same_comparison(
-        FrameBinding.from_record(
-            record,
-            comparison_owner=COMPARISON_OWNER,
-            comparison_reference=comparison_reference(record),
-        )
-    ):
-        raise _ComparisonMoved(requested=bound.binding.comparison_number, current=record.number)
-    return trees
+    if bound.witness is None or not bound.witness.current():
+        raise ExplainerRefused("binding-moved", "comparison inputs moved before packet preparation")
+    return bound.record
 
 
 def _prepare(
@@ -650,7 +338,7 @@ def _prepare(
 ) -> Callable[[LeafScope, LeafFacts, BoundComparison], PreparedPacket]:
     def read(scope: LeafScope, _facts: LeafFacts, bound: BoundComparison) -> PreparedPacket:
         application = plumbing.application
-        trees = _prepared_trees(plumbing, scope, bound)
+        trees = _prepared_trees(bound)
         task_root = plumbing.task_root_for(scope)
         document = leaf_document(task_root, scope.leaf_id) or {}
         try:
@@ -709,8 +397,10 @@ class ExplainerWiring:
 
     host: ExplainerHost
     application: ExplainerApplicationPorts
+    comparison_prepare: ComparisonPreparationPort
     contract_for: Callable[[LeafScope], Path | None] | None = None
     task_root_for: Callable[[LeafScope], Path] | None = None
+    stale_answers: StaleAnswersPort | None = None
 
 
 def explainer_composition(
@@ -731,17 +421,26 @@ def explainer_composition(
     resolve = wiring.task_root_for or (
         lambda scope: leaf_task_root(config, scope.repository_id, scope.task)
     )
+    # Only the build and send path's facts read the explainer's own resolver; every other reader
+    # keeps the shared resolver's refusal.
+    facts_root = wiring.task_root_for or partial(_explainer_task_root, config)
     composition = ExplainerComposition(
         application=application,
         review_trees=review_trees,
         task_root_for=resolve,
         contract_reader=wiring.contract_for,
+        stale_answers=wiring.stale_answers,
     )
     deps = ExplainerDeps(
         config=config,
         host=wiring.host,
-        facts=_facts(resolve),
-        comparison=_comparison(config, review_trees, wiring.contract_for, application),
+        facts=_facts(facts_root),
+        comparison=_comparison(config, wiring.comparison_prepare, wiring.contract_for, application),
+        recheck=lambda scope, facts, bound: (
+            _facts(facts_root)(scope) == facts
+            and bound.witness is not None
+            and bound.witness.current()
+        ),
         prepare=_prepare(
             _ReadPlumbing(
                 config=config,
@@ -973,6 +672,46 @@ def _stale_answer(
     }
 
 
+def stale_view(
+    composition: ExplainerComposition,
+    scope: LeafScope,
+    *,
+    revision: int | None = None,
+    selector: tuple[int | None, str | None] = (None, None),
+) -> dict[str, Any]:
+    """The staleness of one shown revision against one comparison, and that revision's view.
+
+    The top bar's badge reads it, and the background build computes the page's own question with
+    it (D569), so the two derive one key here. An answer for a named recorded comparison is kept
+    on every read it made (D570); a planned or unnamed comparison reads the live master line or
+    the environment's facts, and is computed every time, as is an answer that found no revision
+    or could not be read.
+    """
+
+    deps = _composition_deps(composition)
+    application = composition.application
+    if application is None:
+        raise ExplainerRefused("explainer-unavailable", UNWIRED_DETAIL)
+    number, owner = selector
+    kept = composition.stale_answers is not None and number is not None and owner == "recorded"
+
+    def produce() -> dict[str, Any]:
+        manifest = _manifest_for_scope(deps.config, scope, application, revision=revision)
+        # Only a planned comparison is compared against the series contract's tips.
+        contract = None if kept else composition.contract(scope)
+        stale = _stale_answer(composition, scope, manifest, contract, selector=selector)
+        return {"stale": stale, "explanation": _explanation_view(manifest)}
+
+    if not kept or composition.stale_answers is None:
+        return produce()
+    question = (scope.repository_id, scope.task, scope.leaf_id, revision, number, owner)
+    return composition.stale_answers(question, produce, _keepable_stale)
+
+
+def _keepable_stale(view: dict[str, Any]) -> bool:
+    return view["explanation"] is not None and "unavailable" not in view["stale"]
+
+
 def _moved(
     deps: ExplainerDeps, scope: LeafScope, application: ExplainerApplicationPorts
 ) -> dict[str, Any] | None:
@@ -996,6 +735,7 @@ def _explanation_view(manifest: FrameManifest | None) -> dict[str, Any] | None:
         "at": manifest.created_at,
         "kind": revision_kind_of(manifest),
         "focus": manifest.focus,
+        "coverage": coverage_summary(manifest.interaction_coverage),
     }
 
 
@@ -1078,78 +818,24 @@ def _state_payload(
         "agreedRevision": _agreed_number(deps.config, scope),
         "frameUsage": _total(deps.config, scope, application),
         "transcript": [],
-        "explainer": state.as_record(),
+        "explainer": _labelled_for_the_revision(state.as_record(), manifest),
     }
 
 
-def _parse_comparison_number(body: dict[str, Any]) -> int | JSONResponse | None:
-    if "comparisonNumber" in body and body["comparisonNumber"] is not None:
-        raw = body["comparisonNumber"]
-        if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
-            return _refusal(
-                "invalid-request",
-                "comparisonNumber is a non-negative integer",
-                status=400,
-                extra={"status": "invalid-request"},
-            )
-        return raw
-    raw_comp = body.get("comparison")
-    if isinstance(raw_comp, int) and not isinstance(raw_comp, bool) and raw_comp >= 0:
-        return raw_comp
-    if isinstance(raw_comp, str) and raw_comp.startswith("#") and raw_comp[1:].isdecimal():
-        return int(raw_comp[1:])
-    return None
+def _labelled_for_the_revision(
+    record: dict[str, Any], manifest: FrameManifest | None
+) -> dict[str, Any]:
+    """The label names the comparison of the revision on screen, not the live binding's.
 
+    The page shows one retained revision and the explanation was written against that revision's own
+    comparison, so that is the number it carries. The live binding's newer comparison is the reason
+    the page is stale, and it reaches the reader through the staleness record and the top bar's
+    badge, never through this label.
+    """
 
-def _send_facts(body: dict[str, Any]) -> _SendRequest | JSONResponse:
-    history = body.get("history")
-    if history is not None and (not isinstance(history, str) or history not in _VALID_HISTORIES):
-        return _refusal(
-            "invalid-request",
-            "history may only be 'live', 'recorded', or 'planned'",
-            status=400,
-            extra={"status": "invalid-request"},
-        )
-    parsed_num = _parse_comparison_number(body)
-    if isinstance(parsed_num, JSONResponse):
-        return parsed_num
-    raw_message = body.get("message")
-    picks = body.get("picks")
-    stale_part_ids = body.get("stalePartIds")
-    stale_grades = body.get("staleGrades")
-    if raw_message is None and (picks or stale_part_ids or stale_grades):
-        raw_message = ""
-    if not isinstance(raw_message, str) or len(raw_message) > MAX_MESSAGE:
-        return _refusal("request-invalid", "a Send carries its message", status=400)
-    composed = compose_explainer_send_message(raw_message, picks, stale_part_ids, stale_grades)
-    if not composed.strip() or len(composed) > MAX_MESSAGE:
-        return _refusal("request-invalid", "a Send carries its message", status=400)
-    request_id = body.get("requestId")
-    if not isinstance(request_id, str) or not request_id or len(request_id) > MAX_REQUEST_ID:
-        return _refusal("request-invalid", "a Send carries its request id", status=400)
-    return _SendRequest(
-        message=composed,
-        request_id=request_id,
-        comparison_number=parsed_num,
-        history=history,
-        planned=bool(body.get("planned")) or history == "planned",
-    )
-
-
-def _receipt_id(body: dict[str, Any]) -> str | JSONResponse:
-    if "receiptId" not in body or body["receiptId"] is None:
-        return f"retire-{uuid.uuid4().hex[:12]}"
-    receipt_id = body.get("receiptId")
-    if not isinstance(receipt_id, str) or not receipt_id or len(receipt_id) > 64:
-        return _refusal("request-invalid", "a Retire carries its receipt id", status=400)
-    try:
-        return receipt_id_segment(receipt_id)
-    except PathRefused:
-        return _refusal(
-            "request-invalid",
-            "a receipt id is one file name: no separator, no traversal, no absolute path",
-            status=400,
-        )
+    if manifest is None or manifest.binding.comparison_number is None:
+        return record
+    return {**record, "label": f"#{manifest.binding.comparison_number}"}
 
 
 def _composition_deps(composition: ExplainerComposition) -> ExplainerDeps:
@@ -1171,315 +857,7 @@ def _application(
     return composition.application
 
 
-def _wired(composition: ExplainerComposition) -> ExplainerDeps | JSONResponse:
-    if composition.deps is None:
-        return _refusal("explainer-unavailable", UNWIRED_DETAIL, status=503)
-    return composition.deps
-
-
-def handle_state(composition: ExplainerComposition, request: Request) -> JSONResponse:
-    deps = _wired(composition)
-    if isinstance(deps, JSONResponse):
-        return deps
-    application = _application(composition)
-    if isinstance(application, JSONResponse):
-        return application
-    scope = _scope(request)
-    try:
-        state = seat_state(deps, scope)
-        return JSONResponse(
-            _state_payload(
-                composition,
-                scope,
-                state,
-                composition.contract(scope),
-                request=request,
-            )
-        )
-    except (ExplainerRefused, ValueError) as error:
-        return _refusal("explainer-unavailable", str(error))
-
-
-def handle_stale(composition: ExplainerComposition, request: Request) -> JSONResponse:
-    deps = _wired(composition)
-    if isinstance(deps, JSONResponse):
-        return deps
-    application = _application(composition)
-    if isinstance(application, JSONResponse):
-        return application
-    scope = _scope(request)
-    selected_rev = _query_int(request, "revision")
-    comp_number = _query_int(request, "comparisonNumber", "comparison")
-    comp_owner = request.query_params.get("comparisonOwner") or request.query_params.get("history")
-    manifest = _manifest_for_scope(deps.config, scope, application, revision=selected_rev)
-    stale = _stale_answer(
-        composition,
-        scope,
-        manifest,
-        composition.contract(scope),
-        selector=(comp_number, comp_owner),
-    )
-    return JSONResponse({"state": "ok", "stale": stale, **stale})
-
-
-async def handle_build(composition: ExplainerComposition, request: Request) -> JSONResponse:
-    deps = _wired(composition)
-    if isinstance(deps, JSONResponse):
-        return deps
-    named = _send_facts(await _body(request))
-    if isinstance(named, JSONResponse):
-        return named
-    application = _application(composition)
-    if isinstance(application, JSONResponse):
-        return application
-    scope = _scope(request)
-    token = _SEND_SELECTION.set(named)
-    try:
-        outcome: SeatOutcome = await run_in_threadpool(
-            build_seat,
-            deps,
-            scope,
-            request_id=named.request_id,
-            message=named.message,
-        )
-    except _ComparisonMoved as error:
-        return _refusal(
-            error.reason,
-            error.detail,
-            extra={
-                "requestedComparisonNumber": error.requested,
-                "currentComparisonNumber": error.current,
-                "requestedComparison": error.requested,
-                "currentComparison": error.current,
-                "refresh": True,
-            },
-        )
-    except ExplainerRefused as error:
-        return _refusal(error.reason, error.detail)
-    finally:
-        _SEND_SELECTION.reset(token)
-    if outcome.built or not outcome.current:
-        move_notice_watch(deps.config, application.watcher).clear(LeafSelection.of(scope))
-    seat_record = {**outcome.as_record(), "state": outcome.seat}
-    return JSONResponse(
-        {
-            "state": "ok",
-            "attempt": f"build:{named.request_id}",
-            "seat": seat_record,
-            "agentId": outcome.agent_id,
-            "workspaceId": str(outcome.workspace),
-            "generation": outcome.generation,
-            "binding": serialize_frame_binding(outcome.binding),
-        }
-    )
-
-
-def handle_update(composition: ExplainerComposition, request: Request) -> JSONResponse:
-    deps = _wired(composition)
-    if isinstance(deps, JSONResponse):
-        return deps
-    application = _application(composition)
-    if isinstance(application, JSONResponse):
-        return application
-    scope = _scope(request)
-    try:
-        update = update_seat(deps, scope)
-    except ExplainerRefused as error:
-        return _refusal(error.reason, error.detail)
-    move_notice_watch(deps.config, application.watcher).clear(LeafSelection.of(scope))
-    counts = dict(update.counts())
-    unavailable = update.counts_unavailable
-    if unavailable is not None or update.blocks_changed is None:
-        counts["countsUnavailable"] = True
-    update_record = dict(update.as_record())
-    update_record["counts"] = counts
-    if unavailable is not None or update.blocks_changed is None:
-        update_record["countsUnavailable"] = True
-    if unavailable is not None:
-        update_record["unavailable"] = unavailable
-    return JSONResponse(
-        {
-            "state": "ok",
-            "update": update_record,
-            "counts": counts,
-            "attempt": f"update:{update.previous_number}",
-        }
-    )
-
-
-async def handle_retire(composition: ExplainerComposition, request: Request) -> JSONResponse:
-    deps = _wired(composition)
-    if isinstance(deps, JSONResponse):
-        return deps
-    receipt_id = _receipt_id(await _body(request))
-    if isinstance(receipt_id, JSONResponse):
-        return receipt_id
-    application = _application(composition)
-    if isinstance(application, JSONResponse):
-        return application
-    scope = _scope(request)
-    try:
-        outcome = retire_seat(deps, scope, receipt_id=receipt_id)
-    except ExplainerRefused as error:
-        return _refusal(error.reason, error.detail)
-    move_notice_watch(deps.config, application.watcher).clear(LeafSelection.of(scope))
-    record = outcome.as_record()
-    receipt = record.get("receipt")
-    if isinstance(receipt, dict) and "receipt_id" in receipt:
-        receipt["receiptId"] = receipt["receipt_id"]
-    return JSONResponse({"state": "ok", "retire": record, "receipt": receipt})
-
-
-async def handle_cancel(composition: ExplainerComposition, request: Request) -> JSONResponse:
-    """The developer's cancel (MIK-R105 v1 rule 9): the exact seat and request, nothing else.
-
-    Cancellation names whether a turn stopped, publication was prevented, or a request remains
-    uncertain. It measures the frame store's ready revision around the host's named cancel, so a
-    turn that raced publication is reported truthfully, and it keeps the last ready revision.
-    """
-
-    deps = _wired(composition)
-    if isinstance(deps, JSONResponse):
-        return deps
-    body = await _body(request)
-    request_id = body.get("requestId")
-    if not isinstance(request_id, str) or not request_id or len(request_id) > MAX_REQUEST_ID:
-        return _refusal("request-invalid", "a cancel carries its request id", status=400)
-    application = _application(composition)
-    if isinstance(application, JSONResponse):
-        return application
-    scope = _scope(request)
-    task_root = _task_folder(deps.config, scope)
-    before = page_revision(task_root, scope.leaf_id)
-    try:
-        outcome: CancelOutcome = await run_in_threadpool(
-            cancel_seat, deps, scope, request_id=request_id
-        )
-    except ExplainerRefused as error:
-        return _refusal(error.reason, error.detail)
-    after = page_revision(task_root, scope.leaf_id)
-    record = outcome.as_record()
-    record["publicationPrevented"] = before == after
-    record["revision"] = after
-    return JSONResponse({"state": "ok", "cancel": record})
-
-
-def handle_revisions(composition: ExplainerComposition, request: Request) -> JSONResponse:
-    deps = _wired(composition)
-    if isinstance(deps, JSONResponse):
-        return deps
-    application = _application(composition)
-    if isinstance(application, JSONResponse):
-        return application
-    scope = _scope(request)
-    return JSONResponse(
-        {
-            "state": "ok",
-            "revisions": _revisions(deps.config, scope, application),
-            "pinned": _agreed_number(deps.config, scope),
-            "total": _total(deps.config, scope, application),
-        }
-    )
-
-
 def _total(
     config: McpRuntimeConfig, scope: LeafScope, application: ExplainerApplicationPorts
 ) -> dict[str, Any]:
     return application.task_frames_total(_task_folder(config, scope), scope.leaf_id)
-
-
-async def handle_remove_revisions(
-    composition: ExplainerComposition, request: Request
-) -> JSONResponse:
-    deps = _wired(composition)
-    if isinstance(deps, JSONResponse):
-        return deps
-    application = _application(composition)
-    if isinstance(application, JSONResponse):
-        return application
-    scope = _scope(request)
-    body = await _body(request)
-    named = body.get("revisions")
-    if (
-        not isinstance(named, list)
-        or not named
-        or len(named) > MAX_REMOVE_BATCH
-        or any(isinstance(number, bool) or not isinstance(number, int) for number in named)
-    ):
-        return _refusal("request-invalid", "a removal names the revisions to remove", status=400)
-    try:
-        frame = application.frame_scope(
-            _task_folder(deps.config, scope), scope.leaf_id, EXPLAINER_FRAME
-        )
-        removal = application.remove_revisions(frame, revisions=tuple(named))
-    except application.frame_refused_cls as error:
-        return _refusal(getattr(error, "reason", None) or "revision-removal-refused", str(error))
-    except ValueError as error:
-        return _refusal("revision-removal-refused", str(error))
-    return JSONResponse(
-        {
-            "state": "ok",
-            "removed": list(removal.removed),
-            "remaining": len(removal.retained),
-            "pinned": removal.pinned,
-            "bytesFreed": removal.bytes_freed,
-            "detail": removal.detail,
-        }
-    )
-
-
-def handle_planned(composition: ExplainerComposition, request: Request) -> JSONResponse:
-    deps = _wired(composition)
-    if isinstance(deps, JSONResponse):
-        return deps
-    application = _application(composition)
-    if isinstance(application, JSONResponse):
-        return application
-    scope = _scope(request)
-    try:
-        if not deps.facts(scope).planned:
-            raise ExplainerRefused(
-                "not-a-planning-leaf",
-                f"leaf {scope.leaf_id} is not planning; its page shows the comparison it is bound to",
-            )
-        contract = composition.contract(scope)
-        if contract is None:
-            raise ExplainerRefused(
-                "planned-comparison-unavailable",
-                f"leaf {scope.leaf_id} has no enclosure contract to read the master line's tips "
-                "from; the planned comparison is built from the leaf's own contract",
-            )
-        record, _trees = _planned(deps.config, contract, scope, application)
-        task_root = _task_folder(deps.config, scope)
-        document = leaf_document(task_root, scope.leaf_id)
-        if document is None:
-            raise ExplainerRefused(
-                "leaf-unavailable", f"no task document names leaf {scope.leaf_id} in {task_root}"
-            )
-        payload = planned_payload(
-            document=document,
-            comparison=record,
-            task_root=task_root,
-            coordination_root=Path(deps.config.coordination_root),
-            code_repository=repository_path(deps.config, scope.repository_id),
-        )
-    except (ExplainerRefused, ValueError) as error:
-        return _refusal("planned-unavailable", str(error))
-    return JSONResponse({"state": "ok", "planned": payload})
-
-
-def register_explainer_routes(app: FastAPI, composition: ExplainerComposition) -> None:
-    base = EXPLAINER_API_PREFIX + "/{repository_id}/{master}/{leaf_id}"
-    for suffix, handler, method in (
-        ("/state", handle_state, "GET"),
-        ("/stale", handle_stale, "GET"),
-        ("/build", handle_build, "POST"),
-        ("/send", handle_build, "POST"),
-        ("/update", handle_update, "POST"),
-        ("/revisions", handle_revisions, "GET"),
-        ("/remove-revisions", handle_remove_revisions, "POST"),
-        ("/retire", handle_retire, "POST"),
-        ("/cancel", handle_cancel, "POST"),
-        ("/planned", handle_planned, "GET"),
-    ):
-        app.add_api_route(f"{base}{suffix}", partial(handler, composition), methods=[method])

@@ -3,7 +3,7 @@
 // in memory; it is not published or claimed as an unmodified capture.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { cleanup, render, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import type { ReviewResult } from '../../data/review';
@@ -103,11 +103,22 @@ it("word-diffs a tree review's member statement and family guarantee in the cent
   const intent = within(center).getByTestId('review-center-member-changed');
   expect(within(intent).queryByTestId('diff-pane')).toBeNull();
   cleanup();
+  // A family opens its members' overview (MIK-R211 v4 rule 10): its slot draws the family read's
+  // guarantee change badge, steps and judgment but no word diff; the family guarantee is word-diffed
+  // in the detail of the member opened from it.
   const familyView = open(family);
-  const familyCenter = await familyView.findByTestId('review-center-family');
+  const overview = await familyView.findByTestId('review-family-overview');
+  expect(within(overview).queryAllByTestId('intent-diff')).toHaveLength(0);
+  fireEvent.click(
+    within(overview)
+      .getAllByTestId('review-member-summary')
+      .find((row) => row.dataset.subject === invariant.payload!.knowledge.revision_selection!.record_id)!
+      .querySelector('button')!,
+  );
+  const memberDetails = await familyView.findByTestId('review-center-member-details');
   await waitFor(() =>
     expect(
-      within(familyCenter).getByTestId('review-center-guarantee-changed').dataset.wordDiff,
+      within(memberDetails).getByTestId('review-center-guarantee-changed').dataset.wordDiff,
     ).toBe('true'),
   );
 });

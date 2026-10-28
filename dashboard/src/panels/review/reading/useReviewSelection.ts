@@ -2,10 +2,10 @@
 // reader selects in the tree, in the reading column, by `j`/`k`, by a marker, or what a reload restores
 // from the URL. A selection reads its subject (`/api/review/intent?selector…`) unless an older
 // comparison is shown (W17), takes its cards from read 5 (W4), goes into the URL by
-// `history.replaceState` (W20), and arms the column's one scroll to it (rule 9).
-import { useCallback, useEffect, useState } from 'react';
+// `history.pushState` for reader choices, and arms the column's one scroll to it (rule 9).
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { parseReviewHash, readReviewHashState, writeReviewHashState } from '../../../cockpit/reviewHash';
+import { parseReviewHash, readReviewHashState, reviewHash, writeReviewHashState } from '../../../cockpit/reviewHash';
 import type { ReviewFailure } from '../../../data/review';
 import { readFileClassification } from '../../../data/reviewLane';
 import { blockKey } from '../blockIdentity';
@@ -72,7 +72,8 @@ function scrollTargetOf(selection: ReviewSelection | null, model: ChangeSetModel
   if (selection.kind === 'block') return { kind: 'block', key: blockKey(selection.block) };
   if (selection.subject.kind === 'family') return { kind: 'subject', key: `family:${selection.subject.id}` };
   const id = selection.subject.id;
-  const node = model.subjects.find((one) => one.row.selectorId === id);
+  const node = model.groups.flatMap((one) => one.subjects).find((one) =>
+    one.row.selectorId === id && (selection.family === undefined || one.row.familyId === selection.family));
   return node ? { kind: 'subject', key: node.key } : null;
 }
 
@@ -129,44 +130,81 @@ function useHunkFile(path: string | null, number: number | undefined): ReadonlyM
   return read !== null && read.key === key ? new Map([[read.path, read.hunks]]) : undefined;
 }
 
-// The URL's part of the selection: restored once the reads it needs have answered, then written on
-// every selection (and with the comparison shown when it is not the latest). A selection made while
-// the restore waits supersedes it (rule 9): the restore is dropped, so its late answer neither
-// replaces that selection nor its URL, and arms no landing.
+function restoreComparisonReady(chosen: number | null, wanted: number | null, shown: number | undefined): boolean {
+  return chosen === wanted && (wanted === null || shown === wanted);
+}
+
+function restoreHistorySelection(value: string | null, facts: RestoreFacts, files: ReadonlyMap<string, FileHunks> | undefined) {
+  if (value === null) return { state: 'clear' } as const;
+  return restoreSelection(value, files ? { ...facts, files } : facts);
+}
+
+// Reload and same-target history traverse the same exact-identity admission path. A reader's
+// choice supersedes an unfinished restore, so a late answer cannot replace it or add a landing.
 export function useSelectionUrl(input: {
   selection: ReviewSelection | null;
   chosen: number | null;
   older: boolean;
   facts: RestoreFacts;
-  select: (selection: ReviewSelection, options: SelectOptions) => void;
+  select: (selection: ReviewSelection | null, options: SelectOptions) => void;
+  onRestoreStart?: (value: string | null) => void;
+  onComparisonRestore?: (comparison: number | null) => void;
+  onRestored?: () => void;
 }): string | null {
-  const [pending, setPending] = useState<{ value: string; under: ReviewSelection | null } | null>(() => {
-    const value = readReviewHashState().sel;
-    return value === null ? null : { value, under: input.selection };
+  const [pending, setPending] = useState<{
+    value: string | null; under: ReviewSelection | null; comparison: number | null;
+  } | null>(() => {
+    const { sel, comparison } = readReviewHashState();
+    return sel === null ? null : { value: sel, under: input.selection, comparison };
   });
   const [outsideLine, setOutside] = useState<string | null>(null);
-  const restored = pending === null;
-  const { facts, select, selection } = input;
-  const files = useHunkFile(pending === null ? null : hunkFileOf(pending.value, facts), facts.number);
+  const writeMode = useRef<'push' | 'replace'>('replace');
+  const [target] = useState(() => {
+    const parsed = parseReviewHash(window.location.hash);
+    return parsed ? reviewHash(parsed) : null;
+  });
+  const { facts, select, selection, onRestored, onRestoreStart, onComparisonRestore } = input;
+  useEffect(() => {
+    const restore = () => {
+      const parsed = parseReviewHash(window.location.hash);
+      if (target === null || !parsed || reviewHash(parsed) !== target) return;
+      const { sel, comparison } = readReviewHashState();
+      writeMode.current = 'replace';
+      setOutside(null);
+      onRestoreStart?.(sel);
+      onComparisonRestore?.(comparison);
+      // The prior area's selection must not drive reads while this historical entry is admitted.
+      select(null, { keepTree: false });
+      setPending({ value: sel, under: null, comparison });
+    };
+    window.addEventListener('popstate', restore);
+    return () => window.removeEventListener('popstate', restore);
+  }, [target, select, onRestoreStart, onComparisonRestore]);
+  const files = useHunkFile(pending?.value ? hunkFileOf(pending.value, facts) : null, facts.number);
   useEffect(() => {
     if (pending === null) return;
     if (selection !== pending.under) {
+      writeMode.current = 'push';
       setPending(null);
+      onRestored?.();
       return;
     }
-    const result = restoreSelection(pending.value, files ? { ...facts, files } : facts);
+    if (!restoreComparisonReady(input.chosen, pending.comparison, facts.number)) return;
+    const result = restoreHistorySelection(pending.value, facts, files);
     if (result.state === 'wait') return;
+    writeMode.current = 'replace';
     setPending(null);
+    onRestored?.();
     if (result.state === 'select') select(result.selection, { keepTree: false });
-    else setOutside(result.reason);
-  }, [pending, facts, files, select, selection]);
+    else if (result.state === 'outside') setOutside(result.reason);
+  }, [pending, facts, files, select, selection, onRestored, input.chosen]);
   const sel = encodeSelection(input.selection);
   const comparison = input.older ? input.chosen : null;
   useEffect(() => {
-    if (!restored) return;
-    writeReviewHashState({ sel, comparison });
-  }, [restored, sel, comparison]);
-  // A new selection makes the restore's line moot.
+    if (pending !== null) return;
+    writeReviewHashState({ sel, comparison }, writeMode.current);
+    writeMode.current = 'push';
+  }, [pending, sel, comparison]);
   useEffect(() => {
     if (input.selection) setOutside(null);
   }, [input.selection]);

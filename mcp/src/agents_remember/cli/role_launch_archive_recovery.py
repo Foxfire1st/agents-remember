@@ -16,7 +16,8 @@ from typing import Any
 from fastapi import HTTPException
 
 from agents_remember.cli.role_launch_archive import ArchiveAttempt, leaf_receipt_ref
-from agents_remember.cli.role_launch_receipts import EXECUTIONS_DIRECTORY, _read_receipt
+from agents_remember.cli.role_launch_receipts import _read_receipt
+from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.tasks import read_task_doc

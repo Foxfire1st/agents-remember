@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from agents_remember.observer import observer_root
 from agents_remember.serving.background_accounting import BackgroundLedger
 from agents_remember.serving.build_info import ServingBuild
+from agents_remember.serving.explainer_comparison import ComparisonPreparationPort
 from agents_remember.serving.intent_summary_cache import ReviewIntentSummaryPort
 from agents_remember.serving.knowledge_reader import KnowledgeReaderPort
 from agents_remember.serving.projections.host_activity import (
@@ -27,8 +28,13 @@ from agents_remember.serving.review import (
     ReviewSourceContentPort,
 )
 from agents_remember.serving.review_memory_watch import ReviewMemoryRootPort
-from agents_remember.serving.review_trees import ReviewTreesPort
+from agents_remember.serving.review_trees import (
+    ReviewDetailOrderPort,
+    ReviewInvariantChangesPort,
+    ReviewTreesPort,
+)
 from agents_remember.serving.served_state import served_state_tail
+from agents_remember.serving.stream_shutdown import StreamShutdown
 from agents_remember.serving.task_document_cache import TaskDocumentBodyCache
 
 # The serving app's shared logger, named after the public module so existing
@@ -39,7 +45,8 @@ if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
         McpRuntimeConfig,
     )
-    from agents_remember.serving.explainer import ExplainerApplicationPorts
+    from agents_remember.serving.explainer import ExplainerApplicationPorts, StaleAnswersPort
+    from agents_remember.serving.master_preparation import MasterPreparation
 
 
 # 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_app_common.py:50).
@@ -221,11 +228,16 @@ class ServingCollaborators:
     Git diff of the memory trees and the worklist view. Omitting it refuses that route by name.
     """
 
+    launcher_catalog_prepare: Callable[[], object] | None = None
+    """Prepare the CLI-owned launcher catalog once, without starting any host agent."""
+
     review_trees_shutdown: Callable[[], None] | None = None
     """Stop and reap the tree route's transient child computations at serving shutdown."""
 
     review_memory_root: ReviewMemoryRootPort | None = None
     """Cheap canonical leaf memory-root admission, used only by an open review stream."""
+
+    explainer_preparation: ComparisonPreparationPort | None = None
 
     explainer_application: ExplainerApplicationPorts | None = None
     """The application-tier ports the explainer routes and the moved watcher call.
@@ -235,6 +247,15 @@ class ServingCollaborators:
     Omitting it leaves the explainer routes and the moved watcher unwired, and each refuses by
     name rather than serving a half-composed page.
     """
+
+    explainer_stale_answers: StaleAnswersPort | None = None
+    """Keep the top bar's staleness of a recorded comparison on every read it made (D570)."""
+
+    review_invariant_changes: ReviewInvariantChangesPort | None = None
+    """Name the invariants a leaf's move changed, for the page to refresh only those (D576)."""
+
+    review_detail_order: ReviewDetailOrderPort | None = None
+    """Hand the page's drawn order of a comparison's invariants to the detail queue (D585)."""
 
     knowledge_reader: KnowledgeReaderPort | None = None
     """The path-based knowledge reader (MIK-R29): read-only views of any converted memory tree.
@@ -296,6 +317,7 @@ class _ServingRuntime:
     build: ServingBuild
     interval: float
     review_memory_root: ReviewMemoryRootPort | None = None
+    launcher_catalog_prepare: Callable[[], object] | None = None
     review_trees_shutdown: Callable[[], None] | None = None
     # The always-on background account (MIK-R81 rule 1): the projector and every
     # background loop record their units here; the diagnostics route serves it.
@@ -306,6 +328,9 @@ class _ServingRuntime:
     #: The application-tier explainer ports: the routes and the moved watcher read them from here.
     explainer_application: ExplainerApplicationPorts | None = None
     task_bodies: TaskDocumentBodyCache = field(default_factory=TaskDocumentBodyCache)
+    # The open streams end cleanly the moment the server begins to shut down (stream_shutdown.py).
+    stream_shutdown: StreamShutdown = field(default_factory=StreamShutdown)
+    master_preparation: MasterPreparation | None = None
 
     @property
     def observer_root(self) -> Path:

@@ -11,18 +11,31 @@ manifest, coordination settings -- can only be reused while those files are unch
 
 Actual locator resolutions and root predicates use separate ``resolve:<absolute logical path>``
 and ``exists:<absolute logical path>`` rows. They describe selection, not bytes of an unconsumed
-target. Currentness checks these rows first, before following a possibly retargeted byte locator.
+target. A directory listing a computation walked is an ``entries:<absolute path>`` row: every
+direct name with its kind (file, directory, link, other), or ``absent``. Currentness checks these
+rows first, before following a possibly retargeted byte locator.
 
 A path recorded twice with different identities in one computation (the file changed while it was
 being read) is marked :data:`CONFLICTING`, so the caller knows the result cannot be reused.
 :func:`changed_observations` rechecks the same operations and bytes now. Outside a recording
 block, :func:`record_read` does nothing.
+
+**A file's bytes are read again only when its stat moved** (:func:`file_identity`, D569): the same
+device, inode, size, mode, modification and change times prove the same bytes, as Git's index
+proves an unchanged file. A file written less than :data:`RACY_NS` before its bytes were read is
+never held -- a write within the same clock tick could leave its stat as it was -- and neither is
+one whose stat moved while it was read. At most :data:`HELD_IDENTITIES` files are held; the least
+recently used is read again.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+import threading
+import time
+from collections import OrderedDict
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -37,6 +50,7 @@ __all__ = [
     "file_identity",
     "has_failed_observation",
     "observation_identity",
+    "observed_entries",
     "observed_exists",
     "observed_json_files",
     "observed_path_exists",
@@ -54,21 +68,70 @@ _READS: ContextVar[dict[str, str] | None] = ContextVar("recorded_reads", default
 _EXAMINED: ContextVar[dict[str, str] | None] = ContextVar("examined_reads", default=None)
 _FILE_IDENTITY = re.compile(r"sha256:[0-9a-f]{64}|absent")
 _FAILED_IDENTITY = re.compile(r"conflicting reads|unreadable \([A-Za-z0-9_]+\)")
+#: The rows that describe a selection -- a resolution, a predicate, a listing -- not bytes.
+_SELECTIONS: Final = frozenset({"resolve", "exists", "json-files", "entries"})
 
 
 def bytes_identity(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
+#: A write this close before a read could share its stat with the bytes read (Git's racy rule).
+RACY_NS: Final = 2_000_000_000
+#: How many files' identities are held against their stats.
+HELD_IDENTITIES: Final = 8192
+
+type _Stat = tuple[int, int, int, int, int, int]
+
+_HELD: OrderedDict[str, tuple[_Stat, str]] = OrderedDict()
+_HELD_GUARD = threading.Lock()
+
+
+def _stat_of(path: Path) -> _Stat:
+    info = os.stat(path)
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mode,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
 def file_identity(path: Path) -> str:
-    """The identity of a file now: its bytes' SHA-256, ``absent``, or ``unreadable (...)``."""
+    """The identity of a file now: its bytes' SHA-256, ``absent``, or ``unreadable (...)``.
+
+    The bytes are read again only when the file's stat moved since they were last read.
+    """
 
     try:
-        return bytes_identity(path.read_bytes())
+        stat = _stat_of(path)
     except FileNotFoundError:
         return ABSENT
     except OSError as error:
         return f"unreadable ({type(error).__name__})"
+    key = os.path.abspath(path)
+    with _HELD_GUARD:
+        held = _HELD.get(key)
+        if held is not None and held[0] == stat:
+            _HELD.move_to_end(key)
+            return held[1]
+    read_at = time.time_ns()
+    try:
+        identity = bytes_identity(path.read_bytes())
+        settled = read_at - max(stat[4], stat[5]) > RACY_NS and _stat_of(path) == stat
+    except FileNotFoundError:
+        return ABSENT
+    except OSError as error:
+        return f"unreadable ({type(error).__name__})"
+    if settled:
+        with _HELD_GUARD:
+            _HELD[key] = (stat, identity)
+            _HELD.move_to_end(key)
+            while len(_HELD) > HELD_IDENTITIES:
+                _HELD.popitem(last=False)
+    return identity
 
 
 @contextmanager
@@ -120,45 +183,54 @@ def valid_observation(key: str, identity: str) -> bool:
     if "\0" in key or "\0" in identity:
         return False
     kind, _, logical = key.partition(":")
-    if kind in ("resolve", "exists", "json-files"):
+    if kind in _SELECTIONS:
         if not logical or not Path(logical).is_absolute():
             return False
-        if _FAILED_IDENTITY.fullmatch(identity):
-            return True
-        if kind in ("exists", "json-files"):
-            return (
-                identity in ("present", ABSENT)
-                if kind == "exists"
-                else bool(_FILE_IDENTITY.fullmatch(identity)) and identity != ABSENT
-            )
-        target = identity.removeprefix("resolved:")
-        return identity.startswith("resolved:") and Path(target).is_absolute()
+        return bool(_FAILED_IDENTITY.fullmatch(identity)) or _valid_selection(kind, identity)
     return bool(key) and bool(
         _FILE_IDENTITY.fullmatch(identity) or _FAILED_IDENTITY.fullmatch(identity)
     )
+
+
+def _valid_selection(kind: str, identity: str) -> bool:
+    if kind == "entries":
+        return bool(_FILE_IDENTITY.fullmatch(identity))
+    if kind == "exists":
+        return identity in ("present", ABSENT)
+    if kind == "json-files":
+        return bool(_FILE_IDENTITY.fullmatch(identity)) and identity != ABSENT
+    target = identity.removeprefix("resolved:")
+    return identity.startswith("resolved:") and Path(target).is_absolute()
 
 
 def observation_identity(key: str) -> str:
     """Recheck the same observed bytes or path operation, without reading a selector's target."""
 
     kind, _, logical = key.partition(":")
-    if kind not in ("resolve", "exists", "json-files"):
+    if kind not in _SELECTIONS:
         return file_identity(Path(key))
     try:
-        path = Path(logical)
-        if kind == "resolve":
-            return f"resolved:{path.resolve().as_posix()}"
-        if kind == "json-files":
-            return _json_files_identity(tuple(sorted(path.glob("*.json"))))
-        return "present" if path.exists() else ABSENT
+        return _selection_identity(kind, Path(logical))
+    except FileNotFoundError:
+        return ABSENT if kind == "entries" else f"unreadable ({FileNotFoundError.__name__})"
     except (OSError, RuntimeError) as error:
         return f"unreadable ({type(error).__name__})"
+
+
+def _selection_identity(kind: str, path: Path) -> str:
+    if kind == "entries":
+        return _entries_identity(_entries_of(path))
+    if kind == "resolve":
+        return f"resolved:{path.resolve().as_posix()}"
+    if kind == "json-files":
+        return _json_files_identity(tuple(sorted(path.glob("*.json"))))
+    return "present" if path.exists() else ABSENT
 
 
 def changed_observations(reads: Mapping[str, str]) -> tuple[str, ...]:
     """Recheck selections before bytes; a moved locator must not cause an outside-target read."""
 
-    selections = {key for key in reads if key.startswith(("resolve:", "exists:", "json-files:"))}
+    selections = {key for key in reads if key.partition(":")[0] in _SELECTIONS}
     moved = tuple(key for key in selections if observation_identity(key) != reads[key])
     if moved:
         return moved
@@ -214,6 +286,49 @@ def observed_exists(path: Path) -> bool:
         # Recheck the predicate we actually used, including the errors exists() suppresses.
         _record(f"exists:{path.absolute().as_posix()}", ABSENT)
     return exists
+
+
+def _entries_of(root: Path) -> tuple[tuple[str, str], ...]:
+    with os.scandir(root) as listing:
+        return tuple(
+            sorted(
+                (
+                    entry.name,
+                    "link"
+                    if entry.is_symlink()
+                    else "directory"
+                    if entry.is_dir()
+                    else "file"
+                    if entry.is_file()
+                    else "other",
+                )
+                for entry in listing
+            )
+        )
+
+
+def _entries_identity(entries: tuple[tuple[str, str], ...]) -> str:
+    return bytes_identity("\0".join(f"{kind}:{name}" for name, kind in entries).encode("utf-8"))
+
+
+def observed_entries(root: Path) -> tuple[tuple[str, str], ...]:
+    """Record one directory's direct listing a computation walks: each name with its kind.
+
+    An absent directory is an empty listing recorded as ``absent``, so its creation moves it.
+    """
+
+    root = root.absolute()
+    key = f"entries:{root.as_posix()}"
+    try:
+        entries = _entries_of(root)
+    except FileNotFoundError:
+        _record(key, ABSENT)
+        return ()
+    except OSError as error:
+        _record(key, f"unreadable ({type(error).__name__})")
+        raise
+    _record(key, _entries_identity(entries))
+    return entries
 
 
 def _json_files_identity(paths: tuple[Path, ...]) -> str:

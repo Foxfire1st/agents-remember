@@ -142,9 +142,21 @@ def test_the_retained_loop_is_still_the_independent_stop_caller() -> None:
 
     # The lifespan starts the loop unconditionally: prose may not be repaired by
     # switching the safety loop off.
-    lifespan_source = inspect.getsource(lifespan._serving_lifespan)
-    assert "metrics_task = asyncio.create_task" in lifespan_source
-    assert "_metrics_loop(runtime.config" in lifespan_source
+    # The serving lifetime is two functions: `_serving_lifespan` starts the launcher's catalog and
+    # `_running_lifespan` starts the loops, so the guard follows the loops. Suppression is
+    # preview-only: a preview shares its coordination root with the installed host, which runs this
+    # loop and writes the samples the preview reads. What the guard asserts is the default path rather
+    # than one literal: with the switch absent nothing is suppressed, and the safety sampler is among
+    # the loops this lifespan starts.
+    lifespan_source = inspect.getsource(lifespan._running_lifespan)
+    assert "metrics_task = _live_background_task(" in lifespan_source
+    assert '"metrics"' in lifespan_source
+    assert "_metrics_loop" in lifespan_source
+    assert "metrics" in lifespan._PREVIEW_SUPPRESSED_LOOPS
+    assert lifespan._preview_suppresses({}) == frozenset()
+    assert lifespan._preview_suppresses({lifespan._PREVIEW_BACKGROUND_ENV: "1"}) == frozenset(
+        lifespan._PREVIEW_SUPPRESSED_LOOPS
+    )
 
 
 def test_failsafe_key_is_the_documented_gate() -> None:

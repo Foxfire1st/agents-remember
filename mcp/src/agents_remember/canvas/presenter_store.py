@@ -83,6 +83,7 @@ __all__ = [
     "failed_changes",
     "open_binary",
     "read_bounded",
+    "read_whole",
     "receipt_changes",
 ]
 
@@ -204,6 +205,21 @@ def read_bounded(path: Path, limit: int, *, reason: str, detail: str) -> bytes:
     if len(payload) > limit:
         raise PresenterRefused(reason, f"{detail}; the file grew while it was read")
     return payload
+
+
+def read_whole(path: Path, *, reason: str, detail: str) -> bytes:
+    """Read one file whole, whatever its size.
+
+    The explainer's packet and its assignment are files the product itself wrote into the seat's
+    instructions folder, so digesting or serving them has no byte cap: a limit that refused them
+    would make the product's own output unreadable to its own reader (ruling 6085456d).
+    """
+
+    try:
+        with open_binary(path) as handle:
+            return handle.read()
+    except OSError as error:
+        raise PresenterRefused(reason, f"{detail}: {error}") from error
 
 
 def failed_changes(current: PresenterAttempt, refusal: PresenterRefused) -> dict[str, Any]:

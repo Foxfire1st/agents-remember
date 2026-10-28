@@ -19,7 +19,8 @@ from agents_remember.cli import role_launch_archive as archive
 from agents_remember.cli import role_launch_archive_recovery as recovery
 from agents_remember.cli.paseo_bridge import DAEMON_UNREACHABLE, PaseoBridgeFailure
 from agents_remember.cli.role_launch_liveness import _reconcile_prior_execution
-from agents_remember.cli.role_launch_receipts import EXECUTIONS_DIRECTORY, RECEIPT_SCHEMA
+from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA
+from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.kernel.file_lock import lock_held
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import RoleDispatchRequest
@@ -27,6 +28,7 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving import _app_lifespan as lifespan
 from agents_remember.serving._app_common import _ServingRuntime
 from agents_remember.serving.background_accounting import BackgroundLedger
+from agents_remember.serving.stream_shutdown import StreamShutdown
 from agents_remember.tasks import read_task_doc
 from agents_remember.worktrees.modules import cleanup, terminal_abandon, terminal_cleanup
 from agents_remember.worktrees.modules.args import WorktreeArgs
@@ -404,7 +406,12 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
 
             runtime = cast(
                 _ServingRuntime,
-                SimpleNamespace(config=self.config, background_ledger=BackgroundLedger()),
+                SimpleNamespace(
+                    launcher_catalog_prepare=None,
+                    master_preparation=None,
+                    config=self.config,
+                    background_ledger=BackgroundLedger(),
+                ),
             )
             with patch.object(archive, "bridge_call", side_effect=host) as call:
                 owner = asyncio.create_task(lifespan._leaf_archive_recovery_loop(runtime))
@@ -595,6 +602,9 @@ def test_the_recovery_loop_is_a_background_task_of_the_serving_lifespan_and_keep
         runtime = cast(
             _ServingRuntime,
             SimpleNamespace(
+                launcher_catalog_prepare=None,
+                stream_shutdown=StreamShutdown(),
+                master_preparation=None,
                 config=SimpleNamespace(),
                 background_ledger=BackgroundLedger(),
                 observer_root=None,
@@ -603,7 +613,9 @@ def test_the_recovery_loop_is_a_background_task_of_the_serving_lifespan_and_keep
                 # The lifespan reads the explainer's ports to decide whether the moved
                 # watcher starts (``_app_common.py``: ``explainer_application = None``).
                 explainer_application=None,
-                projector=SimpleNamespace(prime=_settled, run=partial(record, "projection")),
+                projector=SimpleNamespace(
+                    close_readiness=lambda: None, prime=_settled, run=partial(record, "projection")
+                ),
             ),
         )
         with (

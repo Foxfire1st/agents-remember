@@ -32,6 +32,7 @@ from agents_remember.application.knowledge_review import (
     read_complete_knowledge_review,
 )
 from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees
+from agents_remember.application.review_answer_preparation import RecordedReviewAnswers
 from agents_remember.application.review_artifact_cleanup import (
     cleanup_review_artifacts,
 )
@@ -42,7 +43,6 @@ from agents_remember.application.review_candidate_resolution import (
 from agents_remember.application.review_source_content import read_review_source_content
 from agents_remember.application.review_tree_knowledge import read_review_trees
 from agents_remember.application.reviewer_worklist_child import isolated_leaf_worklist
-from agents_remember.cli.dashboard_review_reads import RecordedReviewAnswers
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge_index import KnowledgeIndex, MemoryTreeError, text_uuid
 from agents_remember.models.knowledge.read import InvariantIdentitySeed

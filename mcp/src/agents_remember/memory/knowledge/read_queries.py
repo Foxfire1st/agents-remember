@@ -78,6 +78,34 @@ def fetch_identity_rows(
     return {str(row[0]): str(row[1]) for row in rows}
 
 
+def fetch_revision_populations(
+    connection: apsw.Connection,
+    repository_id: str,
+    identity_table: str,
+    revision_table: str,
+    identity_column: str,
+) -> dict[str, tuple[str, ...]]:
+    """Return every identity with its ordered retained revisions, including empty populations."""
+
+    identity_order = _require_order_column(identity_table)
+    revision_order = _require_order_column(revision_table)
+    rows = connection.execute(
+        f"SELECT identity.{identity_column}, revision.revision_id FROM {identity_table} identity "
+        f"LEFT JOIN {revision_table} revision "
+        "ON revision.repository_id = identity.repository_id "
+        f"AND revision.{identity_column} = identity.{identity_column} "
+        "WHERE identity.repository_id = ? "
+        f"ORDER BY identity.{identity_order}, revision.{revision_order}",
+        (repository_id,),
+    )
+    populations: dict[str, list[str]] = {}
+    for identity, revision in rows:
+        population = populations.setdefault(str(identity), [])
+        if revision is not None:
+            population.append(str(revision))
+    return {identity: tuple(population) for identity, population in populations.items()}
+
+
 def fetch_invariant_revisions(
     connection: apsw.Connection, repository_id: str, revision_ids: Sequence[str]
 ) -> list[dict[str, Any]]:
@@ -218,14 +246,16 @@ def fetch_realizations_at_path(
     normalised, globbed or resolved against a working tree.
     """
 
+    # Start at the exact-path index. Otherwise ORDER BY can make the planner scan every claim in
+    # the namespace for each requested path, including paths with no registered claim.
     rows = connection.execute(
         "SELECT c.claim_id, c.invariant_revision_id, c.role, c.rationale, c.provenance, "
         "a.anchor_id, a.path, a.source_identity, a.locator, r.invariant_id "
-        "FROM realization_claim c JOIN source_anchor a "
+        "FROM source_anchor a CROSS JOIN realization_claim c "
         "ON a.repository_id = c.repository_id AND a.anchor_id = c.anchor_id "
         "JOIN invariant_revision r ON r.repository_id = c.repository_id "
         "AND r.revision_id = c.invariant_revision_id "
-        "WHERE c.repository_id = ? AND a.path = ? ORDER BY c.claim_id",
+        "WHERE a.repository_id = ? AND a.path = ? ORDER BY c.claim_id",
         (repository_id, path),
     )
     return [

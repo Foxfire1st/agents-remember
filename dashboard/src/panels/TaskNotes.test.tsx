@@ -1,4 +1,3 @@
-import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -248,14 +247,14 @@ describe("TaskNotes resolution liveness (L150-CODE-01, kept at the L127 sync)", 
   // L127's landed hooks key the resolution on content; these cases pin that the
   // in-flight result still arrives across equal-content rerenders and replays.
   function stubDeferredNotes() {
-    const parked: { url: string; answer: (value: Response) => void }[] = [];
+    const parked: { url: string; signal?: AbortSignal | null; answer: (value: Response) => void }[] = [];
     const calls: string[] = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn((url: string) => {
+      vi.fn((url: string, init?: RequestInit) => {
         calls.push(url);
         return new Promise<Response>((answer) => {
-          parked.push({ url, answer });
+          parked.push({ url, signal: init?.signal, answer });
         });
       }),
     );
@@ -308,7 +307,7 @@ describe("TaskNotes resolution liveness (L150-CODE-01, kept at the L127 sync)", 
   it("delivers the in-flight result across an equal-content identity rerender", async () => {
     const { parked, calls } = stubDeferredNotes();
     const view = renderNotes(["notes/a.md"]);
-    expect(parked).toHaveLength(2);
+    await waitFor(() => expect(parked).toHaveLength(2));
     // A new array identity with the same content refires nothing: the pending
     // request keeps its only live owner.
     view.rerender(<TaskNotes repo={REPO} master={MASTER} references={["notes/a.md"]} onOpenNotes={vi.fn()} />);
@@ -320,30 +319,62 @@ describe("TaskNotes resolution liveness (L150-CODE-01, kept at the L127 sync)", 
     expect(resolveCalls(calls)).toHaveLength(1);
   });
 
-  it("still delivers through a StrictMode setup replay", async () => {
+  it("sends each notes read once through a StrictMode setup replay and still delivers", async () => {
     const { parked, calls } = stubDeferredNotes();
     const view = render(
-      <StrictMode>
-        <TaskNotes repo={REPO} master={MASTER} references={["notes/a.md"]} onOpenNotes={vi.fn()} />
-      </StrictMode>,
+      <TaskNotes repo={REPO} master={MASTER} docPath={DOC} references={["notes/a.md"]} onOpenNotes={vi.fn()} />,
+      { reactStrictMode: true },
     );
-    // The replay's cleanup cancels the first owner; the replayed setup re-issues.
+    // Discarded setup must not send requests that compete with the live reader.
     await act(async () => {});
-    expect(resolveCalls(calls)).toHaveLength(2);
+    for (const route of ["/api/notes/folder", "/api/notes/resolve", "/api/role-launch/reports"])
+      expect(calls.filter((url) => url.startsWith(route))).toHaveLength(1);
     await settle(parked, "/api/notes/folder", folderAnswer(7));
     await settle(parked, "/api/notes/resolve", resolveAnswer([["notes/a.md", "a.md"]]));
     expect((await view.findByTestId("notes-root-count")).textContent).toContain("7 entries in the top folder");
     expect(await view.findByTestId("note-ref-1")).toBeTruthy();
   });
 
+  it("aborts obsolete task reads and unmounted reads without admitting late answers", async () => {
+    const { parked } = stubDeferredNotes();
+    const props = { repo: REPO, references: ["notes/a.md"], onOpenNotes: vi.fn() };
+    const view = render(<TaskNotes {...props} master={MASTER} docPath={DOC} />);
+    await waitFor(() => expect(parked).toHaveLength(3));
+    const old = [...parked];
+    view.rerender(<TaskNotes {...props} master="other" docPath="other/task.json" />);
+    await waitFor(() => expect(parked).toHaveLength(6));
+    expect(old.every((call) => call.signal?.aborted)).toBe(true);
+    await settleLatest(parked, "/api/notes/folder", folderAnswer(5));
+    await settleLatest(parked, "/api/notes/resolve", resolveAnswer([["notes/a.md", "new.md"]]));
+    await settle(parked, "/api/notes/folder", folderAnswer(99));
+    await settle(parked, "/api/notes/resolve", resolveAnswer([["notes/a.md", "stale.md"]]));
+    expect((await view.findByTestId("notes-root-count")).textContent).toContain("5 entries");
+    fireEvent.click(await view.findByTestId("note-ref-1"));
+    expect(props.onOpenNotes).toHaveBeenLastCalledWith({ kind: "notes", repo: REPO, master: "other", path: "new.md" });
+    view.rerender(<TaskNotes {...props} master="last" docPath="last/task.json" />);
+    await waitFor(() => expect(parked.filter((call) => call.url.includes("master=last"))).toHaveLength(2));
+    const live = parked.filter((call) => !old.includes(call) && !call.signal?.aborted);
+    expect(live).toHaveLength(3);
+    view.unmount();
+    expect(live.every((call) => call.signal?.aborted)).toBe(true);
+  });
+
+  it("sends nothing when unmounted before the request microtask", async () => {
+    const { calls } = stubDeferredNotes();
+    const view = render(<TaskNotes repo={REPO} master={MASTER} docPath={DOC} references={[]} />);
+    view.unmount();
+    await act(async () => {});
+    expect(calls).toEqual([]);
+  });
+
   it("lets the latest content win and ignores the stale answer", async () => {
     const { parked, calls } = stubDeferredNotes();
     const view = renderNotes(["notes/a.md"]);
-    expect(parked).toHaveLength(2);
+    await waitFor(() => expect(parked).toHaveLength(2));
     view.rerender(
       <TaskNotes repo={REPO} master={MASTER} references={["notes/a.md", "notes/b.md"]} onOpenNotes={vi.fn()} />,
     );
-    expect(resolveCalls(calls)).toHaveLength(2);
+    await waitFor(() => expect(resolveCalls(calls)).toHaveLength(2));
     // The latest answer settles first and wins; the stale first answer settles
     // last with different content and must not overwrite it.
     await settleLatest(parked, "/api/notes/folder", folderAnswer(5));

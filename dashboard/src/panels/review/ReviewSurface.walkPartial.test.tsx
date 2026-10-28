@@ -11,9 +11,11 @@ import {
   SHARED,
   bodyOf,
   clickedSecondFamily,
+  families,
   familyBlock,
   installWorld,
   memberOccurrences,
+  memberRow,
   open,
   reviewCount,
   settled,
@@ -41,21 +43,31 @@ it('shows complete outline rows for a partial read and keeps continuation in the
   expect(block.dataset.familyKept).toBe('true');
   expect(memberOccurrences(block).size).toBe(24);
   expect(within(block).queryByTestId('review-family-roster-next')).toBeNull();
+  // A family opens only its overview (MIK-R211 v4 rule 10); the partial roster's continuation is in
+  // the detail of a member read under it. INV-2E8MG43K is R6R's alone, so HBJ stays the kept family.
   fireEvent.click(within(block).getByTestId('review-family-open'));
   await waitFor(
-    () => expect(view.getByTestId('review-center-family').dataset.family).toBe(R6R_ID),
+    () => expect(view.getByTestId('review-family-overview').dataset.family).toBe(R6R_ID),
   );
-  const control = view.getAllByTestId('review-center-roster-next')[0];
+  await settled(view);
+  expect(familyBlock(view, HBJ_ID).dataset.familyKept).toBe('true');
+  fireEvent.click(memberRow(view, R6R_ID, 'INV-2E8MG43K'));
+  const control = (await view.findAllByTestId('review-center-roster-next'))[0];
+  expect(familyBlock(view, HBJ_ID).dataset.familyKept).toBe('true');
   const cursor = control.dataset.continuation!;
   const asked = reviewCount();
   fireEvent.click(control);
   await waitFor(() => expect(reviewCount() - asked).toBe(1));
   await settled(view);
+  // The continuation pages the member's read it was offered under, with the cursor unchanged.
   const request = world.requests.reviews()[asked];
   expect([
     request.searchParams.get('selectorKind'),
+    request.searchParams.get('selectorId'),
     request.searchParams.get('continuation'),
-  ]).toEqual(['family', cursor]);
+  ]).toEqual(['invariant', bodyOf('INV-2E8MG43K').payload!.knowledge.revision_selection!.record_id, cursor]);
   expect(memberOccurrences(familyBlock(view, R6R_ID)).size).toBe(24);
+  // The kept family stays kept across the continuation.
+  expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   expect(familyBlock(view, HBJ_ID).dataset.familyKept).toBe('true');
 });

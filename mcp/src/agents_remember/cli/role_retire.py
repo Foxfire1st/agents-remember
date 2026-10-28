@@ -20,6 +20,7 @@ from typing import Any
 from agents_remember.application.agent_binding import AgentBinding, read_agent_binding
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.cli.paseo_status import read_agent
+from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_identity import LEAF_ROLES
 from agents_remember.models.structural.agent import RetireChildRequest
@@ -317,10 +318,7 @@ def _scan_seat_records(
 ) -> tuple[list[tuple[Path, dict[str, Any]]], list[tuple[Path, dict[str, Any]]]]:
     """All launch records naming one agent: current ones, then history ones."""
 
-    from agents_remember.cli.role_launch_receipts import (  # noqa: PLC0415
-        EXECUTIONS_DIRECTORY,
-        _read_receipt,
-    )
+    from agents_remember.cli.role_launch_receipts import _read_receipt  # noqa: PLC0415
 
     roots = [config.coordination_root / "notes" / "reports" / EXECUTIONS_DIRECTORY]
     roots.extend(

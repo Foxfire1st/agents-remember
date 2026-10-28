@@ -19,6 +19,7 @@ import {
   type RoleTasklessActiveRequest,
 } from './roleLaunchModel';
 import type { useRoleChatControls } from './roleChatControls';
+import { rememberedRoleDefaults } from './launcherDefaultsMemory';
 import type { OptionsFlowState } from './roleChatOptionsLoader';
 import {
   resolveBusy,
@@ -176,11 +177,17 @@ function useRoleChatsPresentation(props: RoleChatsViewProps) {
   const progress = useRoleLaunchProgress(controls.launchRequestId);
   const savedCatalog = options.savedCatalogState && sameRoleOptionsScope(options.savedCatalogState.scope, optionsScope)
     ? options.savedCatalogState.value : undefined;
-  const catalog = resolveLauncherCatalog(display.options, display.optionsLoading, savedCatalog);
+  const { savedShown, ...catalog } = resolveLauncherCatalog(
+    display.options,
+    display.optionsLoading,
+    savedCatalog,
+    rememberedRoleDefaults(documentScope),
+  );
   const live = {
     active,
     busy: execution.busy,
-    options: display.options,
+    // The saved choices on show are the options a start reads while a fresh answer is on its way.
+    options: display.options ?? (savedShown ? catalog : null),
     currentScopedExecution: execution.currentScopedExecution,
   };
   return {
@@ -195,7 +202,8 @@ function useRoleChatsPresentation(props: RoleChatsViewProps) {
       ...execution,
       ...launchActions(props, live, display.optionsLoading),
       progress: execution.busy ? progress : undefined,
-      optionsLoading: display.optionsLoading,
+      // A fresh answer on its way blocks nothing while the saved choices are on show (MIK-R215).
+      optionsLoading: display.optionsLoading && !savedShown,
       optionsError: resolveOptionsErrorText(options.optionsErrorState, optionsScope),
       executionError: resolveExecutionErrorText(controls.executionErrorState, documentScope),
       onRefreshOptions: props.onRefreshOptions,

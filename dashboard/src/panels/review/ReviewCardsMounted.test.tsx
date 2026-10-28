@@ -1,8 +1,8 @@
-// The page's one card read through production clicks (MIK-R89 v2 rule 2, W4; L81-R1-F18's
-// successor). The cards are the opening's read 5: family clicks, member clicks in the centre and a
-// return to the first family read their subjects and never a card set. A card read that fails in
-// transport says so on the subjects (it is not kept) and is not asked again by any selection; a
-// remount asks again (data/reviewTrees.cards.test.ts).
+// The page's card reads through production clicks (MIK-R211 v4 rule 10; L81-R1-F18's successor). A
+// family click, a return to the first family and another family read their subjects and never a card
+// set; a member opened from the family's overview reads its own cards once. A card read that fails in
+// transport says so on the subject (it is not kept); a remount asks again
+// (data/reviewTrees.cards.test.ts).
 import { act, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -75,29 +75,34 @@ const releaseAll = (gates: Gate[]) =>
     for (const gate of gates.splice(0, gates.length)) if (gate.kind === 'intent') gate.settle(await gate.shadow!);
   });
 
-describe("selections never read cards", () => {
-  it('keeps the opening card read the only one, and says when it failed', async () => {
+describe("family selections never read cards", () => {
+  it("reads a member's own cards once, says when that read failed, and reads none for a family", async () => {
     const fail = { first: true };
     const { treesCalls, gates } = holdReads(fail);
     const view = open(R6R);
     await waitFor(() => expect(gates.some((gate) => gate.kind === 'intent')).toBe(true));
     await releaseAll(gates);
-    // The opening's read 5 failed in transport: the subjects say their locations could not be read.
-    await waitFor(() => expect(treesCalls).toHaveLength(1));
+    await waitFor(() => expect(view.getByTestId('review-family-overview').dataset.family).toBe(R6R_ID));
+    await waitFor(() => expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined());
+    // The family's overview reads no card set.
+    expect(treesCalls).toEqual([]);
+
+    // A member from the family's overview reads its own cards; that read fails in transport, and the
+    // subject says its locations could not be read.
+    const member = within(view.getByTestId('review-family-overview')).getAllByTestId('review-member-summary')[0];
+    fireEvent.click(member.querySelector('button')!);
+    await act(async () => {});
+    await releaseAll(gates);
+    await waitFor(() => expect(treesCalls).toEqual([member.dataset.subject]));
     await waitFor(() => expect(view.queryAllByTestId('review-subject-cards-unavailable').length).toBeGreaterThan(0));
     await waitFor(() => expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined());
 
     // Another family: its subject is read, no card set.
     fireEvent.click(within(familyBlock(view, HBJ_ID)).getByTestId('review-family-open'));
+    // A review read starts a microtask after its owner asks (reviewTransport.ts `getReviewJson`).
+    await waitFor(() => expect(gates.some((gate) => gate.kind === 'intent')).toBe(true));
     await releaseIntent(gates, HBJ_ID);
-    await waitFor(() => expect(view.getByTestId('review-center-family').dataset.family).toBe(HBJ_ID));
-    expect(treesCalls).toHaveLength(1);
-
-    // A member of the shown family, from the centre's roster.
-    const member = within(view.getByTestId('review-center-family-details')).getAllByTestId('review-center-open-member')[0];
-    fireEvent.click(member);
-    await act(async () => {});
-    await releaseAll(gates);
+    await waitFor(() => expect(view.getByTestId('review-family-overview').dataset.family).toBe(HBJ_ID));
     expect(treesCalls).toHaveLength(1);
 
     // Back to the first family.
@@ -105,6 +110,7 @@ describe("selections never read cards", () => {
     await act(async () => {});
     await releaseAll(gates);
     await waitFor(() => expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined());
+    await waitFor(() => expect(view.getByTestId('review-family-overview').dataset.family).toBe(R6R_ID));
     expect(treesCalls).toHaveLength(1);
   });
 });

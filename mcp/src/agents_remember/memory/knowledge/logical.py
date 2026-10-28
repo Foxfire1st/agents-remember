@@ -22,17 +22,17 @@ from typing import Any
 import apsw
 
 from agents_remember.kernel.canonical_json import decoded_json, sha256_digest
+from agents_remember.kernel.read_cancellation import raise_if_read_cancelled
 from agents_remember.memory.knowledge import schema
 from agents_remember.memory.knowledge.connection import (
     inspect_schema,
-    open_read_only_database,
 )
+from agents_remember.memory.knowledge.dataset_identity_memo import DATASET_IDENTITIES
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge.request_digests import digest_in_request
 from agents_remember.memory.knowledge.schema import (
     SchemaGeneration,
     generation_for_name,
-    generation_of_database,
 )
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.models.knowledge.repository import RepositoryIdentity
@@ -158,9 +158,7 @@ def dataset_identity(database_path: Path) -> SnapshotIdentity:
     it as empty.
     """
 
-    connection = open_read_only_database(database_path)
-    try:
-        generation = generation_of_database(connection)
+    def compute(connection: apsw.Connection, generation: SchemaGeneration) -> SnapshotIdentity:
         inspect_schema(connection)
         repository = bound_repository(connection)
         if repository is None:
@@ -169,8 +167,8 @@ def dataset_identity(database_path: Path) -> SnapshotIdentity:
                 "knowledge dataset this code can address"
             )
         return snapshot_identity(connection, repository, generation)
-    finally:
-        connection.close()
+
+    return DATASET_IDENTITIES.read(database_path, compute)
 
 
 def bound_repository(connection: apsw.Connection) -> RepositoryIdentity | None:
@@ -195,23 +193,34 @@ def bound_repository(connection: apsw.Connection) -> RepositoryIdentity | None:
     return RepositoryIdentity(repository_id=str(rows[0][0]), authority_home=str(rows[0][1]))
 
 
+#: How many rows are read or decoded between two looks at the read's cancellation (D585).
+_CHECK_EVERY = 256
+
+
 def _rows_of(
     connection: apsw.Connection, generation: SchemaGeneration, table: str
 ) -> list[dict[str, Any]]:
     """Return every row of ``table`` in primary-key order, keyed by declared column name."""
 
     columns = generation.columns[table]
-    keys = generation.primary_keys[table]
-    rows = [tuple(row) for row in connection.execute(f"SELECT {', '.join(columns)} FROM {table}")]
-    rows.sort(key=lambda row: tuple(row[columns.index(key)] for key in keys))
+    ordered = [columns.index(key) for key in generation.primary_keys[table]]
+    rows: list[tuple[Any, ...]] = []
+    for index, row in enumerate(connection.execute(f"SELECT {', '.join(columns)} FROM {table}")):
+        if not index % _CHECK_EVERY:
+            raise_if_read_cancelled()  # a large table reads for a while: a read that left stops
+        rows.append(tuple(row))
+    rows.sort(key=lambda row: tuple(row[position] for position in ordered))
     json_columns = generation.json_columns.get(table, frozenset())
-    return [
-        {
-            column: _cell(value, is_json=column in json_columns)
-            for column, value in zip(columns, row, strict=True)
-        }
-        for row in rows
-    ]
+    decoded: list[dict[str, Any]] = []
+    for row in rows:
+        raise_if_read_cancelled()  # a row's JSON cells can be large: one look per row
+        decoded.append(
+            {
+                column: _cell(value, is_json=column in json_columns)
+                for column, value in zip(columns, row, strict=True)
+            }
+        )
+    return decoded
 
 
 def cell_value(value: Any, *, is_json: bool) -> Any:

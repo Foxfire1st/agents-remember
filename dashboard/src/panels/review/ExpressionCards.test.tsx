@@ -13,16 +13,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReviewTreeEntry, ReviewTreesResult } from '../../data/reviewTrees';
 import { DiffPane } from '../changeset/DiffPane';
 import { BlockCards } from './reading/blockCards.test-utils';
-import { renderPage, servePage, stubInViewAtFirstPaint } from './reading/reviewPage.test-utils';
+import { renderPage, selectInvariant, servePage, stubInViewAtFirstPaint } from './reading/reviewPage.test-utils';
 import { resetCardCachesForTests } from '../../data/reviewTrees';
+import { measured, serveMeasuredTrees } from './lineChanges.test-utils';
 
 const captured = <T,>(name: string): T =>
   JSON.parse(
     readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), name), 'utf8'),
   ) as T;
 const cardsBody = captured<ReviewTreesResult>('gitTrees.cards.captured.json');
+// A captured entry with the producer's line measurement, which the capture predates (W10).
 const real = (id: string): ReviewTreeEntry =>
-  structuredClone(cardsBody.entries!.find((entry) => entry.id === id)!);
+  measured([structuredClone(cardsBody.entries!.find((entry) => entry.id === id)!)])[0];
 const comparison = cardsBody.comparison!;
 
 afterEach(() => {
@@ -232,7 +234,10 @@ describe('the card as the mockup draws it (D401)', () => {
     window.localStorage.clear();
     stubInViewAtFirstPaint();
     servePage();
+    serveMeasuredTrees();
     renderPage();
+    // Cards are an invariant's own detail (MIK-R211 v4 rule 10): open the one L181 #8 changed.
+    await selectInvariant();
     await waitFor(() => expect(screen.getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
     const heads = screen.getAllByTestId('review-block-lines').filter((node) => COUNTS.test(node.textContent ?? ''));
     expect(heads.length).toBeGreaterThan(0);

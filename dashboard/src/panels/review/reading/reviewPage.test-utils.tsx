@@ -4,8 +4,8 @@
 // captures (l86.capture-provenance.json) moved onto comparison #8; the summary, the leaf-wide trees
 // answer and the lane (one added file of ADDED_LINES lines without an invariant) are composed here
 // and named so. Every request is recorded, so a test counts the page's reads.
-import { fireEvent, render } from '@testing-library/react';
-import { vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { expect, vi } from 'vitest';
 
 import type { ReviewEntryListResult, ReviewResult } from '../../../data/review';
 import type { ReviewTreeComparison, ReviewTreesResult } from '../../../data/reviewTrees';
@@ -82,10 +82,27 @@ const leafTrees = (number: number): ReviewTreesResult => ({
   ...l181Answer,
   comparison: comparisonAt(number),
   entries: undefined,
+  entry_inventory: {
+    state: 'ready',
+    entries: (l181Answer.entries ?? []).map((original) => {
+      const entry = structuredClone(original);
+      delete entry.memory;
+      for (const side of [entry.before, entry.after]) {
+        delete side.excerpt;
+        delete side.rationale;
+        delete side.facet;
+      }
+      return entry;
+    }),
+  },
   code_changes: { state: 'facts', invariants: [] },
 });
 
-const cards = (number: number): ReviewTreesResult => ({ ...l181Answer, comparison: comparisonAt(number) });
+const cards = (number: number, invariants: readonly string[]): ReviewTreesResult => ({
+  ...l181Answer,
+  comparison: comparisonAt(number),
+  entries: l181Answer.entries?.filter((entry) => invariants.includes(entry.invariant_key) || invariants.includes(entry.invariant)),
+});
 
 const laneFile = {
   path: LANE_PATH,
@@ -149,7 +166,12 @@ function treesReply(url: URL): unknown {
   const file = url.searchParams.get('file');
   if (file !== null) return classification(file, number);
   if (url.searchParams.has('lane')) return lane(number);
-  return url.searchParams.has('invariants') ? cards(number) : leafTrees(number);
+  const entryId = url.searchParams.get('entry');
+  if (entryId !== null) {
+    const entry = l181Answer.entries?.find((candidate) => candidate.id === entryId);
+    return cards(number, entry ? [entry.invariant_key] : []);
+  }
+  return url.searchParams.has('invariants') ? cards(number, url.searchParams.get('invariants')!.split(',')) : leafTrees(number);
 }
 
 function intentReply(url: URL): unknown {
@@ -288,4 +310,16 @@ export function engage() {
 
 export function renderPage(props: Partial<React.ComponentProps<typeof ReviewSurface>> = {}) {
   return render(<ReviewSurface {...PLACE} onBack={() => undefined} {...props} />);
+}
+
+// Open only the inventory, then make the detail precondition explicit in tests that exercise code.
+export async function waitForOpening() {
+  await waitFor(() => expect(screen.getByTestId('review-summary').textContent).toContain('1 invariant changed'));
+  await waitFor(() => expect(screen.getAllByTestId('review-family-member-open').length).toBeGreaterThan(0));
+}
+
+export async function selectInvariant(id = L181_SUBJECT) {
+  await waitForOpening();
+  fireEvent.click(screen.getAllByTestId('review-family-member-open').find((row) => row.dataset.subjectId === id)!);
+  await waitFor(() => expect(screen.getAllByTestId('review-subject-section').some((node) => node.dataset.subject === id)).toBe(true));
 }

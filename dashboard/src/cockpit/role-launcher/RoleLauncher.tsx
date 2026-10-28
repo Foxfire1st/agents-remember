@@ -4,7 +4,6 @@ import type { TaskEntry, TaskDocumentRef } from '../../types/projection';
 import { sameTaskDocumentRef } from '../../data/taskIdentity';
 import { RoleExecutionStatus, RoleReviveControl } from '../RoleExecutionStatus';
 import { RoleLaunchDefaults, RoleLaunchFeatures } from '../RoleLaunchFeatures';
-import { RoleCatalogStatus } from './RoleCatalogStatus';
 import { StepUpControl, StepUpStatus } from './StepUpControl';
 
 import {
@@ -555,13 +554,14 @@ function modelSelectDisabled(
   );
 }
 
-// The model's default option names the load state until an agent default resolves.
+// The model's default option asks for an agent while none is chosen or known (MIK-R215 rule 2:
+// that is a step to take, not an error), then names the load state until an agent default resolves.
 function modelDefaultOptionText(
   choice: ResolvedAgentChoice,
   selectedAgentId: string,
   selection: RoleLaunchSelection,
 ): string {
-  if (!selectedAgentId) return 'Load agent default';
+  if (!selectedAgentId) return 'Pick an agent first';
   if (!choice.selectedAgent) return 'Agent capabilities loading';
   if (!choice.models.length) return choice.selectedAgent.discovery?.models?.source === 'unknown'
     ? `${choice.selectedModelId || 'Configured model'} · unchecked`
@@ -1164,8 +1164,6 @@ export function RoleLauncher(props: RoleLauncherProps) {
         retryLocked={retryLocked}
         basePreview={Boolean(currentScopedExecution?.stepUp)}
       />
-      <RoleCatalogStatus catalog={props.catalogDiscovery} agent={choice.selectedAgent} model={choice.selectedModel}
-        loading={props.optionsLoading} origin={props.catalogOrigin} pendingAgents={agents} className={roleLauncherMeta} />
       <LauncherActionBar
         {...props}
         boundRoles={boundRoles}

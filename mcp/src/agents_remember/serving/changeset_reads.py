@@ -10,6 +10,7 @@ from agents_remember.serving.changeset_cache import (
     RepositoryRead,
     Retention,
     cached_read,
+    master_range_read,
     observe_inputs,
 )
 from agents_remember.worktrees.modules import git, git_changes
@@ -84,6 +85,15 @@ def changed_files_with_counts(
     )
 
 
+def master_changed_files_with_counts(root: Path, base: str, head: str) -> list[dict[str, Any]]:
+    """The master counter alone may retain a fixed pair across process restarts."""
+    if _object_id(base) and _object_id(head):
+        return master_range_read(
+            root, base, head, lambda: git_changes.changed_files_with_counts(root, base, head)
+        )
+    return changed_files_with_counts(root, base, head)
+
+
 def _range_inputs(root: Path, base: str, head: str) -> tuple[ReadInput, ...]:
     """The freshness inputs of one commit range (MIK-R176 rule 5).
 
@@ -94,7 +104,9 @@ def _range_inputs(root: Path, base: str, head: str) -> tuple[ReadInput, ...]:
 
     Accepted gap, stated here and in the module docstring: a kept commit-pair answer
     outlives the loss of the objects it was computed from until the cache evicts it
-    (L174-R1-07's bound) or the server restarts; and a working-tree input that could
+    (L174-R1-07's bound) or the server restarts. The explicit master-only reader can
+    retain the same pair across restart within its declared disk retention bounds.
+    A working-tree input that could
     change the answer — ``.gitattributes``, diff configuration — is not observed per
     hit. Such a change is a repository/configuration change outside the key, not a
     change of what the pair's diff is.

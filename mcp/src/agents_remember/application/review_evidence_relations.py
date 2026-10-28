@@ -7,17 +7,11 @@ edge another owner records is reported ``recorded-by``, so it is never read as a
 file carries. Each owned edge also **resolves its target at the same bound tree**: the target's own
 revision and origin leaf travel with the edge, and a filename is never trusted as the record it names.
 
-Two cuts are recoverable, because a page a consumer cannot continue is a page it cannot use:
-
-* an edge cut names ``v1:after=<n>`` and the reader accepts it, continuing after the edges already
-  returned instead of restarting the roster;
-* a listing cut names ``v1:names-after=<path>`` and the reader accepts it too, resuming the name
-  stream from that path.
-
-The listing is streamed with a byte and name budget rather than materialized whole, lookups go
-through one id→path index built from that listing, and the reverse-owner scan stops as soon as the
-edge budget is spent. Records are read through :func:`read_bound_source`, so the same exact-tree
-operand, byte bound and measured counters apply here as anywhere else.
+The read answers in full (MIK-R211 v4 rules 1-3): the tree listing names every path under
+``knowledge`` and ``onboarding``, every owned, nested and reverse edge is returned, and no edge
+budget, name or byte cap, depth bound or cursor cuts the roster. Lookups go through one id→path
+index built from that listing. Records are read through :func:`read_bound_source`, so the same
+exact-tree operand and measured counters apply here as anywhere else.
 """
 
 from __future__ import annotations
@@ -27,18 +21,15 @@ import re
 import subprocess
 from collections.abc import Iterator
 from dataclasses import dataclass
-from itertools import islice
 from pathlib import Path
 
 from agents_remember.application.review_evidence_packet import comparison_reference
 from agents_remember.application.review_evidence_read import (
-    DEFAULT_READ_LIMITS,
     SideOperand,
     read_bound_source,
     side_operand,
 )
 from agents_remember.kernel.git_command import git_environment
-from agents_remember.models.knowledge.review_evidence import EvidenceLimits
 from agents_remember.models.knowledge.review_evidence_read import (
     EvidenceReadReceipt,
     EvidenceRelationshipRead,
@@ -55,26 +46,20 @@ from agents_remember.models.knowledge_files.sidecars import FileSidecar
 
 __all__ = ["read_bound_relationships"]
 
-_MAX_LISTED_PATHS = 5000
-_MAX_LISTING_BYTES = 4 * 1024 * 1024
+# How much of the listing stream one pipe read takes: its granularity, not a bound.
 _CHUNK = 65536
 _RECORD_FILE = re.compile(r"^(?P<id>[A-Z]{2,4}-[A-Z0-9]{4,})-[^/]*\.json$")
 _RECORD_ID = re.compile(r"^[A-Z]{2,4}-[A-Z0-9]{4,}$")
-_EDGE_CURSOR = re.compile(r"^v1:after=(?P<after>[0-9]+)$")
-_NAME_CURSOR = re.compile(r"^v1:names-after=(?P<after>.+)$")
 
 
-def read_bound_relationships(  # noqa: PLR0913 - one read states its operands, bounds and cursor
+def read_bound_relationships(
     record: ReviewTreeComparisonRecord,
     side: str,
     path: str,
     *,
     depth: int = 1,
-    limits: EvidenceLimits = DEFAULT_READ_LIMITS,
-    continuation: str | None = None,
-    listing_cursor: str | None = None,
 ) -> EvidenceRelationshipRead:
-    """Follow the recorded relationships of one memory file at one bound side (rules 3, 5)."""
+    """Follow every recorded relationship of one memory file at one bound side (rules 3, 5)."""
 
     if side not in {"memory-base", "memory-candidate"}:
         return _refusal(
@@ -86,81 +71,34 @@ def read_bound_relationships(  # noqa: PLR0913 - one read states its operands, b
                 "are read from the comparison's named memory side"
             ),
         )
-    if depth < 0 or depth > limits.relationship_depth:
+    if depth < 0:
         return _refusal(
             record,
             side,
-            "read-beyond-limit",
-            (
-                f"the requested relationship depth {depth} is beyond the declared bound "
-                f"{limits.relationship_depth}; nothing was read"
-            ),
+            "range-invalid",
+            f"the requested relationship depth {depth} is negative; nothing was read",
         )
-    after = _edge_after(continuation, record, side)
-    if isinstance(after, EvidenceRelationshipRead):
-        return after
-    if after >= limits.records_per_collection * limits.pages_per_read:
-        return _refusal(
-            record,
-            side,
-            "read-beyond-limit",
-            "the continuation exceeds the admitted relationship pages; select a narrower scope",
-        )
-    named_after = _name_after(listing_cursor)
     operand = side_operand(record, side)
     if isinstance(operand, EvidenceReadReceipt):
         return _refusal(record, side, "unknown-side", operand.detail)
-    return _Relations(record, operand, limits).read(path, depth, after, named_after)
-
-
-def _edge_after(
-    cursor: str | None, record: ReviewTreeComparisonRecord, side: str
-) -> int | EvidenceRelationshipRead:
-    if cursor is None:
-        return 0
-    matched = _EDGE_CURSOR.match(cursor)
-    if matched is None:
-        return _refusal(
-            record,
-            side,
-            "unknown-continuation",
-            f"the continuation {cursor!r} is not one this reader issued; nothing was read",
-        )
-    return int(matched.group("after"))
-
-
-def _name_after(cursor: str | None) -> str | None:
-    if cursor is None:
-        return None
-    matched = _NAME_CURSOR.match(cursor)
-    return matched.group("after") if matched else None
+    return _Relations(record, operand).read(path, depth)
 
 
 class _Relations:
-    """One bounded relationship walk over a bound memory tree."""
+    """One relationship walk over a bound memory tree, returning every edge it finds."""
 
-    def __init__(
-        self,
-        record: ReviewTreeComparisonRecord,
-        operand: SideOperand,
-        limits: EvidenceLimits,
-    ) -> None:
+    def __init__(self, record: ReviewTreeComparisonRecord, operand: SideOperand) -> None:
         self.record = record
         self.operand = operand
-        self.limits = limits
         self.examined = 0
         self.resolved = 0
         self._names: list[str] | None = None
         self._index: dict[str, str] | None = None
         self._listing_error: str | None = None
-        self._listing_truncated = False
-        self._listing_cursor: str | None = None
 
     # -- the walk ----------------------------------------------------------------------------
 
-    def read(
-        self, path: str, depth: int, after: int, named_after: str | None
-    ) -> EvidenceRelationshipRead:
+    def read(self, path: str, depth: int) -> EvidenceRelationshipRead:
         document = self._document(path)
         if document is None:
             return self._refuse(
@@ -168,7 +106,7 @@ class _Relations:
                 f"the entry at {path} is not a knowledge file this build reads, so its recorded "
                 "relationships were not followed",
             )
-        edges, cut = self._walk(document, depth, after, named_after)
+        edges = list(self._edges(document, depth)) if self._list_names() else []
         return EvidenceRelationshipRead(
             state="records",
             side=self.operand.side,
@@ -183,37 +121,17 @@ class _Relations:
             edges=tuple(edges),
             depth=depth,
             listed_paths=len(self._names or ()),
-            listing_truncated=self._listing_truncated,
-            listing_cursor=self._listing_cursor,
             examined_bytes=self.examined,
-            continuation=f"v1:after={after + len(edges)}" if cut else None,
-            limit="records_per_collection" if cut else None,
             resolved_targets=self.resolved,
             detail=(
                 f"{len(edges)} edge(s) of {path} at the {self.operand.side} tree "
-                f"{self.operand.tree}, followed to depth {depth}"
-                + (f" from edge {after}" if after else "")
-                + (
-                    f"; the listing was cut at {len(self._names or ())} path(s) and continues "
-                    f"after {self._listing_cursor}"
-                    if self._listing_truncated
-                    else ""
-                )
-                + ("; the record bound cut the population" if cut else "")
+                f"{self.operand.tree}, followed to depth {depth}, from a listing of "
+                f"{len(self._names or ())} path(s)"
             ),
         )
 
-    def _walk(
-        self, document: object, depth: int, after: int, named_after: str | None
-    ) -> tuple[list[RelationshipEdge], bool]:
-        if not self._list_names(named_after):
-            return [], False
-        budget = self.limits.records_per_collection
-        page = list(islice(self._edges(document, depth), after, after + budget + 1))
-        return page[:budget], len(page) > budget
-
     def _edges(self, document: object, depth: int) -> Iterator[RelationshipEdge]:
-        """One stable owned/nested/reverse edge space; paging skips edges, never owners."""
+        """The owned, nested and reverse edges, in one stable order."""
 
         for relation, target in _owned_targets(document):
             edge = self._owned_edge(document, relation, target)
@@ -309,16 +227,16 @@ class _Relations:
     # -- reading the tree --------------------------------------------------------------------
 
     def _document(self, path: str) -> object | None:
-        receipt = read_bound_source(self.record, self.operand.side, path, limits=self.limits)
+        receipt = read_bound_source(self.record, self.operand.side, path)
         if not receipt.source_read:
             return None
         self.examined += receipt.examined_bytes
         return _parse_memory_file(path, receipt.text or "")
 
-    def _list_names(self, after: str | None = None) -> list[str] | None:
-        """The memory tree's names, streamed under a name and byte budget (rules 4, 5)."""
+    def _list_names(self) -> list[str] | None:
+        """Every name of the memory tree's ``knowledge`` and ``onboarding`` paths (rule 5)."""
 
-        if self._names is not None and after is None:
+        if self._names is not None:
             return self._names
         try:
             process = subprocess.Popen(
@@ -342,7 +260,7 @@ class _Relations:
             self._listing_error = f"the memory tree listing could not run ({failure})"
             return None
         try:
-            names, cursor, scanned = _stream_names(process, after)
+            names, scanned = _stream_names(process)
         finally:
             _stop(process)
         if not names and process.returncode not in (0, -15, None):
@@ -351,16 +269,12 @@ class _Relations:
             )
             return None
         self.examined += scanned
-        if cursor is not None:
-            self._listing_truncated = True
-            self._listing_cursor = cursor
-        if after is None:
-            self._names = names
-            self._index = {
-                matched.group("id"): name
-                for name in names
-                if (matched := _RECORD_FILE.match(Path(name).name))
-            }
+        self._names = names
+        self._index = {
+            matched.group("id"): name
+            for name in names
+            if (matched := _RECORD_FILE.match(Path(name).name))
+        }
         return names
 
     def _locate(self, identifier: str) -> str | None:
@@ -373,42 +287,20 @@ class _Relations:
         return _refusal(self.record, self.operand.side, code, detail)
 
 
-def _stream_names(
-    process: subprocess.Popen[bytes], after: str | None
-) -> tuple[list[str], str | None, int]:
-    """Read ``ls-tree -z`` output until the name or byte budget is spent.
-
-    Nothing is materialized beyond the budget: the child is stopped as soon as the cap is reached,
-    and a cut names the cursor a consumer resumes from.
-    """
+def _stream_names(process: subprocess.Popen[bytes]) -> tuple[list[str], int]:
+    """Every name ``ls-tree -z`` writes, and the bytes the stream held."""
 
     names: list[str] = []
-    seen_after = after is None
-    cursor: str | None = None
     scanned = 0
     pending = b""
     assert process.stdout is not None
-    while len(names) <= _MAX_LISTED_PATHS and scanned < _MAX_LISTING_BYTES:
-        chunk = process.stdout.read(_CHUNK)
-        if not chunk:
-            break
+    while chunk := process.stdout.read(_CHUNK):
         scanned += len(chunk)
         pending += chunk
         parts = pending.split(b"\0")
         pending = parts.pop()
-        for raw in parts:
-            name = raw.decode("utf-8", "replace")
-            if not name:
-                continue
-            if not seen_after:
-                seen_after = name == after
-                continue
-            names.append(name)
-            if len(names) > _MAX_LISTED_PATHS:
-                cursor = f"v1:names-after={names[-2]}"
-                names = names[:_MAX_LISTED_PATHS]
-                return names, cursor, scanned
-    return names, cursor, scanned
+        names.extend(name for raw in parts if (name := raw.decode("utf-8", "replace")))
+    return names, scanned
 
 
 def _stop(process: subprocess.Popen[bytes]) -> None:

@@ -442,6 +442,7 @@ export const intentReview = (
   page?: { of: ReviewPagedCollection; continuation?: string | null; size?: number },
   history?: ReviewHistory,
   previousBindingDigest?: string,
+  signal?: AbortSignal,
 ): Promise<ReviewResult> => {
   return getReviewJson<ReviewResult>(
     `${base}/api/review/intent?${qs(
@@ -456,6 +457,7 @@ export const intentReview = (
         previousBindingDigest,
       }),
     )}`,
+    signal,
   );
 };
 
@@ -662,6 +664,7 @@ export const intentReviewEntries = (
   leaf: string,
   base = '',
   comparison?: number,
+  signal?: AbortSignal,
 ): Promise<ReviewEntryListResult> =>
   getReviewJson<ReviewEntryListResult>(
     `${base}/api/review/intent/entries?${qs({
@@ -670,4 +673,5 @@ export const intentReviewEntries = (
       leaf,
       ...(comparison === undefined ? {} : { comparison: String(comparison) }),
     })}`,
+    signal,
   );

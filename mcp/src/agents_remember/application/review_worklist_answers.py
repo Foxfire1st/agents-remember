@@ -37,10 +37,32 @@ def stored_unexplained_open(contract: WorktreeContract | None, trees: ReviewTree
         for item in document.get("items", ())
         if item.get("kind") in ("unexplained_hunk", "unexplained_file")
     ]
+    if not items:
+        return 0
     states = worklist_answers({**document, "items": items}, trees)
     if any(states[str(item["id"])].state == "undecided" for item in items):
         return None
     return sum(states[str(item["id"])].state == "open" for item in items)
+
+
+def stored_worklist_unbound(contract: WorktreeContract | None, trees: ReviewTrees) -> bool:
+    """Whether the stored worklist, by its own bytes, measures no open count for these trees.
+
+    Absent, empty, incomplete or paired with other trees: :func:`stored_unexplained_open` is then
+    ``None`` as a fact of the worklist file, which a kept summary names among its inputs (D570).
+    An unreadable file is no such fact, and neither is a bound worklist with an undecided item.
+    """
+    if contract is None:
+        return False
+    try:
+        document = read_leaf_worklist(contract.contract_path)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    return (
+        not document
+        or document.get("state") != "complete"
+        or not worklist_bound(document.get("pairing") or {}, trees)
+    )
 
 
 def worklist_bound(pairing: Mapping[str, Any], trees: ReviewTrees) -> bool:

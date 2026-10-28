@@ -46,8 +46,14 @@ for (const [kind, raw] of [['family', familyRaw], ['invariant', invariantRaw]] a
     const view = render(<ReviewSurface repo={payload.candidate.repository_id} master={payload.candidate.master}
       leaf={payload.candidate.leaf_id} history="recorded" selectorKind={selected.record_kind}
       selectorId={selected.record_id} onBack={() => undefined} />);
-    // The change facts follow the subject's content and code, open (MIK-R89 v2 rule 1, amended 9dde2b09).
-    const area = await waitFor(() => view.getByTestId(kind === 'family' ? 'review-center-family-details' : 'review-center-member-details'));
+    // The change facts follow the subject's content and code, open (MIK-R89 v2 rule 1, amended 9dde2b09);
+    // a family's stand in its overview's state slot (MIK-R211 v4 rule 10).
+    const area = await waitFor(() => {
+      if (kind === 'invariant') return view.getByTestId('review-center-member-details');
+      const overview = view.getByTestId('review-family-overview');
+      expect(within(overview).getByTestId('review-subject-slot').dataset.slotState).toBe('answered');
+      return overview;
+    });
     const badges = view.getAllByTestId('review-outline-badge').filter((badge) => badge.dataset.changeKind === 'unknown');
     expect(badges.length).toBeGreaterThan(0);
     for (const badge of badges) expect(badge.title).toContain(CURATION);

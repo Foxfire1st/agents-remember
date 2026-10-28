@@ -46,6 +46,32 @@ def sized_catalog(size: int) -> dict:
     return {"readAt": "2026-10-26T15:00:00+00:00", "providers": providers}
 
 
+def _ids(rows: list[dict] | None) -> list[str]:
+    return [row["id"] for row in rows or []]
+
+
+def _choices(agents) -> list[tuple]:
+    """Every choice an answer offers: each provider's modes and tool-server support, and each
+    model's efforts, speed tiers and features."""
+    return [
+        (
+            agent["id"],
+            _ids(agent.get("modes")),
+            agent.get("acceptsToolServers"),
+            [
+                (
+                    model["id"],
+                    _ids(model.get("efforts")),
+                    _ids(model.get("serviceTiers")),
+                    _ids(model.get("features")),
+                )
+                for model in agent["models"]
+            ],
+        )
+        for agent in agents
+    ]
+
+
 class FreshCatalogTests(unittest.TestCase):
     def setUp(self) -> None:
         temp = tempfile.TemporaryDirectory()
@@ -368,6 +394,54 @@ print(json.dumps({'state':result.discovery,'agents':result.agents}))
                 self.assertEqual(
                     [payload["mode"] for _, payload in bridge.calls], ["metadata", "selected"]
                 )
+
+    def test_a_narrow_start_question_leaves_the_saved_answer_full_and_the_fallback_offers_it(
+        self,
+    ) -> None:
+        """MIK-R215 rule 4: a start's narrow question never replaces the saved full answer with
+        less, and with Paseo silent the launcher offers every choice the full answer had."""
+        full = catalog()
+        with mock.patch.object(paseo_catalog, "bridge_call", fixtures.FakeBridge(full)):
+            answered = paseo_catalog.launcher_options(
+                self.config, fixtures.defaults(), fixtures.HARNESS_ORDER
+            )
+        metadata = copy.deepcopy(full)
+        metadata["readAt"] = "2026-10-26T16:00:00+00:00"
+        for row in metadata["providers"][0]["models"]:
+            row.pop("features", None)
+            row.pop("serviceTiers", None)
+        model = full["providers"][0]["models"][0]
+        narrow = {
+            "readAt": metadata["readAt"],
+            "selectedFeatures": {
+                "provider": "codex",
+                "model": model["id"],
+                "features": model["features"],
+                "serviceTiers": model["serviceTiers"],
+            },
+        }
+        start = fixtures.FakeBridge(metadata, narrow)
+        with (
+            mock.patch.object(paseo_catalog, "bridge_call", start),
+            paseo_catalog.launcher_catalog_question(),
+        ):
+            paseo_catalog.resolve_agent_selection(
+                self.config, fixtures.defaults("codex", "gpt-a"), (), None
+            )
+        self.assertEqual([payload["mode"] for _, payload in start.calls], ["metadata", "selected"])
+        silent = PaseoBridgeFailure("paseo_daemon_unreachable", "Paseo does not answer")
+        with mock.patch.object(paseo_catalog, "bridge_call", side_effect=silent):
+            fallback = paseo_catalog.launcher_options(
+                self.config, fixtures.defaults(), fixtures.HARNESS_ORDER
+            )
+        offered = _choices(answered["agents"])
+        self.assertTrue(any(model[3] for agent in offered for model in agent[3]))
+        self.assertEqual(_choices(fallback["agents"]), offered)
+        self.assertEqual(
+            _choices(paseo_catalog.saved_launcher_catalog(self.config).agents), offered
+        )
+        self.assertEqual(fallback["catalogDiscovery"]["source"], "saved")
+        self.assertIs(fallback["roleDefaults"]["available"], True)
 
     def test_saved_reader_never_queries_or_creates_or_writes_files(self) -> None:
         path = catalog_store_path(require_bridge_runtime(self.config).home)

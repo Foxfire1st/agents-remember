@@ -1,50 +1,33 @@
-"""The explainer's authoring declarations, in a light owner (MIK-R204 @ v1 rule 1, slice 1 of 3).
+"""The explainer's four tools, declared in a light owner (MIK-R211 v5 rule 3, MIK-R204 @ v1 rule 1).
 
-These eight tools are declared here with nothing behind them: the module imports the answer boundary, the
-tool framework and the argument vocabulary, and resolves `explainer_authoring`, `_written` and `read_source`
-from `canvas.explainer_server` and `canvas.presenter_evidence` **on the call**. Declaring them therefore
-does not load a reader, a writer or a renderer.
+The explainer works in a normal workspace with its harness's own tools and AR's general tools; its own
+server keeps exactly what no harness tool can do (D603, D607): ``render`` (the browser check and the
+publication into the task) and the three grade tools ``define_category``, ``remove_category`` and
+``grade`` (validated grades). It reports to the architect with ``role_message``, as every agent does.
 
-The declarations are moved, not rewritten: names, descriptions, argument schemas, defaults and bounds are
-byte-for-byte the ones `canvas.explainer_server` declared, and the acceptance for the move is that both
-seat digests stay identical to A6.
+The module imports the answer boundary and the tool framework and resolves the implementations from
+``canvas.explainer_server`` **on the call**, so declaring the tools loads no renderer or grade store.
+Every answer passes its own bound (``canvas.explainer_answer_bounds``, rule 11): content beyond it is a
+file in the workspace that the answer names.
 """
 
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import Callable
 from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Any
 
-from mcp.server.fastmcp import FastMCP, Image
-from pydantic import Field
+from mcp.server.fastmcp import FastMCP
 
+from agents_remember.canvas.explainer_answer_bounds import (
+    EXPLAINER_ANSWER_BOUNDS,
+    answer_tokens,
+    bounded,
+)
 from agents_remember.canvas.explainer_answers import answered
-from agents_remember.canvas.explainer_inputs import ExplainerInputs, coordination_of, now_iso
-
-if TYPE_CHECKING:  # annotations only; nothing here loads a service
-    from agents_remember.canvas.presenter_tools import AuthoringTools
-
-MAX_ASSET_CHARACTERS = 1_048_576
-
-
-def _explainer_authoring(workspace: Path) -> AuthoringTools:
-    """The authoring class, resolved on the call (slice 0 made its home light; this keeps it lazy)."""
-
-    return import_module("agents_remember.canvas.explainer_server").explainer_authoring(workspace)
-
-
-def _written(workspace: Path, relative: str, body: bytes) -> dict[str, Any]:
-    return import_module("agents_remember.canvas.explainer_server")._written(
-        workspace, relative, body
-    )
-
-
-def _read_source(*arguments: Any, **keywords: Any) -> Any:
-    return import_module("agents_remember.canvas.presenter_evidence").source(*arguments, **keywords)
+from agents_remember.canvas.explainer_inputs import ExplainerInputs, now_iso
 
 
 def _render(
@@ -53,13 +36,13 @@ def _render(
     task_root: Path | None = None,
     seat: str | None = None,
     now: Callable[[], str] | None = None,
-) -> tuple[dict[str, Any], bytes | None]:
+) -> dict[str, Any]:
     return import_module("agents_remember.canvas.explainer_server").render_and_publish(
         workspace, task_root=task_root, seat=seat, now=now
     )
 
 
-def register_authoring_tools(
+def register_render_tool(
     server: FastMCP,
     workspace: Path,
     *,
@@ -67,187 +50,102 @@ def register_authoring_tools(
     seat: str | None = None,
     now: Callable[[], str] | None = None,
 ) -> None:
-    """The eight tools kept from the presenter, over this environment's own folders."""
+    """``render``: the one publish command, over this environment's own folders."""
 
     @server.tool()
-    def inputs() -> dict:
-        """List the admitted input names and their digests. There is no arbitrary file reader."""
-        return answered(lambda: {**_explainer_authoring(workspace).grants["inputs"]})
+    def render() -> dict:
+        """Check the draft in drafts/assets/ in Chromium and publish it as the task's next revision.
 
-    @server.tool()
-    def read_input(name: str) -> str:
-        """Read evidence.json or assignment.txt, with its admitted digest checked."""
-        return _explainer_authoring(workspace).read(name)
-
-    @server.tool()
-    def source(side: str, path: str, start: int = 1, end: int = 100) -> dict:
-        """Read a relative path at one of the packet's four exact trees, through bounded R102 IO.
-
-        The packet is re-read on every call, so an Update's new packet needs no restart. No
-        repository, HEAD or revision argument exists. Never writes or executes compared code.
+        Write authored claims as {"claims": [...]} to drafts/assets/claim-map.json first; the map uses
+        EvidenceClaim fields and must cite admitted evidence. Fix readiness failures and call render
+        again; publication.state published (or unchanged, for the same page) confirms publication,
+        and a new revision is copied into revisions/<n>/ at once (publication.workspace says so).
+        Each call writes its own run folder renders/run-NNN/: report.json (the whole report),
+        page.png (the draft picture) and interactions/ (every interaction picture). The answer names
+        them, the publication state and revision, and a summary and the errors that fit 1,000 tokens;
+        `moved` names what is only in the report. No picture is returned: open them from the folder.
+        An interaction run that ran out of time names its unvisited passes; render the same draft
+        again to visit only those.
         """
-        evidence_packet = import_module(
-            "agents_remember.models.knowledge.review_evidence"
-        ).EvidencePacket
-        packet = evidence_packet.model_validate_json(
-            _explainer_authoring(workspace).read("evidence.json")
-        )
-        return answered(lambda: _read_source(packet, side, path, start=start, end=end))
-
-    @server.tool()
-    def assets(relative: str | None = None, offset: int = 0) -> dict:
-        """List/read this environment's assets; read chunks are bounded to 12000 characters."""
-        return answered(lambda: _explainer_authoring(workspace).assets(relative, offset))
-
-    @server.tool()
-    def write_asset(relative: str, text: Annotated[str, Field(max_length=1048576)]) -> dict:
-        """Write UTF-8 page output relative to drafts/assets, never an absolute/protected path."""
-        body = text.encode()
-        return answered(lambda: _written(workspace, relative, body))
-
-    @server.tool()
-    def carry_kit(paths: list[str]) -> dict:
-        """Carry kit-relative files (e.g. shiki/4.5.0/shiki-kit.js) and their notices."""
-        return answered(lambda: _explainer_authoring(workspace).carry(paths))
-
-    @server.tool()
-    def documentation(url: str, offset: int = 0) -> dict:
-        """Fetch bounded authoring documentation. This surface is NEVER review evidence."""
-        # `documentation` is the class's own static reader: resolved on the call, never a TYPE_CHECKING name
-        # (the A16 review's AST check caught it as an unbound runtime name).
-        authoring = import_module("agents_remember.canvas.presenter_tools").AuthoringTools
-        return answered(lambda: authoring.documentation(url, offset))
-
-    @server.tool()
-    def render() -> list:
-        """Load the exact draft in Chromium with reduced motion; return diagnostics and its picture."""
-        report, picture = _render(workspace, task_root=task_root, seat=seat, now=now)
-        result: list[Any] = [json.dumps(report)]
-        if picture is not None:
-            result.append(Image(data=picture, format="png"))
-        return result
+        report = answered(lambda: _render(workspace, task_root=task_root, seat=seat, now=now))
+        return bounded("render", render_answer(report), workspace)
 
 
-def _explainer_access() -> Any:
-    """The readers' owner, resolved on the call: declaring these four must not load it."""
+def render_answer(report: dict[str, Any]) -> dict[str, Any]:
+    """The answer to one render: where its run is, its publication, its counts and first errors.
 
-    return import_module("agents_remember.canvas.explainer_access")
-
-
-def register_read_tools(
-    server: FastMCP,
-    workspace: Path,
-    *,
-    task_root: Path | None,
-    leaf: str,
-) -> None:
-    """``list``, ``search`` and ``read`` — declarations only, readers on the call.
-
-    The readers are built per call from the same three arguments the product always gave them, so the
-    move changes where a declaration lives and nothing about what it answers.
+    The identity items come first and are never trimmed: the run folder, its report and picture, the
+    interaction folder and count, and the publication. The summary (the report's own counts) and then
+    whole errors fill what is left of render's 1,000 tokens. A part that does not fit is not cut: it is
+    named in ``moved`` with the report file that holds all of it (D597).
     """
 
-    @server.tool()
-    def list(surface: str, path: str = "", depth: int = 1) -> dict:
-        """List a folder of the bound snapshot, the retained pages or notes/reference/<leaf>/.
-
-        Surfaces: 'code' and 'memory' (the bound snapshot), 'snapshot-<n>/code' and
-        'snapshot-<n>/memory' (an older one a spanned turn may still read), 'pages' (the leaf's
-        retained page revisions) and 'reference' (notes/reference/<leaf>/). A path outside those
-        is refused by name. Bounded: 400 entries, depth 4.
-        """
-        reads = _explainer_access().ExplainerReads(workspace, task_root, leaf)
-        return answered(lambda: reads.listing(surface, path, depth))
-
-    @server.tool()
-    def search(surface: str, query: str, path: str = "", limit: int = 30) -> dict:
-        """Find a literal string in one admitted surface; answers path, line and the line.
-
-        Bounded: 200 files, 4 MiB, 50 matches. A regex is not admitted; a substring is.
-        """
-        reads = _explainer_access().ExplainerReads(workspace, task_root, leaf)
-        return answered(lambda: reads.searching(surface, query, path, limit))
-
-    @server.tool()
-    def read(surface: str, path: str, offset: int = 0) -> dict:
-        """Read one admitted file: 12000 characters at a time, with the whole file's SHA-256.
-
-        Binary content comes back base64. The answer names the binding; the retained pages and the
-        reference folder are read as they are now and are not part of it.
-        """
-        reads = _explainer_access().ExplainerReads(workspace, task_root, leaf)
-        return answered(lambda: reads.reading(surface, path, offset))
-
-    # `knowledge_read` is registered by `register_knowledge_tool`, after the git declarations, so the
-    # seat's discovery order is the one it has always published (R204 rule 2 covers order, not just names).
+    if report.get("state") == "refused" and "run" not in report:
+        return report  # refused before a run began: the refusal is the whole answer
+    run = report.get("run")
+    path = report.get("reportPath")
+    interactive = report.get("interactive") or {}
+    publication = report.get("publication") or {"state": "not attempted"}
+    answer: dict[str, Any] = {
+        "state": report.get("state"),
+        "run": None if run is None else f"{run}/",
+        "report": path,
+        "picture": report.get("picture"),
+        "interactions": {
+            "folder": interactive.get("pictureFolder"),
+            "count": interactive.get("pictureCount", 0),
+        },
+        "publication": {
+            key: publication[key]
+            for key in ("state", "revision", "coverage", "workspace", "refusal")
+            if key in publication
+        },
+        **({"resumedFrom": interactive["resumedFrom"]} if interactive.get("resumedFrom") else {}),
+    }
+    return _packed(answer, report, path)
 
 
-def register_knowledge_tool(
-    server: FastMCP, workspace: Path, *, memory_repository: Path | None, coordination: Path
-) -> None:
-    """``knowledge_read``, declared after the git tools so discovery order is unchanged (rule 2)."""
+def _packed(answer: dict[str, Any], report: dict[str, Any], path: Any) -> dict[str, Any]:
+    """Add the summary, then whole errors, while the answer stays within render's bound."""
 
-    @server.tool()
-    def knowledge_read(
-        view: str,
-        recordId: str = "",
-        sourcePath: str = "",
-        limit: int = 32,
-        continuation: str | None = None,
-    ) -> dict:
-        """Name records of one view at the bound memory tree.
+    bound = EXPLAINER_ANSWER_BOUNDS["render"]
+    errors = list(report.get("allErrors") or [])
+    summary = report.get("summary")
+    # What a `moved` entry costs at most, kept free so naming the moved part never passes the bound.
+    most = len(errors)
+    reserve = answer_tokens(
+        {
+            "moved": [
+                {"part": "summary", "to": path},
+                {"part": "errors", "shown": most, "total": most, "to": path},
+            ]
+        }
+    )
+    answer = {**answer, "errorsTotal": len(errors)}
+    moved: list[dict[str, Any]] = []
+    if summary is not None:
+        if answer_tokens({**answer, "summary": summary}) + reserve <= bound:
+            answer["summary"] = summary
+        else:
+            moved.append({"part": "summary", "to": path})
+    shown: list[str] = []
+    for error in errors:  # whole errors only: one never arrives cut
+        if answer_tokens({**answer, "errors": [*shown, error]}) + reserve > bound:
+            break
+        shown.append(error)
+    while True:  # tokens do not add exactly across joined JSON: the whole answer is what is held
+        packed = {**answer, "errors": shown, "moved": _moved(moved, shown, errors, path)}
+        if answer_tokens(packed) <= bound or not shown:
+            return packed
+        shown = shown[:-1]
 
-        Views: record, source_context, invariant, family, dependent, weakness. `recordId` takes a
-        text ID (`INV-…`, `FAM-…`, `DEC-…`); `sourcePath` names a code path. Rows name ID, kind,
-        state and location, never text. `limit` is at most 200; `continuation` is the answer's own.
-        """
-        access = _explainer_access()
-        query = access.KnowledgeQuery(
-            view=view,
-            record_id=recordId,
-            source_path=sourcePath,
-            limit=limit,
-            continuation=continuation,
-        )
-        knowledge = access.ExplainerKnowledge(workspace, memory_repository, coordination)
-        return answered(lambda: knowledge.read(query))
 
-
-def register_git_tools(server: FastMCP, workspace: Path, *, repositories: dict[str, Path]) -> None:
-    """The six read-only Git subcommands on the code and memory repositories."""
-
-    def git() -> Any:
-        return _explainer_access().ExplainerGit(repositories, workspace)
-
-    @server.tool()
-    def git_log(repository: str, ref: str = "HEAD", limit: int = 20, path: str = "") -> dict:
-        """Commits of the 'code' or 'memory' repository. History informs; it is never evidence."""
-        return answered(lambda: git().log(repository, ref, limit, path))
-
-    @server.tool()
-    def git_show(repository: str, target: str, path: str = "") -> dict:
-        """One commit or tree as text, by its own object name, never today's checkout."""
-        return answered(lambda: git().show(repository, target, path))
-
-    @server.tool()
-    def git_diff(repository: str, base: str, candidate: str, path: str = "") -> dict:
-        """The diff between two named trees or commits in the 'code' or 'memory' repository."""
-        return answered(lambda: git().diff(repository, base, candidate, path))
-
-    @server.tool()
-    def git_ls_tree(repository: str, tree: str, recursive: bool = False, path: str = "") -> dict:
-        """The entries of one Git tree, with sizes."""
-        return answered(lambda: git().ls_tree(repository, tree, recursive, path))
-
-    @server.tool()
-    def git_cat_file(repository: str, target: str, mode: str = "pretty") -> dict:
-        """One object's content ('pretty'), type ('type') or size ('size')."""
-        return answered(lambda: git().cat_file(repository, target, mode))
-
-    @server.tool()
-    def git_rev_parse(repository: str, expression: str = "HEAD") -> dict:
-        """Resolve one object name to its id. A worktree path is never an answer."""
-        return answered(lambda: git().rev_parse(repository, expression))
+def _moved(
+    moved: list[dict[str, Any]], shown: list[str], errors: list[str], path: Any
+) -> list[dict[str, Any]]:
+    if len(shown) == len(errors):
+        return moved
+    return [*moved, {"part": "errors", "shown": len(shown), "total": len(errors), "to": path}]
 
 
 def register_judgment_tools(
@@ -278,66 +176,33 @@ def register_judgment_tools(
     def define_category(
         name: str, scale: list[dict[str, str]], binding: str, meaning: str = ""
     ) -> dict:
-        """Define a judgment category: 2 to 5 named grades, highest first, each with its meaning.
+        """Define a category the review page can sort blocks by: 2 to 5 grades, highest first.
 
-        `binding` is the claim token or digest the answers name ('#7', 'planned@...', or the
-        comparison digest). A name with another scale or meaning is refused `category-exists`; at
-        most 12 live per leaf.
+        Each scale point names its grade and its meaning. `binding` is the label (or digest) in your
+        workspace's binding.json, e.g. '#7'. The answer is the category and its grade names in order,
+        the names your grade calls use. A name with another scale or meaning is refused
+        `category-exists`.
         """
-        return answered(lambda: judgment().define(name, scale, binding, meaning=meaning))
+        answer = answered(lambda: judgment().define(name, scale, binding, meaning=meaning))
+        return bounded("define_category", answer, workspace)
 
     @server.tool()
     def remove_category(name: str, binding: str) -> dict:
-        """Remove one category and, with it, its grades. `binding` is the label it was made at."""
-        return answered(lambda: judgment().remove(name, binding))
+        """Remove one category and, with it, its grades; the answer says how many grades went."""
+        answer = answered(lambda: judgment().remove(name, binding))
+        return bounded("remove_category", answer, workspace)
 
     @server.tool()
     def grade(references: list[str], category: str, grade: str, reason: str, binding: str) -> dict:
-        """Grade review blocks; answer counts and the refused references with their reasons.
+        """Grade review blocks in a category; answer how many landed and which were refused, and why.
 
         `references` name blocks by L89's identity; `reason` is one line. The grade carries the
-        binding and the block's fingerprint, and is refused `binding-moved` when the environment
-        has left that binding. Bounds: 200 references, 160 characters per reason.
+        binding (the label in binding.json) and the block's fingerprint, and is refused
+        `binding-moved` when the environment has left that binding. A long refused list is written
+        to scratch/grades/ and the answer names the file.
         """
-        return answered(lambda: judgment().grade(references, category, grade, reason, binding))
-
-
-def register_report_tool(
-    server: FastMCP,
-    workspace: Path,
-    *,
-    task_root: Path | None,
-    coordination: Path,
-    seat: str | None,
-    sender: Any,
-    now: Any,
-) -> None:
-    """MIK-R189 rule 7's one report per filed tray message."""
-
-    # Same rule as the judgment: the sender's tray paths are construction-time state, so the instance is
-    # built once on the first call and kept rather than rebuilt for each report (the A14 failure).
-    kept: list[Any] = []
-
-    def reports() -> Any:
-        if not kept:
-            kept.append(
-                import_module("agents_remember.canvas.explainer_server").ExplainerReports(
-                    workspace, task_root, coordination, seat, sender, now
-                )
-            )
-        return kept[0]
-
-    @server.tool()
-    def report_to_architect(messageId: str, perspective: str) -> dict:
-        """Report one filed tray message to the master's architect, with your perspective.
-
-        `messageId` is taken from the delivered developer message's `Message file: …_<messageId>.md`
-        line (or its `messageId:` header): its selections and words are copied byte for byte with
-        their SHA-256, and there is no argument for them. `perspective` is at most 4000 characters,
-        marked presenter inference. One report per tray message; the copy goes back to his tray when
-        no master-to-architect record names a seat.
-        """
-        return answered(lambda: reports().report(messageId, perspective))
+        answer = answered(lambda: judgment().grade(references, category, grade, reason, binding))
+        return bounded("grade", answer, workspace)
 
 
 def register_bound_explainer_tools(
@@ -347,57 +212,28 @@ def register_bound_explainer_tools(
     seat: str | None = None,
     inputs: ExplainerInputs | None = None,
 ) -> None:
-    """Register the explainer's tools on the server the normal seat path already built.
+    """Register the explainer's four tools on the server the normal seat path already built.
 
-    MIK-R186 @ v2 rule 3: there is no separate explainer or presenter server. The normal
-    `agents-remember-task` server serves the explainer, and this supplies exactly its surface on the
-    instance the launch already created -- the same implementations, one copy, no parallel entry point.
+    MIK-R186 @ v2 rule 3: there is no separate explainer server. The normal `agents-remember-task`
+    server serves the explainer with AR's general tools, and this adds the four on the instance the
+    launch already created -- the same implementations, one copy, no parallel entry point.
 
-    ``seat`` is the caller identity the launch binding names; a tool only the leaf's explainer may call
-    refuses every other identity. Authority comes from that binding, not from ``AR_EXPLAINER_WORKSPACE``,
-    which survives only as the retirement scanner's cleanup handle.
+    ``seat`` is the caller identity the launch binding names; the grade tools refuse every other
+    identity, because a grade is the seat's own act.
     """
 
     given = inputs or ExplainerInputs()
     workspace = Path(workspace)
-    leaf = workspace.name
-    repositories = {
-        side: path
-        for side, path in (("code", given.code_repository), ("memory", given.memory_repository))
-        if path is not None
-    }
-    coordination = given.coordination_root or coordination_of(workspace)
     now = given.now or now_iso
     seat = seat or os.environ.get(
         import_module("agents_remember.canvas.explainer_state").AGENT_MARKER
     )
-    # MIK-R204 @ v1 rule 1, slice 1: the eight authoring declarations live in their own light owner.
-    register_authoring_tools(server, workspace, task_root=given.task_root, seat=seat, now=now)
-    # MIK-R204 @ v1 rule 1, slice 2: the four read declarations live in the same light owner.
-    register_read_tools(
-        server,
-        workspace,
-        task_root=given.task_root,
-        leaf=leaf,
-    )
-    register_git_tools(server, workspace, repositories=repositories)
-    register_knowledge_tool(
-        server, workspace, memory_repository=given.memory_repository, coordination=coordination
-    )
+    register_render_tool(server, workspace, task_root=given.task_root, seat=seat, now=now)
     register_judgment_tools(
         server,
         workspace,
         task_root=given.task_root,
         seat=seat,
         fingerprints=given.fingerprints,
-        now=now,
-    )
-    register_report_tool(
-        server,
-        workspace,
-        task_root=given.task_root,
-        coordination=coordination,
-        seat=seat,
-        sender=given.sender,
         now=now,
     )

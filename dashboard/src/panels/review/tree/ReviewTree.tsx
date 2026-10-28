@@ -51,6 +51,8 @@ export interface ReviewTreeProps {
   onOpenGroup: (subject: SubjectNode, group: TreeGroupName) => void;
   // The filter text (tree only, W12); the page keeps it so the way back restores it.
   query: string;
+  queryPending?: boolean;
+  queryProblem?: string;
   onQuery: (query: string) => void;
   // The heading's file count: the leaf's changed files (read 1), "…" while read.
   changedFiles?: number | '…' | 'unavailable';
@@ -70,6 +72,8 @@ export interface ReviewTreeProps {
   codeFacts?: { count: number | undefined; comparison?: number };
   // Sort and view changes; by default the stored preferences.
   onView?: (view: TreeView) => void;
+  // The invariants the latest move changed whose detail has not been read again (D576), by key.
+  stale?: ReadonlySet<string>;
   className?: string;
 }
 
@@ -168,12 +172,14 @@ function SubjectItem({
   selection,
   select,
   onOpenGroup,
+  stale,
 }: {
   item: FilteredSubject;
   nested: boolean;
   selection: ReviewSelection | null;
   select: Select;
   onOpenGroup: ReviewTreeProps['onOpenGroup'];
+  stale?: ReadonlySet<string>;
 }) {
   const { node, locations, groups } = item;
   return (
@@ -182,6 +188,7 @@ function SubjectItem({
         node={node}
         nested={nested}
         current={isCurrentSubject(selection, node)}
+        stale={stale?.has(node.row.selectorId)}
         onSelect={() =>
           select(`s:${node.key}`, {
             kind: 'subject',
@@ -216,12 +223,14 @@ function GroupItem({
   selection,
   select,
   onOpenGroup,
+  stale,
 }: {
   shown: FilteredGroup;
   labelUnlisted: boolean;
   selection: ReviewSelection | null;
   select: Select;
   onOpenGroup: ReviewTreeProps['onOpenGroup'];
+  stale?: ReadonlySet<string>;
 }) {
   const family = shown.group.family;
   return (
@@ -250,10 +259,23 @@ function GroupItem({
             selection={selection}
             select={select}
             onOpenGroup={onOpenGroup}
+            stale={stale}
           />
         ))}
       </ul>
     </li>
+  );
+}
+
+// D576: how many invariants the latest move changed and are not read again yet -- the marks' own
+// set, so the count and the marks cannot disagree. Spoken and drawn only while there is one.
+function StaleLine({ stale }: { stale?: ReadonlySet<string> }) {
+  const count = stale?.size ?? 0;
+  if (!count) return null;
+  return (
+    <p className={styles.status} role="status" aria-live="polite" data-testid="review-stale-invariants" data-count={count}>
+      {`${count} ${count === 1 ? 'invariant' : 'invariants'} changed by the latest move, marked until read again.`}
+    </p>
   );
 }
 
@@ -284,13 +306,20 @@ function CodeFactsLine({ count, comparison }: { count: number | undefined; compa
   );
 }
 
+function filteredRows(props: ReviewTreeProps) {
+  return props.queryPending || props.queryProblem ? { query: props.query, groups: [], empty: false } : filterTree(props.model, props.query);
+}
+function treeStatus(props: ReviewTreeProps): string {
+  const { model } = props;
+  return [props.queryProblem, props.queryPending ? 'Reading all locations for this filter…' : undefined,
+    sortFallback(model.sorts, model.sort, model.requested), ...(props.status ?? [])].filter(Boolean).join(' ');
+}
+
 export function ReviewTree(props: ReviewTreeProps) {
   const { model, selection, onSelect } = props;
   const root = useRef<HTMLElement>(null);
-  const shown = filterTree(model, props.query);
-  const status = [sortFallback(model.sorts, model.sort, model.requested), ...(props.status ?? [])]
-    .filter(Boolean)
-    .join(' ');
+  const shown = filteredRows(props);
+  const status = treeStatus(props);
   const clicked = useRevealSelection(root, selectionRowKey(model, selection));
   const families = shown.groups.some((group) => group.group.family !== undefined);
   const select: Select = (key, next) => {
@@ -313,6 +342,7 @@ export function ReviewTree(props: ReviewTreeProps) {
         </p>
       ) : null}
       <CodeFactsLine count={props.codeFacts?.count} comparison={props.codeFacts?.comparison} />
+      <StaleLine stale={props.stale} />
       <div className={styles.scroller} data-review-tree-panel="" data-testid="review-tree-scroll">
         <CodeFactsScrollAnchor root={root} count={props.codeFacts?.count} comparison={props.codeFacts?.comparison}>
           {model.noChange ? <p className={styles.empty}>This leaf changed no recorded meaning.</p> : null}
@@ -330,10 +360,11 @@ export function ReviewTree(props: ReviewTreeProps) {
                 selection={selection}
                 select={select}
                 onOpenGroup={props.onOpenGroup}
+                stale={props.stale}
               />
             ))}
           </ul>
-          {shown.empty ? <p className={styles.empty}>Nothing matches “{props.query}”.</p> : null}
+          {shown.empty && !props.queryPending ? <p className={styles.empty}>Nothing matches “{props.query}”.</p> : null}
           <TreePinned
             lane={props.lane}
             query={props.query}

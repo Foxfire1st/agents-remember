@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { parseReaderHash } from '../data/knowledgeReader';
 
@@ -23,12 +23,9 @@ export function reviewHash(target: ChangeSetTarget): string {
   return `#review?${params}`;
 }
 
-// The review page's own part of its hash (MIK-R89 v2 rules 9 and 10): the selection, as rule 13's
-// identity (`sel=`, panels/review/blockIdentity.ts `formatSelection`), and the comparison on screen
-// when it is not the latest (`comparison=<n>`). The page writes it with `history.replaceState`: a
-// selection adds no history entry and fires no `hashchange`, so the reason of the comment in
-// `useReviewHash` below holds, and a reload restores what was selected. The target's own keys
-// (repo, master, leaf, history) are never touched here.
+// Selection and comparison are history entries within the mounted review target. Restoring an
+// entry may normalize its state with replace; a reader's new choice uses push, without hashchange.
+// The target's own keys (repo, master, leaf, history) are never touched here.
 export interface ReviewHashState {
   sel: string | null;
   comparison: number | null;
@@ -42,7 +39,7 @@ export function readReviewHashState(hash: string = window.location.hash): Review
   return { sel: params.get('sel') || null, comparison: number };
 }
 
-export function writeReviewHashState(state: ReviewHashState): void {
+export function writeReviewHashState(state: ReviewHashState, mode: 'push' | 'replace' = 'push'): void {
   const hash = window.location.hash;
   if (!hash.startsWith('#review?')) return;
   const params = new URLSearchParams(hash.slice('#review?'.length));
@@ -52,7 +49,7 @@ export function writeReviewHashState(state: ReviewHashState): void {
   if (state.sel) params.set('sel', state.sel);
   const next = `#review?${params}`;
   if (next === hash) return;
-  window.history.replaceState(window.history.state, '', next);
+  window.history[mode === 'push' ? 'pushState' : 'replaceState'](window.history.state, '', next);
 }
 
 export function useReviewHash(
@@ -64,7 +61,7 @@ export function useReviewHash(
     const navigate = () => {
       const next = parseReviewHash(window.location.hash);
       setTarget((current) => {
-        // Subject selection belongs to the mounted reviewer, never to browser history.
+        // Same-target history is restored by the mounted review page.
         if (next) return current?.review && reviewHash(current) === reviewHash(next) ? current : next;
         return current?.review ? null : current;
       });
@@ -74,9 +71,14 @@ export function useReviewHash(
       }
     };
     window.addEventListener('hashchange', navigate);
-    return () => window.removeEventListener('hashchange', navigate);
+    window.addEventListener('popstate', navigate);
+    return () => {
+      window.removeEventListener('hashchange', navigate);
+      window.removeEventListener('popstate', navigate);
+    };
   }, [setView, setNotesOpen]);
   const setChangeSet = useCallback((next: ChangeSetTarget | null) => {
+    parked.current = null;
     if (next?.review) {
       window.history.pushState(null, '', reviewHash(next));
     } else if (window.location.hash.startsWith('#review?')) {
@@ -84,5 +86,19 @@ export function useReviewHash(
     }
     setTarget(next);
   }, []);
-  return [target, setChangeSet] as const;
+  // A bottom tab left with the review open keeps the review mounted (D575): only its address leaves
+  // the URL, and returning puts that exact address back, selection and comparison included. The URL
+  // wins: an address the URL names by then is kept, and the parked one is dropped.
+  const parked = useRef<string | null>(null);
+  const park = useCallback(() => {
+    if (!window.location.hash.startsWith('#review?')) return;
+    parked.current = window.location.hash;
+    window.history.pushState(null, '', window.location.pathname + window.location.search);
+  }, []);
+  const unpark = useCallback(() => {
+    const hash = parked.current;
+    parked.current = null;
+    if (hash && !window.location.hash) window.history.pushState(null, '', hash);
+  }, []);
+  return [target, setChangeSet, { park, unpark }] as const;
 }

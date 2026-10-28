@@ -47,7 +47,6 @@ from .registration import TOOL_REGISTRARS
 from .registration.explainer_surface import (
     EXPLAINER_SURFACE,
     read_explainer_binding,
-    refuse_unexposed,
     register_explainer_surface,
 )
 
@@ -66,12 +65,9 @@ class AgentsRememberMCP(FastMCP):
     # instance (a test), where the log resolves without it.
     _agents_remember_config: Any | None = None
 
-    # MIK-R186 @ v2 rule 3: when this process was launched as an explainer seat, the only tools it
-    # advertises *and* dispatches are the explainer's. None on an ordinary server.
-    _bound_surface: tuple[str, ...] | None = None
-
-    # MIK-R186 @ v2 rule 3: the seat this process was launched for. Set with `_bound_surface`; every
-    # dispatched call is checked against it, so a forged or replaced seat answers by name.
+    # MIK-R186 @ v2 rule 3: the seat this process was launched for, when it was launched as an
+    # explainer seat; each of the explainer's own tools is checked against it, so a forged or
+    # replaced seat answers by name. None on an ordinary server.
     _explainer_binding: Any | None = None
 
     _synchronous_write_lock: asyncio.Lock | None = None
@@ -98,12 +94,6 @@ class AgentsRememberMCP(FastMCP):
         # tool-event writer stays at startup because it is the boot-time caller identity of rule 4.
         config = getattr(self, "_agents_remember_config", None)
         server_startup.start_after_discovery(config)
-        # MIK-R186 @ v2 rule 3: a bound explainer server answers its own surface and nothing else. The
-        # list is enforced here as well as at registration, so naming a tool directly is refused by name
-        # rather than merely absent from discovery.
-        bound = getattr(self, "_bound_surface", None)
-        if bound is not None and name not in bound:
-            raise refuse_unexposed(name)
         # MIK-R108 rule 3: every call is written to the daily log with its
         # arguments, outcome, duration and answer size. The context carries
         # the exact MCP arguments, the call start, and this server's config
@@ -113,10 +103,10 @@ class AgentsRememberMCP(FastMCP):
         # logged like any other raised call.
         with tool_call_context(name, arguments, config=config):
             launched = getattr(self, "_explainer_binding", None)
-            if launched is not None:
-                # MIK-R186 @ v2 rule 3 sentences 3-4: every tool of this server checks that the caller
-                # is the seat the server was launched for, and answers a forged or replaced seat as
-                # data. One check covers all 22 tools because it sits ahead of every one of them.
+            if launched is not None and name in EXPLAINER_SURFACE:
+                # MIK-R186 @ v2 rule 3 sentences 3-4: each of the explainer's own tools checks that the
+                # caller is the seat the server was launched for, and answers a forged or replaced seat
+                # as data. AR's general tools answer the seat as they answer any agent (MIK-R211 v5).
                 not_this_seat = _launched_seat_refusal(launched)
                 if not_this_seat is not None:
                     return not_this_seat
@@ -294,17 +284,15 @@ def create_server(config: McpRuntimeConfig) -> Any:
     # and transcript roots, toolLog keeping) to the answer boundary per call.
     server._agents_remember_config = config
     # The tool surface itself lives in `.registration`, one module per family; this is the only place
-    # that decides which families a server advertises. MIK-R186 @ v2 rule 3: a launch that bound this
-    # process as an explainer seat gets one surface -- the explainer's -- and an invalid binding refuses
-    # service instead of falling through to the ordinary roster.
+    # that decides which families a server advertises. MIK-R211 v5 rule 3: a launch that bound this
+    # process as an explainer seat gets AR's general tools, as a task agent has them, and the
+    # explainer's own four; an invalid binding refuses service instead of serving an unbound seat.
     binding = read_explainer_binding(config)
-    if binding is None:
-        for register_tools in TOOL_REGISTRARS:
-            register_tools(server, config)
-    else:
-        server._bound_surface = EXPLAINER_SURFACE
+    for register_tools in TOOL_REGISTRARS:
+        register_tools(server, config)
+    if binding is not None:
         # MIK-R186 @ v2 rule 3: the binding names the seat this process serves, and the dispatch checks
-        # every call against it.
+        # each explainer tool's call against it.
         server._explainer_binding = binding
         register_explainer_surface(server, config, binding)
     # MIK-R109 rule 7: the one list of read-only marks rides on the advertised

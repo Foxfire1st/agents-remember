@@ -184,7 +184,11 @@ class TestRoleRevivalRegistration(_StatusTestCase):
         )
         runtime = cast(
             _ServingRuntime,
-            SimpleNamespace(config=self.config, background_ledger=BackgroundLedger()),
+            SimpleNamespace(
+                launcher_catalog_prepare=None,
+                config=self.config,
+                background_ledger=BackgroundLedger(),
+            ),
         )
         with (
             patch.object(paseo_warmup, "read_live_agents", return_value=live),

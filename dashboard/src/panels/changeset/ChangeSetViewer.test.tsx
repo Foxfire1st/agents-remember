@@ -30,6 +30,9 @@ const TASK_CHANGESET = {
 };
 const MASTER_CHANGESET = {
   master: 'browser-dashboard',
+  generation: { codeBase: 'b0', codeTip: 't2', memoryBase: '', memoryTip: '', digest: 'd'.repeat(64) },
+  currentness: 'current',
+  scope: 'integrated',
   leaves: [
     {
       leafId: '260628-l1',
@@ -64,7 +67,7 @@ function stubChangeset() {
       const body = url.includes('/api/changeset/file-diff')
         ? FILE_DIFF
         : url.includes('/api/changeset/master')
-          ? MASTER_CHANGESET
+          ? { ...MASTER_CHANGESET, leaves: url.includes('includeLeaves=false') ? [] : MASTER_CHANGESET.leaves }
           : url.includes('/api/changeset/task')
             ? TASK_CHANGESET
             : {};
@@ -270,7 +273,7 @@ describe('ChangeSetViewer screen', () => {
 
   it('opens a per-file NET diff from a clickable row in master mode', async () => {
     stubChangeset();
-    const { findByTestId, getByText, container } = render(
+    const { findByTestId, findByText, container } = render(
       <ChangeSetViewer repo="agents-remember" master="browser-dashboard" onBack={vi.fn()} />,
     );
     await findByTestId('changeset-counters');
@@ -283,8 +286,9 @@ describe('ChangeSetViewer screen', () => {
     ).toBe(true);
     // master mode now lists the net changed files with the normal empty-state backdrop prompt
     // (not the old accumulated-summary message), and the rows are clickable.
+    const file = await findByText('a.ts');
     expect(container.textContent).toContain('Select a changed file');
-    fireEvent.click(getByText('a.ts'));
+    fireEvent.click(file);
     expect((await findByTestId('changeset-pane')).textContent).toBe('a.ts');
   });
 
@@ -306,13 +310,13 @@ describe('ChangeSetViewer screen', () => {
       return new Response(JSON.stringify(body), { status: 200 });
     });
     vi.stubGlobal('fetch', fetchFn);
-    const { findByTestId, getByText, getByTestId } = render(
+    const { findByTestId, findByText, getByTestId } = render(
       <ChangeSetViewer repo="agents-remember" master="browser-dashboard" onBack={vi.fn()} />,
     );
     await findByTestId('changeset-counters');
     expect(getByTestId('changeset-generation').textContent).toContain('gen dddddddd');
     expect(getByTestId('changeset-generation').textContent).toContain('current');
-    fireEvent.click(getByText('a.ts'));
+    fireEvent.click(await findByText('a.ts'));
     expect((await findByTestId('changeset-pane')).textContent).toBe('a.ts');
     const diffUrls = (fetchFn.mock.calls as unknown as string[][])
       .map((c) => String(c[0]))
@@ -377,7 +381,7 @@ describe('ChangeSetViewer screen', () => {
 
   it("lists the master net's leaves, each with its own code and memory counters (R33.2)", async () => {
     stubMaster(MASTER_WITH_LEAVES);
-    const { findAllByTestId, findByTestId, getByText } = render(
+    const { findAllByTestId, findByTestId, findByText } = render(
       <ChangeSetViewer
         repo="agents-remember"
         master="260921_complete-code-and-intent-review"
@@ -387,7 +391,7 @@ describe('ChangeSetViewer screen', () => {
     await findByTestId('changeset-counters');
 
     // The net total is printed beside the breakdown it is the sum of.
-    expect(getByText('by leaf (2)')).toBeTruthy();
+    expect(await findByText('by leaf (2)')).toBeTruthy();
     const rows = await findAllByTestId('changeset-leaf-row');
     expect(rows).toHaveLength(2);
     // Each row carries the leaf's OWN half-by-half measurement: files, insertions and deletions for
@@ -470,7 +474,7 @@ describe('ChangeSetViewer screen', () => {
 
   it('names a measured-empty change-set instead of leaving the pane to the pick-a-file backdrop (R33.3)', async () => {
     stubMaster({
-      master: '260921_complete-code-and-intent-review',
+      master: 'm',
       leaves: [],
       code: [],
       memory: [],
@@ -512,11 +516,13 @@ describe('DetailPanel change-set entry (L4)', () => {
       <DetailPanel selectedId={taskEntrySelectionKey(master.key)} onOpenChangeSet={onOpenChangeSet} />,
     );
     const button = await findByTestId('open-changeset');
+    await vi.waitFor(() => expect(button.textContent).toContain('+3 −1'));
     fireEvent.click(button);
     // The master entry opens the same series target without a session lookup.
     expect(onOpenChangeSet).toHaveBeenCalledWith({
       repo: 'agents-remember',
       master: 'browser-dashboard',
+      generation: MASTER_CHANGESET.generation,
     });
   });
 });

@@ -520,6 +520,39 @@ def test_one_function_computes_each_side_of_a_comparison(world: World) -> None:
     }
 
 
+def test_family_currentness_checks_all_members_without_reading_unrelated_knowledge(
+    world: World,
+) -> None:
+    tree = world.change({REVIEW: _body_edit()})
+    with (
+        world.index() as index,
+        mock.patch.object(index, "invariant", side_effect=AssertionError("full invariant read")),
+        mock.patch.object(index, "family", side_effect=AssertionError("full family read")),
+    ):
+        result = invariant_currentness(
+            tree,
+            index,
+            (identity for identity in ("INV-PPPPPP", "INV-NNNNNN", "FAM-F00001", "missing")),
+            (identity for identity in ("FAM-F00001", "FAM-F00001", "INV-AAAAAA", "missing")),
+        )
+        family_only = invariant_currentness(tree, index, (), ("FAM-F00001",))
+    assert {one.id: one.state for one in result.invariants} == {
+        "INV-AAAAAA": "stale",
+        "INV-BBBBBB": "current",
+        "INV-CCCCCC": "current",
+        "INV-DDDDDD": "current",
+        "INV-NNNNNN": "unrealized",
+        "INV-PPPPPP": "unrealized",
+    }
+    assert len(result.families) == 1
+    assert result.families[0].members == tuple(FAMILIES["FAM-F00001"])
+    assert result.families[0].stale_members == ("INV-AAAAAA",)
+    assert family_only.families == result.families
+    assert family_only.invariants == tuple(
+        one for one in result.invariants if one.id in FAMILIES["FAM-F00001"]
+    )
+
+
 # --------------------------------------------------------------------------------------------------
 # The observation cache
 # --------------------------------------------------------------------------------------------------

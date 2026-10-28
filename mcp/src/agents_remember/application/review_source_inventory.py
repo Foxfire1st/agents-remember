@@ -39,6 +39,7 @@ from pathlib import Path
 
 from agents_remember.application.review_relationship_movement import source_locations
 from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.read_cancellation import raise_if_read_cancelled
 from agents_remember.memory.knowledge.diff_display import (
     TREE_DIFF_ARGS,
     TreeChange,
@@ -310,7 +311,9 @@ def _measure_tree_difference(before: TreeSide, after: TreeSide) -> TreePaths:
     records, classified = _diff_records(raw.stdout)
     if records is None:
         return TreePaths(available=False, detail=_UNPARSED_DETAIL)
-    for record in records:
+    for index, record in enumerate(records):
+        if not index % _CHECK_EVERY:
+            raise_if_read_cancelled()  # a whole tree's difference: a read that left stops here
         for tree, mode, object_id in (
             (before.tree_id, record.old_mode, record.old_object),
             (after.tree_id, record.new_mode, record.new_object),
@@ -318,9 +321,12 @@ def _measure_tree_difference(before: TreeSide, after: TreeSide) -> TreePaths:
             kind = "commit" if mode == _SUBMODULE_MODE else "tree" if mode == "040000" else "blob"
             entry = None if mode == "000000" else (mode, kind, object_id)
             remember_tree_entry(root, tree, record.path, entry)
-    changes = _changes(records, classified)
-    carried = tuple(change for change in changes if is_text_path(change.path))
-    uncarried = tuple(change for change in changes if not is_text_path(change.path))
+    carried_changes, uncarried_changes = [], []
+    for index, change in enumerate(_changes(records, classified)):
+        if not index % _CHECK_EVERY:
+            raise_if_read_cancelled()
+        (carried_changes if is_text_path(change.path) else uncarried_changes).append(change)
+    carried, uncarried = tuple(carried_changes), tuple(uncarried_changes)
     return TreePaths(
         available=True,
         paths=tuple(change.path for change in carried),
@@ -329,6 +335,10 @@ def _measure_tree_difference(before: TreeSide, after: TreeSide) -> TreePaths:
         partial=classified is None or bool(uncarried),
         detail=_observation_detail(classified, uncarried),
     )
+
+
+#: How many measured paths are handled between two looks at the read's cancellation (D585).
+_CHECK_EVERY = 256
 
 
 def is_text_path(path: str) -> bool:
@@ -595,7 +605,11 @@ def _entries(observed: TreePaths) -> tuple[ReviewChangedFile, ...]:
     """
 
     if observed.entries:
-        return tuple(_changed_file(change) for change in observed.entries)
+        files = []
+        for change in observed.entries:
+            raise_if_read_cancelled()  # one model per changed file, thousands of them
+            files.append(_changed_file(change))
+        return tuple(files)
     return tuple(
         ReviewChangedFile(
             path=path,

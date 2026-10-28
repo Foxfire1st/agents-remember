@@ -32,9 +32,9 @@ def register_explainer_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     ) -> dict[str, Any]:
         """Update or retire one leaf's explainer, or claim a master as its architect. `action` is
         `update`, `retire` or `claim` (any other value is refused `unknown-action` before lookup);
-        `leaf_id` names the leaf for the two leaf actions, and a
-        `retire` carries its `receipt_id`. `claim` is open to any hosted architect seat, writes the
-        master-to-architect record and moves that master's held reports to the claiming seat.
+        `leaf_id` names the leaf of a leaf action. `retire` carries its `receipt_id` and
+        removes the workspace whole, chat archived, in any seat state. `claim` is open to any
+        hosted architect seat and writes the master-to-architect record.
         `update` and `retire` are accepted only from the seat that record names; any other caller
         is refused `not-this-masters-architect` and claims first.
         Reference: docs/reference/mcp-tools.md."""

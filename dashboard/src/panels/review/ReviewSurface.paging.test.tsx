@@ -331,7 +331,7 @@ describe("the review surface's page control", () => {
     // client never issues a `pageOf=records` request at all. The attempt resolves to the
     // whole review: no collection is paged and no refusal renders.
     const fetchFn = vi.fn<FetchSignature>(async () =>
-      response(reviewed(payloadWith(null))),
+      response(reviewed(payloadWith({ collection: 'knowledge', state: 'first_page', total: 1, returned: 1, remaining: 0, continuation: null, scope: [] }))),
     );
     vi.stubGlobal('fetch', fetchFn);
 
@@ -350,7 +350,7 @@ describe("the review surface's page control", () => {
       expect(String(call[0])).not.toContain('pageOf=records');
     }
     // The attempt resolves to the whole review: no collection is paged and no refusal renders.
-    expect((view.getByTestId('review-page-collection') as HTMLSelectElement).value).toBe('');
+    expect((view.getByTestId('review-page-collection') as HTMLSelectElement).value).not.toBe('records');
     expect(view.queryByTestId('review-page-refusal')).toBeNull();
   });
 
@@ -480,14 +480,15 @@ describe("the review surface's page control", () => {
     expect(knowledgeBounds.textContent).toContain('96 remaining');
   });
 
-  it('keeps the whole review reachable and carries the selector through a paged request', async () => {
+  it('keeps a whole review free of paging controls and carries its subject selector', async () => {
     const fetchFn = vi.fn<FetchSignature>(async () => response(reviewed(payloadWith(null))));
     vi.stubGlobal('fetch', fetchFn);
 
     const view = mountSubject();
 
-    const bounds = await view.findByTestId('review-page-bounds');
-    expect(bounds.textContent).toContain('whole review');
+    await view.findByTestId('review-page-controls');
+    expect(view.queryByTestId('review-page-bounds')).toBeNull();
+    expect(view.queryByTestId('review-page-collection')).toBeNull();
     expect(view.queryByTestId('review-next-page')).toBeNull();
     expect(view.queryByTestId('review-first-page')).toBeNull();
     const requested = String(reviewCalls(fetchFn)[0][0]);

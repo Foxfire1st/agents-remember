@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
 
@@ -49,7 +50,7 @@ from agents_remember.serving.background_accounting import (
     measured,
     offload,
 )
-from agents_remember.serving.change_watcher import move_notice_watch
+from agents_remember.serving.explainer_move_watch import move_notice_watch
 from agents_remember.serving.heap_diag import (
     heap_diag_loop,
     malloc_trim_enabled,
@@ -374,13 +375,133 @@ async def _warmup_watch_loop(runtime: _ServingRuntime) -> None:
         await driver.aclose()
 
 
+#: The preview switch: set it and this serving process delivers nothing the live dashboard owns.
+#:
+#: A preview process is started from a worktree against the developer's real data, so it must not be
+#: a second deliverer of held role messages, a second archive recoverer, a second warmup that
+#: resumes agents, a second workspace-river compactor or a second metrics writer. What it MAY do is
+#: serve, build and keep the projection: those are the app itself.
+_PREVIEW_BACKGROUND_ENV = "AR_SERVING_PREVIEW_NO_BACKGROUND"
+
+_PREVIEW_SUPPRESSED_LOOPS = (
+    "held-delivery",
+    "leaf-archive-recovery",
+    "warmup-watch",
+    "workspace-river-compaction",
+    "metrics",
+)
+"""The loops only the live dashboard may own, in the order the startup notice names them."""
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _preview_suppresses(environ: Mapping[str, str] | None = None) -> frozenset[str]:
+    """The live-only loops this process must skip, empty unless the preview switch is truthy.
+
+    Read from ``os.environ`` at lifespan start rather than at import, so a reloaded process (or a
+    test that sets the variable) decides for itself. Absent or false leaves the default path
+    untouched: an installed host starts every loop exactly as before.
+    """
+
+    env = environ if environ is not None else os.environ
+    if env.get(_PREVIEW_BACKGROUND_ENV, "").strip().lower() not in _TRUTHY:
+        return frozenset()
+    return frozenset(_PREVIEW_SUPPRESSED_LOOPS)
+
+
+def _live_background_task[**Args](
+    name: str,
+    suppressed: frozenset[str],
+    function: Callable[Args, Coroutine[Any, Any, None]],
+    /,
+    *args: Args.args,
+    **kwargs: Args.kwargs,
+) -> asyncio.Task[None] | None:
+    """Start one live-only loop, or return ``None`` when the preview switch suppresses it."""
+
+    if name in suppressed:
+        return None
+    return asyncio.create_task(function(*args, **kwargs))
+
+
+async def _prepare_launcher_catalog(runtime: _ServingRuntime) -> None:
+    """One read-only startup unit; normal launches keep their existing catalog owner."""
+    prepare = runtime.launcher_catalog_prepare
+    if prepare is None:
+        return
+    try:
+        await offload(OWNER_STARTUP, runtime.background_ledger, prepare)
+    except Exception:
+        logger.exception("launcher catalog preparation failed")
+
+
 def _serving_lifespan(
     runtime: _ServingRuntime, metrics_store: ProviderMetricsStore
 ) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
-    """The app lifespan: prime the projection, run the background loops, stop them cleanly."""
+    """Prepare the launcher's catalog while the existing serving lifetime starts."""
+    serving = _running_lifespan(runtime, metrics_store)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # This is the preview's own read-only preparation, not the live host's agent
+        # warmup. It starts before projection priming and shares the catalog's lock.
+        preparation = (
+            None
+            if runtime.launcher_catalog_prepare is None
+            else asyncio.create_task(_prepare_launcher_catalog(runtime))
+        )
+        runtime.stream_shutdown.install()
+        try:
+            async with serving(app):
+                yield
+        finally:
+            runtime.stream_shutdown.uninstall()
+            if preparation is not None:
+                preparation.cancel()
+                # offload drains its worker even if priming failed or shutdown cancels
+                # repeatedly. No catalog discovery can outlive this serving lifetime.
+                with contextlib.suppress(asyncio.CancelledError):
+                    await preparation
+
+    return lifespan
+
+
+async def _project_until_shutdown(runtime: _ServingRuntime) -> None:
+    """One producer owns the first projection and every later tick."""
+    await runtime.projector.prime()
+    await runtime.projector.run()
+
+
+async def _prepare_master_inputs(runtime: _ServingRuntime) -> None:
+    """Offer missing exact pairs after serving starts; requests join the same jobs."""
+    assert runtime.master_preparation is not None
+    try:
+        # Startup selections share the projection's four-thread pool. Let its first
+        # publication through before offering a whole catalogue of optional counters.
+        # Explicit requests still prepare their own exact generation immediately.
+        await runtime.projector.wait_ready()
+        await runtime.master_preparation.prepare_inputs()
+    except Exception:
+        logger.exception("startup master preparation discovery failed")
+
+
+def _running_lifespan(
+    runtime: _ServingRuntime, metrics_store: ProviderMetricsStore
+) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
+    """The app lifespan: serve while shared inputs prepare, then stop their owners cleanly."""
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # A preview process serves and builds, and leaves the live dashboard's own background
+        # ownership alone. Read once here so every loop below decides from the same value.
+        suppressed = _preview_suppresses()
+        if suppressed:
+            logger.warning(
+                "preview background switch %s=%s: skipped %s",
+                _PREVIEW_BACKGROUND_ENV,
+                os.environ.get(_PREVIEW_BACKGROUND_ENV, "").strip(),
+                ", ".join(name for name in _PREVIEW_SUPPRESSED_LOOPS if name in suppressed),
+            )
         # Compact once before accepting clients, then keep compacting on a slow live
         # cadence. Workspace cursors are virtual (base offset + physical offset), and append/compact/read
         # share a cross-process lock, so this is cursor-safe while MCP and serving processes both write.
@@ -391,15 +512,37 @@ def _serving_lifespan(
             runtime.observer_root,
             now=runtime.clock(),
         )
-        await runtime.projector.prime()
-        projection_task = asyncio.create_task(runtime.projector.run())
-        metrics_task = asyncio.create_task(
-            _metrics_loop(runtime.config, metrics_store, runtime.background_ledger)
+        projection_task = asyncio.create_task(_project_until_shutdown(runtime))
+        master_preparation_task = (
+            None
+            if runtime.master_preparation is None
+            else asyncio.create_task(_prepare_master_inputs(runtime))
         )
-        archive_recovery_task = asyncio.create_task(_leaf_archive_recovery_loop(runtime))
-        held_delivery_task = asyncio.create_task(_held_delivery_loop(runtime))
-        river_compaction_task = asyncio.create_task(_workspace_river_compaction_loop(runtime))
-        warmup_watch_task = asyncio.create_task(_warmup_watch_loop(runtime))
+        # The provider safety sampler. Suppression is preview-only: a preview shares its coordination
+        # root with the installed host, which runs this loop and writes the metrics samples the
+        # preview reads, so the preview's fail-safe is not blind while the host runs. What must hold
+        # is the *default* path: with the switch absent, `_preview_suppresses()` is empty and every
+        # loop below starts.
+        metrics_task = _live_background_task(
+            "metrics",
+            suppressed,
+            _metrics_loop,
+            runtime.config,
+            metrics_store,
+            runtime.background_ledger,
+        )
+        archive_recovery_task = _live_background_task(
+            "leaf-archive-recovery", suppressed, _leaf_archive_recovery_loop, runtime
+        )
+        held_delivery_task = _live_background_task(
+            "held-delivery", suppressed, _held_delivery_loop, runtime
+        )
+        river_compaction_task = _live_background_task(
+            "workspace-river-compaction", suppressed, _workspace_river_compaction_loop, runtime
+        )
+        warmup_watch_task = _live_background_task(
+            "warmup-watch", suppressed, _warmup_watch_loop, runtime
+        )
         move_watch_task = (
             None
             if runtime.explainer_application is None
@@ -417,19 +560,30 @@ def _serving_lifespan(
         # Opt-in RSS bound (glibc arena reclaim), independent of the diagnostic above.
         if malloc_trim_enabled():
             optional.append(asyncio.create_task(_malloc_trim_loop(runtime.background_ledger)))
-        background = [
-            archive_recovery_task,
-            river_compaction_task,
-            held_delivery_task,
-            warmup_watch_task,
-            *([] if move_watch_task is None else [move_watch_task]),
-            metrics_task,
-            projection_task,
-            *optional,
+        background: list[asyncio.Task[None]] = [
+            task
+            for task in (
+                archive_recovery_task,
+                river_compaction_task,
+                held_delivery_task,
+                warmup_watch_task,
+                move_watch_task,
+                metrics_task,
+            )
+            if task is not None
         ]
+        background.append(projection_task)
+        background.extend(optional)
         try:
             yield
         finally:
+            runtime.projector.close_readiness()
+            if master_preparation_task is not None:
+                master_preparation_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await master_preparation_task
+            if runtime.master_preparation is not None:
+                await runtime.master_preparation.aclose()
             if runtime.review_trees_shutdown is not None:
                 # Shutdown work is startup-owned teardown: attributed and drained, so a
                 # cancelled shutdown still waits for the worker before returning (F01).

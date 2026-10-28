@@ -1,5 +1,6 @@
 import { abortedRead, withAbort } from './abortableRead';
 import { BoundedCache } from './boundedCache';
+import { openingFetch } from './reviewOpen';
 
 interface Kept {
   value: unknown;
@@ -88,7 +89,7 @@ export class ConditionalReads {
   ): Promise<T> {
     const kept = this.values.get(url);
     try {
-      const response = await fetch(url, {
+      const response = await openingFetch(url, {
         signal,
         ...(kept?.etag ? { headers: { 'If-None-Match': kept.etag } } : {}),
       });

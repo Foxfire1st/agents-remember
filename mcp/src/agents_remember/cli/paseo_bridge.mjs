@@ -1649,9 +1649,20 @@ function logToStderr(fields, message) {
 
 // A failure a command raised with `failure` keeps its code. Anything else the client threw is the
 // runtime refusing the call, unless the connection is gone: then the daemon is unreachable.
+// The client's errors carry a name, and sometimes a code, on top of a bare message ('Transport'),
+// and a bare message does not let a reader tell a refused call from a daemon that is gone. The words
+// the runtime itself used stay first; what kind of error it was follows in parentheses.
+function errorKind(error) {
+  const parts = [error?.name, error?.code, error?.cause?.code].filter(
+    (part) => typeof part === 'string' && part.length > 0 && part !== 'Error'
+  )
+  return parts.length > 0 ? ` (${[...new Set(parts)].join(' ')})` : ''
+}
+
 function describe(error, connection) {
   if (error?.bridgeFailure === true) return { code: error.code, message: text(error.message) }
-  const message = text(error?.message ?? error) || 'The Paseo runtime refused the call.'
+  const stated = text(error?.message ?? error) || 'The Paseo runtime refused the call.'
+  const message = `${stated}${errorKind(error)}`
   if (connection && connection.daemon.getConnectionState().status !== 'connected') {
     return {
       code: 'paseo_daemon_unreachable',

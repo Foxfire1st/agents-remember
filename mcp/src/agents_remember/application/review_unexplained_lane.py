@@ -106,6 +106,7 @@ def lane_summary(trees: ReviewTrees) -> ReviewLaneSummary:
                 return ReviewLaneSummary(
                     state="partial", detail=observed.detail, unmeasured=_unmeasured(observed)
                 )
+            lane.prepare(observed.entries, hunks=False)
             buckets: Counter[LaneBucket] = Counter(
                 lane.bucket(path)[0] for path in sorted(set(observed.paths))
             )
@@ -144,6 +145,7 @@ def unexplained_lane(trees: ReviewTrees) -> ReviewUnexplainedLane:
             observed = lane.observe()
             if not observed.available:
                 return ReviewUnexplainedLane(state="unavailable", detail=observed.detail)
+            lane.prepare(observed.entries)
             results = [lane.classify(change) for change in observed.entries]
     except (LaneReadError, apsw.Error) as error:
         return ReviewUnexplainedLane(state="unavailable", detail=_UNREADABLE.format(error=error))

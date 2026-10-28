@@ -1,88 +1,195 @@
-"""The explainer's seat on the host: its instructions, its tool policy and its confinement.
+"""The explainer's seat on the host: its instructions and its tool policy.
 
-MIK-R186 rule 5 creates the seat with the capsule as its instructions and with no first prompt;
-rule 3's tool policy must preapprove exactly the tools the seat's own server declares, or a call the
-server admits is refused at the host; and MIK-R192 rule 8 refuses a confined step while the host's
-provider map gives Claude extra arguments, read in the file and in the running daemon.
-"""
+MIK-R186 rule 5 creates the seat with the capsule as its instructions and with no first prompt.
+MIK-R211 v5 rule 3 makes the seat a normal workspace: its tool policy is a task agent's, with the
+explainer's own four tools granted beside the identity read, and nothing about the host's provider
+map refuses it (MIK-R192 rule 8's confinement is gone)."""
 
 from __future__ import annotations
 
-import asyncio
 import json
-from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
-from agents_remember.canvas import explainer_binding, explainer_server
+from agents_remember.canvas import explainer_binding
 from agents_remember.canvas.explainer_binding import EXPLAINER_SURFACE
 from agents_remember.canvas.explainer_capsule import capability_text
-from agents_remember.canvas.explainer_inputs import ExplainerInputs
-from agents_remember.canvas.explainer_state import (
-    ExplainerBinding,
-    ExplainerRefused,
-    agent_id,
-    write_binding,
-)
-from agents_remember.cli import developer_message_files as developer_messages
+from agents_remember.canvas.explainer_state import ExplainerRefused
 from agents_remember.cli import paseo_explainer_host as host_module
-from agents_remember.cli import provider_limit_hold as limit_module
-from agents_remember.cli.paseo_bridge import SEND_OUTCOME_UNKNOWN, PaseoBridgeFailure
+from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import LaunchSelectionRefused
-from agents_remember.cli.paseo_explainer_host import PaseoExplainerHost, explainer_report_sender
-from agents_remember.cli.role_held_messages import (
-    MAX_HELD_PER_RECIPIENT,
-    HeldMessage,
-    hold_message,
-    waiting_total,
-)
-from agents_remember.cli.role_message_files import (
-    MessageContent,
-    render_message_file,
-    store_message_file,
-)
-from agents_remember.models.knowledge.review_frame import FrameBinding
-
-SERVER_NAME = "agents-remember-task"
 from agents_remember.errors import PaseoRuntimeFailure
-from agents_remember.mcp.registration.explainer_tools import (
-    register_bound_explainer_tools,  # the entry
-)
-from canvas_host_test_support import REPO, TASK, config, packet, record
-from mcp.server.fastmcp import FastMCP
-
-LEAF = "260928-MIK-L183"
-CAPSULE = "You are this leaf's review explainer.\n"
-NOW = "2026-10-22T08:00:00+00:00"
+from canvas_host_test_support import REPO, TASK, config
+from explainer_host_test_support import CAPSULE, LEAF, SERVER_NAME, _host, _workspace
 
 
-def _text_of(result: object) -> str:
-    """One ``call_tool`` answer's text content, for the JSON bodies these tests assert on."""
+def test_a_retry_adopts_the_seat_the_failed_attempt_left_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A create the host has already seen is a retry, not an error: it lands on that seat."""
 
-    if isinstance(result, tuple):
-        result = result[0]
-    blocks = result if isinstance(result, list) else getattr(result, "content", None)
-    if isinstance(blocks, list):
-        for block in blocks:
-            text = getattr(block, "text", None)
-            if isinstance(text, str):
-                return text
-    return str(result)
+    calls: list[tuple[str, dict]] = []
+
+    def bridge(_config, command, payload):
+        calls.append((command, payload))
+        if command == "workspace-open":
+            return {"workspace": {"id": "w1"}}
+        if command == "agent-create":
+            raise PaseoBridgeFailure(
+                "agent_request_key_conflict", "this request key already names another request"
+            )
+        return {
+            "agent": {
+                "id": "agent-1",
+                "provider": "claude",
+                "model": "claude-opus-5-5",
+                "workspaceId": "w1",
+            }
+        }
+
+    monkeypatch.setattr(host_module, "bridge_call", bridge)
+    monkeypatch.setattr(host_module, "qualified_launch", lambda _config, _repo: ("claude", {}))
+    host = _host(tmp_path, bridge=bridge)
+
+    provenance = host.create_seat(
+        agent_id="agent-1",
+        workspace=_workspace(tmp_path),
+        title="Explainer · " + LEAF,
+        capsule=CAPSULE,
+        labels={"ar.capability": "review-explainer", "ar.repository": REPO, "ar.task": TASK},
+    )
+
+    assert provenance["adopted"] is True
+    assert provenance["agentId"] == "agent-1"
+    assert provenance["model"] == "claude-opus-5-5"
+    # One create was attempted; the seat the host held was adopted instead of a second one.
+    assert [name for name, _payload in calls].count("agent-create") == 1
+    assert "agent-archive" not in [name for name, _payload in calls]
 
 
-def _workspace(tmp_path: Path) -> Path:
-    """A path of the shape the server reads its coordination root back from."""
+def test_a_seat_on_another_provider_is_adopted_and_that_provider_is_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The host's id names one seat, so a retry adopts it and the record says what really runs."""
 
-    workspace = tmp_path / "explainer" / REPO / TASK / LEAF
-    workspace.mkdir(parents=True, exist_ok=True)
-    return workspace
+    names: list[str] = []
+
+    def bridge(_config, command, payload):
+        names.append(command)
+        if command == "workspace-open":
+            return {"workspace": {"id": "w1"}}
+        if command == "agent-create":
+            raise PaseoBridgeFailure(
+                "paseo_call_failed", "agent_id_conflict: this agent id already exists"
+            )
+        return {"agent": {"id": "agent-1", "provider": "opencode", "model": "gpt-5"}}
+
+    monkeypatch.setattr(host_module, "bridge_call", bridge)
+    monkeypatch.setattr(host_module, "qualified_launch", lambda _config, _repo: ("claude", {}))
+    host = _host(tmp_path, bridge=bridge)
+
+    provenance = host.create_seat(
+        agent_id="agent-1",
+        workspace=_workspace(tmp_path),
+        title="Explainer · " + LEAF,
+        capsule=CAPSULE,
+        labels={"ar.capability": "review-explainer", "ar.repository": REPO, "ar.task": TASK},
+    )
+
+    assert provenance["adopted"] is True
+    assert provenance["adoptedProvider"] == "opencode"
+    assert provenance["model"] == "gpt-5"
+    # Nothing is archived: the seat the developer may still be reading is not this build's to retire.
+    assert "agent-archive" not in names
+    assert names.count("agent-create") == 1
 
 
-def _host(tmp_path: Path, *, bridge) -> PaseoExplainerHost:
-    runtime = config(tmp_path)
-    return PaseoExplainerHost(runtime)
+def test_an_archived_seat_the_host_will_not_replace_names_retire_as_the_way_forward(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An archived seat's id is still taken, so the refusal names the one control that clears it."""
+
+    def bridge(_config, command, payload):
+        if command == "workspace-open":
+            return {"workspace": {"id": "w1"}}
+        if command == "agent-create":
+            raise PaseoBridgeFailure(
+                "paseo_call_failed", "agent_id_conflict: this agent id already exists"
+            )
+        return {
+            "agent": {"id": "agent-1", "provider": "claude", "archivedAt": "2026-10-25T00:00:00Z"}
+        }
+
+    monkeypatch.setattr(host_module, "bridge_call", bridge)
+    monkeypatch.setattr(host_module, "qualified_launch", lambda _config, _repo: ("claude", {}))
+    host = _host(tmp_path, bridge=bridge)
+
+    with pytest.raises(ExplainerRefused) as held:
+        host.create_seat(
+            agent_id="agent-1",
+            workspace=_workspace(tmp_path),
+            title="Explainer · " + LEAF,
+            capsule=CAPSULE,
+            labels={"ar.capability": "review-explainer", "ar.repository": REPO, "ar.task": TASK},
+        )
+
+    assert held.value.reason == "explainer-seat-held"
+    assert "Retire" in held.value.detail
+
+
+def test_the_request_key_names_the_request_so_a_changed_retry_never_collides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The host refuses one key with two payloads, which broke every changed retry (L183)."""
+
+    keys: list[str] = []
+
+    def bridge(_config, command, payload):
+        if command == "agent-create":
+            keys.append(payload["idempotencyKey"])
+        return {"workspace": {"id": "w1"}}
+
+    monkeypatch.setattr(host_module, "bridge_call", bridge)
+    provider = {"name": "claude"}
+    monkeypatch.setattr(
+        host_module, "qualified_launch", lambda _config, _repo: (provider["name"], {})
+    )
+    host = _host(tmp_path, bridge=bridge)
+    labels = {"ar.capability": "review-explainer", "ar.repository": REPO, "ar.task": TASK}
+
+    def create() -> None:
+        host.create_seat(
+            agent_id="agent-1",
+            workspace=_workspace(tmp_path),
+            title="Explainer · " + LEAF,
+            capsule=CAPSULE,
+            labels=labels,
+        )
+
+    create()
+    # An identical retry must adopt the earlier receipt, so the key is the same.
+    create()
+    # A changed request -- the developer switched provider -- must not collide with it.
+    provider["name"] = "opencode"
+    create()
+
+    assert len(keys) == 3
+    assert keys[0] == keys[1]
+    assert keys[2] != keys[1]
+    assert keys[2].startswith("explainer:agent-1:")
+
+
+def test_the_fingerprint_ignores_field_order_and_names_every_change() -> None:
+    assert host_module._request_fingerprint({"a": 1, "b": [2]}) == host_module._request_fingerprint(
+        {"b": [2], "a": 1}
+    )
+    assert host_module._request_fingerprint({"provider": "claude"}) != (
+        host_module._request_fingerprint({"provider": "opencode"})
+    )
+    assert host_module._request_fingerprint({"workspaceId": "w1"}) != (
+        host_module._request_fingerprint({"workspaceId": "w2"})
+    )
 
 
 def test_the_seat_is_created_with_the_capsule_and_no_first_prompt(
@@ -131,19 +238,43 @@ def test_the_seat_is_created_with_the_capsule_and_no_first_prompt(
     assert "--config" in args
 
 
-def test_the_policy_preapproves_exactly_the_tools_the_server_declares(tmp_path: Path) -> None:
-    """Rule 3: a tool the server admits is a tool the host lets the seat call, and no other."""
+def test_the_policy_is_a_task_agents_with_the_four_tools_granted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MIK-R211 v5 rule 3: the seat's grant is a task agent's, never a list that confines it.
 
-    server = FastMCP("review-explainer")
-    register_bound_explainer_tools(server, workspace=_workspace(tmp_path))
-    declared = {tool.name for tool in asyncio.run(server.list_tools())}
+    Claude's host grants by exact name and keeps every other tool, so the identity read and the
+    four kept tools are granted and the harness's and AR's general tools stay with the permission
+    mode. Codex's route would remove every tool not listed, so it gets no grant, as a task agent's
+    launch does not.
+    """
 
-    assert declared == set(EXPLAINER_SURFACE)
-    # The six read-only Git subcommands are named one by one, never as one "git" tool.
-    assert {"git_log", "git_show", "git_diff", "git_ls_tree", "git_cat_file", "git_rev_parse"} <= (
-        declared
-    )
-    assert "knowledge_read" in declared
+    created: dict[str, dict] = {}
+    for provider in ("claude", "codex"):
+
+        def bridge(_config, command, payload, provider=provider):
+            if command == "agent-create":
+                created[provider] = payload
+            return {"workspace": {"id": "w1"}}
+
+        monkeypatch.setattr(host_module, "bridge_call", bridge)
+        monkeypatch.setattr(
+            host_module,
+            "qualified_launch",
+            lambda _config, _repo, provider=provider: (provider, {}),
+        )
+        _host(tmp_path, bridge=bridge).create_seat(
+            agent_id=f"agent-{provider}",
+            workspace=_workspace(tmp_path),
+            title="t",
+            capsule=CAPSULE,
+            labels={"ar.capability": "review-explainer", "ar.repository": REPO, "ar.task": TASK},
+        )
+
+    granted = {entry["tool"] for entry in created["claude"]["toolPolicy"]["preapproved"]}
+    assert granted == {"server_info", *EXPLAINER_SURFACE}
+    assert set(EXPLAINER_SURFACE) == {"render", "define_category", "remove_category", "grade"}
+    assert "toolPolicy" not in created["codex"]
 
 
 def test_the_seat_is_instructed_with_the_capability_its_loader_admits() -> None:
@@ -170,47 +301,46 @@ def _configured_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, extra: 
         "paseo_runtime",
         property(lambda _self: SimpleNamespace(home=home)),
     )
-    monkeypatch.setattr(host_module, "daemon_configuration", lambda _config: {"providers": {}})
+    monkeypatch.setattr(
+        host_module, "daemon_configuration", lambda _config: {"providers": {}}, raising=False
+    )
 
 
-def test_a_host_map_with_extra_arguments_refuses_the_confined_step(
+def test_a_host_map_with_extra_arguments_starts_the_seat_like_any_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """MIK-R192 rule 8: a confined seat never runs with the host's extra arguments."""
+    """MIK-R211 v5 rule 3: nothing is refused for being the explainer.
+
+    The host's provider map gives Claude an extra argument, and the daemon's own map cannot be
+    read; the seat is created and sent to all the same, as a task agent's would be.
+    """
 
     _configured_host(tmp_path, monkeypatch, extra=True)
-    host = _host(tmp_path, bridge=lambda *_args: {})
-
-    with pytest.raises(ExplainerRefused) as refused:
-        host.create_seat(
-            agent_id="agent-1",
-            workspace=_workspace(tmp_path),
-            title="t",
-            capsule=CAPSULE,
-            labels={"ar.capability": "review-explainer", "ar.repository": REPO, "ar.task": TASK},
-        )
-
-    assert refused.value.reason == "explainer-host-extra-arguments"
-    assert "chrome" in refused.value.detail
-
-
-def test_a_map_that_cannot_be_read_refuses_the_confined_step(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """MIK-R192 rule 8: a map that was not read is not a clean one."""
-
-    _configured_host(tmp_path, monkeypatch, extra=False)
 
     def unread(_config):
         raise PaseoRuntimeFailure("daemon-config-unverified", "config", "the daemon did not answer")
 
-    monkeypatch.setattr(host_module, "daemon_configuration", unread)
-    host = _host(tmp_path, bridge=lambda *_args: {})
+    monkeypatch.setattr(host_module, "daemon_configuration", unread, raising=False)
+    calls: list[str] = []
 
-    with pytest.raises(ExplainerRefused) as refused:
-        host.send("agent-1", "explain this")
+    def bridge(_config, command, _payload):
+        calls.append(command)
+        return {"workspace": {"id": "w1"}, "delivery": {"delivered": True}}
 
-    assert refused.value.reason == "explainer-host-map-unread"
+    monkeypatch.setattr(host_module, "bridge_call", bridge)
+    monkeypatch.setattr(host_module, "qualified_launch", lambda _config, _repo: ("claude", {}))
+    host = _host(tmp_path, bridge=bridge)
+
+    host.create_seat(
+        agent_id="agent-1",
+        workspace=_workspace(tmp_path),
+        title="t",
+        capsule=CAPSULE,
+        labels={"ar.capability": "review-explainer", "ar.repository": REPO, "ar.task": TASK},
+    )
+    host.send("agent-1", "explain this")
+
+    assert "agent-create" in calls and "agent-send" in calls
 
 
 def test_the_seat_state_reads_the_hosts_own_agent_view(
@@ -878,390 +1008,3 @@ def test_a_cancel_targets_the_exact_seat_and_request_and_closes_the_pending_deci
     assert host._provenance["agent-1"]["permissionPending"] is False
     assert host._provenance["agent-1"]["mode"] == mode_before
     assert answer["agent"]["modeId"] == mode_before
-
-
-class _ReportRoot:
-    """The one field the developer-message reader needs; the server casts its own."""
-
-    coordination_root: Path
-
-    def __init__(self, root: Path) -> None:
-        self.coordination_root = root
-
-
-def _file_tray_message(root: Path, message_id: str, seat: str) -> Path:
-    folder = developer_messages.target_folder(_ReportRoot(root), REPO, TASK, seat)
-    when = datetime.fromisoformat(NOW)
-    content = render_message_file(
-        MessageContent(
-            when=when,
-            sender_line="developer",
-            sender_task=TASK,
-            recipient_role="review-presenter",
-            recipient_id=seat,
-            recipient_task=TASK,
-            message_id=message_id,
-            text="Prefer the shorter page.\nKeep the comparison table.",
-        )
-    )
-    stem = developer_messages.message_stem(when, "review-presenter", seat, message_id)
-    return store_message_file(folder, stem, content)
-
-
-def _architect_record(root: Path, task_id: str, architect: str) -> None:
-    path = root / "notes" / "reports" / "master-architect" / REPO / f"{task_id}.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {"architectAgentId": architect, "act": "manager-start", "at": NOW}, sort_keys=True
-        )
-    )
-
-
-def _architect_receipt(root: Path, architect: str, status: str = "running") -> Path:
-    folder = root / "notes" / "reports" / "role-executions"
-    folder.mkdir(parents=True, exist_ok=True)
-    workspace = root / "workspace" / f"arch-{architect[:4]}"
-    workspace.mkdir(parents=True, exist_ok=True)
-    receipt = folder / f"{architect[:8]}.json"
-    receipt.write_text(
-        json.dumps(
-            {"agentId": architect, "status": status, "workspace": {"path": workspace.as_posix()}}
-        ),
-        encoding="utf-8",
-    )
-    return workspace
-
-
-def _deliver_with_production_sender(
-    root: Path,
-    config: Any,
-    *,
-    architect: str,
-    folder: Path | None,
-    report_path: Path,
-) -> tuple[str, str | None, Path, dict[str, Any] | None]:
-    report = explainer_server._Report(
-        draft=explainer_server._Draft(
-            message_id="m-1",
-            seat="seat-1",
-            copied="the copied words",
-            perspective="the page is sound",
-            revision=1,
-            task_id=TASK,
-            leaf=LEAF,
-        ),
-        report_id="report-1",
-        path=report_path,
-        digest="sha256:" + "0" * 64,
-    )
-    report_path.write_text("the delivered report", encoding="utf-8")
-    ctx = explainer_server._DeliveryContext(
-        coordination_root=root,
-        architect=architect,
-        report=report,
-        text="From explainer\n\nthe delivered report",
-        folder=folder,
-        tray_folder=root / "tray",
-        now=NOW,
-    )
-    state, reason, _arch, path, pick = explainer_server._deliver_report_to_architect(
-        ctx, sender=explainer_report_sender(config)
-    )
-    return state, reason, path, pick
-
-
-def test_the_production_report_sender_composes_the_limit_hold_and_terminal_outcomes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """I10: the real report delivery with the production sender answers each host state once."""
-
-    runtime = config(tmp_path)
-    root = tmp_path
-    (root / "tasks" / REPO / TASK).mkdir(parents=True, exist_ok=True)
-    architect_a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-    architect_b = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-    workspace_a = _architect_receipt(root, architect_a)
-    _architect_receipt(root, architect_b)
-
-    bridge_calls: list[tuple[str, dict]] = []
-
-    def bridge(_config, command, payload):
-        bridge_calls.append((command, dict(payload)))
-        return {"delivery": {"delivered": True}}
-
-    monkeypatch.setattr(host_module, "bridge_call", bridge)
-
-    # Delivered: the sender reports through the real bridge, to the recorded architect alone.
-    state, _reason, _path, _pick = _deliver_with_production_sender(
-        root,
-        runtime,
-        architect=architect_a,
-        folder=workspace_a,
-        report_path=root / "report-a.md",
-    )
-    assert state == "reported"
-    assert bridge_calls[-1] == (
-        "agent-send",
-        {"agentId": architect_a, "text": "From explainer\n\nthe delivered report"},
-    )
-
-    # Busy: the sender answers held, and the server holds it in the architect's own store.
-    workspace_b = _architect_receipt(root, architect_b)
-    busy_calls: list[tuple[str, dict]] = []
-
-    def busy_bridge_recording(_config, command, payload):
-        busy_calls.append((command, dict(payload)))
-        return {"delivery": {"delivered": False, "refused": "busy"}}
-
-    monkeypatch.setattr(host_module, "bridge_call", busy_bridge_recording)
-    state, _reason, _path, _pick = _deliver_with_production_sender(
-        root,
-        runtime,
-        architect=architect_b,
-        folder=workspace_b,
-        report_path=root / "report-b.md",
-    )
-    assert state == "held"
-    assert waiting_total(workspace_b, architect_b) == 1
-    assert busy_calls[-1][0] == "agent-send" and busy_calls[-1][1]["agentId"] == architect_b
-
-    # Limited (MIK-R190 rule 9): the check the production sender makes holds the report before
-    # anything is sent.
-    architect_c = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
-    workspace_c = _architect_receipt(root, architect_c)
-    calls_before = len(bridge_calls)
-    monkeypatch.setattr(host_module, "bridge_call", bridge)
-    monkeypatch.setattr(
-        limit_module,
-        "provider_limit_hold",
-        lambda _config, agent: (
-            {"heldReason": "provider-limit", "limitedUntil": "2099-01-01T00:00:00+00:00"}
-            if agent == architect_c
-            else None
-        ),
-    )
-    state, _reason, _path, _pick = _deliver_with_production_sender(
-        root,
-        runtime,
-        architect=architect_c,
-        folder=workspace_c,
-        report_path=root / "report-c.md",
-    )
-    assert state == "held"
-    assert len(bridge_calls) == calls_before, "a limited recipient is held before anything is sent"
-    assert waiting_total(workspace_c, architect_c) == 1
-    monkeypatch.setattr(limit_module, "provider_limit_hold", lambda _config, _agent: None)
-
-
-def test_the_production_report_sender_answers_terminal_outcomes_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """I10: archived, bridge-error and timeout each answer one terminal state, once."""
-
-    runtime = config(tmp_path)
-    root = tmp_path
-    (root / "tasks" / REPO / TASK).mkdir(parents=True, exist_ok=True)
-    architect = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
-    _architect_receipt(root, architect)
-
-    # Archived: not reported, kept back for his tray.
-    def archived_bridge(_config, command, payload):
-        return {"delivery": {"delivered": False, "refused": "archived"}}
-
-    monkeypatch.setattr(host_module, "bridge_call", archived_bridge)
-    state, reason, path, pick = _deliver_with_production_sender(
-        root,
-        runtime,
-        architect=architect,
-        folder=None,
-        report_path=root / "report-a.md",
-    )
-    assert state == "not reported" and reason == "bridge-error"
-    assert pick is not None and pick["kind"] == "message-file"
-    assert path.name.endswith(".undelivered.md")
-
-    # A bridge error is kept back for his tray, never claimed delivered.
-    def error_bridge(_config, command, payload):
-        raise PaseoBridgeFailure("paseo_daemon_unreachable", "no daemon")
-
-    monkeypatch.setattr(host_module, "bridge_call", error_bridge)
-    state, reason, path, pick = _deliver_with_production_sender(
-        root,
-        runtime,
-        architect=architect,
-        folder=None,
-        report_path=root / "report-a.md",
-    )
-    assert state == "not reported" and reason == "bridge-error"
-    assert pick is not None
-
-    # A full held store sends the report back to his tray, never dropped and never sent twice.
-    workspace_full = _architect_receipt(root, architect)
-    for index in range(MAX_HELD_PER_RECIPIENT):
-        hold_message(
-            workspace_full,
-            architect,
-            HeldMessage(
-                sender_line="sender",
-                sender_agent_id=f"sender-{index}",
-                text="waiting",
-                reason="busy",
-            ),
-        )
-    monkeypatch.setattr(host_module, "bridge_call", archived_bridge)
-    state, reason, path, pick = _deliver_with_production_sender(
-        root,
-        runtime,
-        architect=architect,
-        folder=workspace_full,
-        report_path=root / "report-a.md",
-    )
-    assert state == "not reported" and reason == "recipient-busy"
-    assert pick is not None and pick["kind"] == "message-file"
-
-    # A timeout answers "sent, outcome unknown" once; the file is kept, never a tray pick.
-    architect_timeout = "ffffffff-ffff-4fff-8fff-ffffffffffff"
-    receipts_folder = root / "notes" / "reports" / "role-executions"
-    (receipts_folder / "ffffffff.json").write_text(
-        json.dumps({"agentId": architect_timeout, "status": "running"}), encoding="utf-8"
-    )
-
-    def timeout_bridge(_config, command, payload):
-        raise PaseoBridgeFailure(SEND_OUTCOME_UNKNOWN, "bridge timed out")
-
-    monkeypatch.setattr(host_module, "bridge_call", timeout_bridge)
-    state, reason, path, pick = _deliver_with_production_sender(
-        root,
-        runtime,
-        architect=architect_timeout,
-        folder=None,
-        report_path=root / "report-a.md",
-    )
-    assert state == "sent, outcome unknown" and reason is None
-    assert not path.name.endswith(".undelivered.md") and pick is None
-
-
-def test_the_registered_report_tool_logs_the_production_senders_last_state(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """I10: the registered composition delivers through the production sender and the report
-    log's last line names the outcome truthfully."""
-
-    runtime = config(tmp_path)
-    root = tmp_path
-    workspace = _workspace(tmp_path)
-    seat = agent_id(workspace, 1)
-    task_root = root / "tasks" / REPO / TASK
-    task_root.mkdir(parents=True, exist_ok=True)
-    architect = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-    _architect_record(root, TASK, architect)
-    _architect_receipt(root, architect)
-    write_binding(
-        workspace,
-        ExplainerBinding(
-            binding=FrameBinding.from_packet(packet(record(7)).comparison),
-            snapshot="snapshot-1",
-            prepared_at=NOW,
-            packet_digest="sha256:" + "0" * 64,
-        ),
-    )
-    (workspace.parent / f"{LEAF}.generation").write_text("1\n", encoding="utf-8")
-    message_id = "20000000-0000-4000-8000-000000000021"
-    _file_tray_message(root, message_id, seat)
-
-    server = FastMCP("review-explainer")
-    register_bound_explainer_tools(
-        server,
-        workspace=workspace,
-        seat=seat,
-        inputs=ExplainerInputs(
-            task_root=task_root,
-            coordination_root=root,
-            sender=explainer_report_sender(runtime),
-            now=lambda: NOW,
-        ),
-    )
-    monkeypatch.setattr(
-        host_module, "bridge_call", lambda *_args: {"delivery": {"delivered": True}}
-    )
-
-    result = asyncio.run(
-        server.call_tool(
-            "report_to_architect",
-            {"messageId": message_id, "perspective": "the page is sound"},
-        )
-    )
-    body = json.loads(_text_of(result))
-
-    assert body["state"] == "reported"
-    assert body["architect"] == architect
-    log = root / "notes" / "reports" / "developer-messages" / REPO / TASK / "reports.jsonl"
-    last = explainer_server.report_state(log, message_id)
-    assert last is not None and last["state"] == "reported"
-    assert last["architect"] == architect
-
-
-def test_a_second_masters_report_reaches_only_its_own_architect(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """I10: two masters each file their report through the production sender; each one reaches
-    only its own recorded architect and logs its own line (MIK-R189 rule 7 step 3)."""
-
-    runtime = config(tmp_path)
-    root = tmp_path
-    second_task = "260928-other-master"
-    second_root = root / "tasks" / REPO / second_task
-    second_root.mkdir(parents=True, exist_ok=True)
-    second_architect = "33333333-3333-4333-8333-333333333333"
-    _architect_record(root, second_task, second_architect)
-    _architect_receipt(root, second_architect)
-    second_workspace = tmp_path / "explainer" / REPO / second_task / LEAF
-    second_workspace.mkdir(parents=True)
-    second_seat = agent_id(second_workspace, 1)
-    second_binding = FrameBinding.from_packet(packet(record(7)).comparison).model_copy(
-        update={"task_id": second_task}
-    )
-    write_binding(
-        second_workspace,
-        ExplainerBinding(
-            binding=second_binding,
-            snapshot="snapshot-1",
-            prepared_at=NOW,
-            packet_digest="sha256:" + "0" * 64,
-        ),
-    )
-    (second_workspace.parent / f"{LEAF}.generation").write_text("1\n", encoding="utf-8")
-    second_message_id = "20000000-0000-4000-8000-000000000022"
-    _file_tray_message(root, second_message_id, second_seat)
-
-    second_server = FastMCP("review-explainer")
-    register_bound_explainer_tools(
-        second_server,
-        workspace=second_workspace,
-        seat=second_seat,
-        inputs=ExplainerInputs(
-            task_root=second_root,
-            coordination_root=root,
-            sender=explainer_report_sender(runtime),
-            now=lambda: NOW,
-        ),
-    )
-    monkeypatch.setattr(
-        host_module, "bridge_call", lambda *_args: {"delivery": {"delivered": True}}
-    )
-    second_result = asyncio.run(
-        second_server.call_tool(
-            "report_to_architect",
-            {"messageId": second_message_id, "perspective": "the page is sound"},
-        )
-    )
-    second_body = json.loads(_text_of(second_result))
-    assert second_body["state"] == "reported"
-    assert second_body["architect"] == second_architect
-    second_log = (
-        root / "notes" / "reports" / "developer-messages" / REPO / second_task / "reports.jsonl"
-    )
-    second_last = explainer_server.report_state(second_log, second_message_id)
-    assert second_last is not None and second_last["state"] == "reported"
-    assert second_last["architect"] == second_architect

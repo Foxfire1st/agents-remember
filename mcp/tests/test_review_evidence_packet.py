@@ -11,12 +11,12 @@ The cases are the round-1 findings' acceptance evidence, one section per finding
 1. F01 identity: a foreign repository, task, leaf, number, ref or conversion is not this comparison;
 2. F02 the effective converted base, with the stored base named beside it;
 3. F03 empty, past-the-end and past-the-decoded-prefix reads, and a continuation that progresses;
-4. F04 byte, page, path and record budgets measured on the work actually done;
+4. F04 no byte, page, scan, path, record, depth or listing bound cuts a read or a population;
 5. F05 the landed relationship owners, typed edges and preserved uncertainty;
 6. F06 an admitted supplemental source bound to the bytes examined;
 7. F07 an authority label earned by the kind and state of its basis;
 8. F08 the landed payload prepared end to end, with addresses a consumer opens;
-9. F16 counters read from the receipts at two sizes, and the caps at their boundary.
+9. F16 a whole-object read answers past every old page and ceiling, with true totals.
 """
 
 from __future__ import annotations
@@ -28,15 +28,14 @@ from pathlib import Path
 
 import pytest
 from agents_remember.application import review_evidence_read as reader
-from agents_remember.application.review_evidence_adapter import (
+from agents_remember.application.review_evidence_adapter import consume_address, prepare_evidence
+from agents_remember.application.review_evidence_claims import resolve_claim
+from agents_remember.application.review_evidence_map import (
     NAME_FAMILY,
     NAME_JUDGMENTS,
     NAME_PROOFS,
     NAME_SOURCES,
-    consume_address,
-    prepare_evidence,
 )
-from agents_remember.application.review_evidence_claims import resolve_claim
 from agents_remember.application.review_evidence_packet import (
     PacketBindingMismatch,
     SideState,
@@ -45,18 +44,10 @@ from agents_remember.application.review_evidence_packet import (
     same_comparison,
 )
 from agents_remember.application.review_evidence_read import (
-    DEFAULT_READ_LIMITS,
-    MAX_PAGE_LINES,
-    measured_limits,
     read_bound_source,
+    read_whole_source,
 )
 from agents_remember.application.review_evidence_relations import read_bound_relationships as follow
-from agents_remember.application.review_supplemental_evidence import (
-    MAX_SUPPLEMENTAL_BYTES,
-    admit_supplemental,
-    capture_supplemental,
-    reread_supplemental,
-)
 from agents_remember.application.review_tree_comparison import reopened_trees, write_files_tree
 from agents_remember.models.knowledge.review_evidence import (
     ClaimBasis,
@@ -64,7 +55,6 @@ from agents_remember.models.knowledge.review_evidence import (
     ClaimMap,
     EvidenceClaim,
     EvidenceCollection,
-    EvidenceLimitMeasurement,
     EvidenceMap,
     EvidencePacket,
 )
@@ -292,7 +282,6 @@ def _packet(record: ReviewTreeComparisonRecord, **over: object) -> EvidencePacke
         "memory_before": SideState("available", index_state="complete"),
         "memory_after": SideState("available", index_state="complete"),
         "evidence_map": _map(),
-        "limits": DEFAULT_READ_LIMITS,
         "recorded_at": AT,
     }
     arguments.update(over)
@@ -396,16 +385,9 @@ def test_f03_a_range_past_the_end_is_a_measured_absence_with_the_real_line_count
     assert "2 line(s)" in receipt.detail
 
 
-def _continuation(text: str) -> tuple[int, int]:
-    """The byte offset and the line that offset begins, as a continuation states them."""
+def test_f03_a_line_deep_in_a_large_object_is_reached_in_one_read(world) -> None:
+    """MIK-R211 v4 rule 3: no scan bound stands between a read and the line it names."""
 
-    parts = dict(part.split("=", 1) for part in text.split(";"))
-    return int(parts["start_byte"]), int(parts["resume_line"])
-
-
-def test_f03_a_range_past_the_decoded_prefix_is_truncated_and_its_continuation_progresses(
-    world,
-) -> None:
     code = world["code"]
     long_text = "".join(f"line {number}\n" for number in range(1, 200_001)).encode()
     tree = write_files_tree(code, {"long.txt": long_text})
@@ -415,34 +397,11 @@ def test_f03_a_range_past_the_decoded_prefix_is_truncated_and_its_continuation_p
     receipt = read_bound_source(
         record, "code-candidate", "long.txt", start_line=150_000, end_line=150_001
     )
-    assert receipt.state == "truncated"
-    assert receipt.limit == "scan_bytes"
-    assert receipt.continuation is not None
-    assert receipt.next_byte and receipt.next_byte > 0
-
-    offset, resume_line = _continuation(receipt.continuation)
-    for _attempt in range(40):
-        moved = read_bound_source(
-            record,
-            "code-candidate",
-            "long.txt",
-            start_line=150_000,
-            end_line=150_001,
-            start_byte=offset,
-            resume_line=resume_line,
-        )
-        if moved.state == "present":
-            assert moved.text is not None and moved.text.startswith("line 150000")
-            assert moved.returned_range == (150_000, 150_001)
-            return
-        if moved.state == "refused":
-            assert moved.refusal_code == "read-beyond-limit"
-            return
-        assert moved.state == "truncated", moved.state
-        next_offset, resume_line = _continuation(moved.continuation)  # type: ignore[arg-type]
-        assert next_offset > offset
-        offset = next_offset
-    pytest.fail("the bounded continuation never reached the requested line")
+    assert receipt.state == "present", receipt.detail
+    assert receipt.text == "line 150000\nline 150001"
+    assert receipt.returned_range == (150_000, 150_001)
+    assert receipt.object_lines == 200_000
+    assert receipt.continuation is None and receipt.limit is None
 
 
 def test_f03_a_long_utf8_line_stays_text_and_is_never_reported_absent(world) -> None:
@@ -453,65 +412,106 @@ def test_f03_a_long_utf8_line_stays_text_and_is_never_reported_absent(world) -> 
         update={"code_candidate": ReviewTreeSide(repository=str(code), tree=tree)}
     )
     receipt = read_bound_source(record, "code-candidate", "wide.txt", start_line=1, end_line=1)
-    assert receipt.state in {"present", "truncated"}
-    assert receipt.text is not None and "héllo" in receipt.text
+    assert receipt.state == "present"
+    assert receipt.text == payload.decode().rstrip("\n")
 
 
-# --- F04: budgets bound the work and the packet populations --------------------------------------
+# --- F04: no bound cuts a read or a population ---------------------------------------------------
 
 
-def test_f04_the_read_bounds_bound_bytes_examined_at_two_sizes(world, tmp_path: Path) -> None:
+def test_f04_a_read_examines_and_returns_the_whole_object_at_two_sizes(world) -> None:
+    """MIK-R211 v4 rule 3: no byte, page or scan bound shapes a read, and the totals are true."""
+
     code = world["code"]
-    small = write_files_tree(code, {"small.txt": b"one\ntwo\n"})
-    large = write_files_tree(code, {"small.txt": b"one\ntwo\n" * 20_000})
-    for tree, expected_min in ((small, 1), (large, 1)):
+    for lines in (40_000, 1):
+        body = "".join(f"line {number}\n" for number in range(lines)).encode()
+        tree = write_files_tree(code, {"sized.txt": body})
         record = world["record"].model_copy(
             update={"code_candidate": ReviewTreeSide(repository=str(code), tree=tree)}
         )
-        receipt = read_bound_source(record, "code-candidate", "small.txt")
-        assert receipt.examined_bytes >= expected_min
-        assert (
-            receipt.examined_bytes
-            <= DEFAULT_READ_LIMITS.bytes_per_read + DEFAULT_READ_LIMITS.bytes_per_read // 2
-        )
-        assert receipt.returned_bytes <= receipt.examined_bytes
-        assert receipt.page == 0
-    limited = measured_limits(
-        EvidenceLimitMeasurement(
-            inputs=(("small", 2), ("large", 40960)),
-            observed_bytes=2,
-            observed_paths=1,
-            observed_records=0,
-            observed_depth=1,
-            elapsed_ms=1,
-        ),
-        limits=DEFAULT_READ_LIMITS,
-    )
-    assert limited.bytes_per_read <= DEFAULT_READ_LIMITS.bytes_per_read
-    assert limited.paths_per_packet <= DEFAULT_READ_LIMITS.paths_per_packet
+        receipt = read_bound_source(record, "code-candidate", "sized.txt")
+        assert receipt.state == "present", receipt.detail
+        assert receipt.examined_bytes == len(body)
+        assert receipt.returned_bytes == len(body) - 1
+        assert receipt.returned_range == (1, lines)
+        assert receipt.object_lines == lines
+    for name in (
+        "MAX_READ_BYTES",
+        "MAX_PAGE_LINES",
+        "MAX_SCAN_BYTES",
+        "MAX_WHOLE_SOURCE_BYTES",
+        "DEFAULT_READ_LIMITS",
+        "measured_limits",
+    ):
+        assert not hasattr(reader, name), f"the reader still declares the bound {name}"
 
 
-def test_f04_a_symlink_is_bounded_like_any_other_bytes(world) -> None:
+def test_f04_a_symlink_inside_the_tree_is_followed_and_one_outside_is_refused(world) -> None:
+    """Ruling K3: an inside link resolves through every hop until a loop; an outside one is refused."""
+
     code = world["code"]
-    (code / "target.txt").write_text("x" * 4096)
-    (code / "link").symlink_to("target.txt")
-    subprocess.run(["git", "-C", str(code), "add", "target.txt", "link"], check=True)
+    (code / "docs").mkdir(exist_ok=True)
+    (code / "docs" / "target.txt").write_text("one\ntwo\nthree\n")
+    links = {
+        "docs/link": "target.txt",
+        "top": "docs/link",
+        "dirlink": "docs",
+        "dangling": "docs/gone.txt",
+        "loop-a": "loop-b",
+        "loop-b": "loop-a",
+        "outside": "../../etc/hosts",
+        "absolute": "/etc/hosts",
+    }
+    for name, target in links.items():
+        (code / name).symlink_to(target)
+    subprocess.run(["git", "-C", str(code), "add", "docs/target.txt", *links], check=True)
     tree = subprocess.run(
         ["git", "-C", str(code), "write-tree"], check=True, capture_output=True, text=True
     ).stdout.strip()
     record = world["record"].model_copy(
         update={"code_candidate": ReviewTreeSide(repository=str(code), tree=tree)}
     )
-    receipt = read_bound_source(record, "code-candidate", "link")
-    assert receipt.state == "symlink"
-    assert receipt.returned_bytes <= DEFAULT_READ_LIMITS.bytes_per_read
-    assert receipt.next_byte is None or receipt.next_byte == receipt.returned_bytes
+
+    whole = read_whole_source(record, "code-candidate", "docs/link")
+    assert whole.state == "present", whole.detail
+    assert whole.text == "one\ntwo\nthree\n"
+    assert whole.path == "docs/link"
+    assert "docs/link → docs/target.txt" in whole.detail
+
+    ranged = read_bound_source(record, "code-candidate", "top", start_line=2, end_line=3)
+    assert ranged.state == "present", ranged.detail
+    assert ranged.text == "two\nthree"
+    assert ranged.returned_range == (2, 3)
+    assert "top → docs/link → docs/target.txt" in ranged.detail
+
+    through = read_bound_source(record, "code-candidate", "dirlink/target.txt")
+    assert through.state == "present", through.detail
+    assert through.text == "one\ntwo\nthree"
+    assert read_bound_source(record, "code-candidate", "dirlink").state == "unavailable"
+
+    dangling = read_bound_source(record, "code-candidate", "dangling")
+    assert dangling.state == "absent"
+    assert "dangling → docs/gone.txt" in dangling.detail
+
+    loop = read_whole_source(record, "code-candidate", "loop-a")
+    assert loop.state == "unavailable"
+    assert "loop-a → loop-b → loop-a" in loop.detail
+
+    for name in ("outside", "absolute"):
+        refused = read_bound_source(record, "code-candidate", name)
+        assert refused.state == "refused" and refused.refusal_code == "path-escape"
+        assert f"{name} is a symlink to {links[name]}, a path outside the tree" in refused.detail
+        assert refused.text is None
 
 
-def test_f04_a_packet_over_its_path_or_record_cap_is_refused(world) -> None:
-    tight = DEFAULT_READ_LIMITS.model_copy(
-        update={"paths_per_packet": 2, "records_per_collection": 1}
-    )
+def test_f04_a_packet_carries_every_path_and_record_however_many(world) -> None:
+    """Ruling 6085456d, addendum (c): no count refuses a packet, and none cuts what it carries.
+
+    These ceilings were refusals before -- a packet over ``paths_per_packet`` or a collection over
+    ``records_per_collection`` raised. Both are gone with the limits that declared them, so the same
+    input builds, and the packet carries every path and every record it was handed.
+    """
+
     collections = {
         NAME_SOURCES: EvidenceCollection(
             name=NAME_SOURCES,
@@ -522,8 +522,10 @@ def test_f04_a_packet_over_its_path_or_record_cap_is_refused(world) -> None:
             items=tuple({"path": f"p{number}"} for number in range(3)),
         )
     }
-    with pytest.raises(ValueError, match="distinct path"):
-        _packet(world["record"], collections=collections, limits=tight)
+    built = _packet(world["record"], collections=collections)
+    sources = next(item for item in built.collections if item.name == NAME_SOURCES)
+    assert len(sources.items) == 3
+
     many = {
         NAME_SOURCES: EvidenceCollection(
             name=NAME_SOURCES,
@@ -534,24 +536,36 @@ def test_f04_a_packet_over_its_path_or_record_cap_is_refused(world) -> None:
             items=({"path": "a"}, {"path": "b"}),
         )
     }
-    with pytest.raises(ValueError, match="per collection"):
-        _packet(world["record"], collections=many, limits=tight)
+    packed = _packet(world["record"], collections=many)
+    carried = next(item for item in packed.collections if item.name == NAME_SOURCES)
+    assert len(carried.items) == 2
 
 
-def test_f04_a_truncated_relationship_population_names_its_continuation(world) -> None:
-    tight = DEFAULT_READ_LIMITS.model_copy(
-        update={"records_per_collection": 1, "relationship_depth": 1}
+def test_f04_a_relationship_population_is_never_cut_and_the_listing_names_every_path(
+    world,
+) -> None:
+    """MIK-R211 v4 rules 1-3: no edge budget, depth bound or listing cap cuts the roster."""
+
+    memory = world["memory"]
+    members = [INVARIANT, SIBLING, *(f"INV-M{number:05d}" for number in range(250))]
+    family_path = f"knowledge/families/{FAMILY}-evidence.json"
+    notes = {f"knowledge/notes/n{number:05d}.md": b"note\n" for number in range(5_001)}
+    files = {
+        **MEMORY_FILES,
+        family_path: json.dumps({**_family(), "members": members}).encode(),
+        **notes,
+    }
+    tree = write_files_tree(memory, files)
+    record = world["record"].model_copy(
+        update={"memory_candidate": ReviewTreeSide(repository=str(memory), tree=tree)}
     )
-    relations = follow(
-        world["record"],
-        "memory-candidate",
-        f"knowledge/families/{FAMILY}-evidence.json",
-        limits=tight,
-    )
-    assert relations.state == "records"
-    assert len(relations.edges) == 1
-    assert relations.limit == "records_per_collection"
-    assert relations.continuation is not None
+    relations = follow(record, "memory-candidate", family_path, depth=3)
+    assert relations.state == "records", relations.detail
+    assert [edge.record_id for edge in relations.edges if edge.relation == "members"] == members
+    assert any(edge.direction == "recorded-by" for edge in relations.edges)
+    assert relations.continuation is None and relations.limit is None
+    assert relations.listing_truncated is False and relations.listing_cursor is None
+    assert relations.listed_paths == len(files)
 
 
 # --- F05: the landed owners' relationships -------------------------------------------------------
@@ -626,188 +640,6 @@ def test_f05_an_unreadable_owner_file_is_invalid_not_absent(world, tmp_path: Pat
     invalid = [edge for edge in relations.edges if edge.state == "invalid"]
     assert invalid, "an owner file that cannot be read is reported, not skipped"
     assert any(edge.path and FAMILY in edge.path for edge in invalid)
-
-
-# --- F06: admitted supplemental sources ----------------------------------------------------------
-
-
-def _task_root(tmp_path: Path) -> Path:
-    root = tmp_path / "task"
-    (root / "requirements").mkdir(parents=True)
-    (root / "notes").mkdir()
-    (root / "requirements" / "MIK-R102.md").write_text("# R102\n")
-    return root
-
-
-def test_f06_a_supplemental_receipt_binds_the_bytes_it_admits(tmp_path: Path) -> None:
-    root = _task_root(tmp_path)
-    receipt = capture_supplemental(
-        root,
-        "requirements/MIK-R102.md",
-        receipt_id="sup-1",
-        capture_identity="capture-1",
-        establishes="the approved packet",
-        producer="architect",
-        authority="approved",
-        source_version="v1",
-    )
-    assert receipt.read_state == "present"
-    assert receipt.canonical_source == "requirements/MIK-R102.md"
-    assert receipt.digest is not None and receipt.byte_size == len("# R102\n")
-
-    moved = reread_supplemental(
-        receipt,
-        task_root=root,
-        receipt_id="sup-2",
-        capture_identity="capture-2",
-        source_version="v2",
-    )
-    assert moved.read_state == "present"
-    assert moved.digest == receipt.digest
-
-
-def test_f06_a_changed_source_answers_a_successor_and_never_reuses_the_old_identity(
-    tmp_path: Path,
-) -> None:
-    root = _task_root(tmp_path)
-    first = capture_supplemental(
-        root,
-        "requirements/MIK-R102.md",
-        receipt_id="sup-1",
-        capture_identity="capture-1",
-        establishes="the approved packet",
-        authority="approved",
-        source_version="v1",
-    )
-    (root / "requirements" / "MIK-R102.md").write_text("# R102, revised\n")
-    successor = reread_supplemental(
-        first, task_root=root, receipt_id="sup-2", capture_identity="capture-2"
-    )
-    assert successor.read_state == "changed"
-    assert successor.digest != first.digest
-    assert successor.canonical_source == first.canonical_source
-    assert successor.source_version is None, "a version the new bytes do not carry is not copied"
-    assert successor.limitation is not None
-
-
-def test_f06_a_foreign_symlinked_or_oversized_source_is_refused(tmp_path: Path) -> None:
-    root = _task_root(tmp_path)
-    assert admit_supplemental(root, "../outside.md").refusal_code == "foreign-source"
-    assert admit_supplemental(root, "/etc/hostname").refusal_code == "foreign-source"
-    assert admit_supplemental(root, "memory/onboarding/x.md").refusal_code == "foreign-source"
-    (root / "notes" / "big.md").write_text("x" * (MAX_SUPPLEMENTAL_BYTES + 1))
-    oversized = admit_supplemental(root, "notes/big.md")
-    assert oversized.refusal_code == "read-beyond-limit"
-    (root / "notes" / "link.md").symlink_to(root / "requirements" / "MIK-R102.md")
-    assert admit_supplemental(root, "notes/link.md").refusal_code == "foreign-source"
-    (root / "task").mkdir(exist_ok=True)
-    (root / "task" / "foreign.json").write_text('{"id": "foreign"}\n')
-    assert admit_supplemental(root, "task/foreign.json").refusal_code == "foreign-source"
-    assert (
-        admit_supplemental(
-            root, "task/foreign.json", leaf_document="183_the-review-pages-explainer"
-        ).refusal_code
-        == "foreign-source"
-    )
-    (root / "DEVELOPER-DIRECTION.md").write_text("# direction\n")
-    assert admit_supplemental(root, "DEVELOPER-DIRECTION.md").refusal_code == "foreign-source"
-
-
-def test_f06_own_leaf_documents_survive_capture_and_reread_while_foreign_stays_refused(
-    tmp_path: Path,
-) -> None:
-    root = _task_root(tmp_path)
-    stem = "183_the-review-pages-explainer"
-    (root / f"{stem}.json").write_text(json.dumps({"id": LEAF, "slug": stem}))
-    (root / f"{stem}.md").write_text("# the leaf\n")
-    (root / "184_foreign.json").write_text(
-        json.dumps({"id": "260928-MIK-L184", "slug": "184_foreign"})
-    )
-
-    for suffix, receipt_id in ((".json", "task-document"), (".md", "task-document-md")):
-        name = f"{stem}{suffix}"
-        captured = capture_supplemental(
-            root,
-            name,
-            receipt_id=receipt_id,
-            capture_identity="cap-1",
-            establishes="the leaf's own document",
-            producer=f"leaf {LEAF}",
-            leaf_document=stem,
-        )
-        assert captured.read_state == "present"
-        assert captured.digest is not None
-
-        unchanged = reread_supplemental(
-            captured,
-            task_root=root,
-            receipt_id=f"{receipt_id}-r2",
-            capture_identity="cap-2",
-        )
-        assert unchanged.read_state == "present"
-        assert unchanged.digest == captured.digest
-
-        (root / name).write_text((root / name).read_text() + "\nupdated\n")
-        changed = reread_supplemental(
-            captured,
-            task_root=root,
-            receipt_id=f"{receipt_id}-r3",
-            capture_identity="cap-3",
-        )
-        assert changed.read_state == "changed"
-        assert changed.digest is not None and changed.digest != captured.digest
-        assert captured.digest is not None
-
-        (root / name).unlink()
-        missing = reread_supplemental(
-            changed,
-            task_root=root,
-            receipt_id=f"{receipt_id}-r4",
-            capture_identity="cap-4",
-        )
-        assert missing.read_state == "unavailable"
-        assert missing.digest is None
-        assert changed.digest is not None
-
-    foreign = capture_supplemental(
-        root,
-        "184_foreign.json",
-        receipt_id="foreign-doc",
-        capture_identity="cap-1",
-        establishes="another leaf",
-        producer=f"leaf {LEAF}",
-        leaf_document=stem,
-    )
-    assert foreign.read_state == "unavailable"
-    foreign_reread = reread_supplemental(
-        foreign,
-        task_root=root,
-        receipt_id="foreign-doc-r2",
-        capture_identity="cap-2",
-        leaf_document=stem,
-    )
-    assert foreign_reread.read_state == "unavailable"
-    assert foreign_reread.digest is None
-
-
-def test_f06_a_lost_source_keeps_the_earlier_receipts_digest(tmp_path: Path) -> None:
-    root = _task_root(tmp_path)
-    receipt = capture_supplemental(
-        root,
-        "notes/ruling.md"
-        if (root / "notes" / "ruling.md").exists()
-        else "requirements/MIK-R102.md",
-        receipt_id="sup-1",
-        capture_identity="capture-1",
-        establishes="a ruling",
-    )
-    (root / receipt.canonical_source).unlink()
-    lost = reread_supplemental(
-        receipt, task_root=root, receipt_id="sup-2", capture_identity="capture-2"
-    )
-    assert lost.read_state == "unavailable"
-    assert lost.digest is None
-    assert receipt.digest is not None
 
 
 # --- F07: authority earned by a typed basis ------------------------------------------------------
@@ -947,39 +779,23 @@ def test_f08_an_unselected_scope_stays_stated_and_the_state_is_honest(world) -> 
 # --- F16: measured evidence at two sizes --------------------------------------------------------
 
 
-def test_f16_two_sizes_measure_the_read_bounds(world, tmp_path: Path) -> None:
-    code = world["code"]
-    measured: list[tuple[int, int, int]] = []
-    for size in (1, 200):
-        body = "".join(f"line {number}\n" for number in range(size)).encode()
-        tree = write_files_tree(code, {"sized.txt": body})
-        record = world["record"].model_copy(
-            update={"code_candidate": ReviewTreeSide(repository=str(code), tree=tree)}
-        )
-        receipt = read_bound_source(record, "code-candidate", "sized.txt")
-        assert receipt.state == "present"
-        assert receipt.page == 0
-        assert receipt.examined_bytes == len(body)
-        assert receipt.returned_bytes == len(body.rstrip(b"\n"))
-        measured.append((size, receipt.examined_bytes, receipt.returned_bytes))
-    assert measured[0][1] < measured[1][1]
-    assert all(examined - returned <= 1 for _size, examined, returned in measured)
+def test_f16_no_page_or_ceiling_cuts_a_whole_object_read(world) -> None:
+    """MIK-R211 v4 rule 3: past every old page bound and whole-object ceiling, the read is whole."""
 
-
-def test_f16_the_page_bound_is_refused_beyond_its_admitted_pages(world, tmp_path: Path) -> None:
     code = world["code"]
-    body = "".join(f"line {number}\n" for number in range(MAX_PAGE_LINES * 3)).encode()
+    body = b"".join(f"line {number:07d}\n".encode() for number in range(200_000))
     tree = write_files_tree(code, {"pages.txt": body})
     record = world["record"].model_copy(
         update={"code_candidate": ReviewTreeSide(repository=str(code), tree=tree)}
     )
-    first = read_bound_source(record, "code-candidate", "pages.txt", start_line=1)
-    assert first.state in {"present", "truncated"}
-    beyond = read_bound_source(
-        record, "code-candidate", "pages.txt", start_line=1, page=DEFAULT_READ_LIMITS.pages_per_read
-    )
-    assert beyond.state == "refused"
-    assert beyond.refusal_code == "read-beyond-limit"
+    whole = read_whole_source(record, "code-candidate", "pages.txt")
+    assert whole.state == "present", whole.detail
+    assert whole.returned_bytes == len(body)
+    assert (whole.text or "").encode() == body
+    assert whole.continuation is None and whole.limit is None
+    paged = read_bound_source(record, "code-candidate", "pages.txt", start_line=1, end_line=1_200)
+    assert paged.state == "present", paged.detail
+    assert paged.returned_range == (1, 1_200)
 
 
 # --- round 2: the remaining fixed-list properties ------------------------------------------------
@@ -1040,116 +856,6 @@ def _record_with(world, code_candidate: str):
     )
 
 
-def test_f03_r2_a_byte_capped_prefix_of_a_long_line_is_truncated(world) -> None:
-    code = world["code"]
-    line = "x" * 200 + "\n"
-    tree = write_files_tree(code, {"one-line.txt": line.encode()})
-    record = world["record"].model_copy(
-        update={"code_candidate": ReviewTreeSide(repository=str(code), tree=tree)}
-    )
-    tight = DEFAULT_READ_LIMITS.model_copy(update={"bytes_per_read": 16})
-    first = read_bound_source(
-        record, "code-candidate", "one-line.txt", start_line=1, end_line=1, limits=tight
-    )
-    assert first.state == "truncated"
-    assert first.limit == "bytes_per_read"
-    assert first.remaining_state == "unknown"
-    assert first.continuation is not None
-
-    collected = first.text or ""
-    offset, resume_line = _continuation(first.continuation)
-    for _attempt in range(40):
-        moved = read_bound_source(
-            record,
-            "code-candidate",
-            "one-line.txt",
-            start_line=resume_line,
-            end_line=resume_line,
-            start_byte=offset,
-            resume_line=resume_line,
-            limits=tight,
-        )
-        collected += moved.text or ""
-        if moved.state == "present":
-            break
-        assert moved.state == "truncated", moved.state
-        assert moved.continuation is not None
-        offset, resume_line = _continuation(moved.continuation)
-    assert collected == line.rstrip("\n")
-
-
-def test_f04_r2_a_resumed_read_reports_the_prefix_it_consumed(world) -> None:
-    code = world["code"]
-    body = "".join(f"line {number}\n" for number in range(1, 40_000)).encode()
-    tree = write_files_tree(code, {"stream.txt": body})
-    record = world["record"].model_copy(
-        update={"code_candidate": ReviewTreeSide(repository=str(code), tree=tree)}
-    )
-    tight = DEFAULT_READ_LIMITS.model_copy(update={"bytes_per_read": 16})
-    mounted = read_bound_source(
-        record,
-        "code-candidate",
-        "stream.txt",
-        start_line=1,
-        start_byte=300_000,
-        resume_line=30_000,
-        limits=tight,
-    )
-    assert mounted.state in {"present", "truncated"}
-    assert mounted.examined_bytes >= 300_000
-
-
-def test_f04_r2_the_reverse_roster_stops_at_the_edge_budget(world) -> None:
-    tight = DEFAULT_READ_LIMITS.model_copy(
-        update={"records_per_collection": 1, "relationship_depth": 1}
-    )
-    relations = follow(
-        world["record"],
-        "memory-candidate",
-        f"knowledge/families/{FAMILY}-evidence.json",
-        limits=tight,
-    )
-    assert relations.state == "records"
-    assert len(relations.edges) == 1
-    assert relations.continuation is not None
-    assert relations.examined_bytes > 0
-
-
-def test_f05_r2_a_continuation_consumes_the_next_edges(world) -> None:
-    tight = DEFAULT_READ_LIMITS.model_copy(
-        update={"records_per_collection": 1, "relationship_depth": 1}
-    )
-    first = follow(
-        world["record"],
-        "memory-candidate",
-        f"knowledge/families/{FAMILY}-evidence.json",
-        limits=tight,
-    )
-    second = follow(
-        world["record"],
-        "memory-candidate",
-        f"knowledge/families/{FAMILY}-evidence.json",
-        limits=tight,
-        continuation=first.continuation,
-    )
-    assert second.state == "records"
-    assert first.edges[0].record_id != second.edges[0].record_id
-    assert second.edges[0].lookup_state == "resolved"
-    assert second.edges[0].target_revision == 1
-    assert second.edges[0].target_origin_leaf == LEAF
-
-
-def test_f06_r2_the_bound_is_the_bytes_read_not_a_prior_stat(tmp_path: Path) -> None:
-    root = _task_root(tmp_path)
-    source = root / "requirements" / "grow.md"
-    source.write_bytes(b"x" * MAX_SUPPLEMENTAL_BYTES)
-    assert admit_supplemental(root, "requirements/grow.md").state == "present"
-    source.write_bytes(b"x" * (MAX_SUPPLEMENTAL_BYTES + 1))
-    refused = admit_supplemental(root, "requirements/grow.md")
-    assert refused.refusal_code == "read-beyond-limit"
-    assert refused.byte_size is not None and refused.byte_size > MAX_SUPPLEMENTAL_BYTES
-
-
 def test_f07_r2_an_absent_item_earns_no_authority(world) -> None:
     prepared = prepare_evidence(
         world["trees"],
@@ -1197,84 +903,6 @@ def test_f08_r2_an_address_is_never_resolved_for_a_foreign_comparison(world) -> 
     assert "different identity" in refused.detail
     resolved = consume_address(world["record"], prepared, address.address_id)
     assert resolved.state == "resolved"
-
-
-def test_f03_r4_a_literal_continuation_crosses_a_separator_and_a_long_line(world) -> None:
-    payload = b"one\n" + b"x" * 100 + b"\nlast"
-    tree = write_files_tree(world["code"], {"mixed.txt": payload})
-    record = _record_with(world, tree)
-    limits = DEFAULT_READ_LIMITS.model_copy(update={"bytes_per_read": 16, "pages_per_read": 20})
-    arguments = {"start_line": 1, "end_line": 2}
-    offsets = []
-    pieces = []
-    for _ in range(12):
-        receipt = read_bound_source(
-            record, "code-candidate", "mixed.txt", limits=limits, **arguments
-        )
-        pieces.append(receipt.text or "")
-        if receipt.state == "present":
-            break
-        assert receipt.state == "truncated"
-        assert receipt.continuation is not None
-        arguments = {
-            key: int(value)
-            for key, value in (part.split("=", 1) for part in receipt.continuation.split(";"))
-        }
-        offsets.append(arguments["start_byte"])
-    else:
-        pytest.fail("the literal continuation stalled")
-    assert offsets == sorted(set(offsets))
-    assert pieces[0] == "one"
-    assert "".join(pieces[1:]) == "x" * 100
-
-
-def test_f04_r4_resume_work_is_bounded_before_streaming(world, monkeypatch) -> None:
-    tree = write_files_tree(world["code"], {"wide.txt": b"x" * (reader.MAX_SCAN_BYTES + 100)})
-    record = _record_with(world, tree)
-    actual = []
-    original = reader._Blob._read
-
-    def measured(blob, length):
-        payload = original(blob, length)
-        actual.append(len(payload))
-        return payload
-
-    monkeypatch.setattr(reader._Blob, "_read", measured)
-    for offset in (reader.MAX_SCAN_BYTES + 1, 2 * reader.MAX_SCAN_BYTES):
-        receipt = read_bound_source(
-            record,
-            "code-candidate",
-            "wide.txt",
-            start_byte=offset,
-            limits=DEFAULT_READ_LIMITS.model_copy(update={"bytes_per_read": 16}),
-        )
-        assert receipt.state == "refused"
-        assert receipt.refusal_code == "read-beyond-limit"
-    assert sum(actual) == 0
-
-
-def test_f05_r4_paging_covers_the_same_owned_nested_and_reverse_roster(world) -> None:
-    for path in (
-        f"knowledge/invariants/{INVARIANT}-packet.json",
-        f"knowledge/families/{FAMILY}-evidence.json",
-    ):
-        whole = follow(world["record"], "memory-candidate", path)
-        limits = DEFAULT_READ_LIMITS.model_copy(
-            update={"records_per_collection": 1, "pages_per_read": 20}
-        )
-        collected = []
-        cursor = None
-        for _ in range(20):
-            page = follow(
-                world["record"], "memory-candidate", path, limits=limits, continuation=cursor
-            )
-            collected.extend(page.edges)
-            cursor = page.continuation
-            if cursor is None:
-                break
-        assert collected == list(whole.edges)
-        if path.startswith("knowledge/invariants/"):
-            assert any(edge.direction == "recorded-by" for edge in collected)
 
 
 def test_f07_r4_a_claim_can_only_cite_the_inspected_range(world) -> None:

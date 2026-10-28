@@ -1,7 +1,7 @@
 """The master-to-architect record: which hosted architect seat owns one master (MIK-R189 rule 7).
 
-The record is the one address an explainer's report resolves before it is delivered, and the one
-identity ``explainer_control``'s ``update`` and ``retire`` are accepted from (MIK-R186 rule 6). It
+The record is the one identity ``explainer_control``'s ``update`` and ``retire`` are accepted from
+(MIK-R186 rule 6); the explainer reports with ``role_message`` like every agent (MIK-R211 v5). It
 lives at ``<coordination>/notes/reports/master-architect/<repository>/<master folder>.json`` and
 holds three facts: the architect agent id, the act that wrote it, and the time.
 
@@ -19,13 +19,13 @@ anything: a missing or unreadable record is simply a master no seat is named for
 
 from __future__ import annotations
 
-import hashlib
+import copy
 import json
 import os
 import re
 import tempfile
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -40,10 +40,10 @@ from agents_remember.kernel.primitives.control_vocabulary import (
     EXECUTIONS_DIRECTORY,
     HELD_STORE_SCHEMA,
     PROVIDER_LIMIT_REASON,
-    REPORT_LOG_NAME,
     SEND_OUTCOME_UNKNOWN,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.witnessed_memo import WitnessedMemo
 from agents_remember.observer.provider_limits import limited_until, read_provider_limits
 from agents_remember.serving.paseo.provider_limits import provider_limits_path
 
@@ -57,30 +57,20 @@ __all__ = [
     "MANAGER_START",
     "MAX_AGENT_ID",
     "MAX_MASTER_ARCHITECT_BYTES",
-    "MAX_REPORT_LOG_BYTES",
     "PROVIDER_LIMIT_REASON",
-    "REPORT_LOG_NAME",
     "SEND_OUTCOME_UNKNOWN",
     "ExplainerControlHostPorts",
     "HeldMessage",
     "HeldMessageCommitted",
     "HeldStoreFull",
-    "MasterReportTransition",
-    "append_master_report_transition",
     "architect_receipt",
     "bind_explainer_control_host",
-    "explainer_control_bridge_send",
     "explainer_control_host",
-    "extract_report_file_path",
-    "foreign_logged_report_ids",
     "hold_message",
     "leaf_execution_receipts",
-    "mark_report_undelivered",
     "master_architect_path",
-    "master_report_log_path",
     "provider_limit_hold",
     "read_execution_receipt",
-    "read_master_report_states",
     "read_record",
     "read_record_architect",
     "store_path_for",
@@ -100,13 +90,10 @@ ACTS = (MANAGER_START, CLAIM)
 MAX_AGENT_ID = 128
 #: One record is three short facts; anything larger is not one this module wrote.
 MAX_MASTER_ARCHITECT_BYTES = 4096
-#: One report log's read bound (MIK-R189 rule 7).
-MAX_REPORT_LOG_BYTES = 4 * 1024 * 1024
 
 RECORD_DIRECTORY = ("notes", "reports", "master-architect")
 DEVELOPER_MESSAGES_DIRECTORY = ("notes", "reports", "developer-messages")
 _SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
-_MESSAGE_FILE_LINE = re.compile(r"^Message file:\s+(.+?)\s+\(SHA-256\s+[0-9a-fA-F]{64}\)\s*$")
 
 
 def master_architect_path(coordination_root: Path, repository_id: str, master: str) -> Path:
@@ -194,188 +181,9 @@ def _agent_id(value: str) -> str:
     return cleaned
 
 
-def _safe_folder_segment(value: str) -> str:
-    return _SAFE_SEGMENT.sub("_", value).strip("._") or "unnamed"
-
-
-def master_report_log_path(coordination_root: Path, repository_id: str, master: str) -> Path:
-    """The report log of one master under ``developer-messages/<repository>/<master>/``."""
-
-    _segment(repository_id, "repository")
-    _segment(master, "master")
-    return (
-        coordination_root.joinpath(*DEVELOPER_MESSAGES_DIRECTORY)
-        / _safe_folder_segment(repository_id)
-        / _safe_folder_segment(master)
-        / REPORT_LOG_NAME
-    )
-
-
-def _read_report_log_file(path: Path) -> list[dict[str, Any]]:
-    try:
-        if not path.is_file() or path.is_symlink():
-            return []
-        if path.stat().st_size > MAX_REPORT_LOG_BYTES:
-            return []
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return []
-    rows: list[dict[str, Any]] = []
-    for line in text.splitlines():
-        if not line.strip():
-            continue
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict) and isinstance(parsed.get("reportId"), str):
-            rows.append({**parsed, "_logPath": path.as_posix()})
-    return rows
-
-
-def _candidate_master_log_paths(
-    coordination_root: Path, repository_id: str, master: str
-) -> list[Path]:
-    canonical = master_report_log_path(coordination_root, repository_id, master)
-    raw = (
-        coordination_root.joinpath(*DEVELOPER_MESSAGES_DIRECTORY)
-        / _segment(repository_id, "repository")
-        / _segment(master, "master")
-        / REPORT_LOG_NAME
-    )
-    paths = [canonical]
-    if raw != canonical:
-        paths.append(raw)
-    task_dir = (
-        coordination_root
-        / "tasks"
-        / _segment(repository_id, "repository")
-        / _segment(master, "master")
-    )
-    if task_dir.is_dir() and not task_dir.is_symlink():
-        for extra in sorted(task_dir.glob(f"**/{REPORT_LOG_NAME}")):
-            if extra not in paths and not extra.is_symlink():
-                paths.append(extra)
-    return paths
-
-
-def read_master_report_states(
-    coordination_root: Path, repository_id: str, master: str
-) -> dict[str, dict[str, Any]]:
-    """Latest logged state per ``reportId`` for one master (MIK-R189 rule 7)."""
-
-    latest: dict[str, dict[str, Any]] = {}
-    for path in _candidate_master_log_paths(coordination_root, repository_id, master):
-        for row in _read_report_log_file(path):
-            latest[str(row["reportId"])] = row
-    return latest
-
-
-def foreign_logged_report_ids(coordination_root: Path, repository_id: str, master: str) -> set[str]:
-    """Report ids logged under any other repository or master under ``developer-messages/``."""
-
-    own_paths = {
-        path.resolve()
-        for path in _candidate_master_log_paths(coordination_root, repository_id, master)
-    }
-    base = coordination_root.joinpath(*DEVELOPER_MESSAGES_DIRECTORY)
-    if not base.is_dir() or base.is_symlink():
-        return set()
-    foreign: set[str] = set()
-    for log_path in sorted(base.glob(f"*/*/{REPORT_LOG_NAME}")):
-        if log_path.is_symlink():
-            continue
-        try:
-            if log_path.resolve() in own_paths:
-                continue
-        except OSError:
-            continue
-        for row in _read_report_log_file(log_path):
-            foreign.add(str(row["reportId"]))
-    return foreign
-
-
-def extract_report_file_path(
-    row: Mapping[str, Any], logged: Mapping[str, Any] | None = None
-) -> Path | None:
-    """The report message file path from durable report state or the delivered text's footer."""
-
-    if logged is not None:
-        logged_file = logged.get("file")
-        if isinstance(logged_file, str) and logged_file.strip():
-            return Path(logged_file.strip())
-    row_file = row.get("file")
-    if isinstance(row_file, str) and row_file.strip():
-        return Path(row_file.strip())
-    text = str(row.get("text") or "")
-    for line in reversed(text.splitlines()):
-        matched = _MESSAGE_FILE_LINE.match(line.strip())
-        if matched is not None:
-            return Path(matched.group(1).strip())
-    return None
-
-
-@dataclass(frozen=True)
-class MasterReportTransition:
-    """One report state transition line for ``reports.jsonl`` (MIK-R189 rule 7)."""
-
-    report_id: str
-    state: str
-    at: str
-    logged: Mapping[str, Any] | None = None
-    row: Mapping[str, Any] | None = None
-    architect: str | None = None
-    file_path: Path | None = None
-    reason: str | None = None
-    refusal: str | None = None
-    limited_until: str | None = None
-
-
-def append_master_report_transition(
-    log_path: Path, transition: MasterReportTransition
-) -> dict[str, Any]:
-    """Append one report state transition line to ``reports.jsonl`` under its lock."""
-
-    source = transition.logged or {}
-    raw_text = str((transition.row or {}).get("text") or "")
-    message_id = str(
-        source.get("messageId") or (transition.row or {}).get("messageId") or transition.report_id
-    )
-    digest = str(source.get("sha256") or hashlib.sha256(raw_text.encode("utf-8")).hexdigest())
-    resolved_file = transition.file_path or extract_report_file_path(
-        transition.row or {}, transition.logged
-    )
-    entry: dict[str, Any] = {
-        "messageId": message_id,
-        "reportId": transition.report_id,
-        "sha256": digest,
-        "state": transition.state,
-        "at": transition.at,
-    }
-    optional = {
-        "file": str(resolved_file) if resolved_file is not None else None,
-        "architect": transition.architect,
-        "reason": transition.reason,
-        "refusal": transition.refusal,
-        "limitedUntil": transition.limited_until,
-    }
-    entry.update({key: value for key, value in optional.items() if value is not None})
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    encoded = json.dumps(entry, sort_keys=True) + "\n"
-    with (
-        exclusive_file_lock(log_path, "explainer report log"),
-        log_path.open("a", encoding="utf-8") as stream,
-    ):
-        stream.write(encoded)
-        stream.flush()
-        os.fsync(stream.fileno())
-    return entry
-
-
 # -- report custody, limit hold, held-store file operations, and host ports ------------------
 
 MAX_HELD_PER_RECIPIENT = 20
-_UNDELIVERED_SUFFIX = ".undelivered.md"
 
 
 class HeldStoreFull(ValueError):
@@ -421,14 +229,6 @@ def explainer_control_host(config: McpRuntimeConfig) -> ExplainerHost | None:
     if not _HOST_PORTS:
         return None
     return _HOST_PORTS[0].host_factory(config)
-
-
-def explainer_control_bridge_send(
-    config: McpRuntimeConfig, command: str, payload: dict[str, object]
-) -> dict[str, object]:
-    if not _HOST_PORTS:
-        raise RuntimeError("no Paseo bridge sender is bound in this process")
-    return _HOST_PORTS[0].bridge_send(config, command, payload)
 
 
 def provider_limit_hold(
@@ -507,7 +307,7 @@ def leaf_execution_receipts(master_root: Path, leaf_id: str) -> tuple[dict[str, 
         if path.is_symlink() or path.parent != folder or "message-bindings" in path.parts:
             continue
         try:
-            receipt = read_execution_receipt(path)
+            receipt = _witnessed_receipt(path)
         except (OSError, ValueError):
             continue
         selection = receipt.get("selection")
@@ -517,27 +317,46 @@ def leaf_execution_receipts(master_root: Path, leaf_id: str) -> tuple[dict[str, 
             ref_path.rsplit("/", 1)[-1].removesuffix(".json") if isinstance(ref_path, str) else ""
         )
         if leaf_id in {named_leaf, path.stem}:
-            found.append(receipt)
+            found.append(copy.deepcopy(receipt))
     return tuple(found)
 
 
-def mark_report_undelivered(path: Path, *, refusal: str, refusal_detail: str) -> Path:
-    """Keep a refused report's file under a name ending in ``.undelivered.md``."""
+type _ReceiptWitness = tuple[int, int, int, int, int, int]
 
-    target = path.with_name(path.stem + _UNDELIVERED_SUFFIX)
-    counter = 2
-    while target.exists():
-        target = path.with_name(f"{path.stem}-{counter}{_UNDELIVERED_SUFFIX}")
-        counter += 1
+#: The last parse per receipt file, with the identity it was read under. A parse is kept only
+#: when the identity was the same before and after its read; callers receive copies. A master
+#: folder holds about 400 receipts and the coordination root about 800 in all, so the bound
+#: sits well above that working set; an evicted receipt is simply parsed again.
+_parsed_receipts: WitnessedMemo[Path, _ReceiptWitness, dict[str, Any]] = WitnessedMemo(8192)
+
+
+def _receipt_witness(path: Path) -> _ReceiptWitness:
+    """Device, inode, mode, size, mtime and ctime; ctime moves on a restored-mtime rewrite."""
+    info = os.lstat(path)
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _witnessed_receipt(path: Path) -> dict[str, Any]:
+    """One receipt, parsed again only when the file's full identity moved."""
     try:
-        with open(path, "a", encoding="utf-8") as stream:
-            stream.write(f"\ndelivery: refused as {refusal}\nrefusalDetail: {refusal_detail}\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(path, target)
-        return target
-    except OSError:
-        return path
+        before = _receipt_witness(path)
+    except FileNotFoundError:
+        _parsed_receipts.discard(path)
+        raise
+    kept = _parsed_receipts.get(path, before)
+    if kept is not None:
+        return kept[0]
+    receipt = read_execution_receipt(path)
+    if _receipt_witness(path) == before:
+        _parsed_receipts.put(path, before, receipt)
+    return receipt
 
 
 def store_path_for(workspace_path: str | Path, agent_id: str) -> Path:

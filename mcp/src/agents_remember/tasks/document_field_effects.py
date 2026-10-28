@@ -550,8 +550,14 @@ def validate_task_document_field_effects(
     *,
     root_model: type[BaseModel] = TaskDocument,
 ) -> None:
-    """Refuse any unclassified, stale, or empty task-document field taxonomy entry."""
+    """Refuse any unclassified, stale, or empty task-document field taxonomy entry.
 
+    The schema classes and the taxonomy are fixed when the module loads, so a root that
+    validated once is not walked again; a refusal is never remembered and repeats.
+    """
+
+    if root_model in _validated_roots:
+        return
     for model in task_document_schema_models(root_model):
         classifications = _classifications_for(model)
         if classifications is None:
@@ -562,6 +568,10 @@ def validate_task_document_field_effects(
             raise TaskDocumentFieldEffectTaxonomyError(
                 f"invalid field-effect taxonomy for {_model_name(model)}: {detail}"
             )
+    _validated_roots.add(root_model)
+
+
+_validated_roots: set[type[BaseModel]] = set()
 
 
 def _taxonomy_difference(

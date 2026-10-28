@@ -14,10 +14,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.recorded_reads import (
+    observed_entries,
+    observed_json_files,
+    observed_path_exists,
+    observed_text,
+)
 from agents_remember.models.knowledge.review_frame import (
     PLANNED_OWNER,
     FrameBinding,
     FrameManifest,
+    coverage_summary,
 )
 from agents_remember.models.knowledge.review_trees import (
     ReviewTreeComparisonRecord,
@@ -219,11 +226,12 @@ def serialize_frame_binding(binding: FrameBinding | None) -> dict[str, Any] | No
 
 
 def _find_leaf_document(task_root: Path, leaf_id: str) -> tuple[str, dict[str, Any]] | None:
-    if not task_root.is_dir():
+    # The listing and every document read before the match are inputs of the answer (D570).
+    if not observed_path_exists(task_root) or not task_root.is_dir():
         return None
-    for path in sorted(task_root.glob("*.json")):
+    for path in observed_json_files(task_root):
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = json.loads(observed_text(path))
         except (OSError, ValueError):
             continue
         if isinstance(payload, dict) and payload.get("id") == leaf_id:
@@ -263,17 +271,17 @@ def agreed_revision_number(task_root: Path, leaf_id: str) -> int | None:
 
 def retained_revision_numbers(frame_dir: Path) -> list[int]:
     revisions_dir = frame_dir / "revisions"
-    if not revisions_dir.is_dir():
-        return []
     try:
-        children = list(revisions_dir.iterdir())
+        children = observed_entries(revisions_dir)  # the listing is an input (D570)
     except OSError:
         return []
     return sorted(
         (
-            int(child.name)
-            for child in children
-            if child.is_dir() and not child.name.startswith(".") and child.name.isdigit()
+            int(name)
+            for name, kind in children
+            if (kind == "directory" or (kind == "link" and (revisions_dir / name).is_dir()))
+            and not name.startswith(".")
+            and name.isdigit()
         ),
         reverse=True,
     )
@@ -339,6 +347,7 @@ def revision_row_of(manifest: FrameManifest, *, agreed: int | None) -> dict[str,
         "at": manifest.created_at,
         "kind": revision_kind_of(manifest),
         "focus": manifest.focus,
+        "coverage": coverage_summary(manifest.interaction_coverage),
         "agreed": number == agreed,
         "pinned": number == agreed,
     }

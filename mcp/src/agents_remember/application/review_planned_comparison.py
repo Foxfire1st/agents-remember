@@ -7,7 +7,7 @@ and binds the ``application``-tier adapters into :mod:`agents_remember.serving.e
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -34,14 +34,15 @@ from agents_remember.application.review_tree_comparison import (
     _code_sides,
     _live_draft,
     _missing_tree,
-    comparison_records,
+    latest_record,
     memory_converted,
     reopen_review_trees,
 )
 from agents_remember.models.knowledge.review_evidence import SupplementalReceipt
 from agents_remember.models.knowledge.review_frame import MAX_TASK_BYTES
+from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
 from agents_remember.serving.explainer import ExplainerApplicationPorts
-from agents_remember.serving.explainer_watcher import WatcherApplicationPorts
+from agents_remember.serving.explainer_watcher import LeafSelection, WatcherApplicationPorts
 from agents_remember.tasks.planned_comparison import (
     PLANNED_RECORDED_AT,
     agreed_revision_number,
@@ -143,7 +144,7 @@ def task_frames_total(task_root: Path, leaf_id: str) -> dict[str, Any]:
                     raise FrameRefused(
                         f"the task store path {child} is not physically inside its area"
                     )
-                held = usage(child)
+                held = usage(child, include_frames=False)
                 if held.get("held"):
                     raise FrameRefused(str(held["held"][0].get("reason") or "unreadable frame"))
                 used += int(held.get("bytes") or 0)
@@ -152,23 +153,35 @@ def task_frames_total(task_root: Path, leaf_id: str) -> dict[str, Any]:
     return {"state": "ok", "used": used, "bytes": used, "limit": MAX_TASK_BYTES}
 
 
-def watcher_application_ports() -> WatcherApplicationPorts:
+def watcher_application_ports(
+    turn_end_captured: Callable[[LeafSelection, ReviewTreeComparisonRecord], None] | None = None,
+    coverage: Callable[[Mapping[tuple[str, str, str], frozenset[str]]], None] | None = None,
+) -> WatcherApplicationPorts:
     """The application-tier comparison and lane ports the moved watcher calls."""
 
     return WatcherApplicationPorts(
         recorded_leaf_contract=recorded_leaf_contract,
-        comparison_records=comparison_records,
+        latest_comparison=latest_record,
         memory_converted=memory_converted,
         draft_live_comparison=_live_draft,
         open_tree_lane=open_tree_lane,
         execution_receipts=leaf_execution_receipts,
         capture_errors=(TreeSideUnreadable,),
         lane_errors=(CodeReadError, LaneReadError),
+        turn_end_captured=turn_end_captured,
+        coverage=coverage,
     )
 
 
-def explainer_application_ports() -> ExplainerApplicationPorts:
-    """The application-tier frame, evidence and comparison ports the explainer routes call."""
+def explainer_application_ports(
+    turn_end_captured: Callable[[LeafSelection, ReviewTreeComparisonRecord], None] | None = None,
+    coverage: Callable[[Mapping[tuple[str, str, str], frozenset[str]]], None] | None = None,
+) -> ExplainerApplicationPorts:
+    """The application-tier frame, evidence and comparison ports the explainer routes call.
+
+    ``turn_end_captured`` is handed each capture the moved watcher makes at a turn end;
+    ``coverage`` the leaves the moved watcher tracks, with why, for the worktree watch.
+    """
 
     return ExplainerApplicationPorts(
         recorded_leaf_contract=recorded_leaf_contract,
@@ -183,5 +196,5 @@ def explainer_application_ports() -> ExplainerApplicationPorts:
         code_sides=_code_sides,
         missing_tree=_missing_tree,
         reopen_review_trees=reopen_review_trees,
-        watcher=watcher_application_ports(),
+        watcher=watcher_application_ports(turn_end_captured, coverage),
     )
