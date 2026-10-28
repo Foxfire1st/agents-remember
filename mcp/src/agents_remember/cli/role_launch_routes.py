@@ -123,6 +123,11 @@ from agents_remember.models.role_launcher import (
     RoleResultRequest,
     RoleSelection,
 )
+from agents_remember.observer.acp_providers import (
+    acp_launch_instruction,
+    acp_providers_path,
+    read_acp_providers,
+)
 from agents_remember.serving.paseo.paseo_daemon_config import provider_denied_tools
 from agents_remember.tasks.document_refs import TaskDocumentRefError
 
@@ -624,6 +629,13 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         # First work carried with the start (MIK-R100 rule 3): the seat opens at once
         # with its handover and that message.
         prompt = f"{prompt}\n{start.opening_message}"
+    # MIK-R216 rule 3: a seat on an ACP connection is told at launch how to wait for its own
+    # helpers, and the sentence joins the message that is stored below, so the saved first
+    # message already carries it. Nothing else about the launch changes: the capsule, the
+    # artifact line and the retry check read the same prompt they always did.
+    instruction, acp_instruction = _acp_launch_instruction(start.config, provider)
+    if instruction is not None:
+        prompt = f"{prompt}\n\n{instruction}"
     # The message's artifact and the complete hand-over are written before the message that
     # names them is sent; both targets are checked first, so a refusal creates neither.
     artifact, handover_file = publish_handover_files(
@@ -679,6 +691,9 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         **missing_copies_receipt_warning(
             prepared.get("taskDocumentFiles"), session_options.get("stepUpWarning")
         ),
+        # MIK-R216 rule 3: the launch's own answer about this seat's provider, beside the
+        # warnings — what was added, or that nothing was and why.
+        "acpInstruction": acp_instruction,
         "choices": session_options.get("choices", {}),
         "capsuleOperation": prepared["capsuleOperation"],
         "taskDocumentDigest": prepared["taskDocumentDigest"],
@@ -798,6 +813,21 @@ def _host_denied_tools(config: McpRuntimeConfig, provider: str) -> tuple[str, ..
 
     runtime = config.paseo_runtime
     return provider_denied_tools(runtime.home, provider) if runtime is not None else ()
+
+
+def _acp_launch_instruction(
+    config: McpRuntimeConfig, provider: str
+) -> tuple[str | None, dict[str, Any]]:
+    """The wait sentence this seat's launch adds, and the receipt field that records the answer.
+
+    MIK-R216 rule 3: the plugin's own read of its installation decides. No configured runtime is
+    the same answer as no file — nothing is added, and the receipt says the file was unreadable.
+    """
+
+    runtime = config.paseo_runtime
+    if runtime is None:
+        return acp_launch_instruction(None, provider)
+    return acp_launch_instruction(read_acp_providers(acp_providers_path(runtime.home)), provider)
 
 
 class LaunchLockBusy(HTTPException):

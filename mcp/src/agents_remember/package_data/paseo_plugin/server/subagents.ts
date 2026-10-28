@@ -74,6 +74,12 @@ type SubagentUpdate =
         readonly parentAgentId: string;
         readonly status: string;
         readonly createdAt: string;
+        /**
+         * MIK-R216 rule 1: the provider the helper itself runs on. An ACP client
+         * emits no such event, so seeing one is how a provider that does report
+         * its helpers is told apart from one that does not.
+         */
+        readonly provider?: string;
       };
     }
   | { readonly kind: "timeline"; readonly parentAgentId: string; readonly subagentId: string }
@@ -106,7 +112,17 @@ export function subagentUpdateOf(message: unknown): SubagentUpdate | null {
     const status = text(subagent["status"]);
     const createdAt = text(subagent["createdAt"]);
     if (id === null || parentAgentId === null || status === null || createdAt === null) return null;
-    return { kind: "upsert", subagent: { id, parentAgentId, status, createdAt } };
+    const provider = text(subagent["provider"]);
+    return {
+      kind: "upsert",
+      subagent: {
+        id,
+        parentAgentId,
+        status,
+        createdAt,
+        ...(provider === null ? {} : { provider }),
+      },
+    };
   }
   const parentAgentId = text(payload["parentAgentId"]);
   const subagentId = text(payload["subagentId"]);
@@ -127,9 +143,19 @@ export class SubagentTracker {
   private readonly watchers = new Map<string, Set<() => void>>();
   private total = 0;
   private readonly records: () => Readonly<Record<string, TurnEndedFacts>>;
+  /**
+   * MIK-R216 rule 1: told once per provider whose helper event arrives, whatever
+   * the helper's parent is. The plugin's ACP verdict for that provider is then
+   * false for the rest of the host's life.
+   */
+  private readonly onNativeProvider: (provider: string) => void;
 
-  constructor(records: () => Readonly<Record<string, TurnEndedFacts>>) {
+  constructor(
+    records: () => Readonly<Record<string, TurnEndedFacts>>,
+    onNativeProvider: (provider: string) => void = () => {},
+  ) {
     this.records = records;
+    this.onNativeProvider = onNativeProvider;
   }
 
   /** The seat's running providers now, as rule 4 and rule 5 read them. */
@@ -190,6 +216,16 @@ export class SubagentTracker {
     if (update === null) return false;
     // A timeline row is traffic of a subagent already counted; it never changes a count.
     if (update.kind === "timeline") return false;
+    // MIK-R216 rule 1: a provider that reports a helper at all is off the ACP
+    // list, whoever the helper's parent is — the parent is read only afterwards,
+    // and a parent outside the role record still proves the provider reports.
+    if (update.kind === "upsert" && update.subagent.provider !== undefined) {
+      try {
+        this.onNativeProvider(update.subagent.provider);
+      } catch {
+        // A verdict store that fails to write is not the host's traffic to fix.
+      }
+    }
     const records = this.records();
     if (update.kind === "upsert") {
       const parent = update.subagent.parentAgentId;

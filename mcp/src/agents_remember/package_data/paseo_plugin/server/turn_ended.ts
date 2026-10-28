@@ -40,6 +40,15 @@
  * as the host's mapper builds it. Every seat message, marked line, cancelled
  * wait and left-alone end is a row in the plugin's own file
  * (`<PASEO_HOME>/agents-remember/turn-ends.jsonl`, turned over at 2 MiB).
+ *
+ * MIK-R216 adds the third way to end a turn beside a hand-off and a block: a
+ * seat on an ACP connection whose last assistant message holds a line that
+ * starts `WAITING FOR SUBAGENTS:` has declared a helper wait. That end is not a
+ * silent end and adds none, gives the parent nothing without a hand-off, and
+ * arms the plugin's own check three minutes later; the check asks the seat for
+ * its helpers' progress through the same gates as the seat message, and the
+ * seat's next end without a declaration ends the wait. The declaration is a
+ * signal read from the turn's text, never a guess from a helper call.
  */
 
 import type { TurnEndLogRow } from "./turn_log.ts";
@@ -58,7 +67,7 @@ export interface TurnEndedFacts {
 }
 
 /** MIK-R183 rule 4/5: what the wait ends with — the seat's message, or the parent's marked line. */
-export type SeatWakeKind = "seat" | "parent-line";
+export type SeatWakeKind = "seat" | "parent-line" | "subagent-check";
 
 /** MIK-R183 rule 4: the wait owed to one seat, as a caller may observe it. */
 export interface SeatWakeWait {
@@ -119,6 +128,11 @@ export interface TurnEndedSignals {
   /** Rule 5: called once when the seat's count falls from above 0 to 0. */
   readonly watchSubagents?: (agentId: string, listener: () => void) => void;
   readonly unwatchSubagents?: (agentId: string, listener: () => void) => void;
+  /**
+   * MIK-R216 rule 1: whether the host's `acp-providers.json` puts this provider
+   * on an ACP connection. Absent, no seat is on ACP and the packet adds nothing.
+   */
+  readonly acpProvider?: (providerId: string) => boolean;
 }
 
 /** Rule 5: an end left alone for a running subagent, waiting for it to finish. */
@@ -126,6 +140,12 @@ export interface SubagentLeftAlone {
   readonly seat: string;
   readonly ordinal: number;
   readonly listener: () => void;
+}
+
+/** MIK-R216 rule 4: one seat's open declared wait, as its rows name it. */
+export interface DeclaredWait {
+  readonly ordinal: number;
+  readonly facts: TurnEndedFacts;
 }
 
 /** Rule 11: the one resume armed at a limited seat's `until` plus the lag. */
@@ -211,6 +231,12 @@ export interface TurnEndedTracker {
   readonly resumes: Map<string, PendingLimitResume>;
   /** MIK-R190 rule 12: the one timer per limited parent that has a held line. */
   readonly limitFlushes: Map<string, PendingLimitFlush>;
+  /**
+   * MIK-R216 rule 4: each seat whose last end declared a helper wait, with the
+   * ordinal its rows carry. The entry is the open wait: it is replaced by the
+   * seat's next declaration and dropped by its next end without one.
+   */
+  readonly declarations: Map<string, DeclaredWait>;
   /** The plugin's own file of rule 7 rows; a no-op when the caller supplies none. */
   readonly append: (row: TurnEndLogRow) => void;
 }
@@ -266,6 +292,13 @@ export const PROVIDER_LIMIT_RESUME_MS = 60_000;
  * message.
  */
 export const SEAT_WAKE_FIRST_LINE = "[ar-plugin] turn ended with no hand-off:";
+
+/** MIK-R216 rules 4 and 5: the declaration's keyword, and the check's own first line. */
+export const SUBAGENT_WAIT_KEYWORD = "WAITING FOR SUBAGENTS:";
+export const SUBAGENT_WAIT_FIRST_LINE = "[ar-plugin] subagent wait:";
+
+/** MIK-R216 rule 5: three minutes after each declared end, the plugin asks for progress. */
+export const SUBAGENT_WAIT_CHECK_MS = 180_000;
 
 /** MIK-R183 rule 1: the AR tool server, as a harness may spell it in a row's text. */
 const AR_SERVER_WORDS: readonly string[] = ["agents remember task"];
@@ -376,6 +409,7 @@ export function createTurnEndedTracker(
     subagentEnds: new Map(),
     resumes: new Map(),
     limitFlushes: new Map(),
+    declarations: new Map(),
     append,
   };
 }
@@ -885,7 +919,10 @@ export function isPluginWakeMessage(text: string | null): boolean {
   // The contract is the FIRST line: a message whose first line is blank and whose
   // second line carries the marker is not the plugin's own.
   const firstLine = (text.split(/\r?\n/, 1)[0] ?? "").replace(/^[ \t]+/, "");
-  return firstLine.startsWith(SEAT_WAKE_FIRST_LINE) && !/^From\s/.test(firstLine);
+  // MIK-R216 rule 5: the check is the plugin's own too, so the turn it opens does
+  // not reset the seat's run of silent ends.
+  const own = firstLine.startsWith(SEAT_WAKE_FIRST_LINE) || firstLine.startsWith(SUBAGENT_WAIT_FIRST_LINE);
+  return own && !/^From\s/.test(firstLine);
 }
 
 /**
@@ -1022,24 +1059,36 @@ export function notSilentReason(
  * of text or says it had none, says the turn ended with no hand-off, and asks it
  * to go on with its stage or to send what blocks it. It holds no document and
  * keeps the limit.
+ *
+ * MIK-R216 rule 6: on an ACP connection the last sentence names the declaration
+ * among the allowed ways to end a turn, and replaces today's helper sentence.
  */
 export function composeSeatWakeMessage(
   agentId: string,
   facts: TurnEndedFacts,
   lastText: TurnLastText,
   helperDispatched = false,
+  acpSeat = false,
 ): string {
   const said =
     lastText.kind === "text" ? lastText.text : lastText.kind === "empty" ? "no text" : "unreadable";
-  const message =
-    `${SEAT_WAKE_FIRST_LINE} ${facts.role} ${agentId} · ${facts.task}\n` +
-    `you last said: ${said}\n` +
-    "Go on with your stage in this turn, or send what blocks you to your parent with role_message." +
-    (helperDispatched
-      ? " On this host a helper's result does not come back as a message: collect what your helpers finished and go on."
-      : "");
+  const asked = acpSeat
+    ? ACP_SEAT_WAKE_SENTENCE
+    : "Go on with your stage in this turn, or send what blocks you to your parent with role_message." +
+      (helperDispatched
+        ? " On this host a helper's result does not come back as a message: collect what your helpers finished and go on."
+        : "");
+  const message = `${SEAT_WAKE_FIRST_LINE} ${facts.role} ${agentId} · ${facts.task}\n` + `you last said: ${said}\n` + asked;
   return message.length <= TURN_ENDED_LINE_LIMIT ? message : message.slice(0, TURN_ENDED_LINE_LIMIT);
 }
+
+/**
+ * MIK-R216 rule 6's last sentence, verbatim, for a seat on an ACP connection. It
+ * names the declaration beside the hand-off and the block, because a forgotten
+ * declaration is the case this packet exists for.
+ */
+export const ACP_SEAT_WAKE_SENTENCE =
+  'Go on with your stage in this turn, or send what blocks you to your parent with role_message. If you are waiting for helpers, end your turn with a line that starts "WAITING FOR SUBAGENTS:", followed by a progress report: each helper, what it does, its status, and what came back.';
 
 /** The parent's line for a silent end from the third on, marked with its count (rule 5). */
 export function markThirdSilentEnd(line: string, ordinal: number): string {
@@ -1216,6 +1265,54 @@ export function lastLineOfTurn(timeline: readonly unknown[]): TurnLastText {
   }
 }
 
+/**
+ * MIK-R216 rule 4: the text of the ended turn's last assistant message, or null
+ * when the turn holds none. The declaration is read from that one message, not
+ * from the last non-empty line of it, because the progress report follows the
+ * keyword and may run over several lines.
+ */
+export function lastAssistantText(timeline: readonly unknown[]): string | null {
+  if (!Array.isArray(timeline)) return null;
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const item = asRecord(timeline[index]);
+    if (item === null || item["type"] !== "assistant_message") continue;
+    const text = item["text"];
+    if (typeof text !== "string") continue;
+    return text;
+  }
+  return null;
+}
+
+/**
+ * MIK-R216 rule 4: every marker a line may carry before the keyword — leading
+ * spaces, the Markdown markers `*`, `_`, `>`, `-` and `#`, and the quoting marks
+ * `` ` `` and `"`, also where they wrap the keyword itself.
+ */
+const KEYWORD_LEAD = /^[ \t*_>#`"-]*/;
+
+/** MIK-R216 rule 4: the declaration is a signal in the turn's text. */
+export function declaresSubagentWait(timeline: readonly unknown[]): boolean {
+  const text = lastAssistantText(timeline);
+  if (text === null) return false;
+  return text.split(/\r?\n/).some((line) => KEYWORD_LEAD.test(line) && line.replace(KEYWORD_LEAD, "").startsWith(SUBAGENT_WAIT_KEYWORD));
+}
+
+/**
+ * MIK-R216 rule 5: the check the plugin sends the seat three minutes after a
+ * declared end. It names the seat as the seat message does, asks for each
+ * helper's state, and says how to declare again; the seat's answer stays in its
+ * own chat.
+ */
+export function composeSubagentWaitCheck(agentId: string, facts: TurnEndedFacts): string {
+  const role = facts.role === "" ? "" : facts.role[0].toUpperCase() + facts.role.slice(1);
+  return (
+    `${SUBAGENT_WAIT_FIRST_LINE} ${role} ${agentId} · ${facts.task}\n` +
+    "Report your helpers' progress here: each helper, what it does, its status, and what came back. " +
+    "Collect what finished. If helpers still run, end your turn with a new " +
+    `"${SUBAGENT_WAIT_KEYWORD}" line; otherwise go on with your stage.`
+  );
+}
+
 function ancestorsOf(agentId: string, tracker: TurnEndedTracker): Set<string> {
   const ancestors = new Set<string>();
   let current = tracker.parentOf.get(agentId);
@@ -1240,6 +1337,16 @@ function parentIsFree(parent: string, tracker: TurnEndedTracker): boolean {
 /** MIK-R190 rule 4/5: the seat's running provider subagents now, as the publication counts them. */
 function runningSubagentsNow(tracker: TurnEndedTracker, agentId: string): number {
   return tracker.signals.runningSubagents?.(agentId) ?? 0;
+}
+
+/**
+ * MIK-R216 rule 1: whether this seat's provider is on an ACP connection, as the
+ * plugin read the host's Paseo installation at its start and keeps it. All of
+ * this packet hangs on it: no verdict, no declaration and no check.
+ */
+function seatIsAcp(agent: TurnEndedAgent, tracker: TurnEndedTracker): boolean {
+  if (typeof agent.provider !== "string" || agent.provider === "") return false;
+  return tracker.signals.acpProvider?.(agent.provider) === true;
 }
 
 /** MIK-R190 rules 11 and 12: the seat's `until` while the file says it is limited. */
@@ -1407,6 +1514,20 @@ export function noteAgentArchived(
   tracker.providerOf.delete(agentId);
   tracker.inTurn.delete(agentId);
   tracker.permissionWait.delete(agentId);
+  // MIK-R216 rule 4: an archived seat's declared wait ends with it.
+  const declared = tracker.declarations.get(agentId);
+  if (declared !== undefined) {
+    tracker.declarations.delete(agentId);
+    tracker.append(
+      turnEndRow("subagent-wait-ended", declared.facts, agentId, declared.ordinal, "the seat was archived", isoWithOffset(now())),
+    );
+  }
+  const pendingCheck = tracker.waits.get(agentId);
+  if (pendingCheck !== undefined && pendingCheck.kind === "subagent-check") {
+    tracker.waits.delete(agentId);
+    stopTimer({}, pendingCheck.timer);
+    pendingCheck.finish();
+  }
   cancelLimitResume(tracker, agentId, now, "the seat was archived before the resume");
   dropLimitFlush(tracker, agentId);
   const kept: HeldLine[] = [];
@@ -1706,6 +1827,7 @@ export type TurnEndedOutcome =
   | { readonly kind: "sent"; readonly text: string; readonly parent: string }
   | { readonly kind: "held"; readonly parent: string }
   | { readonly kind: "waiting"; readonly seat: string; readonly ordinal: number }
+  | { readonly kind: "declared"; readonly seat: string; readonly ordinal: number }
   | { readonly kind: "none"; readonly log?: string };
 
 /** The clock and timers a caller lets the decision use, so tests can drive them. */
@@ -1760,8 +1882,17 @@ function cancelSeatWake(
   if (wait === undefined) return;
   tracker.waits.delete(seat);
   stopTimer(scheduling, wait.timer);
+  // MIK-R216 rule 7: a check that is dropped unspent is one of its own skip
+  // kinds; every other wait keeps the cancelled-wait row INV-1ZKP4R asks for.
   tracker.append(
-    turnEndRow("wait-cancelled", wait.facts, seat, wait.ordinal, reason, isoWithOffset(now())),
+    turnEndRow(
+      wait.kind === "subagent-check" ? "subagent-wait-check-skipped" : "wait-cancelled",
+      wait.facts,
+      seat,
+      wait.ordinal,
+      reason,
+      isoWithOffset(now()),
+    ),
   );
   wait.finish();
 }
@@ -1824,6 +1955,145 @@ function reclaimDepartedSeat(
   dropLimitFlush(tracker, seat);
 }
 
+/** MIK-R216 rule 7: a check's own row kinds; every other wait keeps rule 7's existing ones. */
+function skipRowKind(wait: PendingSeatWake): string {
+  return wait.kind === "subagent-check" ? "subagent-wait-check-skipped" : "send-skipped";
+}
+
+/**
+ * MIK-R216 rule 5: the check armed three minutes after a declared end. It walks
+ * the same gates as the seat message (one wait per seat, the wait budget, the
+ * host's state at the send), and it is the plugin's own message, so the turn it
+ * opens neither resets the seat's run nor ends the wait.
+ */
+function scheduleSubagentCheck(
+  agent: TurnEndedAgent,
+  facts: TurnEndedFacts,
+  ordinal: number,
+  tracker: TurnEndedTracker,
+  sender: TurnEndedSender,
+  scheduling: TurnEndScheduling & { readonly readHost?: HostStateReader },
+): SeatWakeWait | undefined {
+  const now = clockOf(scheduling);
+  const replacing = tracker.waits.get(agent.id) !== undefined;
+  if (!replacing && tracker.waits.size >= TURN_ENDED_WAIT_LIMIT) {
+    tracker.append(
+      turnEndRow("subagent-wait-check-skipped", facts, agent.id, ordinal, "over-capacity", isoWithOffset(now())),
+    );
+    return undefined;
+  }
+  // One wait per seat: a later declaration replaces the check already pending.
+  cancelSeatWake(tracker, agent.id, "a later declaration replaced the check", now, scheduling);
+  let finish!: () => void;
+  const done = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const message = composeSubagentWaitCheck(agent.id, facts);
+  const wait: PendingSeatWake = {
+    seat: agent.id,
+    ordinal,
+    dueAt: now().getTime() + SUBAGENT_WAIT_CHECK_MS,
+    message,
+    kind: "subagent-check",
+    facts,
+    epoch: tracker.epoch,
+    seatEpoch: tracker.seatEpoch.get(agent.id) ?? 0,
+    // The seat reads its progress report in its own chat; the row records the
+    // check that went out, not the report.
+    deliver: async () => {
+      await sender.sendMessage(agent.id, message);
+      tracker.append(
+        turnEndRow("subagent-wait-check-sent", facts, agent.id, ordinal, "asked for helper progress", isoWithOffset(now())),
+      );
+    },
+    timer: undefined,
+    done,
+    finish,
+  };
+  wait.timer = startTimer(
+    scheduling,
+    () => {
+      void deliverSeatWake(wait, tracker, now, scheduling.readHost, sender, scheduling).finally(() => wait.finish());
+    },
+    SUBAGENT_WAIT_CHECK_MS,
+  );
+  tracker.waits.set(agent.id, wait);
+  return wait;
+}
+
+/** MIK-R216 rule 5: a check that could not go out is armed again for three minutes later. */
+function rearmSubagentCheck(
+  wait: PendingSeatWake,
+  tracker: TurnEndedTracker,
+  now: () => Date,
+  readHost: HostStateReader | undefined,
+  sender: TurnEndedSender,
+  scheduling: TurnEndScheduling,
+): void {
+  if (tracker.waits.get(wait.seat) !== undefined) return;
+  let finish!: () => void;
+  const done = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const next: PendingSeatWake = {
+    ...wait,
+    dueAt: now().getTime() + SUBAGENT_WAIT_CHECK_MS,
+    epoch: tracker.epoch,
+    seatEpoch: tracker.seatEpoch.get(wait.seat) ?? 0,
+    timer: undefined,
+    done,
+    finish,
+  };
+  next.timer = startTimer(
+    scheduling,
+    () => {
+      void deliverSeatWake(next, tracker, now, readHost, sender, scheduling).finally(() => next.finish());
+    },
+    SUBAGENT_WAIT_CHECK_MS,
+  );
+  tracker.waits.set(wait.seat, next);
+}
+
+/** MIK-R216 rule 4: the seat's next end without a declaration ends its wait. */
+function endSubagentWait(
+  tracker: TurnEndedTracker,
+  seat: string,
+  facts: TurnEndedFacts,
+  now: () => Date,
+  scheduling: TurnEndScheduling = {},
+  reason = "a turn of the seat ended with no declaration",
+): void {
+  const open = tracker.declarations.get(seat);
+  if (open === undefined) return;
+  tracker.declarations.delete(seat);
+  // The check this wait still holds is dropped with it; the wait's own row below
+  // is the one rule 7 asks for, so no second cancelled-wait row is written.
+  const pending = tracker.waits.get(seat);
+  if (pending !== undefined && pending.kind === "subagent-check") {
+    tracker.waits.delete(seat);
+    stopTimer(scheduling, pending.timer);
+    pending.finish();
+  }
+  tracker.append(turnEndRow("subagent-wait-ended", facts, seat, open.ordinal, reason, isoWithOffset(now())));
+}
+
+/** MIK-R216 rule 4: one declaration, its ordinal being the seat's next in the wait. */
+function rememberDeclaration(
+  tracker: TurnEndedTracker,
+  seat: string,
+  facts: TurnEndedFacts,
+): number {
+  const ordinal = (tracker.declarations.get(seat)?.ordinal ?? 0) + 1;
+  tracker.declarations.delete(seat);
+  tracker.declarations.set(seat, { ordinal, facts });
+  while (tracker.declarations.size > TURN_ENDED_SILENT_LIMIT) {
+    const oldest = tracker.declarations.keys().next();
+    if (oldest.done === true) break;
+    tracker.declarations.delete(oldest.value);
+  }
+  return ordinal;
+}
+
 /**
  * Rule 4: the act goes out only when the wait ends with the seat out of a turn,
  * not archived and owing no permission. A send skipped there writes its row and
@@ -1859,12 +2129,26 @@ async function deliverSeatWake(
         : null;
     if (terminal !== null) {
       tracker.append(
-        turnEndRow("send-skipped", wait.facts, wait.seat, wait.ordinal, terminal, isoWithOffset(now())),
+        turnEndRow(skipRowKind(wait), wait.facts, wait.seat, wait.ordinal, terminal, isoWithOffset(now())),
+      );
+      return;
+    }
+    // CS-6 / L184-R1-F13: the deferred fleet is finite, so the one deferred action this
+    // seat would take is shed instead. For a check that shed is the whole record: one
+    // row of rule 7's kind, no resume armed and nothing stored, because one undelivered
+    // check is one decision (MIK-R216 A2). An ordinary seat wake keeps the legacy row.
+    if (
+      wait.kind === "subagent-check" &&
+      tracker.resumes.get(wait.seat) === undefined &&
+      !deferredHasRoom(tracker)
+    ) {
+      tracker.append(
+        turnEndRow("subagent-wait-check-skipped", wait.facts, wait.seat, wait.ordinal, "over-capacity", isoWithOffset(now())),
       );
       return;
     }
     tracker.append(
-      turnEndRow("send-skipped", wait.facts, wait.seat, wait.ordinal, `provider-limit until ${limited}`, isoWithOffset(now())),
+      turnEndRow(skipRowKind(wait), wait.facts, wait.seat, wait.ordinal, `provider-limit until ${limited}`, isoWithOffset(now())),
     );
     armLimitResume(wait, limited, tracker, sender, now, scheduling, readHost);
     return;
@@ -1881,7 +2165,14 @@ async function deliverSeatWake(
             ? "subagent-running"
             : null;
   if (skipped !== null) {
-    tracker.append(turnEndRow("send-skipped", wait.facts, wait.seat, wait.ordinal, skipped, isoWithOffset(now())));
+    tracker.append(turnEndRow(skipRowKind(wait), wait.facts, wait.seat, wait.ordinal, skipped, isoWithOffset(now())));
+    // MIK-R216 rule 5: a check the seat cannot take now because it waits for a
+    // permission, or because the host's state cannot be read, is re-armed for
+    // three minutes later instead of being spent. A seat in a turn is not: its
+    // own next end judges the wait, and a declaring end arms a fresh check.
+    if (wait.kind === "subagent-check" && (skipped === "permission-wait" || skipped === "host-state-unavailable")) {
+      rearmSubagentCheck(wait, tracker, now, readHost, sender, scheduling);
+    }
     return;
   }
   try {
@@ -1923,9 +2214,11 @@ function armLimitResume(
 ): void {
   if (tracker.resumes.get(wait.seat) === undefined && !deferredHasRoom(tracker)) {
     // CS-6 / L184-R1-F13: the deferred fleet is finite, so the one deferred action
-    // this seat would take is shed and the row says so. Nothing is left stored.
+    // this seat would take is shed and the row says so. Nothing is left stored. A check
+    // is shed earlier, at `deliverSeatWake`, so this path is an ordinary seat wake's, and
+    // `skipRowKind` keeps the row's kind right whatever reaches it (MIK-R216 A2).
     tracker.append(
-      turnEndRow("send-skipped", wait.facts, wait.seat, wait.ordinal, "over-capacity", isoWithOffset(now())),
+      turnEndRow(skipRowKind(wait), wait.facts, wait.seat, wait.ordinal, "over-capacity", isoWithOffset(now())),
     );
     return;
   }
@@ -2096,7 +2389,7 @@ function scheduleSeatWake(
   // it whatever this wait would have done: from the third end on the limit
   // suppresses the parent's marked line, and the resume still has to be the
   // plugin's own standard message with the ended turn's own last line.
-  const message = composeSeatWakeMessage(agent.id, facts, lastLineOfTurn(own), helperDispatched);
+  const message = composeSeatWakeMessage(agent.id, facts, lastLineOfTurn(own), helperDispatched, seatIsAcp(agent, tracker));
   const wait: PendingSeatWake = {
     seat: agent.id,
     ordinal,
@@ -2231,6 +2524,35 @@ export async function noteTurnEnded(
   // puts the seat's run back to zero.
   const opening = firstUserMessage(own);
   if (handoff || (opening !== null && !isPluginWakeMessage(opening))) resetSilentEnds(tracker, agent.id);
+
+  // MIK-R216 rule 4: the declaration is the third way to end a turn, read as a
+  // signal from the turn's own last assistant message and only on a seat whose
+  // provider the host's Paseo installation puts on ACP. Nothing else in this
+  // packet reaches a seat off such a connection, and no helper call is ever
+  // mistaken for a declaration.
+  const declared = seatIsAcp(agent, tracker) && declaresSubagentWait(own);
+  // Rule 4 has two endings and both hold at one end: an end without a declaration ends
+  // the wait, and an archived seat's wait ends with it. So a declaring end on a seat the
+  // host already reports archived ends the earlier wait — no wait outlives its seat —
+  // and arms nothing for the next one (MIK-R216 A2).
+  const archived = declared && archivedNow(agent.id, states, tracker);
+  if (!declared) endSubagentWait(tracker, agent.id, facts, now, options);
+  else if (archived) endSubagentWait(tracker, agent.id, facts, now, options, "the seat was archived");
+  if (declared && !archived) {
+    const ordinal = rememberDeclaration(tracker, agent.id, facts);
+    tracker.append(
+      turnEndRow("subagent-wait-declared", facts, agent.id, ordinal, "declared a helper wait", isoWithOffset(now())),
+    );
+    // A declared turn with a hand-off still gives the parent what a hand-off
+    // gives today (MIK-R172, INV-1ZKP4R); without one it gives the parent
+    // nothing — neither the no-hand-off line nor MIK-R172's line.
+    if (handoff) {
+      await noteParentLine(agent, facts, own, records, tracker, sender, sequence, undefined, options);
+    }
+    // Three minutes after each declared end, whatever opened that turn.
+    scheduleSubagentCheck(agent, facts, ordinal, tracker, sender, options);
+    return { kind: "declared", seat: agent.id, ordinal };
+  }
 
   const unavailable = hostFactsUnavailable(options.readHost, states, agent.id);
   const reason = isSeat
@@ -2412,6 +2734,9 @@ export function cleanupSeatWaits(tracker: TurnEndedTracker, scheduling: TurnEndS
   }
   tracker.silentEnds.clear();
   tracker.turnMarks.clear();
+  // MIK-R216 rule 4: a declared wait is the plugin's own state and is not carried
+  // across a reload; the seat's next end is judged anew.
+  tracker.declarations.clear();
 }
 
 /** A permission resolved: the agent is free, so deliver what waits for it. */

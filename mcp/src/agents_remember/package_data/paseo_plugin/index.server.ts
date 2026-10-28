@@ -1,9 +1,12 @@
 import type { PluginHandlerContext, PluginServerContext } from "@getpaseo/plugin/server";
+import { createAcpProviderSet, type AcpProviderSet } from "./server/acp_providers";
 import { readEmbedList } from "./server/embed";
 import { createHostActivityPublisher, registerHostActivityEvents } from "./server/host_activity";
 import { readRoleAgents } from "./server/role_agents";
 import { SubagentSubscription, SubagentTracker } from "./server/subagents";
+import { isoWithOffset } from "./server/turn_ended";
 import { registerParentWakeEvents } from "./server/turn_events";
+import { createTurnEndLog } from "./server/turn_log";
 import { arEmbedList, arHostActivitySnapshot, arHostActivitySubagents } from "./shared/rpc";
 
 /**
@@ -49,6 +52,12 @@ export default function contribute(server: PluginServerContext) {
   console.log(`agents-remember plugin loaded; embed entries: ${embed.length}`);
   server.handle(arEmbedList, () => ({ embed }));
 
+  // L184-R1-F11: the one row file this boot writes — MIK-R183's turn-end rows and
+  // MIK-R216's provider verdict row share it.
+  const home = process.env.PASEO_HOME;
+  const log = createTurnEndLog(home);
+  /** MIK-R216 rule 1: the ACP verdict read at this plugin's start. */
+  let acp: AcpProviderSet | undefined;
   let activity: ReturnType<typeof createHostActivityPublisher> | undefined;
   let subagents: SubagentTracker | undefined;
   let subscription: SubagentSubscription | undefined;
@@ -72,9 +81,28 @@ export default function contribute(server: PluginServerContext) {
     return subscription.attach(paseo);
   };
   try {
-    if (!process.env.PASEO_HOME) throw new Error("PASEO_HOME is not set");
-    subagents = new SubagentTracker(() => readRoleAgents(process.env.PASEO_HOME));
-    activity = createHostActivityPublisher(process.env.PASEO_HOME, subagents);
+    if (!home) throw new Error("PASEO_HOME is not set");
+    // MIK-R216 rule 1: the verdict is read from the installed Paseo at this
+    // plugin's start and published for the launch; a provider that reports a
+    // helper natively is dropped out of it for the rest of the host's life.
+    acp = createAcpProviderSet(home, {
+      onUnread: (providerId, reason) => {
+        log.append({
+          at: isoWithOffset(new Date()),
+          agent: providerId,
+          role: "",
+          task: "",
+          kind: "acp-provider-unread",
+          count: 0,
+          reason,
+        });
+      },
+    });
+    subagents = new SubagentTracker(
+      () => readRoleAgents(home),
+      (provider) => acp?.noteNativeProvider(provider),
+    );
+    activity = createHostActivityPublisher(home, subagents);
     subscription = new SubagentSubscription(
       subagents,
       () => activity?.publishSubagents(),
@@ -146,7 +174,13 @@ export default function contribute(server: PluginServerContext) {
 
   // MIK-R183 rule 8: the returned cleanup clears every pending wait, so no wait
   // fires after a reload and every seat's count begins again at zero.
-  const stopTurnEnds = registerParentWakeEvents(server, { subagents });
+  // MIK-R216: the same file carries this boot's provider verdicts and its checks,
+  // and the ACP verdict is read from the set the start published.
+  const stopTurnEnds = registerParentWakeEvents(server, {
+    subagents,
+    log: (row) => log.append(row),
+    acpProvider: (providerId) => acp?.isAcp(providerId) === true,
+  });
 
   return () => {
     stopped = true;

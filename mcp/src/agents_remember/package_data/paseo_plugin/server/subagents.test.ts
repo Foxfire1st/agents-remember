@@ -23,6 +23,14 @@ function upsert(parentAgentId: string, id: string, status: string, createdAt: st
   };
 }
 
+/** MIK-R216 rule 1: an upsert that names the helper's own provider. */
+function upsertWithProvider(parentAgentId: string, id: string, provider: string, status = "running") {
+  return {
+    type: "agent.provider_subagents.update",
+    payload: { kind: "upsert", subagent: { id, parentAgentId, provider, status, createdAt: "2026-10-20T11:58:00.000Z" } },
+  };
+}
+
 /** A publication and the tracker it renders, with every write kept. */
 function harness() {
   const written: HostActivityPublication[] = [];
@@ -379,4 +387,44 @@ test("L184-R1-F12: the list merge keeps the stored and published fleet within th
     );
     assert.equal(stored(full), SUBAGENTS_TOTAL_LIMIT);
   }
+});
+
+test("a helper's own provider is reported whatever its parent, and only an upsert reports one", () => {
+  const reported: string[] = [];
+  const tracker = new SubagentTracker(
+    () => RECORDS,
+    (provider) => reported.push(provider),
+  );
+
+  // A parent outside the role record: the count does not move, and the provider is
+  // still reported — a helper of any agent proves the provider reports helpers.
+  assert.equal(tracker.noteUpdate(upsertWithProvider(OTHER, "s9", "claude")), false);
+  assert.deepEqual(reported, ["claude"]);
+  assert.equal(tracker.count(OTHER), 0);
+
+  assert.equal(tracker.noteUpdate(upsertWithProvider(WORKER, "s1", "codex")), true);
+  assert.deepEqual(reported, ["claude", "codex"]);
+
+  // An upsert that names no provider, a timeline row and a remove report nothing.
+  tracker.noteUpdate(upsert(WORKER, "s2", "running", "2026-10-20T11:58:00.000Z"));
+  tracker.noteUpdate({
+    type: "agent.provider_subagents.update",
+    payload: { kind: "timeline", parentAgentId: WORKER, subagentId: "s1", seq: 1 },
+  });
+  tracker.noteUpdate({
+    type: "agent.provider_subagents.update",
+    payload: { kind: "remove", parentAgentId: WORKER, subagentId: "s1" },
+  });
+  assert.deepEqual(reported, ["claude", "codex"]);
+});
+
+test("a verdict store that throws does not stop the count or the row", () => {
+  const tracker = new SubagentTracker(
+    () => RECORDS,
+    () => {
+      throw new Error("the verdict file could not be written");
+    },
+  );
+  assert.equal(tracker.noteUpdate(upsertWithProvider(WORKER, "s1", "claude")), true);
+  assert.equal(tracker.count(WORKER), 1);
 });

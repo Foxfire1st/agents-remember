@@ -21,7 +21,7 @@ import type { PluginLifecycleRegistration } from "@getpaseo/plugin/server";
 import { limitedUntil, readProviderLimits } from "./provider_limits.ts";
 import { readRoleAgents } from "./role_agents.ts";
 import type { SubagentTracker } from "./subagents.ts";
-import { createTurnEndLog } from "./turn_log.ts";
+import { createTurnEndLog, type TurnEndLogRow } from "./turn_log.ts";
 import {
   TURN_ENDED_STEERING_PROVIDERS,
   cleanupSeatWaits,
@@ -56,6 +56,13 @@ export interface ParentWakeOptions {
   readonly home?: string;
   /** MIK-R190 rules 4 and 5: the seat's running provider subagents. */
   readonly subagents?: SubagentTracker;
+  /**
+   * The plugin's own row writer, when the caller already holds one (the same file
+   * carries MIK-R216's provider verdicts); absent, the rows go to this module's own.
+   */
+  readonly log?: (row: TurnEndLogRow) => void;
+  /** MIK-R216 rule 1: the host's ACP verdict for a provider id. */
+  readonly acpProvider?: (providerId: string) => boolean;
 }
 
 /** The host's agents, as rule 3 and rule 4's send read them. */
@@ -124,7 +131,7 @@ export function registerParentWakeEvents(
   options: ParentWakeOptions = {},
 ): () => void {
   const home = options.home ?? process.env.PASEO_HOME;
-  const log = createTurnEndLog(home);
+  const log = options.log === undefined ? createTurnEndLog(home) : { append: options.log };
   const subagents = options.subagents;
   // MIK-R190: the two host signals the send-back reads — the seat's own running
   // subagents, and the one file that says a seat is limited and until when. The
@@ -143,6 +150,8 @@ export function registerParentWakeEvents(
     // L184-R1-F13: the role record, read where a deferred action decides, so a
     // seat that has left it is reclaimed with its timer instead of being sent to.
     roleRecord: () => readRoleAgents(home),
+    // MIK-R216 rule 1: the ACP verdict the plugin wrote at its start.
+    ...(options.acpProvider === undefined ? {} : { acpProvider: options.acpProvider }),
   };
   const turns = createTurnEndedTracker(
     TURN_ENDED_STEERING_PROVIDERS,
