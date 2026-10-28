@@ -1,0 +1,7 @@
+{
+  "name": "@getpaseo/server",
+  "version": "0.12.0",
+  "description": "Synthetic stand-in for the installed Paseo server package; not copied source",
+  "type": "module",
+  "types": "./dist/server/server/exports.d.ts"
+}
