@@ -6,32 +6,31 @@
  * outside it: this component draws neither, and it mounts no chat.
  *
  * WHAT IT SHOWS, in this order:
- *   * the moved notice and its Update offer, when the leaf moved past the binding;
- *   * the trusted list of stale parts with their titles and reasons -- always, whatever the frame
- *     shows, hides or imitates (MIK-R104 v3 rule 3);
  *   * the revision selector: each retained revision with its binding, time and kind, the agreed one
  *     marked, Compare (two isolated frames) and, at the task total, the removal control;
- *   * the page itself, in MIK-R104 v3's isolated host, stored by MIK-R103 v2;
- *   * the claims with their MIK-R102 bases, and their links into the Review view.
+ *   * the page itself, in MIK-R104 v3's isolated host, stored by MIK-R103 v2.
+ *
+ * WHAT IT DOES NOT SHOW: staleness, and the moved notice. Both are the top line's (F18): the badge
+ * beside the switch carries the count, the stale parts and their reasons, the newer comparison and
+ * the one refresh control that regenerates. A revision column draws its record and nothing else.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type RefObject } from 'react';
 
 import { css } from '../../../../styled-system/css';
-import { askFirstRequest } from '../../../explainer/request';
+import { buildFailure as buildFailureOf } from '../../../explainer/model';
+import { askFirstRequest, clearFirstRequest, onFirstRequest } from '../../../explainer/request';
+import { sameExplainerAddress } from '../../../explainer/client';
 import { trayStore } from '../../../tray/trayStore';
 import type { EvidenceDestination } from '../canvas/canvasApi';
 import type { ChangeSetModel } from '../changeSetOrder';
 import { blockElement } from '../reading/blockDom';
-import { BasisLegend, ClaimList } from './BasisLegend';
-import { MovedNotice, type UpdateRun } from './MovedNotice';
+import { ExplanationRequest } from './ExplanationRequest';
 import { RevisionFrame } from './RevisionFrame';
 import { RevisionSelector, type ComparePair } from './RevisionSelector';
-import { StalePartsList } from './StalePartsList';
 import {
   readExplainerState,
   type BindingOwner,
-  type ClaimLink,
   type ExplainerRevision,
   type ExplainerState,
   type ExplainerTarget,
@@ -42,8 +41,8 @@ import {
   bindingLabel,
   clockOf,
   defaultComparePair,
+  coldRegenerateItems,
   defaultShownRevision,
-  hasWork,
   kindLabel,
   orderRevisions,
   phaseOf,
@@ -51,7 +50,6 @@ import {
   staleParts,
   staleRegenerationOf,
   standfirstText,
-  updateOffered,
   type ExplanationPhase,
 } from './explainerModel';
 
@@ -94,6 +92,17 @@ const quiet = css({
   cursor: 'pointer',
 });
 const standfirst = css({ fontFamily: 'mono', fontSize: '0.72rem', color: 'muted', margin: 0 });
+// In the frame's single header row the same sentence is one clipped line: it must never wrap and push
+// the canvas down (F5 c).
+const standfirstInline = css({
+  fontFamily: 'mono',
+  fontSize: '0.68rem',
+  color: 'muted',
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+});
 const who = css({ color: 'purple' });
 const skeleton = css({ display: 'grid', gap: '0.4rem', width: '100%' });
 const bone = css({ height: '0.8rem', borderRadius: '2px', background: 'grid' });
@@ -105,8 +114,6 @@ export interface ExplanationViewProps {
   target: ExplainerTarget;
   /** The comparison on screen: an Update names it (MIK-R185 v2), and the view never rebinds silently. */
   comparison?: { reference: string; number?: number; owner?: BindingOwner | string };
-  /** Opens the block a claim links to, in the Review view, and selects it (MIK-R89 v2 rule 9). */
-  onOpenBlock: (claim: ClaimLink) => void;
   /** "✦ Explain the change set": opens the chat's first-request form. It starts nothing here. */
   onExplain: () => void;
   /** Where a frame's own evidence operation goes; the page's selection owner wires this. */
@@ -115,6 +122,8 @@ export interface ExplanationViewProps {
   taskLabel?: string;
   /** A read the page's owner already holds, so the switch and this view read one answer between them. */
   read?: ExplainerRead;
+  /** The page's provenance disclosure shares the frame's compact header. */
+  headerDetails?: React.ReactNode;
 }
 
 interface Model {
@@ -126,13 +135,15 @@ interface Model {
   shown: number | null;
   compared: ComparePair | null;
   refusal: RefusalInfo | null;
-  run: UpdateRun | null;
   regenProblem: string | null;
   chosen: number | null;
+  /** The developer's ✦ Explain in this view: the request's form is open here, where he pressed. */
+  requestOpen: boolean;
   choose: (revision: number | null) => void;
   compare: (pair: ComparePair | null) => void;
-  pressUpdate: () => void;
   pressRegenerate: (forState?: ExplainerState | null, forRevision?: number | null) => void;
+  openRequest: () => void;
+  cancelRequest: () => void;
 }
 
 const phaseOfRead = (read: ExplainerRead): ExplanationPhase =>
@@ -197,18 +208,6 @@ function useRevisionStates(
   return revisionStates;
 }
 
-function buildColdRegenerateItems(
-  stale: ReturnType<typeof staleParts>,
-  staleGrades: readonly string[],
-) {
-  const partItems = stale.parts.map((p) => ({ id: p.id, title: p.title, reason: p.reason }));
-  const seen = new Set(partItems.map((p) => p.id));
-  const gradeItems = staleGrades
-    .filter((ref) => !seen.has(ref))
-    .map((ref) => ({ id: ref, title: `Grade · ${ref}`, reason: 'stale grade' }));
-  return [...partItems, ...gradeItems];
-}
-
 function useRegenerateHandler(
   activeState: ExplainerState | null,
   shown: number | null,
@@ -237,7 +236,7 @@ function useRegenerateHandler(
         return;
       }
 
-      askFirstRequest({ repository, master, leaf }, buildColdRegenerateItems(stale, staleGrades));
+      askFirstRequest({ repository, master, leaf }, coldRegenerateItems(targetState));
       trayStore.getState().setText(regeneration.message);
       props.onExplain();
     },
@@ -248,10 +247,19 @@ function useRegenerateHandler(
 function useExplanationView(props: ExplanationViewProps): Model {
   const [chosen, setChosen] = useState<number | null>(null);
   const [compared, setCompared] = useState<ComparePair | null>(null);
-  const [run, setRun] = useState<UpdateRun | null>(null);
   const [regenProblem, setRegenProblem] = useState<string | null>(null);
+  const [requestOpen, setRequestOpen] = useState(false);
+  const { repository, master, leaf } = props.target;
+  const address = useMemo(
+    () => ({ repository, master, leaf }),
+    [repository, master, leaf],
+  );
 
-  const own = useExplainer(props.target, props.comparison, props.read === undefined, chosen);
+  // Handed the surface's read, this view's own read is off and stays off: the surface's read follows
+  // the leaf's publications, so a second forced read here would ask the same answer twice.
+  const own = useExplainer(props.target, props.comparison, props.read === undefined, chosen, {
+    watchWhileDisabled: false,
+  });
   const read = props.read ?? own;
   const rows = useMemo<ExplainerRevision[]>(
     () => orderRevisions(read.revisions?.revisions ?? []),
@@ -259,6 +267,29 @@ function useExplanationView(props: ExplanationViewProps): Model {
   );
   const shown = chosen ?? defaultShownRevision(rows, read.state);
   const revisionStates = useRevisionStates(props, chosen, compared);
+
+  // A press of ✦ Explain for this leaf asks for the first request; the ask opens this view's own
+  // form, so the request is where he pressed it and not only in the chat column.
+  useEffect(
+    () =>
+      onFirstRequest((body) => {
+        if (sameExplainerAddress(body.address, address)) setRequestOpen(true);
+      }),
+    [address],
+  );
+  // A revision is the answer the request was waiting for: the page takes the form's place.
+  useEffect(() => {
+    if (rows.length > 0) setRequestOpen(false);
+  }, [rows.length]);
+
+  const openRequest = useCallback(() => {
+    setRequestOpen(true);
+    props.onExplain();
+  }, [props]);
+  const cancelRequest = useCallback(() => {
+    setRequestOpen(false);
+    clearFirstRequest(address);
+  }, [address]);
 
   const activeRow = useMemo(() => rows.find((r) => r.revision === shown), [rows, shown]);
   const activeState = useMemo(
@@ -271,16 +302,6 @@ function useExplanationView(props: ExplanationViewProps): Model {
     [read.state, activeRow, shown, revisionStates],
   );
 
-  const pressUpdate = useCallback(async () => {
-    setRun({ state: 'updating' });
-    const outcome = await read.update();
-    setRun(
-      outcome.kind === 'updated'
-        ? { state: 'done', counts: outcome.counts }
-        : { state: 'failed', detail: `${outcome.reason}: ${outcome.detail}` },
-    );
-  }, [read]);
-
   const pressRegenerate = useRegenerateHandler(activeState, shown, read, props, setRegenProblem);
 
   return {
@@ -292,13 +313,14 @@ function useExplanationView(props: ExplanationViewProps): Model {
     shown,
     compared,
     refusal: refusalOf(read),
-    run,
     regenProblem,
     chosen,
+    requestOpen,
     choose: setChosen,
     compare: setCompared,
-    pressUpdate: () => void pressUpdate(),
     pressRegenerate: (forState, forRevision) => void pressRegenerate(forState, forRevision),
+    openRequest,
+    cancelRequest,
   };
 }
 
@@ -306,40 +328,34 @@ export function ExplanationView(props: ExplanationViewProps) {
   const model = useExplanationView(props);
   return (
     <section className={view} data-testid="explanation-view" data-phase={model.phase}>
-      <ExplanationPanel model={model} props={props} />
+      <ExplanationBody model={model} props={props} />
     </section>
   );
 }
 
-/** The panel's fixed lines, then whatever the phase draws. */
-function ExplanationPanel({ model, props }: { model: Model; props: ExplanationViewProps }) {
-  const state = model.activeState;
-  const stale = staleParts(state);
-  const staleGrades = staleGradesOf(state);
-  const regeneration = staleRegenerationOf(state, model.shown);
-  return (
-    <>
-      {state?.moved ? (
-        <MovedNotice
-          moved={state.moved}
-          hasWork={hasWork(state)}
-          update={model.run}
-          onUpdate={updateOffered(state) ? model.pressUpdate : undefined}
-        />
-      ) : null}
-      {model.compared ? null : (
-        <StalePartsList
-          parts={stale.parts}
-          total={stale.total}
-          unavailable={stale.unavailable}
-          staleGrades={staleGrades}
-          regeneration={regeneration}
-          regenerating={model.read.busy === 'regenerating'}
-          regenerationProblem={model.regenProblem}
-          onRegenerate={() => model.pressRegenerate(state, model.shown)}
-        />
-      )}
-      {model.rows.length ? (
+/**
+ * Whether a revision exists to be stale against. Before one does, the host answers that staleness
+ * cannot be read ("the leaf has no retained revision"), and there is nothing to say yet.
+ */
+const hasRevisionOf = (model: Model): boolean => model.rows.length > 0 || model.shown !== null;
+
+/** The build the state answer holds, when it stopped at a failed step: the server's own words. */
+const failedBuildOf = (state: ExplainerState | null | undefined) =>
+  state?.build ? buildFailureOf(state.build) : null;
+
+const revisionMenu = css({
+  flex: '0 0 auto',
+  '& > summary': { cursor: 'pointer', padding: '0 0.3rem', whiteSpace: 'nowrap' },
+});
+const revisionPanel = css({
+  position: 'absolute', top: '100%', insetInline: 0, zIndex: 10,
+  maxHeight: '70vh', overflow: 'auto', whiteSpace: 'normal', background: 'bgPanel',
+});
+
+function RevisionControls({ model }: { model: Model }) {
+  return <details className={revisionMenu} data-testid="revision-controls">
+    <summary>Revisions {model.rows.length}</summary>
+    <div className={revisionPanel}>
         <RevisionSelector
           rows={model.rows}
           pinned={model.read.revisions?.pinned ?? null}
@@ -355,10 +371,47 @@ function ExplanationPanel({ model, props }: { model: Model; props: ExplanationVi
           onStopCompare={() => model.compare(null)}
           onRemove={(numbers) => void model.read.remove(numbers)}
         />
-      ) : null}
-      <ExplanationBody model={model} props={props} />
-    </>
-  );
+
+    </div>
+  </details>;
+}
+
+/**
+ * Which body a view without a revision draws. A build the server is running is drawn with its own
+ * steps and counts here, not sent away to the chat; the request is drawn where ✦ Explain was pressed,
+ * with the server's own sentence when it stopped (MIK-R211 rules 3 and 4).
+ */
+function noRevisionKind(model: Model): 'request' | 'placeholder' | 'empty' {
+  if (model.requestOpen || failedBuildOf(model.activeState)) return 'request';
+  if (model.phase !== 'building') return 'empty';
+  return model.activeState?.build?.steps.length ? 'request' : 'placeholder';
+}
+
+function NoRevisionBody({ model, props }: { model: Model; props: ExplanationViewProps }) {
+  const kind = noRevisionKind(model);
+  const taskLabel = props.taskLabel ?? props.target.leaf;
+  if (kind === 'request') {
+    return (
+      <ExplanationRequest
+        target={props.target}
+        task={taskLabel}
+        binding={model.activeState?.binding ?? null}
+        comparison={props.comparison}
+        build={model.activeState?.build ?? null}
+        onBuilt={() => void model.read.refresh()}
+        onCancel={model.cancelRequest}
+      />
+    );
+  }
+  if (kind === 'placeholder') return <BuildingPlaceholder />;
+  return <EmptyExplanation taskLabel={taskLabel} onExplain={model.openRequest} />;
+}
+
+/** What the view draws once a revision exists: the page, or the still placeholder while it builds. */
+function RevisionBody({ model, props }: { model: Model; props: ExplanationViewProps }) {
+  if (model.phase === 'building') return <BuildingPlaceholder />;
+  if (model.shown === null) return null;
+  return <SavedPage model={model} props={props} shown={model.shown} />;
 }
 
 /** What the column draws for the phase on screen: a sentence, a placeholder, or the page itself. */
@@ -373,17 +426,8 @@ function ExplanationBody({ model, props }: { model: Model; props: ExplanationVie
   if (model.phase === 'unavailable') {
     return <Unreadable problem={model.read.problem} onRetry={() => void model.read.refresh()} />;
   }
-  if (model.phase === 'none') {
-    return (
-      <EmptyExplanation
-        taskLabel={props.taskLabel ?? props.target.leaf}
-        onExplain={props.onExplain}
-      />
-    );
-  }
-  if (model.phase === 'building') return <BuildingPlaceholder />;
-  if (model.shown === null) return null;
-  return <SavedPage model={model} props={props} shown={model.shown} />;
+  if (!hasRevisionOf(model)) return <NoRevisionBody model={model} props={props} />;
+  return <RevisionBody model={model} props={props} />;
 }
 
 function Unreadable({ problem, onRetry }: { problem: RefusalInfo | null; onRetry: () => void }) {
@@ -436,6 +480,24 @@ const agentIdOf = (state: ExplainerState | null | undefined): string | null =>
 const partIdsOf = (parts: ReadonlyArray<{ id: string }> | undefined): string[] =>
   (parts ?? []).map((p) => p.id);
 
+function FrameMeta({ state, revision, rows, details, controls, slot }: {
+  state: ExplainerState | null;
+  revision: number;
+  rows: ExplainerRevision[];
+  details?: React.ReactNode;
+  controls?: React.ReactNode;
+  slot?: 'left' | 'right';
+}) {
+  return <>
+    <span className={standfirstInline} data-testid="explanation-standfirst">
+      <span className={who}>✦ Written by the explainer</span>
+      {standfirstText(state, revision, rows)}
+    </span>
+    {slot === 'right' ? null : controls}
+    {slot === 'right' ? null : details}
+  </>;
+}
+
 function CompareColumn({
   slot,
   revision,
@@ -452,25 +514,9 @@ function CompareColumn({
   const row = model.rows.find((r) => r.revision === revision);
   const revState = mergeRevisionIntoState(model.read.state, row, model.compareStates[revision]);
   const stale = staleParts(revState);
-  const staleGrades = staleGradesOf(revState);
-  const regeneration = staleRegenerationOf(revState, revision);
   const binding = row ? row.binding : (revState?.binding ?? null);
   return (
     <div className={compareCol} data-testid="explanation-compare-column" data-revision={revision}>
-      <p className={standfirst} data-testid="explanation-standfirst">
-        <span className={who}>✦ Written by the explainer</span>
-        {standfirstText(revState, revision, model.rows)}
-      </p>
-      <StalePartsList
-        parts={stale.parts}
-        total={stale.total}
-        unavailable={stale.unavailable}
-        staleGrades={staleGrades}
-        regeneration={regeneration}
-        regenerating={model.read.busy === 'regenerating'}
-        regenerationProblem={model.regenProblem}
-        onRegenerate={() => model.pressRegenerate(revState, revision)}
-      />
       <RevisionFrame
         target={props.target}
         revision={revision}
@@ -482,11 +528,7 @@ function CompareColumn({
         staleTotal={stale.total}
         explainerAgentId={agentId}
         onEvidence={props.onEvidence}
-      />
-      <ClaimList
-        claims={revState?.claims ?? []}
-        parts={revState?.parts ?? []}
-        onOpenBlock={props.onOpenBlock}
+        meta={<FrameMeta state={revState} revision={revision} rows={model.rows} slot={slot} details={props.headerDetails} controls={<RevisionControls model={model} />} />}
       />
     </div>
   );
@@ -518,11 +560,6 @@ function SingleSavedPage({
   const binding = row ? row.binding : (state?.binding ?? null);
   return (
     <>
-      <p className={standfirst} data-testid="explanation-standfirst">
-        <span className={who}>✦ Written by the explainer</span>
-        {standfirstText(state, shown, model.rows)}
-      </p>
-      <BasisLegend />
       <RevisionFrame
         target={props.target}
         revision={shown}
@@ -534,18 +571,14 @@ function SingleSavedPage({
         staleTotal={stale.total}
         explainerAgentId={agentId}
         onEvidence={props.onEvidence}
+        meta={<FrameMeta state={state} revision={shown} rows={model.rows} details={props.headerDetails} controls={<RevisionControls model={model} />} />}
       />
       <RetiredNotice retired={state?.retired} />
-      <ClaimList
-        claims={state?.claims ?? []}
-        parts={state?.parts ?? []}
-        onOpenBlock={props.onOpenBlock}
-      />
     </>
   );
 }
 
-/** The saved page: its standfirst, the legend, one frame or the compared pair, and the claims. */
+/** The saved page: its standfirst and one frame or the compared pair. */
 function SavedPage({
   model,
   props,
@@ -560,7 +593,6 @@ function SavedPage({
   if (model.compared) {
     return (
       <>
-        <BasisLegend />
         <div className={frames} data-testid="explanation-compare">
           <CompareColumn slot="left" revision={model.compared.left} model={model} props={props} agentId={agentId} />
           <CompareColumn slot="right" revision={model.compared.right} model={model} props={props} agentId={agentId} />
@@ -578,33 +610,6 @@ function captionOf(rows: readonly ExplainerRevision[], revision: number): string
   if (!row) return `revision ${revision}`;
   const focus = row.focus ? ` · ${row.focus}` : '';
   return `${bindingLabel(row.binding)} · ${clockOf(row.at)} · ${kindLabel(row.kind)}${focus} · revision ${row.revision}`;
-}
-
-/**
- * The moved notice banner shown in the Review tab when the leaf moved past the explainer's binding
- * (MIK-R186 rule 7; MIK-R187 rules 4 and 9).
- */
-export function ReviewMovedBanner({ read }: { read: ExplainerRead }) {
-  const [run, setRun] = useState<UpdateRun | null>(null);
-  const state = read.state;
-  const pressUpdate = useCallback(async () => {
-    setRun({ state: 'updating' });
-    const outcome = await read.update();
-    setRun(
-      outcome.kind === 'updated'
-        ? { state: 'done', counts: outcome.counts }
-        : { state: 'failed', detail: `${outcome.reason}: ${outcome.detail}` },
-    );
-  }, [read]);
-  if (!state?.moved) return null;
-  return (
-    <MovedNotice
-      moved={state.moved}
-      hasWork={hasWork(state)}
-      update={run}
-      onUpdate={updateOffered(state) ? () => void pressUpdate() : undefined}
-    />
-  );
 }
 
 function allModelNodes(model: ChangeSetModel) {

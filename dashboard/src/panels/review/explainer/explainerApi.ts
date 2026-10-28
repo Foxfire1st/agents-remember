@@ -3,11 +3,15 @@
  * MIK-R104 v3).
  *
  *   GET  /api/explainer/<repository>/<master>/<leaf>/state            the binding, the seat, the saved
- *     page, the trusted stale parts, the claim map and the moved notice;
+ *     page, the trusted stale parts, the claim map and the newer comparison the leaf moved to;
  *   GET  /api/explainer/<repository>/<master>/<leaf>/revisions        the retained revisions, with
  *     their binding, time, kind and the agreed (pinned) one;
+ *   GET  /api/explainer/<repository>/<master>/<leaf>/stale            the top bar's badge alone: the
+ *     staleness `/state` carries, the shown revision and the newer-comparison notice, no seat;
  *   POST /api/explainer/<repository>/<master>/<leaf>/update           the developer's press
  *     (MIK-R186 rule 6);
+ *   POST /api/explainer/<repository>/<master>/<leaf>/cancel           the developer's end to a stuck
+ *     build (MIK-R211 v2 rules 4 and 5), named by the build's own request id;
  *   POST /api/explainer/<repository>/<master>/<leaf>/remove-revisions the developer's removal of old
  *     revisions (MIK-R103 v2 rule 8), never the pinned one.
  *
@@ -24,8 +28,16 @@
  * own, and no read resumes anything (MIK-R106 v2 rule 10).
  */
 
+import { sharedRead } from '../../../data/abortableRead';
+import { openingFetch } from '../../../data/reviewOpen';
 import { CanvasRefusal, revokeSession, type CanvasSession } from '../canvas/canvasApi';
-import type { ExplainerAddress } from '../../../explainer/client';
+import {
+  parseExplainerBuild,
+  type ExplainerAddress,
+  type ExplainerBuild,
+} from '../../../explainer/client';
+import { readCategories, readGrades } from './explainerGradeParser';
+import { firstText, isRecord, text } from './explainerValues';
 import { readPlannedPage, type PlannedPage } from './planned/plannedPage';
 
 /** The explainer frame's lineage ID (MIK-R103 v2; MIK-R106 v2). */
@@ -135,19 +147,19 @@ export interface SavedExplanation {
   entrypoint: string | null;
   comparison: string | null;
   binding?: ExplainerBinding | null;
+  /** What its interaction check reached, as the revision states it: "2 of 5 passes" (MIK-R211 v5). */
+  coverage?: string;
 }
 
-/** The leaf moved past the binding: the notice, and whether an Update would do anything. */
-export interface MovedNoticeData {
-  kind?: 'comparison-moved' | 'master-moved';
+/** The leaf moved past the binding: the newer comparison the top line's badge names (F18). */
+export interface ExplainerMoved {
   from: number | null;
   to: number | null;
   /** The master line's tip commits, for a planned binding (MIK-R186 rule 7). */
   commitFrom?: string | null;
   commitTo?: string | null;
   blocks: number;
-  blocksChanged?: number;
-  updateOffered?: boolean;
+  /** The line the watcher published on `/api/stream`, shown as it was published. */
   text?: string;
 }
 
@@ -190,6 +202,12 @@ export interface ExplainerState {
   retiredAt: string | null;
   explanation: SavedExplanation | null;
   building: { state: 'idle' | 'building' | 'starting'; step?: string } | null;
+  /**
+   * The server's own build record, whatever its state (MIK-R106 v2 rule 4): the same record the
+   * chat column reads, so a stopped build names the step and the sentence the server wrote in
+   * `error`. The view draws it where the developer pressed Explain.
+   */
+  build?: ExplainerBuild | null;
   /** The trusted stale parts and grades, computed by the host; `total` is the true count when more are stale. */
   stale: {
     parts: StalePart[];
@@ -205,9 +223,18 @@ export interface ExplainerState {
   claims: ExplanationClaim[];
   categories?: ExplainerCategory[];
   grades?: ExplainerGrade[];
-  moved: MovedNoticeData | null;
+  moved: ExplainerMoved | null;
   limit: ExplainerLimit | null;
 }
+
+/**
+ * `GET .../stale`: what the top bar's badge and the Review tab's judgment chips read (F18), and
+ * nothing seat-related. Its fields are `ExplainerState`'s own, so the badge's model reads either.
+ */
+export type ExplainerStaleBadge = Pick<
+  ExplainerState,
+  'state' | 'stale' | 'categories' | 'grades' | 'explanation' | 'moved' | 'building' | 'retired'
+>;
 
 /** One retained revision (MIK-R103 v2 rules 1, 8). */
 export interface ExplainerRevision {
@@ -217,6 +244,8 @@ export interface ExplainerRevision {
   kind: 'global' | 'focused';
   /** What a focused revision explains; absent for a global one. */
   focus?: string;
+  /** What its interaction check reached, as the revision states it: "2 of 5 passes" (MIK-R211 v5). */
+  coverage?: string;
   /** `intentReview.agreedRevision` names it: pinned, never offered for removal. */
   agreed: boolean;
   pinned: boolean;
@@ -242,7 +271,13 @@ export interface ExplainerRevisions {
 /** What an Update's press answers: the attempt it joined, and its counts when the host gives them. */
 export interface ExplainerUpdate {
   attempt: string | null;
-  counts?: { blocks?: number; parts?: number; grades?: number; files?: number; bytes?: number };
+  counts?: {
+    blocks?: number;
+    parts?: number;
+    grades?: number;
+    files?: number;
+    bytes?: number;
+  };
 }
 
 export interface ExplainerRemoval {
@@ -263,6 +298,19 @@ export class ExplainerRefusal extends Error {
   }
 }
 
+/** `POST .../cancel`'s answer: the request it ended, and what the seat did (MIK-R105 v1 rule 9). */
+export interface ExplainerCancel {
+  /** The request the cancel named; the build's own `requestId`, echoed back. */
+  requestId: string | null;
+  seat: string | null;
+  /** The host stopped the turn it was running. */
+  turnStopped: boolean;
+  /** The ledger did not name this request: the cancel is reported, not claimed. */
+  requestUncertain: boolean;
+  /** No page was written between the route's two reads of the frame store. */
+  publicationPrevented: boolean;
+}
+
 export interface RefusalInfo {
   reason: string;
   detail: string;
@@ -275,11 +323,6 @@ export function refusalInfo(error: unknown): RefusalInfo | null {
 }
 
 // ---- reading the host's answers, leniently ----
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 
 const number = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -340,12 +383,22 @@ export function stateUrl(target: ExplainerTarget, query?: ExplainerStateQuery): 
   return search ? `${base}?${search}` : base;
 }
 
+export function staleUrl(target: ExplainerTarget, query?: ExplainerStateQuery): string {
+  const state = stateUrl(target, query);
+  const search = state.indexOf('?');
+  return `${leafUrl(target, '/stale')}${search < 0 ? '' : state.slice(search)}`;
+}
+
 export function revisionsUrl(target: ExplainerTarget): string {
   return leafUrl(target, '/revisions');
 }
 
 export function plannedUrl(target: ExplainerTarget): string {
   return leafUrl(target, '/planned');
+}
+
+export function cancelUrl(target: ExplainerTarget): string {
+  return leafUrl(target, '/cancel');
 }
 
 // ---- the parsers ----
@@ -355,13 +408,6 @@ const RECORDED_OWNERS = new Set([
   'agents_remember.application.review_tree_comparison',
   'review-tree-comparison',
 ]);
-
-function firstText(values: readonly unknown[]): string | null {
-  for (const val of values) {
-    if (typeof val === 'string') return val;
-  }
-  return null;
-}
 
 function firstNumber(values: readonly unknown[]): number | null {
   for (const val of values) {
@@ -411,7 +457,13 @@ export function readBinding(
   const kind = resolveBindingOwner(rawOwner, rawNum !== null || ref !== null, ref);
   if (!kind) return null;
   const label = firstText([record.label, value.label, fallbackLabel]);
-  return { owner: kind, number: rawNum ?? 0, reference: ref, label, raw: record };
+  return {
+    owner: kind,
+    number: rawNum ?? 0,
+    reference: ref,
+    label,
+    raw: record,
+  };
 }
 
 function hasIdentityValue(
@@ -444,8 +496,7 @@ function readExplainerIdentity(answer: Record<string, unknown>): ExplainerIdenti
   ]);
   const workspaceId =
     firstText([answer.workspaceId, nested.workspaceId, nested.workspace]) ?? workspace;
-  const generation =
-    firstNumber([answer.generation, nested.generation, seatRec.generation]) ?? 0;
+  const generation = firstNumber([answer.generation, nested.generation, seatRec.generation]) ?? 0;
   const present = typeof nested.present === 'boolean' ? nested.present : undefined;
   if (!hasIdentityValue(agentId, workspaceId, generation, present)) return null;
   return {
@@ -464,7 +515,10 @@ function resolveSeatState(value: unknown, rec: Record<string, unknown> | null): 
   return raw && SEAT_STATES.has(raw) ? (raw as SeatState) : 'none';
 }
 
-function attachSeatIdentity(result: ExplainerState['seat'], identity: ExplainerIdentityRecord | null) {
+function attachSeatIdentity(
+  result: ExplainerState['seat'],
+  identity: ExplainerIdentityRecord | null,
+) {
   if (!identity) return;
   if (identity.agentId) result.agentId = identity.agentId;
   if (identity.workspaceId) result.workspaceId = identity.workspaceId;
@@ -476,7 +530,9 @@ function readSeat(
   identity: ExplainerIdentityRecord | null,
 ): ExplainerState['seat'] {
   const rec = isRecord(value) ? value : null;
-  const result: ExplainerState['seat'] = { state: resolveSeatState(value, rec) };
+  const result: ExplainerState['seat'] = {
+    state: resolveSeatState(value, rec),
+  };
   const detail = firstText([rec?.detail]);
   const since = firstText([rec?.since]);
   if (detail) result.detail = detail;
@@ -506,7 +562,10 @@ function readStringArray(value: unknown): string[] | undefined {
   return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
 }
 
-function rawStalePartsList(answer: Record<string, unknown>, raw: Record<string, unknown> | null): unknown[] | null {
+function rawStalePartsList(
+  answer: Record<string, unknown>,
+  raw: Record<string, unknown> | null,
+): unknown[] | null {
   if (raw && Array.isArray(raw.parts)) return raw.parts;
   if (Array.isArray(answer.staleParts)) return answer.staleParts;
   return null;
@@ -548,7 +607,9 @@ function readStaleRegeneration(
   answer: Record<string, unknown>,
   raw: Record<string, unknown> | null,
 ): StaleRegeneration | undefined {
-  return (raw ? readRegeneration(raw.regeneration) : undefined) ?? readRegeneration(answer.regeneration);
+  return (
+    (raw ? readRegeneration(raw.regeneration) : undefined) ?? readRegeneration(answer.regeneration)
+  );
 }
 
 function readStale(answer: Record<string, unknown>): ExplainerState['stale'] {
@@ -579,12 +640,14 @@ function readExplanation(answer: Record<string, unknown>): SavedExplanation | nu
     const revision = number(raw.revision);
     if (revision === null) return null;
     const binding = readBinding(raw.binding);
+    const coverage = text(raw.coverage);
     return {
       revision,
       at: firstText([raw.at, raw.writtenAt]),
       entrypoint: text(raw.entrypoint),
       comparison: firstText([raw.comparison, binding?.reference]),
       ...(binding ? { binding } : {}),
+      ...(coverage ? { coverage } : {}),
     };
   }
   const revision = number(answer.readyRevision);
@@ -611,23 +674,19 @@ function readBuilding(answer: Record<string, unknown>): ExplainerState['building
   return null;
 }
 
-function readMoved(value: unknown): MovedNoticeData | null {
+function readMoved(value: unknown): ExplainerMoved | null {
   if (!isRecord(value)) return null;
-  const blocksChanged = number(value.blocksChanged);
-  const blocks = firstNumber([value.blocks, blocksChanged]) ?? 0;
-  const result: MovedNoticeData = {
+  const blocks = firstNumber([value.blocks, value.blocksChanged]) ?? 0;
+  const result: ExplainerMoved = {
     from: number(value.from),
     to: number(value.to),
     blocks,
   };
-  if (value.kind === 'master-moved' || value.kind === 'comparison-moved') result.kind = value.kind;
   const commitFrom = text(value.commitFrom);
   const commitTo = text(value.commitTo);
   const publishedText = text(value.text);
   if (commitFrom) result.commitFrom = commitFrom;
   if (commitTo) result.commitTo = commitTo;
-  if (blocksChanged !== null) result.blocksChanged = blocksChanged;
-  if (typeof value.updateOffered === 'boolean') result.updateOffered = value.updateOffered;
   if (publishedText) result.text = publishedText;
   return result;
 }
@@ -690,150 +749,6 @@ function readParts(value: unknown): Array<{ id: string; title: string }> {
   });
 }
 
-function readScale(value: unknown): ExplainerScalePoint[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((point) => {
-    if (typeof point === 'string' && point.trim()) return [{ grade: point.trim() }];
-    if (!isRecord(point)) return [];
-    const grade = firstText([point.grade, point.name]);
-    if (!grade) return [];
-    const meaning = text(point.meaning) ?? undefined;
-    return [{ grade, ...(meaning ? { meaning } : {}) }];
-  });
-}
-
-function parseCategoryRow(cat: unknown): ExplainerCategory[] {
-  if (!isRecord(cat)) return [];
-  const name = text(cat.name);
-  const scale = readScale(cat.scale);
-  if (!name || scale.length < 2) return [];
-  const meaning = text(cat.meaning) ?? undefined;
-  return [{ name, ...(meaning ? { meaning } : {}), scale }];
-}
-
-function readCategories(answer: Record<string, unknown>): ExplainerCategory[] {
-  const rawGrades = isRecord(answer.grades) ? answer.grades : {};
-  const rawStale = isRecord(answer.stale) ? answer.stale : {};
-  const rawExplainer = isRecord(answer.explainer) ? answer.explainer : {};
-  const source =
-    answer.categories ??
-    rawGrades.categories ??
-    rawStale.categories ??
-    rawExplainer.categories;
-  if (!Array.isArray(source)) return [];
-  return source.flatMap(parseCategoryRow);
-}
-
-function parseCarriedGradeRow(
-  c: unknown,
-  defaultCategory: string,
-): NonNullable<ExplainerGrade['carried']>[number][] {
-  if (!isRecord(c)) return [];
-  const cNested = isRecord(c.grade) ? c.grade : {};
-  const cCat = firstText([c.category, cNested.category]) ?? defaultCategory;
-  const cGrade = firstText([c.grade, cNested.grade]);
-  if (!cGrade) return [];
-  const cReason = firstText([cNested.reason, c.reason]) ?? '';
-  const reference = text(c.reference);
-  return [
-    {
-      ...(reference ? { reference } : {}),
-      category: cCat,
-      grade: cGrade,
-      reason: cReason,
-      stale: c.stale !== false,
-      staleReason: firstText([c.staleReason, c.stale_reason]),
-    },
-  ];
-}
-
-function readGradeStaleFlag(
-  item: Record<string, unknown>,
-  nested: Record<string, unknown>,
-  reference: string,
-  staleRefs: ReadonlySet<string>,
-): boolean {
-  return item.stale === true || nested.stale === true || staleRefs.has(reference);
-}
-
-function readGradeCarriedList(
-  item: Record<string, unknown>,
-  category: string,
-): ExplainerGrade['carried'] {
-  if (!Array.isArray(item.carried)) return undefined;
-  const carried = item.carried.flatMap((c) => parseCarriedGradeRow(c, category));
-  return carried.length ? carried : undefined;
-}
-
-function parseGradeRow(item: unknown, staleRefs: ReadonlySet<string>): ExplainerGrade[] {
-  if (!isRecord(item)) return [];
-  const nested = isRecord(item.grade) ? item.grade : {};
-  const reference = firstText([item.reference, nested.reference]);
-  const category = firstText([item.category, nested.category]);
-  const grade = firstText([item.grade, nested.grade]);
-  if (!reference || !category || !grade) return [];
-  const staleReason = firstText([
-    item.staleReason,
-    item.stale_reason,
-    nested.staleReason,
-    nested.stale_reason,
-    isRecord(item.grade) ? item.reason : null,
-  ]);
-  const carried = readGradeCarriedList(item, category);
-  const row: ExplainerGrade = {
-    reference,
-    category,
-    grade,
-    reason: firstText([nested.reason, item.reason]) ?? '',
-    stale: readGradeStaleFlag(item, nested, reference, staleRefs),
-  };
-  if (staleReason) row.staleReason = staleReason;
-  if (carried) row.carried = carried;
-  return [row];
-}
-
-function readGradeList(source: unknown, staleRefs: ReadonlySet<string>): ExplainerGrade[] {
-  if (!Array.isArray(source)) return [];
-  return source.flatMap((item) => parseGradeRow(item, staleRefs));
-}
-
-function mergeGradeWithStale(
-  grade: ExplainerGrade,
-  staleMap: ReadonlyMap<string, ExplainerGrade>,
-): ExplainerGrade {
-  const match = staleMap.get(`${grade.reference}\u0000${grade.category}\u0000${grade.grade}`);
-  if (!match) return grade;
-  const staleReason = match.staleReason ?? match.reason;
-  return {
-    ...grade,
-    stale: grade.stale || match.stale,
-    reason: grade.reason || match.reason,
-    ...(staleReason ? { staleReason } : {}),
-  };
-}
-
-function readGrades(
-  answer: Record<string, unknown>,
-  stale: ExplainerState['stale'],
-): ExplainerGrade[] {
-  const staleRefs = new Set<string>(stale?.staleGrades ?? []);
-  const rawGrades = answer.grades;
-  const rawStale = isRecord(answer.stale) ? answer.stale : {};
-  const primarySource = Array.isArray(rawGrades)
-    ? rawGrades
-    : isRecord(rawGrades)
-      ? rawGrades.grades
-      : null;
-  const primary = readGradeList(primarySource, staleRefs);
-  const fromStale = readGradeList(rawStale.grades, staleRefs);
-  if (!primary.length) return fromStale;
-  if (!fromStale.length) return primary;
-  const staleMap = new Map(
-    fromStale.map((g) => [`${g.reference}\u0000${g.category}\u0000${g.grade}`, g]),
-  );
-  return primary.map((g) => mergeGradeWithStale(g, staleMap));
-}
-
 function readLimit(value: unknown): ExplainerLimit | null {
   if (!isRecord(value)) return null;
   if (value.state === 'refused') {
@@ -864,9 +779,7 @@ function readStateBinding(
   nested: Record<string, unknown>,
 ): ExplainerBinding | null {
   const fallbackLabel = firstText([answer.label, nested.label]);
-  return (
-    readBinding(answer.binding, fallbackLabel) ?? readBinding(nested.binding, fallbackLabel)
-  );
+  return readBinding(answer.binding, fallbackLabel) ?? readBinding(nested.binding, fallbackLabel);
 }
 
 function readStateParts(answer: Record<string, unknown>): ExplainerState['parts'] {
@@ -894,6 +807,7 @@ export function parseState(answer: Record<string, unknown>): ExplainerState {
     retiredAt,
     explanation: readExplanation(answer),
     building: readBuilding(answer),
+    build: parseExplainerBuild(answer.build ?? nested.build),
     stale,
     parts: readStateParts(answer),
     claims: readStateClaims(answer),
@@ -921,8 +835,10 @@ function readRevisionKind(row: Record<string, unknown>): 'global' | 'focused' {
 
 function attachOptionalRevisionFields(result: ExplainerRevision, row: Record<string, unknown>) {
   const focus = text(row.focus);
+  const coverage = text(row.coverage);
   const bytes = number(row.bytes);
   if (focus) result.focus = focus;
+  if (coverage) result.coverage = coverage;
   if (row.removed === true) result.removed = true;
   if (bytes !== null) result.bytes = bytes;
   if (Array.isArray(row.parts)) result.parts = readParts(row.parts);
@@ -951,7 +867,10 @@ export function parseRevisions(answer: Record<string, unknown>): ExplainerRevisi
   const rows = Array.isArray(answer.revisions) ? answer.revisions : [];
   const revisions = rows.flatMap(parseRevisionRow);
   const total = isRecord(answer.total)
-    ? { used: number(answer.total.used) ?? 0, limit: number(answer.total.limit) ?? 0 }
+    ? {
+        used: number(answer.total.used) ?? 0,
+        limit: number(answer.total.limit) ?? 0,
+      }
     : undefined;
   const detail = text(answer.detail);
   return {
@@ -965,29 +884,70 @@ export function parseRevisions(answer: Record<string, unknown>): ExplainerRevisi
 
 // ---- the calls ----
 
-export async function readExplainerState(
-  target: ExplainerTarget,
-  query?: ExplainerStateQuery,
-): Promise<ExplainerState> {
-  const url = stateUrl(target, query);
-  const base = stateUrl(target);
-  const response = await fetch(url);
-  if (url !== base && response.status === 404) {
-    const clone = response.clone();
-    const peek: unknown = await clone.json().catch(() => null);
-    if (isRecord(peek) && peek.reason === 'unmocked') {
-      const fallback = await fetch(base);
-      return parseState(await bodyOf(fallback));
-    }
-  }
-  return parseState(await bodyOf(response));
+/** The badge's answer, parsed by the same readers `/state` is: no second spelling of a field. */
+export function parseStaleBadge(answer: Record<string, unknown>): ExplainerStaleBadge {
+  const stale = readStale(answer);
+  const categories = readCategories(answer);
+  const grades = readGrades(answer, stale);
+  return {
+    state: 'ok',
+    stale,
+    explanation: readExplanation(answer),
+    moved: readMoved(answer.movedNotice),
+    building: readBuilding(answer),
+    retired: answer.retired === true,
+    ...(categories.length ? { categories } : {}),
+    ...(grades.length ? { grades } : {}),
+  };
 }
 
-export async function readExplainerRevisions(
+// Identical explainer reads in flight are one request (`sharedRead`): a StrictMode remount or a second
+// mounted reader joins the request already asked for, and the request is cancelled on the wire once
+// no mounted reader wants it. The answer object is shared, so readers treat it as immutable.
+
+export function readExplainerState(
   target: ExplainerTarget,
+  query?: ExplainerStateQuery,
+  signal?: AbortSignal,
+): Promise<ExplainerState> {
+  const url = stateUrl(target, query);
+  return sharedRead(`explainer:${url}`, async (shared) => {
+    const base = stateUrl(target);
+    const response = await fetch(url, { signal: shared });
+    if (url !== base && response.status === 404) {
+      const clone = response.clone();
+      const peek: unknown = await clone.json().catch(() => null);
+      if (isRecord(peek) && peek.reason === 'unmocked') {
+        const fallback = await fetch(base, { signal: shared });
+        return parseState(await bodyOf(fallback));
+      }
+    }
+    return parseState(await bodyOf(response));
+  }, signal);
+}
+
+/** The top bar's badge: `/stale`, read for the comparison on screen (F18). */
+export function readExplainerStale(
+  target: ExplainerTarget,
+  query?: ExplainerStateQuery,
+  signal?: AbortSignal,
+): Promise<ExplainerStaleBadge> {
+  const url = staleUrl(target, query);
+  return sharedRead(`explainer:${url}`, async (shared) => {
+    const response = await openingFetch(url, { signal: shared });
+    return parseStaleBadge(await bodyOf(response));
+  }, signal);
+}
+
+export function readExplainerRevisions(
+  target: ExplainerTarget,
+  signal?: AbortSignal,
 ): Promise<ExplainerRevisions> {
-  const response = await fetch(revisionsUrl(target));
-  return parseRevisions(await bodyOf(response));
+  const url = revisionsUrl(target);
+  return sharedRead(`explainer:${url}`, async (shared) => {
+    const response = await fetch(url, { signal: shared });
+    return parseRevisions(await bodyOf(response));
+  }, signal);
 }
 
 export async function readPlannedReview(target: ExplainerTarget): Promise<PlannedPage | null> {
@@ -1032,6 +992,33 @@ export async function updateExplainer(
       }
     : undefined;
   return { attempt: text(answer.attempt), ...(counts ? { counts } : {}) };
+}
+
+/**
+ * The developer's Cancel while a build runs (MIK-R211 v2 rules 4 and 5).
+ *
+ * It names the build's own request id, so the host ends that attempt and nothing else; the route
+ * answers with the seat's receipt and no build record, which is why the caller re-reads `/state` to
+ * show the ended build and its reason. A refusal is thrown as `ExplainerRefusal`, like every read.
+ */
+export async function cancelExplainerBuild(
+  target: ExplainerTarget,
+  requestId: string,
+): Promise<ExplainerCancel> {
+  const response = await fetch(cancelUrl(target), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ requestId }),
+  });
+  const answer = await bodyOf(response);
+  const cancel = isRecord(answer.cancel) ? answer.cancel : {};
+  return {
+    requestId: text(cancel.requestId) ?? requestId,
+    seat: text(cancel.seat),
+    turnStopped: cancel.turnStopped === true,
+    requestUncertain: cancel.requestUncertain === true,
+    publicationPrevented: cancel.publicationPrevented !== false,
+  };
 }
 
 /**

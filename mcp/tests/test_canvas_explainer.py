@@ -1,9 +1,8 @@
 """One leaf's explainer environment: build, Update, Retire and their confinement (MIK-R186).
 
-Each case protects one promise the environment makes: the snapshot equals the bound tree, the
-binding is written last, an unchanged Update answers ``current`` and writes nothing, a moved Update
-links what it can and removes the snapshot it replaced, Retire ends the seat's processes by both
-counts and leaves a receipt, and a symlink planted in the folder is held rather than followed.
+Each case protects one environment operation: exact detached worktrees and binding last,
+unchanged Update, in-place Update and failure recovery, process retirement and Git registration
+cleanup, and physical confinement of metadata and ordinary workspace entries.
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ from agents_remember.canvas.explainer_paths import (
     generation_path,
     leaf_workspace,
     retire_receipts_root,
-    retired_marker,
 )
 from agents_remember.canvas.explainer_state import (
     ProcessRecord,
@@ -30,7 +28,6 @@ from agents_remember.canvas.explainer_state import (
     agent_id,
     end_processes,
     generation,
-    mark_retired,
     process_tree,
     raise_generation,
     read_binding,
@@ -39,15 +36,11 @@ from agents_remember.canvas.explainer_state import (
     write_receipt,
 )
 from agents_remember.canvas.explainer_workspace import (
-    MAX_SNAPSHOT_FILE_BYTES,
     EnvironmentInputs,
     EnvironmentRef,
     EnvironmentRun,
     RetireRequest,
-    SnapshotTooLarge,
     build_environment,
-    count_tree,
-    next_snapshot_number,
     plan_retire,
     retire_environment,
     update_environment,
@@ -122,27 +115,39 @@ def _receipts(runtime) -> Path:
     return retire_receipts_root(task_folder, LEAF)
 
 
-def test_a_build_writes_the_bound_trees_and_binds_last(tmp_path: Path) -> None:
+def test_a_build_checks_out_both_bound_trees_and_binds_last(tmp_path: Path) -> None:
     code = _repository(tmp_path, "code", {"src/app.py": "x = 1\n", "README.md": "hi\n"})
     memory = _repository(tmp_path, "memory", {"system/settings.md": "s\n"})
     runtime = config(tmp_path)
-    build = build_environment(
-        EnvironmentRun(ref=_ref(runtime), inputs=_inputs(code, memory), now=NOW)
-    )
     workspace = leaf_workspace(runtime, REPOSITORY, TASK, LEAF)
-    snapshot = workspace / build.binding.snapshot
-    assert (snapshot / "code/src/app.py").read_text() == "x = 1\n"
-    assert (snapshot / "memory/system/settings.md").read_text() == "s\n"
-    # Every blob of the tree is there, and the count equals git's own.
-    assert build.code is not None
-    assert count_tree(code, _tree(code)) == build.code.files == 2
-    # The binding is the last write, and it names the snapshot that exists.
-    stored = read_binding(workspace)
-    assert stored is not None and stored.snapshot == build.binding.snapshot
-    assert (workspace / "instructions" / "evidence.json").is_file()
-    assert (workspace / "instructions" / "assignment.txt").read_text() == "You are the explainer.\n"
+    seen = []
+
+    def observe(step, _facts):
+        if step != "bound":
+            assert read_binding(workspace) is None
+        seen.append(step)
+
+    build = build_environment(
+        EnvironmentRun(
+            ref=_ref(runtime),
+            inputs=_inputs(code, memory),
+            now=NOW,
+            progress=observe,
+        )
+    )
+    assert build.binding.snapshot is None
+    for side, repository in (("code", code), ("memory", memory)):
+        checkout = workspace / "trees" / side
+        assert _tree(checkout) == _tree(repository)
+        assert str(checkout) in _git(repository, "worktree", "list", "--porcelain")
+        assert _git(checkout, "branch", "--show-current") == ""
+    assert (workspace / "trees/code/src/app.py").read_text() == "x = 1\n"
+    assert build.code is not None and build.code.files == 2
+    assert read_binding(workspace) == build.binding
+    assert (workspace / "instructions/evidence.json").is_file()
+    assert (workspace / "instructions/assignment.txt").read_text() == "You are the explainer.\n"
     assert (workspace / "scratch").is_dir() and (workspace / "drafts").is_dir()
-    assert build.steps[-1] == "bound"
+    assert seen[-1] == build.steps[-1] == "bound"
 
 
 def test_an_unchanged_update_answers_current_and_writes_nothing(tmp_path: Path) -> None:
@@ -156,40 +161,57 @@ def test_an_unchanged_update_answers_current_and_writes_nothing(tmp_path: Path) 
         EnvironmentRun(ref=run.ref, inputs=run.inputs, now=NOW, previous=build.binding)
     )
     assert update.current
-    assert update.snapshot is None
+    assert update.code is None and update.memory is None
     assert binding_path(build.workspace).read_bytes() == before
 
 
-def test_a_moved_update_links_unchanged_files_and_removes_the_old_snapshot(tmp_path: Path) -> None:
+def test_a_moved_update_reuses_both_registered_worktrees(tmp_path: Path) -> None:
     code = _repository(tmp_path, "code", {"a.py": "1\n", "b.py": "2\n"})
     memory = _repository(tmp_path, "memory", {"m.md": "m\n"})
     runtime = config(tmp_path)
     build = build_environment(
         EnvironmentRun(ref=_ref(runtime), inputs=_inputs(code, memory, 7), now=NOW)
     )
-    _write(code, {"b.py": "2 changed\n", "c.py": "3\n"})
+    original_metadata = {
+        side: (build.workspace / "trees" / side / ".git").read_bytes()
+        for side in ("code", "memory")
+    }
+    _write(code, {"b.py": "changed\n", "c.py": "3\n"})
     _git(code, "add", "-A")
-    _git(code, "commit", "-q", "-m", "two")
+    _git(code, "commit", "-qm", "two")
+    _write(memory, {"m.md": "changed memory\n"})
+    _git(memory, "add", "-A")
+    _git(memory, "commit", "-qm", "two")
+
+    def observe(step, _facts):
+        if step != "bound":
+            assert read_binding(build.workspace) is None
+
     update = update_environment(
         EnvironmentRun(
             ref=_ref(runtime),
             inputs=_inputs(code, memory, 8),
             now=NOW,
             previous=build.binding,
+            progress=observe,
         )
     )
     assert not update.current
-    assert update.binding.snapshot != build.binding.snapshot
-    assert update.code is not None
-    assert update.code.files == 3
-    assert update.code.linked == 1  # a.py was unchanged and linked from the old snapshot
-    assert update.code.written == 2
-    assert not (build.workspace / build.binding.snapshot).exists()
-    stored = read_binding(build.workspace)
-    assert stored is not None and stored.binding.comparison_number == 8
+    assert update.binding.snapshot == build.binding.snapshot is None
+    for side, repository in (("code", code), ("memory", memory)):
+        checkout = build.workspace / "trees" / side
+        assert (checkout / ".git").read_bytes() == original_metadata[side]
+        assert _tree(checkout) == _tree(repository)
+        assert _git(repository, "worktree", "list", "--porcelain").count("worktree ") == 2
+    assert (build.workspace / "trees/code/b.py").read_text() == "changed\n"
+    assert (build.workspace / "trees/memory/m.md").read_text() == "changed memory\n"
+    assert not list(build.workspace.glob("snapshot-*"))
+    assert read_binding(build.workspace) == update.binding
 
 
 def test_retire_ends_the_seats_processes_and_leaves_a_receipt(tmp_path: Path) -> None:
+    # The seat counter lies with the task (MIK-R211 v5 rule 12), so the task folder exists.
+    (tmp_path / "tasks" / REPOSITORY / TASK).mkdir(parents=True)
     code = _repository(tmp_path, "code", {"a.py": "1\n"})
     memory = _repository(tmp_path, "memory", {"m.md": "m\n"})
     runtime = config(tmp_path)
@@ -201,7 +223,11 @@ def test_retire_ends_the_seats_processes_and_leaves_a_receipt(tmp_path: Path) ->
     seat = agent_id(workspace, seat_number)
     child = subprocess.Popen(
         ["sleep", "300"],
-        env={**os.environ, "AR_EXPLAINER_WORKSPACE": str(workspace), "PASEO_AGENT_ID": seat},
+        env={
+            **os.environ,
+            "AR_EXPLAINER_WORKSPACE": str(workspace),
+            "PASEO_AGENT_ID": seat,
+        },
     )
     try:
         tree = process_tree(workspace, seat)
@@ -224,9 +250,13 @@ def test_retire_ends_the_seats_processes_and_leaves_a_receipt(tmp_path: Path) ->
     assert outcome.receipt.ended_by_marker >= 1
     assert outcome.receipt.ended_by_tree >= 1
     assert outcome.receipt.remaining == ()
-    assert retired_marker(workspace).is_file()
-    assert not (workspace / "instructions").exists()
-    assert not (workspace / build.binding.snapshot).exists()
+    # MIK-R211 v5 rule 12: the folder is gone completely, and no Git worktree entry is left.
+    assert not workspace.exists()
+    assert list(workspace.parent.iterdir()) == []
+    for repository in (code, memory):
+        assert _git(repository, "worktree", "list", "--porcelain").count("worktree ") == 1
+    assert (code / "a.py").read_text() == "1\n"
+    assert (memory / "m.md").read_text() == "m\n"
     stored_receipt = read_receipt(receipts, "receipt-1")
     assert stored_receipt is not None and stored_receipt.state == "finished"
 
@@ -307,8 +337,6 @@ def test_receipt_id_validation_rejects_traversal_and_separators_in_internal_writ
             receipt_path(receipts, bad)
         with pytest.raises(PathRefused):
             read_receipt(receipts, bad)
-        with pytest.raises(PathRefused):
-            mark_retired(workspace, bad, at=NOW)
         if bad:
             with pytest.raises(PathRefused):
                 write_receipt(receipts, sample.model_copy(update={"receipt_id": bad}))
@@ -368,75 +396,39 @@ def test_every_metadata_writer_guards_ancestors_and_retire_holds_nested_symlinks
     assert (outside / "keep.txt").read_text() == "keep\n"
 
 
-def test_update_stages_instructions_reclaims_orphans_and_keeps_spanning_turn_snapshot(
+def test_a_failed_binding_write_leaves_no_claim_and_retry_binds_the_same_worktrees(
     tmp_path: Path,
 ) -> None:
-    """MIK-R186 rule 6: Update stages instructions, reclaims orphans, and checks in_turn before removal."""
-
     code = _repository(tmp_path, "code", {"a.py": "1\n"})
     memory = _repository(tmp_path, "memory", {"m.md": "m\n"})
     runtime = config(tmp_path)
-    build = build_environment(
-        EnvironmentRun(ref=_ref(runtime), inputs=_inputs(code, memory, 7), now=NOW)
-    )
-    old_evidence = (build.workspace / "instructions" / "evidence.json").read_bytes()
-    old_grants = (build.workspace / "instructions" / "grants.json").read_bytes()
-
-    # Plant an interrupted orphan snapshot-2; next_snapshot_number reclaims it.
-    orphan = build.workspace / "snapshot-2"
-    orphan.mkdir()
-    (orphan / "stale.txt").write_text("orphan\n")
-    assert next_snapshot_number(build.workspace) == 2
-    assert not orphan.exists()
-
-    # Fault write_binding during Update: old instructions/evidence.json and grants.json stay intact.
+    ref = _ref(runtime)
+    build = build_environment(EnvironmentRun(ref=ref, inputs=_inputs(code, memory, 7), now=NOW))
     _write(code, {"a.py": "2\n"})
     _git(code, "add", "-A")
-    _git(code, "commit", "-q", "-m", "two")
+    _git(code, "commit", "-qm", "two")
     with (
         mock.patch.object(explainer_workspace, "write_binding", side_effect=OSError("disk full")),
         pytest.raises(OSError),
     ):
         update_environment(
             EnvironmentRun(
-                ref=_ref(runtime),
+                ref=ref,
                 inputs=_inputs(code, memory, 8),
                 now=NOW,
                 previous=build.binding,
             )
         )
-    assert read_binding(build.workspace) == build.binding
-    assert (build.workspace / "instructions" / "evidence.json").read_bytes() == old_evidence
-    assert (build.workspace / "instructions" / "grants.json").read_bytes() == old_grants
-    assert not (build.workspace / "snapshot-2").exists()
-
-    # Spanning turn keeps old snapshot-1 readable; subsequent idle Update removes it.
-    spanning = update_environment(
-        EnvironmentRun(
-            ref=_ref(runtime),
-            inputs=_inputs(code, memory, 8),
-            now=NOW,
-            previous=build.binding,
-            in_turn=lambda: True,
-        )
+    assert read_binding(build.workspace) is None
+    assert (build.workspace / "trees/code/a.py").read_text() == "2\n"
+    recovered = update_environment(
+        EnvironmentRun(ref=ref, inputs=_inputs(code, memory, 8), now=NOW)
     )
-    assert (build.workspace / "snapshot-1").is_dir()
-    assert (build.workspace / "snapshot-2").is_dir()
-    _write(code, {"a.py": "3\n"})
-    _git(code, "add", "-A")
-    _git(code, "commit", "-q", "-m", "three")
-    settled = update_environment(
-        EnvironmentRun(
-            ref=_ref(runtime),
-            inputs=_inputs(code, memory, 9),
-            now=NOW,
-            previous=spanning.binding,
-            in_turn=lambda: False,
-        )
-    )
-    assert settled.binding.snapshot == "snapshot-3"
-    assert not (build.workspace / "snapshot-1").exists()
-    assert not (build.workspace / "snapshot-2").exists()
+    assert recovered.previous_number is None
+    assert read_binding(build.workspace) == recovered.binding
+    assert recovered.binding.binding.comparison_number == 8
+    assert _git(code, "worktree", "list", "--porcelain").count("worktree ") == 2
+    assert _git(memory, "worktree", "list", "--porcelain").count("worktree ") == 2
 
 
 def test_process_matching_and_signalling_use_exact_markers_and_start_time_identity(
@@ -458,7 +450,11 @@ def test_process_matching_and_signalling_use_exact_markers_and_start_time_identi
     )
     actual = subprocess.Popen(
         ["sleep", "300"],
-        env={**os.environ, "AR_EXPLAINER_WORKSPACE": str(workspace), "PASEO_AGENT_ID": seat},
+        env={
+            **os.environ,
+            "AR_EXPLAINER_WORKSPACE": str(workspace),
+            "PASEO_AGENT_ID": seat,
+        },
     )
     try:
         tree = process_tree(workspace, seat)
@@ -487,56 +483,3 @@ def test_process_matching_and_signalling_use_exact_markers_and_start_time_identi
             if proc.poll() is None:
                 proc.kill()
                 proc.wait(timeout=HANG_GUARD_SECONDS)
-
-
-def test_snapshot_preserves_nul_paths_enforces_pre_read_size_bounds_and_sets_readonly_modes(
-    tmp_path: Path,
-) -> None:
-    """MIK-R186 rule 2: NUL-delimited ls-tree paths, pre-read size ceiling, and readonly files."""
-
-    unusual = 'dir/with\ttab "quote" and café.py'
-    code = _repository(tmp_path, "code", {unusual: "val = 1\n", "keep.py": "k = 1\n"})
-    memory = _repository(tmp_path, "memory", {"m.md": "m\n"})
-    runtime = config(tmp_path)
-    build = build_environment(
-        EnvironmentRun(ref=_ref(runtime), inputs=_inputs(code, memory, 7), now=NOW)
-    )
-    snap1_file = build.workspace / build.binding.snapshot / "code" / unusual
-    snap1_keep = build.workspace / build.binding.snapshot / "code" / "keep.py"
-    assert snap1_file.read_text(encoding="utf-8") == "val = 1\n"
-    assert (snap1_file.stat().st_mode & 0o222) == 0
-    assert (snap1_keep.stat().st_mode & 0o222) == 0
-
-    # Make snap1_keep writable before Update; linking must restore read-only mode on the inode.
-    snap1_keep.chmod(0o644)
-    _write(code, {unusual: "val = 2\n"})
-    _git(code, "add", "-A")
-    _git(code, "commit", "-q", "-m", "two")
-    updated = update_environment(
-        EnvironmentRun(
-            ref=_ref(runtime),
-            inputs=_inputs(code, memory, 8),
-            now=NOW,
-            previous=build.binding,
-        )
-    )
-    snap2_keep = build.workspace / updated.binding.snapshot / "code" / "keep.py"
-    assert (snap2_keep.stat().st_mode & 0o222) == 0
-
-    # Oversized blob in tree metadata refuses before reading blobs via cat-file.
-    with (
-        mock.patch.object(
-            explainer_workspace,
-            "_tree_entries",
-            return_value=[("huge.bin", "a" * 40, MAX_SNAPSHOT_FILE_BYTES + 1, "100644")],
-        ),
-        mock.patch.object(
-            explainer_workspace,
-            "read_git_blobs_bytes",
-            side_effect=AssertionError("cat-file should not be called"),
-        ),
-        pytest.raises(SnapshotTooLarge),
-    ):
-        build_environment(
-            EnvironmentRun(ref=_ref(runtime), inputs=_inputs(code, memory, 9), now=NOW)
-        )

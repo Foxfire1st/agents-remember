@@ -89,13 +89,18 @@ function open(subject: ReviewResult) {
 type View = ReturnType<typeof open>;
 const labelOf = (node: HTMLElement) =>
   node.dataset.treeNode === 'family' ? `family ${node.dataset.family}` : (node.textContent ?? '');
+// A family row opens the family's overview (MIK-R211 v4 rule 10).
 const clickFamilyRow = async (view: View, id: string) => {
   fireEvent.click(within(familyBlock(view, id)).getByTestId('review-family-open'));
   await waitFor(
-    () => expect(view.getByTestId('review-center-family').dataset.family).toBe(id),
+    () => expect(view.getByTestId('review-family-overview').dataset.family).toBe(id),
   );
   await settled(view);
 };
+const memberRowOf = (view: View, familyId: string, label: string) =>
+  within(familyBlock(view, familyId))
+    .getAllByTestId('review-family-member-open')
+    .find((node) => node.textContent?.includes(label))!;
 
 it("keeps both families as the second family's own member is selected, and an explicit unknown read fails", async () => {
   const view = open(SHARED);
@@ -137,7 +142,7 @@ it("keeps both families as the second family's own member is selected, and an ex
   expect(families(view)).toEqual(first);
 });
 
-it('keeps complete outline rows while a partial family continues in the main page', async () => {
+it('keeps complete outline rows while a member read continues its partial family roster in the main page', async () => {
   useFirstPage = true;
   treeOrderStore.getState().setOrder('authored');
   const view = open(SHARED);
@@ -148,17 +153,20 @@ it('keeps complete outline rows while a partial family continues in the main pag
   expect(rows).toBe(9);
   expect(view.queryByTestId('review-family-roster-next')).toBeNull();
   await clickFamilyRow(view, FAM1_ID);
-  const control = view.getAllByTestId('review-center-roster-next')[0];
+  // The partial roster's continuation is in the detail of a member read under the family.
+  fireEvent.click(memberRowOf(view, FAM1_ID, 'INV-FFFFFF'));
+  const control = (await view.findAllByTestId('review-center-roster-next'))[0];
   const cursor = control.dataset.continuation!;
   const asked = reviewCount();
   fireEvent.click(control);
   await waitFor(() => expect(reviewCount() - asked).toBe(1));
   await settled(view);
+  // The continuation pages the member's read it was offered under, with the cursor unchanged.
   const request = world.requests.reviews()[asked];
   expect([
     request.searchParams.get('selectorId'),
     request.searchParams.get('continuation'),
-  ]).toEqual([FAM1_ID, cursor]);
+  ]).toEqual([SHARED.payload!.knowledge.revision_selection!.record_id, cursor]);
   expect(memberOccurrences(familyBlock(view, FAM1_ID)).size).toBe(rows);
   await clickFamilyRow(view, FAM2_ID);
   expect(familyBlock(view, FAM1_ID).dataset.familyKept).toBe('true');
@@ -172,9 +180,11 @@ it('keeps the first family when a member of the second is opened from its slot, 
   await clickFamilyRow(view, FAM2_ID);
   const first = families(view);
   const before = reviewCount();
-  const opener = within(view.getByTestId('review-center-column'))
-    .getAllByTestId('review-center-open-member')
-    .find((button) => button.textContent?.includes('INV-PPPPPP'))!;
+  // The family opens its members' overview now (MIK-R211 v4 rule 10): a member opens from its summary row.
+  const opener = within(view.getByTestId('review-family-overview'))
+    .getAllByTestId('review-member-summary')
+    .find((row) => row.dataset.subject === MEMBER_P.payload!.knowledge.revision_selection!.record_id)!
+    .querySelector('button')!;
   fireEvent.click(opener);
   await waitFor(() => expect(view.getByTestId('review-center-member')).toBeTruthy());
   await settled(view);

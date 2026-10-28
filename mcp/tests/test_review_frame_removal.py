@@ -29,7 +29,6 @@ from agents_remember.application.review_evidence_packet import (
     SideState,
     build_evidence_packet,
 )
-from agents_remember.application.review_evidence_read import DEFAULT_READ_LIMITS
 from agents_remember.application.review_frame_store import (
     TASK_LOCK_NAME,
     FrameRefused,
@@ -110,7 +109,6 @@ def _evidence(record: ReviewTreeComparisonRecord):
         memory_before=SideState("available", index_state="complete"),
         memory_after=SideState("available", index_state="complete"),
         evidence_map=EvidenceMap(coverage="the selected change"),
-        limits=DEFAULT_READ_LIMITS,
         claims=(claim,),
         recorded_at=AT,
     )
@@ -362,7 +360,7 @@ def test_a_second_removal_of_the_same_number_refuses(task: Path) -> None:
 # --- 7: retention and the per-revision ceiling still hold ----------------------------------------
 
 
-def test_retention_and_the_per_revision_ceiling_still_hold_after_a_removal(task: Path) -> None:
+def test_retention_and_a_named_per_revision_ceiling_still_hold_after_a_removal(task: Path) -> None:
     for number in range(1, 11):
         assert _publish(task, request=f"req-{number}").published
     scope = frame_scope(task, LEAF, FRAME)
@@ -374,11 +372,14 @@ def test_retention_and_the_per_revision_ceiling_still_hold_after_a_removal(task:
     assert len(removed.retained) > 8
     assert _receipt(scope)["revisions"] == [2]
 
-    # The 16 MiB per-revision ceiling still refuses that one revision -- and it is not a refusal of
-    # the task total, so the removal control is not offered for it (v2 item 8).
-    assert FrameLimits().bytes_per_revision == 16 * 1024 * 1024
+    # No revision has a ceiling of its own by default (MIK-R211 v4 rule 3, D567). A ceiling a caller
+    # names still refuses that one revision -- and it is not a refusal of the task total, so the
+    # removal control is not offered for it (v2 item 8).
+    assert FrameLimits().bytes_per_revision is None and FrameLimits().draft_bytes is None
+    ceiling = 4096
+    named = FrameLimits(bytes_per_revision=ceiling, draft_bytes=ceiling)
     ready_before = json.loads((scope.frame_dir / "ready.json").read_text())
-    big = {"index.html": b"x" * (FrameLimits().bytes_per_revision + 1)}
+    big = {"index.html": b"x" * (ceiling + 1)}
     scope_root = task.parent / "over-revision"
     begin_draft(
         scope,
@@ -398,7 +399,7 @@ def test_retention_and_the_per_revision_ceiling_still_hold_after_a_removal(task:
             evidence=_evidence(_record()),
             supplemental=(),
             created_at=LATER,
-            limits=FrameLimits(),
+            limits=named,
         )
     assert too_large.value.reason == "revision-too-large", (
         "the refusal names the per-revision ceiling, not the task total"
@@ -423,7 +424,7 @@ def test_retention_and_the_per_revision_ceiling_still_hold_after_a_removal(task:
             authoring=_authoring("req-big-2"),
             focus="a draft past its own ceiling",
             assets=big,
-            limits=FrameLimits(),
+            limits=named,
             now=LATER,
         )
     assert draft_refused.value.reason == "draft-too-large"

@@ -4,6 +4,8 @@
 // none stays collapsed as before. The real DiffPane and CodeMirror render in jsdom.
 import { cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EditorState } from '@codemirror/state';
+import type { EditorView } from '@codemirror/view';
 
 import { DiffPane } from '../changeset/DiffPane';
 import {
@@ -12,6 +14,7 @@ import {
   REVEAL_HOLD_FRAMES,
   type Revealed,
   holdRevealed,
+  revealMark,
 } from './markGutter';
 
 afterEach(cleanup);
@@ -160,7 +163,7 @@ describe('a focused mark redrawn in another gutter element', () => {
 // further focus or scroll made, and every listener it added removed".
 describe('the hold after a return', () => {
   // Spelled out, not read from the module: each release is pinned on its own.
-  const RELEASES = ['pointerdown', 'keydown', 'wheel'];
+  const RELEASES = ['pointerdown', 'keydown', 'wheel', 'touchmove'];
   let frames: FrameRequestCallback[] = [];
   const added: string[] = [];
   const removed: string[] = [];
@@ -279,5 +282,96 @@ describe('the hold after a return', () => {
     // Frames 0 .. cap-1 hold; the frame at the cap ends it: no frame loop is left running.
     expect(run).toBe(REVEAL_HOLD_FRAMES + 1);
     ended();
+  });
+});
+
+describe('a pending return to a mark', () => {
+  let nextFrame = 0;
+  const frames = new Map<number, FrameRequestCallback>();
+  const cancels: Array<() => void> = [];
+
+  afterEach(() => {
+    for (const cancel of cancels.splice(0)) cancel();
+    document.body.replaceChildren();
+    const remaining = [...frames.values()];
+    frames.clear();
+    for (const callback of remaining) callback(performance.now());
+    vi.unstubAllGlobals();
+  });
+
+  function pending() {
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+    const dom = document.createElement('div');
+    const host = document.createElement('span');
+    const button = document.createElement('button');
+    host.appendChild(button);
+    document.body.appendChild(dom);
+    const dispatch = vi.fn();
+    const view = { dom, state: EditorState.create({ doc: 'line 1\nline 2' }), dispatch } as unknown as EditorView;
+    host.scrollIntoView = vi.fn();
+    const focus = vi.spyOn(button, 'focus');
+    const done = vi.fn();
+    const cancel = revealMark({ view, first: 1 }, mark('after', 2), host, done);
+    cancels.push(cancel);
+    return { dom, host, button, dispatch, focus, done, cancel };
+  }
+
+  function frame() {
+    const first = frames.entries().next().value;
+    if (!first) return;
+    frames.delete(first[0]);
+    first[1](performance.now());
+  }
+
+  it.each(['pointerdown', 'keydown', 'wheel', 'touchmove'])(
+    'does not pull the reader back after %s while the mark is still being drawn', (name) => {
+      const pendingMark = pending();
+      document.body.dispatchEvent(new Event(name, { bubbles: true }));
+      pendingMark.dom.appendChild(pendingMark.host);
+      frame();
+      expect(pendingMark.focus).not.toHaveBeenCalled();
+      expect(pendingMark.host.scrollIntoView).not.toHaveBeenCalled();
+      expect(pendingMark.dispatch).toHaveBeenCalledTimes(1);
+      expect(pendingMark.done).toHaveBeenCalledTimes(1);
+      expect(frames.size).toBe(0);
+    },
+  );
+
+  it('cancels when the reader moves focus elsewhere', () => {
+    const pendingMark = pending();
+    const elsewhere = document.createElement('button');
+    document.body.appendChild(elsewhere);
+    elsewhere.focus();
+    pendingMark.dom.appendChild(pendingMark.host);
+    frame();
+    expect(document.activeElement).toBe(elsewhere);
+    expect(pendingMark.host.scrollIntoView).not.toHaveBeenCalled();
+    expect(pendingMark.done).toHaveBeenCalledTimes(1);
+  });
+
+  it('never scrolls a detached pane from a queued frame', () => {
+    const pendingMark = pending();
+    pendingMark.dom.remove();
+    frame();
+    expect(pendingMark.host.scrollIntoView).not.toHaveBeenCalled();
+    expect(pendingMark.focus).not.toHaveBeenCalled();
+    expect(pendingMark.done).not.toHaveBeenCalled();
+    expect(frames.size).toBe(0);
+  });
+
+  it('lets a new explicit return reveal after the previous one was cancelled', () => {
+    const previous = pending();
+    previous.cancel();
+    const next = pending();
+    next.dom.appendChild(next.host);
+    frame();
+    expect(previous.host.scrollIntoView).not.toHaveBeenCalled();
+    expect(next.host.scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(next.focus).toHaveBeenCalledTimes(1);
+    expect(next.done).toHaveBeenCalledTimes(1);
   });
 });

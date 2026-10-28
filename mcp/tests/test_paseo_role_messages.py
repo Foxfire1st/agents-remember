@@ -6,20 +6,38 @@ import copy
 import hashlib
 import json
 import os
+import shutil
 import unittest
 import uuid
 from pathlib import Path
 from typing import Any, get_args
 from unittest.mock import patch
 
+from agents_remember.application.review_evidence_packet import comparison_reference
+from agents_remember.application.review_frame_store import (
+    begin_draft,
+    frame_scope,
+    publish_revision,
+)
+from agents_remember.canvas.explainer_binding import EXPLAINER_BINDING_ENV, EXPLAINER_WORKSPACE_ENV
+from agents_remember.canvas.explainer_paths import EXPLAINER_FRAME
+from agents_remember.canvas.explainer_state import (
+    AGENT_MARKER,
+    ExplainerBinding,
+    binding_digest,
+    write_binding,
+)
 from agents_remember.cli import (
     paseo_role_recipients,
     paseo_role_tools,
     role_held_messages,
     role_launch_receipts,
 )
+from agents_remember.cli.paseo_role_caller import _message_caller
 from agents_remember.cli.paseo_role_tools import send_role_message, sender_line, starting_agent
 from agents_remember.cli.role_held_messages import HeldMessage
+from agents_remember.models.knowledge.review_frame import FrameAuthoring, FrameBinding, FrameLimits
+from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord, ReviewTreeSide
 from agents_remember.models.role_agents import (
     RoleMessageCall,
     RoleMessageRefusal,
@@ -28,9 +46,11 @@ from agents_remember.models.role_agents import (
 )
 from agents_remember.observer.host_activity import HOST_ACTIVITY_FILE
 from agents_remember.serving.projections.host_activity import activity_directory
+from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees import role_reports
+from canvas_host_test_support import AT, packet
 from paseo_role_tools_test_support import ARCHIVED_AT, TURN
-from test_paseo_launch import runtime_config
+from test_paseo_launch import REPO, runtime_config
 from test_paseo_role_tools import (
     OTHER_SPRINT,
     RoleToolsTestCase,
@@ -38,6 +58,82 @@ from test_paseo_role_tools import (
     selection_of,
 )
 from test_paseo_status import NO_ROLLOUT
+
+
+def _explainer_environment(coordination_root: Path, seat: str) -> dict[str, str]:
+    """The environment a leaf explainer seat's tool server is launched with: no AR role binding."""
+
+    workspace = coordination_root / "explainer" / REPO / "master" / "01_LEAF"
+    workspace.mkdir(parents=True, exist_ok=True)
+    launch = {
+        "capability": "explainer",
+        "agent": seat,
+        "request": f"create:{seat}",
+        "repository": REPO,
+        "task": "master",
+        "leaf": "01_LEAF",
+        "workspace": str(workspace),
+        "generation": 1,
+        "seat": seat,
+    }
+    return {
+        EXPLAINER_BINDING_ENV: json.dumps(launch),
+        EXPLAINER_WORKSPACE_ENV: str(workspace),
+        AGENT_MARKER: seat,
+    }
+
+
+def _explainer_binding(
+    workspace: Path, number: int
+) -> tuple[ExplainerBinding, ReviewTreeComparisonRecord]:
+    """Write the leaf's comparison and its environment's binding.json, as a build writes them."""
+
+    record = ReviewTreeComparisonRecord(
+        task_id="master",
+        leaf_id="01_LEAF",
+        number=number,
+        code_base=ReviewTreeSide(repository="/repo/code", tree="a" * 40),
+        code_candidate=ReviewTreeSide(repository="/repo/code", tree="b" * 40),
+        memory_base=ReviewTreeSide(repository="/repo/memory", tree="c" * 40),
+        memory_candidate=ReviewTreeSide(repository="/repo/memory", tree="d" * 40),
+        recorded_at=AT,
+    )
+    binding = ExplainerBinding(
+        binding=FrameBinding.from_record(
+            record, comparison_owner="recorded", comparison_reference=comparison_reference(record)
+        ),
+        prepared_at=AT,
+        packet_digest="sha256:" + "0" * 64,
+    )
+    write_binding(workspace, binding)
+    return binding, record
+
+
+def _publish_explainer_revision(task_root: Path, record: ReviewTreeComparisonRecord) -> int:
+    """Publish one page revision into the leaf's explainer frame, as the seat's render does."""
+
+    scope = frame_scope(task_root, record.leaf_id, EXPLAINER_FRAME)
+    begin_draft(
+        scope,
+        working_directory=task_root.parent / "authoring" / "explained",
+        request_id="explained",
+        authoring=FrameAuthoring(request_id="explained", session_id="seat", started_at=AT),
+        focus="the explained change",
+        assets={"index.html": b"<!doctype html><p>the explained change</p>"},
+        limits=FrameLimits(),
+        now=AT,
+    )
+    publication = publish_revision(
+        scope,
+        request_id="explained",
+        entrypoint="index.html",
+        evidence=packet(record),
+        supplemental=(),
+        created_at=AT,
+        limits=FrameLimits(),
+    )
+    assert publication.manifest is not None
+    return publication.manifest.revision
 
 
 class RoleMessageTests(RoleToolsTestCase):
@@ -708,9 +804,76 @@ class RoleMessageTests(RoleToolsTestCase):
             self.assertEqual((result["status"], result["resumed"]), ("accepted", True))
 
     def test_a_caller_without_a_binding_or_a_runtime_is_refused(self) -> None:
+        """No role binding and no explainer launch binding: no sender (MIK-R113 rule 6).
+
+        A leaf explainer is no AR role, but its launch binding names who it is (MIK-R211 v5 rule 3,
+        D607): it reports to its master's architect with role_message, the tray file attached, and
+        an explainer binding that does not hold is refused as no binding at all.
+        """
+
         _request, worker = self.started(status="idle")
         self.runtime.calls.clear()
         self.refusal(self.message(None, agent_id=worker), "caller-has-no-binding")
+        with self.subTest("a leaf explainer's launch binding is its sender identity"):
+            _architect_request, architect = self.started("architect", status="idle")
+            # The leaf is its master's declared sub-task, as every explained leaf is.
+            master = self.master.document.model_dump(mode="json", by_alias=True, exclude_none=True)
+            leaf_row = {"number": "01_LEAF", "name": "Leaf", "file": "01_leaf.json"}
+            write_task_doc(
+                self.master.path.parent,
+                TaskDocument.model_validate({**master, "subTasks": [leaf_row]}),
+            )
+            seat = str(uuid.uuid4())
+            tray = self.root / "developer-messages" / "tray.md"
+            tray.parent.mkdir(parents=True)
+            tray.write_text("the developer's words")
+            explainer = _explainer_environment(self.config.coordination_root, seat)
+            workspace = Path(explainer[EXPLAINER_WORKSPACE_ENV])
+            binding, record = _explainer_binding(workspace, 5)
+            bound = f"binding #5 ({binding_digest(binding)})"
+            message = RoleMessageCall(
+                text="the developer asks", role="architect", attach=[str(tray)]
+            )
+            # Before any page is published, the line says so; after one, it names that revision.
+            sender = starting_agent(self.config, _message_caller(self.config, explainer))
+            self.assertEqual(
+                sender_line(sender),
+                f"From explainer · 01_LEAF · {bound} · no published revision · agent {seat}",
+            )
+            revision = _publish_explainer_revision(self.master.path.parent, record)
+            result = send_role_message(self.config, message, environment=explainer)
+            # The accepted sender is the explainer, named: its leaf, its binding and the revision it
+            # speaks from, and its seat -- in the line that opens the delivered message and in the
+            # filed message the architect's receipt names (the Manager's 14:49Z condition).
+            line = f"From explainer · 01_LEAF · {bound} · revision {revision} · agent {seat}"
+            self.assertEqual(result.get("refusal"), None)  # once refused as caller-has-no-binding
+            self.assertEqual(
+                (result["status"], result["recipientAgentId"]), ("accepted", architect)
+            )
+            self.assertEqual(result["senderLine"], line)
+            filed = Path(result["messageFile"])
+            (delivered,) = self.received(architect)
+            self.assertTrue(
+                delivered.startswith(f"{line}\nthe developer asks\nMessage file: {filed}")
+            )
+            receipt = filed.read_text()
+            self.assertIn(line, receipt)
+            self.assertIn("_explainer-", filed.name)
+            self.assertIn(f"{tray.as_posix()} sha256:", receipt)
+            self.assertEqual(len(sorted(filed.parent.glob("*.attach-1-tray.md"))), 1)
+        with self.subTest("an explainer binding that does not hold is no binding"):
+            broken = _explainer_environment(self.config.coordination_root, str(uuid.uuid4()))
+            shutil.rmtree(json.loads(broken[EXPLAINER_BINDING_ENV])["workspace"])
+            refused = self.refusal(
+                send_role_message(
+                    self.config,
+                    RoleMessageCall(text="the developer asks", role="architect"),
+                    environment=broken,
+                ),
+                "caller-has-no-binding",
+            )
+            self.assertIn("explainer", refused["detail"])
+        self.runtime.calls.clear()
         with patch.dict(
             os.environ,
             {"XDG_CONFIG_HOME": str((self.root / "unconfigured-user-config").resolve())},

@@ -10,10 +10,14 @@ import { Fragment, useEffect, useState } from 'react';
 import {
   type ChangeCounters,
   type MasterChangeset,
+  type MasterCounters,
+  type TaskChangeset,
   loadChangeSet,
   peekChangeSet,
 } from '../../data/changeset';
 import { isAbortedRead } from '../../data/abortableRead';
+import { useMasterCounters } from '../../data/useMasterCounters';
+import { MasterCounterStatus } from '../changeset/MasterCounterStatus';
 import { useIntentEntryGeneration } from '../../data/intentEntryRevalidation';
 import { type ReviewFailure, reviewProblemFromCause } from '../../data/review';
 import type { TaskEntry } from '../../types/projection';
@@ -69,7 +73,7 @@ function changesetTotal(
 // the bar printed `+0 −0` for a series nothing had measured — a zero of nothing, which is exactly
 // the reading this control must never publish (B6), and the one the developer saw frozen on a page
 // whose read had answered while the series contract was unreadable.
-function masterUnmeasured(data: Awaited<ReturnType<typeof loadChangeSet>>): string | null {
+function masterUnmeasured(data: TaskChangeset | MasterCounters): string | null {
   if (!('leaves' in data)) return null; // a leaf/task view has no generation to name
   if (data.generation) return null; // a measured generation is a real range, even an empty one
   if (data.currentness !== 'unmeasured') return null;
@@ -79,7 +83,7 @@ function masterUnmeasured(data: Awaited<ReturnType<typeof loadChangeSet>>): stri
   );
 }
 
-function changeSetRead(data: Awaited<ReturnType<typeof loadChangeSet>> | undefined) {
+function changeSetRead(data: TaskChangeset | MasterCounters | undefined) {
   if (!data) {
     return { counters: null, unrecorded: null, unmeasured: null, leaves: null, generation: null };
   }
@@ -92,15 +96,27 @@ function changeSetRead(data: Awaited<ReturnType<typeof loadChangeSet>> | undefin
   };
 }
 
-export function ChangeSetButton({
-  target,
-  label,
-  onOpen,
-}: {
+interface ControlProps {
   target: ChangeSetTarget;
   label: string;
   onOpen: (target: ChangeSetTarget) => void;
-}) {
+}
+
+export function ChangeSetButton(props: ControlProps) {
+  const master = props.target.master;
+  return master && !props.target.leaf && props.target.comparison === undefined
+    ? <MasterChangeSetButton {...props} master={master} />
+    : <TaskChangeSetButton {...props} />;
+}
+
+function MasterChangeSetButton({ target, label, onOpen, master }: ControlProps & { master: string }) {
+  const generation = useIntentEntryGeneration();
+  const read = useMasterCounters({ repo: target.repo, master, pins: target.generation }, generation);
+  return <ChangeSetControl target={target} label={label} onOpen={onOpen}
+    data={read.data} problem={read.problem} attribution={read.attribution} />;
+}
+
+function TaskChangeSetButton({ target, label, onOpen }: ControlProps) {
   const key = JSON.stringify(target);
   const revalidation = useIntentEntryGeneration();
   const [settled, setSettled] = useState<{
@@ -110,59 +126,39 @@ export function ChangeSetButton({
   } | null>(null);
   const data = settled?.key === key ? settled.data : peekChangeSet(target);
   const problem = settled?.key === key ? (settled.problem ?? null) : null;
-  const { counters, unrecorded, unmeasured, leaves, generation } = changeSetRead(data);
   useEffect(() => {
     let live = true;
-    // A switch to another task aborts this page's read with its request: the
-    // browser's free connections belong to the task shown now, and an abandoned
-    // read leaves neither an error on the page nor an entry in the store.
     const controller = new AbortController();
-    void loadChangeSet(
-      {
-        repo: target.repo,
-        scope: target.scope,
-        master: target.master,
-        leaf: target.leaf,
-        mode: target.mode,
-      },
-      controller.signal,
-    ).then(
+    void loadChangeSet({ repo: target.repo, scope: target.scope, master: target.master,
+      leaf: target.leaf, mode: target.mode }, controller.signal).then(
       (next) => live && setSettled({ key, data: next }),
       (cause: unknown) => {
         if (live && !isAbortedRead(cause)) setSettled({ key, problem: reviewProblemFromCause(cause) });
       },
     );
-    return () => {
-      live = false;
-      controller.abort();
-    };
+    return () => { live = false; controller.abort(); };
   }, [key, revalidation, target.repo, target.scope, target.master, target.leaf, target.mode]);
-  // An unrecorded range prints no total: `+0 −0` would present a zero of nothing as a measurement.
+  return <ChangeSetControl target={target} label={label} onOpen={onOpen} data={data} problem={problem} />;
+}
+
+function ChangeSetControl({ target, label, onOpen, data, problem, attribution }: ControlProps & {
+  data?: TaskChangeset | MasterCounters;
+  problem: ReviewFailure | null;
+  attribution?: import('../../data/useMasterCounters').MasterAttribution;
+}) {
+  const { counters, unrecorded, unmeasured, leaves, generation } = changeSetRead(data);
   const total = changesetTotal(counters, unrecorded, unmeasured);
   return (
     <Fragment>
-      <button
-        type="button"
-        className={changeSetBtn}
-        onClick={() => onOpen(generation ? { ...target, generation } : target)}
-        data-testid="open-changeset"
-      >
+      <button type="button" className={changeSetBtn}
+        onClick={() => onOpen(generation ? { ...target, generation } : target)} data-testid="open-changeset">
         ⇄ {label}
         {total ? <span className={changeSetCounts}>{total}</span> : null}
-        <LeafAttribution leaves={leaves} />
-        <ChangeSetReadState
-          counters={counters}
-          problem={problem}
-          unrecorded={unrecorded}
-          unmeasured={unmeasured}
-        />
+        <LeafAttribution leaves={attribution?.leaves ?? leaves} />
+        {attribution ? <MasterCounterStatus value={attribution} className={changeSetCounts} /> : null}
+        <ChangeSetReadState counters={counters} problem={problem} unrecorded={unrecorded} unmeasured={unmeasured} />
       </button>
-      <ChangeSetStateDetails
-        label={label}
-        problem={problem}
-        unrecorded={unrecorded}
-        unmeasured={unmeasured}
-      />
+      <ChangeSetStateDetails label={label} problem={problem} unrecorded={unrecorded} unmeasured={unmeasured} />
     </Fragment>
   );
 }

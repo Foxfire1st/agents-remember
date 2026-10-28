@@ -11,6 +11,7 @@
 import { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { columnScrolls } from './blockDom';
+import { useReviewShown } from '../reviewShown';
 
 export const READ_BATCH = 8;
 
@@ -101,8 +102,10 @@ function typing(target: EventTarget | null): boolean {
 }
 
 export function useEngageOnGesture(gate: ReadGate, page: React.RefObject<HTMLElement | null>): void {
+  // A hidden review (another bottom tab on screen, D575) is engaged by nothing done in that tab.
+  const shown = useReviewShown();
   useEffect(() => {
-    if (gate.engaged) return undefined;
+    if (gate.engaged || !shown) return undefined;
     // The page under the reader: the tree and the column (not the change page drawn over them), or a
     // cold page's body.
     const inPage = (target: EventTarget | null) =>
@@ -122,7 +125,7 @@ export function useEngageOnGesture(gate: ReadGate, page: React.RefObject<HTMLEle
       for (const name of MOVES) window.removeEventListener(name, onMove, options);
       window.removeEventListener('keydown', onKey, true);
     };
-  }, [gate, page]);
+  }, [gate, page, shown]);
 }
 
 // How far beyond the viewport a block counts as in view, so its reads have answered by the time the

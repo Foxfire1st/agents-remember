@@ -37,7 +37,6 @@ from agents_remember.application.review_evidence_packet import (
     build_evidence_packet,
     comparison_reference,
 )
-from agents_remember.application.review_evidence_read import DEFAULT_READ_LIMITS
 from agents_remember.application.review_frame_store import (
     RECLAMATION_RECEIPT,
     TASK_LOCK_NAME,
@@ -68,8 +67,11 @@ from agents_remember.models.knowledge.review_evidence import (
 from agents_remember.models.knowledge.review_frame import (
     FrameAuthoring,
     FrameBinding,
+    FrameInteractionCoverage,
     FrameLimits,
+    FrameManifest,
     FramePart,
+    FramePassCoverage,
 )
 from agents_remember.models.knowledge.review_trees import (
     ReviewConvertedBase,
@@ -149,7 +151,6 @@ def _evidence(record: ReviewTreeComparisonRecord):
         memory_before=SideState("available", index_state="complete"),
         memory_after=SideState("available", index_state="complete"),
         evidence_map=EvidenceMap(coverage="the selected change"),
-        limits=DEFAULT_READ_LIMITS,
         claims=(claim,),
         recorded_at=AT,
     )
@@ -172,6 +173,13 @@ def _authoring(request: str = "req-1") -> FrameAuthoring:
     return FrameAuthoring(request_id=request, session_id="session-1", started_at=AT)
 
 
+#: The runner's own words for the one bound on an interaction run (canvas-interactive-report.mjs).
+WINDOW = (
+    "the browser load process's own 180 s window"
+    " (canvas/prospective.py; not a limit on pages or a product cap)"
+)
+
+
 def _publish(  # noqa: PLR0913 - one test publication states its own comparison and assets
     task_root: Path,
     record: ReviewTreeComparisonRecord,
@@ -184,6 +192,7 @@ def _publish(  # noqa: PLR0913 - one test publication states its own comparison 
     now: str = AT,
     part_map: tuple[FramePart, ...] = (),
     binding_source: Callable[[], FrameBinding | None] | None = None,
+    interaction_coverage: FrameInteractionCoverage | None = None,
 ):
     scope = frame_scope(task_root, record.leaf_id, FRAME)
     begin_draft(
@@ -211,6 +220,7 @@ def _publish(  # noqa: PLR0913 - one test publication states its own comparison 
         asset_ancestry=ancestry,
         part_map=part_map,
         binding_source=binding_source,
+        interaction_coverage=interaction_coverage,
     )
 
 
@@ -516,6 +526,41 @@ def test_f13_a_manifest_that_does_not_match_the_pointer_is_unavailable(task: Pat
     manifest.write_text(json.dumps(document))
     opening = reopen_frame(scope)
     assert opening.state == "unavailable"
+
+
+def test_a_revision_published_before_a_limit_was_removed_still_reads(task: Path) -> None:
+    """A published revision is a record: removing a limit must not orphan it.
+
+    Revisions of L201 on disk were written while the packet still declared ``map.budget_bytes`` and
+    ``limits.packet_bytes``. With ``extra="forbid"`` the reader refused every one of them, so the page
+    reported no retained revision at all. The reader drops those two keys and still refuses any other
+    unknown key; it never writes them back.
+    """
+
+    _publish(task, _record())
+    scope = frame_scope(task, LEAF, FRAME)
+    document = json.loads((scope.frame_dir / "revisions" / "1" / "manifest.json").read_text())
+    # A packet no longer declares read limits (MIK-R211 v4 rule 3); the stored one did, budget too.
+    document["evidence"]["limits"] = {
+        "bytes_per_read": 262144,
+        "paths_per_packet": 64,
+        "records_per_collection": 200,
+        "relationship_depth": 2,
+        "pages_per_read": 4,
+        "packet_bytes": 100 * 1024,
+    }
+    if isinstance(document["evidence"].get("map"), dict):
+        document["evidence"]["map"]["budget_bytes"] = document["evidence"]["map"]["measured_bytes"]
+
+    parsed = FrameManifest.model_validate_json(json.dumps(document))
+    rewritten = parsed.model_dump_json()
+    assert "packet_bytes" not in rewritten
+    assert "budget_bytes" not in rewritten
+
+    # Everything else stays forbidden: one other unknown key still refuses the revision.
+    document["evidence"]["limits"]["not_a_limit"] = 1
+    with pytest.raises(ValidationError):
+        FrameManifest.model_validate_json(json.dumps(document))
 
 
 # --- F14: a refusal mutates nothing ------------------------------------------------------------
@@ -1039,13 +1084,16 @@ def test_f16_r4_the_task_byte_maximum_costs_restart_and_reclamation(task: Path) 
     refused by name, a restart reading the last revision, and the archive reclaiming what it counted.
     """
 
-    limits = FrameLimits()
-    per_file = limits.bytes_per_revision // 64
+    # The revision size the fill uses is named here: a revision has no ceiling of its own any more
+    # (MIK-R211 v4 rule 3), so the task total is filled with sixteen-mebibyte revisions on purpose.
+    per_revision = 16 * 1024 * 1024
+    limits = FrameLimits(bytes_per_revision=per_revision)
+    per_file = per_revision // 64
     large = {"index.html": b"x" * per_file}
     large.update({f"asset-{index:02}.css": b"x" * per_file for index in range(63)})
     small = {path: b"x" for path in large}
     # The largest store one lineage may hold is the whole task total at the per-revision ceiling.
-    count = limits.task_bytes // limits.bytes_per_revision
+    count = limits.task_bytes // per_revision
     assert count > 8, "the measured store reaches well past the eight revisions v1 reclaimed at"
     record = _record()
 
@@ -1107,21 +1155,18 @@ def test_f16_r4_the_task_byte_maximum_costs_restart_and_reclamation(task: Path) 
     assert _revisions(scope) == list(range(1, count + 1))
 
     other = frame_scope(task, LEAF, "extra")
-    for assets, reason in (
-        ({**small, "extra.css": b"x"}, "file"),
-        ({"index.html": b"x" * (limits.bytes_per_revision + 1)}, "draft"),
-    ):
-        with pytest.raises(FrameRefused, match=reason):
-            begin_draft(
-                other,
-                working_directory=task.parent / "over-asset",
-                request_id="over",
-                authoring=_authoring("over"),
-                focus="over cap",
-                assets=assets,
-                limits=limits,
-                now=AT,
-            )
+    # A ceiling the caller named still refuses past itself; no file count is named, so none is.
+    with pytest.raises(FrameRefused, match="draft"):
+        begin_draft(
+            other,
+            working_directory=task.parent / "over-asset",
+            request_id="over",
+            authoring=_authoring("over"),
+            focus="over cap",
+            assets={"index.html": b"x" * (per_revision + 1)},
+            limits=FrameLimits(bytes_per_revision=per_revision, draft_bytes=per_revision),
+            now=AT,
+        )
     assert (scope.frame_dir / "ready.json").read_bytes() == before
 
     restarted = subprocess.run(
@@ -1160,11 +1205,13 @@ def test_f16_r4_the_task_byte_maximum_costs_restart_and_reclamation(task: Path) 
     )
 
 
-def test_f16_r4_the_default_manifest_ceiling_is_exact(task: Path) -> None:
-    scope = frame_scope(task, LEAF, FRAME)
-    limits = FrameLimits()
+def test_f16_r4_a_manifest_has_no_default_ceiling_and_a_named_one_is_exact(task: Path) -> None:
+    """MIK-R211 v4 rule 3: a manifest past the old 1 MiB is written and reopened; only a ceiling a
+    caller names refuses, and it refuses exactly past itself."""
 
-    def publish(padding):
+    scope = frame_scope(task, LEAF, FRAME)
+
+    def publish(padding, limits):
         collection = EvidenceCollection(
             name="source-inventory-and-linked-locations",
             producer="fixture",
@@ -1202,15 +1249,23 @@ def test_f16_r4_the_default_manifest_ceiling_is_exact(task: Path) -> None:
             limits=limits,
         )
 
-    publish(0)
     manifest = scope.frame_dir / "revisions" / "1" / "manifest.json"
-    padding = limits.manifest_bytes - manifest.stat().st_size
+    assert publish(1024 * 1024, FrameLimits()).published
+    assert manifest.stat().st_size > 1024 * 1024
+    opened = reopen_frame(scope)
+    assert opened.state == "ready" and opened.manifest is not None
     shutil.rmtree(scope.frame_dir)
-    assert publish(padding).published
-    assert manifest.stat().st_size == limits.manifest_bytes
+
+    publish(0, FrameLimits())
+    ceiling = manifest.stat().st_size + 4096
+    padding = 4096
+    shutil.rmtree(scope.frame_dir)
+    named = FrameLimits(manifest_bytes=ceiling)
+    assert publish(padding, named).published
+    assert manifest.stat().st_size == ceiling
     shutil.rmtree(scope.frame_dir)
     with pytest.raises(FrameRefused, match="manifest"):
-        publish(padding + 1)
+        publish(padding + 1, named)
     assert not (scope.frame_dir / "ready.json").exists()
 
 
@@ -1306,14 +1361,34 @@ def test_f01_v2_a_publish_refused_by_a_moved_binding_writes_nothing(task: Path) 
 
 
 def test_f09_v2_a_part_map_is_stored_with_the_revision_and_reopens(task: Path) -> None:
-    """The product's part map is durable with its revision, so per-part staleness needs no page."""
+    """The product's part map is durable with its revision, so per-part staleness needs no page.
+
+    A title is content and is stored whole, past the old 120-character bound (the Manager's 14:29Z
+    ruling); a part id keeps its 64-character address bound. The revision states its interaction
+    coverage in the artifact too (MIK-R211 v5, the Manager's 15:43Z ruling): 2 of 5 is said, never
+    implied.
+    """
     part_map = (
-        FramePart(part="overview", title="What changed", claims=("c1",)),
+        FramePart(part="overview", title="What changed " + "and why " * 30, claims=("c1",)),
         FramePart(part="bases", title="Where each claim comes from"),
     )
-    published = _publish(task, _record(), part_map=part_map)
+    coverage = FrameInteractionCoverage(
+        passes_total=5,
+        passes_complete=2,
+        complete=False,
+        passes=(FramePassCoverage(name="1280-click", controls=3, visited=3, complete=True),),
+        window=WINDOW,
+    )
+    published = _publish(task, _record(), part_map=part_map, interaction_coverage=coverage)
     assert published.published and published.manifest is not None
     assert published.manifest.part_map == part_map
+    assert published.manifest.interaction_coverage == coverage
+    # An incomplete observation names the window it stopped before, and whose limit that is.
+    assert coverage.summary() == f"2 of 5 passes — stopped before {WINDOW}"
+    unbounded = "none: no time limit was given, so the run observes every pass to its end"
+    assert coverage.model_copy(update={"window": unbounded}).summary() == (
+        f"2 of 5 passes — window {unbounded}"
+    )
 
     scope = frame_scope(task, LEAF, FRAME)
     opening = reopen_frame(scope)
@@ -1323,6 +1398,8 @@ def test_f09_v2_a_part_map_is_stored_with_the_revision_and_reopens(task: Path) -
     assert [entry["part"] for entry in stored["part_map"]] == ["overview", "bases"]
     assert stored["part_map"][0]["claims"] == ["c1"]
     assert stored["part_map"][1]["claims"] == []
+    assert stored["interaction_coverage"]["passes_complete"] == 2
+    assert opening.manifest.interaction_coverage == coverage
 
 
 def test_f09_v2_a_part_map_naming_an_unknown_claim_is_refused(task: Path) -> None:

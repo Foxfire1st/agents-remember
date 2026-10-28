@@ -94,7 +94,7 @@ export function displayedModelLabel(
     return choice.models.find((model) => model.id === selection.agentOverride?.modelId)?.label ??
       selection.agentOverride.modelId;
   }
-  if (!choice.selectedAgentId) return "Load agent default";
+  if (!choice.selectedAgentId) return "Pick an agent first";
   if (!choice.selectedAgent) return "Agent capabilities loading";
   if (!choice.models.length) return unavailableModelsLabel(choice);
   if (choice.defaultModel) return choice.defaultModel.label + " · default";

@@ -39,12 +39,17 @@ from agents_remember.models.knowledge.review_lane import (
 )
 from agents_remember.models.knowledge.review_refusal import ReviewRefusal
 from agents_remember.models.knowledge.review_tree_entries import ReviewTreeEntry
+from agents_remember.models.knowledge.review_tree_overview import (
+    ReviewOverview,
+    ReviewWorklistSummary,
+)
 
 __all__ = [
     "REVIEW_REF_NAMESPACE",
     "REVIEW_TREE_COMPARISON_SCHEMA",
     "ReviewCodeSide",
     "ReviewConvertedBase",
+    "ReviewEntryInventory",
     "ReviewEntryMemoryState",
     "ReviewKnowledgeFileChange",
     "ReviewKnowledgeRecordGroup",
@@ -292,6 +297,14 @@ class ReviewDeliveredComparison(KnowledgeModel):
     detail: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
 
 
+class ReviewEntryInventory(KnowledgeModel):
+    """Complete sidebar locations without excerpts, authored detail or memory metrics."""
+
+    state: Literal["ready", "unavailable"]
+    entries: tuple[ReviewTreeEntry, ...] = ()
+    reason: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+
+
 class ReviewTreesResult(KnowledgeModel):
     """The reviewer's tree view of one leaf, or why there is none.
 
@@ -321,6 +334,11 @@ class ReviewTreesResult(KnowledgeModel):
     entries: tuple[ReviewTreeEntry, ...] = ()
     # Whether those entries carry their memory values (MIK-R89 v2 rule 3); a card read only.
     entry_memory: ReviewEntryMemoryState | None = None
+    # Main-view metadata; unavailable never means a measured zero locations.
+    entry_inventory: ReviewEntryInventory | None = None
+    # The explicit compact representation has summaries, not pretend-loaded location rows.
+    overview: ReviewOverview | None = None
+    worklist_summary: ReviewWorklistSummary | None = None
     # The unexplained-changes lane's destinations, or one changed path's classification (MIK-R32).
     lane: ReviewUnexplainedLane | None = None
     file_classification: ReviewFileClassification | None = None
@@ -351,6 +369,9 @@ class ReviewTrees:
     after: TreeKnowledge
     live: bool = False
     memory_worktree: Path | None = field(default=None)
+    # A live comparison's coordination root: its memory candidate is rechecked through the
+    # worktree's kept capture index there (MIK-R81 rule 7, D569).
+    coordination_root: Path | None = field(default=None)
     code_sides: tuple[ReviewCodeSide, ...] = ()
 
     def sides(self) -> tuple[ReviewKnowledgeSide, ...]:

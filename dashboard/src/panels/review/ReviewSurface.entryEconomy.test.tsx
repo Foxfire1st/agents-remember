@@ -126,7 +126,13 @@ it('reads the catalogue once on entry, opens on the task context, then asks the 
   // A subject reads that subject's review, never the catalogue again.
   for (const [index, family] of families.entries()) {
     fireEvent.click(familyRow(view, family.family_id));
-    await waitFor(() => expect(view.getByTestId('review-center-family').dataset.family).toBe(family.family_id));
+    // The family's members' overview (MIK-R211 v4 rule 10), over the family's own read.
+    await waitFor(() => {
+      expect(view.getByTestId('review-family-overview').dataset.family).toBe(family.family_id);
+      expect(reviewReads()).toHaveLength(index + 2);
+      expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined();
+      expect(view.getByTestId('review-subject-provenance')).toBeTruthy();
+    });
     expect(reviewReads()).toHaveLength(index + 2);
     expect(reviewReads()[index + 1].searchParams.get('selectorKind')).toBe('family');
     expect(reviewReads()[index + 1].searchParams.get('selectorId')).toBe(family.family_id);

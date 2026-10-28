@@ -7,13 +7,15 @@ workspace with ``AR_EXPLAINER_WORKSPACE`` so Retire can end what the seat starte
 (rules 3 and 8).
 
 This module is the ``cli`` half: it may call the bridge, and the seat service in ``canvas`` never
-does. The service hands in an agent id it derived from the workspace and the generation, so a
-create that is repeated after a lost reply reconciles the same host session
-(``idempotencyKey``) rather than making a second one.
+does. The service hands in an agent id it derived from the workspace and the generation, and this
+module derives the host's ``idempotencyKey`` from the create request's own contents: a create that
+is repeated after a lost reply reconciles the same host session, while a create whose request has
+changed is a new one instead of the host's ``agent_request_key_conflict``.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import uuid
@@ -38,25 +40,21 @@ from agents_remember.canvas.explainer_paths import INSTRUCTIONS_DIRECTORY, guard
 from agents_remember.canvas.explainer_state import AGENT_MARKER, ExplainerRefused
 from agents_remember.canvas.paths import PathRefused
 from agents_remember.cli.paseo_bridge import (
-    BRIDGE_TIMEOUT,
-    SEND_OUTCOME_UNKNOWN,
     PaseoBridgeFailure,
     bridge_call,
-    daemon_configuration,
 )
 from agents_remember.cli.paseo_catalog import LaunchSelectionRefused
 from agents_remember.cli.paseo_catalog import settings_role_launch as qualified_launch
-from agents_remember.cli.paseo_launch import launching_source_root, tool_server_definition
-from agents_remember.errors import PaseoRuntimeFailure
-from agents_remember.kernel._agentic_settings_core import EXTRA_ARGS_HARNESSES
+from agents_remember.cli.paseo_launch import (
+    ROLE_IDENTITY_READ_TOOLS,
+    launching_source_root,
+    preapproval_policy,
+    tool_server_definition,
+)
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.serving.paseo.paseo_daemon_config import (
-    CONFIG_FILE,
-    host_provider_extra_args,
-)
 
-__all__ = ["SERVER_NAME", "PaseoExplainerHost", "explainer_report_sender"]
+__all__ = ["SERVER_NAME", "PaseoExplainerHost"]
 
 #: The tool server's name on this seat: the normal AR task server of this build (MIK-R186 @ v2 rule 3).
 SERVER_NAME = TOOL_SERVER_NAME
@@ -193,6 +191,34 @@ def _stated_agent_fields(agent: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+#: The host's words when a create names a seat or a request key it already holds: the request is not
+#: wrong, it is a retry, and a retry adopts or replaces what is there instead of failing. The bridge
+#: reports most host failures under one code with the host's own word in the message, so the word is
+#: what is matched.
+_CREATE_CONFLICT_WORDS = ("agent_id_conflict", "agent_request_key_conflict")
+
+
+def _names_create_conflict(refused: ExplainerRefused) -> bool:
+    """Whether this refusal is the host saying a create names something it already holds."""
+
+    said = f"{refused.reason} {refused.detail}"
+    return any(word in said for word in _CREATE_CONFLICT_WORDS)
+
+
+def _request_fingerprint(payload: Mapping[str, Any]) -> str:
+    """One digest of a create request's own contents, keyed canonically so a repeat is a repeat.
+
+    Two creates that differ only in field order fingerprint the same; any changed value (provider,
+    model, workspace id, capsule, tool server) fingerprints differently, which is what makes the
+    host's per-key receipt adopt an identical retry and admit a changed one.
+    """
+
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+
+
 def _require_applied(reply: dict[str, Any], create: dict[str, Any]) -> dict[str, Any]:
     """Refuse a seat the host launched on values other than the ones the settings chose."""
 
@@ -308,40 +334,6 @@ class PaseoExplainerHost:
         except PaseoBridgeFailure as error:
             raise ExplainerRefused(f"host-{error.code}", str(error)) from error
 
-    def _require_confined_host(self) -> None:
-        """Refuse a confined step while the host's provider map gives a harness extra arguments.
-
-        MIK-R192 rule 8: a confined capability runs with exactly its confinement's arguments, at
-        its start and at every resume. The host merges its configured options into both and resumes
-        a stored seat by itself, so the map is read before each step -- in the file and in the
-        running daemon -- for every harness whose provider options carry arguments (the set the
-        settings owner keeps). The seat's own harness is the settings role's, resolved by the
-        launch; no harness is named here.
-        """
-
-        runtime = self._config.paseo_runtime
-        if runtime is None:
-            return
-        try:
-            arguments = tuple(
-                name
-                for harness in sorted(EXTRA_ARGS_HARNESSES)
-                for name in host_provider_extra_args(
-                    self._config, harness, read_config=daemon_configuration
-                )
-            )
-        except PaseoRuntimeFailure as unread:
-            raise ExplainerRefused("explainer-host-map-unread", str(unread)) from unread
-        if not arguments:
-            return
-        raise ExplainerRefused(
-            "explainer-host-extra-arguments",
-            f"the host's configuration at {runtime.home / CONFIG_FILE} gives extra arguments "
-            f"{list(arguments)} to a harness whose provider takes them; a confined explainer never "
-            "runs with them. Run runtime_install or `agents-remember paseo provision` to write "
-            "AR's provider map back.",
-        )
-
     def create_seat(
         self,
         *,
@@ -353,7 +345,6 @@ class PaseoExplainerHost:
     ) -> dict[str, Any]:
         """Create the seat with the capsule as its instructions and no first prompt."""
 
-        self._require_confined_host()
         named = dict(labels or {})
         repository_id = str(named.get("ar.repository") or "")
         if not repository_id:
@@ -397,20 +388,22 @@ class PaseoExplainerHost:
         )
         create: dict[str, Any] = {
             "agentId": agent_id,
-            "idempotencyKey": f"explainer:{agent_id}",
             "workspaceId": workspace_id,
             "provider": provider,
             "title": title,
             "labels": named,
             "mcpServers": {SERVER_NAME: server},
-            "toolPolicy": {
-                "preapproved": [
-                    {"kind": "mcp", "server": SERVER_NAME, "tool": name}
-                    for name in EXPLAINER_SURFACE
-                ]
-            },
             "systemPrompt": capsule,
         }
+        # The same grant a task agent's launch carries, from the same place (``paseo_launch``):
+        # the identity read, and the explainer's own four tools beside it, because only the seat
+        # calls them and a render or a grade must not wait on a prompt nobody answers. Every other
+        # tool stays with the seat's permission mode (MIK-R211 v5 rule 3: no confinement).
+        policy = preapproval_policy(
+            provider, SERVER_NAME, (*ROLE_IDENTITY_READ_TOOLS, *EXPLAINER_SURFACE)
+        )
+        if policy is not None:
+            create["toolPolicy"] = policy
         for option, native in (
             ("model", "model"),
             ("effort", "thinkingOptionId"),
@@ -419,14 +412,88 @@ class PaseoExplainerHost:
         ):
             if options.get(option):
                 create[native] = options[option]
-        reply = self._call("agent-create", create)
-        stated = _require_applied(reply, create)
+        # The host keeps one receipt per request key and refuses the same key with a different
+        # payload (`agent_request_key_conflict`). One key per agent id therefore broke every retry
+        # whose request had changed -- a provider switch, or a workspace whose host id moved. The
+        # key now names the request itself: an identical retry adopts the earlier receipt and a
+        # changed one is a new create instead of a collision (MIK-R211 v2 rule 6).
+        create["idempotencyKey"] = f"explainer:{agent_id}:{_request_fingerprint(create)}"
+        stated, adopted = self._create_or_adopt(create, agent_id=agent_id, provider=provider)
+        return self._record_seat(
+            agent_id=agent_id,
+            workspace=workspace,
+            workspace_id=workspace_id,
+            repository_id=repository_id,
+            provider=provider,
+            options=options,
+            stated=stated,
+            server=server,
+            adopted=adopted,
+        )
+
+    def _create_or_adopt(
+        self, create: dict[str, Any], *, agent_id: str, provider: str
+    ) -> tuple[Mapping[str, Any], bool]:
+        """Create the seat, or adopt the one the host already holds for this id.
+
+        Retrying after a failure is the developer's normal move, and by then the host may already
+        hold this seat from the attempt that failed -- under this id (`agent_id_conflict`) or under
+        this request key with an older payload (`agent_request_key_conflict`). Adopting it makes the
+        retry land on that same seat, which is the only seat the id can name (MIK-R211 v2 rule 6).
+
+        Nothing is archived here. A seat the developer may still be reading is not this build's to
+        retire, and the host keeps an archived seat's id, so an archive would turn one retry into
+        two failures. A seat whose provider is not the one this request asked for is adopted and the
+        difference is recorded, so the page shows what actually runs.
+        """
+
+        conflict: ExplainerRefused | None = None
+        try:
+            return _require_applied(self._call("agent-create", create), create), False
+        except ExplainerRefused as refused:
+            if not _names_create_conflict(refused):
+                raise
+            conflict = refused
+        view = self._call("agent-state", {"agentId": agent_id}).get("agent")
+        if isinstance(view, dict) and not view.get("archivedAt"):
+            stated = dict(_stated_agent_fields(view))
+            settled = stated.get("provider")
+            if settled and provider and str(settled) != str(provider):
+                stated["requestedProvider"] = provider
+            return stated, True
+        raise ExplainerRefused(
+            "explainer-seat-held",
+            f"the host already holds the seat {agent_id} for this generation and it is archived; "
+            f"press Retire to clear it, then Send again ({conflict.detail if conflict else ''})",
+        ) from conflict
+
+    def _record_seat(  # noqa: PLR0913 - one seat, one record: every field here is part of it
+        self,
+        *,
+        agent_id: str,
+        workspace: Path,
+        workspace_id: str,
+        repository_id: str,
+        provider: str,
+        options: Mapping[str, Any],
+        stated: Mapping[str, Any],
+        server: Mapping[str, Any],
+        adopted: bool,
+    ) -> dict[str, Any]:
+        """Write and return the seat's provenance, whether it was created or adopted."""
+
         provenance: dict[str, Any] = {
             "schema": PROVENANCE_SCHEMA,
             "agentId": agent_id,
             "workspaceId": workspace_id,
             "repository": repository_id,
             "provider": provider,
+            "adopted": adopted,
+            **(
+                {"adoptedProvider": stated.get("provider")}
+                if adopted and stated.get("provider") and stated.get("provider") != provider
+                else {}
+            ),
             "model": stated.get("model") or options.get("model"),
             "effort": stated.get("thinkingOptionId") or options.get("effort"),
             "mode": stated.get("modeId") or options.get("mode"),
@@ -447,7 +514,6 @@ class PaseoExplainerHost:
         return provenance
 
     def send(self, agent_id: str, text: str, *, message_id: str | None = None) -> dict[str, Any]:
-        self._require_confined_host()
         resolved_id = message_id or str(uuid.uuid4())
         if (agent_id, resolved_id) in self._unknown_sends:
             with suppress(ExplainerRefused):
@@ -511,7 +577,6 @@ class PaseoExplainerHost:
         happen.
         """
 
-        self._require_confined_host()
         stored: dict[str, Any] = dict(self._provenance.get(agent_id) or {"agentId": agent_id})
         payload = _resume_payload(self._config, agent_id, str(stored.get("repository") or ""))
         try:
@@ -606,7 +671,6 @@ class PaseoExplainerHost:
         (the request's outcome then stays uncertain).
         """
 
-        self._require_confined_host()
         stored: dict[str, Any] = dict(self._provenance.get(agent_id) or {"agentId": agent_id})
         reply = self._call("agent-cancel", {"agentId": agent_id, "requestId": request_id})
         view = reply.get("agent") if isinstance(reply, dict) else None
@@ -636,54 +700,6 @@ class PaseoExplainerHost:
             "requestUncertain": False,
             "agent": view,
         }
-
-
-def explainer_report_sender(config: McpRuntimeConfig) -> Any:
-    """The production sender `report_to_architect` delivers through (MIK-R189 rule 7 step 4).
-
-    One sender answers one of the report states for one architect recipient, composed with the
-    real bridge and the product's one limit check (MIK-R190 rule 9): a limited recipient or one
-    the host's activity record reports in a turn is held before anything is sent; the bridge's
-    ``agent-send`` then reports, holds a refused-but-live seat, or answers a terminal outcome. A
-    bridge timeout answers ``sent, outcome unknown`` once -- the report log keeps that state and
-    nothing is ever re-sent, so nothing is delivered twice (rule 7 step 5).
-
-    The sender is built here, in the ``cli`` half, because it is the half that may call the
-    bridge; the report's hold, re-addressing and tray fallback stay with the server's own
-    delivery (:mod:`agents_remember.canvas.explainer_server`), which composes this sender.
-    """
-
-    def send_report(architect: str, text: str) -> str:
-        # Imported on the first call: this module loads on the launching build's path, and the
-        # limit and turn readers pull the serving projections only when a report actually goes out.
-        from agents_remember.cli.provider_limit_hold import provider_limit_hold  # noqa: PLC0415
-        from agents_remember.serving.projections.host_activity import agent_in_turn  # noqa: PLC0415
-
-        limited = provider_limit_hold(config, architect)
-        if limited is not None:
-            return "held"
-        if agent_in_turn(config, architect):
-            return "held"
-        try:
-            reply = bridge_call(config, "agent-send", {"agentId": architect, "text": text})
-        except PaseoBridgeFailure as error:
-            if error.code in {SEND_OUTCOME_UNKNOWN, BRIDGE_TIMEOUT}:
-                return "sent, outcome unknown"
-            raise
-        delivery = reply.get("delivery") if isinstance(reply.get("delivery"), dict) else reply
-        if isinstance(delivery, dict) and delivery.get("delivered") is True:
-            return "reported"
-        refused = delivery.get("refused") if isinstance(delivery, dict) else None
-        if refused in {"busy", "in-turn", "permission-pending", "host-unreachable"}:
-            return "held"
-        if refused in {"archived", "not-found"}:
-            return "not reported"
-        raise ExplainerRefused(
-            "explainer-report-refused",
-            str(delivery.get("detail")) if isinstance(delivery, dict) else str(reply),
-        )
-
-    return send_report
 
 
 bind_explainer_control_host(

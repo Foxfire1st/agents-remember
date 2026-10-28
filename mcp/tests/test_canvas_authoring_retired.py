@@ -12,15 +12,18 @@ GETs are pinned here as surviving the refusal.
 
 from __future__ import annotations
 
+from importlib import resources
 from pathlib import Path
 
 import canvas_host_test_support as host_support
-from agents_remember.canvas import kit
+from agents_remember.canvas import kit, paths
+from agents_remember.canvas.presenter import Presenter
 from agents_remember.serving.app import (
     REPLACED_AUTHORING_PATHS,
     create_app,
     refuse_replaced_canvas_authoring,
 )
+from agents_remember.serving.canvas import canvas_hosts, register_canvas_routes
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.testclient import TestClient
@@ -221,3 +224,21 @@ def test_a_missing_frame_is_refused_by_name_and_never_swapped(tmp_path: Path) ->
     assert answer.status_code == 404
     assert answer.json()["reason"] == "frame-unavailable"
     assert "review-page" in answer.json()["detail"]
+
+
+def test_the_retired_design_loader_default_and_generate_route_are_absent(tmp_path: Path) -> None:
+    """D565 removes the old launch itself while preserving the saved-page host."""
+
+    assert not hasattr(paths, "design_text_source")
+    assert not hasattr(Presenter, "start")
+    assert (
+        not resources.files("agents_remember")
+        .joinpath("package_data", "canvas", "artifact-design.md")
+        .is_file()
+    )
+
+    app = FastAPI()
+    register_canvas_routes(app, canvas_hosts(host_support.config(tmp_path)))
+    client = TestClient(app)
+    response = client.post(FRAME + "/generate", json={})
+    assert response.status_code == 404

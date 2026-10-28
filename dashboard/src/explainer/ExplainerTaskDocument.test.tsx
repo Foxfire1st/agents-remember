@@ -1,6 +1,6 @@
 // Retire on the task document (MIK-R106 v2 rule 7): the same control and the same two lists as the
 // chat header's, and nothing at all while no seat is known.
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ExplainerTaskDocumentControl, publishExplainerSeat, resetExplainerSeats } from './ExplainerTaskDocument';
@@ -43,6 +43,14 @@ describe('Retire on the task document (rule 7)', () => {
     expect(typeof server.last('POST', RETIRE)?.body?.receiptId).toBe('string');
     expect((await panel.findByTestId('explainer-task-document-receipt')).textContent).toContain('No process remains');
     expect(panel.queryByTestId('explainer-task-document-retire')).toBeNull();
+    act(() => publishExplainerSeat(ADDRESS, explainerState({
+      seat: 'live', agentId: 'a-next', workspaceId: 'wks-next', generation: 2,
+    })));
+    expect(panel.queryByTestId('explainer-task-document-receipt')).toBeNull();
+    act(() => publishExplainerSeat(ADDRESS, explainerState({
+      seat: 'closed', agentId: 'a-next', workspaceId: 'wks-next', generation: 2,
+    })));
+    expect(panel.queryByTestId('explainer-task-document-receipt')).toBeNull();
   });
 
   it('offers Retire for a live seat, with the confirmation’s two lists', async () => {
@@ -52,9 +60,9 @@ describe('Retire on the task document (rule 7)', () => {
     expect((await panel.findByTestId('explainer-task-document-state')).textContent).toContain('live');
     fireEvent.click(panel.getByTestId('explainer-task-document-retire'));
     const confirm = await panel.findByTestId('explainer-task-document-confirm');
-    expect(confirm.textContent).toContain('Retire the explainer of L181?');
+    expect(confirm.textContent).toContain('Remove the explainer of L181?');
     expect(panel.getByTestId('explainer-task-document-ends').textContent).toContain('AR_EXPLAINER_WORKSPACE');
-    expect(panel.getByTestId('explainer-task-document-stays').textContent).toContain('from a retired explainer');
+    expect(panel.getByTestId('explainer-task-document-stays').textContent).toContain('published revision');
 
     fireEvent.click(panel.getByTestId('explainer-task-document-confirm-send'));
     await waitFor(() => expect(server.count('POST', RETIRE)).toBe(1));

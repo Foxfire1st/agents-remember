@@ -3,14 +3,21 @@
 import asyncio
 import contextlib
 import socket
+import subprocess
 import threading
 import time
 from types import SimpleNamespace
+from typing import cast
 from urllib.request import urlopen
 
 import uvicorn
 from agents_remember.application import review_candidate_resolution
+from agents_remember.application import review_overview_precompute as precompute_module
+from agents_remember.application.review_overview_precompute import OverviewPrecompute
 from agents_remember.cli.dashboard import serving_collaborators
+from agents_remember.kernel.reviewer_worklist_process import ReviewerWorklistProcesses
+from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
+from agents_remember.serving import leaf_worktree_watch as worktree_watch
 from agents_remember.serving import review_memory_watch as module
 from agents_remember.serving._app_routes import _register_projection_routes
 from agents_remember.serving.app import (
@@ -20,6 +27,8 @@ from agents_remember.serving.app import (
     _build_serving_runtime,
     create_app,
 )
+from agents_remember.serving.explainer_watcher import LeafSelection
+from agents_remember.serving.leaf_worktree_watch import process_worktree_watch
 from agents_remember.serving.projector import ProjectionCadence
 from agents_remember.serving.review_memory_watch import multiplex_review_memory
 from agents_remember_test_support.testing.review_git_trees import LEAF, MASTER, REPO, build_world
@@ -34,7 +43,10 @@ async def _revision(stream):
     while True:
         event = await anext(stream)
         if event.event == "review.memory":
-            assert {k: v for k, v in event.data.items() if k != "revision"} == {
+            # The arming baseline alone also names how long ago memory last changed.
+            assert {
+                k: v for k, v in event.data.items() if k not in {"revision", "changedAgoMs"}
+            } == {
                 "repo": "repo",
                 "master": "master",
                 "leaf": "leaf",
@@ -148,16 +160,19 @@ async def _native_open_review_ten_markers_and_close(tmp_path):
 
 
 def test_change_during_registration_is_not_swallowed_by_baseline(tmp_path, monkeypatch):
-    native = module.RustNotify
+    # D569: the stream subscribes to the process's one worktree watch instead of installing its
+    # own native handle; the edit lands right after the subscription armed, before the baseline.
+    watch = process_worktree_watch()
+    subscribe = watch.subscribe
     installed = threading.Event()
 
     def installing(*args):
-        handle = native(*args)
+        unsubscribe = subscribe(*args)
         (tmp_path / "registered.md").write_text("outside edit during installation")
         installed.set()
-        return handle
+        return unsubscribe
 
-    monkeypatch.setattr(module, "RustNotify", installing)
+    monkeypatch.setattr(watch, "subscribe", installing)
 
     async def check():
         stream = module._memory_events(tmp_path, ("repo", "master", "leaf"))
@@ -171,6 +186,53 @@ def test_change_during_registration_is_not_swallowed_by_baseline(tmp_path, monke
             first = await initial
             second = await asyncio.wait_for(anext(stream), HANG_GUARD_SECONDS)
             assert first.data["revision"] != second.data["revision"]
+        finally:
+            await stream.aclose()
+
+    asyncio.run(check())
+
+
+def test_arming_baseline_names_how_long_ago_memory_last_changed(tmp_path):
+    """The first event carries the age of the newest change before arming; later ones do not.
+
+    A reader that asked its HTTP answers before arming compares this age with its own open time,
+    so an unchanged memory costs no second read while an edit before arming is still caught.
+    """
+
+    root = tmp_path / "memory"
+    (root / "onboarding").mkdir(parents=True)
+    card = root / "onboarding" / "card.md"
+    card.write_text("authored long before the review opened")
+    settle = 0.4
+    time.sleep(settle)
+
+    async def arm():
+        stream = module._memory_events(root, ("repo", "master", "leaf"))
+        try:
+            first = await asyncio.wait_for(anext(stream), HANG_GUARD_SECONDS)
+            return first, stream
+        except BaseException:
+            await stream.aclose()
+            raise
+
+    async def check():
+        quiet, stream = await arm()
+        await stream.aclose()
+        # Timestamp granularity may round a stamp down a little, which only makes it look older.
+        assert quiet.data["changedAgoMs"] >= settle * 1000 - 20, quiet.data
+        before = time.monotonic()
+        card.unlink()  # a delete leaves no file to stat: its directory's stamp carries it
+        edited, stream = await arm()
+        elapsed_ms = (time.monotonic() - before) * 1000
+        try:
+            assert edited.data["changedAgoMs"] <= elapsed_ms + 20, (edited.data, elapsed_ms)
+            pending = asyncio.create_task(anext(stream))
+            # load-independent: a scheduling yield so the armed worker is blocked in its watch
+            await asyncio.sleep(0.05)
+            (root / "onboarding" / "next.md").write_text("an edit after arming")
+            later = await asyncio.wait_for(pending, HANG_GUARD_SECONDS)
+            assert later.event == "review.memory"
+            assert "changedAgoMs" not in later.data
         finally:
             await stream.aclose()
 
@@ -225,32 +287,35 @@ def test_route_multiplexes_native_and_real_projector_and_reconnects(tmp_path, mo
     outside = tmp_path / "outside"
     outside.mkdir()
     (root / "linked").symlink_to(outside, target_is_directory=True)
-    native = module.RustNotify
+    # D569: each connection subscribes to the process's one worktree watch for its memory root,
+    # and its close unsubscribes; the walk of the root happens once per subscription.
+    watch = process_worktree_watch()
+    subscribe = watch.subscribe
     registrations, walks, closed = [], [], []
-    directories = module._directories
+    walked = worktree_watch.walked_directories
 
-    def install(*args):
-        registrations.append(args)
-        handle = native(*args)
+    def install(key, listen_root, notify):
+        registrations.append((key, listen_root))
+        unsubscribe = subscribe(key, listen_root, notify)
 
         def close():
-            handle.close()
-            closed.append(args)
+            unsubscribe()
+            closed.append((key, listen_root))
 
-        return SimpleNamespace(watch=handle.watch, close=close)
+        return close
 
     def walk(path):
         walks.append(path)
-        return directories(path)
+        return walked(path)
 
-    monkeypatch.setattr(module, "RustNotify", install)
-    monkeypatch.setattr(module, "_directories", walk)
-    monkeypatch.setenv("WATCHFILES_FORCE_POLLING", "true")
+    monkeypatch.setattr(watch, "subscribe", install)
+    monkeypatch.setattr(worktree_watch, "walked_directories", walk)
     asyncio.run(_route_lifecycle(tmp_path, root, walks))
     assert registrations
     assert closed == registrations
-    assert all(args[2] is False and args[4] is False for args in registrations)
-    assert all(args[0] == [str(root)] for args in registrations)
+    assert all(listen_root == root for _key, listen_root in registrations)
+    assert watch.reasons(("repo", "master", "leaf")) == frozenset(), "a closed stream kept its leaf"
+    assert str(outside) not in {str(path) for path in walks}
     assert not any(t.name.startswith("review-memory-") for t in threading.enumerate())
 
 
@@ -306,7 +371,11 @@ def test_existing_sse_route_accepts_review_context_and_refuses_unwired(tmp_path)
     _register_projection_routes(app, _runtime(tmp_path, None))
     endpoint = _stream_endpoint(app)
     names = {p["name"] for p in app.openapi()["paths"]["/api/stream"]["get"]["parameters"]}
-    assert names == {"reviewRepo", "reviewMaster", "reviewLeaf"}
+    # `publication` is F17's fix and it is the shape, not a path list: the client sends the leaf's
+    # publication scope and the server opens its publication watcher only for that key, so a new
+    # revision of this leaf's explainer reaches an open page without a reload. `page` names the
+    # page itself: when its last stream closes, the open it was being served is released (D585).
+    assert names == {"reviewRepo", "reviewMaster", "reviewLeaf", "publication", "page"}
 
     async def check():
         for selection in (
@@ -383,16 +452,24 @@ def test_app_factory_passes_the_connection_root_port(tmp_path):
 
 
 def test_real_http_disconnect_retires_native_watch_before_server_shutdown(tmp_path, monkeypatch):
+    # D569: the connection's native watch is its subscription to the process watch; "retired" is
+    # its unsubscription.
     exited = threading.Event()
-    worker = module._native_worker
+    watch = process_worktree_watch()
+    subscribe = watch.subscribe
 
-    def tracked_worker(*args):
-        try:
-            worker(*args)
-        finally:
-            exited.set()
+    def tracked_subscribe(*args):
+        unsubscribe = subscribe(*args)
 
-    monkeypatch.setattr(module, "_native_worker", tracked_worker)
+        def retired():
+            try:
+                unsubscribe()
+            finally:
+                exited.set()
+
+        return retired
+
+    monkeypatch.setattr(watch, "subscribe", tracked_subscribe)
     calls = []
 
     def root(*identity):
@@ -457,3 +534,117 @@ def test_dashboard_port_resolves_only_canonical_live_memory_without_capture(tmp_
     contract.write_text(text)
     world.contract(live=False)
     assert port(REPO, MASTER, LEAF) is None
+
+
+# --- D569: one process watch, streams subscribe, every change source builds -----------------------
+
+
+def _memory_repository(root):
+    root.mkdir(parents=True)
+    for args in (["init", "-q", "-b", "main"], ["config", "user.email", "x@example.invalid"]):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+    (root / "onboarding").mkdir()
+    (root / "onboarding" / "card.md").write_text("a card\n")
+    return root
+
+
+def test_one_memory_edit_under_a_stream_only_leaf_is_one_event_one_capture_one_build(
+    tmp_path, monkeypatch
+):
+    """A leaf with only an open stream -- no seat, no environment -- is covered by the stream.
+
+    One edit gives one native event, one stream event and, through the build's debounce, one
+    capture and one build.
+    """
+    root = _memory_repository(tmp_path / "memory")
+    key = ("repo", "master", "leaf")
+    watch = process_worktree_watch()
+    native: list[int] = []
+    handle = watch.handle
+
+    def counted(buffer):
+        ours = watch._maps.wds_of.get(key, set())
+        native.extend(1 for wd, _mask, _name in worktree_watch._events(buffer) if wd in ours)
+        handle(buffer)
+
+    monkeypatch.setattr(watch, "handle", counted)
+    captures, builds = [], []
+    record = SimpleNamespace(number=1, same_trees=lambda _other: False)
+
+    def capture(selection: LeafSelection) -> ReviewTreeComparisonRecord:
+        captures.append(selection)
+        return cast("ReviewTreeComparisonRecord", record)  # a stand-in: only its number is read
+
+    build = OverviewPrecompute(
+        _config(tmp_path),
+        ReviewerWorklistProcesses(),
+        capture=capture,
+        latest=lambda _s: None,
+        quiet=0.2,
+        ceiling=1.0,
+    )
+    monkeypatch.setattr(build, "compute", lambda selection, _record: builds.append(selection))
+    monkeypatch.setattr(precompute_module, "trees_digest", lambda _record: "one tree state")
+    watch.bind(lambda _key: (), lambda leaf: build.changed(LeafSelection(*leaf)), lambda: None)
+
+    async def check():
+        stream = module._memory_events(root, key)
+        try:
+            baseline = await asyncio.wait_for(anext(stream), HANG_GUARD_SECONDS)
+            assert "changedAgoMs" in baseline.data
+            assert watch.reasons(key) == frozenset({"open stream"}), "the stream did not cover it"
+            pending = asyncio.create_task(anext(stream))
+            (root / "onboarding" / "card.md").write_text("one edit\n")
+            await asyncio.wait_for(pending, HANG_GUARD_SECONDS)
+            wait_until(lambda: builds, "the build")
+            follow = asyncio.create_task(anext(stream))
+            # load-independent: no second event is expected; the window is the assertion
+            done, _ = await asyncio.wait({follow}, timeout=0.5)
+            assert not done, "one edit gave a second stream event"
+            follow.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await follow
+        finally:
+            await stream.aclose()
+
+    try:
+        asyncio.run(check())
+    finally:
+        build.shutdown()
+    assert native == [1], native
+    assert len(captures) == 1 and len(builds) == 1, (captures, builds)
+    assert watch.reasons(key) == frozenset()
+
+
+def test_streams_opened_and_closed_repeatedly_leave_one_subscriber_and_one_event_per_edit(
+    tmp_path,
+):
+    root = _memory_repository(tmp_path / "memory")
+    key = ("repo", "master", "leaf")
+    watch = process_worktree_watch()
+
+    async def check():
+        for _ in range(6):
+            churned = module._memory_events(root, key)
+            await asyncio.wait_for(anext(churned), HANG_GUARD_SECONDS)
+            await churned.aclose()
+        assert watch.reasons(key) == frozenset() and not watch.covered(key)
+        stream = module._memory_events(root, key)
+        try:
+            await asyncio.wait_for(anext(stream), HANG_GUARD_SECONDS)
+            assert len(watch._maps.subscribers.get(key, ())) == 1
+            pending = asyncio.create_task(anext(stream))
+            (root / "onboarding" / "card.md").write_text("an edit after the churn\n")
+            changed = await asyncio.wait_for(pending, HANG_GUARD_SECONDS)
+            assert changed.event == "review.memory", "the edit was missed"
+            follow = asyncio.create_task(anext(stream))
+            # load-independent: no duplicate is expected; the window is the assertion
+            done, _ = await asyncio.wait({follow}, timeout=0.5)
+            assert not done, "a closed stream's subscription delivered a duplicate"
+            follow.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await follow
+        finally:
+            await stream.aclose()
+
+    asyncio.run(check())

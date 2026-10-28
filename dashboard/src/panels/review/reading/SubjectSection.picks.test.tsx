@@ -11,7 +11,7 @@ import type { TrayReference } from '../../../tray/types';
 import { changeSetModel, type ChangeSetModel } from '../changeSetOrder';
 import { l181Answer, l181Inputs, L181_SUBJECT } from '../changeSetOrder.test-utils';
 import { ReadingContext, type ReadingContextValue } from './readingContext';
-import { SubjectGroupSection } from './SubjectSection';
+import { FamilyOverview, SubjectSection } from './SubjectSection';
 
 const comparison = l181Answer.comparison!;
 
@@ -38,7 +38,8 @@ function draw(model: ChangeSetModel) {
   return render(
     <ReadingContext.Provider value={context()}>
       {model.groups.map((group) => (
-        <SubjectGroupSection key={group.key} group={group} labelUnlisted={false} />
+        group.family ? <FamilyOverview key={group.key} group={group} subjects={model.subjects} /> :
+          group.subjects.map((node) => <SubjectSection key={node.key} node={node} />)
       ))}
     </ReadingContext.Provider>,
   );

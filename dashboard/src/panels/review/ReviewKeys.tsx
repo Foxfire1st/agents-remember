@@ -5,6 +5,7 @@ import { css } from '../../../styled-system/css';
 import { COMMANDS } from '../../data/commands';
 import { useEffectiveKeymap } from '../../data/keymap/preferences';
 import { routeKey } from '../../data/keymap/zones';
+import { useReviewShown } from './reviewShown';
 
 const popup = css({
   zIndex: 110,
@@ -33,7 +34,9 @@ function isHelpKey(event: KeyboardEvent): boolean {
 export function ReviewKeys() {
   const [open, setOpen] = useState(false);
   const keymap = useEffectiveKeymap();
+  const shown = useReviewShown();
   useEffect(() => {
+    if (!shown) return undefined;
     const onKey = (event: KeyboardEvent) => {
       if (!isHelpKey(event)) return;
       const target = event.target instanceof HTMLElement ? event.target : null;
@@ -45,7 +48,7 @@ export function ReviewKeys() {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, []);
+  }, [shown]);
   return (
     <DialogTrigger isOpen={open} onOpenChange={setOpen}>
       <Button aria-label="Keys">Keys</Button>

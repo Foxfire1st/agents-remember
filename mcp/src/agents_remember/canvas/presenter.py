@@ -6,41 +6,20 @@ into its own working folder, publishes only through MIK-R103's confined writer, 
 attributable record of the attempt, its activity and its conversation. It writes no knowledge, no
 task record, no review result and no gate decision; those stay with their owners.
 
-Four separations are structural here, not advisory:
-
-* **generation is explicit.** :meth:`Presenter.start` demands an explicit activation and refuses
-  without one. Reading a saved page, a status or a transcript calls none of this module's start
-  paths; there is no implicit generation to hide a model turn in a renderer.
-* **publication is not a finished turn.** :meth:`Presenter.publish` hands bytes to the frame store
-  and reports the store's result; the attempt's ``publication`` and the store's ready pointer are
-  read separately, so a cancelled turn never claims to have published.
-* **the harness must be confined.** The authoring execution is behind :class:`PresenterRunner`; a
-  caller that wires none gets :class:`UnconfiguredPresenterRunner`, which refuses by name. The
-  native launch this capability shipped -- a dedicated presenter tool server, whose standalone
-  entry is gone -- was retired with the explainer's move to the normal task server, so a bare
-  presenter starts nothing rather than a seat with no tools (MIK-R186 @ v2 Scope). A runner that
-  cannot confine its writes must refuse. An instruction that says "do not write outside the
-  folder" is not confinement.
-* **the design text steers the look only.** The selected text travels with the assignment verbatim,
-  beside its source and sha256, behind a non-authority fence. A repository text that asks to change
-  permissions, evidence, the claim set, the isolation or where the page may load from is delivered
-  as text but not followed, and the attempt's conversation says so (rule 18).
+Existing attempts remain readable, their current-frame questions retain the same attribution,
+and publication still goes through the confined frame writer. New authoring belongs to the
+explainer workspace; this legacy presenter no longer starts or replaces an authoring attempt.
 
 Attempt listing is chronological and bounded (20 shown, 32 retained); request and session lookups
 read every retained record, not only the displayed window. Every transition is a locked
 read-modify-write of a fresh record, so a delayed host receipt cannot revive a cancelled attempt.
 Retention actually evicts the oldest settled attempts and reclaims their working folders.
-The durable store and the launch, design and instruction inputs are separate modules
-(:mod:`agents_remember.canvas.presenter_store` and
-:mod:`agents_remember.canvas.presenter_inputs`); this module keeps the capability's own
-orchestration, its saved-first view and the working-folder admission it publishes from.
+The durable store is :mod:`agents_remember.canvas.presenter_store`; this module keeps its
+saved-first view and the working-folder admission it publishes from.
 """
 
 from __future__ import annotations
 
-import json
-from contextlib import suppress
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
@@ -58,31 +37,13 @@ from agents_remember.application.review_frame_store import (
 from agents_remember.canvas.paths import (
     PathRefused,
     guard_path,
-    make_directory,
     path_segment,
     presenter_root,
     presenter_work_base,
-    presenter_working_root,
     task_root,
 )
 from agents_remember.canvas.presenter_assets import collect_assets
-from agents_remember.canvas.presenter_files import remove_directory, write_file
 from agents_remember.canvas.presenter_host import HostReceipt
-from agents_remember.canvas.presenter_inputs import (
-    DESIGN_NON_AUTHORITY_FENCE,
-    INSTRUCTIONS_FILE,
-    MAX_DESIGN_WORDS,
-    MAX_INSTRUCTION_WORDS,
-    DesignText,
-    PresenterLaunch,
-    _compose_assignment,
-    _design_disclosures,
-    admit_retained,
-    capability_instructions,
-    design_text,
-    presenter_launch,
-    seed_from_revision,
-)
 from agents_remember.canvas.presenter_store import (
     ATTEMPT_SCHEMA,
     CAPABILITY,
@@ -101,20 +62,13 @@ from agents_remember.canvas.presenter_store import (
     PresenterAttempt,
     PresenterRefused,
     RunnerReceipt,
-    StartOutcomeUnknown,
-    digest_bytes,
-    failed_changes,
-    receipt_changes,
 )
 from agents_remember.canvas.prospective import BrowserProspectiveLoad, ProspectiveLoad
 from agents_remember.canvas.readiness import check_page
-from agents_remember.cli.role_instructions import compose_capability_capsule, instruction_metadata
-from agents_remember.kernel.canonical_json import canonical_json_bytes
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.knowledge.review_evidence import EvidencePacket
 from agents_remember.models.knowledge.review_frame import (
     FrameAuthoring,
-    FrameBinding,
     FrameLimits,
     FramePart,
 )
@@ -122,13 +76,9 @@ from agents_remember.models.knowledge.review_frame import (
 __all__ = [
     "ATTEMPT_SCHEMA",
     "CAPABILITY",
-    "DESIGN_NON_AUTHORITY_FENCE",
-    "INSTRUCTIONS_FILE",
     "MAX_ACTIVITY",
     "MAX_ATTEMPTS",
     "MAX_CONVERSATION",
-    "MAX_DESIGN_WORDS",
-    "MAX_INSTRUCTION_WORDS",
     "MAX_MESSAGE_CHARS",
     "MAX_RECORD_BYTES",
     "MAX_REQUEST_LEDGER",
@@ -137,18 +87,13 @@ __all__ = [
     "REQUEST_LEDGER_NAME",
     "ActivityEntry",
     "ConversationEntry",
-    "DesignText",
     "Presenter",
     "PresenterAttempt",
     "PresenterHost",
-    "PresenterLaunch",
     "PresenterRefused",
     "PresenterRunner",
     "RunnerReceipt",
     "UnconfiguredPresenterRunner",
-    "capability_instructions",
-    "design_text",
-    "presenter_launch",
 ]
 #: How many attempts the panel reads. The retained set is larger, so a request or a live attempt
 #: outside the displayed window can still be reconciled.
@@ -173,9 +118,8 @@ class RunnerRefused(PresenterRefused):
 class PresenterRunner(Protocol):
     """The authoring execution port. A runner that cannot confine its writes must refuse.
 
-    ``instructions`` is the whole assignment: the capability text, the non-authority fence and the
-    exact recorded design text with its source and sha256. A runner never re-reads the design from
-    the repository; the attempt's ``design_sha256`` names the bytes it was given.
+    Only deterministic fixture callers use this port to prepare historical session records.
+    Production authoring starts through the explainer workspace.
     """
 
     def start(
@@ -225,19 +169,6 @@ class UnconfiguredPresenterRunner:
             "this build wires no confined authoring harness for review-presenter; the page was "
             "not generated rather than authored with an unproven write boundary",
         )
-
-
-@dataclass(frozen=True)
-class _StartRequest:
-    """The admitted inputs one start or replacement hands to :meth:`Presenter._admit_start`."""
-
-    caller: str
-    request_id: str
-    binding: FrameBinding
-    evidence: EvidencePacket
-    focus: str
-    regenerate_from: int | None = None
-    predecessor_attempt: str | None = None
 
 
 def _now() -> str:
@@ -406,219 +337,6 @@ class Presenter:
         return self._store.read_evidence(attempt_id, expected)
 
     # -- authoring -----------------------------------------------------------------------------
-
-    def start(  # noqa: PLR0913 - one start states the assignment's own inputs
-        self,
-        *,
-        caller: str,
-        request_id: str,
-        activation: str,
-        evidence: EvidencePacket,
-        focus: str,
-        regenerate_from: int | None = None,
-        predecessor_attempt: str | None = None,
-    ) -> PresenterAttempt:
-        """Start one explicit authoring attempt, or refuse by name.
-
-        The request identity is the reconciliation key: a repeat returns the attempt it already
-        created, a second live attempt is refused, and no start happens without explicit developer
-        activation. Regeneration copies the retained revision's own assets into the new working
-        folder and records its ancestry; missing retained bytes are a refusal, never a fresh start.
-        The runner receives the exact selected design text with its source and sha256, behind the
-        non-authority fence.
-        """
-
-        binding = FrameBinding.from_packet(evidence.comparison)
-        self._admit_binding(binding)
-        if evidence.comparison.repository_id != self._repository_id:
-            raise PresenterRefused("foreign-comparison", "the evidence names another repository")
-        if activation != "explicit":
-            raise PresenterRefused(
-                "not-activated",
-                "authoring starts only from the explicit Generate control; a mount, a reload, a "
-                "saved page or a status read starts no model",
-            )
-        attempt, assignment, launch_model = self._admit_start(
-            _StartRequest(
-                caller=caller,
-                request_id=request_id,
-                binding=binding,
-                evidence=evidence,
-                focus=focus,
-                regenerate_from=regenerate_from,
-                predecessor_attempt=predecessor_attempt,
-            )
-        )
-        if assignment is None or launch_model is None:
-            if attempt.state == "started" and (attempt.detail or "").startswith(
-                "start-outcome-unknown"
-            ):
-                reconcile = getattr(self._runner, "reconcile", None)
-                if callable(reconcile):
-                    try:
-                        receipt = cast(RunnerReceipt, reconcile(attempt, self._working(attempt)))
-                    except StartOutcomeUnknown:
-                        return attempt
-                    return self._store.mutate(
-                        attempt.attempt_id,
-                        lambda current: receipt_changes(current, receipt, attempt.model or ""),
-                    )
-            return attempt
-        return self._run(attempt, assignment=assignment, launch_model=launch_model)
-
-    def _admit_binding(self, binding: FrameBinding) -> None:
-        if (binding.task_id, binding.leaf_id) != (self._task, self._leaf_id):
-            raise PresenterRefused(
-                "foreign-comparison",
-                f"the evidence names {binding.task_id}/{binding.leaf_id}; this page explains "
-                f"{self._task}/{self._leaf_id}",
-            )
-
-    def _admit_start(
-        self, request: _StartRequest
-    ) -> tuple[PresenterAttempt, str | None, str | None]:
-        """Admit and durably record one new attempt, then release the lock before any host call."""
-
-        with self._store.locked():
-            existing = self._store.by_request(request.request_id)
-            if existing is not None:
-                return existing, None, None
-            reclaimed = self._store.ledger().get(request.request_id)
-            if reclaimed is not None:
-                raise PresenterRefused(
-                    "attempt-record-reclaimed",
-                    f"request {request.request_id} created attempt {reclaimed}, whose record has "
-                    "been reclaimed under the retention ceiling; this request is reconciled to it "
-                    "and starts no second session",
-                )
-            live = self._store.live()
-            if live is not None:
-                raise PresenterRefused(
-                    "in-flight",
-                    f"attempt {live.attempt_id} is still {live.state} for this comparison; "
-                    "reconcile it before a second start",
-                )
-            launch = presenter_launch(self._config, repository_id=self._repository_id)
-            if launch.state != "ok":
-                raise PresenterRefused("launch-choice-unavailable", launch.detail)
-            design = design_text(self._config, self._repository_id)
-            instructions, composition = compose_capability_capsule(
-                CAPABILITY, launch.provenance.get("notes", {})
-            )
-            instructions_digest = digest_bytes(instructions.encode())
-            attempt = self._open_attempt(
-                caller=request.caller,
-                request_id=request.request_id,
-                binding=request.binding,
-                evidence=request.evidence,
-                focus=request.focus,
-                launch_model=launch.model or "",
-                design=design,
-                instructions_digest=instructions_digest,
-                regenerate_from=request.regenerate_from,
-                predecessor_attempt=request.predecessor_attempt,
-                disclosures=_design_disclosures(design),
-            )
-            attempt = attempt.model_copy(
-                update={
-                    "instruction_composition": instruction_metadata(composition),
-                    "launch_provenance": launch.provenance,
-                }
-            )
-            self._store.write_locked(attempt)
-        return attempt, _compose_assignment(instructions, design), launch.model or ""
-
-    def _open_attempt(  # noqa: PLR0913 - one attempt record's own decided fields
-        self,
-        *,
-        caller: str,
-        request_id: str,
-        binding: FrameBinding,
-        evidence: EvidencePacket,
-        focus: str,
-        launch_model: str,
-        design: DesignText,
-        instructions_digest: str,
-        regenerate_from: int | None,
-        predecessor_attempt: str | None,
-        disclosures: tuple[str, ...],
-    ) -> PresenterAttempt:
-        attempt_id = f"att-{digest_bytes(f'{request_id}:{self._clock()}'.encode())[:16]}"
-        working = presenter_working_root(
-            self._config,
-            repository_id=self._repository_id,
-            task=self._task,
-            leaf_id=self._leaf_id,
-            frame_id=self._frame_id,
-            attempt_id=attempt_id,
-        )
-        make_directory(presenter_work_base(self._config), working, label="attempt working folder")
-        try:
-            if regenerate_from is not None:
-                seed_from_revision(self.scope, working, regenerate_from)
-            evidence_bytes = canonical_json_bytes(
-                json.loads(evidence.model_dump_json(by_alias=True))
-            )
-            write_file(self._store.evidence_path(attempt_id), evidence_bytes)
-        except (PresenterRefused, OSError):
-            with suppress(OSError):
-                remove_directory(working)
-            raise
-        now = self._clock()
-        conversation = tuple(
-            ConversationEntry(
-                at=now,
-                role="presenter",
-                comparison=binding.comparison_reference,
-                text=text,
-            )
-            for text in disclosures
-        )
-        return PresenterAttempt(
-            attempt_id=attempt_id,
-            request_id=request_id,
-            caller=caller,
-            repository_id=self._repository_id,
-            task=self._task,
-            leaf_id=self._leaf_id,
-            frame_id=self._frame_id,
-            comparison=binding,
-            evidence_digest=digest_bytes(evidence_bytes),
-            focus=focus,
-            state="started",
-            created_at=now,
-            updated_at=now,
-            working_directory=str(working),
-            parent_revision=regenerate_from,
-            predecessor_attempt=predecessor_attempt,
-            model=launch_model,
-            design_source=design.source,
-            design_sha256=design.sha256,
-            design_words=design.words,
-            instructions_sha256=instructions_digest,
-            conversation=conversation,
-        )
-
-    def _run(
-        self, attempt: PresenterAttempt, *, assignment: str, launch_model: str
-    ) -> PresenterAttempt:
-        """Hand the attempt to the confined runner and keep whatever it answered."""
-
-        working = self._working(attempt)
-        try:
-            receipt = self._runner.start(attempt, assignment, working)
-        except StartOutcomeUnknown as refusal:
-            detail = f"start-outcome-unknown: {refusal}; retry the same request to reconcile"
-            return self._store.mutate(attempt.attempt_id, lambda _current: {"detail": detail})
-        except PresenterRefused as refusal:
-            captured = refusal
-            return self._store.mutate(
-                attempt.attempt_id, lambda current: failed_changes(current, captured)
-            )
-        return self._store.mutate(
-            attempt.attempt_id,
-            lambda current: receipt_changes(current, receipt, launch_model),
-        )
 
     def note_activity(self, attempt_id: str, *, kind: str, text: str) -> PresenterAttempt:
         """Append one attributable activity line, bounded and typed."""
@@ -836,106 +554,6 @@ class Presenter:
             return {"state": "cancelled", "detail": f"{reason}; {published}; {note}"}
 
         return self._store.mutate(attempt_id, change)
-
-    def replace(self, attempt_id: str, *, request_id: str, reason: str) -> PresenterAttempt:
-        """Record an explicit replacement after admitting every successor input.
-
-        Nothing about the predecessor is mutated until the successor's evidence, launch choices,
-        design text and retained assets are all admitted. A refused replacement therefore leaves
-        the predecessor's record bytes, state and published revision exactly as they were. A
-        failed or cancelled regeneration passes its own retained parent, not an empty start.
-        """
-
-        with self._store.locked():
-            existing = self._store.by_request(request_id)
-            if existing is not None:
-                if existing.predecessor_attempt != attempt_id:
-                    raise PresenterRefused(
-                        "replacement-request-conflict", "this request names another predecessor"
-                    )
-                return existing
-            predecessor = self._store.require(attempt_id)
-            evidence = self._read_evidence(predecessor.attempt_id, predecessor.evidence_digest)
-            if evidence is None:
-                raise PresenterRefused(
-                    "retained-evidence-unavailable",
-                    f"attempt {attempt_id}'s admitted evidence is unreadable; a replacement would "
-                    "invent the comparison it starts from",
-                )
-            parent = predecessor.published_revision or predecessor.parent_revision
-            self._admit_replacement(predecessor, parent)
-            binding = FrameBinding.from_packet(evidence.comparison)
-            self._admit_binding(binding)
-            detail = f"replaced: {reason}"
-            settled = self._store.mutate(
-                predecessor.attempt_id,
-                lambda current: {
-                    "state": "cancelled" if current.state in LIVE_STATES else current.state,
-                    "detail": detail,
-                },
-            )
-            archived = self._archive_host(predecessor)
-            if archived:
-                settled = self._store.mutate(
-                    predecessor.attempt_id,
-                    lambda current: {"detail": f"{current.detail}{archived}"},
-                )
-            try:
-                attempt, assignment, launch_model = self._admit_start(
-                    _StartRequest(
-                        caller=settled.caller,
-                        request_id=request_id,
-                        binding=binding,
-                        evidence=evidence,
-                        focus=settled.focus,
-                        regenerate_from=parent,
-                        predecessor_attempt=predecessor.attempt_id,
-                    )
-                )
-            except (PresenterRefused, OSError):
-                self._store.write_locked(predecessor)
-                raise
-        if assignment is None or launch_model is None:
-            return attempt
-        return self._run(attempt, assignment=assignment, launch_model=launch_model)
-
-    def _admit_replacement(self, predecessor: PresenterAttempt, parent: int | None) -> None:
-        """Admit the successor's choices and retained source before touching the predecessor."""
-
-        other = next(
-            (
-                item
-                for item in self._store.records()
-                if item.state in LIVE_STATES and item.attempt_id != predecessor.attempt_id
-            ),
-            None,
-        )
-        if other is not None:
-            raise PresenterRefused(
-                "in-flight",
-                f"attempt {other.attempt_id} is still {other.state}; reconcile it before a "
-                "replacement",
-            )
-        launch = presenter_launch(self._config, repository_id=self._repository_id)
-        if launch.state != "ok":
-            raise PresenterRefused("launch-choice-unavailable", launch.detail)
-        design_text(self._config, self._repository_id)
-        capability_instructions()
-        if parent is not None:
-            admit_retained(self.scope, parent)
-
-    def _archive_host(self, attempt: PresenterAttempt) -> str:
-        """Settle the predecessor's host session and record what the host answered."""
-
-        hosted = self._host_for(attempt)
-        if hosted is None:
-            return ""
-        self._retain_transcript(attempt, locked=True)
-        try:
-            receipt = hosted[0].archive(hosted[1])
-        except PresenterRefused as refusal:
-            return f"; host archive refused: {refusal.reason}"
-        return f"; host archive: {receipt.detail}"
 
     # -- publication ---------------------------------------------------------------------------
 

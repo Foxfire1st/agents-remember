@@ -1,11 +1,11 @@
-"""The receipts one bounded evidence read answers with (MIK-R102 rules 3, 4, 5, 7, 8 and 12).
+"""The receipts one evidence read answers with (MIK-R102 rules 3, 4, 5, 7, 8 and 12; MIK-R211 v4).
 
 A receipt is the whole answer, and it separates the facts a reader has to tell apart:
 
 * the **side and tree actually read** -- for a memory base with a conversion applied that is the
   *effective* converted tree, with the stored tree named beside it (rule 1, rule 3);
-* the **object** the entry names, its full size where measured, and the byte window that was
-  examined and returned (rule 4);
+* the **object** the entry names, its full size and line count, and the bytes that were examined
+  and returned (rule 4; MIK-R211 v4 rule 3);
 * the **range** asked for and the range returned, the continuation that reaches the rest, and
   whether the remainder is known or merely unexamined (rule 4, rule 12);
 * the **state**: ``present``, ``present`` with zero bytes (measured empty), ``absent`` for a range
@@ -14,7 +14,13 @@ A receipt is the whole answer, and it separates the facts a reader has to tell a
   for an operand this surface will not accept (rule 3, rule 12).
 
 Nothing here claims that an unread remainder is empty, that a truncated window is the whole object,
-or that a stored memory tree is the converted one that was compared.
+or that a stored memory tree is the converted one that was compared. A ``truncated`` state and a
+continuation are still read from a receipt stored before reads answered in full; no read writes
+them now.
+
+Prose and path fields carry no length bound (MIK-R211 v4, Q6): a detail that names every file, or a
+path as deep as the tree holds, is the answer and is never refused for its length. Identifiers and
+enum-like labels keep theirs.
 """
 
 from __future__ import annotations
@@ -26,8 +32,6 @@ from pydantic import Field, model_validator
 from agents_remember.models.knowledge.base import (
     GIT_OBJECT_PATTERN,
     LABEL_MAX_LENGTH,
-    PATH_MAX_LENGTH,
-    PROSE_MAX_LENGTH,
     REFERENCE_MAX_LENGTH,
     SHA256_PATTERN,
     KnowledgeModel,
@@ -69,19 +73,21 @@ RemainderState = Literal["known", "unknown", "none"]
 
 
 class EvidenceReadReceipt(KnowledgeModel):
-    """One bounded read of one bound side: what came back, and every limit that shaped it."""
+    """One read of one bound side: what came back, and the object's true totals beside it."""
 
     state: EvidenceReadState
     side: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     comparison_number: int | None = Field(default=None, ge=0)
     comparison_reference: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    repository: str | None = Field(default=None, max_length=PATH_MAX_LENGTH)
+    repository: str | None = None
     tree: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
     # The stored tree, present only when the effective operand is a converted base (rule 1).
     stored_tree: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
-    path: str | None = Field(default=None, max_length=PATH_MAX_LENGTH)
+    path: str | None = None
     object_id: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
     object_size: int | None = Field(default=None, ge=0)
+    # The object's true line count, where the read measured a text object (MIK-R211 v4 rule 3).
+    object_lines: int | None = Field(default=None, ge=0)
     examined_bytes: int = Field(default=0, ge=0)
     returned_bytes: int = Field(default=0, ge=0)
     requested_range: tuple[int, int] | None = None
@@ -95,7 +101,7 @@ class EvidenceReadReceipt(KnowledgeModel):
     remaining_lines: int | None = Field(default=None, ge=0)
     limit: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     text: str | None = None
-    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    detail: str = Field(min_length=1)
     refusal_code: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
 
     @model_validator(mode="after")
@@ -133,7 +139,7 @@ class RelationshipEdge(KnowledgeModel):
     record_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     relation: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     direction: Literal["owns", "recorded-by"]
-    path: str | None = Field(default=None, max_length=PATH_MAX_LENGTH)
+    path: str | None = None
     depth: int = Field(ge=0)
     state: Literal["present", "absent", "unavailable", "unexamined", "invalid"]
     record_revision: int | None = Field(default=None, ge=1)
@@ -145,7 +151,7 @@ class RelationshipEdge(KnowledgeModel):
     target_revision: int | None = Field(default=None, ge=1)
     target_origin_leaf: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     lookup_state: Literal["resolved", "absent", "unreadable", "not-followed"] = "not-followed"
-    detail: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+    detail: str | None = None
 
     @model_validator(mode="after")
     def _unread_edge_is_named(self) -> RelationshipEdge:
@@ -155,16 +161,20 @@ class RelationshipEdge(KnowledgeModel):
 
 
 class EvidenceRelationshipRead(KnowledgeModel):
-    """A bounded relationship read from one memory record, with its depth and its cut."""
+    """A relationship read from one memory record, with its depth and every edge it holds.
+
+    ``listing_truncated``, ``listing_cursor``, ``continuation`` and ``limit`` are read from a
+    receipt stored before the walk listed everything (MIK-R211 v4 rule 1); no read sets them now.
+    """
 
     state: Literal["records", "refused", "unavailable"]
     side: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     comparison_number: int | None = Field(default=None, ge=0)
     comparison_reference: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    repository: str | None = Field(default=None, max_length=PATH_MAX_LENGTH)
+    repository: str | None = None
     tree: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
     stored_tree: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
-    from_path: str | None = Field(default=None, max_length=PATH_MAX_LENGTH)
+    from_path: str | None = None
     from_record: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     from_revision: int | None = Field(default=None, ge=1)
     edges: tuple[RelationshipEdge, ...] = ()
@@ -176,7 +186,7 @@ class EvidenceRelationshipRead(KnowledgeModel):
     continuation: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     resolved_targets: int = Field(default=0, ge=0)
     limit: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    detail: str = Field(min_length=1)
     refusal_code: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
 
     @model_validator(mode="after")
@@ -206,7 +216,7 @@ class ClaimResolution(KnowledgeModel):
     resolvable: bool
     checked: int = Field(ge=0)
     unresolved: tuple[str, ...] = ()
-    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    detail: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def _unresolved_is_named(self) -> ClaimResolution:
@@ -219,9 +229,9 @@ class SupplementalRead(KnowledgeModel):
     """One supplemental source resolved through its owner: the bytes, or the refusal (rule 6)."""
 
     state: Literal["present", "refused", "unavailable"]
-    canonical_source: str | None = Field(default=None, max_length=PATH_MAX_LENGTH)
-    admitted_root: str | None = Field(default=None, max_length=PATH_MAX_LENGTH)
+    canonical_source: str | None = None
+    admitted_root: str | None = None
     digest: str | None = Field(default=None, pattern=SHA256_PATTERN)
     byte_size: int = Field(default=0, ge=0)
-    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    detail: str = Field(min_length=1)
     refusal_code: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)

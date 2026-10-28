@@ -10,6 +10,7 @@
 // holding the document's references; folder answers never grow with the tree.
 
 import { getJson, qs } from "./files";
+import { abortedRead } from "./abortableRead";
 
 export interface FolderEntry {
   name: string;
@@ -50,8 +51,9 @@ export const listFolder = (
   path = "",
   offset = 0,
   base = "",
+  signal?: AbortSignal,
 ): Promise<NotesFolder> =>
-  getJson<NotesFolder>(`${base}/api/notes/folder?${qs({ repo, master, path, offset: String(offset) })}`);
+  getJson<NotesFolder>(`${base}/api/notes/folder?${qs({ repo, master, path, offset: String(offset) })}`, undefined, signal);
 
 export const readNote = (
   repo: string,
@@ -66,11 +68,17 @@ export const resolveNoteReferences = async (
   master: string,
   references: string[],
   base = "",
+  signal?: AbortSignal,
 ): Promise<Map<string, string>> => {
+  if (signal) {
+    await Promise.resolve();
+    if (signal.aborted) throw abortedRead();
+  }
   const response = await fetch(`${base}/api/notes/resolve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ repo, master, references }),
+    ...(signal ? { signal } : {}),
   });
   const value = (await response.json().catch(() => null)) as {
     resolutions?: NoteResolution[];

@@ -18,8 +18,11 @@ import { writeSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { interactiveReport } from "./canvas-interactive-report.mjs";
 
 const PREFIX = "/canvas/page/prospective/";
+// When this load began: its caller's time limit counts from here.
+const STARTED = Date.now();
 const PLAYWRIGHT = process.env.AR_PLAYWRIGHT
   ? pathToFileURL(process.env.AR_PLAYWRIGHT).href
   : "playwright";
@@ -153,9 +156,9 @@ async function observe(page) {
     const references = [...document.querySelectorAll("[data-evidence]")].map(
       (element) => element.getAttribute("data-evidence").trim(),
     );
-    const claimIds = [...document.querySelectorAll("[data-evidence-claim]")].map(
-      (element) => element.getAttribute("data-evidence-claim").trim(),
-    );
+    const claimIds = [
+      ...document.querySelectorAll("[data-evidence-claim]"),
+    ].map((element) => element.getAttribute("data-evidence-claim").trim());
     const unresolved = [...references, ...claimIds]
       .filter((reference) => !reference)
       .map(() => "(empty)");
@@ -167,8 +170,8 @@ async function observe(page) {
       unresolved,
       // Read the rendered DOM, keeping data-evidence basis references and data-evidence-claim
       // claim IDs in separate inventories for the Python caller to resolve against its packet.
-      references: references.filter(Boolean).slice(0, 401),
-      claimIds: claimIds.filter(Boolean).slice(0, 401),
+      references: references.filter(Boolean),
+      claimIds: claimIds.filter(Boolean),
       playing,
       reduce: matchMedia("(prefers-reduced-motion: reduce)").matches,
       animations: document.getAnimations ? document.getAnimations().length : 0,
@@ -214,15 +217,13 @@ async function watchReferences(page) {
     const collect = () => {
       for (const element of document.querySelectorAll("[data-evidence]")) {
         const value = element.getAttribute("data-evidence").trim();
-        if (value && references.size < 401) {
-          references.add(value);
-        }
+        if (value) references.add(value);
       }
-      for (const element of document.querySelectorAll("[data-evidence-claim]")) {
+      for (const element of document.querySelectorAll(
+        "[data-evidence-claim]",
+      )) {
         const value = element.getAttribute("data-evidence-claim").trim();
-        if (value && claimIds.size < 401) {
-          claimIds.add(value);
-        }
+        if (value) claimIds.add(value);
       }
     };
     collect();
@@ -263,6 +264,26 @@ async function observeInBrowser(origin) {
     module.chromium ? module : module.default,
   );
   const browser = await chromium.launch({ args: ["--no-sandbox"] });
+  const interactiveDirectory = flag("interactive-dir", null);
+  if (interactiveDirectory) {
+    // The earlier run of the same draft, when it left passes or controls unvisited (resumed).
+    const resumeFile = flag("interactive-resume", null);
+    const resume = resumeFile
+      ? JSON.parse(await readFile(resumeFile, "utf8"))
+      : null;
+    try {
+      return await interactiveReport(
+        browser,
+        `${origin}${PREFIX}`,
+        interactiveDirectory,
+        Number(flag("comparison", "0")),
+        resume,
+        { started: STARTED, limitSeconds: Number(flag("time-limit", "0")) },
+      );
+    } finally {
+      await browser.close();
+    }
+  }
   const errors = [];
   const failed = [];
   const outside = new Set();
@@ -342,9 +363,19 @@ async function observeInBrowser(origin) {
   }
 }
 
-/** Write one answer and leave: a stray handle (a driver child, a socket) must never hang the caller. */
+/** Write one answer whole and leave: a stray handle (a driver child, a socket) must never hang the
+ * caller. One writeSync to a pipe writes at most what the pipe holds (64 KiB here), so the answer is
+ * written until every byte is out; exiting after a partial write cut the report mid-JSON. */
 function answerAndExit(payload, code) {
-  writeSync(1, `${JSON.stringify(payload)}\n`);
+  const bytes = Buffer.from(`${JSON.stringify(payload)}\n`);
+  let written = 0;
+  while (written < bytes.length) {
+    try {
+      written += writeSync(1, bytes, written);
+    } catch (error) {
+      if (error.code !== "EAGAIN") throw error;
+    }
+  }
   process.exit(code);
 }
 

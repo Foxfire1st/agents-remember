@@ -1,7 +1,6 @@
-"""The isolation policy one admitted page executes under (MIK-R104 rules 2, 3, 4, 8, 10).
+"""The isolation policy one admitted page executes under (MIK-R104 rules 2, 3, 4, 8).
 
-One policy, stated once, so that the served bytes, the browser proof and the runtime gate cannot
-drift apart:
+One policy, stated once, so that the served bytes and every answer about them cannot drift apart:
 
 * **the origin arrangement is an opaque origin.** The page is framed with ``sandbox="allow-scripts"``
   and never ``allow-same-origin``, so its document has an opaque origin: no dashboard cookies, no
@@ -18,14 +17,10 @@ drift apart:
   page that found a write route still cannot reach it with an opaque origin.
 * **generated scripts run in the browser's sandbox** (MIK-R104 v2, D331). The browser is the
   execution environment: no stronger container is built, and the frame navigating itself is an
-  accepted channel, not something this module guards against. ``scripts_enabled`` is the one gate,
-  and it is a *proof* gate (rule 10): the shipped record must prove this exact policy -- the same
-  digest and origin arrangement, a browser and version this policy is written for, no failed check,
-  and every check the record itself names present in its own observations with the value it
-  expected. A record that was not run in full enables nothing; a page with no record is served
-  inert (``sandbox`` without ``allow-scripts``, ``script-src 'none'``).
-  The proof is produced by ``scripts/canvas-isolation-proof.mjs`` against the real browser and the
-  served headers; the record is the artifact that gate reads.
+  accepted channel, not something this module guards against. Scripts always run, and only ever
+  inside this isolation: the document is served with ``sandbox="allow-scripts"`` and a
+  ``script-src`` that admits nothing but the session's own admitted assets and inline script. No
+  runtime switch can serve the page with less than that, or with more.
 
 The finite limits (:data:`LIMITS`) name, for each bound, whether the browser enforces it or whether
 only a stronger container could. Nothing here claims a measured resource guarantee an iframe cannot
@@ -35,45 +30,23 @@ frame's timers have no enforced count. Those are named, not engineered around (r
 
 from __future__ import annotations
 
-import hashlib
-import json
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Literal
-
-from agents_remember.canvas.proof_record import record_gaps, source_bindings
-
 __all__ = [
     "ASSET_HEADERS",
     "ASSET_PATH_PREFIX",
     "CONTAINER_REQUIRED",
-    "ENFORCEMENT_SOURCES",
     "FRAME_HEADERS",
     "FRAME_PERMISSIONS_POLICY",
-    "ISOLATION_PROOF_NAME",
-    "ISOLATION_PROOF_SCHEMA",
     "LIMITS",
     "ORIGIN_ARRANGEMENT",
-    "POLICY_ID",
-    "REQUIRED_CHECKS",
-    "SUPPORTED_BROWSERS",
-    "IsolationProof",
-    "PolicyDigestMismatch",
     "asset_headers",
     "document_headers",
     "frame_csp",
     "frame_sandbox",
-    "load_isolation_proof",
-    "policy_digest",
-    "proof_gaps",
-    "scripts_enabled",
-    "scripts_gap",
     "shell_csp",
 ]
 
-#: The design this policy implements. A proof record names it, and the gate refuses any other.
+#: The design this policy implements: the arrangement the served headers produce.
 ORIGIN_ARRANGEMENT = "opaque-sandbox-v1"
-POLICY_ID = "ar-canvas-isolation/v1"
 
 #: Where a live page and its assets are served: ``/canvas/page/{session}/`` and
 #: ``/canvas/page/{session}/<asset>``. The CSP allowlist is this one prefix, so a relative reference
@@ -84,8 +57,6 @@ ASSET_PATH_PREFIX = "/canvas/page/"
 #: The sandbox tokens. ``allow-same-origin`` is absent by design and must stay absent: with it the
 #: framed document would share the dashboard's origin and the whole boundary would collapse.
 _SANDBOX_SCRIPTS = "allow-scripts"
-#: The empty token set for an unproven policy: no scripts, no same-origin, no forms, no popups.
-_SANDBOX_INERT = ""
 
 #: What the document may not do, in the browser's own vocabulary.
 #:
@@ -215,174 +186,6 @@ CONTAINER_REQUIRED: tuple[str, ...] = (
     "gpu",
 )
 
-#: The proof record the gate reads. It is shipped beside the policy it proves.
-#: The enforcing check catalog (L104-B05). This is the policy's own table, not the record's: it is
-#: the set of checks the shipped runner must observe for scripts to be served at all. A record that
-#: trims the table -- one matching pair out of forty-two -- proves nothing about this policy, so the
-#: gate refuses it rather than accepting a self-selected scope. The expected value of each check is
-#: the value the enforcement code is written to produce; a record may add checks, never lower one.
-REQUIRED_CHECKS: tuple[tuple[str, str], ...] = (
-    ("servedSandbox", "sandbox allow-scripts"),
-    ("servedScriptSrc", "admitted-prefix-and-inline"),
-    ("documentOrigin", "null"),
-    ("inlineScript", "ran"),
-    ("ownAssetScript", "ran"),
-    ("externalScript", "blocked"),
-    ("cspViolations", "refused-by-policy"),
-    ("cookie", "blocked"),
-    ("localStorage", "blocked"),
-    ("sessionStorage", "blocked"),
-    ("indexedDb", "blocked"),
-    ("parentDom", "blocked"),
-    ("opener", "null"),
-    ("topNavigation", "blocked"),
-    ("popup", "blocked"),
-    ("worker", "blocked"),
-    ("eval", "blocked"),
-    ("admittedStyle", "applied"),
-    ("admittedCorsImage", "loaded"),
-    # The asset-authority matrix (L104-B03): a document's own relative script, stylesheet and image
-    # render, and every governed load class refuses an asset of another revision of its frame, of a
-    # sibling frame, and of the leaf's task root. Each class is attempted in a real browser through
-    # the canvas prefix -- the only address a served document holds -- and recorded as refused.
-    ("ownScript", "loaded"),
-    ("ownStyle", "loaded"),
-    ("ownImage", "loaded"),
-    ("foreignScript", "blocked"),
-    ("foreignStyle", "blocked"),
-    ("foreignImage", "blocked"),
-    ("foreignFont", "blocked"),
-    ("foreignMedia", "blocked"),
-    ("foreignIframe", "blocked"),
-    ("foreignWorker", "blocked"),
-    ("foreignFetch", "blocked"),
-    ("foreignTaskPath", "blocked"),
-    ("permissions", "denied"),
-    ("permissionsPolicyWarnings", "0"),
-    ("hostApiRequests", "0"),
-    ("externalSinkRequests", "0"),
-    ("navigationGuard", "absent"),
-    ("formNavigation", "blocked"),
-    ("linkNavigation", "self-frame-only"),
-    ("selfNavigation", "observed:navigated"),
-    ("metaNavigation", "observed:script-inserted-meta-refresh-navigated"),
-    ("timerRuns", "active"),
-    ("timerReleasedOnClose", "stopped"),
-    ("revokedPage", "410"),
-    ("revokedAsset", "410"),
-    ("directOpenOrigin", "null"),
-    ("directOpenScript", "ran"),
-    ("directOpenCookie", "blocked"),
-    ("directOpenStorage", "blocked"),
-    ("directOpenOpener", "null"),
-    ("directOpenDom", "blocked"),
-    ("directOpenSentinel", "blocked"),
-    ("frameCorp", "same-origin"),
-    ("assetCorp", "cross-origin"),
-    ("assetCors", "*"),
-    # L104-B02: the frame's own navigation is the accepted channel (D331); the product's second-load
-    # reaction revokes the old channel, and the ready revision outlives it.
-    ("navigatedAway", "observed:navigated"),
-    ("navigatedRevoke", "410"),
-    ("navigatedMessage", "410"),
-    ("navigatedRevoked", "revoked"),
-    ("revisionRetained", "served"),
-    ("browserProtocol", "accepted"),
-    ("assetMatrix", "complete:35"),
-)
-
-ISOLATION_PROOF_NAME = "isolation-proof.json"
-ISOLATION_PROOF_SCHEMA = "ar-canvas-isolation-proof/v1"
-
-#: The browsers this policy is written and measured for. A proof from any other engine proves a
-#: different browser than the one this product runs in, so it enables nothing (rule 10).
-SUPPORTED_BROWSERS: frozenset[str] = frozenset(
-    {"chromium", "chrome", "firefox", "safari", "webkit"}
-)
-
-
-class PolicyDigestMismatch(ValueError):
-    """A proof record was produced for a policy other than the one now served."""
-
-
-@dataclass(frozen=True)
-class IsolationProof:
-    """The shipped browser proof, as far as the runtime gate reads it.
-
-    ``state`` is ``proven`` only when the proof ran every hostile check against this exact policy;
-    ``failed`` carries the checks that did not hold, and ``absent`` means no proof was shipped.
-    ``required_checks`` is the record's own table of what it set out to check, with the value it
-    expected, and ``observed`` the values the run actually saw. A record whose checks were not all
-    run is not a proof: :func:`proof_gaps` names what it lacks and :func:`scripts_enabled` refuses
-    it.
-    """
-
-    state: Literal["proven", "failed", "absent"]
-    policy_digest: str | None = None
-    browser: str | None = None
-    browser_version: str | None = None
-    origin_arrangement: str | None = None
-    failed_checks: tuple[str, ...] = ()
-    observed: tuple[str, ...] = ()
-    required_checks: tuple[tuple[str, str], ...] = ()
-    detail: str = ""
-    record_gaps: tuple[str, ...] = ("no served/source/artifact observations",)
-
-    @property
-    def proven(self) -> bool:
-        """Whether this record proves every clause of the policy now served."""
-
-        return not proof_gaps(self)
-
-
-#: The modules whose bytes enforce the policy. A proof that does not cover them would certify a
-#: policy the product no longer runs (L104-B05).
-ENFORCEMENT_SOURCES = (
-    "agents_remember.canvas.policy",
-    "agents_remember.serving.canvas",
-    "agents_remember.serving.write_guard",
-    "agents_remember.serving.app",
-    "agents_remember.canvas.sessions",
-    "agents_remember.canvas.document",
-    "agents_remember.canvas.protocol",
-    "agents_remember.canvas.evidence",
-    "agents_remember.canvas.proof_record",
-    "agents_remember.application.review_frame_store",
-    "agents_remember.application.review_frame_read",
-    "agents_remember.models.knowledge.review_frame",
-)
-
-
-def _enforcement_digest() -> str:
-    """sha256 over the enforcement modules' own source bytes, imported from the running package."""
-
-    return hashlib.sha256(json.dumps(source_bindings(), sort_keys=True).encode()).hexdigest()
-
-
-def _policy_payload() -> dict[str, object]:
-    """The exact facts a proof is bound to. Any edit here invalidates every old proof."""
-
-    return {
-        "policy": POLICY_ID,
-        "enforcementDigest": _enforcement_digest(),
-        "originArrangement": ORIGIN_ARRANGEMENT,
-        "sandboxScripts": _SANDBOX_SCRIPTS,
-        "sandboxInert": _SANDBOX_INERT,
-        "assetPrefix": ASSET_PATH_PREFIX,
-        "permissions": FRAME_PERMISSIONS_POLICY,
-        "headers": FRAME_HEADERS,
-        "limits": LIMITS,
-        "containerRequired": list(CONTAINER_REQUIRED),
-        "supportedBrowsers": sorted(SUPPORTED_BROWSERS),
-    }
-
-
-def policy_digest() -> str:
-    """sha256 of the canonical policy, the value a proof record must name."""
-
-    encoded = json.dumps(_policy_payload(), sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(encoded).hexdigest()
-
 
 def _sources(origin: str, session: str) -> str:
     """The one origin, restricted to admitted assets. Paths are part of a CSP source expression."""
@@ -400,25 +203,26 @@ def _document_tail() -> str:
     return "frame-ancestors 'self'; base-uri 'none'; form-action 'none'"
 
 
-def frame_csp(origin: str, *, session: str, scripts: bool) -> str:
+def frame_csp(origin: str, *, session: str) -> str:
     """The document policy one frame is served with.
 
     ``origin`` is the host origin (scheme, host and port) the request arrived on. Only paths below
     :data:`ASSET_PATH_PREFIX` on that origin are admissible for any subresource; everything the
-    browser can reach over the network for data is closed.
+    browser can reach over the network for data is closed. Script execution is part of the served
+    document, never a separate decision: ``script-src`` admits the session's own assets and inline
+    script, and no other origin.
     """
 
     allowed = _sources(origin, session)
-    script = f"script-src {allowed} 'unsafe-inline'" if scripts else "script-src 'none'"
     # The `sandbox` directive applies to the document however it is opened: inside the reviewer's
     # iframe, in a tab, or through a popup. Without it a direct open would be a same-origin dashboard
     # document and the whole authority separation would depend on the embedding caller (L104-B01).
-    sandbox = "sandbox allow-scripts" if scripts else "sandbox"
+    sandbox = f"sandbox {_SANDBOX_SCRIPTS}"
     return "; ".join(
         (
             sandbox,
             "default-src 'none'",
-            script,
+            f"script-src {allowed} 'unsafe-inline'",
             f"style-src {allowed} 'unsafe-inline'",
             f"img-src {allowed} data:",
             f"font-src {allowed} data:",
@@ -453,18 +257,18 @@ def shell_csp(origin: str, nonce: str) -> str:
     )
 
 
-def frame_sandbox(*, scripts: bool) -> str:
-    """The sandbox token set. Never carries ``allow-same-origin``."""
+def frame_sandbox() -> str:
+    """The sandbox token set every served document carries. Never ``allow-same-origin``."""
 
-    return _SANDBOX_SCRIPTS if scripts else _SANDBOX_INERT
+    return _SANDBOX_SCRIPTS
 
 
-def document_headers(origin: str, *, session: str, scripts: bool) -> dict[str, str]:
+def document_headers(origin: str, *, session: str) -> dict[str, str]:
     """Every header a frame document carries, including the policy and a missing-cache answer."""
 
     return {
         **FRAME_HEADERS,
-        "Content-Security-Policy": frame_csp(origin, session=session, scripts=scripts),
+        "Content-Security-Policy": frame_csp(origin, session=session),
         "Cache-Control": "no-store",
     }
 
@@ -503,156 +307,3 @@ def asset_headers(media_type: str) -> dict[str, str]:
     if media_type in {"text/html", "image/svg+xml"}:
         headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
     return headers
-
-
-def _check_entry(entry: object) -> tuple[str, str] | None:
-    """One ``{name, expected}`` row of the record's check table, or ``None`` when it is not one."""
-
-    if not isinstance(entry, dict):
-        return None
-    name, expected = entry.get("name"), entry.get("expected")
-    if not isinstance(name, str) or not isinstance(expected, str) or not name:
-        return None
-    return name, expected
-
-
-def _required_checks(entries: object) -> tuple[tuple[str, str], ...]:
-    """The record's own check table; a table that cannot be read covers nothing at all."""
-
-    if not isinstance(entries, (list, tuple)):
-        return ()
-    parsed: list[tuple[str, str]] = []
-    for entry in entries:
-        row = _check_entry(entry)
-        if row is None:
-            return ()
-        parsed.append(row)
-    return tuple(parsed)
-
-
-def _observed_values(observed: tuple[str, ...]) -> dict[str, str]:
-    """The record's observations as name -> value; the record writes them as ``name: value``."""
-
-    values: dict[str, str] = {}
-    for line in observed:
-        name, separator, value = line.partition(": ")
-        if separator:
-            values[name.strip()] = value.strip()
-    return values
-
-
-def _uncovered(required: tuple[tuple[str, str], ...], observed: tuple[str, ...]) -> tuple[str, ...]:
-    """Every check the record required that it did not observe with the value it expected."""
-
-    values = _observed_values(observed)
-    missing: list[str] = []
-    for name, expected in required:
-        value = values.get(name)
-        if value is None or not value.startswith(expected):
-            missing.append(f"{name} (expected {expected!r}, observed {value!r})")
-    return tuple(missing)
-
-
-def _catalog_gaps(proof: IsolationProof) -> list[str]:
-    """The enforcing catalog judged against the record's own table and observations (L104-B05).
-
-    A record may add checks, never narrow the set it is judged by and never lower one of its
-    expected values: the catalog is the policy's, so a record that trims it proves nothing.
-    """
-
-    declared = dict(proof.required_checks)
-    gaps: list[str] = []
-    omitted = [name for name, _ in REQUIRED_CHECKS if name not in declared]
-    if omitted:
-        listed = ", ".join(omitted[:8]) + ("…" if len(omitted) > 8 else "")
-        gaps.append(
-            f"the record omits {len(omitted)} of the {len(REQUIRED_CHECKS)} enforcing checks: "
-            f"{listed}"
-        )
-    lowered = [
-        f"{name} (expected {expected!r}, record declares {declared[name]!r})"
-        for name, expected in REQUIRED_CHECKS
-        if name in declared and declared[name] != expected
-    ]
-    if lowered:
-        gaps.append(
-            f"{len(lowered)} enforcing check(s) were declared more weakly: {', '.join(lowered)}"
-        )
-    missing = _uncovered(REQUIRED_CHECKS, proof.observed)
-    if missing:
-        gaps.append(
-            f"{len(missing)} required check(s) were not observed as expected: {', '.join(missing)}"
-        )
-    return gaps
-
-
-def proof_gaps(proof: IsolationProof) -> tuple[str, ...]:
-    """Every clause of the proof gate this record does not meet, named.
-
-    The gate is rule 10's: a browser proof precedes enablement, so the record must be a *proven*
-    record of *this* policy, run in a browser this policy is written for, with nothing failed, and
-    with every check it set out to run present in its own observations. An empty table is not
-    coverage -- a record that named no checks proved nothing.
-    """
-
-    gaps: list[str] = list(proof.record_gaps)
-    if proof.state != "proven":
-        gaps.append(f"the record's state is {proof.state!r}")
-    if proof.policy_digest != policy_digest():
-        gaps.append("the record names another policy digest")
-    if proof.origin_arrangement != ORIGIN_ARRANGEMENT:
-        gaps.append(f"the record names the origin arrangement {proof.origin_arrangement!r}")
-    if (proof.browser or "").lower() not in SUPPORTED_BROWSERS:
-        gaps.append(f"the record names no browser this policy is written for ({proof.browser!r})")
-    if not (proof.browser_version or "").strip():
-        gaps.append("the record names no browser version")
-    if proof.failed_checks:
-        gaps.append(f"{len(proof.failed_checks)} check(s) failed: {', '.join(proof.failed_checks)}")
-    if not proof.required_checks:
-        gaps.append("the record names no required checks, so it proves nothing")
-    else:
-        gaps.extend(_catalog_gaps(proof))
-    return tuple(gaps)
-
-
-def load_isolation_proof(bundle_root: Path | None) -> IsolationProof:
-    """Read the shipped proof record, refusing malformed JSON rather than assuming proof."""
-
-    if bundle_root is None:
-        return IsolationProof(state="absent", detail="no proof record ships")
-    path = bundle_root / ISOLATION_PROOF_NAME
-    if not path.is_file():
-        return IsolationProof(state="absent", detail=f"no proof record at {path}")
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        return IsolationProof(state="absent", detail=f"the proof record could not be read: {error}")
-    if not isinstance(payload, dict) or payload.get("schema") != ISOLATION_PROOF_SCHEMA:
-        return IsolationProof(state="absent", detail="the proof record names another schema")
-    return IsolationProof(
-        record_gaps=record_gaps(payload),
-        state=payload.get("state", "absent"),
-        policy_digest=payload.get("policyDigest"),
-        browser=payload.get("browser"),
-        browser_version=payload.get("browserVersion"),
-        origin_arrangement=payload.get("originArrangement"),
-        failed_checks=tuple(payload.get("failedChecks", ())),
-        observed=tuple(payload.get("observed", ())),
-        required_checks=_required_checks(payload.get("requiredChecks", ())),
-        detail=str(payload.get("detail", "")),
-    )
-
-
-def scripts_enabled(proof: IsolationProof) -> bool:
-    """Whether generated script execution may be served for this policy (rule 10)."""
-
-    return proof.proven
-
-
-def scripts_gap(proof: IsolationProof) -> str:
-    """The named reasons generated scripts are served disabled, or ``""`` when they may run."""
-
-    gaps = proof_gaps(proof)
-    if not gaps:
-        return ""
-    return "generated scripts stay disabled (MIK-R104 rule 10): " + "; ".join(gaps)

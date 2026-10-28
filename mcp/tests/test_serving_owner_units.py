@@ -22,6 +22,7 @@ from agents_remember.serving import projector as projection
 from agents_remember.serving._app_common import _ServingRuntime
 from agents_remember.serving.change_watcher import ProjectionDomain, ProjectionWake
 from agents_remember.serving.projections.landing_state import LandingStateRefresher
+from agents_remember.serving.stream_shutdown import StreamShutdown
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
@@ -418,11 +419,16 @@ class MaterialOwnerUnitTests(unittest.IsolatedAsyncioTestCase):
             runtime = cast(
                 _ServingRuntime,
                 SimpleNamespace(
+                    launcher_catalog_prepare=None,
+                    stream_shutdown=StreamShutdown(),
+                    master_preparation=None,
                     config=_config(root),
                     observer_root=root,
                     background_ledger=clock.ledger,
                     clock=lambda: datetime(2026, 10, 13, tzinfo=UTC),
-                    projector=SimpleNamespace(prime=mock.AsyncMock(), run=parked),
+                    projector=SimpleNamespace(
+                        close_readiness=mock.Mock(), prime=mock.AsyncMock(), run=parked
+                    ),
                     review_trees_shutdown=clock.wrap("shutdown", 5, lambda: None),
                     # The merged runtime carries the explainer's application port (MIK-R186);
                     # this stand-in runs no explainer, so the lifespan admits no move watcher.
@@ -478,6 +484,9 @@ class MaterialOwnerUnitTests(unittest.IsolatedAsyncioTestCase):
                 runtime = cast(
                     _ServingRuntime,
                     SimpleNamespace(
+                        launcher_catalog_prepare=None,
+                        stream_shutdown=StreamShutdown(),
+                        master_preparation=None,
                         config=_config(Path(tmp)),
                         observer_root=Path(tmp),
                         background_ledger=clock.ledger,

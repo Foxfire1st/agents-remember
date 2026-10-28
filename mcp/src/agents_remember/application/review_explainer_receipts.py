@@ -20,11 +20,11 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application.review_supplemental_evidence import capture_supplemental
+from agents_remember.kernel.recorded_reads import observed_entries
 from agents_remember.models.knowledge.review_evidence import SupplementalReceipt
 from agents_remember.tasks.document import resolve_agreed_revision
 
 __all__ = [
-    "MAX_RECEIPTS",
     "TASK_DOCUMENT_JSON_ID",
     "TASK_DOCUMENT_MD_ID",
     "compose_receipts",
@@ -32,7 +32,6 @@ __all__ = [
 ]
 
 #: One packet's byte-read budget: every source beyond it is receipted as an explicit omission.
-MAX_RECEIPTS = 48
 CAPTURE_IDENTITY = "the explainer's build and Update"
 ESTABLISHES = "a document the explained change set rests on, bound by the bytes read"
 REFERENCE_DIRECTORY = "notes/reference"
@@ -78,14 +77,22 @@ def _document_sources(document: Mapping[str, Any]) -> tuple[tuple[str, str], ...
 
 
 def _reference_files(task_root: Path, leaf_id: str) -> tuple[str, ...]:
-    folder = task_root / REFERENCE_DIRECTORY / leaf_id
-    if not folder.is_dir():
-        return ()
-    return tuple(
-        entry.relative_to(task_root).as_posix()
-        for entry in sorted(folder.rglob("*"))
-        if entry.is_file() and not entry.is_symlink()
-    )
+    """Every regular file under the leaf's reference folder; each listing walked is an input."""
+
+    files: list[Path] = []
+    pending = [task_root / REFERENCE_DIRECTORY / leaf_id]
+    while pending:
+        folder = pending.pop()
+        try:
+            entries = observed_entries(folder)
+        except OSError:
+            continue
+        for name, kind in entries:
+            if kind == "directory":
+                pending.append(folder / name)
+            elif kind == "file":
+                files.append(folder / name)
+    return tuple(entry.relative_to(task_root).as_posix() for entry in sorted(files))
 
 
 def _agreed_manifest_entry(
@@ -156,34 +163,16 @@ def compose_receipts(
     ]
     if agreed is not None:
         sources.append(("agreed-manifest", agreed[0], agreed[1]))
-    read_ids = _admitted_read_ids(packets, docs, references, agreed is not None)
-    context = (task_root, leaf_id, slug if own else None, read_ids)
+    context = (task_root, leaf_id, slug if own else None)
     return tuple(_build_receipt(source, context) for source in sources)
-
-
-def _admitted_read_ids(
-    packets: list[tuple[str, str]],
-    docs: list[tuple[str, str]],
-    references: list[tuple[str, str]],
-    has_agreed: bool,
-) -> set[str]:
-    """Prioritize required yardstick sources so they are never displaced at the read ceiling."""
-
-    mandatory = [receipt_id for receipt_id, _ in docs]
-    if has_agreed:
-        mandatory.append("agreed-manifest")
-    remaining = max(0, MAX_RECEIPTS - len(mandatory))
-    ordered = [receipt_id for receipt_id, _ in (*packets, *references)]
-    return set(mandatory) | set(ordered[:remaining])
 
 
 def _build_receipt(
     source: tuple[str, str, str | None],
-    context: tuple[Path, str, str | None, set[str]],
+    context: tuple[Path, str, str | None],
 ) -> SupplementalReceipt:
     receipt_id, relative, failure = source
-    task_root, leaf_id, leaf_document, read_ids = context
-    within_bound = receipt_id in read_ids
+    task_root, leaf_id, leaf_document = context
     producer = f"leaf {leaf_id}"
     authority = "the task document this leaf is registered by"
     if failure is not None:
@@ -196,21 +185,6 @@ def _build_receipt(
             capture_identity=CAPTURE_IDENTITY,
             establishes=ESTABLISHES,
             limitation=failure,
-        )
-    if not within_bound:
-        return SupplementalReceipt(
-            receipt_id=receipt_id,
-            canonical_source=relative,
-            producer=producer,
-            authority=authority,
-            read_state="unavailable",
-            capture_identity=CAPTURE_IDENTITY,
-            establishes=ESTABLISHES,
-            limitation=(
-                f"the source was not read: the packet already examined the maximum {MAX_RECEIPTS} "
-                f"supplemental sources, so {relative} is recorded as a truncated-read omission "
-                "rather than silently dropped"
-            ),
         )
     return capture_supplemental(
         task_root,

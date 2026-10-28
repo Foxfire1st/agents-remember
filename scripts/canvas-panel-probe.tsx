@@ -1,7 +1,7 @@
-// Browser fixture: the real mounted production panel. Only its saved-state read is a fixture;
-// allocation, frame delivery, messages and revocation use the actual product HTTP endpoints.
+// Browser fixture: the real mounted revision frame. Its retained revision and target come from
+// the fixture; allocation, delivery, messages and revocation use the product HTTP endpoints.
 import { createRoot } from "../dashboard/node_modules/react-dom/client";
-import { CanvasPanel } from "../dashboard/src/panels/review/canvas/CanvasPanel";
+import { RevisionFrame } from "../dashboard/src/panels/review/explainer/RevisionFrame";
 
 const fixture = await fetch("/proof/panel-state").then((response) =>
   response.json(),
@@ -10,8 +10,6 @@ const nativeFetch = window.fetch.bind(window);
 let first = true;
 window.fetch = async (input, init) => {
   const url = String(input);
-  if (url.startsWith("/api/canvas/frames/"))
-    return Response.json(fixture.state);
   const response = await nativeFetch(input, init);
   if (
     url === "/api/canvas/sessions" &&
@@ -28,5 +26,13 @@ window.fetch = async (input, init) => {
   return response;
 };
 createRoot(document.getElementById("root")!).render(
-  <CanvasPanel {...fixture.props} />,
+  <RevisionFrame
+    target={{
+      repository: fixture.props.repository,
+      master: fixture.props.master,
+      leaf: fixture.props.leaf,
+    }}
+    revision={fixture.state.opening.revision}
+    caption="Isolation proof"
+  />,
 );

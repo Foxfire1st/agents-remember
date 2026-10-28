@@ -58,6 +58,39 @@ function dashboardSourceFingerprint(): string {
 // "/" static mount (serving/static.py). The dev `/api` proxy points at a locally running
 // `agents-remember dashboard` server so `npm run dev` consumes the real (or --sim) stream.
 // Test config lives in vitest.config.ts (separate, to keep pure Vite plugin types here).
+//
+// `/canvas` is the backend's second surface, not the app's: a revision frame's `pageUrl` is
+// `/canvas/page/<session>/` (serving/canvas.py CANVAS_FRAME_PREFIX), every asset it loads hangs off
+// that prefix, and the backend answers 410 for a session it does not hold. Unproxied, Vite answers
+// the page itself with its own index.html and a 200, so the frame renders white and the backend
+// never sees a request (F4). Both prefixes come from one target so they cannot drift.
+const BACKEND = process.env.AR_DASHBOARD_API ?? "http://127.0.0.1:8765";
+
+// The browser's own origin travels with a `/canvas` request. The backend admits a request only when
+// `Host` names its own address and bound port (serving/write_guard.py, `foreign-host`), and it
+// builds a frame document's policy from the origin the page is loaded from
+// (serving/canvas.py `_origin`). Those two facts conflict behind a proxy: with `changeOrigin` the
+// backend sees the proxy target and every `style-src`/`img-src` it writes names the wrong origin, so
+// the browser blocks the frame's own `styles.css` and the page renders as raw HTML (F5). The proxy
+// therefore keeps `Host` for admission and states the browser's origin separately, which the backend
+// reads as `X-Forwarded-Host` (and `X-Forwarded-Proto` when it is a known scheme).
+interface ProxyRequestOut {
+  setHeader(name: string, value: string): void;
+}
+interface ProxyRequestLike {
+  headers: Record<string, string | string[] | undefined>;
+}
+interface ProxyLike {
+  on(event: "proxyReq", listener: (out: ProxyRequestOut, req: ProxyRequestLike) => void): void;
+}
+function forwardedOrigin(proxy: ProxyLike): void {
+  proxy.on("proxyReq", (out, req) => {
+    const host = req.headers.host;
+    if (typeof host === "string" && host.length > 0) out.setHeader("x-forwarded-host", host);
+    out.setHeader("x-forwarded-proto", "http");
+  });
+}
+
 export default defineConfig({
   base: "./",
   plugins: [react()],
@@ -66,14 +99,12 @@ export default defineConfig({
   },
   build: { outDir: "dist", emptyOutDir: true },
   server: {
-    // Port + `/api` proxy target are env-overridable so parallel worktree dev loops can each run
-    // their own Vite + dashboard backend without colliding (defaults: 5173 -> 127.0.0.1:8765).
+    // Port + proxy target are env-overridable so parallel worktree dev loops can each run their own
+    // Vite + dashboard backend without colliding (defaults: 5173 -> 127.0.0.1:8765).
     port: Number(process.env.AR_DASHBOARD_DEV_PORT) || 5173,
     proxy: {
-      "/api": {
-        target: process.env.AR_DASHBOARD_API ?? "http://127.0.0.1:8765",
-        changeOrigin: true,
-      },
+      "/api": { target: BACKEND, changeOrigin: true },
+      "/canvas": { target: BACKEND, changeOrigin: true, configure: forwardedOrigin },
     },
   },
 });

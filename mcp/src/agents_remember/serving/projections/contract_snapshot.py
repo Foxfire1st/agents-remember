@@ -81,6 +81,7 @@ class ContractSnapshotCache:
 
     def __init__(self) -> None:
         self._entries: dict[Path, _ParseCacheEntry] = {}
+        self._failed: set[Path] = set()
 
     def build(self, tasks_root: Path, only: Collection[Path] | None = None) -> ContractSnapshot:
         """Enumerate + parse the live leaf contracts once; publish an immutable snapshot.
@@ -106,28 +107,34 @@ class ContractSnapshotCache:
             contracts[path] = contract
         for stale in [path for path in self._entries if path not in seen]:
             del self._entries[stale]
+        self._failed = skipped
         return ContractSnapshot(contracts=MappingProxyType(contracts), skipped=frozenset(skipped))
 
     def _build_scoped(self, tasks_root: Path, only: Collection[Path]) -> ContractSnapshot:
         """Re-parse exactly the given contract paths against the retained entries."""
-        for path in only:
-            if is_archived_path(path) or is_below_notes(path, tasks_root):
-                continue
-            try:
-                is_file = path.is_file()
-            except OSError:
-                is_file = False
-            if not is_file:
+        # Failed reads are retried on every build, including a scoped pass for a
+        # different path. Keep their addresses, never a cached failed answer.
+        for path in set(only) | self._failed:
+            if (
+                is_archived_path(path)
+                or is_below_notes(path, tasks_root)
+                or not os.path.lexists(path)
+            ):
                 self._entries.pop(path, None)
+                self._failed.discard(path)
                 continue
-            self._parse_live(path)
+            if self._parse_live(path) is None:
+                self._failed.add(path)
+            else:
+                self._failed.discard(path)
         contracts = {
             path: entry.contract
             for path, entry in self._entries.items()
             if entry.contract is not None
         }
-        skipped = {path for path in only if path not in contracts}
-        return ContractSnapshot(contracts=MappingProxyType(contracts), skipped=frozenset(skipped))
+        return ContractSnapshot(
+            contracts=MappingProxyType(contracts), skipped=frozenset(self._failed)
+        )
 
     def _parse_live(self, path: Path) -> WorktreeContract | None:
         """The cached parse while its stat identity holds, else a fresh parse."""

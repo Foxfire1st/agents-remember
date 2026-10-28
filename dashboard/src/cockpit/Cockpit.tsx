@@ -13,7 +13,7 @@ import { motion } from 'motion/react';
 
 import { cx } from '../../styled-system/css';
 import { shell, topbar, title, statusRow, dim, effectsToggle, railToggle, railToggleButton, caution, connBadge, bodyGrid, rail, RailResizeHandle, viewport, chatsLayer, takeoverBody, useNarrowCockpit, sidebarStrip, LEFT_RAIL_ID, RIGHT_RAIL_ID } from './layout';
-import { useReviewChat, type ReviewChatColumn } from './reviewChat';
+import { reviewChatTask, useReviewChat, type ReviewChatColumn } from './reviewChat';
 import { ReviewChatClose, ReviewMain, reviewRailView } from './reviewPage';
 import { useReviewHash, parseReviewHash } from './reviewHash';
 import { RoleChatsPane } from './RoleChats';
@@ -157,6 +157,8 @@ interface CockpitShellState {
   // The bell's way into an agent's chat (L190-R1-F09): the shell names the exact seat, and the
   // Chats view shows it. The rail itself owns no chat surface, so it only forwards this.
   agentChat: AgentChatTarget | null;
+  // The review's address while another bottom tab is on screen (D575; reviewHash.ts).
+  reviewAddress: { park: () => void; unpark: () => void };
   setView: (view: CockpitView) => void;
   setSelectedId: (id: string | null) => void;
   setChangeSet: (target: ChangeSetTarget | null) => void;
@@ -198,7 +200,7 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notes, setNotes] = useState<NotesReaderTarget | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
-  const [changeSet, setChangeSet] = useReviewHash(setView, setNotesOpen);
+  const [changeSet, setChangeSet, reviewAddress] = useReviewHash(setView, setNotesOpen);
   const [chatRail, setChatRail] = usePersistedFlag('cockpit.rail-chat', false);
   const railView: 'river' | 'chat' = chatRail ? 'chat' : 'river';
   const [leftRailWidth, setLeftRailWidth] = usePersistedNumber('cockpit.rail-left-w', 340);
@@ -252,7 +254,52 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
     setRightRailWidth,
     setViewedTask,
     setAgentChat,
+    reviewAddress,
   };
+}
+
+// What a bottom tab change needs of the shell: the tab on screen, the review it holds, and its address.
+interface TabMemory {
+  view: CockpitView;
+  changeSet: ChangeSetTarget | null;
+  address: { park: () => void; unpark: () => void };
+}
+
+// A bottom tab change (D575). Every tab keeps the page it was last on: Chats, Knowledge and the File
+// Viewer stay mounted, and so does a review open in Operations, hidden while another tab is on
+// screen; returning restores its address. A review whose leaf the task list no longer holds is gone,
+// and Operations falls back to the task document. Pressing Operations on the review itself still
+// leaves it for the task document, and any other change set closes on a tab change, as before.
+function useTabChange(
+  tab: TabMemory,
+  setChangeSet: (target: ChangeSetTarget | null) => void,
+  setNotesOpen: (open: boolean) => void,
+  setView: (view: CockpitView) => void,
+): (next: CockpitView) => void {
+  // One identity for the session: the mode bar is behind a memo gate (tab-switch CPU).
+  const latest = useRef(tab);
+  latest.current = tab;
+  return useCallback(
+    (next: CockpitView) => {
+      const { view, changeSet, address } = latest.current;
+      setNotesOpen(false);
+      if (!changeSet?.review || (view === 'operations' && next === 'operations')) {
+        setChangeSet(null);
+      } else if (view === 'operations') {
+        address.park();
+      } else if (next === 'operations') {
+        if (reviewLeafGone(changeSet)) setChangeSet(null);
+        else address.unpark();
+      }
+      setView(next);
+    },
+    [setChangeSet, setNotesOpen, setView],
+  );
+}
+
+function reviewLeafGone(review: ChangeSetTarget): boolean {
+  const { tasks, generatedAt } = dashboardStore.getState();
+  return reviewChatTask(review, tasks, generatedAt !== null).state === 'unknown';
 }
 
 // The Operations page's own way in: a row's document key, and the view a document is read in.
@@ -304,6 +351,7 @@ function useCockpitShellActions(
   setView: (view: CockpitView) => void,
   setSelectedId: (id: string | null) => void,
   setAgentChat: (target: AgentChatTarget | null) => void,
+  tab: TabMemory,
 ): {
   setRailView: (next: 'river' | 'chat') => void;
   open: (id: string) => void;
@@ -320,14 +368,7 @@ function useCockpitShellActions(
     [setChatRail],
   );
   const open = useOpenDocument(setChangeSet, setNotesOpen, setSelectedId, setView);
-  const changeView = useCallback(
-    (next: CockpitView) => {
-      setChangeSet(null);
-      setNotesOpen(false);
-      setView(next);
-    },
-    [setChangeSet, setNotesOpen, setView],
-  );
+  const changeView = useTabChange(tab, setChangeSet, setNotesOpen, setView);
   // The bell's way into a chat (L190-R1-F09).
   const openAgentChat = useOpenAgentChat(changeView, setAgentChat);
   const openChangeSet = useCallback(
@@ -736,11 +777,14 @@ function RailedBody({
       {/* The review page's slot, just before the right rail: a null slot keeps the rail's place,
           so showing and leaving the review never moves the rail or its chat frame (rule 12). No
           wrapper and no key around the rail: either would build a new frame and load it again. */}
-      {state.reviewShown && state.review ? (
+      {/* Another bottom tab on screen keeps the review mounted and hidden, so returning to
+          Operations shows the reader's page as it was left, with no request (D575). */}
+      {state.review ? (
         <ReviewMain
           target={state.review}
-          chat={{ open: state.reviewChat.open, toggle: state.reviewChat.toggle }}
+          chat={{ open: state.reviewChat.open, toggle: state.reviewChat.toggle, expand: state.reviewChat.expand }}
           onBack={actions.closeChangeSet}
+          hidden={!state.reviewShown}
         />
       ) : null}
       <RightRail
@@ -802,6 +846,7 @@ export function CockpitShell({ initialView = 'chats' }: { initialView?: CockpitV
     state.setView,
     state.setSelectedId,
     state.setAgentChat,
+    { view: state.view, changeSet: state.changeSet, address: state.reviewAddress },
   );
   const page = shownPage(state);
   usePublishShownPage(page.page, page.repository);

@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import subprocess
 import sys
+import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -39,6 +40,23 @@ class ProcessMutableState:
 @dataclass
 class _PytestProcessState:
     snapshot: dict[str, Any] | None = None
+
+
+#: Generous join bound for a watchdog thread between test modules; it exits on its own stop flag.
+BUILD_WATCHDOG_JOIN_SECONDS = 30.0
+
+
+def _reset_build_watchdog(module: ModuleType, attribute: str) -> None:
+    """Stop a preceding module's build watchdog thread before forgetting the reference."""
+
+    thread = getattr(module, attribute, None)
+    if thread is None:
+        return
+    # A loaded owner may stand in a placeholder here rather than a thread; only a live thread can be
+    # joined, and the row's contract is that the reference is cleared either way.
+    if isinstance(thread, threading.Thread) and thread.is_alive():
+        thread.join(BUILD_WATCHDOG_JOIN_SECONDS)
+    setattr(module, attribute, None)
 
 
 def _clear(module: ModuleType, attribute: str) -> None:
@@ -105,6 +123,15 @@ def _reset_background_pool(module: ModuleType, attribute: str) -> None:
             module._BackgroundPool.executor = None
 
 
+def _reset_process_worktree_watch(module: ModuleType, attribute: str) -> None:
+    held = getattr(module, attribute)
+    for watch in list(held.values()):
+        shutdown = getattr(watch, "shutdown", None)
+        if callable(shutdown):
+            shutdown()  # its reader thread and inotify instance end with the module
+    held.clear()
+
+
 def _row(
     module: str,
     attribute: str,
@@ -152,6 +179,23 @@ PROCESS_MUTABLE_STATES = (
         _finish_quality_runs,
     ),
     _row(
+        "application.review_memo_store",
+        "_STORES",
+        "Forget which memo stores a preceding module's process opened, restored and saved.",
+    ),
+    _row(
+        "application.review_memo_store",
+        "_git_identity",
+        "Forget the Git version a preceding module's memo store namespace was read from.",
+        _clear_cache,
+    ),
+    _row(
+        "application.review_memo_store",
+        "_grammar_identity",
+        "Forget the grammar bytes a preceding module's memo store namespace was read from.",
+        _clear_cache,
+    ),
+    _row(
         "application.task_projection.statuses",
         "UNREACHABLE_STATUSES",
         "The empty status vocabulary is written only at import and tests only read it.",
@@ -173,6 +217,20 @@ PROCESS_MUTABLE_STATES = (
         "_BUILD_STATES",
         "Forget a preceding module's in-flight build ledgers between test modules.",
     ),
+    # A build in flight owns cancel events and may own a watchdog thread; clearing them under a live
+    # build leaves its turn with nothing to cancel against, so these are restored around each test
+    # rather than wiped between modules.
+    _row(
+        "canvas.explainer_service",
+        "_BUILD_CANCELS",
+        "Forget a preceding module's build cancel events between test modules.",
+    ),
+    _row(
+        "canvas.explainer_service",
+        "_BUILD_WATCHDOG",
+        "Stop a preceding module's build watchdog thread between test modules.",
+        _reset_build_watchdog,
+    ),
     _row(
         "cli.role_held_messages",
         "_sweep_walks",
@@ -188,6 +246,11 @@ PROCESS_MUTABLE_STATES = (
         "kernel.atomic_write",
         "_temps_in_flight",
         "Forget this process's in-flight temp paths between test modules.",
+    ),
+    _row(
+        "kernel.recorded_reads",
+        "_HELD",
+        "Forget the file identities held against their stats between test modules.",
     ),
     _row(
         "kernel.file_lock",
@@ -286,7 +349,12 @@ PROCESS_MUTABLE_STATES = (
         _clear_cache,
     ),
     _row(
-        "serving.change_watcher",
+        "serving.changeset_cache",
+        "_OBJECT_HISTORY",
+        "Forget the process's object-store census history between test modules.",
+    ),
+    _row(
+        "serving.explainer_move_watch",
         "_WATCHES",
         "Forget per-root move watches between test modules.",
     ),
@@ -320,6 +388,27 @@ PROCESS_MUTABLE_STATES = (
         "serving.projections.snapshots_impl._closeout_queue",
         "_digest_file_stats",
         "Forget retained task-tree file identities between test modules.",
+    ),
+    _row(
+        "serving.projections.snapshots_impl._closeout_queue",
+        "_held_door_sources",
+        "Forget each sprint's held door sources and the stats they were read under.",
+    ),
+    _row(
+        "serving.leaf_worktree_watch",
+        "_PROCESS_WATCH",
+        "Shut the process's one worktree watch down between test modules.",
+        _reset_process_worktree_watch,
+    ),
+    _row(
+        "tasks.document_field_effects",
+        "_validated_roots",
+        "Forget the task-document schema roots already validated between test modules.",
+    ),
+    _row(
+        "worktrees.modules.kept_capture",
+        "_HELD",
+        "Forget held worktree capture witnesses between test modules.",
     ),
     _row(
         "worktrees.integration.lifecycle.lifecycle_location_cache",

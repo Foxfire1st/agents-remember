@@ -1,8 +1,4 @@
-// MIK-R89 v2 rules 2, 5 and 7 on L181 #8 (reviewPage.test-utils.tsx): the page opens with nothing
-// selected and makes exactly six reads; a lane file's two reads wait until the opening's six are done
-// and the file is in view, with no gesture (amendment f43ae286), and a card's marks until the card is
-// in view after the reader's first gesture; each subject shows its two closed groups; the one "All
-// changes" link is the tree's.
+// Opening loads the comparison inventory; code and file text follow the selected area.
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,6 +11,8 @@ import {
   L181_SUBJECT,
   pageReads,
   renderPage,
+  selectInvariant,
+  waitForOpening,
   serveLaneText,
   servePage,
   stubInViewAtFirstPaint,
@@ -34,9 +32,19 @@ afterEach(() => {
 });
 
 async function opened() {
-  await waitFor(() => expect(screen.getAllByTestId('review-subject-section').length).toBeGreaterThan(0));
-  await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+  await waitForOpening();
+}
+
+async function openedInvariant() {
+  await selectInvariant();
+  await waitFor(() => expect(screen.getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
   await waitFor(() => expect(screen.queryByTestId('review-subject-cards-reading')).toBeNull());
+}
+
+async function openedLane() {
+  await opened();
+  fireEvent.click(screen.getByTestId('review-tree-lane'));
+  await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
 }
 
 function kindOf(url: URL): string {
@@ -47,11 +55,12 @@ function kindOf(url: URL): string {
   return 'trees:leaf';
 }
 
+const DRAWN_ORDER = '/api/review/trees/order';
+
 const OPENING = [
   '/api/review/intent',
   '/api/review/intent/entries',
   '/api/review/intent/summary',
-  'trees:cards',
   'trees:lane',
   'trees:leaf',
 ].sort();
@@ -66,81 +75,90 @@ async function turns(count = 5) {
 }
 
 describe('the opening', () => {
-  it('makes exactly the six opening reads and selects nothing', async () => {
+  it('makes only the five inventory reads, names its drawn order after them, selects nothing and mounts no code', async () => {
     stubIntersection();
     const { asked } = servePage();
     renderPage();
     await opened();
     await turns();
-    const reads = pageReads(asked).map(kindOf).sort();
-    expect(reads).toEqual(OPENING);
-    const cards = pageReads(asked).find((url) => kindOf(url) === 'trees:cards')!;
-    expect(cards.searchParams.get('invariants')).toBe(L181_SUBJECT);
-    expect(cards.searchParams.get('comparison')).toBe('8');
-    expect(pageReads(asked).find((url) => url.pathname === '/api/review/intent')!.searchParams.has('selectorId')).toBe(false);
-    expect(document.querySelector('[data-review-scroller] :is(article, section, li)[data-selected]')).toBeNull();
+    const sent = pageReads(asked).map(kindOf);
+    expect(sent.filter((kind) => kind !== DRAWN_ORDER).sort()).toEqual(OPENING);
+    // The order it drew, once, after its reads: a message to the background, no read (D585).
+    expect(sent.filter((kind) => kind === DRAWN_ORDER)).toHaveLength(1);
+    expect(sent.indexOf(DRAWN_ORDER)).toBe(sent.length - 1);
+    expect(screen.queryAllByTestId('review-expression-card')).toHaveLength(0);
+    expect(screen.queryByTestId('review-lane-section')).toBeNull();
     expect(document.querySelector('[data-tree-node][aria-current]')).toBeNull();
     expect(screen.queryByTestId('review-subject-slot')).toBeNull();
-    expect(screen.getByTestId('review-summary').textContent).toContain('1 invariant changed');
   });
 
-  // A short page: every block is in view at the first paint and the reader has nothing to scroll. The
-  // lane file is read once the opening's six reads are done (here the card read is held, so they are
-  // not), with no gesture; until its read arrives it shows its skeleton, never "Read when in view…".
-  // A card's marks still wait for the reader's first gesture.
-  it('reads a lane file in view at the first paint once the six opening reads are done, with no gesture', async () => {
-    stubInViewAtFirstPaint();
-    const { asked, release } = servePage((url) => kindOf(url) === 'trees:cards');
-    renderPage();
-    await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
-    await waitFor(() => expect(pageReads(asked).map(kindOf).sort()).toEqual(OPENING));
-    await turns();
-    expect(fileReads(asked)).toEqual([]);
-    const file = screen.getByTestId('review-lane-file');
-    expect(file.dataset.laneRead).toBe('waiting');
-    expect(document.body.textContent).not.toContain('Read when in view');
-
+  it('starts an exact selected invariant read before an unrelated pending catalogue settles', async () => {
+    stubIntersection();
+    const { asked, release } = servePage((url) => url.pathname === '/api/review/intent/entries');
+    renderPage({ selectorKind: 'invariant', selectorId: L181_SUBJECT });
+    const cardReads = () => pageReads(asked).filter((url) => kindOf(url) === 'trees:cards');
+    await waitFor(() => expect(cardReads()).toHaveLength(1));
+    expect(cardReads()[0].searchParams.get('invariants')).toBe(L181_SUBJECT);
+    expect(cardReads()[0].searchParams.get('comparison')).toBe('8');
     await act(async () => release());
-    await waitFor(() => expect(file.dataset.laneRead).toBe('ready'));
-    const reads = pageReads(asked);
-    expect(reads.slice(0, 6).map(kindOf).sort()).toEqual(OPENING);
-    // Then the file's two reads, its classification and its text, counted by file.
-    expect(reads.slice(6).map(fileOf).sort()).toEqual(
-      [
-        ['/api/changeset/file-diff', LANE_PATH],
-        ['trees:file', LANE_PATH],
-      ].sort(),
-    );
-    // The reader's first gesture starts the card marks' reads of what is in view, through the gate.
-    engage();
-    await waitFor(() => expect(fileReads(asked).length).toBeGreaterThan(2));
-    expect(fileReads(asked).slice(2).every((url) => kindOf(url) === 'trees:file' && url.searchParams.get('file') !== LANE_PATH)).toBe(true);
+    await opened();
+    await turns();
+    expect(cardReads()).toHaveLength(1);
   });
 
-  // Below the fold: the opening makes its six reads and no other. The file scrolls into view (the
-  // page's own scroll or the reader's) and is read then, with no gesture.
-  it("reads a lane file's classification and text as it comes into view, with no gesture, and a card's marks once in view", async () => {
-    const view = stubIntersection();
+  it('reads only the selected invariant cards after the opening inventory', async () => {
+    stubIntersection();
     const { asked } = servePage();
     renderPage();
     await opened();
     await turns();
-    expect(pageReads(asked).map(kindOf).sort()).toEqual(OPENING);
+    const before = pageReads(asked).length;
+    await openedInvariant();
+    const reads = pageReads(asked).slice(before);
+    const cards = reads.filter((url) => kindOf(url) === 'trees:cards');
+    expect(cards).toHaveLength(1);
+    expect(cards[0].searchParams.get('invariants')).toBe(L181_SUBJECT);
+    expect(cards[0].searchParams.get('comparison')).toBe('8');
+    expect(reads.filter((url) => url.pathname === '/api/review/intent').map((url) => url.searchParams.get('selectorId'))).toEqual([L181_SUBJECT]);
+    expect(screen.getAllByTestId('review-subject-section')).toHaveLength(1);
+    expect(screen.queryByTestId('review-lane-section')).toBeNull();
+  });
+
+  it('reads an in-view lane file only after the lane is selected, without needing a gesture', async () => {
+    stubInViewAtFirstPaint();
+    const { asked } = servePage();
+    renderPage();
+    await opened();
+    await turns();
+    expect(fileReads(asked)).toEqual([]);
+    await openedLane();
+    await waitFor(() => expect(screen.getByTestId('review-lane-file').dataset.laneRead).toBe('ready'));
+    expect(fileReads(asked).map(fileOf).sort()).toEqual([
+      ['/api/changeset/file-diff', LANE_PATH], ['trees:file', LANE_PATH],
+    ].sort());
+    expect(screen.queryAllByTestId('review-expression-card')).toHaveLength(0);
+  });
+
+  it('reads the selected lane file as it comes into view and selected card marks as they come into view', async () => {
+    const view = stubIntersection();
+    const { asked } = servePage();
+    renderPage();
+    await openedLane();
     const laneFile = screen.getByTestId('review-lane-file');
+    expect(fileReads(asked)).toEqual([]);
     await act(async () => view.show(laneFile));
     await waitFor(() => expect(screen.getByTestId('review-lane-file').dataset.laneRead).toBe('ready'));
-    expect(fileReads(asked).map(fileOf).sort()).toEqual(
-      [
-        ['/api/changeset/file-diff', LANE_PATH],
-        ['trees:file', LANE_PATH],
-      ].sort(),
-    );
+    expect(fileReads(asked).map(fileOf).sort()).toEqual([
+      ['/api/changeset/file-diff', LANE_PATH], ['trees:file', LANE_PATH],
+    ].sort());
+    await openedInvariant();
     engage();
     const card = screen.getAllByTestId('review-expression-card')[0];
     const before = fileReads(asked).length;
     await act(async () => view.show(card));
     await waitFor(() => expect(fileReads(asked).length).toBeGreaterThan(before));
     expect(fileReads(asked).slice(before).every((url) => url.searchParams.has('file'))).toBe(true);
+    expect(screen.queryByTestId('review-lane-section')).toBeNull();
   });
 
   it('lets at most READ_BATCH file reads run at a time', async () => {
@@ -166,7 +184,7 @@ describe('the two closed groups (rule 5)', () => {
     stubIntersection();
     servePage();
     renderPage();
-    await opened();
+    await openedInvariant();
     const section = screen.getAllByTestId('review-subject-section').find((node) => node.dataset.subject === L181_SUBJECT)!;
     const groups = within(section).getAllByTestId('review-location-group');
     expect(groups.map((group) => group.dataset.group)).toEqual(['unchanged', 'not-comparable']);
@@ -186,7 +204,7 @@ describe('the two closed groups (rule 5)', () => {
     stubIntersection();
     servePage();
     renderPage();
-    await opened();
+    await openedInvariant();
     const scroller = document.querySelector<HTMLElement>('[data-review-scroller]')!;
     const tree = document.querySelector<HTMLElement>('[data-review-tree-panel]')!;
     const sets: number[] = [];
@@ -224,7 +242,7 @@ describe("the lane's added-file cap", () => {
     servePage();
     serveLaneText(`${lines(count)}\n`);
     renderPage();
-    await opened();
+    await openedLane();
     engage();
     await waitFor(() => expect(screen.getByTestId('review-lane-file').dataset.laneRead).toBe('ready'));
     const button = screen.queryByTestId('review-lane-more');
@@ -238,7 +256,7 @@ describe('one way to all changes (rule 7)', () => {
     stubIntersection();
     servePage();
     renderPage();
-    await opened();
+    await openedInvariant();
     const links = screen.getAllByRole('button').filter((node) => /All changes/.test(node.textContent ?? ''));
     expect(links).toHaveLength(1);
     expect(links[0].closest('[data-testid="review-tree"]')).not.toBeNull();
@@ -251,7 +269,7 @@ describe('one way to all changes (rule 7)', () => {
     stubIntersection();
     servePage();
     renderPage();
-    await opened();
+    await openedInvariant();
     expect(screen.getAllByTestId('review-expression-card').length).toBeGreaterThan(0);
     expect(screen.queryAllByTestId('review-card-full-file')).toHaveLength(0);
     for (const card of screen.getAllByTestId('review-expression-card')) expect(card.textContent).not.toMatch(/Full file/);
@@ -267,7 +285,7 @@ describe("the tree's code-facts line", () => {
     stubIntersection();
     servePage();
     renderPage();
-    await opened();
+    await openedInvariant();
     const line = screen.getByTestId('review-code-facts-status');
     await waitFor(() => expect(line.textContent).not.toBe(''));
     expect(line.textContent).toBe('No invariant changed only in its code.');

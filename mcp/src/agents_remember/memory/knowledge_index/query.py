@@ -29,7 +29,7 @@ The lookups:
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
@@ -86,6 +86,14 @@ class Entry:
 class EntriesAtPath:
     realizations: tuple[Entry, ...]
     proofs: tuple[Entry, ...]
+
+
+@dataclass(frozen=True)
+class CurrentnessInputs:
+    """Only the entries and family members needed to check currentness."""
+
+    entries: dict[str, EntriesAtPath]
+    families: dict[str, tuple[str, ...]]
 
 
 @dataclass(frozen=True)
@@ -204,6 +212,11 @@ class KnowledgeIndex:
             )
         )
 
+    def entry(self, entry_id: str) -> Answer[Entry | None]:
+        """One exact entry and its recorded owner, without reading unrelated entries."""
+
+        return self._answer(next(iter(self._entries("id = ?", (entry_id,))), None))
+
     def invariant(self, invariant_id: str) -> Answer[InvariantKnowledge]:
         entries = self._entries("invariant = ?", (invariant_id,))
         families = tuple(
@@ -242,6 +255,46 @@ class KnowledgeIndex:
         )
         return self._answer(
             FamilyKnowledge(record=self._record(family_id), members=members, routes=routes)
+        )
+
+    def currentness_inputs(
+        self, invariants: Iterable[str], families: Iterable[str] = ()
+    ) -> Answer[CurrentnessInputs]:
+        """Read selected records' entries and every selected family's members in two queries.
+
+        JSON arrays bind each selection as one value, independent of SQLite's parameter limit.
+        Record kinds are checked without reading statements, routes, links or history. Retirement
+        does not remove an invariant's entries from its currentness check.
+        """
+
+        members: dict[str, list[str]] = {}
+        for family, member in self._rows(
+            "SELECT r.id, m.invariant FROM ix_record r "
+            "LEFT JOIN ix_member m ON m.family = r.id "
+            "WHERE r.kind = 'family' AND r.id IN (SELECT value FROM json_each(?)) "
+            "ORDER BY r.id, m.invariant",
+            (json.dumps(sorted(set(families))),),
+        ):
+            family_members = members.setdefault(str(family), [])
+            if member is not None:
+                family_members.append(str(member))
+        wanted = set(invariants).union(*members.values())
+        entries: dict[str, list[Entry]] = {}
+        for row in self._rows(
+            "SELECT r.id, e.id, e.kind, e.invariant, e.path, e.sidecar, e.document "
+            "FROM ix_record r LEFT JOIN ix_entry e ON e.invariant = r.id "
+            "WHERE r.kind = 'invariant' AND r.id IN (SELECT value FROM json_each(?)) "
+            "ORDER BY r.id, e.path, e.id",
+            (json.dumps(sorted(wanted)),),
+        ):
+            invariant_entries = entries.setdefault(str(row[0]), [])
+            if row[1] is not None:
+                invariant_entries.append(_entry(row[1:]))
+        return self._answer(
+            CurrentnessInputs(
+                entries={identity: _split(values) for identity, values in entries.items()},
+                families={identity: tuple(values) for identity, values in members.items()},
+            )
         )
 
     def families_governing(self, path: str) -> Answer[tuple[tuple[str, str], ...]]:
@@ -417,17 +470,7 @@ class KnowledgeIndex:
             "ORDER BY path, id",
             parameters,
         )
-        return tuple(
-            Entry(
-                id=str(row[0]),
-                kind="proof" if row[1] == "proof" else "realization",
-                invariant=str(row[2]),
-                path=str(row[3]),
-                sidecar=str(row[4]),
-                document=json.loads(row[5]),
-            )
-            for row in rows
-        )
+        return tuple(_entry(row) for row in rows)
 
     def _incoming(self, record_id: str) -> tuple[Link, ...]:
         return self._links("target_kind = 'record' AND target = ?", (record_id,))
@@ -492,6 +535,17 @@ class KnowledgeIndex:
             status=str(row[4]),
             document=json.loads(row[5]),
         )
+
+
+def _entry(row: Sequence[Any]) -> Entry:
+    return Entry(
+        id=str(row[0]),
+        kind="proof" if row[1] == "proof" else "realization",
+        invariant=str(row[2]),
+        path=str(row[3]),
+        sidecar=str(row[4]),
+        document=json.loads(row[5]),
+    )
 
 
 def _self_and_ancestors(path: str) -> list[str]:

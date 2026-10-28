@@ -64,6 +64,7 @@ import type {
   ReviewPayload,
   ReviewSelectorKind,
 } from '../../data/review';
+import { detachInFlightReads } from '../../data/abortableRead';
 import { intentReview, reviewProblemFromCause, reviewProblemFromRefusal } from '../../data/review';
 import { type ReviewRead, readFrom } from './ReviewOutcome';
 import type { ReviewReadCache } from './ReviewReadCache';
@@ -118,6 +119,7 @@ function askReview(
     selection: ReviewPageRequest | undefined;
     history?: ReviewHistory;
     previous: string | null;
+    signal: AbortSignal;
   },
   apply: (answered: ReviewRead) => void,
 ): void {
@@ -133,10 +135,12 @@ function askReview(
         question.selection,
         question.history,
         question.previous ?? undefined,
+        question.signal,
       );
       apply(readFrom(result));
     } catch (cause) {
-      apply({ phase: 'failed', problem: reviewProblemFromCause(cause) });
+      if (!question.signal.aborted)
+        apply({ phase: 'failed', problem: reviewProblemFromCause(cause) });
     }
   })();
 }
@@ -205,7 +209,8 @@ function startRead(reads: { current: number }, context: ReadContext): () => void
   context.setRetained((retained) =>
     continuing ? { ...continuing, key: askedFor } : retained?.key === askedFor ? retained : null,
   );
-  askReview({ ...context.request, previous }, (answered) => {
+  const controller = new AbortController();
+  askReview({ ...context.request, previous, signal: controller.signal }, (answered) => {
     if (context.cache.inputEpoch !== inputEpoch) return;
     if (!current()) {
       // Superseded: it never writes the read state. The task-context answer is kept unshown.
@@ -227,6 +232,7 @@ function startRead(reads: { current: number }, context: ReadContext): () => void
   });
   return () => {
     superseded = true;
+    controller.abort();
   };
 }
 
@@ -390,6 +396,14 @@ function memoryWatchActions(context: {
   };
 }
 
+// A refresh re-asks the server: the kept answer for the question on screen is not the answer, and
+// neither is a review request asked before the press (identical reads in flight are shared, and a
+// renewal must send its own).
+function forgetAnswered(cache: ReviewReadCache, key: string): void {
+  cache.forgetReview(key);
+  detachInFlightReads('review:');
+}
+
 export function useReviewReadCycle({
   repo,
   master,
@@ -456,8 +470,7 @@ export function useReviewReadCycle({
   }, [targetKey, questionKey, refreshNonce, asked, hold, retainedRef, carriedRef, cache, setFrame]);
 
   const refresh = useCallback(() => {
-    // A refresh re-asks the server: the kept answer for the question on screen is not the answer.
-    cache.forgetReview(targetRef.current);
+    forgetAnswered(cache, targetRef.current);
     const shown = retainedRef.current;
     const shownBinding = shown?.payload.comparison?.binding_digest;
     // The identity is filed with the question it was displayed for AND the read that will replace it,

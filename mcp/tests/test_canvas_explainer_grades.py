@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 from agents_remember.canvas.explainer_grades import (
-    MAX_CATEGORIES,
     GradeStore,
     ScalePoint,
     grades_path,
@@ -82,22 +81,23 @@ def test_the_same_category_name_with_another_scale_is_refused(tmp_path: Path) ->
     assert refused.value.reason == "category-exists"
 
 
-def test_the_category_bound_is_named_and_removal_takes_its_grades(tmp_path: Path) -> None:
+def test_any_number_of_categories_and_removal_takes_its_grades(tmp_path: Path) -> None:
+    """MIK-R211 v4 rule 3, D567: no count bounds the categories, and a reason has no length cap."""
+
     store = _store(tmp_path)
-    for index in range(MAX_CATEGORIES):
+    for index in range(20):  # past the old twelve
         store.define(f"cat-{index}", SCALE)
-    with pytest.raises(ExplainerRefused) as refused:
-        store.define("one-more", SCALE)
-    assert refused.value.reason == "category-limit"
+    assert len(store.load().categories) == 20
     store.grade(
-        references=("block-a",),
+        references=tuple(f"block-{index}" for index in range(250)),  # past the old 200
         category="cat-0",
         grade="sound",
-        reason="checked",
-        fingerprints={"block-a": "sha256:a"},
+        reason="checked " + "x" * 500,  # past the old 160 characters
+        fingerprints={f"block-{index}": f"sha256:{index}" for index in range(250)},
         binding=_binding(),
         at=AT,
     )
+    assert len(store.load().grades) == 250
     after = store.remove("cat-0")
     assert all(item.name != "cat-0" for item in after.categories)
     assert all(item.category != "cat-0" for item in after.grades)

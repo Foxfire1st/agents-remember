@@ -10,6 +10,7 @@ import { useEffect } from 'react';
 import { css } from '../../../../styled-system/css';
 import { RailResizeHandle, useMediaQuery } from '../../../cockpit/layout';
 import { usePersistedNumber } from '../../file-viewer/usePersistedFlag';
+import { useReviewShown } from '../reviewShown';
 
 const REVIEW_TREE_WIDTH_KEYS = {
   wide: 'cockpit.review.tree-w.wide',
@@ -43,7 +44,7 @@ export const reviewRoot = css({
   // A subject's title is a heading, not a control (`data-subject-title`; d9a1ec8f, the subject heading).
   // A control drawn as the mockup's quiet text or bordered link marks itself `data-own-look` (D401:
   // the lane's links and hunk rows, a group's heading and its "… N more").
-  '& button:not([data-tree-node]):not([data-path]):not([data-add-to-tray]):not([data-sidebar-side]):not([data-subject-title]):not([data-own-look]):not(#review-tree *):not([data-segment] *), & select:not(#review-tree *), & input:not(#review-tree *)': {
+  '& button:not([data-tree-node]):not([data-path]):not([data-add-to-tray]):not([data-sidebar-side]):not([data-subject-title]):not([data-own-look]):not(#review-tree *):not([data-segment] *):not([data-review-toolbar] *), & select:not(#review-tree *), & input:not(#review-tree *)': {
     background: 'bgPanel',
     color: 'ink',
     border: '1px solid var(--grid)',
@@ -149,8 +150,9 @@ function bracketKey(event: KeyboardEvent): '[' | ']' | null {
 }
 
 export function useBracketKeys(toggleTree: () => void, toggleChat: (() => void) | undefined, enabled = true): void {
+  const shown = useReviewShown();
   useEffect(() => {
-    if (!enabled) return undefined;
+    if (!enabled || !shown) return undefined;
     const onKey = (event: KeyboardEvent) => {
       const key = bracketKey(event);
       if (key === null) return;
@@ -161,5 +163,5 @@ export function useBracketKeys(toggleTree: () => void, toggleChat: (() => void) 
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [toggleTree, toggleChat, enabled]);
+  }, [toggleTree, toggleChat, enabled, shown]);
 }

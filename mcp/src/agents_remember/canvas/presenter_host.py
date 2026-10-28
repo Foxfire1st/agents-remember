@@ -5,8 +5,8 @@ things at once:
 
 * **confined authoring.** One attempt gets one prepared folder. The harness writes only presentation
   output below ``<working>/assets`` and session bookkeeping below ``<working>/host``; every other
-  target is refused by name (``native-scope-escape``). It reads exactly the three admitted inputs --
-  evidence packet, design text, capability text -- each verified against the attempt's recorded
+  target is refused by name (``native-scope-escape``). It reads exactly the two admitted inputs --
+  evidence packet and capability text -- each verified against the attempt's recorded
   digest, and refuses any other read (``foreign-scope-read``). An instruction saying "do not write
   elsewhere" is not a boundary; this writer has no other target it can name.
 * **identity-bound host operations.** ``start``, ``message``, ``status``, ``transcript``,
@@ -42,7 +42,6 @@ from typing import Any, ClassVar, Literal
 
 from agents_remember.canvas.paths import (
     PathRefused,
-    design_text_source,
     ensure_directory,
     guard_path,
     path_segment,
@@ -92,7 +91,6 @@ MAX_DRAFT_ENTRIES = 1024
 MAX_DRAFT_BYTES = 4 * 1024 * 1024
 
 DEFAULT_ACCENT = "#2f6f4f"
-_ACCENT = re.compile(r"--accent\s*:\s*(#[0-9a-fA-F]{3,8})\b")
 _WORD = re.compile(r"[a-z0-9]+")
 _LANES = {"developer": "developer", "presenter": "presenter", "system-owner": "system-owner"}
 _TALKABLE_STATES = frozenset({"running", "published"})
@@ -112,7 +110,7 @@ class HostIdentity:
 
 @dataclass(frozen=True)
 class InputGrant:
-    role: Literal["evidence", "design", "instructions"]
+    role: Literal["evidence", "instructions"]
     path: Path
     sha256: str
 
@@ -486,9 +484,9 @@ class LocalPresenterHarness(SessionShelf):
     def start(self, attempt: PresenterAttempt, instructions: str, working: Path) -> RunnerReceipt:
         """Prepare the attempt folder, author its page, and record one host session."""
 
-        workspace, packet, design = self._prepare(attempt, working)
+        workspace, packet = self._prepare(attempt, working)
         claims = _claim_lines(packet)
-        assets = compose_page(attempt=attempt, claims=claims, design=design)
+        assets = compose_page(attempt=attempt, claims=claims)
         for relative, payload in assets.items():
             workspace.write_output(relative, payload)
         render = render_draft(assets, packet=packet)
@@ -518,9 +516,9 @@ class LocalPresenterHarness(SessionShelf):
 
     def _prepare(
         self, attempt: PresenterAttempt, working: Path
-    ) -> tuple[HostWorkspace, EvidencePacket, str]:
+    ) -> tuple[HostWorkspace, EvidencePacket]:
         self._admit_working(attempt, working)
-        grants, packet, design = self._inputs(attempt)
+        grants, packet = self._inputs(attempt)
         workspace = HostWorkspace(working, inputs=grants, protected=self._protected())
         try:
             workspace.prepare()
@@ -537,7 +535,7 @@ class LocalPresenterHarness(SessionShelf):
             raise HarnessRefused(
                 "unprepared-working-folder", f"the attempt folder could not be prepared: {error}"
             ) from error
-        return workspace, packet, design
+        return workspace, packet
 
     def _admit_working(self, attempt: PresenterAttempt, working: Path) -> None:
         expected = self._working(attempt.attempt_id)
@@ -556,25 +554,12 @@ class LocalPresenterHarness(SessionShelf):
                 f"the attempt folder {working} was not prepared by the product",
             )
 
-    def _inputs(
-        self, attempt: PresenterAttempt
-    ) -> tuple[tuple[InputGrant, ...], EvidencePacket, str]:
-        identity = self._identity
-        source, design = design_text_source(self._config, identity.repository_id)
-        if design is None:
-            raise HarnessRefused(
-                "design-input-unreadable", f"the {source} design text could not be read"
-            )
+    def _inputs(self, attempt: PresenterAttempt) -> tuple[tuple[InputGrant, ...], EvidencePacket]:
         grants = (
             InputGrant(
                 role="evidence",
                 path=self._evidence_path(attempt.attempt_id),
                 sha256=attempt.evidence_digest,
-            ),
-            InputGrant(
-                role="design",
-                path=_design_path(self._config, identity.repository_id, source),
-                sha256=attempt.design_sha256,
             ),
             InputGrant(
                 role="instructions", path=_instructions_path(), sha256=attempt.instructions_sha256
@@ -591,7 +576,7 @@ class LocalPresenterHarness(SessionShelf):
             ) from error
         for grant in grants[1:]:
             _read_bounded_file(grant.path, MAX_INPUT_BYTES, expected=grant.sha256)
-        return grants, packet, design
+        return grants, packet
 
     # -- draft and explicit probes --------------------------------------------------------------
 
@@ -618,13 +603,10 @@ class LocalPresenterHarness(SessionShelf):
         return workspace.read_input(path)
 
 
-def compose_page(
-    *, attempt: PresenterAttempt, claims: tuple[_ClaimLine, ...], design: str
-) -> dict[str, bytes]:
+def compose_page(*, attempt: PresenterAttempt, claims: tuple[_ClaimLine, ...]) -> dict[str, bytes]:
     """Compose the presentation-only page: one document, one stylesheet, no scripts."""
 
     title = f"the change to {attempt.focus}" if attempt.focus else "the explained change"
-    accent = _ACCENT.search(design)
     return {
         "index.html": _PAGE.format(
             title=html.escape(title),
@@ -632,9 +614,7 @@ def compose_page(
             focus=html.escape(attempt.focus or "the selected change"),
             claims="\n".join(_claim_markup(claim) for claim in claims),
         ).encode(),
-        "app.css": _STYLESHEET.format(
-            accent=accent.group(1) if accent else DEFAULT_ACCENT
-        ).encode(),
+        "app.css": _STYLESHEET.format(accent=DEFAULT_ACCENT).encode(),
     }
 
 
@@ -808,15 +788,6 @@ def _admit_relative(root: Path, relative: str) -> Path:
     return root.joinpath(*candidate.parts)
 
 
-def _design_path(config: McpRuntimeConfig, repository_id: str, source: str) -> Path:
-    if source == "repository":
-        scope = config.repositories[repository_id]
-        if scope.memory_root is None:
-            raise HarnessRefused("design-input-unreadable", "the repository has no memory root")
-        return Path(scope.memory_root) / "system" / "artifact-design.md"
-    return _package_path("package_data", "canvas", "artifact-design.md")
-
-
 def _instructions_path() -> Path:
     return _package_path("canvas", "review-presenter.md")
 
@@ -886,7 +857,7 @@ _PAGE = (
 )
 
 _STYLESHEET = (
-    "/* authored from the admitted evidence; the design text steers appearance only */\n"
+    "/* authored from the admitted evidence; the admitted packet supplies the claims */\n"
     ":root {{ --accent: {accent}; --ink: #16181d; --paper: #f7f5f0; }}\n"
     "* {{ box-sizing: border-box; }}\n"
     "body {{ margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.55 monospace; }}\n"

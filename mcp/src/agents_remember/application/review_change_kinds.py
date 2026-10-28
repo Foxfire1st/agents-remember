@@ -130,7 +130,10 @@ def implementation_facts(
     for side in reader.sides:
         if side.index is not None:
             entries = side.index.entries_under(".").value
-            identities.update(entry.invariant for entry in (*entries.realizations, *entries.proofs))
+            grouped = reader._entries_by_side[side.name] = {}
+            for entry in (*entries.realizations, *entries.proofs):
+                grouped.setdefault(entry.invariant, {})[entry.id] = entry
+            identities.update(grouped)
     facts = []
     for invariant in sorted(identities):
         fact = reader._implementation(invariant)
@@ -189,6 +192,7 @@ class _ChangeKinds:
     _changes: dict[str, TreeChange] | None = None
     _inventory_problem: str | None = None
     _files: dict[str, FileResult | str] = field(default_factory=dict)
+    _entries_by_side: dict[str, dict[str, dict[str, Entry]]] = field(default_factory=dict)
 
     @property
     def sides(self) -> tuple[LaneSide, LaneSide]:
@@ -395,6 +399,10 @@ class _ChangeKinds:
                 f"the {side.name} memory tree has sidecars that do not parse, so the entries of "
                 f"{invariant} there are not all known: {', '.join(onboarding[:3])}"
             )
+        # The leaf-wide calculation already read every entry to enumerate invariant IDs.
+        # Reuse that exact population, including entries whose record is absent.
+        if side.name in self._entries_by_side:
+            return self._entries_by_side[side.name].get(invariant, {})
         found = side.index.invariant(invariant).value
         return {entry.id: entry for entry in (*found.realizations, *found.proofs)}
 

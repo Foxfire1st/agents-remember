@@ -514,6 +514,9 @@ def _require_named_place(contract: WorktreeContract, found_at: Path) -> None:
 
 
 def _same_path(one: Path, other: Path) -> bool:
+    # One absolute spelling names one file: resolving both sides could only answer the same.
+    if one.is_absolute() and one == other:
+        return True
     try:
         return one.resolve() == other.resolve()
     except OSError:

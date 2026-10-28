@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { ReviewPayload, ReviewResult } from '../../data/review';
 import { ReviewSurface } from './ReviewSurface';
 import { resetCardCachesForTests } from '../../data/reviewTrees';
+import { syntheticCatalogue } from './outline.test-utils';
 
 const captured = (name: string): ReviewResult =>
   JSON.parse(
@@ -60,6 +61,9 @@ function serve(family: ReviewResult | null, invariant: ReviewResult) {
         return response({
           state: 'entries',
           entries,
+          // The family overview lists its members from the outline (MIK-R211 v4 rule 10); these
+          // captures predate it, so the explicitly synthetic adapter supplies one.
+          ...(family ? { outline: syntheticCatalogue([family]).outline } : {}),
           total_subjects: entries.length,
           family_total: family ? 1 : 0,
           invariant_total: 1,
@@ -103,11 +107,13 @@ it('compares an authored successor through the family member route using both au
   expect(selected.state).toBe('compared');
   expect(selected.before_revision_id).not.toBe(selected.after_revision_id);
   const view = mount(successorFamily.payload!);
-  await view.findByTestId('review-center-family');
+  // The family opens its members' overview (MIK-R211 v4 rule 10); its member row opens the member.
+  const overview = await view.findByTestId('review-family-overview');
   fireEvent.click(
-    view
-      .getAllByTestId('review-center-open-member')
-      .find((node) => node.dataset.revision === selected.after_revision_id)!,
+    within(overview)
+      .getAllByTestId('review-member-summary')
+      .find((node) => node.dataset.subject === selected.record_id)!
+      .querySelector('button')!,
   );
   const changed = await view.findByTestId('review-center-member-changed');
   const statement = within(changed)

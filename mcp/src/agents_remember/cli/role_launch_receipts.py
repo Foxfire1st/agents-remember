@@ -40,7 +40,7 @@ from agents_remember.cli.role_launch_choices import (
 from agents_remember.cli.role_launch_outcome import publish_launch_outcome
 from agents_remember.cli.role_receipt_listing import taskless_execution_receipts
 from agents_remember.cli.role_step_up_decisions import record_step_up
-from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
+from agents_remember.controlplane.held_store_discovery import receipt_holder
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_identity import LEAF_ROLES, TASKLESS_ROLES, canonical_role
@@ -369,10 +369,8 @@ def _legacy_receipt_path(config: McpRuntimeConfig, selection: RoleSelection) -> 
     key = digest(selection_binding(selection))[:24]
     if ref:
         parent = topology.path_for_ref(ref).parent
-        return parent / "notes" / "reports" / EXECUTIONS_DIRECTORY / f"{role}-{key}.json"
-    return (
-        config.coordination_root / "notes" / "reports" / EXECUTIONS_DIRECTORY / f"{role}-{key}.json"
-    )
+        return receipt_holder(parent) / f"{role}-{key}.json"
+    return receipt_holder(config.coordination_root) / f"{role}-{key}.json"
 
 
 def _taskless_session_directory(config: McpRuntimeConfig, role: str) -> Path:
@@ -380,7 +378,7 @@ def _taskless_session_directory(config: McpRuntimeConfig, role: str) -> Path:
         raise ValueError(
             "Per-request role execution receipts are reserved for taskless project roles."
         )
-    return config.coordination_root / "notes" / "reports" / EXECUTIONS_DIRECTORY / role / "sessions"
+    return receipt_holder(config.coordination_root) / role / "sessions"
 
 
 def _message_binding_projection_reference(
@@ -451,12 +449,7 @@ def _verify_message_binding_projection(
 
 def message_binding_projection_path(config: McpRuntimeConfig, request_id: uuid.UUID) -> Path:
     return (
-        config.coordination_root
-        / "notes"
-        / "reports"
-        / EXECUTIONS_DIRECTORY
-        / "message-bindings"
-        / f"{request_id}.json"
+        receipt_holder(config.coordination_root) / "message-bindings" / f"{request_id}.json"
     ).resolve(strict=False)
 
 

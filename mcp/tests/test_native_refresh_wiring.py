@@ -17,6 +17,7 @@ import contextlib
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -38,8 +39,7 @@ from agents_remember.serving.change_watcher import (
     held_receipt_root,
     is_projection_input_event,
     projection_domains_for_paths,
-    projection_input_roots,
-    shallow_projection_input_roots,
+    projection_watch_plan,
 )
 from agents_remember.serving.projections import projection_inputs as inputs_module
 from agents_remember.serving.projections.projection_inputs import (
@@ -50,7 +50,10 @@ from agents_remember.serving.projections.projection_inputs import (
     ProjectionRefresh,
     RefreshPass,
 )
-from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS, async_wait_until
+from agents_remember_test_support.testing.waits import (
+    HANG_GUARD_SECONDS,
+    async_wait_until,
+)
 
 NOW = datetime(2026, 10, 22, 9, 0, tzinfo=UTC)
 AGENT_ID = "22222222-2222-4222-8222-222222222222"
@@ -92,7 +95,7 @@ def _case_test_the_native_stores_have_real_bounded_watch_roots(tmp_path: Path) -
     activation = _coordination_tree(tmp_path)
     controlplane = tmp_path / "controlplane"
 
-    roots = projection_input_roots(config)
+    roots = projection_watch_plan(config).roots
     assert activation in roots, f"activation records are watched: {roots}"
     assert controlplane in roots, f"the notice store's parent is watched: {roots}"
     assert tmp_path / "temp" in roots, f"the held queue's parent is watched: {roots}"
@@ -100,9 +103,13 @@ def _case_test_the_native_stores_have_real_bounded_watch_roots(tmp_path: Path) -
     # Bounded (F10): exactly those two parents are watched without recursion, so neither the
     # lifecycle archives nor the product's scratch trees are recursed into, and no root reaches
     # the worktree checkouts.
-    assert shallow_projection_input_roots(config) == frozenset({controlplane, tmp_path / "temp"})
+    assert {
+        controlplane,
+        tmp_path / "temp",
+        tmp_path / "tasks",
+    } <= projection_watch_plan(config).shallow
     assert controlplane / "lifecycle-enclosure-archives" not in roots
-    assert tmp_path not in roots
+    assert tmp_path in projection_watch_plan(config).shallow
     worktrees = tmp_path / "worktrees"
     assert not any(root == worktrees or worktrees in root.parents for root in roots), roots
 
@@ -137,7 +144,9 @@ def _case_test_each_native_store_write_maps_to_its_own_domain(tmp_path: Path) ->
     )
 
 
-def _case_test_a_withdrawal_receipt_reaches_the_held_reader_on_both_shapes(tmp_path: Path) -> None:
+def _case_test_a_withdrawal_receipt_reaches_the_held_reader_on_both_shapes(
+    tmp_path: Path,
+) -> None:
     """L190-R1-F10: the receipt a withdrawal rewrites is a held event, task-bound or taskless.
 
     The store itself sits in a workspace product tree the projection does not watch, and every
@@ -154,7 +163,6 @@ def _case_test_a_withdrawal_receipt_reaches_the_held_reader_on_both_shapes(tmp_p
         / "tasks"
         / "repo"
         / "master"
-        / "leaf"
         / "notes"
         / "reports"
         / "paseo-native-executions"
@@ -180,12 +188,12 @@ def _case_test_a_withdrawal_receipt_reaches_the_held_reader_on_both_shapes(tmp_p
         {ProjectionDomain.ATTENTION_HELD}
     )
     # The taskless shape is watched at all now; before this repair nothing named it.
-    roots = set(projection_input_roots(config))
+    roots = set(projection_watch_plan(config).roots)
     assert held_receipt_root(config) in roots
     assert is_projection_input_event(str(task_bound))
     assert is_projection_input_event(str(taskless))
     # A non-receipt document in the same tree keeps its own root's meaning only.
-    other = tmp_path / "tasks" / "repo" / "master" / "leaf" / "task.json"
+    other = tmp_path / "tasks" / "repo" / "master" / "task.json"
     other.write_text("{}", encoding="utf-8")
     assert projection_domains_for_paths(config, {str(other)}) == frozenset({ProjectionDomain.TASKS})
 
@@ -221,7 +229,9 @@ def _case_test_the_existing_own_write_lock_and_temp_filters_still_drop_non_input
 class NativeWatchRootWakeTests(unittest.IsolatedAsyncioTestCase):
     """F10: one real watcher generation delivers each store write to its domain's reader."""
 
-    async def test_a_notice_and_a_held_queue_write_wake_their_domains_without_a_poll(self) -> None:
+    async def test_a_notice_and_a_held_queue_write_wake_their_domains_without_a_poll(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _coordination_tree(root)
@@ -230,14 +240,22 @@ class NativeWatchRootWakeTests(unittest.IsolatedAsyncioTestCase):
             # path on this machine and is not this test's subject (its mapping is above).
             roots = [
                 path
-                for path in projection_input_roots(config)
+                for path in projection_watch_plan(config).roots
                 if path == root or root in path.parents
             ]
-            self.assertEqual(len(roots), 6, roots)
+            self.assertTrue(
+                {root, root / "tasks", root / "controlplane", root / "temp"} <= set(roots)
+            )
             # A heartbeat far longer than the test: every wake below must come from the write.
             pacer = ChangePacer(interval=0.05, heartbeat=600.0)
             watcher = ProjectionInputWatcher(config)
-            task = asyncio.create_task(watcher._watch_once(roots, pacer, reconcile=False))
+            task = asyncio.create_task(
+                watcher._watch_once(
+                    replace(projection_watch_plan(config), roots=tuple(roots)),
+                    pacer,
+                    reconcile=False,
+                )
+            )
             try:
                 async with asyncio.timeout(HANG_GUARD_SECONDS):
                     await async_wait_until(
@@ -264,7 +282,8 @@ class NativeWatchRootWakeTests(unittest.IsolatedAsyncioTestCase):
                     pacer.acknowledge(wake)
                     self.assertEqual(wake.reason, "change")
                     self.assertEqual(
-                        wake.domains, frozenset({ProjectionDomain.ATTENTION_CONTROLPLANE})
+                        wake.domains,
+                        frozenset({ProjectionDomain.ATTENTION_CONTROLPLANE}),
                     )
                     self.assertIn(str(notice), wake.paths)
 
@@ -283,13 +302,17 @@ class NativeWatchRootWakeTests(unittest.IsolatedAsyncioTestCase):
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
 
-    async def test_the_recursive_lane_never_watches_the_archive_or_worktree_trees(self) -> None:
+    async def test_the_recursive_lane_never_watches_the_archive_or_worktree_trees(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             activation = _coordination_tree(root)
             config = _config(root)
-            shallow = shallow_projection_input_roots(config)
-            recursive = [path for path in projection_input_roots(config) if path not in shallow]
+            shallow = projection_watch_plan(config).shallow
+            recursive = [
+                path for path in projection_watch_plan(config).roots if path not in shallow
+            ]
             self.assertIn(activation, recursive)
             self.assertNotIn(root / "controlplane", recursive)
             self.assertNotIn(root / "temp", recursive)
@@ -485,7 +508,9 @@ def _notice(root: Path) -> None:
     confirm_terminal_notice(root, notice.occurrenceId)
 
 
-def _case_test_a_heartbeat_retains_every_native_fact_with_the_stores_gone(tmp_path: Path) -> None:
+def _case_test_a_heartbeat_retains_every_native_fact_with_the_stores_gone(
+    tmp_path: Path,
+) -> None:
     """F11: no store is reread on an unchanged pass; only a named domain re-derives facts."""
 
     config = _config(tmp_path)

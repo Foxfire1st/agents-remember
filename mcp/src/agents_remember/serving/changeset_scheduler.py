@@ -6,7 +6,7 @@ import asyncio
 import contextvars
 import threading
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from fastapi import Request
 from fastapi.responses import Response
@@ -157,13 +157,43 @@ async def _read_off_the_loop(
         return Response(status_code=503, headers={"Retry-After": "1"})
     work = _Work(admission, produce)
     reads.submit(work)
+    return await _await_connected(request, work.future, lambda: work.abandon(reads))
+
+
+async def _await_connected[T](
+    request: Request, future: asyncio.Future[T], abandon: Callable[[], object]
+) -> T | Response:
+    """The route family's one disconnect poll, for native or shared async work."""
     try:
-        while not work.future.done():
-            await asyncio.wait((work.future,), timeout=DISCONNECT_POLL_SECONDS)
+        while not future.done():
+            await asyncio.wait((future,), timeout=DISCONNECT_POLL_SECONDS)
             if await request.is_disconnected():
-                work.abandon(reads)
+                abandon()
                 return Response(status_code=499)
-        return await work.future
+        return await future
     except asyncio.CancelledError:
-        work.abandon(reads)
+        abandon()
         raise
+
+
+async def read_async[T](request: Request, produce: Callable[[], Awaitable[T]]) -> T | Response:
+    """Keep a shared preparation wait under the same disconnect/cancellation rule.
+
+    The service owns native admission. This wrapper owns only this caller's async
+    claim; canceling it cannot cancel another request's claim on the same job.
+    """
+    task = asyncio.ensure_future(produce())
+    try:
+        return await _await_connected(request, task, task.cancel)
+    finally:
+        if not task.done():
+            task.cancel()
+        drain = asyncio.gather(task, return_exceptions=True)
+        cancelled = False
+        while not drain.done():
+            try:
+                await asyncio.shield(drain)
+            except asyncio.CancelledError:
+                cancelled = True
+        if cancelled:
+            raise asyncio.CancelledError

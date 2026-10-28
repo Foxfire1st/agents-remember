@@ -27,8 +27,8 @@ from pathlib import Path
 from typing import Any, Final
 
 from agents_remember.kernel.atomic_write import atomic_write_bytes, atomic_write_text
+from agents_remember.tasks.task_paths import CLEANUP_REPORT_NAME
 
-CLEANUP_REPORT_NAME: Final = "review-artifact-cleanup.json"
 IN_PROGRESS: Final = "in-progress"
 # Receipt keys whose entries name one deleted artifact each, by ``ref`` or by ``path``.
 # ``arCaches`` entries carry ``path``/``bytes`` like ``datasetCopies``: the class belongs here so
@@ -182,6 +182,8 @@ class ReceiptLedger:
                 "reason": planned["reason"],
                 "attempt": attempt,
                 "planned": {key: planned[key] for key in DELETION_KEYS},
+                # What the attempt is about to take of each explainer, read before any reopen.
+                "explainerRecords": planned.get("explainerRecords", []),
             }
             atomic_write_text(self.path, json.dumps(receipt, indent=2, sort_keys=True) + "\n")
         except (OSError, ValueError) as error:

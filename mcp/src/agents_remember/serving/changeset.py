@@ -57,9 +57,16 @@ from agents_remember.serving.changeset_reads import (
     changed_files_with_counts,
     commit_text_or_none,
     head_commit,
+    master_changed_files_with_counts,
     working_text,
 )
 from agents_remember.serving.changeset_scheduler import _BoundedReads, _read_off_the_loop
+from agents_remember.serving.master_counter import (
+    CounterRoute,
+    CounterSource,
+    MasterChangesetRef,
+    prepared_master_pins,
+)
 from agents_remember.serving.master_net_generation import (
     MASTER_NET_SCOPE,
     MasterEndpointAbsent,
@@ -159,7 +166,7 @@ def _leaf_counts(contract: WorktreeContract, *, memory: bool) -> list[dict[str, 
     if live is not None and live.exists():
         return changed_files_with_counts(live, base, None)
     if repo is not None and head:
-        return changed_files_with_counts(repo, base, head)
+        return master_changed_files_with_counts(repo, base, head)
     return []
 
 
@@ -234,7 +241,7 @@ def _net_diff(
             kind="no-repository",
         )
     try:
-        return changed_files_with_counts(repo_path, base, tip)
+        return master_changed_files_with_counts(repo_path, base, tip)
     except (RuntimeError, OSError) as err:
         raise MasterEndpointAbsent(
             f"the master {master!r} net {side} range {base}..{tip} was validated but cannot "
@@ -601,35 +608,6 @@ class MasterFileRef:
     pins: MasterNetPins = field(default_factory=MasterNetPins)
 
 
-@dataclass(frozen=True)
-class MasterChangesetRef:
-    """Which master net, at which generation, with how much leaf detail.
-
-    ``pins`` names the exact recorded endpoints a listing published; empty means the declared
-    integrated result. ``include_leaves`` keeps the per-leaf counter breakdown alongside the
-    net for callers that render it.
-    """
-
-    repo: str
-    master: str
-    include_leaves: Annotated[bool, Query(alias="includeLeaves")] = True
-    code_base: Annotated[str, Query(alias="codeBase")] = ""
-    code_tip: Annotated[str, Query(alias="codeTip")] = ""
-    memory_base: Annotated[str, Query(alias="memoryBase")] = ""
-    memory_tip: Annotated[str, Query(alias="memoryTip")] = ""
-
-
-def _pins_from_master_ref(ref: MasterChangesetRef) -> MasterNetPins:
-    """The master generation pins a change-set selector carries, if any."""
-
-    return MasterNetPins(
-        code_base=ref.code_base,
-        code_tip=ref.code_tip,
-        memory_base=ref.memory_base,
-        memory_tip=ref.memory_tip,
-    )
-
-
 def _master_json(produce: Any) -> Response:
     """Run ``produce`` with the change-set 400/404 status idiom for a master range.
 
@@ -805,7 +783,11 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> Changes
     went away and ends the read with the Git process it started (rule 4).
     """
 
-    cache = ChangesetCache()
+    from agents_remember.serving.changeset_ranges import (  # noqa: PLC0415 - composition
+        runtime_master_ranges,
+    )
+
+    cache = ChangesetCache(master_ranges=runtime_master_ranges(config))
     reads = _BoundedReads(
         threads=CHANGESET_READ_THREADS,
         pending=CHANGESET_READ_PENDING,
@@ -860,6 +842,12 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> Changes
     async def api_changeset_master(
         ref: Annotated[MasterChangesetRef, Depends()], request: Request
     ) -> Response:
+        preparation = cache.master_preparation
+        if preparation is None:
+            raise RuntimeError("master preparation was not composed")
+        pins = await prepared_master_pins(request, preparation, ref, _master_json)
+        if isinstance(pins, Response):
+            return pins
         return await _read_off_the_loop(
             request,
             reads,
@@ -871,11 +859,18 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> Changes
                         ref.repo,
                         ref.master,
                         include_leaves=ref.include_leaves,
-                        pins=_pins_from_master_ref(ref),
+                        pins=pins,
                     )
                 ),
                 abandoned=cancellation,
             ),
         )
 
+    from agents_remember.serving.master_preparation import (  # noqa: PLC0415 - composition
+        MasterPreparation,
+    )
+
+    counter_reader = CounterSource(_net_diff, _master_leaf_summaries).read
+    cache.master_preparation = MasterPreparation(config, cache, counter_reader)
+    CounterRoute(config, cache, reads, counter_reader, _master_json).register(app)
     return cache

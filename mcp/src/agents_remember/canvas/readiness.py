@@ -48,9 +48,6 @@ __all__ = [
     "evidence_reference_state",
 ]
 
-MAX_REFERENCES = 400
-MAX_PAGE_BYTES = 4 * 1024 * 1024
-
 #: One expression for the three ways an asset reference appears in HTML or CSS.
 _REFERENCE = re.compile(
     r"""(?:href|src|poster)\s*=\s*["']([^"']*)["']|url\(\s*["']?([^"')]*)["']?\s*\)""",
@@ -153,10 +150,6 @@ def _check_entry(assets: dict[str, bytes], entrypoint: str) -> ReadinessCheck:
         return ReadinessCheck("entrypoint", "failed", f"the revision holds no {entrypoint!r}")
     if not payload.strip():
         return ReadinessCheck("entrypoint", "failed", f"{entrypoint!r} is empty")
-    if len(payload) > MAX_PAGE_BYTES:
-        return ReadinessCheck(
-            "entrypoint", "failed", f"{entrypoint!r} is {len(payload)} bytes, beyond the page bound"
-        )
     try:
         payload.decode("utf-8")
     except UnicodeDecodeError:
@@ -180,7 +173,6 @@ def _offending(assets: dict[str, bytes]) -> tuple[list[str], list[str]]:
 
     outside: list[str] = []
     missing: list[str] = []
-    scanned = 0
     for path, payload in sorted(assets.items()):
         if not _names_references(path):
             continue
@@ -189,10 +181,8 @@ def _offending(assets: dict[str, bytes]) -> tuple[list[str], list[str]]:
         except UnicodeDecodeError:
             continue
         for reference in _references(text):
-            scanned += 1
-            if scanned > MAX_REFERENCES:
-                missing.append(f"more than {MAX_REFERENCES} references in one revision")
-                return outside, missing
+            # A reference that leaves the revision is refused: that is the published page's
+            # isolation in the browser, one of the three things MIK-R211 v4 rule 3 keeps.
             if _ABSOLUTE.match(reference):
                 outside.append(f"{path} -> {reference}")
                 continue
@@ -211,14 +201,13 @@ def _check_assets(assets: dict[str, bytes]) -> ReadinessCheck:
         return ReadinessCheck(
             "admitted-assets",
             "failed",
-            "the page requests something outside its own admitted assets: "
-            + "; ".join(outside[:5]),
+            "the page requests something outside its own admitted assets: " + "; ".join(outside),
         )
     if missing:
         return ReadinessCheck(
             "admitted-assets",
             "failed",
-            "the page names assets the revision does not carry: " + "; ".join(missing[:5]),
+            "the page names assets the revision does not carry: " + "; ".join(missing),
         )
     return ReadinessCheck(
         "admitted-assets",
@@ -260,7 +249,7 @@ def _check_evidence(assets: dict[str, bytes], packet: EvidencePacket) -> Readine
             "evidence-references",
             "failed",
             "the page cites references the admitted packet does not carry: "
-            + "; ".join(sorted(set(unknown))[:5]),
+            + "; ".join(sorted(set(unknown))),
         )
     states = sorted({evidence_reference_state(packet, reference) or "" for reference in seen})
     return ReadinessCheck(
@@ -285,7 +274,7 @@ def _check_parts(document: str, packet: EvidencePacket) -> tuple[ReadinessCheck,
             ReadinessCheck(
                 "part-map",
                 "failed",
-                "; ".join(part_map.problems[:5]),
+                "; ".join(part_map.problems),
             ),
             part_map,
         )
@@ -298,7 +287,7 @@ def _check_parts(document: str, packet: EvidencePacket) -> tuple[ReadinessCheck,
                 "part-map",
                 "failed",
                 "the page marks values that are not claim ids of this revision's claim map: "
-                + ", ".join(sorted(set(unknown))[:5])
+                + ", ".join(sorted(set(unknown)))
                 + "; a claim mark carries a claim id, never a basis reference or a receipt id",
             ),
             part_map,
@@ -316,7 +305,7 @@ def _check_parts(document: str, packet: EvidencePacket) -> tuple[ReadinessCheck,
                 "part-map",
                 "failed",
                 "every claim of the revision must belong to one part; unmapped claim(s): "
-                + ", ".join(unowned[:5]),
+                + ", ".join(unowned),
             ),
             part_map,
         )
@@ -327,7 +316,7 @@ def _check_parts(document: str, packet: EvidencePacket) -> tuple[ReadinessCheck,
     ]
     if basis_problems:
         return (
-            ReadinessCheck("part-map", "failed", "; ".join(basis_problems[:5])),
+            ReadinessCheck("part-map", "failed", "; ".join(basis_problems)),
             part_map,
         )
     titles = ", ".join(
@@ -380,7 +369,7 @@ def _single_basis_problem(packet: EvidencePacket, claim_id: str, basis: ClaimBas
     if basis.state == "present" and _collections_built(packet, basis.kind):
         resolution = resolve_claim(packet, claim_id)
         if not resolution.resolvable:
-            return "; ".join(resolution.unresolved[:2])
+            return "; ".join(resolution.unresolved)
     return None
 
 

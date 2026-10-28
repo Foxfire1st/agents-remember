@@ -351,8 +351,8 @@ class BackgroundProjectionTests(unittest.IsolatedAsyncioTestCase):
     async def test_native_watcher_observes_nested_atomic_writes_without_wsl_polling(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            tasks = root / "tasks"
-            tasks.mkdir()
+            tasks = root / "tasks" / "repository"
+            tasks.mkdir(parents=True)
             changed = asyncio.Event()
             pacer = mock.Mock(spec=ChangePacer)
             pacer.notify_change.side_effect = lambda _domains, _paths=frozenset(): changed.set()
@@ -361,11 +361,7 @@ class BackgroundProjectionTests(unittest.IsolatedAsyncioTestCase):
                 mock.patch.dict("os.environ", {"WATCHFILES_FORCE_POLLING": "true"}),
                 mock.patch.object(watchfiles.main, "RustNotify", native),
             ):
-                task = asyncio.create_task(
-                    ProjectionInputWatcher(_config(root))._watch_once(
-                        [tasks], pacer, reconcile=False
-                    )
-                )
+                task = asyncio.create_task(ProjectionInputWatcher(_config(root)).run(pacer))
                 try:
                     async with asyncio.timeout(HANG_GUARD_SECONDS):
                         while not native.call_count:
@@ -377,9 +373,9 @@ class BackgroundProjectionTests(unittest.IsolatedAsyncioTestCase):
                     draft.write_text("{}", encoding="utf-8")
                     draft.rename(nested / "task.json")
                     await asyncio.wait_for(changed.wait(), timeout=HANG_GUARD_SECONDS)
-                    self.assertEqual(
-                        pacer.notify_change.call_args.args[0], frozenset({ProjectionDomain.TASKS})
-                    )
+                    # A newly discovered task requires a complete reconciliation after
+                    # replacing the shallow watch plan; its first atomic write is retained.
+                    self.assertIn(ProjectionDomain.TASKS, pacer.notify_change.call_args.args[0])
                 finally:
                     task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):

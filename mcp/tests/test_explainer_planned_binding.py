@@ -7,7 +7,7 @@ promise of the explainer's planned-preparation path:
 * a master tip that moves between the comparison read and the preparation refuses the build and
   the Update before any effect, and an unreadable master line refuses them by name (E03;
   MIK-R185 v2, MIK-R186 rule 4, MIK-R103 v2);
-* the written packet, grants, binding and snapshot all name the same four sides, measured through
+* the written packet, grants, binding and checked-out worktrees all name the same four sides, measured through
   the owners (E03);
 * the planned comparison binds the master line -- an atomic master's integration branch, not its
   fork source -- and the initial read, the Update and the moved watcher all follow that line
@@ -24,14 +24,19 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from agents_remember.application.review_planned_comparison import explainer_application_ports
+from agents_remember.application.review_planned_comparison import (
+    explainer_application_ports,
+)
 from agents_remember.application.review_tree_comparison import _code_sides
 from agents_remember.canvas.explainer_grades import GradeStore, ScalePoint, grades_path
 from agents_remember.canvas.explainer_paths import generation_path, leaf_workspace
 from agents_remember.canvas.explainer_service import ExplainerDeps, LeafScope
 from agents_remember.canvas.explainer_state import generation, read_binding
 from agents_remember.models.knowledge.review_evidence import EvidencePacket
-from agents_remember.models.knowledge.review_frame import PLANNED_OWNER, planned_reference
+from agents_remember.models.knowledge.review_frame import (
+    PLANNED_OWNER,
+    planned_reference,
+)
 from agents_remember.models.knowledge.review_trees import (
     ReviewKnowledgeSide,
     ReviewTreeComparisonRecord,
@@ -42,10 +47,11 @@ from agents_remember.serving.explainer import (
     ExplainerComposition,
     ExplainerWiring,
     explainer_composition,
-    register_explainer_routes,
 )
+from agents_remember.serving.explainer_routes import register_explainer_routes
 from agents_remember.serving.explainer_watcher import LeafSelection, notice_for
 from agents_remember.serving.review_trees import ReviewTreesPort
+from agents_remember_test_support.testing.prepared_comparison import prepared_from_port
 from canvas_host_test_support import REPO, TASK, config, task
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -216,6 +222,7 @@ def _composition(
         wiring=ExplainerWiring(
             host=host,
             application=explainer_application_ports(),
+            comparison_prepare=prepared_from_port(port or _recorded_port_guard()),
             contract_for=None if contract is None else lambda _scope: contract,
         ),
     )
@@ -298,7 +305,16 @@ def test_a_master_line_change_between_comparison_and_prepare_refuses_the_build_b
     assert answer.status_code == 409
     assert answer.json()["reason"] == expected
     assert host.created == [] and host.sent == []
-    assert not leaf_workspace(runtime, REPO, TASK, LEAF).exists()
+    # The leaf's state lives inside its folder (MIK-R211 v5 rule 12): the refused build leaves its
+    # lock and the failure the page reads, and nothing of an environment.
+    state = leaf_workspace(runtime, REPO, TASK, LEAF) / "state"
+    assert sorted(
+        path.relative_to(state.parent).as_posix() for path in state.parent.rglob("*")
+    ) == [
+        "state",
+        "state/leaf.lock",
+        "state/requests.json",
+    ]
     assert generation(generation_path(runtime, REPO, TASK, LEAF)) == 0
 
 
@@ -336,10 +352,10 @@ def test_a_master_tip_move_between_comparison_and_prepare_refuses_the_update_bef
     assert sorted(path.name for path in workspace.iterdir()) == before_names
 
 
-def test_the_written_planned_environment_binds_one_exact_record_across_packet_grants_and_snapshot(
+def test_the_written_planned_environment_binds_one_exact_record_across_packet_grants_and_worktrees(
     tmp_path: Path,
 ) -> None:
-    """E03: the packet, grants, binding and snapshot all name the same four measured sides."""
+    """E03: the packet, grants, binding and checked-out worktrees all name the same four measured sides."""
 
     runtime, _root, code, memory, contract = _planning_world(tmp_path)
     host = _RecordingHost()
@@ -363,10 +379,18 @@ def test_the_written_planned_environment_binds_one_exact_record_across_packet_gr
     assert comparison.comparison_owner == PLANNED_OWNER
     assert comparison.comparison_reference == planned_reference(TASK, LEAF)
     for side in (comparison.code_base, comparison.code_candidate):
-        assert (side.repository, side.tree, side.commit) == (str(code), code_tree, code_tip)
+        assert (side.repository, side.tree, side.commit) == (
+            str(code),
+            code_tree,
+            code_tip,
+        )
         assert side.state == "available"
     for side in (comparison.memory_base, comparison.memory_candidate):
-        assert (side.repository, side.tree, side.commit) == (str(memory), memory_tree, memory_tip)
+        assert (side.repository, side.tree, side.commit) == (
+            str(memory),
+            memory_tree,
+            memory_tip,
+        )
         assert side.state == "available"
 
     grants = json.loads((workspace / "instructions" / "grants.json").read_text("utf-8"))
@@ -382,18 +406,25 @@ def test_the_written_planned_environment_binds_one_exact_record_across_packet_gr
     assert binding.memory_base_tree == binding.memory_candidate_tree == memory_tree
     assert binding.memory_base_commit == binding.memory_candidate_commit == memory_tip
 
-    snapshot = workspace / stored.snapshot
-    code_manifest = json.loads((snapshot / "code" / ".snapshot.json").read_text("utf-8"))
-    memory_manifest = json.loads((snapshot / "memory" / ".snapshot.json").read_text("utf-8"))
-    assert code_manifest["tree"] == code_tree
-    assert memory_manifest["tree"] == memory_tree
-    assert (snapshot / "code" / "src" / "app.py").read_text("utf-8") == "x = 2\n"
+    assert stored.snapshot is None
+    checked_out = workspace / "trees"
+    for side, source_repository, expected_tree in (
+        ("code", code, code_tree),
+        ("memory", memory, memory_tree),
+    ):
+        checkout = checked_out / side
+        assert _git(checkout, "rev-parse", "HEAD^{tree}") == expected_tree
+        assert _git(checkout, "branch", "--show-current") == ""
+        assert str(checkout) in _git(source_repository, "worktree", "list", "--porcelain")
+    assert (checked_out / "code" / "src" / "app.py").read_text("utf-8") == "x = 2\n"
 
 
 # --- I06: the master line, not the source ----------------------------------------------------------
 
 
-def test_the_planned_read_follows_the_master_line_not_the_source(tmp_path: Path) -> None:
+def test_the_planned_read_follows_the_master_line_not_the_source(
+    tmp_path: Path,
+) -> None:
     """I06: the planned comparison binds the integration branch's tips on both sides."""
 
     runtime, _root, code, memory, contract = _planning_world(tmp_path)
@@ -414,7 +445,9 @@ def test_the_planned_read_follows_the_master_line_not_the_source(tmp_path: Path)
     assert bound.binding.memory_candidate_commit == work_memory
 
 
-def test_an_update_of_a_planned_environment_follows_the_master_line(tmp_path: Path) -> None:
+def test_an_update_of_a_planned_environment_follows_the_master_line(
+    tmp_path: Path,
+) -> None:
     """I06: an Update rebinds the integration branch's new tips, never the unmoved source."""
 
     runtime, _root, code, memory, contract = _planning_world(tmp_path)
@@ -442,7 +475,9 @@ def test_an_update_of_a_planned_environment_follows_the_master_line(tmp_path: Pa
     assert answer.json()["counts"]["blocks"] >= 1
 
 
-def test_the_moved_watcher_follows_the_master_line_not_the_source(tmp_path: Path) -> None:
+def test_the_moved_watcher_follows_the_master_line_not_the_source(
+    tmp_path: Path,
+) -> None:
     """I06: the watcher's master-moved notice measures the integration branch's own move."""
 
     runtime, _root, code, memory, contract = _planning_world(tmp_path)
@@ -465,7 +500,9 @@ def test_the_moved_watcher_follows_the_master_line_not_the_source(tmp_path: Path
     assert _git(code, "rev-parse", "main") == source_code
 
 
-def test_an_organizational_master_binds_its_sprint_integration_line(tmp_path: Path) -> None:
+def test_an_organizational_master_binds_its_sprint_integration_line(
+    tmp_path: Path,
+) -> None:
     """I06: an organizational master's planned comparison binds its sprint integration branch.
 
     The canonical ``executionNature`` cell decides the line: for an organizational master the

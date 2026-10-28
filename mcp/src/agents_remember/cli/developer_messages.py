@@ -69,6 +69,7 @@ from agents_remember.cli.developer_delivery import (
     DeveloperDelivery,
     deliver_or_hold,
 )
+from agents_remember.cli.developer_explainer_seats import explainer_recipient
 from agents_remember.cli.developer_message_files import (
     MessageFiling,
     append_sent,
@@ -232,7 +233,7 @@ def send_developer_message(
     try:
         prepared = _prepare(config, request, FormRoots(config, leaf_memory_root))
         walk = walk_seats(config)
-        record, receipt = _recipient(walk, agent_id)
+        record, receipt = _recipient(config, walk, agent_id)
         task = task_of(config, record)
         repository = task["repository"] if task else prepared.repository
         if repository is None:
@@ -432,14 +433,25 @@ def _decoded(index: int, image: ImagePick) -> bytes:
     return decoded
 
 
-def _recipient(walk: SeatWalk, agent_id: str) -> tuple[SeatRecord, dict[str, Any]]:
-    """The current launch record of the target, read whole; AR seats only."""
+def _recipient(
+    config: McpRuntimeConfig, walk: SeatWalk, agent_id: str
+) -> tuple[SeatRecord, dict[str, Any]]:
+    """The target's current record, read whole: an AR seat's launch record, else a live explainer seat.
+
+    A role seat resolves by its launch record exactly as before. Only an id no launch record names
+    is looked up as a leaf explainer's current seat (``developer_explainer_seats``), the tray's
+    second recipient class; anything else stays ``recipient-not-found``.
+    """
 
     try:
         minted = str(uuid.UUID(agent_id)) == agent_id
     except ValueError:
         minted = False
     record = walk.record_of(agent_id) if minted else None
+    if record is None and minted:
+        explainer = explainer_recipient(config, agent_id)
+        if explainer is not None:
+            return explainer
     if record is None:
         unread = f" {walk.unread} launch record(s) could not be read." if walk.unread else ""
         raise _Refusal(

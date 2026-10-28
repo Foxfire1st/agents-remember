@@ -1,4 +1,4 @@
-// The reading head's crumb as the mockup writes it (ruling 9498d6e4; app.js `updateCrumb`,
+// The toolbar's crumb as the mockup writes it (ruling 9498d6e4; app.js `updateCrumb`,
 // styles.css `.rhead .crumb b`): "Change set · comparison #n", then the subject's id in bold ink, then
 // for a block its file's name and its after range; for the lane "Code without invariant" in bold, then
 // a file's name with no range. It follows the selection (MIK-R89 v2 rule 9), not the scroll.
@@ -21,8 +21,13 @@ afterEach(() => {
 });
 
 async function opened() {
-  await waitFor(() => expect(screen.getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-  await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+  await waitFor(() => expect(screen.getByTestId('review-comparison-overview')).toBeTruthy());
+  await waitFor(() => expect(screen.getAllByTestId('review-family-member-open').length).toBeGreaterThan(0));
+}
+
+function selectInvariant() {
+  const row = screen.getAllByTestId('review-family-member-open').find((node) => node.textContent?.includes('INV-1ZKP4R'))!;
+  fireEvent.click(row);
 }
 
 const crumb = () => screen.getByTestId('review-crumb');
@@ -41,8 +46,7 @@ it("names a selected subject's id in bold after the change set", async () => {
   renderPage();
   await opened();
   expect(crumb().textContent).toBe('Change set · comparison #8');
-  const row = screen.getAllByTestId('review-family-member-open').find((node) => node.textContent?.includes('INV-1ZKP4R'))!;
-  fireEvent.click(row);
+  selectInvariant();
   await waitFor(() => expect(crumb().textContent).toBe('Change set · comparison #8 › INV-1ZKP4R'));
   expect(bold()).toBe('INV-1ZKP4R');
 });
@@ -52,6 +56,8 @@ it("names a selected block's subject in bold, then its file's name and its after
   servePage();
   renderPage();
   await opened();
+  selectInvariant();
+  await waitFor(() => expect(screen.getAllByTestId('review-tree-location').length).toBeGreaterThan(0));
   fireEvent.click(screen.getAllByTestId('review-tree-location')[0]);
   await waitFor(() => expect(crumb().textContent).toBe('Change set · comparison #8 › INV-1ZKP4R › turn_ended.ts L1697–1817'));
   expect(bold()).toBe('INV-1ZKP4R');
@@ -65,6 +71,8 @@ it("names the lane in bold, then a selected lane file's name with no range", asy
   servePage();
   renderPage();
   await opened();
+  fireEvent.click(screen.getByTestId('review-tree-lane'));
+  await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
   const name = LANE_PATH.split('/').pop()!;
   const row = within(screen.getByTestId('review-tree-lane-files'))
     .getAllByRole('button')

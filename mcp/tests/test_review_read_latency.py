@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import time
 from collections import Counter
@@ -34,17 +35,21 @@ import pytest
 from agents_remember.application import (
     knowledge_review,
     review_candidate_resolution,
+    review_comparison_preparation,
     review_leaf_view_memo,
     review_tree_comparison,
     review_tree_knowledge,
 )
-from agents_remember.application.knowledge_review import read_knowledge_review
+from agents_remember.application import review_answer_preparation as dashboard_review_reads
+from agents_remember.application.knowledge_review import (
+    read_complete_knowledge_review,
+    read_knowledge_review,
+)
 from agents_remember.application.knowledge_worklist import leaf as worklist_leaf
 from agents_remember.application.review_candidate_resolution import ReviewCandidateResolution
 from agents_remember.application.review_leaf_view_memo import (
     CAPACITY,
     LEAF_VIEW_MEMO,
-    MAX_AGE_SECONDS,
     LeafViewKey,
     LeafViewParts,
     leaf_view_key,
@@ -65,7 +70,7 @@ from agents_remember.models.knowledge.review_trees import (
 )
 from agents_remember.serving.review_trees import ReviewTreesQuery
 from agents_remember.tasks import store as task_store
-from agents_remember.worktrees.modules import capture_index
+from agents_remember.worktrees.modules import capture_index, kept_capture
 from agents_remember.worktrees.modules import git as capture_owner
 from agents_remember.worktrees.services import reset_worktree_services
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -90,12 +95,27 @@ from test_review_git_trees import world  # noqa: F401 - ``world`` is the fixture
 SUBJECT_READ_CHILDREN = 80  # the packet's bound for one subject read (rule 7)
 
 
+@dataclass
+class _PortLifetimes:
+    shutdowns: list[Callable[[], None]] | None = None
+
+
+_port_lifetimes = _PortLifetimes()
+
+
 @pytest.fixture(autouse=True)
 def _fresh_process_state() -> Iterator[None]:
     LEAF_VIEW_MEMO.clear()
-    yield
-    LEAF_VIEW_MEMO.clear()
-    reset_worktree_services()
+    callbacks: list[Callable[[], None]] = []
+    _port_lifetimes.shutdowns = callbacks
+    try:
+        yield
+    finally:
+        _port_lifetimes.shutdowns = None
+        for shutdown in reversed(callbacks):
+            shutdown()
+        LEAF_VIEW_MEMO.clear()
+        reset_worktree_services()
 
 
 @dataclass(frozen=True)
@@ -110,6 +130,11 @@ class Ports:
 
 def _ports(world: World) -> Ports:  # noqa: F811
     ports = serving_collaborators(world.config)
+    # Retain the real app-owned cleanup alongside the test's read adapters. Other modules
+    # importing _ports own their fixture lifecycle; this list exists only during these tests.
+    if _port_lifetimes.shutdowns is not None:
+        assert ports.review_trees_shutdown is not None
+        _port_lifetimes.shutdowns.append(ports.review_trees_shutdown)
     assert ports.knowledge_review is not None and ports.knowledge_review_entries is not None
     assert ports.review_intent_summary is not None and ports.review_trees is not None
     summary_read = ports.review_intent_summary.read
@@ -193,6 +218,7 @@ def measured() -> Iterator[Measured]:
     seen = Measured()
     run = subprocess.run
     from_copy = capture_index._tree_from_index_copy
+    from_kept = kept_capture._tree_from_kept_index
     from_head = capture_owner._tree_from_head
     resolve = review_candidate_resolution._live_resolution
 
@@ -206,6 +232,11 @@ def measured() -> Iterator[Measured]:
         seen.captures[repo.name] += 1
         return from_copy(repo, *args, **kwargs)
 
+    def counting_kept(repo: Path, *args: Any, **kwargs: Any) -> str:
+        # A capture through the worktree's kept index is a capture too (D569).
+        seen.captures[repo.name] += 1
+        return from_kept(repo, *args, **kwargs)
+
     def counting_head(*args: Any, **kwargs: Any) -> str:
         seen.full_captures += 1
         return from_head(*args, **kwargs)
@@ -217,6 +248,7 @@ def measured() -> Iterator[Measured]:
     with (
         mock.patch.object(git_command.subprocess, "run", counting_run),
         mock.patch.object(capture_index, "_tree_from_index_copy", counting_copy),
+        mock.patch.object(kept_capture, "_tree_from_kept_index", counting_kept),
         mock.patch.object(capture_owner, "_tree_from_head", counting_head),
         mock.patch.object(review_candidate_resolution, "_live_resolution", counting_resolution),
     ):
@@ -226,7 +258,7 @@ def measured() -> Iterator[Measured]:
 # -- rules 2 and 7: one resolution, two captures, a bounded number of Git children ---------------------
 
 
-def test_a_subject_read_resolves_once_and_captures_each_worktree_once_and_for_the_recheck(
+def test_a_warm_read_resolves_once_and_captures_nothing_while_each_worktree_witness_holds(
     world: World,  # noqa: F811
 ) -> None:
     world.edit()
@@ -235,8 +267,13 @@ def test_a_subject_read_resolves_once_and_captures_each_worktree_once_and_for_th
     request = world.review(selector=_seed())
     warm = ports.review(request)  # records the comparison and builds both indexes
     assert warm.state == "review", warm.refusal
+    # The page's warm read of the same subject is the kept answer (D574): no resolution at all.
+    with measured() as kept:
+        assert _body(ports.review(request)) == _body(warm)
+    assert (kept.resolutions, kept.captures, kept.full_captures) == (0, {}, 0)
+    # The composition itself, as the port computes it on a move.
     with measured() as seen:
-        review = ports.review(request)
+        review = read_complete_knowledge_review(world.config, request)
     assert review.state == "review" and _body(review) == _body(warm)
     # The answer is the one the two-resolution port gave: the composition over the candidate's
     # complete record collection.
@@ -249,29 +286,54 @@ def test_a_subject_read_resolves_once_and_captures_each_worktree_once_and_for_th
     # the remembered tree instead of deriving it again — one capture per worktree, never the
     # full capture, which hashes every file. The skip's meaning is pinned beside the subject
     # budget: a forced re-derivation beside a hit names the identical tree.
-    assert seen.captures == {"code": 1, "memory": 1} and seen.full_captures == 0
+    # The warm read's capture is held while each worktree's status witness still proves it
+    # (D569: one capture per worktree while its witness holds), so this read captures nothing.
+    assert seen.captures == {} and seen.full_captures == 0
+    assert seen.verbs["add"] == 0 and seen.verbs["write-tree"] == 0
     assert seen.verbs["mktree"] == 0 and seen.verbs["hash-object"] == 0
     assert len(seen.children) <= SUBJECT_READ_CHILDREN, seen.verbs
 
-    # The other reads of the surface resolve once too and capture once: they publish no comparison
-    # of their own that a moved candidate could be bound to.
-    for read in (
-        lambda: ports.entries(REPO, MASTER, LEAF, None),
-        lambda: ports.summary(REPO, MASTER, LEAF),
-        lambda: ports.trees(_query()),
+    # Summaries still resolve once; the tree view shares a native capture witness, and so does the
+    # live leaf's own catalogue, kept on its comparison's witness (D570). Repeated exact inputs
+    # must not force another capture merely to reconstruct that view.
+    for read, expected_resolutions in (
+        (lambda: ports.entries(REPO, MASTER, LEAF, None), 0),
+        (lambda: ports.summary(REPO, MASTER, LEAF), 1),
+        (lambda: ports.trees(_query()), 0),
     ):
         read()
         with measured() as seen:
             read()
-        assert (seen.resolutions, seen.full_captures) == (1, 0)
-        assert seen.captures == {"code": 1, "memory": 1}, seen.captures
+        assert (seen.resolutions, seen.full_captures) == (expected_resolutions, 0)
+        # Nothing moved since the capture each worktree's witness holds: none is taken (D569).
+        assert seen.captures == {}, seen.captures
     # The task-context read (no subject) publishes a comparison, so it rechecks like a subject read:
     # one capture per worktree, with the recheck standing for the remembered trees.
     with measured() as seen:
         assert ports.review(world.review()).state == "review"
-    assert seen.resolutions == 1 and seen.captures == {"code": 1, "memory": 1}
+    assert seen.resolutions == 1 and seen.captures == {}
     # No read wrote a worktree's own index or left a lock beside it (ICR-R01).
     assert _real_indexes(world) == indexes
+
+
+def test_a_read_after_a_worktree_moved_captures_that_worktree_and_only_it(
+    world: World,  # noqa: F811
+) -> None:
+    """The witness holds a capture only while its worktree is unmoved: a new tree is captured."""
+
+    world.edit()
+    ports = _ports(world)
+    request = world.review(selector=_seed())
+    assert ports.review(request).state == "review"
+    (world.code_worktree / CODE_FILE).write_text(CODE_V1.replace("return value", "return 2"))
+    with measured() as seen:
+        moved = ports.review(request)
+    assert moved.state == "review", moved.refusal
+    # Two resolutions: the kept answer's witness proves the comparison moved, then the composition
+    # resolves the new one (D574); the worktree is captured once between them.
+    assert seen.resolutions == 2 and seen.full_captures == 0
+    assert set(seen.captures) == {world.code_worktree.name}, seen.captures
+    assert seen.verbs["write-tree"] >= 1, "the new tree was never written"
 
 
 def test_the_recheck_still_refuses_a_candidate_that_moved_while_the_review_was_composed(
@@ -299,8 +361,9 @@ def test_the_recheck_still_refuses_a_candidate_that_moved_while_the_review_was_c
         return composed
 
     for side, named in (("memory", "memory candidate"), ("code", "the captured candidate tree")):
+        # The composition itself: the port keeps an unmoved answer and composes only on a move.
         with mock.patch.object(knowledge_review, "compose_review", moving(side)):
-            refused = ports.review(request)
+            refused = read_complete_knowledge_review(world.config, request)
         assert refused.state == "refused" and refused.refusal is not None
         assert refused.refusal.code == "candidate_unresolved"
         assert named in (refused.refusal.offending_input or ""), refused.refusal
@@ -351,13 +414,18 @@ def test_a_converted_base_tree_git_holds_is_not_written_again(world: World) -> N
         # tree is written, no converted file is loaded, and the answer is the same. The
         # confirmation is the resolve-time baseline proof, so the recheck stands for the
         # remembered candidate instead of capturing each worktree a second time.
+        # The page's repeat is the kept answer (D574); the composition resolves again.
+        with measured() as kept:
+            assert _body(ports.review(request)) == _body(review)
+        assert (kept.resolutions, kept.verbs["mktree"], convert.call_count) == (0, 0, 1)
         with measured() as again:
-            repeat = ports.review(request)
+            repeat = read_complete_knowledge_review(world.config, request)
         assert _body(repeat) == _body(review)
         assert again.verbs["mktree"] == 0 and again.verbs["hash-object"] == 0
         assert convert.call_count == 1
         assert len(again.children) <= SUBJECT_READ_CHILDREN, again.verbs
-        assert again.resolutions == 1 and again.captures == {"code": 1, "memory": 1}
+        # The held capture's witness proves both worktrees unmoved: no capture is taken (D569).
+        assert again.resolutions == 1 and again.captures == {}
 
         # A new comparison of the same leaf (the candidate changed) still names the same inputs.
         (world.code_worktree / "pkg" / "b.py").write_text("B = 1\n", encoding="utf-8")
@@ -439,12 +507,12 @@ def test_the_leaf_wide_view_captures_nothing_itself_and_is_computed_once_per_com
         assert snapshots.call_count == 0 and code_captures.call_count == 0
         assert first.captures == {"code": 1, "memory": 1} and first.full_captures == 0
 
-        # Unchanged trees: both worktrees are captured again, and nothing is computed again.
+        # Unchanged inputs reuse the native capture witness and the computed worklist.
         with measured() as repeat:
             again = ports.trees(_query())
         assert _body(again, by_alias=True) == _body(view, by_alias=True)
         assert worklists.call_count == 1
-        assert repeat.captures == {"code": 1, "memory": 1}
+        assert not repeat.captures and repeat.resolutions == 0
         assert repeat.verbs["diff"] == 0 and len(repeat.children) < len(first.children)
         # The client pins the view to the comparison it shows: the same kept parts answer.
         assert _body(ports.trees(_query(number=1)), by_alias=True) == _body(view, by_alias=True)
@@ -534,6 +602,11 @@ def test_an_unreadable_task_input_is_observed_and_never_memoized_even_when_the_w
         (FileNotFoundError, ABSENT),
     ):
         LEAF_VIEW_MEMO.clear()
+        # A real denial or disappearance moves the file's stat (its change time, or no stat at
+        # all), and an unchanged stat proves unchanged bytes (D569). The failure below is
+        # simulated, so the stat is moved as the real event would move it.
+        stat = os.stat(path)
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
 
         def denied(source: Path, failure: type[OSError] = problem) -> bytes:
             if source == path:
@@ -672,7 +745,7 @@ def test_a_task_edit_restored_during_computation_refuses_and_the_next_read_uses_
             assert dict(held.reads)[str(path)] == bytes_identity(original)
 
 
-def test_the_view_memo_is_bounded_by_count_and_by_age_and_never_answers_another_key(
+def test_the_view_memo_is_bounded_by_count_not_by_age_and_never_answers_another_key(
     world: World,  # noqa: F811
 ) -> None:
     world.edit()
@@ -701,11 +774,13 @@ def test_the_view_memo_is_bounded_by_count_and_by_age_and_never_answers_another_
         assert len(LEAF_VIEW_MEMO) == min(size, CAPACITY)
         assert remembered(other(size - 1)) is parts
         assert (remembered(other(0)) is None) is (size > CAPACITY)
-    # Bounded by age, and a key that was never computed is never answered.
+    # Never bounded by age (D570): kept past the old fifteen minutes while its reads are identical.
+    # A key that was never computed is never answered.
     remember(key, parts, dict(key.task_reads))
-    now = time.monotonic()
-    assert remembered(key, now=now) is parts
-    assert remembered(key, now=now + MAX_AGE_SECONDS + 1) is None
+    assert remembered(key) is parts
+    # load-independent: the clock is moved past the old fifteen-minute bound, never waited on.
+    with mock.patch.object(time, "monotonic", return_value=time.monotonic() + 15 * 60 + 1):
+        assert remembered(key) is parts
     assert remembered(other(999)) is None
     # A recorded comparison is not a live one, whether or not its worktrees are still there, and
     # a leaf whose memory HEAD cannot be read has no key.
@@ -722,7 +797,7 @@ def test_the_view_memo_is_bounded_by_count_and_by_age_and_never_answers_another_
 # -- rule 6: never a stale answer ---------------------------------------------------------------------
 
 
-def test_a_read_after_an_edit_shows_the_new_content_and_nothing_composed_is_kept(
+def test_a_read_after_an_edit_shows_the_new_content_and_an_unmoved_one_is_the_kept_answer(
     world: World,  # noqa: F811
 ) -> None:
     world.edit()
@@ -744,15 +819,17 @@ def test_a_read_after_an_edit_shows_the_new_content_and_nothing_composed_is_kept
             tree,
         )
 
-    # Two identical reads are two compositions over two captures: nothing composed is kept.
+    # Two identical reads are one composition: the second is the answer kept on the live
+    # comparison's witness (D574), which every edit below moves.
     composed = mock.Mock(wraps=knowledge_review.compose_review)
     with mock.patch.object(knowledge_review, "compose_review", composed), measured() as seen:
         first, second = read(), read()
     assert first == second and first[0] == "Values land exactly as given."
-    assert composed.call_count == 2 and seen.resolutions == 2
-    # Two reads, one capture per worktree per read: each read's recheck proves its worktrees
-    # unmoved and stands for the remembered trees instead of capturing twice.
-    assert seen.captures == {"code": 2, "memory": 2}
+    # The first read resolves twice -- the live comparison its answer is kept on, then the
+    # composition -- and the second not at all.
+    assert composed.call_count == 1 and seen.resolutions == 2
+    # One capture per worktree, by the first read; the second captures nothing (D569).
+    assert seen.captures == {"code": 1, "memory": 1}
 
     # An edit of a knowledge file, then of a code file: the next read is the new comparison.
     (world.memory_worktree / INVARIANT_PATH).write_text(
@@ -877,9 +954,9 @@ def test_a_recorded_tree_view_is_served_again_from_its_exact_inputs(world: World
     assert comparison.is_dir()
 
     with mock.patch.object(
-        review_tree_knowledge,
-        "read_review_trees",
-        wraps=review_tree_knowledge.read_review_trees,
+        review_comparison_preparation,
+        "read_prepared_review_trees",
+        wraps=review_comparison_preparation.read_prepared_review_trees,
     ) as counted:
         ports = _ports(world)
         first = ports.trees(_query(recorded=True))
@@ -894,14 +971,40 @@ def test_a_recorded_tree_view_is_served_again_from_its_exact_inputs(world: World
     # A successor file in the comparison directory is a new input set: the view is composed again.
     (comparison / "record-successor.json").write_text("{}\n", encoding="utf-8")
     with mock.patch.object(
-        review_tree_knowledge,
-        "read_review_trees",
-        wraps=review_tree_knowledge.read_review_trees,
+        review_comparison_preparation,
+        "read_prepared_review_trees",
+        wraps=review_comparison_preparation.read_prepared_review_trees,
     ) as recomposed:
         recomposed_view = _ports(world).trees(_query(recorded=True))
     assert recomposed.call_count == 1
     assert recomposed_view.state == first.state
     assert contract.leaf_id == LEAF
+
+
+def test_numbered_reads_validate_only_the_selected_comparisons_objects(world: World) -> None:  # noqa: F811
+    """Opening one comparison consumes its bodies, not bodies unique to a later comparison."""
+
+    world.edit()
+    _, first = _live(world)
+    (world.code_worktree / CODE_FILE).write_text(
+        CODE_V1.replace("return value", "return value + 99")
+    )
+    _, second = _live(world)
+    assert first.record.number != second.record.number
+    later_blob = git(world.code, "rev-parse", f"{second.record.code_candidate.tree}:{CODE_FILE}")
+    world.contract(live=False)
+    ports = _ports(world)
+    with mock.patch.object(
+        dashboard_review_reads,
+        "_object_bodies_readable",
+        wraps=dashboard_review_reads._object_bodies_readable,
+    ) as checked:
+        view = ports.trees(_query(number=first.record.number, invariants=(INVARIANT,)))
+        catalogue = ports.entries(REPO, MASTER, LEAF, first.record.number)
+    assert view.state == "trees", view.refusal
+    assert catalogue.state == "entries", catalogue
+    assert checked.call_count > 0
+    assert all(later_blob not in call.args[1] for call in checked.call_args_list)
 
 
 def test_a_removed_recorded_tree_is_never_served_from_the_kept_answer(world: World) -> None:  # noqa: F811
@@ -924,8 +1027,9 @@ def test_a_removed_recorded_tree_is_never_served_from_the_kept_answer(world: Wor
     assert loose.is_file(), "the fixture's recorded tree is a loose object"
 
     ports = _ports(world)
-    first = ports.trees(_query(recorded=True))
-    assert first.state == "trees", first.refusal
+    queries = (_query(recorded=True), _query(number=records[-1].number))
+    first = [ports.trees(query) for query in queries]
+    assert all(value.state == "trees" for value in first)
 
     data = loose.read_bytes()
     loose.unlink()
@@ -936,14 +1040,15 @@ def test_a_removed_recorded_tree_is_never_served_from_the_kept_answer(world: Wor
         check=True,
     )
     try:
-        lost = ports.trees(_query(recorded=True))
-        cold = _ports(world).trees(_query(recorded=True))
+        lost = [ports.trees(query) for query in queries]
+        cold = [_ports(world).trees(query) for query in queries]
     finally:
         loose.write_bytes(data)
         loose.chmod(0o444)
 
-    assert _body(lost) != _body(first), "the kept answer stood in for a read it no longer matches"
-    assert _body(cold) == _body(lost), "the answer is the cold composition of the same record"
+    for original, missing, fresh in zip(first, lost, cold, strict=True):
+        assert _body(missing) != _body(original), "the kept answer outlived a recorded tree"
+        assert _body(fresh) == _body(missing), "the answer differs from a cold composition"
 
 
 @pytest.mark.parametrize(

@@ -4,11 +4,11 @@
 // `scrollIntoView` of the tree row, no window scroll, and the page root does not move. At either end
 // of the blocks a key keeps the selection, the focus and the tree where they are. jsdom geometry is
 // explicit; native captured answers (walkReal.capture-provenance.json).
-import { act, fireEvent, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { resetCardCachesForTests } from '../../data/reviewTrees';
 import {
-  J, K, R6R, bodyOf, installWorld, open, selectedNode, settled, subjectOf,
+  J, K, R6R, bodyOf, installWorld, open, overviewMember, selectedNode, settled, subjectOf,
 } from './walk.test-utils';
 
 installWorld();
@@ -36,7 +36,10 @@ it.each([390, 1280])(
     vi.stubGlobal('innerWidth', width);
     vi.stubGlobal('matchMedia', (query: string) => ({ ...media(query), matches: width <= 640 }));
     const view = open(R6R);
-    await view.findByTestId('review-center-family');
+    // The family opens its members' overview in the column (MIK-R211 v4 rule 10).
+    await view.findByTestId('review-family-overview');
+    // The family's own read has answered.
+    await view.findByTestId('review-subject-provenance');
     const target = bodyOf('INV-2E8MG43K');
     const id = target.payload!.knowledge.revision_selection!.record_id;
     const row = view.getAllByTestId('review-family-member-open').find((node) => node.dataset.subjectId === id)!;
@@ -59,8 +62,7 @@ it.each([390, 1280])(
     const ancestorScroll = vi.fn();
     row.scrollIntoView = ancestorScroll;
     try {
-      const section = view.getAllByTestId('review-subject-section').find((node) => node.dataset.subject === id)!;
-      fireEvent.click(within(section).getByTestId('review-subject-select'));
+      fireEvent.click(overviewMember(view, id));
       await view.findByTestId('review-reading-pending');
       await waitFor(() => expect(requests).toHaveLength(1));
       expect(view.getByTestId('review-surface').dataset.reviewPending).toBe(subjectOf(target));
@@ -90,7 +92,7 @@ it.each([{ key: J, edge: 'later' }, { key: K, edge: 'earlier' }])(
     const media = window.matchMedia;
     vi.stubGlobal('matchMedia', (query: string) => ({ ...media(query), matches: true }));
     const view = open(R6R);
-    await view.findByTestId('review-center-family');
+    await view.findByTestId('review-family-overview');
     const stops = [...view.getByTestId('review-family-list').querySelectorAll<HTMLElement>('[data-tree-node="member"]')]
       .filter((node) => node.dataset.changePrimary !== undefined && !['unknown', 'unchanged'].includes(node.dataset.changePrimary));
     const row = edge === 'later' ? stops.at(-1)! : stops[0];

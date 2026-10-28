@@ -214,6 +214,16 @@ export function ExplainerPlaceholder({
 
 // ---- the build's progress (rule 4.1) ----
 
+/**
+ * Whether a build record is still live. The server writes `building`; the dashboard's parser settles
+ * on `running` (`readBuilding`), and a record read straight from `/state` may carry either. A build
+ * that ended is cleared from the record, so only these two spellings mean work is still happening.
+ */
+export function isRunningBuild(build: ExplainerBuild): boolean {
+  const state = build.state as string;
+  return state === 'running' || state === 'building';
+}
+
 /** One step of the build: its mark, its name and its own count. */
 function BuildStepRow({ entry }: { entry: ExplainerBuild['steps'][number] }) {
   const detail = stepDetail(entry);
@@ -237,14 +247,25 @@ export function BuildProgress({
   build,
   request,
   titles,
+  onCancel,
+  cancelling = false,
 }: {
   build: ExplainerBuild;
   request: string;
   /** His references, as the build panel names them while they wait to go out. */
   titles: string[];
+  /**
+   * His Cancel while the build runs (MIK-R211 v2 rules 4 and 5): the one press that ends a stuck
+   * attempt. It names the build's own request id — `attempt` holds it, because the parser keeps a
+   * `requestId` there — and it is drawn only while the build runs, so a stopped or cleared build
+   * offers no dead button.
+   */
+  onCancel?: () => void;
+  cancelling?: boolean;
 }) {
   const percent = buildPercent(build);
   const failure = buildFailure(build);
+  const running = isRunningBuild(build);
   return (
     <div className={body} data-testid="explainer-build">
       <div className={card}>
@@ -265,11 +286,27 @@ export function BuildProgress({
             {failure.step} failed: {failure.reason}. Your request stays here for a new Send.
           </p>
         ) : null}
-        <p className={line} data-testid="explainer-build-waiting">
-          Your request waits until the explainer is ready, then goes out as its first turn:
-          {titles.length ? ` ${titles.join(', ')}` : ''}
-          {request.trim() ? ` “${request.trim()}”` : ''}
-        </p>
+        {failure ? null : (
+          <p className={line} data-testid="explainer-build-waiting">
+            Your request waits until the explainer is ready, then goes out as its first turn:
+            {titles.length ? ` ${titles.join(', ')}` : ''}
+            {request.trim() ? ` “${request.trim()}”` : ''}
+          </p>
+        )}
+        {onCancel && running ? (
+          <div className={row}>
+            <span className={spacer} />
+            <button
+              type="button"
+              className={dangerButton}
+              disabled={cancelling}
+              data-testid="explainer-build-cancel"
+              onClick={onCancel}
+            >
+              {cancelling ? 'Cancelling…' : 'Cancel the build'}
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

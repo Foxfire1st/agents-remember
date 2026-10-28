@@ -1,17 +1,19 @@
 // Current L37 raw tree-route answers: family/member reading, and the reading column's cards (MIK-R89
 // v2 rule 2, W1, W2: each subject's changed locations as one card per entry under its own heading,
-// its unchanged and not comparable locations as two closed groups).
+// its unchanged and not comparable locations as two closed groups). Since MIK-R211 v4 rule 10 a family
+// opens its members' overview and a member's cards are its own detail.
 // Provenance: subjectReview.capture-provenance.json and l86.capture-provenance.json.
 // The full-tree fixture is historical, used only for isolated worklist chrome;
 // these tests do not qualify the separately reported current full-tree refusal.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { ReviewResult } from '../../data/review';
+import type { ReviewOutline, ReviewResult } from '../../data/review';
 import type { ReviewTreesResult } from '../../data/reviewTrees';
 import { ReviewSurface } from './ReviewSurface';
 import { resetCardCachesForTests } from '../../data/reviewTrees';
+import { treeViewStore } from './triageViewPreference';
 
 const captured = <T,>(name: string): T =>
   JSON.parse(
@@ -27,7 +29,21 @@ afterEach(() => {
   resetCardCachesForTests();
   cleanup();
   vi.unstubAllGlobals();
+  treeViewStore.getState().setView('changed');
 });
+
+// The touched member, opened from the family's overview (MIK-R211 v4 rule 10).
+const touchedId = invariant.payload!.knowledge.revision_selection!.record_id;
+async function openTouched(view: ReturnType<typeof render>) {
+  const overview = await view.findByTestId('review-family-overview');
+  fireEvent.click(
+    within(overview)
+      .getAllByTestId('review-member-summary')
+      .find((node) => node.dataset.subject === touchedId)!
+      .querySelector('button')!,
+  );
+  return view.findByTestId('review-center-member');
+}
 
 const requested: URL[] = [];
 
@@ -84,7 +100,7 @@ it('renders a converted leaf family review from its trees and opens the touched 
       onBack={() => undefined}
     />,
   );
-  await view.findByTestId('review-center-family');
+  const overview = await view.findByTestId('review-family-overview');
   expect(view.getByTestId('review-scope-record').textContent).toContain(
     `${payload.source.inventory.listed_total} changed files`,
   );
@@ -92,23 +108,32 @@ it('renders a converted leaf family review from its trees and opens the touched 
   // The family and its whole recorded roster, read from the memory trees' indexes.
   const entry = payload.family_context!.entries[0];
   expect(entry.display_label).toBe('knowledge-write-and-publication-foundation');
-  // The family's members follow its content and its members' code (MIK-R89 v2 rule 1, 9dde2b09).
-  const members = within(view.getByTestId('review-center-family-details')).getAllByTestId(
-    'review-center-open-member',
+  // The overview draws the model's members (MIK-R211 v4 rule 10). In the default Changed view it
+  // lists exactly the roster's members the catalogue marks changed, each with its mark.
+  expect(treeViewStore.getState().view).toBe('changed');
+  const outline = (entries as { outline: ReviewOutline }).outline;
+  const roster = outline.families.find((row) => row.selector_id === entry.family_id)!.members.map((row) => row.selector_id);
+  const changed = outline.invariants
+    .filter((row) => roster.includes(row.selector_id) && row.change !== 'unchanged')
+    .map((row) => row.selector_id);
+  expect(changed.sort()).toEqual(['8b1a17ca-96ba-5ede-a09f-abfb11ada0a5', 'c88cc287-0469-556c-9f42-b742b2377478']);
+  await waitFor(() =>
+    expect(within(overview).getAllByTestId('review-member-summary').map((node) => node.dataset.subject).sort()).toEqual(changed),
   );
-  expect(members).toHaveLength(
-    new Set(
-      [...entry.before.members, ...entry.after.members].map((row) => row.invariant_revision_id),
-    ).size,
+  for (const row of within(overview).getAllByTestId('review-member-summary'))
+    expect(row.querySelector('[data-change]')?.getAttribute('data-change')).toBe('changed');
+  // The All view lists each member invariant of its roster once, with no member's code.
+  act(() => treeViewStore.getState().setView('all'));
+  await waitFor(() => expect(within(overview).getAllByTestId('review-member-summary')).toHaveLength(roster.length));
+  const members = within(overview).getAllByTestId('review-member-summary');
+  expect(members.map((node) => node.dataset.subject).sort()).toEqual(
+    [...new Set([...entry.before.members, ...entry.after.members].map((row) => row.invariant_id))].sort(),
   );
   expect(entry.before.members).toHaveLength(3);
+  expect(view.queryAllByTestId('review-expression-card')).toHaveLength(0);
   // Opening the touched member reads its own review and shows both statements.
   const touched = invariant.payload!.knowledge.revision_selection!;
-  fireEvent.click(
-    view
-      .getAllByTestId('review-center-open-member')
-      .find((node) => node.dataset.revision === touched.after_revision_id)!,
-  );
+  fireEvent.click(members.find((node) => node.dataset.subject === touched.record_id)!.querySelector('button')!);
   const center = await view.findByTestId('review-center-member');
   const statement = within(center).getByTestId('review-center-member-changed');
   // Both revision ids are Technical details' (rule 6, 9dde2b09).
@@ -153,15 +178,17 @@ it('shows the current family as focused cards with changed and unchanged express
       onBack={() => undefined}
     />,
   );
-  const center = await view.findByTestId('review-center-family');
+  // The family's overview draws no member's code and reads no cards (MIK-R211 v4 rule 10).
+  await view.findByTestId('review-family-overview');
+  expect(view.queryAllByTestId('review-expression-card')).toHaveLength(0);
+  expect(requested.some((url) => url.searchParams.get('invariants'))).toBe(false);
+  const center = await openTouched(view);
   await waitFor(() => expect(view.getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-  // The cards read (read 5) names the review's own comparison and the opening's shown subjects,
-  // the family's two changed members among them, sorted and distinct (W4).
-  const read = requested.find((url) => url.searchParams.get('invariants'))!;
-  expect(read.searchParams.get('comparison')).toBe('5');
-  const asked = read.searchParams.get('invariants')!.split(',');
-  expect(asked).toEqual([...new Set(asked)].sort());
-  expect(asked).toEqual(expect.arrayContaining(['8b1a17ca-96ba-5ede-a09f-abfb11ada0a5', 'c88cc287-0469-556c-9f42-b742b2377478']));
+  // The cards read names the review's own comparison and the selected member alone.
+  const reads = requested.filter((url) => url.searchParams.get('invariants'));
+  expect(reads).toHaveLength(1);
+  expect(reads[0].searchParams.get('comparison')).toBe('5');
+  expect(reads[0].searchParams.get('invariants')).toBe('8b1a17ca-96ba-5ede-a09f-abfb11ada0a5');
   // The leaf-wide read is pinned to the same comparison (review F11).
   const leafWide = requested.find(
     (url) =>
@@ -171,10 +198,10 @@ it('shows the current family as focused cards with changed and unchanged express
   )!;
   expect(leafWide.searchParams.get('comparison')).toBe('5');
   expect(leafWide.searchParams.get('history')).toBeNull();
-  // No accordion of whole files: one card per changed entry, under its subject's heading.
+  // No accordion of whole files: one card per changed entry of the member, under its heading.
   expect(view.queryByTestId('review-expression-diffs')).toBeNull();
   const all = view.getAllByTestId('review-expression-card');
-  expect(all.map((card) => card.dataset.entries).sort()).toEqual(['PRF-TMK4N3', 'RLZ-6HAWT71R', 'RLZ-K64BDQNF']);
+  expect(all.map((card) => card.dataset.entries).sort()).toEqual(['PRF-TMK4N3', 'RLZ-6HAWT71R']);
   const proof = all.find((card) => card.dataset.cardKind === 'proof')!;
   expect(proof.dataset.entries).toBe('PRF-TMK4N3');
   expect(within(proof).getByTestId('review-block-role').textContent).toBe('proof');
@@ -190,14 +217,14 @@ it('shows the current family as focused cards with changed and unchanged express
   expect(groups.length).toBeGreaterThan(0);
   // Worklist records have their own view; the subject shows only its own items, after its code.
   expect(center).toBeTruthy();
-  const block = within(view.getByTestId('review-center-family-details')).getByTestId('review-subject-worklist');
+  const block = within(view.getByTestId('review-center-member-details')).getByTestId('review-subject-worklist');
   expect(block.textContent).toContain('Worklist items about this record');
   expect(requested.some((url) => url.searchParams.has('lane'))).toBe(true);
   fireEvent.click(view.getByTestId('review-tree-worklist'));
   const knowledge = view.getByTestId('review-worklist-view');
+  // The view reads the comparison's complete trees answer when it is opened (MIK-R211 v4 rule 10).
   expect(
-    within(knowledge)
-      .getAllByTestId('review-worklist-item')
+    (await within(knowledge).findAllByTestId('review-worklist-item'))
       .map((row) => row.dataset.kind)
       .sort(),
   ).toEqual(leafTrees.worklist!.items.map((item) => item.kind).sort());
@@ -219,8 +246,8 @@ it('takes no planning mark from a leaf-wide read of another comparison (review R
       onBack={() => undefined}
     />,
   );
-  await view.findByTestId('review-center-family');
-  const panel = await within(view.getByTestId('review-center-family-details')).findByTestId('review-subject-worklist');
+  await openTouched(view);
+  const panel = await within(await view.findByTestId('review-center-member-details')).findByTestId('review-subject-worklist');
   expect(panel.textContent).toContain('The available answer belongs to comparison 2.');
   await waitFor(() => expect(view.getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
   const voices = view.getAllByTestId('review-card-voice');

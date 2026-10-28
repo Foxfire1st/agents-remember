@@ -6,10 +6,13 @@ import logging
 from collections.abc import AsyncGenerator, AsyncIterator
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import FastAPI, Header, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
+from agents_remember.canvas.explainer_paths import EXPLAINER_FRAME, generation_path, leaf_workspace
+from agents_remember.canvas.explainer_state import ledger_path
+from agents_remember.canvas.paths import task_root as leaf_task_root
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
@@ -29,18 +32,22 @@ from agents_remember.serving.actions import (
     DismissalIntent,
     evaluate_action,
 )
-from agents_remember.serving.change_watcher import MoveNoticeWatch, move_notice_watch
 from agents_remember.serving.conditional_read import if_none_match_matches
 from agents_remember.serving.direct_execution_grants import (
     DeveloperGrantRequest,
     developer_grant_tool,
 )
 from agents_remember.serving.events import stream_raw_events
+from agents_remember.serving.explainer_move_watch import (
+    MoveNoticeWatch,
+    move_notice_watch,
+)
 from agents_remember.serving.explainer_watcher import (
     NOTICE_EVENT,
     LeafSelection,
     notice_event,
 )
+from agents_remember.serving.projector import ProjectorClosed
 from agents_remember.serving.response_contract import (
     ACTION_RESPONSES,
     ActionAccepted,
@@ -51,7 +58,17 @@ from agents_remember.serving.review_memory_watch import (
     ReviewMemoryRootPort,
     multiplex_review_memory,
 )
-from agents_remember.serving.served_state import ServedWorkspaceProjection, served_state_tail
+from agents_remember.serving.review_open_observation import OPEN_OBSERVATIONS
+from agents_remember.serving.review_publication_watch import (
+    PublicationInputs,
+    safe_publication_events,
+    valid_publication_identity,
+)
+from agents_remember.serving.served_state import (
+    ServedWorkspaceProjection,
+    served_state_tail,
+)
+from agents_remember.serving.stream_shutdown import until_shutdown
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +84,14 @@ if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
         McpRuntimeConfig,
     )
+
+
+async def _wait_for_projection(runtime: _ServingRuntime) -> None:
+    """Wait on the single producer before a sync route uses its real snapshot."""
+    try:
+        await runtime.projector.wait_ready()
+    except ProjectorClosed as error:
+        raise HTTPException(status_code=503, detail="projection owner stopped") from error
 
 
 def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Response:
@@ -167,6 +192,19 @@ def _note_check_failure(task: asyncio.Task[object]) -> None:
         logger.warning("the moved watcher could not compare this review page: %s", error)
 
 
+#: How often ``/api/stream`` names itself alive. The transport's keepalive is a comment frame an
+#: EventSource never surfaces, so without this a healthy quiet stream looks dead to the page's
+#: liveness watchdog and is reopened; with it, silence means the transport died.
+STREAM_ALIVE_SECONDS = 15.0
+STREAM_ALIVE_EVENT = "alive"
+
+
+async def _alive_events() -> AsyncGenerator[ServerSentEvent]:
+    while True:
+        await asyncio.sleep(STREAM_ALIVE_SECONDS)
+        yield ServerSentEvent(event=STREAM_ALIVE_EVENT, data={})
+
+
 async def _next_event(source: AsyncGenerator[ServerSentEvent]) -> ServerSentEvent:
     return await anext(source)
 
@@ -196,8 +234,73 @@ async def _merged_stream(
         await asyncio.gather(*streams, return_exceptions=True)
 
 
+async def _publication_notices(
+    ordinary: AsyncGenerator[ServerSentEvent],
+    identity: tuple[str, str, str],
+    watch: MoveNoticeWatch | None,
+) -> AsyncGenerator[ServerSentEvent]:
+    if watch is None or not valid_publication_identity(identity):
+        async for event in ordinary:
+            yield event
+        return
+    async with (
+        contextlib.aclosing(_moved_events(identity, watch)) as moved,
+        contextlib.aclosing(_merged_stream(ordinary, moved)) as stream,
+    ):
+        async for event in stream:
+            yield event
+
+
+async def _publication_stream(
+    ordinary: AsyncGenerator[ServerSentEvent],
+    runtime: _ServingRuntime,
+    selection: str | None,
+    watch: MoveNoticeWatch | None = None,
+    moved_already: bool = False,
+) -> AsyncGenerator[ServerSentEvent]:
+    """Saved pages subscribe independently of live-memory admission, including landed leaves."""
+    async with contextlib.aclosing(ordinary):
+        if selection is None:
+            async for event in ordinary:
+                yield event
+            return
+        parts = selection.split("/", 2)
+        identity = (parts + [""] * 3)[:3]
+
+        def publication_pointer(selected: tuple[str, str, str]):
+            if runtime.explainer_application is None:
+                raise ValueError("explainer application is not wired")
+            repo, master, leaf = selected
+            root = leaf_task_root(runtime.config, repo, master)
+            frame = runtime.explainer_application.frame_scope(root, leaf, EXPLAINER_FRAME)
+            return PublicationInputs(
+                root=runtime.config.coordination_root,
+                pointer=frame.frame_dir / "ready.json",
+                workspace=leaf_workspace(runtime.config, repo, master, leaf),
+                generation_file=generation_path(runtime.config, repo, master, leaf),
+                ledger=ledger_path(runtime.config, repo, master, leaf),
+            )
+
+        selected = (identity[0], identity[1], identity[2])
+        extra_watch = None if moved_already else watch
+        async with (
+            contextlib.aclosing(_publication_notices(ordinary, selected, extra_watch)) as notices,
+            contextlib.aclosing(
+                safe_publication_events(
+                    (identity[0], identity[1], identity[2]), publication_pointer
+                )
+            ) as publications,
+            contextlib.aclosing(_merged_stream(notices, publications)) as merged,
+        ):
+            async for event in merged:
+                yield event
+
+
 def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     """The read side of the cockpit: the projection once, tailed, and the raw event river."""
+
+    async def projection_ready() -> None:
+        await _wait_for_projection(runtime)
 
     # One watcher per coordination root: it remembers which pages it compared just now, and
     # publishes to the process's one notice channel that review-scoped streams read (rule 7). The
@@ -213,6 +316,7 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     # the 200 shape; ``mcp/tests/test_served_state_conformance.py`` holds both branches shut.
     @app.get(
         "/api/state",
+        dependencies=[Depends(projection_ready)],
         response_model=ServedWorkspaceProjection,
         responses={
             304: {"description": "Content revision unchanged; ETag only, no body"},
@@ -226,6 +330,7 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
 
     @app.get(
         "/api/task-document",
+        dependencies=[Depends(projection_ready)],
         response_model=TaskSummary,
         responses={
             304: {"description": "Content revision unchanged; ETag only, no body"},
@@ -234,7 +339,8 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
         },
     )
     def api_task_document(
-        path: Annotated[str, Query()], if_none_match: Annotated[str | None, Header()] = None
+        path: Annotated[str, Query()],
+        if_none_match: Annotated[str | None, Header()] = None,
     ) -> Response:
         return _task_document_response(runtime, path, if_none_match)
 
@@ -256,6 +362,10 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
         reviewRepo: str | None = None,
         reviewMaster: str | None = None,
         reviewLeaf: str | None = None,
+        publication: str | None = None,
+        # The page's own id (its review opens name it too): the page leaves when its last
+        # stream closes, and the open it was being served is released (D585).
+        page: str | None = None,
     ) -> AsyncIterator[ServerSentEvent]:
         supplied = (reviewRepo, reviewMaster, reviewLeaf)
         identity = (
@@ -275,11 +385,22 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
         )
         # ``aclose`` the inner stream explicitly: ``async for`` does not close its iterator, and
         # a disconnected page must release the projector's subscription at once (MIK-R81).
-        async with contextlib.aclosing(
-            _review_stream(ordinary, identity, runtime.review_memory_root, move_watch)
-        ) as streamed:
-            async for event in streamed:
-                yield event
+        async with (
+            contextlib.aclosing(
+                _publication_stream(
+                    _review_stream(ordinary, identity, runtime.review_memory_root, move_watch),
+                    runtime,
+                    publication,
+                    move_watch,
+                    identity is not None,
+                )
+            ) as streamed,
+            contextlib.aclosing(_merged_stream(streamed, _alive_events())) as alive,
+            contextlib.aclosing(until_shutdown(alive, runtime.stream_shutdown)) as served,
+        ):
+            with OPEN_OBSERVATIONS.page_stream(page):
+                async for event in served:
+                    yield event
 
     # The raw river: every ``event`` frame is a verbatim observer JSONL record replayed from
     # disk, so its schema belongs to the observer. What THIS route mints is the ready marker,
@@ -297,14 +418,19 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     )
     async def api_events(
         last_event_id: Annotated[str | None, Header()] = None,
+        # The same cursor for a page that reopens the river itself: a fresh EventSource cannot
+        # send the header, so it names the last event it had here (the header wins).
+        lastEventId: str | None = None,
     ) -> AsyncIterator[ServerSentEvent]:
-        async for event in stream_raw_events(
+        raw = stream_raw_events(
             runtime.config,
-            last_event_id=last_event_id,
+            last_event_id=last_event_id or lastEventId,
             interval=runtime.interval,
             ledger=runtime.background_ledger,
-        ):
-            yield event
+        )
+        async with contextlib.aclosing(until_shutdown(raw, runtime.stream_shutdown)) as served:
+            async for event in served:
+                yield event
 
     # MIK-R81 rule 1: the always-on background account. Read-only; a failure
     # here never touches anything the dashboard serves (the route builds no
@@ -369,6 +495,9 @@ def _action_response(runtime: _ServingRuntime, action: str, request: ActionReque
 def _register_action_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     """The write side the developer drives: actions and the direct-execution grant."""
 
+    async def projection_ready() -> None:
+        await _wait_for_projection(runtime)
+
     # ``status_code=202`` because that is the status this route actually answers with: an
     # accepted intent is recorded, not applied. Left implicit it declared its success shape at
     # 200 -- a pair no request can ever produce, and therefore one no conformance check could
@@ -376,6 +505,7 @@ def _register_action_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     # only and moves no bytes.
     @app.post(
         "/api/actions/{action}",
+        dependencies=[Depends(projection_ready)],
         response_model=ActionAccepted,
         status_code=202,
         responses=ACTION_RESPONSES,

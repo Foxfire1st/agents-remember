@@ -49,6 +49,7 @@ from agents_remember.application.review_tree_comparison import (
     comparison_directory,
     comparison_records,
     converted_base_side,
+    latest_record,
     reopened_trees,
     review_task_id,
     tree_resolution,
@@ -561,5 +562,5 @@ def _statement(
 def recorded_latest(contract: WorktreeContract) -> int | None:
     """The highest comparison number this leaf recorded, or ``None`` when it recorded none."""
 
-    records = comparison_records(contract.task_root, contract.leaf_id or contract.task_name)
-    return None if not records else records[-1].number
+    latest = latest_record(contract.task_root, contract.leaf_id or contract.task_name)
+    return None if latest is None else latest.number

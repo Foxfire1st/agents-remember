@@ -15,9 +15,7 @@ from pathlib import Path
 
 from agents_remember.application import review_frame_store
 from agents_remember.application.review_evidence_packet import SideState, build_evidence_packet
-from agents_remember.application.review_evidence_read import DEFAULT_READ_LIMITS
 from agents_remember.application.review_explainer_receipts import (
-    MAX_RECEIPTS,
     compose_receipts,
     requirement_paths,
 )
@@ -175,7 +173,6 @@ def _publish_agreed_revision(root: Path) -> tuple[int, str]:
         memory_before=SideState("available", index_state="complete"),
         memory_after=SideState("available", index_state="complete"),
         evidence_map=EvidenceMap(coverage="planned"),
-        limits=DEFAULT_READ_LIMITS,
         recorded_at="planned-master-tip",
     )
     scope = frame_scope(root, LEAF, "explainer")
@@ -248,7 +245,7 @@ def test_an_agreed_revision_adds_its_manifest(tmp_path: Path) -> None:
     assert bad_agreed[0].digest is None
 
 
-def test_the_receipts_stay_bounded(tmp_path: Path) -> None:
+def test_every_named_source_is_read(tmp_path: Path) -> None:
     root = _task(tmp_path)
     rev_num, html_sha = _publish_agreed_revision(root)
     for number in range(80):
@@ -278,11 +275,10 @@ def test_the_receipts_stay_bounded(tmp_path: Path) -> None:
     assert by_id[TASK_DOCUMENT_JSON_ID].read_state == "present"
     assert by_id[TASK_DOCUMENT_MD_ID].read_state == "present"
     assert by_id["agreed-manifest"].read_state == "present"
-    present = [receipt for receipt in receipts if receipt.read_state == "present"]
-    omitted = [receipt for receipt in receipts if receipt.read_state == "unavailable"]
-    assert len(present) == MAX_RECEIPTS
-    assert len(omitted) == len(receipts) - MAX_RECEIPTS
-    assert all("truncated-read" in (receipt.limitation or "") for receipt in omitted)
+    # Ruling 6085456d, addendum (a): no ceiling leaves a source unread. The old ceiling was 48 of
+    # 119; every one of these 119 is read now, and none carries a truncated-read limitation.
+    assert all(receipt.read_state == "present" for receipt in receipts)
+    assert not any("truncated-read" in (receipt.limitation or "") for receipt in receipts)
     # No source is dropped: every named path is receipted, and what was not read says so itself.
     expected_sources = {
         *(f"requirements/MIK-R{number}.md" for number in range(80)),
@@ -292,8 +288,8 @@ def test_the_receipts_stay_bounded(tmp_path: Path) -> None:
         *(f"notes/reference/{LEAF}/picks.md" for _ in range(1)),
     }
     assert {receipt.canonical_source for receipt in receipts} >= expected_sources
-    assert all(receipt.digest is None for receipt in omitted), (
-        "an omitted source examined no bytes and cannot wear a digest"
+    assert all(receipt.digest for receipt in receipts), (
+        "a source that was read carries the digest of the bytes it read"
     )
 
 

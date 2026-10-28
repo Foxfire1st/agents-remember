@@ -52,7 +52,10 @@ from agents_remember.serving.background_accounting import (
     measured,
     offload,
 )
-from agents_remember.serving.cadence import DEFAULT_PROJECTION_CADENCE, ProjectionCadence
+from agents_remember.serving.cadence import (
+    DEFAULT_PROJECTION_CADENCE,
+    ProjectionCadence,
+)
 from agents_remember.serving.change_watcher import (
     ALL_PROJECTION_DOMAINS,
     DEFAULT_HEARTBEAT_SECONDS,
@@ -69,7 +72,9 @@ from agents_remember.serving.projections.host_activity import (
     HostActivityReconcile,
     activity_directory,
 )
-from agents_remember.serving.projections.host_supervisor import HostSupervisorSubscription
+from agents_remember.serving.projections.host_supervisor import (
+    HostSupervisorSubscription,
+)
 from agents_remember.serving.projections.projection_inputs import (
     ProjectionDomain,
     ProjectionInputState,
@@ -149,6 +154,10 @@ LIVE_PROJECTION_CLOCK = ProjectionReplay()
 NO_PROJECTION_REFRESHERS = ProjectionRefreshers()
 
 
+class ProjectorClosed(RuntimeError):
+    """The serving owner stopped before a requested projection was available."""
+
+
 class Projector:
     """Owns the latest projection, a monotonic sequence, and the subscriber fan-out."""
 
@@ -210,6 +219,13 @@ class Projector:
         # holding "0" from the previous process would 304 against different content otherwise.
         self._boot_id = uuid4().hex[:12]
         self._subscribers: set[asyncio.Queue[_Item]] = set()
+        self._ready = asyncio.Event()
+        self._readiness_closed = False
+
+    def bind_series_changed(self, callback: Callable[[str, str], bool]) -> None:
+        """Bind the app's one preparation owner before native watches start."""
+        if self._change_watcher is not None:
+            self._change_watcher.bind_series_changed(callback)
 
     def has_subscribers(self) -> bool:
         """Whether a page currently consumes this projector's shared SSE stream."""
@@ -219,7 +235,7 @@ class Projector:
         """Compute the first projection so the first client gets an immediate snapshot.
 
         Resilient: a failure here is logged and left for the tick loop to retry, so the
-        server still starts and serves ``503`` from ``/api/state`` until a tick succeeds.
+        server still starts while projection-dependent requests await a successful tick.
         The wake is recorded before the outcome is known (F02): the prime ran because a
         full refresh was due at boot, whatever it returns.
         """
@@ -239,6 +255,8 @@ class Projector:
             return
         self._latest_stable = stable_projection_state(first)
         self._published = (0, first)
+        self._broadcast((0, DeltaEvent("snapshot", first)))
+        self._ready.set()
 
     def _next_refresh(self, wake: ProjectionWake) -> ProjectionRefresh:
         """Map one pacer wake to the tick's refresh, recording why it ran (F02)."""
@@ -388,7 +406,12 @@ class Projector:
                 )
             # _tick_sync owns the actual CPU unit, including direct replay calls.
             return await offload(
-                OWNER_PROJECTION, None, self._tick_sync, moment, refresh, self._latest_stable
+                OWNER_PROJECTION,
+                None,
+                self._tick_sync,
+                moment,
+                refresh,
+                self._latest_stable,
             )
         finally:
             if self._pacer is not None:
@@ -469,8 +492,24 @@ class Projector:
             items.append((seq, event))
         self._latest_stable = current_stable
         self._published = (seq, current)
+        self._ready.set()
         for item in items:
             self._broadcast(item)
+
+    async def wait_ready(self) -> None:
+        """Join the first real publication without starting or owning its producer.
+
+        Cancelling one waiter leaves the shared event and projection task intact.
+        A failed prime leaves waiters pending for the existing run-loop retry.
+        """
+        await self._ready.wait()
+        if self._readiness_closed:
+            raise ProjectorClosed("projection owner has stopped")
+
+    def close_readiness(self) -> None:
+        """Release pending request waits when the serving owner begins shutdown."""
+        self._readiness_closed = True
+        self._ready.set()
 
     def current(self) -> tuple[int, WorkspaceProjection | None]:
         """The latest (sequence, projection) for a new connection's snapshot."""

@@ -20,13 +20,14 @@ import {
   type TaskChangeset,
   comparisonFileDiff,
   fileDiff,
-  leafChangeset,
-  loadChangeSet,
-  peekChangeSet,
   leafFileDiff,
   masterFileDiff,
 } from '../../data/changeset';
 import { type ReviewFailure, reviewProblemFromCause } from '../../data/review';
+import { useInspectionCounter } from './useInspectionCounter';
+import { MasterCounterStatus, CounterRow, SeriesGenerationTag } from './MasterCounterStatus';
+import { useChangesetLoad } from './useInspectionChangeset';
+import { useWorkingChangesetPoll } from './useWorkingChangeset';
 import { EmptyStateBackdrop } from '../EmptyStateBackdrop';
 import { SidebarToggle, sidebarHandleProps, sidebarPanelProps, useSidebar } from '../../grammar/SidebarToggle';
 import type { ReviewSelectorKind } from '../../data/review';
@@ -105,16 +106,6 @@ const back = css({
   _hover: { borderColor: 'amber' },
 });
 const title = css({ fontSize: '0.82rem', color: 'ink', fontWeight: '600' });
-const counterRow = css({
-  display: 'flex',
-  gap: '0.8rem',
-  marginLeft: 'auto',
-  fontSize: '0.74rem',
-  fontFamily: 'mono',
-});
-// The bound net generation: short digest + currentness + the one scope this view ever serves.
-// Rendered only when the list response names its generation, so older payloads read unchanged.
-const generationTag = css({ fontSize: '0.7rem', fontFamily: 'mono', color: 'muted' });
 const ins = css({ color: 'mint' });
 const del = css({ color: 'amber' });
 const colList = css({
@@ -249,18 +240,6 @@ function partnerCodePath(memPath: string): string | null {
   return base;
 }
 
-function changesetListRequest(
-  repo: string,
-  scope: string | undefined,
-  master: string | undefined,
-  leaf: string | undefined,
-  mode: LeafMode | undefined,
-  generation: MasterNetPins | undefined,
-  comparison?: number,
-): Promise<TaskChangeset | MasterChangeset> {
-  return loadChangeSet({ repo, scope, master, leaf, mode, generation, comparison });
-}
-
 function diffRequestFor(
   repo: string,
   scope: string | undefined,
@@ -302,72 +281,6 @@ function headerLabelFor(
 ): string {
   if (leaf) return mode === 'working' ? `working · ${leaf} · uncommitted` : `committed · ${leaf}`;
   return isSeries ? `series ${master} · net since series start` : (scope ?? '');
-}
-
-function CounterRow({ counters }: { counters: TaskChangeset['counters'] }) {
-  return (
-    <span className={counterRow} data-testid="changeset-counters">
-      <span>
-        code <span className={ins}>+{counters.code.insertions}</span>{' '}
-        <span className={del}>−{counters.code.deletions}</span> ({counters.code.files})
-      </span>
-      <span>
-        memory <span className={ins}>+{counters.memory.insertions}</span>{' '}
-        <span className={del}>−{counters.memory.deletions}</span> ({counters.memory.files})
-      </span>
-    </span>
-  );
-}
-
-// The series list response when it names its bound generation, else null. A task/leaf payload
-// never carries one, so the check is the discriminant -- not the target the view opened with.
-function seriesListMeta(
-  isSeries: boolean,
-  data: TaskChangeset | MasterChangeset | null,
-): MasterChangeset | null {
-  if (!isSeries || data === null || !('generation' in data)) return null;
-  return data;
-}
-
-// The per-leaf attribution a series read answered with (R33.2). A task/leaf payload has no `leaves`
-// field at all, so the discriminant is the field's presence -- and a body that predates the
-// breakdown reads as no breakdown rather than as an invented one.
-function seriesLeaves(
-  isSeries: boolean,
-  data: TaskChangeset | MasterChangeset | null,
-): MasterChangeset['leaves'] {
-  if (!isSeries || data === null || !('leaves' in data)) return [];
-  return data.leaves ?? [];
-}
-
-// The generation the open series view is bound to: the list response's own generation when it
-// names one (it is newer than the entry's), else the entry's pins. Every file expansion below
-// carries it, so an opened entry stays bound after the branch advances.
-function boundSeriesGeneration(
-  isSeries: boolean,
-  data: TaskChangeset | MasterChangeset | null,
-  entry: MasterNetPins | undefined,
-): MasterNetPins | undefined {
-  const listed = seriesListMeta(isSeries, data)?.generation ?? undefined;
-  return listed ?? entry;
-}
-
-// The bound net generation as a header caption: short digest + currentness + the one scope this
-// view ever serves. Rendered only when the list response names its generation, so older
-// payloads read unchanged.
-function SeriesGenerationTag({ meta }: { meta: MasterChangeset | null }) {
-  const generation = meta?.generation;
-  if (!generation) return null;
-  const currentness = meta?.currentness ?? 'unmeasured';
-  return (
-    <span
-      className={generationTag}
-      data-testid="changeset-generation"
-      title={`net generation ${generation.digest} · scope integrated · ${currentness}`}
-    >
-      gen {generation.digest.slice(0, 8)} · {currentness} · integrated
-    </span>
-  );
 }
 
 function ChangeList({
@@ -481,112 +394,6 @@ function LeafBreakdown({
   );
 }
 
-function useChangesetLoad(
-  repo: string,
-  scope: string | undefined,
-  master: string | undefined,
-  leaf: string | undefined,
-  mode: LeafMode | undefined,
-  generation: MasterNetPins | undefined,
-  setData: (data: TaskChangeset | MasterChangeset | null) => void,
-  setError: (error: ReviewFailure | null) => void,
-  setActive: (
-    active: { kind: 'code' | 'memory'; path: string; hasSidecar?: boolean } | null,
-  ) => void,
-  setDiff: (diff: FileDiff | null) => void,
-  setPartner: (diff: FileDiff | null) => void,
-  comparison?: number,
-): void {
-  useEffect(() => {
-    let live = true;
-    setData(peekChangeSet({ repo, scope, master, leaf, mode, generation, comparison }) ?? null);
-    setError(null);
-    setActive(null);
-    setDiff(null);
-    setPartner(null);
-    const req = changesetListRequest(repo, scope, master, leaf, mode, generation, comparison);
-    void req.then(
-      (d) => live && setData(d),
-      // The refusal is an ANSWER and is carried as one (the same doctrine as the change-set bar's
-      // own counter read, L32/D01): the route publishes its code, its reason, the input it refused
-      // and the next action, and all of it is kept so this pane can NAME what it cannot show rather
-      // than printing a bare status. A cause that is not this route's refusal is named as the
-      // failure it is rather than guessed into one.
-      (cause: unknown) => live && setError(reviewProblemFromCause(cause)),
-    );
-    return () => {
-      live = false;
-    };
-  }, [
-    repo,
-    scope,
-    master,
-    leaf,
-    mode,
-    generation,
-    comparison,
-    setData,
-    setError,
-    setActive,
-    setDiff,
-    setPartner,
-  ]);
-}
-
-function useWorkingChangesetPoll(
-  target: Pick<ChangeSetTarget, 'mode' | 'leaf' | 'repo' | 'master' | 'comparison'>,
-  active: { kind: 'code' | 'memory'; path: string; hasSidecar?: boolean } | null,
-  setters: {
-    setData: (data: TaskChangeset | MasterChangeset | null) => void;
-    setDiff: (diff: FileDiff | null) => void;
-    setError: (error: ReviewFailure | null) => void;
-    setDiffError: (error: ReviewFailure | null) => void;
-  },
-): void {
-  const { mode, leaf, repo, master, comparison } = target;
-  const { setData, setDiff, setError, setDiffError } = setters;
-  useEffect(() => {
-    if (mode !== 'working' || !leaf || comparison !== undefined) return;
-    let live = true;
-    const m = master ?? '';
-    let timer: number | undefined;
-    const refresh = async () => {
-      const listRequest = leafChangeset(repo, m, leaf, 'working');
-      const diffRequest = active
-        ? leafFileDiff(repo, m, leaf, active.kind, active.path, 'working')
-        : Promise.resolve(null);
-      const [listResult, diffResult] = await Promise.allSettled([listRequest, diffRequest]);
-      if (!live) return;
-      applyWorkingRead(listResult, setData, setError);
-      applyWorkingRead<FileDiff | null>(diffResult, setDiff, setDiffError);
-      timer = window.setTimeout(refresh, 2500);
-    };
-    timer = window.setTimeout(refresh, 2500);
-    return () => {
-      live = false;
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, [mode, leaf, repo, master, comparison, active, setData, setDiff, setError, setDiffError]);
-}
-
-function applyWorkingRead<T>(
-  result: PromiseSettledResult<T>,
-  setValue: (value: T | null) => void,
-  setProblem: (problem: ReviewFailure | null) => void,
-): void {
-  if (result.status === 'fulfilled') {
-    setValue(result.value);
-    setProblem(null);
-  } else {
-    setValue(null);
-    setProblem(reviewProblemFromCause(result.reason));
-  }
-}
-
-// WHAT COULD NOT BE SHOWN, NAMED (R33.3). A refused read says which read it was (the owner's own code,
-// kept in its own element so the status line still reads exactly as it always did), the reason in the
-// owner's words, the input it refused and the next action it published -- never an empty pane that
-// leaves the reader guessing whether there was nothing to show or nothing was read.
 function ChangeSetRefusal({ error }: { error: ReviewFailure }) {
   return (
     <div
@@ -789,10 +596,8 @@ function useChangesetState({
   const [partner, setPartner] = useState<FileDiff | null>(null);
   // Selection precedence leaf > master > scope: a `leaf` is one leaf's committed/working delta
   // (qualified by `master`); `master` alone is the series net; otherwise an enclosure `scope`.
-  const isSeries = Boolean(master) && !leaf;
-  const seriesMeta = seriesListMeta(isSeries, data);
-  const leaves = seriesLeaves(isSeries, data);
-  const boundGeneration = boundSeriesGeneration(isSeries, data, generation);
+  const counter = useInspectionCounter({ repo, master, leaf, generation }, data, error);
+  const { seriesMeta, leaves, boundGeneration } = counter;
 
   useChangesetLoad(
     repo,
@@ -800,13 +605,14 @@ function useChangesetState({
     master,
     leaf,
     mode,
-    generation,
+    boundGeneration,
     setData,
     setError,
     setActive,
     setDiff,
     setPartner,
     comparison,
+    counter.enabled,
   );
 
   // L4a: the WORKING view is the LIVE uncommitted delta, so it must not be a frozen snapshot taken
@@ -844,12 +650,13 @@ function useChangesetState({
   const shown =
     data && shownContext ? filteredChangeSet(data as TaskChangeset, shownContext, filter) : data;
   useComparisonFirstFile(comparison, data, reviewContext, filter, { open, clear });
-  const counters = data?.counters;
+  const counters = counter.counters;
   const headerLabel = viewerLabel({ repo, leaf, master, scope, mode, comparison });
 
   return {
     data,
-    error,
+    error: counter.error,
+    counterAttribution: counter.attribution,
     active,
     diff,
     partner,
@@ -1008,6 +815,7 @@ export function ChangeSetViewer(
     shownContext,
     shown,
     counters,
+    counterAttribution,
     headerLabel,
   } = useChangesetState(props);
   const rail = useSidebar('changeset', 'left');
@@ -1028,6 +836,7 @@ export function ChangeSetViewer(
         <ComparisonTreesTag data={data} />
         <SeriesGenerationTag meta={seriesMeta} />
         {counters ? <CounterRow counters={counters} /> : null}
+        {counterAttribution ? <MasterCounterStatus value={counterAttribution} /> : null}
       </header>
 
       <ReviewFilters context={reviewContext} data={data} filter={filter} onFilter={setFilter} />

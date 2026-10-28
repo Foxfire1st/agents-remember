@@ -19,13 +19,13 @@ from fastapi import HTTPException
 
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.cli.role_launch_receipts import (
-    EXECUTIONS_DIRECTORY,
     _leaf_is_closing,
     _now_iso,
     _read_receipt,
     _same_request_receipt,
     _write_receipt,
 )
+from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.file_lock import exclusive_file_lock

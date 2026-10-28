@@ -16,7 +16,6 @@ from agents_remember.application.review_tree_comparison import reopened_trees, w
 from agents_remember.memory.knowledge_index import KnowledgeIndex, KnowledgeIndexCache
 from agents_remember.memory.knowledge_index import cache as cache_owner
 from agents_remember.memory.knowledge_index.tree import MemoryTreeError
-from agents_remember.models.knowledge.review_frame import MAX_MANIFEST_BYTES, MAX_REVISION_BYTES
 from test_review_evidence_packet import (
     FAMILY,
     INVARIANT,
@@ -65,20 +64,26 @@ def test_f05_filename_is_only_a_locator_not_the_native_identity(world) -> None:
 
 
 @pytest.mark.parametrize("kind", ["manifest", "digest", "asset", "pointer"])
-def test_f10_corrupt_store_reads_stop_at_the_admitted_byte_bound(task, monkeypatch, kind) -> None:
+def test_f10_corrupt_store_reads_whole_metadata_and_stop_at_a_recorded_size(
+    task, monkeypatch, kind
+) -> None:
+    """A corrupt manifest or pointer is read to its end -- no size bound refuses metadata (MIK-R211
+    v4 rule 3) -- and a digest or asset stops one byte past the size its record names."""
+
     record = _record()
     _publish(task, record)
     scope = store.frame_scope(task, record.leaf_id, "comparison-bound-evidence")
     revision = scope.frame_dir / store.REVISIONS_DIRECTORY / "1"
     target, cap = {
-        "manifest": (revision / store.MANIFEST_NAME, MAX_MANIFEST_BYTES),
+        "manifest": (revision / store.MANIFEST_NAME, None),
         "digest": (revision / store.MANIFEST_DIGEST_NAME, 64),
         "asset": (revision / store.ASSETS_DIRECTORY / "index.html", 0),
-        "pointer": (scope.frame_dir / store.READY_POINTER, MAX_MANIFEST_BYTES),
+        "pointer": (scope.frame_dir / store.READY_POINTER, None),
     }[kind]
     if kind == "asset":
         cap = target.stat().st_size
-    target.write_bytes(b"x" * (MAX_MANIFEST_BYTES * 2 + 37))
+    size = 2 * 1024 * 1024 + 37  # past the old 1 MiB metadata bound
+    target.write_bytes(b"x" * size)
     original = Path.open
     reads: list[tuple[int, int]] = []
 
@@ -98,34 +103,33 @@ def test_f10_corrupt_store_reads_stop_at_the_admitted_byte_bound(task, monkeypat
 
     monkeypatch.setattr(Path, "open", measured)
     assert store.reopen_frame(scope).state == "unavailable"
-    assert reads and sum(count for _requested, count in reads) <= cap + 1
-    assert all(0 <= requested <= cap + 1 for requested, _count in reads)
+    consumed = sum(count for _requested, count in reads)
+    if cap is None:
+        assert consumed == size  # the whole file, not a bounded prefix
+    else:
+        assert reads and consumed <= cap + 1
+        assert all(0 <= requested <= cap + 1 for requested, _count in reads)
     print(json.dumps({"finding": "F10", "kind": kind, "cap": cap, "reads": reads}))
 
 
-def test_f10_asset_metadata_cannot_authorize_an_over_cap_read(task, monkeypatch) -> None:
+def test_f10_asset_metadata_that_misstates_its_size_leaves_the_frame_unavailable(task) -> None:
+    """MIK-R211 v4 rule 2: no revision ceiling refuses the read; the manifest's artifact digest,
+    not a byte budget, is what keeps a misstated asset size from opening."""
+
     record = _record()
     _publish(task, record)
     scope = store.frame_scope(task, record.leaf_id, "comparison-bound-evidence")
     revision = scope.frame_dir / store.REVISIONS_DIRECTORY / "1"
     manifest = revision / store.MANIFEST_NAME
     document = json.loads(manifest.read_bytes())
-    document["assets"][0]["byte_size"] = MAX_REVISION_BYTES + 1
+    document["assets"][0]["byte_size"] = 16 * 1024 * 1024 + 1  # past the old 16 MiB ceiling
     encoded = json.dumps(document).encode()
     manifest.write_bytes(encoded)
     (revision / store.MANIFEST_DIGEST_NAME).write_text(hashlib.sha256(encoded).hexdigest())
-    asset = revision / store.ASSETS_DIRECTORY / document["assets"][0]["path"]
-    original = Path.open
-    touched = []
-
-    def observed(path, *args, **kwargs):
-        if path == asset:
-            touched.append(path)
-        return original(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "open", observed)
-    assert store.reopen_frame(scope).state == "unavailable"
-    assert not touched
+    reopened = store.reopen_frame(scope)
+    assert reopened.state == "unavailable"
+    assert "the artifact digest and the asset list disagree" in reopened.detail
+    assert "read bounds" not in reopened.detail
 
 
 def test_f16_real_partial_index_cold_rebuild_and_historical_packet(world, tmp_path) -> None:

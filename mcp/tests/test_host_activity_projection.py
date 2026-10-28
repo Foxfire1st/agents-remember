@@ -27,17 +27,23 @@ from test_paseo_role_agents import runtime_config
 NOW = datetime(2026, 10, 15, tzinfo=UTC)
 
 
-def test_supervisor_lease_heartbeat_is_not_a_host_activity_input(tmp_path: Path) -> None:
+def test_supervisor_lease_heartbeat_is_not_a_host_activity_input(
+    tmp_path: Path,
+) -> None:
     home = tmp_path / "host"
     config = runtime_config(tmp_path, home)
     publish(home)
     publication = home / "agents-remember" / host_activity.HOST_ACTIVITY_FILE
     record = home / "paseo.pid"
     record.write_text('{"pid": 123, "heartbeat": true}')
-    roots = watcher.projection_input_roots(config)
+    roots = watcher.projection_watch_plan(config).roots
     assert home / "agents-remember" in roots
     assert record not in roots
-    assert not any(root == home or root in home.parents for root in roots)
+    assert not any(
+        root == home or root in home.parents
+        for root in roots
+        if root not in watcher.projection_watch_plan(config).shallow
+    )
     assert watcher.projection_domains_for_paths(config, {str(publication)}) == frozenset(
         {watcher.ProjectionDomain.HOST_ACTIVITY}
     )
@@ -72,7 +78,9 @@ def test_startup_replaces_old_activity_before_it_can_be_served(tmp_path: Path) -
     config = runtime_config(tmp_path, home)
     publish(home, known={"state": "in-turn", "eventAt": "2026-10-14T00:00:00Z"})
     publish_role_agent(
-        home, "known", {"role": "worker", "task": "repo/master/leaf.json", "reportPath": "/report"}
+        home,
+        "known",
+        {"role": "worker", "task": "repo/master/leaf.json", "reportPath": "/report"},
     )
 
     def reconcile(*_args: object) -> dict[str, object]:
@@ -93,7 +101,9 @@ def test_startup_replaces_old_activity_before_it_can_be_served(tmp_path: Path) -
         bridge.assert_called_once_with(config)
 
 
-def test_a_new_host_boot_and_a_new_dashboard_each_require_the_whole_read(tmp_path: Path) -> None:
+def test_a_new_host_boot_and_a_new_dashboard_each_require_the_whole_read(
+    tmp_path: Path,
+) -> None:
     home = tmp_path / "host"
     config = runtime_config(tmp_path, home)
     publish(home)
@@ -138,7 +148,9 @@ def test_an_older_reconciliation_answer_cannot_certify_a_boot(tmp_path: Path) ->
         assert intake._reconciled_boot is None
 
 
-def test_idle_heartbeats_do_not_read_activity_or_launch_another_snapshot(tmp_path: Path) -> None:
+def test_idle_heartbeats_do_not_read_activity_or_launch_another_snapshot(
+    tmp_path: Path,
+) -> None:
     home = tmp_path / "host"
     config = runtime_config(tmp_path, home)
     publish(home)
@@ -153,7 +165,9 @@ def test_idle_heartbeats_do_not_read_activity_or_launch_another_snapshot(tmp_pat
         pass_=RefreshPass(NOW, ProjectionRefresh.full()),
     )
     with patch.object(
-        host_activity, "_read_publication", side_effect=AssertionError("periodic activity read")
+        host_activity,
+        "_read_publication",
+        side_effect=AssertionError("periodic activity read"),
     ):
         for seconds in range(15, 301, 15):
             inputs = state.read(
@@ -166,7 +180,9 @@ def test_idle_heartbeats_do_not_read_activity_or_launch_another_snapshot(tmp_pat
     bridge.assert_called_once()
 
 
-def test_periodic_full_and_degraded_wakes_retain_host_without_reads(tmp_path: Path) -> None:
+def test_periodic_full_and_degraded_wakes_retain_host_without_reads(
+    tmp_path: Path,
+) -> None:
     config = runtime_config(tmp_path, tmp_path / "host")
     publish(tmp_path / "host")
     state = ProjectionInputState(
@@ -176,7 +192,10 @@ def test_periodic_full_and_degraded_wakes_retain_host_without_reads(tmp_path: Pa
     readers = ProjectionReaders(repo_surfaces=lambda _config, _now: ([], []))
     observer = config.coordination_root / "logs" / "observer"
     state.read(
-        config, readers, observer_root=observer, pass_=RefreshPass(NOW, ProjectionRefresh.full())
+        config,
+        readers,
+        observer_root=observer,
+        pass_=RefreshPass(NOW, ProjectionRefresh.full()),
     )
 
     async def exercise():
@@ -212,7 +231,9 @@ def test_periodic_full_and_degraded_wakes_retain_host_without_reads(tmp_path: Pa
 
     with (
         patch.object(
-            host_activity, "_read_publication", side_effect=AssertionError("periodic host read")
+            host_activity,
+            "_read_publication",
+            side_effect=AssertionError("periodic host read"),
         ),
         patch.object(
             host_activity,
@@ -223,7 +244,9 @@ def test_periodic_full_and_degraded_wakes_retain_host_without_reads(tmp_path: Pa
         asyncio.run(exercise())
 
 
-def test_failed_boot_reconcile_retries_only_after_a_new_publication(tmp_path: Path) -> None:
+def test_failed_boot_reconcile_retries_only_after_a_new_publication(
+    tmp_path: Path,
+) -> None:
     home = tmp_path / "host"
     config = runtime_config(tmp_path, home)
     publish(home)

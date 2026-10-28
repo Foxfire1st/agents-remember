@@ -197,6 +197,59 @@ def test_an_invariant_answers_its_code_tests_families_links_and_history(
     assert outsider.families == () and outsider.realizations == ()
 
 
+def test_currentness_inputs_match_full_reads_with_two_queries_and_no_unrelated_content(
+    memory: Path, cache: KnowledgeIndexCache, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    statement = _statement_file(memory)
+    retired = json.loads(statement.read_text())
+    retired["status"] = "retired"
+    statement.write_text(canonical_text(retired), encoding="utf-8")
+    requested = [REVIEW_INVARIANT, OUTSIDER_INVARIANT, FAMILY, DECISION]
+    requested.extend(f"INV-MISSING-{number}" for number in range(1500))
+    families = [FAMILY, REVIEW_INVARIANT, "FAM-MISSING"]
+    with cache.for_directory(memory) as index:
+        members = index.family(FAMILY).value.members
+        expected = {}
+        for identity in set(requested).union(members):
+            record = index.record(identity).value
+            if record is not None and record.kind == "invariant":
+                full = index.invariant(identity).value
+                expected[identity] = (full.realizations, full.proofs)
+        statements: list[str] = []
+        read_rows = KnowledgeIndex._rows
+
+        def observed(self, statement, parameters=()):
+            statements.append(statement)
+            return read_rows(self, statement, parameters)
+
+        monkeypatch.setattr(KnowledgeIndex, "_rows", observed)
+        answer = index.currentness_inputs(requested, families)
+        empty = index.currentness_inputs((), ()).value
+        missing = index.currentness_inputs(("INV-MISSING",), ("FAM-MISSING",)).value
+        family_only = index.currentness_inputs((), (FAMILY,)).value
+
+    assert answer.index == index.state
+    assert answer.value.families == {FAMILY: members}
+    assert {
+        identity: (entries.realizations, entries.proofs)
+        for identity, entries in answer.value.entries.items()
+    } == expected
+    assert REVIEW_INVARIANT in answer.value.entries  # retirement does not hide its checks
+    assert empty.entries == missing.entries == {}
+    assert empty.families == missing.families == {}
+    assert family_only.families == {FAMILY: members}
+    assert {
+        identity: (entries.realizations, entries.proofs)
+        for identity, entries in family_only.entries.items()
+    } == {identity: expected[identity] for identity in members}
+    assert len(statements) == 8  # two queries each, including empty/missing and family-only reads
+    assert not any(
+        table in statement
+        for statement in statements
+        for table in ("ix_history_row", "ix_link", "ix_route")
+    )
+
+
 def test_a_family_answers_members_and_routes_and_routes_answer_their_families(
     memory: Path, cache: KnowledgeIndexCache
 ) -> None:
@@ -470,7 +523,7 @@ def test_the_cache_reuses_rebuilds_and_loses_nothing_when_deleted(
     cache.directory.mkdir(parents=True)
     with cache.for_directory(memory) as from_nothing:
         assert from_nothing.invariant(REVIEW_INVARIANT).value == answer
-    assert sorted(p.name for p in cache.directory.iterdir()) == [path.name]
+    assert sorted(p.name for p in cache.directory.iterdir()) == [path.name, f"{path.name}.used"]
 
 
 def test_old_and_excess_index_files_are_evicted(memory: Path, tmp_path: Path) -> None:
@@ -478,7 +531,9 @@ def test_old_and_excess_index_files_are_evicted(memory: Path, tmp_path: Path) ->
     stale = cache.directory / f"{'a' * 40}.sqlite"
     stale.write_bytes(b"x" * 10)
     old = time.time() - 7200
-    os.utime(stale, (old, old))
+    stale_usage = stale.with_name(f"{stale.name}.used")
+    stale_usage.touch()
+    os.utime(stale_usage, (old, old))
     with cache.for_directory(memory) as index:
         kept = index.database_path
     assert not stale.exists() and kept.exists()

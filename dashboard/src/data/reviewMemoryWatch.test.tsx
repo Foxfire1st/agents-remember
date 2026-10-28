@@ -1,7 +1,7 @@
 // Transport/lifetime consumer tests; native filesystem timing is proved separately in Python.
 import { act, cleanup, render } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
-import { useReviewMemoryWatch } from './reviewMemoryWatch';
+import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
+import { publishReviewPublication, subscribeReviewPublication, useReviewMemoryWatch } from './reviewMemoryWatch';
 import { connectState } from './stream';
 import { enclosure, seedProjection } from '../panels/detail-panel/test-utils';
 
@@ -113,4 +113,74 @@ it('reports a same-target watch failure, not an unrelated target or empty succes
   act(() => latest().emit('review.memory.error', { ...target, detail: 'Native watch unavailable: reopen this review.' }));
   expect(failed).toHaveBeenCalledWith('Native watch unavailable: reopen this review.');
   expect(changed).not.toHaveBeenCalled();
+});
+
+// D569 mean 1: the arming baseline names how long ago memory last changed (`changedAgoMs`, read by the
+// server after arming). The HTTP answers were asked after the review opened, so a change older than
+// that is already in them and renews nothing; a newer one -- an edit before arming, which raised no
+// native notification -- renews them once. File stamps may round down, so the bound has slack.
+let clock = 0;
+function startClocked() {
+  start();
+  clock = 100_000;
+  const now = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+  onTestFinished(() => now.mockRestore());
+}
+
+it('renews nothing on an arming baseline whose memory last changed before the review opened', () => {
+  startClocked();
+  render(<Reader />);
+  clock += 400;
+  act(() => { latest().emit('open'); latest().emit('review.memory', { ...target, revision: 'armed:0', changedAgoMs: 10 * 60_000 }); });
+  expect(changed).not.toHaveBeenCalled();
+  act(() => latest().emit('review.memory', { ...target, revision: 'armed:1' }));
+  expect(changed).toHaveBeenCalledTimes(1); // an edit after arming is a notification, as before
+});
+
+it('renews once on an arming baseline whose memory changed after the review opened, or within the stamp slack before it', () => {
+  startClocked();
+  const view = render(<Reader />);
+  clock += 400;
+  act(() => { latest().emit('open'); latest().emit('review.memory', { ...target, revision: 'armed:0', changedAgoMs: 100 }); });
+  expect(changed).toHaveBeenCalledTimes(1);
+  act(() => latest().emit('review.memory', { ...target, revision: 'armed:0', changedAgoMs: 100 }));
+  expect(changed).toHaveBeenCalledTimes(1); // a duplicate of the same connection stays quiet
+  view.rerender(<Reader master="other" />);
+  clock += 400;
+  const slackMs = 1_000; // a stamp 1 s before the open may have been rounded down past it
+  act(() => latest().emit('review.memory', { ...target, master: 'other', revision: 'other:0', changedAgoMs: 400 + slackMs }));
+  expect(changed).toHaveBeenCalledTimes(2);
+});
+
+it('renews on a reconnect baseline only for a change after the last event the old connection delivered', () => {
+  startClocked();
+  render(<Reader />);
+  const source = latest();
+  act(() => source.emit('review.memory', { ...target, revision: 'armed:0', changedAgoMs: 10 * 60_000 }));
+  expect(changed).not.toHaveBeenCalled();
+  clock += 30_000; // the connection drops and the browser reconnects
+  act(() => { source.emit('open'); source.emit('review.memory', { ...target, revision: 'again:0', changedAgoMs: 40_000 }); });
+  expect(changed).not.toHaveBeenCalled(); // last changed before the old connection's last event
+  clock += 30_000;
+  act(() => { source.emit('open'); source.emit('review.memory', { ...target, revision: 'again:0', changedAgoMs: 5_000 }); });
+  expect(changed).toHaveBeenCalledTimes(1); // changed while no watch was armed
+});
+
+// D569: a stream that reopens is sent a publication baseline whose revision is per connection while
+// its page and environment stamps name the publication state. A baseline repeating the state the
+// page already saw renews nothing; a changed stamp, or a server sending no stamps, still renews.
+it('renews nothing for a reconnect whose baseline repeats the publication it saw', () => {
+  const renewed = vi.fn();
+  const scope = { repo: 'agents-remember', master: 'watch', leaf: 'stamped-leaf' };
+  const unsubscribe = subscribeReviewPublication(scope, renewed, vi.fn());
+  const baseline = { ...scope, kind: 'baseline', pageStamp: 'page-1', environmentStamp: 'environment-1' };
+  publishReviewPublication({ ...baseline, revision: 'first:0' });
+  expect(renewed).toHaveBeenCalledTimes(1);
+  publishReviewPublication({ ...baseline, revision: 'second:0' });
+  expect(renewed).toHaveBeenCalledTimes(1);
+  publishReviewPublication({ ...baseline, revision: 'third:0', environmentStamp: 'environment-2' });
+  expect(renewed).toHaveBeenCalledTimes(2);
+  publishReviewPublication({ ...scope, kind: 'baseline', revision: 'fourth:0', pageStamp: 'page-1' });
+  expect(renewed).toHaveBeenCalledTimes(3);
+  unsubscribe();
 });

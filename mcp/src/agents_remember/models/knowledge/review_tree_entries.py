@@ -60,6 +60,7 @@ __all__ = [
     "ReviewEntryChange",
     "ReviewEntryMemory",
     "ReviewEntryRangeState",
+    "ReviewLineChanges",
     "ReviewTreeEntry",
     "ReviewTreeEntrySide",
 ]
@@ -108,6 +109,16 @@ class ReviewEntryMemory(KnowledgeModel):
     open_weaknesses: int = Field(ge=0)
 
 
+class ReviewLineChanges(KnowledgeModel):
+    """Exact added/removed lines of the full resolved ranges, independent of display excerpts.
+
+    Missing counts mean unavailable text/placement or an unfinished 4,000-edit Myers walk.
+    """
+
+    added: int = Field(ge=0)
+    removed: int = Field(ge=0)
+
+
 class ReviewTreeEntry(KnowledgeModel):
     """One realization or proof entry of the comparison, on the code base and the code candidate.
 
@@ -124,3 +135,4 @@ class ReviewTreeEntry(KnowledgeModel):
     after: ReviewTreeEntrySide
     change: ReviewEntryChange
     memory: ReviewEntryMemory | None = None
+    line_changes: ReviewLineChanges | None = None

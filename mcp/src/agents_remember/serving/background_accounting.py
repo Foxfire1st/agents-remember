@@ -61,6 +61,7 @@ OWNER_RIVER_COMPACTION = "river-compaction"
 OWNER_WARMUP = "warmup"
 OWNER_EVENT_TAIL = "event-tail"
 OWNER_STARTUP = "startup"
+OWNER_MASTER_PREPARATION = "master-preparation"
 
 BACKGROUND_OWNERS: tuple[str, ...] = (
     OWNER_PROJECTION,
@@ -72,6 +73,7 @@ BACKGROUND_OWNERS: tuple[str, ...] = (
     OWNER_WARMUP,
     OWNER_EVENT_TAIL,
     OWNER_STARTUP,
+    OWNER_MASTER_PREPARATION,
 )
 
 

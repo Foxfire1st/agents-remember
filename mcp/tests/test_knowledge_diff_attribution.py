@@ -67,6 +67,33 @@ def fixture(tmp_path: Path) -> DiffFixture:
 # --- the attribution partition (ICR-R04) ------------------------------------------------------
 
 
+def test_registered_path_lookup_keeps_exact_path_namespace_and_claim_order(
+    fixture: DiffFixture,
+) -> None:
+    store = open_knowledge_store(fixture.before.database_path, fixture.repository_id)
+    try:
+        rows = fetch_realizations_at_path(
+            store.connection, fixture.repository_id, fixture.changed_source_path
+        )
+        assert [row["claim_id"] for row in rows] == sorted(fixture.unchanged_claim_ids)
+        assert all(row["path"] == fixture.changed_source_path for row in rows)
+        assert all(row["invariant_id"] == fixture.sibling_invariant_id for row in rows)
+        for other in (
+            fixture.changed_source_path.upper(),
+            f"./{fixture.changed_source_path}",
+            f"{fixture.changed_source_path}%",
+        ):
+            assert fetch_realizations_at_path(store.connection, fixture.repository_id, other) == []
+        assert (
+            fetch_realizations_at_path(
+                store.connection, "another-namespace", fixture.changed_source_path
+            )
+            == []
+        )
+    finally:
+        store.close()
+
+
 def test_the_measured_changes_are_partitioned_once_and_the_buckets_are_disjoint_and_exhaustive(
     fixture: DiffFixture,
 ) -> None:

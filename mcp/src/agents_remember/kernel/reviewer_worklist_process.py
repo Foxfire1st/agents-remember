@@ -1,8 +1,8 @@
-"""The review route's transient worklist children; no cache or durable job state.
+"""The review route's bounded warm worklist children; no retained request results.
 
 MIK-R42: the supported worklist/read-set collections have no total byte ceiling. The protocol
-therefore adds no arbitrary result cap. Stdlib communicate drains both bounded OS pipes while
-materializing the one result, as the existing HTTP model does.
+therefore adds no arbitrary result cap. Nonblocking I/O drains the bounded OS pipes while
+materializing one newline-framed result, as the existing HTTP model does.
 
 **Admission (ruling 1 of the second round).** One reader never meets a "busy" refusal while the
 reviewer is merely working:
@@ -22,18 +22,20 @@ reviewer is merely working:
 **Lifetime (ruling 3).** The child must not outlive the dashboard. It has its own session and
 process group, so the parent stops the whole group; and the child itself arms
 :func:`arm_child_lifetime` before its work: a parent-death signal (Linux ``prctl``; elsewhere a
-parent watcher thread) and a deadline of its own, either of which kills the child's whole group,
+parent watcher thread) and a deadline for each active computation, either of which kills the child's whole group,
 so its Git children go with it even when the dashboard was killed without a chance to clean up.
 """
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import ctypes
 import hashlib
 import json
 import math
 import os
+import selectors
 import signal
 import subprocess
 import sys
@@ -41,6 +43,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -48,6 +51,12 @@ from pathlib import Path
 from typing import Any, Final
 
 import agents_remember
+from agents_remember.kernel.read_cancellation import (
+    ReadCancelled,
+    cancellable_read,
+    lets_children_land,
+    read_cancellation,
+)
 from agents_remember.kernel.recorded_reads import valid_observation
 
 MAX_ACTIVE_CHILDREN: Final = 2
@@ -67,9 +76,6 @@ _REAP_SECONDS: Final = 5.0
 # A slot that opens with less of the deadline left than this would only start a computation to end
 # it: the request is refused as overloaded instead, which is what it is.
 _MINIMUM_RUN_SECONDS: Final = 1.0
-_CANCELLATION: ContextVar[threading.Event | None] = ContextVar(
-    "worklist_cancellation", default=None
-)
 _ARRIVAL: ContextVar[float | None] = ContextVar("worklist_arrival", default=None)
 _RESTART_ACTION: Final = (
     "restart the dashboard so it serves the build that is installed now, then reopen the review"
@@ -97,20 +103,25 @@ class WorklistBuildMismatch(WorklistProcessError):
 
 
 @contextmanager
-def worklist_request(cancellation: threading.Event) -> Iterator[None]:
-    """Bind the actual HTTP request's disconnect/cancellation and arrival to its worker thread.
+def worklist_request(cancellation: threading.Event | None = None) -> Iterator[None]:
+    """Bind the actual HTTP request's arrival (and, when given, its cancellation) to its thread.
 
     The request's deadline runs from this moment, so the work before the child starts (capture,
-    memo key, knowledge diff) consumes it and the child gets what remains.
+    memo key, knowledge diff) consumes it and the child gets what remains. The cancellation is the
+    read's own (:mod:`agents_remember.kernel.read_cancellation`); a route that binds it there
+    already passes none here, so a shared review flight's token, not one client's, is what a
+    requester waits under.
     """
 
-    token = _CANCELLATION.set(cancellation)
     arrival = _ARRIVAL.set(time.monotonic())
     try:
-        yield
+        if cancellation is None:
+            yield
+        else:
+            with cancellable_read(cancellation):
+                yield
     finally:
         _ARRIVAL.reset(arrival)
-        _CANCELLATION.reset(token)
 
 
 def build_identity(stamp: Mapping[str, Any]) -> dict[str, Any]:
@@ -277,12 +288,22 @@ class _Flight:
 
 
 class ReviewerWorklistProcesses:
-    """The route's bounded active processes and their flights, to admit, share, stop and reap."""
+    """The route's bounded active processes and their flights, to admit, share, stop and reap.
 
-    def __init__(self) -> None:
+    ``niceness`` lowers every child's scheduling priority by that much once it is launched: a
+    background build's children never compete with a page's reads for the processor (D569).
+    """
+
+    def __init__(self, *, niceness: int = 0) -> None:
+        self._niceness = niceness
         self._lock = threading.Lock()
         self._changed = threading.Condition(self._lock)
         self._active: set[subprocess.Popen[bytes]] = set()
+        self._idle: deque[subprocess.Popen[bytes]] = deque()
+        self._bindings: dict[subprocess.Popen[bytes], tuple[dict[str, str], str]] = {}
+        # Linux parent-death signals follow the thread that calls Popen. Keep that one thread
+        # alive across flights so parking a child does not itself kill it.
+        self._launcher = ThreadPoolExecutor(max_workers=1, thread_name_prefix="worklist-launch")
         self._flights: dict[str, _Flight] = {}
         self._queue: deque[_Flight] = deque()
         self._waiting = 0
@@ -291,17 +312,20 @@ class ReviewerWorklistProcesses:
     def shutdown(self) -> None:
         with self._changed:
             self._stopped.set()
-            active = tuple(self._active)
+            processes = (*self._active, *self._idle)
+            self._idle.clear()
+            self._bindings.clear()
             self._changed.notify_all()
-        for process in active:
-            _stop(process)
+        for process in processes:
+            _reap(process)
+        self._launcher.shutdown(wait=True)
 
     def compute(self, payload: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
         started = _ARRIVAL.get() or time.monotonic()
         request = {"operation": OPERATION, "source": source, "payload": payload}
         request["request"] = request_digest(request)
         environment = _environment(source)
-        flight = self._join(request, environment, started)
+        flight = self._join(request, environment, os.getcwd(), started)
         try:
             value = self._await(flight, started)
         finally:
@@ -313,9 +337,11 @@ class ReviewerWorklistProcesses:
         return copy.deepcopy(value) if flight.shared else value
 
     def _join(
-        self, request: dict[str, Any], environment: dict[str, str], started: float
+        self, request: dict[str, Any], environment: dict[str, str], cwd: str, started: float
     ) -> _Flight:
-        digest = request["request"]
+        digest = request_digest(
+            {"request": request["request"], "environment": environment, "cwd": cwd}
+        )
         with self._changed:
             if self._stopped.is_set():
                 raise WorklistProcessError("reviewer worklist dashboard is shutting down")
@@ -333,7 +359,7 @@ class ReviewerWorklistProcesses:
                 try:
                     threading.Thread(
                         target=self._fly,
-                        args=(flight, request, environment),
+                        args=(flight, request, environment, cwd),
                         name=f"reviewer-worklist-{digest[:8]}",
                         daemon=True,
                     ).start()
@@ -366,9 +392,18 @@ class ReviewerWorklistProcesses:
             return abandoned
 
     def _await(self, flight: _Flight, started: float) -> dict[str, Any]:
-        cancellation = _CANCELLATION.get()
+        cancellation = read_cancellation()
         while not flight.done.wait(_POLL_SECONDS):
-            if self._stopped.is_set() or (cancellation is not None and cancellation.is_set()):
+            if (
+                cancellation is not None
+                and cancellation.is_set()
+                and not lets_children_land(cancellation)
+            ):
+                # This requester's askers are gone: it leaves the flight (the last one to leave
+                # stops and reaps the child) and answers nothing -- never a worklist failure. A
+                # superseded build waits instead: its child lands and stays warm (D569).
+                raise ReadCancelled
+            if self._stopped.is_set():
                 raise WorklistProcessError("reviewer worklist computation was cancelled")
             if time.monotonic() - started >= DEADLINE_SECONDS:
                 raise _deadline(waiting=not flight.running)
@@ -377,16 +412,22 @@ class ReviewerWorklistProcesses:
         assert flight.result is not None
         return flight.result
 
-    def _fly(self, flight: _Flight, request: dict[str, Any], environment: dict[str, str]) -> None:
-        """Admit, run and reap one child for every request that shares the flight."""
+    def _fly(
+        self, flight: _Flight, request: dict[str, Any], environment: dict[str, str], cwd: str
+    ) -> None:
+        """Admit one isolated computation, returning a healthy child to the bounded pool."""
 
         process = None
+        reusable = False
         try:
-            process = self._admit(flight, environment)
-            value = _reply(self._collect(process, json.dumps(request).encode(), flight), request)
+            process = self._admit(flight, environment, cwd)
+            value = _reply(
+                self._collect(process, json.dumps(request).encode() + b"\n", flight), request
+            )
             if value["pid"] != process.pid:
                 raise WorklistProcessError("reviewer worklist child process identity disagrees")
             flight.result = value
+            reusable = value["error"] is None
         except WorklistProcessError as error:
             flight.error = error
         except (OSError, subprocess.SubprocessError) as error:
@@ -399,20 +440,31 @@ class ReviewerWorklistProcesses:
             )
         finally:
             if process is not None:
-                _stop(process)
-                for pipe in (process.stdin, process.stdout, process.stderr):
-                    if pipe is not None:
-                        pipe.close()
+                if reusable and self._park(process, flight):
+                    process = None
+                if process is not None:
+                    _reap(process)
             with self._changed:
                 if process is not None:
                     self._active.discard(process)
+                    self._bindings.pop(process, None)
                 if self._flights.get(flight.digest) is flight:
                     del self._flights[flight.digest]
                 flight.done.set()
                 self._changed.notify_all()
 
-    def _admit(self, flight: _Flight, environment: dict[str, str]) -> subprocess.Popen[bytes]:
-        """Wait first in, first out for one of the child slots, then start the child."""
+    def _park(self, process: subprocess.Popen[bytes], flight: _Flight) -> bool:
+        with self._changed:
+            if self._stopped.is_set() or flight.cancel.is_set() or process.poll() is not None:
+                return False
+            self._active.discard(process)
+            self._idle.append(process)
+            return True
+
+    def _admit(
+        self, flight: _Flight, environment: dict[str, str], cwd: str
+    ) -> subprocess.Popen[bytes]:
+        """Wait first in, first out for a slot, reusing a healthy child before launching."""
 
         with self._changed:
             self._queue.append(flight)
@@ -426,7 +478,9 @@ class ReviewerWorklistProcesses:
                     if remaining <= min(_MINIMUM_RUN_SECONDS, DEADLINE_SECONDS / 4):
                         raise _deadline(waiting=True)  # too late to start a computation
                     if len(self._active) < MAX_ACTIVE_CHILDREN and self._queue[0] is flight:
-                        process = self._launch(environment)
+                        process = self._take_idle(environment, cwd) or self._launch(
+                            environment, cwd
+                        )
                         flight.running = True
                         return process
                     self._changed.wait(min(remaining, _POLL_SECONDS))
@@ -434,47 +488,129 @@ class ReviewerWorklistProcesses:
                 self._queue.remove(flight)
                 self._changed.notify_all()
 
-    def _launch(self, environment: dict[str, str]) -> subprocess.Popen[bytes]:
+    def _take_idle(self, environment: dict[str, str], cwd: str) -> subprocess.Popen[bytes] | None:
+        # Called under the admission lock: active plus idle never exceeds the two slots.
+        while self._idle:
+            process = self._idle.popleft()
+            if process.poll() is None and self._bindings[process] == (environment, cwd):
+                self._active.add(process)
+                return process
+            _reap(process)
+            self._bindings.pop(process, None)
+        return None
+
+    def _launch(self, environment: dict[str, str], cwd: str) -> subprocess.Popen[bytes]:
         try:
-            process = subprocess.Popen(
+            process = self._launcher.submit(
+                subprocess.Popen,
                 [sys.executable, "-P", "-m", CHILD_MODULE],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=environment,
+                cwd=cwd,
                 start_new_session=True,
-            )
+            ).result()
         except OSError as error:
             raise WorklistProcessError(f"reviewer worklist launch failed: {error}") from error
+        if self._niceness:
+            with contextlib.suppress(OSError):  # a child that already left needs no priority
+                os.setpriority(os.PRIO_PROCESS, process.pid, self._niceness)
         self._active.add(process)
+        self._bindings[process] = (environment, cwd)
         return process
 
     def _collect(self, process: subprocess.Popen[bytes], data: bytes, flight: _Flight) -> bytes:
-        first = True
-        while True:
-            if self._stopped.is_set() or flight.cancel.is_set():
-                raise WorklistProcessError("reviewer worklist computation was cancelled")
-            remaining = DEADLINE_SECONDS - (time.monotonic() - flight.created)
-            if remaining <= 0:
-                raise _deadline(waiting=False)
-            try:
-                output, errors = process.communicate(
-                    data if first else None, timeout=min(_POLL_SECONDS * 2, remaining)
-                )
-            except subprocess.TimeoutExpired:
-                first = False
-                continue
-            if process.returncode == EXIT_BUILD_MISMATCH:
-                raise WorklistBuildMismatch(
-                    "reviewer worklist child imported a different build than this dashboard "
-                    "booted with; the installed package changed under this running dashboard"
-                )
-            if process.returncode:
-                raise WorklistProcessError(
-                    f"reviewer worklist child exited {process.returncode}: "
-                    f"{errors.decode(errors='replace')[:1000]}"
-                )
-            return output
+        assert (
+            process.stdin is not None and process.stdout is not None and process.stderr is not None
+        )
+        output = bytearray()
+        errors = bytearray()
+        written = 0
+        with selectors.DefaultSelector() as ready:
+            for pipe, event in (
+                (process.stdin, selectors.EVENT_WRITE),
+                (process.stdout, selectors.EVENT_READ),
+                (process.stderr, selectors.EVENT_READ),
+            ):
+                os.set_blocking(pipe.fileno(), False)
+                ready.register(pipe, event)
+            while True:
+                if self._stopped.is_set() or flight.cancel.is_set():
+                    raise WorklistProcessError("reviewer worklist computation was cancelled")
+                remaining = DEADLINE_SECONDS - (time.monotonic() - flight.created)
+                if remaining <= 0:
+                    raise _deadline(waiting=False)
+                for key, _event in ready.select(min(_POLL_SECONDS * 2, remaining)):
+                    if key.fileobj is process.stdin:
+                        written = _write_request(process, ready, data, written, errors)
+                    elif _read_response(process, ready, key.fd, output, errors):
+                        return bytes(output)
+
+
+def _reap(process: subprocess.Popen[bytes]) -> None:
+    _stop(process)
+    for pipe in (process.stdin, process.stdout, process.stderr):
+        if pipe is not None:
+            pipe.close()
+
+
+def _exit_failure(process: subprocess.Popen[bytes], errors: bytearray) -> WorklistProcessError:
+    # EOF or a broken request pipe may race the process exit by a few instructions.
+    with suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=_POLL_SECONDS)
+    if process.returncode == EXIT_BUILD_MISMATCH:
+        return WorklistBuildMismatch(
+            "reviewer worklist child imported a different build than this dashboard "
+            "booted with; the installed package changed under this running dashboard"
+        )
+    if process.returncode:
+        return WorklistProcessError(
+            f"reviewer worklist child exited {process.returncode}: "
+            f"{errors.decode(errors='replace')[:1000]}"
+        )
+    return WorklistProcessError(
+        "reviewer worklist child closed its reply before a complete JSON line"
+    )
+
+
+def _write_request(
+    process: subprocess.Popen[bytes],
+    ready: selectors.BaseSelector,
+    data: bytes,
+    written: int,
+    errors: bytearray,
+) -> int:
+    assert process.stdin is not None
+    try:
+        written += os.write(process.stdin.fileno(), memoryview(data)[written:])
+    except BrokenPipeError as error:
+        raise _exit_failure(process, errors) from error
+    if written == len(data):
+        ready.unregister(process.stdin)
+    return written
+
+
+def _read_response(
+    process: subprocess.Popen[bytes],
+    ready: selectors.BaseSelector,
+    descriptor: int,
+    output: bytearray,
+    errors: bytearray,
+) -> bool:
+    assert process.stdout is not None
+    chunk = os.read(descriptor, 65536)
+    reply = descriptor == process.stdout.fileno()
+    if not chunk:
+        ready.unregister(descriptor)
+        if reply:
+            raise _exit_failure(process, errors)
+        return False
+    if reply:
+        output.extend(chunk)
+        return b"\n" in chunk
+    errors.extend(chunk[: max(0, 1000 - len(errors))])
+    return False
 
 
 def _deadline(*, waiting: bool) -> WorklistProcessError:

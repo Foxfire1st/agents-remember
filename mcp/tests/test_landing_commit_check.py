@@ -503,6 +503,17 @@ class AnswerAndTextTests(unittest.TestCase):
         Porcelain commits (prepared closeout, sync's native merges,
         commit_if_dirty) run the repository's hooks natively through Git
         itself — the no-``--no-verify`` scan pins that half.
+
+        The census classifies every site rather than exempting one by omission.
+        Old invariant, as the base list stated it: these four files are the whole
+        set of ``commit-tree`` callers, all of them publishing. New invariant: a
+        site is either a publishing site, which must run the check on the exact
+        tree, or a declared unreferenced site, which must provably move no ref —
+        nothing lands, so there is no landing commit for the check to gate. The
+        explainer's detached checkout (``canvas/explainer_worktrees.py``) is the
+        second kind: it mints one commit object for a tree-only comparison and
+        says so ("never a ref"), and its assertions below prove the no-ref half
+        instead of assuming it.
         """
 
         package = Path(__file__).resolve().parent.parent / "src" / "agents_remember"
@@ -514,6 +525,7 @@ class AnswerAndTextTests(unittest.TestCase):
         self.assertEqual(
             sorted(sites),
             [
+                "canvas/explainer_worktrees.py",
                 "kernel/memory_backfill.py",
                 "memory/baseline.py",
                 "worktrees/direct_landing.py",
@@ -530,6 +542,14 @@ class AnswerAndTextTests(unittest.TestCase):
         self.assertIn("_require_commit_check_on_rewritten_trees", backfill)
         self.assertIn("commit_check", backfill)
         self.assertNotIn("exclusion", backfill)
+        # The declared unreferenced site: it publishes nothing, so the check has nothing to
+        # gate. Each assertion below is the evidence for that classification, not an excuse.
+        detached = sites["canvas/explainer_worktrees.py"]
+        self.assertIn("never a ref", detached)
+        self.assertIn('"worktree", "add", "--detach"', detached)
+        for publication in ("update-ref", '"branch"', '"push"', "refs/heads"):
+            self.assertNotIn(publication, detached)
+        self.assertNotIn("run_landing_commit_check", detached)
 
     def test_baseline_adoption_runs_the_commit_check(self) -> None:
         """MIK-R152 rules 1+7: baseline adoption refuses on a failing hook, moving no ref."""

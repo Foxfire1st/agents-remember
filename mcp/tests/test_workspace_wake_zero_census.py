@@ -42,8 +42,18 @@ class WorkspaceOnlyWakeTests(unittest.TestCase):
             temp_sibling.write_text("partial\n", encoding="utf-8")
             try:
                 with (
+                    # The full task-tree read is instrumented at its one entry point.
+                    # Old invariant: the walk happened in the module-level ``_walk_files``
+                    # filesystem scan that ``_walk_tasks_tree_digest`` wrapped. That helper
+                    # is gone: the digest now reads exactly the reader-derived task-input
+                    # plan (`TaskInputPlan.input_files()`), still behind
+                    # ``_walk_tasks_tree_digest``. New invariant, same assertion: a
+                    # workspace-only wake never enters `_walk_tasks_tree_digest`, so no
+                    # task input file is stat-read for the digest.
                     mock.patch.object(
-                        queue_module, "_walk_files", wraps=queue_module._walk_files
+                        queue_module,
+                        "_walk_tasks_tree_digest",
+                        wraps=queue_module._walk_tasks_tree_digest,
                     ) as walked,
                     mock.patch.object(
                         queue_module,

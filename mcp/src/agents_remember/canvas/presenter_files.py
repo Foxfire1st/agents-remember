@@ -147,32 +147,24 @@ def ensure_child(root: Path, name: str) -> None:
         os.close(child)
 
 
-def scan_files(
-    descriptor: int, *, depth_limit: int, entry_limit: int
-) -> Iterator[tuple[str, int, str, int]]:
+def scan_files(descriptor: int) -> Iterator[tuple[str, int, str, int]]:
     """Yield (relative path, parent descriptor, name, size) while the parent remains open.
 
     The consumer must read a yielded child before advancing this iterator. Entries are sized with
-    no following of links; the read independently checks the opened file is regular.
+    no following of links; the read independently checks the opened file is regular. Every entry
+    at every depth is yielded: a draft is read however it is laid out, and a link is refused, so the
+    walk cannot loop.
     """
 
-    seen = 0
-
-    def descend(parent: int, prefix: str, depth: int):
-        nonlocal seen
-        if depth > depth_limit:
-            raise ScanRefused("assets-too-deep", f"directory depth exceeds {depth_limit}")
+    def descend(parent: int, prefix: str):
         with os.scandir(parent) as entries:
             for entry in entries:
-                seen += 1
-                if seen > entry_limit:
-                    raise ScanRefused("too-many-entries", f"entry count exceeds {entry_limit}")
                 relative = f"{prefix}{entry.name}"
                 metadata = entry.stat(follow_symlinks=False)
                 if stat.S_ISDIR(metadata.st_mode):
                     child = os.open(entry.name, _DIRECTORY, dir_fd=parent)
                     try:
-                        yield from descend(child, f"{relative}/", depth + 1)
+                        yield from descend(child, f"{relative}/")
                     finally:
                         os.close(child)
                 elif stat.S_ISREG(metadata.st_mode):
@@ -182,4 +174,4 @@ def scan_files(
                         "symlinked-asset", f"non-regular entry or symlink: {relative}"
                     )
 
-    yield from descend(descriptor, "", 0)
+    yield from descend(descriptor, "")

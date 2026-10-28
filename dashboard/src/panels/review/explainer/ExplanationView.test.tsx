@@ -6,177 +6,47 @@
 //   * during the build: a still placeholder that points at the chat, and no page;
 //   * a saved page opens with no model -- one isolated-host channel for one revision, and no
 //     generate, no build and no message;
-//   * the trusted stale list is drawn from the host's answer whatever the frame draws, or fails to;
+//   * the column is a record: the page, its standfirst and its revision selector, and no staleness;
+//   * staleness -- the parts, their reasons and the newer comparison -- is the top line's badge,
+//     drawn from the same answer whatever the frame draws, or fails to;
 //   * Compare mounts two isolated frames;
 //   * the task-total refusal names itself and offers only unpinned revisions to remove;
-//   * every claim carries its basis, the legend names all four, and a claim's link opens its block.
 //
 // Assertions are plain DOM assertions: this suite loads no jest-dom matchers.
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { useState } from 'react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { resetCardCachesForTests } from '../../../data/reviewTrees';
 import { pendingFirstRequest, resetFirstRequest } from '../../../explainer/request';
 import { resetTray } from '../../../explainer/testSupport';
 import { trayStore } from '../../../tray/trayStore';
 import { forwardedBody } from '../canvas/canvasHooks';
+import {
+  PLACE,
+  renderPage,
+  servePage,
+  stubIntersection,
+  waitForOpening,
+} from '../reading/reviewPage.test-utils';
+import { treeOrderStore } from '../triageOrderPreference';
+import { treeViewStore } from '../triageViewPreference';
+import { ExplanationSwitch } from './ExplanationSwitch';
 import { ExplanationView } from './ExplanationView';
 import { RevisionFrame } from './RevisionFrame';
-import type { ClaimLink } from './explainerApi';
 
-const REPO = 'agents-remember';
-const MASTER = '260928_maintained-invariant-knowledge';
-const LEAF = '260928-MIK-L183';
-const BASE = `/api/explainer/${REPO}/${MASTER}/${LEAF}`;
-
-interface Call {
-  url: string;
-  method: string;
-  body: Record<string, unknown> | undefined;
-}
-
-const text = (element: Element | null | undefined): string => element?.textContent ?? '';
-
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-
-function serve(
-  reply: (call: Call, calls: Call[], counter: { sessions: number }) => Response,
-): Call[] {
-  const calls: Call[] = [];
-  const counter = { sessions: 0 };
-  vi.stubGlobal(
-    'fetch',
-    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      const call: Call = {
-        url: String(input),
-        method: init?.method ?? 'GET',
-        body:
-          typeof init?.body === 'string'
-            ? (JSON.parse(init.body) as Record<string, unknown>)
-            : undefined,
-      };
-      calls.push(call);
-      return Promise.resolve(reply(call, calls, counter));
-    }),
-  );
-  return calls;
-}
-
-const channel = (name: string, revision: number) => ({
-  state: 'ok',
-  session: name,
-  revision,
-  comparison: 'review-comparison:task/leaf/9',
-  entrypoint: 'index.html',
-  scripts: false,
-  sandbox: 'allow-scripts',
-  pageUrl: `/canvas/page/${name}`,
-});
-
-const BINDING9 = { kind: 'recorded', comparison: 9, label: '#9' };
-
-const SAVED_STATE = {
-  state: 'ok',
-  seat: 'live',
-  retiredAt: null,
-  binding: BINDING9,
-  explanation: {
-    revision: 8,
-    at: '2026-10-19T12:36:00Z',
-    entrypoint: 'index.html',
-    comparison: 'review-comparison:task/leaf/8',
-  },
-  building: null,
-  stale: {
-    total: 5,
-    parts: [
-      { id: 'look', title: 'Where to look first', reason: 'noteTurnEnded and the tracker changed in #9' },
-      { id: 'risks', title: 'Risks I see', reason: 'the grades of 4 changed blocks' },
-      { id: 'flow', title: 'Before and after', reason: 'the wait and the count changed in #9' },
-    ],
-  },
-  parts: [
-    { id: 'answer', title: 'In one page' },
-    { id: 'look', title: 'Where to look first' },
-    { id: 'risks', title: 'Risks I see' },
-  ],
-  claims: [
-    {
-      id: 'c1',
-      part: 'answer',
-      basis: 'recorded-fact',
-      text: 'the curator recorded this as a weaken',
-      link: { block: 'b20', label: 'turn_ended.ts L1697–1817' },
-    },
-    { id: 'c2', part: 'look', basis: 'mechanical-signal', text: '13 of 71 locations changed' },
-    { id: 'c3', part: 'risks', basis: 'presenter-inference', text: 'the send to the seat may throw' },
-    { id: 'c4', part: 'risks', basis: 'intended', text: 'a seat is meant to return to its work' },
-  ],
-  moved: null,
-  limit: null,
-};
-
-const REVISIONS = {
-  state: 'ok',
-  pinned: 8,
-  total: { used: 41 * 1024 * 1024, limit: 512 * 1024 * 1024 },
-  revisions: [
-    {
-      revision: 7,
-      binding: { kind: 'recorded', comparison: 7, label: '#7' },
-      at: '2026-10-19T11:20:00Z',
-      kind: 'global',
-      agreed: false,
-      pinned: false,
-    },
-    {
-      revision: 8,
-      binding: { kind: 'recorded', comparison: 8, label: '#8' },
-      at: '2026-10-19T12:36:00Z',
-      kind: 'global',
-      agreed: true,
-      pinned: true,
-    },
-    {
-      revision: 9,
-      binding: { kind: 'recorded', comparison: 9, label: '#9' },
-      at: '2026-10-19T13:10:00Z',
-      kind: 'focused',
-      focus: 'Risks I see',
-      agreed: false,
-      pinned: false,
-    },
-  ],
-};
-
-function server(
-  over: { state?: unknown; revisions?: unknown; sessions?: (call: Call) => Response } = {},
-) {
-  return serve((call, _calls, counter) => {
-    if (call.url.startsWith(`${BASE}/state`)) return json(over.state ?? SAVED_STATE);
-    if (call.url === `${BASE}/revisions`) return json(over.revisions ?? REVISIONS);
-    if (call.url === '/api/canvas/sessions') {
-      counter.sessions += 1;
-      if (over.sessions) return over.sessions(call);
-      return json(channel(`s${counter.sessions}`, Number(call.body?.revision ?? 1)));
-    }
-    if (call.url.endsWith('/revoke')) return json({ state: 'ok', revoked: true });
-    if (call.url === `${BASE}/update`) return json({ attempt: 'a1', state: {} });
-    if (call.url === `${BASE}/remove-revisions`)
-      return json({ state: 'ok', removed: call.body?.revisions ?? [] });
-    return json({ state: 'refused', reason: 'unmocked', detail: call.url }, 404);
-  });
-}
-
-const onExplain = vi.fn();
-const onOpenBlock = vi.fn();
-
-const props = {
-  target: { repository: REPO, master: MASTER, leaf: LEAF },
-  comparison: { reference: 'review-comparison:task/leaf/9', number: 9 },
+import {
+  BASE,
+  text,
+  json,
+  serve,
+  channel,
+  SAVED_STATE,
+  REVISIONS,
+  server,
   onExplain,
-  onOpenBlock,
-};
+  props,
+  badgeBriefOf,
+} from './ExplanationView.test-utils';
 
 afterEach(() => {
   resetTray();
@@ -242,9 +112,59 @@ describe('during the build', () => {
 });
 
 describe('a saved page', () => {
+  it('puts its frame container in fullscreen and follows entry and exit', async () => {
+    server();
+    render(<ExplanationView {...props} />);
+    await screen.findByTestId('explanation-frame');
+    const shell = screen.getByTestId('explanation-frame-slot');
+    const button = within(shell).getByTestId('explanation-frame-fullscreen');
+    let fullscreenElement: Element | null = null;
+    const originalElement = Object.getOwnPropertyDescriptor(document, 'fullscreenElement');
+    const originalExit = Object.getOwnPropertyDescriptor(document, 'exitFullscreen');
+    const change = (element: Element | null) => {
+      fullscreenElement = element;
+      document.dispatchEvent(new Event('fullscreenchange'));
+      return Promise.resolve();
+    };
+    const request = vi.fn(() => change(shell));
+    const exit = vi.fn(() => change(null));
+    Object.defineProperty(shell, 'requestFullscreen', { value: request });
+    Object.defineProperties(document, {
+      fullscreenElement: { configurable: true, get: () => fullscreenElement },
+      exitFullscreen: { configurable: true, value: exit },
+    });
+    try {
+      expect(button.getAttribute('aria-pressed')).toBe('false');
+      fireEvent.click(button);
+      expect(request).toHaveBeenCalledOnce();
+      expect(button.getAttribute('aria-pressed')).toBe('true');
+      expect(text(button)).toBe('esc to leave full screen');
+
+      fireEvent.click(button);
+      expect(exit).toHaveBeenCalledOnce();
+      expect(button.getAttribute('aria-pressed')).toBe('false');
+      expect(text(button)).toBe('full screen');
+
+      fireEvent.click(button);
+      act(() => void change(null));
+      expect(button.getAttribute('aria-pressed')).toBe('false');
+      expect(text(button)).toBe('full screen');
+    } finally {
+      if (originalElement) Object.defineProperty(document, 'fullscreenElement', originalElement);
+      else Reflect.deleteProperty(document, 'fullscreenElement');
+      if (originalExit) Object.defineProperty(document, 'exitFullscreen', originalExit);
+      else Reflect.deleteProperty(document, 'exitFullscreen');
+    }
+  });
+
   it('opens in one isolated frame with no model: a channel for its revision and nothing else', async () => {
     const calls = server();
-    render(<ExplanationView {...props} />);
+    render(
+      <ExplanationView
+        {...props}
+        headerDetails={<span data-testid="technical-slot">Technical details</span>}
+      />,
+    );
 
     const frame = await screen.findByTestId('explanation-frame');
     // One frame instance of MIK-R104 v3's host, on the saved revision exactly.
@@ -258,35 +178,101 @@ describe('a saved page', () => {
     // Nothing that could start an agent or a model was called.
     expect(calls.some((call) => /generate|build|messages|\/say/.test(call.url))).toBe(false);
     expect(calls.some((call) => call.url === `${BASE}/update`)).toBe(false);
-    expect(text(screen.getByTestId('explanation-standfirst'))).toContain('revision 8 · bound to #8');
+    expect(text(screen.getByTestId('explanation-standfirst'))).toContain(
+      'revision 8 · bound to #8',
+    );
+    const header = screen.getByTestId('explanation-frame-header');
+    expect(within(header).getByTestId('technical-slot')).toBeTruthy();
+    const menu = within(header).getByTestId('revision-controls') as HTMLDetailsElement;
+    expect(menu.open).toBe(false);
+    expect(within(menu).getByTestId('revision-selector')).toBeTruthy();
   });
 
-  it('shows the trusted stale list whatever the frame draws, and whatever it fails to draw', async () => {
+  it('draws its record and no stale list whatever the frame draws, and the badge holds the parts', async () => {
     server();
-    const { unmount } = render(<ExplanationView {...props} />);
+    const brief = await badgeBriefOf();
+    const { unmount } = render(
+      <>
+        <ExplanationSwitch
+          view="explanation"
+          stale={brief.total}
+          brief={brief}
+          onSwitch={vi.fn()}
+        />
+        <ExplanationView {...props} />
+      </>,
+    );
     await screen.findByTestId('explanation-frame');
+    const column = screen.getByTestId('explanation-view');
+    // F18: the column is the revision's record -- no "Stale parts" block, no rows, no regenerate.
+    expect(within(column).queryByTestId('stale-parts')).toBeNull();
+    expect(within(column).queryAllByTestId('stale-part')).toHaveLength(0);
+    expect(within(column).queryByTestId('regenerate-stale')).toBeNull();
+    expect(within(column).getByTestId('revision-controls')).toBeTruthy();
+
+    // The badge holds the trusted list instead: five parts, three listed, with their reasons.
+    fireEvent.click(screen.getByTestId('explanation-stale-mark'));
+    expect(screen.getByTestId('explanation-stale-badge').getAttribute('data-count')).toBe('5');
     expect(screen.getAllByTestId('stale-part')).toHaveLength(3);
-    expect(screen.getByTestId('stale-parts').getAttribute('data-count')).toBe('5');
+    expect(text(screen.getByTestId('explanation-stale-details'))).toContain('Risks I see');
+    expect(text(screen.getByTestId('explanation-stale-details'))).toContain(
+      'the grades of 4 changed blocks',
+    );
     expect(text(screen.getByTestId('stale-more'))).toContain('+ 2 more stale parts');
-    expect(text(screen.getByTestId('stale-parts'))).toContain('Risks I see');
-    expect(text(screen.getByTestId('stale-parts'))).toContain('the grades of 4 changed blocks');
     unmount();
 
-    // The page cannot be shown at all: the list is unchanged, because it never came from the page.
-    vi.unstubAllGlobals();
-    server({
-      sessions: (call) =>
-        json(
-          { state: 'refused', reason: 'no-ready-revision', detail: `r${call.body?.revision}` },
-          404,
-        ),
-    });
-    render(<ExplanationView {...props} />);
-    expect(text(await screen.findByTestId('explanation-frame-problem'))).toContain(
-      'no-ready-revision',
+    // The page cannot be shown at all: on the mounted review page, whose top line badge is wired
+    // from the page's own read (useHeaderStaleness), the badge still holds the trusted list.
+    const page = `/api/explainer/${PLACE.repo}/${PLACE.master}/${PLACE.leaf}`;
+    window.localStorage.clear();
+    window.history.replaceState(
+      null,
+      '',
+      `/#review?${new URLSearchParams({ repo: PLACE.repo, master: PLACE.master, leaf: PLACE.leaf })}`,
     );
-    expect(screen.getAllByTestId('stale-part')).toHaveLength(3);
-    expect(screen.getByTestId('stale-parts').getAttribute('data-count')).toBe('5');
+    resetCardCachesForTests();
+    treeViewStore.getState().setView('changed');
+    treeOrderStore.getState().setOrder('priority');
+    stubIntersection();
+    vi.unstubAllGlobals();
+    servePage();
+    const baseFetch = globalThis.fetch;
+    const sessions: unknown[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const url = new URL(String(input), 'http://localhost');
+        if (url.pathname === `${page}/state`) return json(SAVED_STATE);
+        if (url.pathname === `${page}/revisions`) return json(REVISIONS);
+        if (url.pathname === '/api/canvas/sessions') {
+          const body = JSON.parse(String(init?.body)) as { revision?: number };
+          sessions.push(body);
+          return json({ state: 'refused', reason: 'no-ready-revision', detail: `r${body.revision}` }, 404);
+        }
+        return baseFetch(input, init);
+      }),
+    );
+    try {
+      renderPage({ chat: { open: false, toggle: vi.fn(), expand: vi.fn() } });
+      await waitForOpening();
+      fireEvent.click(screen.getByTestId('switch-explanation'));
+      expect(text(await screen.findByTestId('explanation-frame-problem'))).toContain(
+        'no-ready-revision',
+      );
+      expect(sessions.length).toBeGreaterThan(0);
+      expect(screen.queryByTestId('explanation-frame')).toBeNull();
+      expect(within(screen.getByTestId('explanation-view')).queryByTestId('stale-parts')).toBeNull();
+      fireEvent.click(await screen.findByTestId('explanation-stale-mark'));
+      expect(screen.getByTestId('explanation-stale-badge').getAttribute('data-count')).toBe('5');
+      expect(screen.getAllByTestId('stale-part')).toHaveLength(3);
+      expect(text(screen.getByTestId('explanation-stale-details'))).toContain('Risks I see');
+      expect(text(screen.getByTestId('explanation-stale-details'))).toContain(
+        'the grades of 4 changed blocks',
+      );
+      expect(text(screen.getByTestId('stale-more'))).toContain('+ 2 more stale parts');
+    } finally {
+      cleanup();
+    }
   });
 });
 
@@ -323,7 +309,9 @@ describe('the revision selector in the view', () => {
     expect(removal?.body).toEqual({ revisions: [9] });
     // The view re-reads after the removal, so it never shows a revision the host no longer holds.
     await waitFor(() =>
-      expect(calls.filter((call) => call.url.startsWith(`${BASE}/state`)).length).toBeGreaterThan(1),
+      expect(calls.filter((call) => call.url.startsWith(`${BASE}/state`)).length).toBeGreaterThan(
+        1,
+      ),
     );
   });
 
@@ -342,8 +330,18 @@ describe('the revision selector in the view', () => {
     const opened = calls
       .filter((call) => call.url === '/api/canvas/sessions')
       .map((call) => call.body);
-    expect(opened.slice(-2).map((body) => body?.revision).sort()).toEqual([8, 9]);
-    expect(opened.slice(-2).map((body) => body?.compareSlot).sort()).toEqual(['left', 'right']);
+    expect(
+      opened
+        .slice(-2)
+        .map((body) => body?.revision)
+        .sort(),
+    ).toEqual([8, 9]);
+    expect(
+      opened
+        .slice(-2)
+        .map((body) => body?.compareSlot)
+        .sort(),
+    ).toEqual(['left', 'right']);
     // Neither compare channel is substituted by the latest revision: each asks for exactly its
     // own retained revision and its own binding.
     const leftCall = opened.slice(-2).find((body) => body?.compareSlot === 'left');
@@ -352,9 +350,7 @@ describe('the revision selector in the view', () => {
     expect(leftCall?.comparisonNumber).toBe(9);
     expect(rightCall?.revision).toBe(8);
     expect(rightCall?.comparisonNumber).toBe(8);
-    expect(
-      calls.filter((call) => call.url.endsWith('/revoke')).length,
-    ).toBeGreaterThanOrEqual(1);
+    expect(calls.filter((call) => call.url.endsWith('/revoke')).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByTestId('explanation-compare')).not.toBeNull();
     expect(text(screen.getByTestId('compare-line'))).toContain('its own isolated frame');
     // Two frames of the same isolated host: one sandbox policy, two different documents.
@@ -362,84 +358,42 @@ describe('the revision selector in the view', () => {
   });
 });
 
-describe('the claims and their bases', () => {
-  it('marks every claim and names all four bases in the legend', async () => {
-    server();
-    render(<ExplanationView {...props} />);
-    await screen.findByTestId('explanation-frame');
-
-    const legend = screen.getByTestId('basis-legend');
-    const entries = within(legend).getAllByTestId('legend-entry');
-    expect(entries.map((entry) => entry.getAttribute('data-basis'))).toEqual([
-      'recorded-fact',
-      'mechanical-signal',
-      'presenter-inference',
-      'intended',
-    ]);
-    expect(text(legend)).toContain('a fact in the memory');
-    expect(text(legend)).toContain('measured by the product');
-    expect(text(legend)).toContain("the explainer's reading");
-    expect(text(legend)).toContain('intended, not a fact about the code');
-
-    const claims = screen.getAllByTestId('claim');
-    expect(claims.map((claim) => claim.getAttribute('data-basis'))).toEqual([
-      'recorded-fact',
-      'mechanical-signal',
-      'presenter-inference',
-      'intended',
-    ]);
-    expect(text(within(claims[2]).getByTestId('claim-chip'))).toContain('✦ inference');
-  });
-
-  it('opens a claim’s block in the Review view and selects it', async () => {
-    server();
-    const selected: ClaimLink[] = [];
-    function Harness() {
-      const [block, setBlock] = useState<string | null>(null);
-      return (
-        <>
-          <ExplanationView
-            {...props}
-            onOpenBlock={(link) => {
-              selected.push(link);
-              setBlock(link.block);
-            }}
-          />
-          <p data-testid="review-selection">{block ?? 'nothing selected'}</p>
-        </>
-      );
-    }
-    render(<Harness />);
-    await screen.findByTestId('explanation-frame');
-    expect(text(screen.getByTestId('review-selection'))).toBe('nothing selected');
-
-    fireEvent.click(screen.getByTestId('claim-link'));
-    expect(selected[0]).toEqual({ block: 'b20', label: 'turn_ended.ts L1697–1817' });
-    expect(text(screen.getByTestId('review-selection'))).toBe('b20');
-  });
-});
-
-describe('the moved notice', () => {
-  it('offers Update when the leaf moved and an explainer has worked, and presses only that route', async () => {
-    const calls = server({ state: { ...SAVED_STATE, moved: { from: 8, to: 9, blocks: 4 } } });
-    render(<ExplanationView {...props} />);
-
-    const notice = await screen.findByTestId('moved-notice');
-    expect(notice.getAttribute('data-moved')).toBe('moved');
-    expect(text(screen.getByTestId('moved-line'))).toContain('Task moved: #8 → #9 · 4 blocks changed');
-    fireEvent.click(screen.getByTestId('update'));
-
-    await waitFor(() =>
-      expect(calls.filter((call) => call.url === `${BASE}/update`)).toHaveLength(1),
-    );
-    expect(calls.find((call) => call.url === `${BASE}/update`)?.body).toEqual({
-      comparison: 'review-comparison:task/leaf/9',
+describe('the moved leaf', () => {
+  it('names the newer comparison in the badge, and the column neither notices nor rebinds by itself', async () => {
+    const calls = server({
+      state: { ...SAVED_STATE, moved: { from: 8, to: 9, blocks: 4 } },
     });
-    expect(calls.some((call) => /generate|build|messages/.test(call.url))).toBe(false);
+    const brief = await badgeBriefOf();
+    render(
+      <>
+        <ExplanationSwitch
+          view="explanation"
+          stale={brief.total}
+          brief={brief}
+          onSwitch={vi.fn()}
+        />
+        <ExplanationView {...props} />
+      </>,
+    );
+
+    await screen.findByTestId('explanation-frame');
+    // The notice is gone from the column (F18): its reason is the badge's, in the page's own words.
+    expect(screen.queryByTestId('moved-notice')).toBeNull();
+    expect(screen.queryByTestId('moved-line')).toBeNull();
+    expect(screen.queryByTestId('update')).toBeNull();
+    fireEvent.click(screen.getByTestId('explanation-stale-mark'));
+    expect(text(screen.getByTestId('newer-comparison'))).toBe(
+      'A newer comparison exists: Task moved: #8 → #9 · 4 blocks changed',
+    );
+
+    // Reading the page and opening the badge press nothing: the rebind route is never asked, and no
+    // model, build or message is started.
+    expect(calls.filter((call) => call.url === `${BASE}/update`)).toHaveLength(0);
+    expect(calls.filter((call) => /generate|build|messages/.test(call.url))).toHaveLength(0);
   });
 
-  it('says the view renewed itself, and offers no Update, when no explainer has worked', async () => {
-    server({
+  it('draws no notice and no badge when no explainer has worked: there is nothing to say', async () => {
+    const calls = server({
       state: {
         ...SAVED_STATE,
         explanation: null,
@@ -450,14 +404,27 @@ describe('the moved notice', () => {
       },
       revisions: { state: 'ok', revisions: [], pinned: null },
     });
-    render(<ExplanationView {...props} />);
-
-    const notice = await screen.findByTestId('moved-notice');
-    expect(notice.getAttribute('data-moved')).toBe('moved-no-explainer');
-    expect(text(screen.getByTestId('moved-no-explainer-note'))).toContain(
-      'the view renewed itself',
+    const brief = await badgeBriefOf();
+    render(
+      <>
+        <ExplanationSwitch
+          view="explanation"
+          stale={brief.total}
+          brief={brief}
+          onSwitch={vi.fn()}
+        />
+        <ExplanationView {...props} />
+      </>,
     );
+
+    // No page, no grade, nothing stale: no part is claimed, so the top line marks nothing.
+    expect(brief.total).toBe(0);
+    expect(screen.queryByTestId('explanation-stale-badge')).toBeNull();
+    expect(screen.queryByTestId('explanation-stale-mark')).toBeNull();
+    expect(screen.queryByTestId('moved-notice')).toBeNull();
     expect(screen.queryByTestId('update')).toBeNull();
+    expect(await screen.findByTestId('explanation-empty')).toBeTruthy();
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0);
   });
 });
 
@@ -466,7 +433,11 @@ describe('a read that fails', () => {
     serve((call) =>
       call.url.startsWith(`${BASE}/state`)
         ? json(
-            { state: 'refused', reason: 'no-environment', detail: 'the leaf has no explainer workspace' },
+            {
+              state: 'refused',
+              reason: 'no-environment',
+              detail: 'the leaf has no explainer workspace',
+            },
             503,
           )
         : json({ state: 'ok', revisions: [], pinned: null }),
@@ -498,9 +469,16 @@ describe('revision & comparison re-reads, compare dual metadata, and selective r
               text: `claim text for revision ${rev}`,
             },
           ],
+          // Each revision's own stale part, so the frame's list can name the revision it belongs to.
           stale: {
             total: 1,
-            parts: [{ id: 'look', title: `Stale in r${rev}`, reason: `reason r${rev}` }],
+            parts: [
+              {
+                id: rev === 7 ? 'risks' : 'look',
+                title: `Stale in r${rev}`,
+                reason: `reason r${rev}`,
+              },
+            ],
           },
         });
       }
@@ -515,32 +493,70 @@ describe('revision & comparison re-reads, compare dual metadata, and selective r
 
     const view = render(<ExplanationView {...props} />);
     await screen.findByTestId('explanation-frame');
+    // The staleness the frame is told on its ready: the shown revision's own stale parts.
+    const staleSentOnReady = () => {
+      const frame = screen.getByTestId('explanation-frame') as HTMLIFrameElement;
+      const post = vi.spyOn(frame.contentWindow!, 'postMessage');
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            source: frame.contentWindow,
+            data: { type: 'ready', requestId: `req-ready-${frame.getAttribute('data-revision')}` },
+          }),
+        );
+      });
+      const sent = post.mock.calls
+        .map(([envelope]) => envelope as { type: string; revision: number; payload: { parts: string[] } })
+        .filter((envelope) => envelope.type === 'stale-parts');
+      post.mockRestore();
+      // The ready and the parts' own effect may both send it; each envelope says the same.
+      return [...new Set(sent.map((envelope) => JSON.stringify([envelope.revision, envelope.payload.parts])))]
+        .map((one) => JSON.parse(one) as [number, string[]]);
+    };
+    expect(staleSentOnReady()).toEqual([[8, ['look']]]);
 
     const firstSession = calls.find((call) => call.url === '/api/canvas/sessions')!;
     expect(firstSession.body?.frame).toBe('explainer');
     expect(firstSession.body?.compareSlot).toBe('primary');
     expect(firstSession.body?.revision).toBe(8);
     expect(firstSession.body?.comparisonNumber).toBe(8);
-    expect(text(screen.getByTestId('explanation-standfirst'))).toContain('revision 8 · bound to #8');
-    expect(text(screen.getByTestId('explanation-claims'))).toContain('claim text for revision 8');
+    expect(text(screen.getByTestId('explanation-standfirst'))).toContain(
+      'revision 8 · bound to #8',
+    );
 
-    // Switch to historical revision 7: re-reads state for revision 7 and updates standfirst, stale list, and claims.
+    // Switch to historical revision 7: re-reads state for revision 7 and updates the standfirst. The
+    // stale list is the top line's badge (F18), so the column draws none for either revision.
     const revButtons = screen.getAllByTestId('revision-show');
     fireEvent.click(revButtons[0]);
 
     await waitFor(() =>
-      expect(text(screen.getByTestId('explanation-standfirst'))).toContain('revision 7 · bound to #7'),
+      expect(text(screen.getByTestId('explanation-standfirst'))).toContain(
+        'revision 7 · bound to #7',
+      ),
     );
+    expect(
+      calls.some(
+        (call) =>
+          call.url.startsWith(`${BASE}/state`) &&
+          new URL(call.url, 'http://localhost').searchParams.get('revision') === '7',
+      ),
+    ).toBe(true);
+    expect(screen.queryByTestId('stale-parts')).toBeNull();
+    // The staleness shown with revision 7 is revision 7's: its frame is told r7's stale part.
     await waitFor(() =>
-      expect(text(screen.getByTestId('explanation-claims'))).toContain('claim text for revision 7'),
+      expect(screen.getByTestId('explanation-frame').getAttribute('data-revision')).toBe('7'),
     );
-    expect(text(screen.getByTestId('stale-parts'))).toContain('Stale in r7');
+    await waitFor(() => expect(staleSentOnReady()).toEqual([[7, ['risks']]]));
 
     // Change comparison prop: re-reads state with the new comparisonNumber.
     view.rerender(
       <ExplanationView
         {...props}
-        comparison={{ reference: 'review-comparison:task/leaf/10', number: 10, owner: 'recorded' }}
+        comparison={{
+          reference: 'review-comparison:task/leaf/10',
+          number: 10,
+          owner: 'recorded',
+        }}
       />,
     );
     await waitFor(() =>
@@ -552,20 +568,44 @@ describe('revision & comparison re-reads, compare dual metadata, and selective r
       ).toBe(true),
     );
 
-    // Compare mode renders per-page stale lists, standfirsts, and claims for BOTH compared revisions.
+    // Compare mode renders a standfirst for each compared revision, and no stale list in either.
     fireEvent.click(screen.getByTestId('compare'));
     const compareCols = await screen.findAllByTestId('explanation-compare-column');
     expect(compareCols).toHaveLength(2);
-    expect(screen.getAllByTestId('stale-parts')).toHaveLength(2);
-    expect(screen.getAllByTestId('explanation-claims')).toHaveLength(2);
+    for (const column of compareCols) {
+      expect(within(column).getByTestId('explanation-standfirst')).toBeTruthy();
+      expect(within(column).queryByTestId('stale-parts')).toBeNull();
+    }
   });
 
   it('sends selective regeneration once when live, and opens prefilled parts+grades form when no seat or archived, preserving state on failure', async () => {
+    // F18: the one refresh control is the top line badge's, wired by the mounted review page, so
+    // this case runs through ReviewSurface rather than the column alone.
+    const address = { repository: PLACE.repo, master: PLACE.master, leaf: PLACE.leaf };
+    const page = `/api/explainer/${PLACE.repo}/${PLACE.master}/${PLACE.leaf}`;
+    window.localStorage.clear();
+    window.history.replaceState(
+      null,
+      '',
+      `/#review?${new URLSearchParams({ repo: PLACE.repo, master: PLACE.master, leaf: PLACE.leaf })}`,
+    );
+    resetCardCachesForTests();
+    treeViewStore.getState().setView('changed');
+    treeOrderStore.getState().setOrder('priority');
+    stubIntersection();
+    let seat: 'live' | 'archived' = 'live';
     let failBuild = false;
-    const calls = serve((call, _calls, counter) => {
-      if (call.url.startsWith(`${BASE}/state`)) {
-        return json({
+    const builds: Array<Record<string, unknown>> = [];
+    servePage();
+    const baseFetch = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const url = new URL(String(input), 'http://localhost');
+        const saved = {
           ...SAVED_STATE,
+          seat: { state: seat },
+          retired: seat === 'archived',
           stale: {
             ...SAVED_STATE.stale,
             staleGrades: ['RLZ-10', 'RLZ-11'],
@@ -576,93 +616,81 @@ describe('revision & comparison re-reads, compare dual metadata, and selective r
               gradeCount: 2,
             },
           },
-        });
-      }
-      if (call.url === `${BASE}/revisions`) return json(REVISIONS);
-      if (call.url === '/api/canvas/sessions') {
-        counter.sessions += 1;
-        return json(channel(`s${counter.sessions}`, Number(call.body?.revision ?? 1)));
-      }
-      if (call.url === `${BASE}/build`) {
-        if (failBuild) {
-          return json({ state: 'refused', reason: 'host-busy', detail: 'explainer is busy' }, 409);
+        };
+        // The Review tab's badge reads `/stale` alone: the same staleness, no seat (D569).
+        if (url.pathname === `${page}/stale`) {
+          return json({ state: 'ok', stale: saved.stale, ...saved.stale, explanation: saved.explanation, movedNotice: null });
         }
-        return json({ state: 'ok', attempt: 'regen-1' });
-      }
-      if (call.url.endsWith('/revoke')) return json({ state: 'ok', revoked: true });
-      return json({ state: 'ok' });
-    });
-
-    const { unmount } = render(<ExplanationView {...props} />);
-    const regenBtn = await screen.findByTestId('regenerate-stale');
-    expect(text(regenBtn)).toBe('Regenerate stale (3 parts · 2 grades)');
-
-    // Failure preserves the saved revision and stale marks.
-    failBuild = true;
-    fireEvent.click(regenBtn);
-    expect(text(await screen.findByTestId('regenerate-stale-problem'))).toContain(
-      'host-busy: explainer is busy',
+        if (url.pathname === `${page}/state`) return json(saved);
+        if (url.pathname === `${page}/revisions`) return json(REVISIONS);
+        if (url.pathname === `${page}/build`) {
+          builds.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          if (failBuild) {
+            return json({ state: 'refused', reason: 'host-busy', detail: 'explainer is busy' }, 409);
+          }
+          return json({ state: 'ok', attempt: 'regen-1' });
+        }
+        if (url.pathname === '/api/canvas/sessions') return json(channel('s1', 8));
+        if (url.pathname.endsWith('/revoke')) return json({ state: 'ok', revoked: true });
+        return baseFetch(input, init);
+      }),
     );
-    expect(screen.getByTestId('explanation-frame').getAttribute('data-revision')).toBe('8');
-    expect(screen.getAllByTestId('stale-part')).toHaveLength(3);
+    const chat = { open: false, toggle: vi.fn(), expand: vi.fn() };
 
-    // Live success sends selective message once.
-    failBuild = false;
-    fireEvent.click(regenBtn);
-    await waitFor(() =>
-      expect(calls.filter((call) => call.url === `${BASE}/build`)).toHaveLength(2),
-    );
-    const buildCall = calls.filter((call) => call.url === `${BASE}/build`)[1];
-    expect(buildCall.body).toMatchObject({
-      message: 'Regenerate revision 8: 3 parts and 2 grades are stale.',
-      stalePartIds: ['look', 'risks', 'flow'],
-      staleGrades: ['RLZ-10', 'RLZ-11'],
-      regeneration: true,
-    });
-    unmount();
+    try {
+      const live = renderPage({ chat });
+      await waitForOpening();
+      fireEvent.click(screen.getByTestId('switch-explanation'));
+      await screen.findByTestId('explanation-frame');
+      fireEvent.click(await screen.findByTestId('explanation-stale-mark'));
+      const regenBtn = screen.getByTestId('regenerate-stale');
+      expect(text(regenBtn)).toBe('Regenerate stale (3 parts · 2 grades)');
 
-    // Archived / no-seat case: opens first-request form prefilled with both stale parts and stale grades, no POST.
-    vi.unstubAllGlobals();
-    const archivedCalls = serve((call) => {
-      if (call.url.startsWith(`${BASE}/state`)) {
-        return json({
-          ...SAVED_STATE,
-          seat: { state: 'archived' },
-          retired: true,
-          stale: {
-            ...SAVED_STATE.stale,
-            staleGrades: ['RLZ-10', 'RLZ-11'],
-            regeneration: {
-              label: 'Regenerate stale (3 parts · 2 grades)',
-              message: 'Regenerate revision 8: 3 parts and 2 grades are stale.',
-              partCount: 3,
-              gradeCount: 2,
-            },
-          },
-        });
-      }
-      if (call.url === `${BASE}/revisions`) return json(REVISIONS);
-      if (call.url === '/api/canvas/sessions') return json(channel('s1', 8));
-      return json({ state: 'ok' });
-    });
+      // Failure preserves the saved revision and stale marks.
+      failBuild = true;
+      fireEvent.click(regenBtn);
+      expect(text(await screen.findByTestId('regenerate-stale-problem'))).toContain(
+        'host-busy: explainer is busy',
+      );
+      expect(screen.getByTestId('explanation-frame').getAttribute('data-revision')).toBe('8');
+      expect(screen.getAllByTestId('stale-part')).toHaveLength(3);
 
-    render(<ExplanationView {...props} />);
-    const archivedBtn = await screen.findByTestId('regenerate-stale');
-    fireEvent.click(archivedBtn);
+      // Live success sends selective message once.
+      failBuild = false;
+      fireEvent.click(screen.getByTestId('regenerate-stale'));
+      await waitFor(() => expect(builds).toHaveLength(2));
+      expect(builds[1]).toMatchObject({
+        message: 'Regenerate revision 8: 3 parts and 2 grades are stale.',
+        stalePartIds: ['look', 'risks', 'flow'],
+        staleGrades: ['RLZ-10', 'RLZ-11'],
+        regeneration: true,
+      });
+      live.unmount();
 
-    expect(onExplain).toHaveBeenCalledTimes(1);
-    const pending = pendingFirstRequest(props.target);
-    expect(pending?.staleParts.map((p) => p.id)).toEqual([
-      'look',
-      'risks',
-      'flow',
-      'RLZ-10',
-      'RLZ-11',
-    ]);
-    expect(trayStore.getState().text).toBe(
-      'Regenerate revision 8: 3 parts and 2 grades are stale.',
-    );
-    expect(archivedCalls.filter((call) => call.url === `${BASE}/build`)).toHaveLength(0);
+      // Archived / no-seat case: opens first-request form prefilled with both stale parts and stale grades, no POST.
+      seat = 'archived';
+      renderPage({ chat });
+      await waitForOpening();
+      fireEvent.click(await screen.findByTestId('explanation-stale-mark'));
+      fireEvent.click(screen.getByTestId('regenerate-stale'));
+
+      // From the Review tab the seat is read at the press, so the form opens once that read answers.
+      await waitFor(() => expect(chat.expand).toHaveBeenCalledTimes(1));
+      const pending = pendingFirstRequest(address);
+      expect(pending?.staleParts.map((p) => p.id)).toEqual([
+        'look',
+        'risks',
+        'flow',
+        'RLZ-10',
+        'RLZ-11',
+      ]);
+      expect(trayStore.getState().text).toBe(
+        'Regenerate revision 8: 3 parts and 2 grades are stale.',
+      );
+      expect(builds).toHaveLength(2);
+    } finally {
+      cleanup();
+    }
   });
 });
 
@@ -671,7 +699,9 @@ describe('frame protocol: stale-parts, offer-selections, request-explanation, an
     expect(
       forwardedBody({
         type: 'offer-selections',
-        payload: { selections: [{ question: 'Which path?', choice: 'Fast path' }] },
+        payload: {
+          selections: [{ question: 'Which path?', choice: 'Fast path' }],
+        },
       }),
     ).not.toBeNull();
 
@@ -679,12 +709,20 @@ describe('frame protocol: stale-parts, offer-selections, request-explanation, an
       if (call.url.startsWith(`${BASE}/state`)) {
         return json({
           ...SAVED_STATE,
-          explainer: { agentId: 'explainer-seat-1', workspace: '/tmp/wks', generation: 1 },
+          explainer: {
+            agentId: 'explainer-seat-1',
+            workspace: '/tmp/wks',
+            generation: 1,
+          },
           stale: {
             total: 4,
             parts: [
               { id: 'look', title: 'Where to look first', reason: 'changed' },
-              { id: 'unknown-part', title: 'Unknown', reason: 'not in part map' },
+              {
+                id: 'unknown-part',
+                title: 'Unknown',
+                reason: 'not in part map',
+              },
             ],
           },
         });
@@ -721,7 +759,9 @@ describe('frame protocol: stale-parts, offer-selections, request-explanation, an
     };
     expect(sentEnvelope.type).toBe('stale-parts');
     expect(sentEnvelope.payload.parts).toEqual(['look']);
-    expect(screen.getByTestId('explanation-frame-slot').getAttribute('data-stale-dropped')).toBe('1');
+    expect(screen.getByTestId('explanation-frame-slot').getAttribute('data-stale-dropped')).toBe(
+      '1',
+    );
 
     // First offer-selections places one replacing pick in trayStore defaulted to explainer-seat-1.
     let now = 1000;
@@ -886,9 +926,7 @@ describe('frame protocol: stale-parts, offer-selections, request-explanation, an
     fireEvent.load(leftFrame);
     fireEvent.load(leftFrame);
 
-    await waitFor(() =>
-      expect(screen.getByTestId('explanation-frame-navigated')).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByTestId('explanation-frame-navigated')).toBeTruthy());
     await waitFor(() => {
       const updatedFrames = screen.getAllByTestId('explanation-frame');
       const currentRight = updatedFrames.find((f) => f.getAttribute('data-slot') === 'right')!;
@@ -904,27 +942,36 @@ describe('frame protocol: stale-parts, offer-selections, request-explanation, an
       window.dispatchEvent(
         new MessageEvent('message', {
           source: (currentRight as HTMLIFrameElement).contentWindow,
-          data: { schema: 'ar-canvas-document/v1', session: rightSession, phase: 'departed' },
+          data: {
+            schema: 'ar-canvas-document/v1',
+            session: rightSession,
+            phase: 'departed',
+          },
         }),
       );
     });
     await waitFor(() =>
-      expect(
-        calls.some((call) => call.url === `/api/canvas/sessions/${rightSession}/revoke`),
-      ).toBe(true),
+      expect(calls.some((call) => call.url === `/api/canvas/sessions/${rightSession}/revoke`)).toBe(
+        true,
+      ),
     );
   });
 
-  it('revokes and reopens the right channel when its document-owned liveness port is lost', async () => {
+  it('revokes and reopens the right channel when its document never presents a liveness port', async () => {
     const calls = server();
     render(<ExplanationView {...props} />);
     const frame = await screen.findByTestId('explanation-frame');
     const srcBefore = frame.getAttribute('src');
     const sessionBefore = (srcBefore ?? '').split('/').pop()!;
 
-    // First load hands the document over to the presence probe. The document never answers the
-    // challenge with its port (a lost port, as a document that navigated while parsing leaves):
-    // the probe's own 250 ms timer revokes exactly this channel and reopens the saved revision.
+    // DOM attachment precedes passive-effect registration: finish that mount, as the next case does,
+    // before the document's first load. Then the load hands the document over to the presence
+    // probe, and the document never posts its `entered` port at all (a lost port, as a document that
+    // navigated while parsing leaves): the probe's own 250 ms timer revokes exactly this channel and
+    // reopens the saved revision.
+    await act(async () => {
+      await Promise.resolve();
+    });
     fireEvent.load(frame);
 
     // No local ceiling: the wait runs on the shared async bound configured in test/setup.ts
@@ -934,6 +981,57 @@ describe('frame protocol: stale-parts, offer-selections, request-explanation, an
         calls.some((call) => call.url === `/api/canvas/sessions/${sessionBefore}/revoke`),
       ).toBe(true),
     );
+    expect(screen.getByTestId('explanation-frame-navigated')).toBeTruthy();
+    // The replacement document is never rebound: a new channel opens, and the frame shows the
+    // saved page of the same revision through it.
+    await waitFor(() => {
+      const reopened = screen.getByTestId('explanation-frame');
+      expect(reopened.getAttribute('src')).not.toBe(srcBefore);
+    });
+    expect(screen.getByTestId('explanation-frame').getAttribute('data-revision')).toBe('8');
+  });
+
+  it('revokes and reopens the right channel when its document-owned liveness port is lost', async () => {
+    const calls = server();
+    render(<ExplanationView {...props} />);
+    const frame = await screen.findByTestId('explanation-frame');
+    const srcBefore = frame.getAttribute('src');
+    const sessionBefore = (srcBefore ?? '').split('/').pop()!;
+
+    // DOM attachment precedes passive-effect registration. Finish that mount before supplying
+    // the document's port, just as the admitted document's bootstrap does before its first load.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const port = {
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      postMessage: vi.fn(),
+      close: vi.fn(),
+    };
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source: (frame as HTMLIFrameElement).contentWindow,
+          data: { schema: 'ar-canvas-document/v1', session: sessionBefore, phase: 'entered' },
+          ports: [port as unknown as MessagePort],
+        }),
+      );
+    });
+    expect(port.onmessage).toEqual(expect.any(Function));
+    // The admitted document's port receives the challenge but never answers it. The probe's own
+    // 250 ms timer must revoke exactly this channel and reopen the saved revision.
+    fireEvent.load(frame);
+    expect(port.postMessage).toHaveBeenCalledOnce();
+    expect(port.postMessage).toHaveBeenCalledWith(expect.any(String));
+
+    // No local ceiling: the wait runs on the shared async bound configured in test/setup.ts
+    // (20 s), so a loaded machine delays the 250 ms product timer's revoke without failing it.
+    await waitFor(() =>
+      expect(
+        calls.some((call) => call.url === `/api/canvas/sessions/${sessionBefore}/revoke`),
+      ).toBe(true),
+    );
+    expect(port.close).toHaveBeenCalledOnce();
     expect(screen.getByTestId('explanation-frame-navigated')).toBeTruthy();
     // The replacement document is never rebound: a new channel opens, and the frame shows the
     // saved page of the same revision through it.

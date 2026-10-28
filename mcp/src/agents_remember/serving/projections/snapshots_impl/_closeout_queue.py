@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import os
+import threading
+import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.kernel.git_reference_files import packed_references
+from agents_remember.kernel.witnessed_memo import WitnessedMemo
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.projection import (
     CloseoutCandidateNode,
@@ -22,12 +26,15 @@ from agents_remember.serving.projections.snapshots_impl._common import (
     _read_json,
     _task_doc_cache,
 )
+from agents_remember.serving.projections.task_input_plan import TaskInputPlan, task_input_plan
 from agents_remember.tasks import TASK_DOCUMENT_SCHEMA, TaskDocument
 from agents_remember.tasks.retired_rows import payload_is_sprint
 from agents_remember.worktrees.modules.capture_index import _index_copy_has_trust_flags
 from agents_remember.worktrees.queue.closeout_projection import (
+    _DoorSource,
     _leaf_door_sources,
     _task_census,
+    _TaskCensus,
     capture_projection_source,
 )
 
@@ -67,10 +74,10 @@ def _sample_touches_live_inputs(coordination_root: Path, paths: tuple[str, ...])
 
 
 def tasks_tree_digest(tasks_root: Path, *, paths: list[Path] | None = None) -> str | None:
-    """One digest over every task-tree file's path, size, mtime and ctime (F09/F13).
+    """Digest the shared task-input plan's paths, sizes, mtimes and ctimes (F09/F13).
 
-    Task documents, enclosure contracts and queue store files all live under tasks/, so any
-    write a queue is built from moves this digest. ``ctime`` is part of the identity
+    The same reader-derived plan owns native watch admission and this invalidation set;
+    unrelated reports and evidence do not enter either. ``ctime`` is part of the identity
     (the F07 lesson): a rewrite whose ``(mtime_ns, size)`` was pinned via ``os.utime``
     still changes ctime, so without it the digest would call changed bytes unchanged
     and retain stale queues. A metadata-only change flips the digest but re-validates
@@ -84,15 +91,21 @@ def tasks_tree_digest(tasks_root: Path, *, paths: list[Path] | None = None) -> s
     yet) and a ``None`` sample walk and rebuild the map, which also prunes entries
     for files that left the tree.
     """
+    plan = task_input_plan(tasks_root)
+    if not plan.complete:
+        return None
     if paths is None:
-        return _walk_tasks_tree_digest(tasks_root)
+        return _walk_tasks_tree_digest(tasks_root, plan)
     stats = _digest_file_stats.get(str(tasks_root))
     if stats is None:
-        return _walk_tasks_tree_digest(tasks_root)
+        return _walk_tasks_tree_digest(tasks_root, plan)
     for path in paths:
         try:
             relative = path.relative_to(tasks_root).as_posix()
         except ValueError:
+            continue
+        if not plan.accepts_file(path):
+            stats.pop(relative, None)
             continue
         try:
             stamp = path.stat()
@@ -112,13 +125,15 @@ def tasks_tree_digest(tasks_root: Path, *, paths: list[Path] | None = None) -> s
 _digest_file_stats: dict[str, dict[str, tuple[int, int, int]]] = {}
 
 
-def _walk_tasks_tree_digest(tasks_root: Path) -> str | None:
-    """Full task-tree walk that rebuilds the retained per-file stat map (F09)."""
+def _walk_tasks_tree_digest(tasks_root: Path, plan: TaskInputPlan) -> str | None:
+    """Rebuild the stat map from the watcher's complete reader-derived plan."""
+    found: list[Path] = []
     try:
-        found = _walk_files(tasks_root, _TASKS_DIGEST_FILE_CAP)
+        for path in plan.input_files():
+            found.append(path)
+            if len(found) > _TASKS_DIGEST_FILE_CAP:
+                return None
     except OSError:
-        return None
-    if found is None:
         return None
     names = sorted(str(path.relative_to(tasks_root)) for path in found)
     digest = hashlib.sha256()
@@ -245,30 +260,6 @@ def _sprint_entries(
         ):
             sprints.append((ref, doc, path))
     return sprints
-
-
-def _walk_files(root: Path, cap: int) -> list[Path] | None:
-    """Every file under ``root``, or ``None`` past the cap / on any error."""
-
-    found: list[Path] = []
-    stack = [root]
-    while stack:
-        try:
-            with os.scandir(stack.pop()) as entries:
-                children = sorted(entries, key=lambda entry: entry.name)
-        except OSError:
-            return None
-        for child in children:
-            try:
-                if child.is_dir(follow_symlinks=False):
-                    stack.append(Path(child.path))
-                elif child.is_file(follow_symlinks=False):
-                    found.append(Path(child.path))
-                    if len(found) > cap:
-                        return None
-            except OSError:
-                return None
-    return found
 
 
 #: Watcher-visible task inputs are fully re-observed at least every five minutes.
@@ -440,17 +431,117 @@ def sprint_live_fingerprint(
     """
 
     try:
-        tasks = _task_census(coordination_root, sprint_ref, [], overrides)
+        sources = _sprint_door_sources(coordination_root, sprint_ref, overrides)
     except Exception:
         return None
     digest = hashlib.sha256()
     try:
-        for leaf, _master, _order in tasks.leafs:
-            for source in _leaf_door_sources(coordination_root, leaf, []):
-                digest.update(_door_source_live_parts(source).encode())
+        for source in sources:
+            digest.update(_door_source_live_parts(source).encode())
     except Exception:
         return None
     return digest.hexdigest()
+
+
+#: An input whose last write is this recent when its read begins is not held: a write landing while
+#: the census reads could otherwise be held under stats newer than what the census read.
+_RACY_NS = 2_000_000_000
+#: At most this many sprints' door sources are held; the least recently asked is read again.
+_HELD_SPRINTS = 256
+
+
+@dataclass(frozen=True)
+class _HeldDoorSources:
+    """One sprint's door sources and the inputs they were read from (stat first, F13)."""
+
+    paths: tuple[Path, ...]
+    stats: tuple[tuple[int, ...] | None, ...]
+    #: The task documents the census took from ``overrides``, held so their identity stays theirs.
+    documents: tuple[tuple[TaskDocumentRef, TaskDocument | None], ...]
+    sources: tuple[object, ...]
+
+
+_held_door_sources: OrderedDict[tuple[str, str], _HeldDoorSources] = OrderedDict()
+_held_door_sources_lock = threading.Lock()
+
+
+def _sprint_door_sources(
+    coordination_root: Path,
+    sprint_ref: TaskDocumentRef,
+    overrides: dict[TaskDocumentRef, TaskDocument] | None,
+) -> tuple[object, ...]:
+    """The sprint's door sources: the census and enclosure contracts, read only when they moved.
+
+    Stat first: the census (sprint, masters, leaves) and every leaf's enclosure contracts are read
+    again only when one of their files' stats, or a document the census took from ``overrides``,
+    differs from what the held sources were read under. Otherwise the held sources answer, and
+    only their live parts -- heads, index stamps, native status, source tips -- are read, which is
+    what an edit or a tip advance moves. A changed input always recounts.
+    """
+
+    key = (coordination_root.as_posix(), sprint_ref.key)
+    with _held_door_sources_lock:
+        held = _held_door_sources.get(key)
+        if held is not None:
+            _held_door_sources.move_to_end(key)
+    if held is not None and _still_held(held, overrides):
+        return held.sources
+    started = time.time_ns()
+    tasks = _task_census(coordination_root, sprint_ref, [], overrides)
+    sources: list[_DoorSource] = []
+    for leaf, _master, _order in tasks.leafs:
+        sources.extend(_leaf_door_sources(coordination_root, leaf, []))
+    paths = _census_inputs(tasks, sources)
+    stats = tuple(_input_stat(path) for path in paths)
+    if all(stat is None or (stat and stat[2] < started - _RACY_NS) for stat in stats):
+        refs = (
+            tasks.sprint.ref,
+            *(master.ref for master in tasks.masters),
+            *(leaf.ref for leaf, _master, _order in tasks.leafs),
+        )
+        documents = tuple((ref, None if overrides is None else overrides.get(ref)) for ref in refs)
+        with _held_door_sources_lock:
+            _held_door_sources[key] = _HeldDoorSources(paths, stats, documents, tuple(sources))
+            _held_door_sources.move_to_end(key)
+            while len(_held_door_sources) > _HELD_SPRINTS:
+                _held_door_sources.popitem(last=False)
+    return tuple(sources)
+
+
+def _still_held(
+    held: _HeldDoorSources, overrides: dict[TaskDocumentRef, TaskDocument] | None
+) -> bool:
+    for ref, document in held.documents:
+        if (None if overrides is None else overrides.get(ref)) is not document:
+            return False
+    return tuple(_input_stat(path) for path in held.paths) == held.stats
+
+
+def _census_inputs(tasks: _TaskCensus, sources: list[_DoorSource]) -> tuple[Path, ...]:
+    """Every file the census and the door sources read: documents, leaf rows, contracts."""
+
+    paths: dict[Path, None] = {tasks.sprint.path: None}
+    for master in tasks.masters:
+        paths[master.path] = None
+        for row in master.document.subTasks:
+            if row.file and row.status != "abandoned":
+                paths[(master.path.parent / row.file).with_suffix(".json")] = None
+    for source in sources:
+        paths[source.address] = None
+        paths[source.address.parent] = None  # a swapped ancestry is a moved input
+    return tuple(paths)
+
+
+def _input_stat(path: Path) -> tuple[int, ...] | None:
+    """The file's identity, ``None`` when absent; an unreadable one is never equal."""
+
+    try:
+        found = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return ()  # never held, never equal to a later read
+    return (found.st_ino, found.st_size, found.st_mtime_ns, found.st_ctime_ns, found.st_mode)
 
 
 def _door_source_live_parts(
@@ -505,15 +596,28 @@ def _worktree_live_parts(
         # Native status can hide an eligible edit under assume-unchanged/skip-worktree.
         # Reuse the capture owner's scanner: flags or an unsupported index force the
         # existing recomputation path rather than treating empty status as freshness.
-        if _index_copy_has_trust_flags(index_path) is not False:
+        # A clean scan is reused while the index keeps the full identity it was taken
+        # under (ctime included); any difference scans the bytes again.
+        if (
+            not stamp or _clean_index_stamps.get(index_path, stamp) is None
+        ) and _index_copy_has_trust_flags(index_path) is not False:
             return None
         index = f"{stamp!r}\0"
         generation = working_generation(worktree)
         if identity(index_path) != stamp:
             return None
+        if stamp:
+            _clean_index_stamps.put(index_path, stamp, True)
     except OSError:
         return None
     return f"head\0{head}\0index\0{index}entries\0{generation}\0"
+
+
+#: The index identity each worktree's last clean trust-flag scan was taken under; an entry
+#: is written only when the identity held from before the scan until after native status.
+#: One index per worktree (38 on the measured coordination root); an evicted index is
+#: simply scanned again.
+_clean_index_stamps: WitnessedMemo[Path, tuple[int, ...], bool] = WitnessedMemo(1024)
 
 
 def _worktree_gitdir(worktree: Path) -> Path | None:

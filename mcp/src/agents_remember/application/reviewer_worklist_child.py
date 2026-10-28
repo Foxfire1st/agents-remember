@@ -1,4 +1,4 @@
-"""One exact-tree reviewer worklist, through pipes and the existing leaf computation owner."""
+"""Exact-tree reviewer worklists in a warm isolated interpreter, one request at a time."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import atexit
 import gc
 import json
 import os
+import signal
 import sys
 import time
 from dataclasses import asdict, fields
@@ -24,11 +25,13 @@ from agents_remember.application.review_code_changes import (
     trees_from_request,
 )
 from agents_remember.application.review_leaf_facts import leaf_facts
+from agents_remember.application.review_memo_store import restore_review_memos, save_review_memos
 from agents_remember.application.review_source_inventory import memo_tree_observations
 from agents_remember.application.review_tree_comparison import ReviewTrees
 from agents_remember.kernel.git_command import memo_git_object_lookups, shared_blob_reads
 from agents_remember.kernel.recorded_reads import recorded_reads, replay_reads
 from agents_remember.kernel.reviewer_worklist_process import (
+    CHILD_DEADLINE_SECONDS,
     EXIT_BUILD_MISMATCH,
     OPERATION,
     ReviewerWorklistProcesses,
@@ -38,7 +41,8 @@ from agents_remember.kernel.reviewer_worklist_process import (
     build_identity,
     request_digest,
 )
-from agents_remember.serving.build_info import process_serving_build
+from agents_remember.memory.knowledge_index.build import kept_document_parses
+from agents_remember.serving.build_info import process_serving_build, runtime_source_digest
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 # The owner for a caller that supplies none (tests, scripts). The dashboard composes its own and
@@ -108,10 +112,15 @@ def _run(request: dict[str, Any]) -> dict[str, Any]:
     source = build_identity(
         process_serving_build().payload().model_dump(mode="json", exclude_none=True)
     )
-    if source != request["source"]:
+    if (
+        source != request["source"]
+        or runtime_source_digest(Path(source["packageRoot"])) != source["sourceDigest"]
+    ):
         raise WorklistBuildMismatch("reviewer worklist child imported a different source or build")
     payload = request["payload"]
     contract = _contract(payload["contract"])
+    # This child's first request fills the blob-keyed memos from the store (D569).
+    restore_review_memos(contract.coordination_root, source["sourceDigest"])
     candidate = CandidateTrees(**payload["candidate"])
     base = CapturedBase(**payload["base"])
     started = time.monotonic()
@@ -123,6 +132,7 @@ def _run(request: dict[str, Any]) -> dict[str, Any]:
         memo_git_object_lookups(),
         memo_tree_observations(),
         classification_run() as classification,
+        kept_document_parses(),
     ):
         try:
             review = payload.get("review")
@@ -151,16 +161,33 @@ def _run(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def main() -> None:
-    arm_child_lifetime()
-    gc.disable()  # the short-lived child alone owns the worklist parse and its objects
-    request = json.load(sys.stdin)
+def _serve(line: str) -> None:
+    request = json.loads(line)
     try:
         result = _run(request)
     except WorklistBuildMismatch as mismatch:
         print(mismatch, file=sys.stderr)
         raise SystemExit(EXIT_BUILD_MISMATCH) from mismatch
-    json.dump(result, sys.stdout)
+    sys.stdout.write(json.dumps(result) + "\n")
+    sys.stdout.flush()
+
+
+def main() -> None:
+    arm_child_lifetime()
+    signal.setitimer(signal.ITIMER_REAL, 0)
+    gc.disable()
+    for line in sys.stdin:
+        signal.setitimer(signal.ITIMER_REAL, CHILD_DEADLINE_SECONDS)
+        try:
+            _serve(line)
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            del line
+            # Request contexts have exited; retain imports, never the preceding request's graph.
+            gc.collect()
+        # After the answer was delivered: what this request added to the memos is queued for the
+        # answer writer, which stores it beside the next request (D569).
+        save_review_memos()
 
 
 if __name__ == "__main__":

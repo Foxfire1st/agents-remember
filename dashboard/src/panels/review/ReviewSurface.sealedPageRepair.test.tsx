@@ -31,24 +31,45 @@ const response = (body: unknown) => new Response(JSON.stringify(body), { status:
 // its selector, which is the subject the old auto-selection chose.
 const familyId = catalogue.outline!.families.find((one) => one.id === 'FAM-2HBJREC2')!.selector_id;
 const familyTarget = { ...target, selectorKind: 'family' as const, selectorId: familyId };
+// The family's members' overview (MIK-R211 v4 rule 10), once the family's own read has answered.
+const familyAnswered = (view: ReturnType<typeof render>) =>
+  waitFor(() => {
+    expect(view.getByTestId('review-family-overview').dataset.family).toBe(familyId);
+    expect(view.getByTestId('review-subject-provenance')).toBeTruthy();
+  });
+
+// The attribution is the read's facts: a family's stand in its overview's slot after its member
+// summaries (FamilyState, MIK-R211 v4 rule 10), an invariant's after its code.
+async function heldAttribution(view: ReturnType<typeof render>, area: () => HTMLElement, release: () => void, asked: URL[]) {
+  const remaining = () => within(area()).getByTestId('review-remaining');
+  await waitFor(() => expect(remaining().dataset.attributionSource).toBe('lane'));
+  expect(view.getAllByTestId('review-remaining')).toHaveLength(1);
+  expect(remaining().textContent).toContain('Attribution pending');
+  await waitFor(() => expect(asked.filter((url) => url.searchParams.has('lane'))).toHaveLength(1));
+  await act(async () => release());
+  await waitFor(() =>
+    expect(remaining().textContent).toContain(
+      'changed files without an invariant: 167',
+    ),
+  );
+  expect(remaining().textContent).toContain(
+    'changed files of unknown attribution: 2',
+  );
+  expect(asked.filter((url) => url.searchParams.has('lane'))).toHaveLength(1);
+}
 
 it('F05 main attribution uses the held destination counts and states pending without another read', async () => {
   const { release, asked } = serve(undefined, 'lane');
   const view = render(<ReviewSurface {...familyTarget} />);
-  await view.findByTestId('review-center-family');
-  expect(view.getByTestId('review-remaining').dataset.attributionSource).toBe('lane');
-  expect(view.getByTestId('review-remaining').textContent).toContain('Attribution pending');
-  await waitFor(() => expect(asked.filter((url) => url.searchParams.has('lane'))).toHaveLength(1));
-  await act(async () => release());
-  await waitFor(() =>
-    expect(view.getByTestId('review-remaining').textContent).toContain(
-      'changed files without an invariant: 167',
-    ),
-  );
-  expect(view.getByTestId('review-remaining').textContent).toContain(
-    'changed files of unknown attribution: 2',
-  );
-  expect(asked.filter((url) => url.searchParams.has('lane'))).toHaveLength(1);
+  await familyAnswered(view);
+  await heldAttribution(view, () => within(view.getByTestId('review-family-overview')).getByTestId('review-subject-slot'), release, asked);
+});
+
+it('F05 holds the same attribution in a selected invariant\'s facts after its code', async () => {
+  const { release, asked } = serve(undefined, 'lane');
+  const view = render(<ReviewSurface {...target} selectorKind="invariant" selectorId={selectedMemberId} />);
+  await view.findByTestId('review-center-member');
+  await heldAttribution(view, () => view.getByTestId('review-subject-after-code'), release, asked);
 });
 
 it('F08 every non-tree complete-file trigger gives a named refusal without selecting an unrelated range', async () => {
@@ -75,7 +96,7 @@ it('F08 every non-tree complete-file trigger gives a named refusal without selec
     }),
   );
   const view = render(<ReviewSurface {...familyTarget} />);
-  await view.findByTestId('review-center-family');
+  await familyAnswered(view);
   // The one "All changes" link is the tree's (MIK-R89 v2 rule 7); no card or pane repeats it.
   const triggers = view.getAllByRole('button', { name: /^All changes/ });
   expect(triggers).toHaveLength(1);
@@ -166,7 +187,7 @@ it('F04 an opened comparison retains its lane and inventory after a held subject
     }),
   );
   const view = render(<ReviewSurface {...familyTarget} />);
-  await view.findByTestId('review-center-family');
+  await familyAnswered(view);
   const tree = view.getByTestId('review-tree');
   // The tree's lane row counts the lane's bucket files (MIK-R86 v2 rule 4; W14).
   await waitFor(() => expect(within(tree).getByTestId('review-tree-lane').textContent).toContain('138 files'));

@@ -38,8 +38,8 @@ The code trees and both memory indexes are opened once per :class:`TreeLane` and
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Iterator, Mapping
-from contextlib import ExitStack, contextmanager
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
@@ -65,6 +65,7 @@ from agents_remember.application.knowledge_worklist.compute import non_text_link
 from agents_remember.application.review_source_inventory import tree_difference_observation
 from agents_remember.application.review_tree_comparison import ReviewTrees, TreeKnowledge
 from agents_remember.application.review_tree_entries import PLACEMENTS
+from agents_remember.memory.conversion.code_objects import CodeObjectError
 from agents_remember.memory.knowledge.tree_observation import TreeChange, TreePaths, TreeSide
 from agents_remember.memory.knowledge_index import Entry, KnowledgeIndex
 from agents_remember.memory.knowledge_index.query import IndexMismatchError
@@ -275,6 +276,46 @@ class TreeLane:
 
     def other(self, name: LaneSideName) -> LaneSide:
         return self.after if name == "before" else self.before
+
+    def prepare(self, changes: Sequence[TreeChange], *, hunks: bool = True) -> None:
+        """Read ahead, for the whole request, what classifying ``changes`` reads one path at a time.
+
+        The blobs the classification reads -- an added or deleted text file's (its line count) and
+        each blob an entry recorded on a side is placed in -- come in one ``git cat-file --batch``,
+        and with ``hunks`` the changed text files' hunks come from one ``git diff`` of the two trees
+        (:meth:`CodeTrees.prepare_hunks`). These are the reads the classification makes, answered
+        by the same functions: a blob or pair not read here is read where it is used, and fails
+        there as it always did, so no class depends on this (D569).
+        """
+
+        base, candidate = self.before.files, self.after.files
+        text = [one for one in changes if one.content == "text" and one.status != "type_changed"]
+        if hunks:
+            self.code.prepare_hunks(
+                (one.path, base[one.path], candidate[one.path])
+                for one in text
+                if one.path in base and one.path in candidate
+            )
+        blobs = {
+            present
+            for one in (text if hunks else ())
+            if (one.path in base) != (one.path in candidate)
+            and (present := base.get(one.path) or candidate.get(one.path)) is not None
+        }
+        for side in (self.before, self.after):
+            for one in changes:
+                blob = side.files.get(one.path)
+                if (
+                    blob is not None
+                    and side.unavailable(one.path) is None
+                    and any(
+                        str((entry.document.get("anchor") or {}).get("blob", "")) == blob
+                        for entry in side.entries_at(one.path)
+                    )
+                ):
+                    blobs.add(blob)
+        with suppress(CodeObjectError):
+            self.code.objects.prefetch(blobs)
 
     # -- file buckets (no hunk is read) ------------------------------------------------------------
 

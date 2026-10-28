@@ -1,7 +1,7 @@
 // Uses the lane answer already held by the reviewer; this view reads no review route.
 import type { ChangedFile, TaskChangeset } from '../../data/changeset';
 import type { ReviewSourceInventory } from '../../data/review';
-import type { ReviewWorklistView } from '../../data/reviewTrees';
+import type { ReviewWorklistView, ReviewWorklistSummary } from '../../data/reviewTrees';
 import { fileAnswers } from '../review/worklistState';
 import type { LaneRead, ReviewLaneFile, ReviewUnexplainedLane } from '../../data/reviewLane';
 export type ReviewChangeFilter = 'all' | 'unexplained' | 'unknown';
@@ -16,6 +16,7 @@ export interface ReviewChangeContext {
   lane: LaneRead<ReviewUnexplainedLane> | null;
   inventory: ReviewSourceInventory;
   worklist?: ReviewWorklistView;
+  worklistSummary?: ReviewWorklistSummary;
 }
 export const FILTER_NOTES = {
   unexplained:
@@ -58,7 +59,7 @@ export function fileBadge(file: ChangedFile, context: ReviewChangeContext): stri
 // Build once per rendered list, not once per file: both populations may be the whole leaf.
 export function reviewFileBadges(context: ReviewChangeContext): Map<string, string> {
   const badges = new Map<string, string>();
-  const answers = context.page.filter === 'unexplained' ? fileAnswers(context.worklist) : new Map<string, string>();
+  const answers = context.page.filter === 'unexplained' ? fileAnswers(context.worklistSummary ?? context.worklist) : new Map<string, string>();
   for (const row of badgeLaneFiles(context)) {
     const badge = [badgeForLaneFile(row), answers.get(row.path)].filter(Boolean).join(' · ');
     if (badge) badges.set(row.path, badge);

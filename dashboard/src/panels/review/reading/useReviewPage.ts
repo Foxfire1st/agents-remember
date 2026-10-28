@@ -4,9 +4,10 @@
 // `j`/`k` stops (the model's changed blocks, then the lane's hunks as their files are read).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
+import { readReviewHashState } from '../../../cockpit/reviewHash';
 import type { ReviewFailure, ReviewHistory, ReviewPayload } from '../../../data/review';
 import type { LaneRead, ReviewUnexplainedLane } from '../../../data/reviewLane';
-import type { HunkIdentity } from '../blockIdentity';
+import { parseSelection, type HunkIdentity } from '../blockIdentity';
 import type { SubjectNode } from '../changeSetOrder';
 import { blockStops, laneStops, type TraversalStop } from '../changeTraversal';
 import type { ReviewNavigation } from '../ReviewNavigation';
@@ -19,8 +20,9 @@ import { advanceWalk, type TreeIntent, type Walk } from '../walkedTree';
 import type { WorkspaceState } from '../workspaceState';
 import { groupDomId } from './blockDom';
 import { laneFiles, type LaneFileFacts } from './LaneSection';
+import { knownSubjects } from './selectionRestore';
 import { useChangeSet } from './useChangeSet';
-import { useReviewSelection, useSelectionUrl, type SelectionDeps } from './useReviewSelection';
+import { readSubjectOf, useReviewSelection, useSelectionUrl, type SelectionDeps } from './useReviewSelection';
 import { useScrollOnce } from './useScrollOnce';
 
 // What the page takes from the surface's reads.
@@ -108,6 +110,23 @@ function useTargetSelection(initial: ReviewSelection | null, select: ReturnType<
   }, [key, select]);
 }
 
+// D576: a selected invariant the latest move changed away -- the comparison's catalogue no longer
+// records it -- closes: the page opens unselected, as a selection outside the comparison does. Its
+// identity is its selector id, never a row's position; a changed invariant still recorded stays.
+function useGoneSelection(
+  selection: ReviewSelection | null,
+  stale: ReadonlySet<string>,
+  catalogue: ReviewNavigation['catalogue'],
+  select: ReturnType<typeof useReviewSelection>['select'],
+) {
+  const id = selection?.kind === 'subject' && selection.subject.kind === 'invariant' ? selection.subject.id : undefined;
+  const read = !catalogue.loading && catalogue.entries !== undefined;
+  const gone = id !== undefined && stale.has(id) && read && !knownSubjects(catalogue).has(`invariant:${id}`);
+  useEffect(() => {
+    if (gone) select(null, { keepTree: true });
+  }, [gone, select]);
+}
+
 function laneHunks(lane: LaneRead<ReviewUnexplainedLane> | null, files: ReadonlyMap<string, LaneFileFacts>): HunkIdentity[] {
   if (lane?.phase !== 'ready') return [];
   return laneFiles(lane.value).flatMap((file) => files.get(file.path)?.hunks ?? []);
@@ -129,8 +148,19 @@ export function useReviewPage(reads: PageReads) {
   const scroll = useScrollOnce(scroller);
   const deps = useRef<SelectionDeps | null>(null);
   const { selection, select } = useReviewSelection(reads.initial, deps);
+  // The URL's block must be resolved before useSelectionUrl can admit it. Only its owner is read.
+  const [restoring, setRestoring] = useState(() => parseSelection(readReviewHashState().sel?.split('@')[0]));
+  const restored = useCallback(() => setRestoring(null), []);
+  const restoreStarted = useCallback((value: string | null) => setRestoring(parseSelection(value?.split('@')[0])), []);
   useTargetSelection(reads.initial, select);
-  const changeSet = useChangeSet({ repo, master, leaf, frame: reads.frame, chosen, catalogue: navigation.catalogue, selection, walked });
+  const changeSet = useChangeSet({ repo, master, leaf, frame: reads.frame, chosen, catalogue: navigation.catalogue, selection, restoring, walked, query: workspace.query });
+  useGoneSelection(selection, changeSet.stale, navigation.catalogue, select);
+  const blockSubject = selection?.kind === 'block' && selection.block.kind === 'entry'
+    ? readSubjectOf(selection, changeSet.cards, changeSet.older) : undefined;
+  useEffect(() => {
+    if (blockSubject && navigation.subject?.id !== blockSubject.id)
+      navigation.onSelect(blockSubject, undefined, { keepTree: true });
+  }, [blockSubject, navigation]);
   useLayoutEffect(() => {
     deps.current = {
       navigationSelect: navigation.onSelect,
@@ -155,6 +185,9 @@ export function useReviewPage(reads: PageReads) {
     older: changeSet.older,
     facts: { number: changeSet.number, comparison: changeSet.comparison, cards: changeSet.cards, catalogue: navigation.catalogue, lane: changeSet.lane },
     select,
+    onRestored: restored,
+    onRestoreStart: restoreStarted,
+    onComparisonRestore: setChosen,
   });
   const lanes = useLaneFacts(changeSet.number);
   const stops = useMemo<TraversalStop[]>(
@@ -189,10 +222,11 @@ export function useReviewPage(reads: PageReads) {
   const openGroup = useCallback(
     (subject: SubjectNode, group: TreeGroupName) => {
       const kind = group === 'unchanged' ? 'unchanged' : 'not-comparable';
+      select({ kind: 'subject', subject: { kind: 'invariant', id: subject.row.selectorId }, family: subject.row.familyId });
       openWorkspaceGroup(groupDomId(subject.key, kind));
       arm({ kind: 'group', subjectKey: subject.key, group: kind });
     },
-    [openWorkspaceGroup, arm],
+    [openWorkspaceGroup, arm, select],
   );
   return { chosen, chooseComparison, chooseDelivered, walk, walked, scroller, selection, select, changeSet, outsideLine, lanes, stops, openGroup };
 }

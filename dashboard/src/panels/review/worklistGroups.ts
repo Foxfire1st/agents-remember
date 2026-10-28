@@ -14,6 +14,7 @@ import type {
   ReviewWorklistHistoryRow,
   ReviewWorklistItem,
   ReviewWorklistView,
+  ReviewWorklistSummary,
 } from '../../data/reviewTrees';
 
 export const UNEXPLAINED_KINDS = new Set(['unexplained_hunk', 'unexplained_file']);
@@ -99,7 +100,8 @@ export function worklistGroups(worklist: ReviewWorklistView): WorklistGroups {
 }
 
 // MIK-R11's mark per invariant or family subject, for the cards: "touched · planned".
-export function planningMarks(worklist: ReviewWorklistView | undefined): Map<string, string> {
+export function planningMarks(worklist: ReviewWorklistView | ReviewWorklistSummary | undefined): Map<string, string> {
+  if (worklist && 'file_open_counts' in worklist) return new Map(Object.entries(worklist.planning));
   const marks = new Map<string, string>();
   for (const item of worklist?.items ?? []) {
     if (item.planning === undefined) continue;

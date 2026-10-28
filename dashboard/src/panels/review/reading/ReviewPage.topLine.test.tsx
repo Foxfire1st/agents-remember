@@ -15,6 +15,8 @@ import {
   pageReads,
   PLACE,
   renderPage,
+  selectInvariant,
+  waitForOpening,
   servePage,
   stubInViewAtFirstPaint,
   stubIntersection,
@@ -36,8 +38,7 @@ afterEach(() => {
 });
 
 async function opened() {
-  await waitFor(() => expect(screen.getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
-  await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+  await waitForOpening();
 }
 
 const movement = (binding_state: ReviewMovement['binding_state'], reason?: string): ReviewMovement => ({
@@ -221,8 +222,8 @@ describe('the status chip (rule 6)', () => {
       if (isSelectionRead(url)) throw new TypeError('the subject read failed');
       return passed(address, init);
     }));
+    await selectInvariant();
     const section = screen.getAllByTestId('review-subject-section').find((node) => node.dataset.subject === L181_SUBJECT)!;
-    fireEvent.click(within(section).getByTestId('review-subject-select'));
     await waitFor(() => expect(within(section).getByTestId('review-reading-problem')).toBeTruthy());
     expect(screen.getByTestId('review-status-label').textContent).toBe('branches: not measured');
     expect(screen.getByTestId('review-status-chip').textContent).not.toMatch(/unavailable|reading…/);
@@ -242,7 +243,8 @@ describe('the comparison selector (rule 10)', () => {
     const before = pageReads(served.asked).length;
     fireEvent.click(options.find((option) => option.dataset.number === '7')!);
     await waitFor(() => expect(screen.getByTestId('review-older-comparison')).toBeTruthy());
-    await waitFor(() => expect(screen.getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
+    await opened();
+    expect(screen.queryByTestId('review-expression-card')).toBeNull();
     const reads = pageReads(served.asked).slice(before);
     // The outline (entries), the summary and the trees are each read at #7, and none at another number.
     for (const route of ['/api/review/intent/entries', '/api/review/intent/summary', '/api/review/trees']) {
@@ -250,12 +252,11 @@ describe('the comparison selector (rule 10)', () => {
       expect(routeReads.length).toBeGreaterThan(0);
       expect(routeReads.every((url) => url.searchParams.get('comparison') === '7')).toBe(true);
     }
-    expect(reads.some((url) => url.searchParams.has('invariants'))).toBe(true);
+    expect(reads.some((url) => url.searchParams.has('invariants'))).toBe(false);
     expect(reads.some((url) => url.searchParams.has('lane'))).toBe(true);
     expect(window.location.hash).toContain('comparison=7');
-    const section = screen.getAllByTestId('review-subject-section').find((node) => node.dataset.subject === L181_SUBJECT)!;
     const asked = served.asked.length;
-    fireEvent.click(within(section).getByTestId('review-subject-select'));
+    await selectInvariant();
     await waitFor(() => expect(screen.getByTestId('review-subject-slot').dataset.slotState).toBe('older'));
     expect(served.asked.slice(asked).some(isSelectionRead)).toBe(false);
     expect(screen.getByTestId('review-older-subject').textContent).toContain('#8');
@@ -289,6 +290,7 @@ describe('the comparison selector (rule 10)', () => {
     const options = await screen.findAllByTestId('review-comparison-option');
     fireEvent.click(options.find((option) => option.dataset.number === '7')!);
     await waitFor(() => expect(screen.getByTestId('review-older-comparison')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('review-tree-lane'));
     await waitFor(() => expect(screen.getByTestId('review-lane-file').dataset.path).toBe(ONLY));
     fireEvent.wheel(screen.getByTestId('review-center-column'), { deltaY: 120 });
     await waitFor(() => expect(screen.getByTestId('review-lane-file').dataset.laneRead).toBe('ready'));
@@ -306,6 +308,7 @@ describe('Changes only | Full context (rule 4)', () => {
     servePage();
     const first = renderPage();
     await opened();
+    await selectInvariant();
     const excerpts = () => Array.from(document.querySelectorAll<HTMLElement>('[data-excerpt="diff"]'));
     await waitFor(() => expect(document.querySelector('[data-excerpt="diff"] .cm-collapsedLines')).not.toBeNull());
     expect(excerpts().every((node) => node.dataset.collapse === 'true')).toBe(true);
@@ -365,6 +368,7 @@ describe('Changes only | Full context (rule 4)', () => {
     servePage();
     renderPage();
     await opened();
+    await selectInvariant();
     await waitFor(() => expect(document.querySelector('[data-excerpt="diff"] .cm-mergeView')).not.toBeNull());
   });
 });

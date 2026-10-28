@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import subprocess
 from collections.abc import Mapping
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from agents_remember.application import review_frame_store
@@ -38,11 +40,14 @@ from agents_remember.application.review_tree_comparison import (
 )
 from agents_remember.canvas.explainer_paths import EXPLAINER_FRAME, leaf_workspace
 from agents_remember.canvas.explainer_service import (
+    _BUILD_CANCELS,
+    _BUILD_STATES,
     BoundComparison,
     ExplainerDeps,
     LeafFacts,
     LeafScope,
     PreparedPacket,
+    _progress_tracker,
 )
 from agents_remember.canvas.explainer_state import (
     ExplainerBinding,
@@ -55,21 +60,25 @@ from agents_remember.models.knowledge.review_frame import (
     MAX_TASK_BYTES,
     FrameAuthoring,
     FrameBinding,
+    FrameInteractionCoverage,
     FrameLimits,
+    FrameManifest,
 )
 from agents_remember.models.knowledge.review_trees import (
     ReviewKnowledgeSide,
     ReviewTreesResult,
 )
-from agents_remember.serving.change_watcher import move_notice_watch
+from agents_remember.serving.explainer_move_watch import move_notice_watch
+from agents_remember_test_support.testing.prepared_comparison import prepared_from_port
 
 WATCHER_PORTS = explainer_application_ports().watcher
 from agents_remember.serving.explainer import (
     ExplainerComposition,
     ExplainerWiring,
+    _labelled_for_the_revision,
     explainer_composition,
-    register_explainer_routes,
 )
+from agents_remember.serving.explainer_routes import register_explainer_routes
 from agents_remember.serving.explainer_watcher import (
     LeafSelection,
     MovedNotice,
@@ -194,7 +203,13 @@ def _canonical_contract(
     return contract
 
 
-def _publish(root: Path, comparison, *, request: str = "req-1") -> int:
+def _publish(
+    root: Path,
+    comparison,
+    *,
+    request: str = "req-1",
+    coverage: FrameInteractionCoverage | None = None,
+) -> int:
     """Publish one ready revision of the explainer frame, bound to ``comparison``."""
 
     scope = frame_scope(root, LEAF, EXPLAINER_FRAME)
@@ -218,6 +233,7 @@ def _publish(root: Path, comparison, *, request: str = "req-1") -> int:
         supplemental=(),
         created_at=AT,
         limits=FrameLimits(),
+        interaction_coverage=coverage,
     )
     assert publication.manifest is not None
     return publication.manifest.revision
@@ -261,6 +277,7 @@ def _deps(
             packet=packet(bound.record), digest="sha256:" + "0" * 64
         ),
         capsule=lambda _scope: "You are the explainer.\n",
+        recheck=lambda _scope, _facts, _bound: True,
         counter=partial(blocks_changed, ports=WATCHER_PORTS),
         now=lambda: NOW,
     )
@@ -561,6 +578,37 @@ def test_the_cancel_route_targets_the_exact_seat_and_request(tmp_path: Path) -> 
     assert invalid.status_code == 400
 
 
+def test_a_cancel_ends_a_live_build_that_never_reached_its_seat(tmp_path: Path) -> None:
+    """MIK-R211 v2 rule 5: a build in progress can be ended by hand, and says where it stopped."""
+
+    runtime, _root, code, memory = _world(tmp_path)
+    bound = _bound(_comparison(code, memory, 7))
+    host = _Host()
+    client = _client(_deps(runtime, bound, host=host))
+    scope = _scope()
+    report, _state = _progress_tracker(scope, "stuck-build-1", None)
+    report("snapshot-code", {"done": 1, "total": 2})
+    try:
+        cancelled = client.post(_url("/cancel"), json={"requestId": "stuck-build-1"})
+        assert cancelled.status_code == 200, cancelled.text
+        body = cancelled.json()["cancel"]
+        assert body["buildStopped"] is True
+        assert body["failedStep"] == "snapshot-code"
+        assert str(body["reason"]).startswith("build-cancelled")
+        # The ended record is what the page reads next, so it never sees "building" again: the
+        # active build is gone and the ended one is the build the page shows.
+        state = client.get(_url("/state")).json()
+        assert state["building"] is None
+        assert state["build"]["state"] == "failed"
+        assert state["build"]["failedStep"] == "snapshot-code"
+        assert str(state["build"]["error"]).startswith("build-cancelled")
+        # No seat turn was involved: the host's cancel was never asked for.
+        assert host.cancelled == []
+    finally:
+        _BUILD_STATES.clear()
+        _BUILD_CANCELS.clear()
+
+
 def test_the_update_route_answers_counts(tmp_path: Path) -> None:
     """Rule 6: an Update's answer carries the counts the page shows."""
 
@@ -630,24 +678,133 @@ def test_the_master_contract_is_the_one_the_document_names(tmp_path: Path) -> No
 
 
 def test_the_revisions_route_names_the_task_total(tmp_path: Path) -> None:
-    """MIK-R103 v2 item 10: the selector knows what the task holds against its ceiling."""
+    """MIK-R103 v2 item 10: the selector knows what the task holds against its ceiling. Each row
+    says its revision's interaction coverage (MIK-R211 v5, the Manager's 15:43Z ruling): one
+    published before coverage was recorded says so rather than implying any."""
 
     runtime, root, code, memory = _world(tmp_path)
     comparison = _comparison(code, memory, 7)
     first = _publish(root, comparison, request="req-1")
+    window = "the browser load process's own 180 s window (canvas/prospective.py; not a page limit)"
+    covered = FrameInteractionCoverage(
+        passes_total=5, passes_complete=2, complete=False, window=window
+    )
+    said = f"2 of 5 passes — stopped before {window}"
+    second = _publish(root, comparison, request="req-2", coverage=covered)
     bound = _bound(comparison)
 
-    answer = _client(_deps(runtime, bound)).get(_url("/revisions")).json()
+    client = _client(_deps(runtime, bound))
+    answer = client.get(_url("/revisions")).json()
 
     assert answer["state"] == "ok"
-    assert [row["revision"] for row in answer["revisions"]] == [first]
+    assert [row["revision"] for row in answer["revisions"]] == [second, first]  # newest first
+    assert [row["coverage"] for row in answer["revisions"]] == [said, "not recorded"]
+    assert client.get(_url("/state")).json()["explanation"]["coverage"] == said
     assert answer["pinned"] is None
     assert answer["total"]["state"] == "ok"
     assert answer["total"]["limit"] == MAX_TASK_BYTES
     assert answer["total"]["used"] > 0
 
 
-@pytest.mark.parametrize("suffix", ["/state", "/revisions"])
+def test_the_stale_route_answers_the_top_bars_badge_without_the_seat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Review tab's badge reads `/stale` alone: the staleness `/state` carries, the shown
+    revision and the watcher's notice -- and no seat, build, retire, part map or usage field."""
+
+    runtime, root, code, memory = _world(tmp_path)
+    published = _comparison(code, memory, 7)
+    revision = _publish(root, published)
+    (code / "src/app.py").write_text("x = 2\n", encoding="utf-8")
+    _git(code, "add", "-A")
+    _git(code, "commit", "-q", "-m", "two")
+    bound = _bound(_comparison(code, memory, 8))
+    _write_environment(runtime, bound.binding)
+    notice = MovedNotice(
+        kind="comparison-moved",
+        from_number=7,
+        to_number=8,
+        blocks_changed=4,
+        update_offered=True,
+    )
+    monkeypatch.setattr(
+        "agents_remember.serving.explainer.notice_for", lambda *_args, **_kwargs: notice
+    )
+    client = _client(_deps(runtime, bound))
+
+    badge = client.get(_url("/stale")).json()
+    state = client.get(_url("/state")).json()
+
+    assert badge["state"] == "ok"
+    assert badge["stale"] == state["stale"]
+    assert badge["stale"]["total"] >= 1
+    assert (badge["grades"], badge["categories"]) == (state["grades"], state["categories"])
+    assert badge["explanation"]["revision"] == revision == state["explanation"]["revision"]
+    assert badge["movedNotice"] == state["moved"]
+    assert badge["movedNotice"]["text"] == "task moved: #7 -> #8, 4 blocks changed"
+    # `parts` here is the staleness's own list (spread from `stale`), not the revision's part map.
+    assert badge["parts"] == badge["stale"]["parts"]
+    # The label's two marks are the state's own, read without the host's seat state.
+    assert (badge["retired"], badge["building"]) == (state["retired"], state["building"])
+    seat_and_page = {
+        "seat",
+        "agentId",
+        "workspace",
+        "workspaceId",
+        "generation",
+        "build",
+        "retiredAt",
+        "claims",
+        "frameUsage",
+        "agreedRevision",
+        "explainer",
+    }
+    assert not seat_and_page & set(badge)
+    assert not leaf_workspace(runtime, REPO, TASK, LEAF).joinpath("retired.json").exists()
+
+
+def test_a_removed_leaf_reads_as_no_explainer_on_the_badge_and_the_state(tmp_path: Path) -> None:
+    """MIK-R211 v5 rule 12: a removal leaves no marker, so nothing reads a leaf as 'retired'.
+
+    A ``retired.json`` an older Retire left is not a mark any more, and once the folder is gone both
+    the badge and /state say there is no explainer -- and taking no lock made no folder again.
+    """
+
+    runtime, _root, code, memory = _world(tmp_path)
+    bound = _bound(_comparison(code, memory, 7))
+    _write_environment(runtime, bound.binding)
+    workspace = leaf_workspace(runtime, REPO, TASK, LEAF)
+    workspace.joinpath("retired.json").write_text(
+        json.dumps({"receipt": None, "at": "2026-10-25T00:00:00Z"})
+    )
+    client = _client(_deps(runtime, bound))
+
+    assert client.get(_url("/stale")).json()["retired"] is False
+    assert client.get(_url("/state")).json()["retired"] is False
+    shutil.rmtree(workspace)
+    badge = client.get(_url("/stale")).json()
+    state = client.get(_url("/state")).json()
+
+    assert badge["retired"] is False and badge["building"] is None
+    assert state["retired"] is False and state["seat"]["state"] == "missing"
+    assert not workspace.exists()
+
+
+def test_the_stale_route_says_no_revision_exists_on_a_fresh_leaf(tmp_path: Path) -> None:
+    """With no retained revision the badge's `explanation` is null and no notice is invented."""
+
+    runtime, _root, code, memory = _world(tmp_path)
+    bound = _bound(_comparison(code, memory, 7))
+    _write_environment(runtime, bound.binding)
+
+    badge = _client(_deps(runtime, bound)).get(_url("/stale")).json()
+
+    assert badge["explanation"] is None
+    assert badge["movedNotice"] is None
+    assert badge["stale"]["unavailable"] == "the leaf has no retained revision"
+
+
+@pytest.mark.parametrize("suffix", ["/state", "/revisions", "/stale"])
 def test_the_reads_start_nothing(tmp_path: Path, suffix: str) -> None:
     """MIK-R106 v2 rule 10: a read opens nothing, builds nothing and wakes no seat."""
 
@@ -833,7 +990,11 @@ def test_explainer_composition_wires_live_code_sides_record_digest_and_planned_w
     composed = explainer_composition(
         runtime,
         _port,
-        wiring=ExplainerWiring(host=_Host(), application=explainer_application_ports()),
+        wiring=ExplainerWiring(
+            host=_Host(),
+            application=explainer_application_ports(),
+            comparison_prepare=prepared_from_port(_port),
+        ),
     )
     assert composed.deps is not None
     scope = _scope()
@@ -853,6 +1014,7 @@ def test_explainer_composition_wires_live_code_sides_record_digest_and_planned_w
         wiring=ExplainerWiring(
             host=_Host(),
             application=explainer_application_ports(),
+            comparison_prepare=prepared_from_port(_port),
             contract_for=lambda _s: contract,
         ),
     )
@@ -908,7 +1070,11 @@ def test_a_stale_comparison_number_and_an_unknown_history_are_refused_before_the
     composed = explainer_composition(
         runtime,
         _port,
-        wiring=ExplainerWiring(host=_Host(), application=explainer_application_ports()),
+        wiring=ExplainerWiring(
+            host=_Host(),
+            application=explainer_application_ports(),
+            comparison_prepare=prepared_from_port(_port),
+        ),
     )
     client = _client_composition(composed)
 
@@ -959,3 +1125,29 @@ def test_the_state_route_names_the_seat_it_shows(tmp_path: Path) -> None:
     assert set(answer["seat"]) >= {"state", "agentId", "generation"}
     assert answer["seat"]["agentId"] is None
     assert answer["seat"]["generation"] is None
+
+
+def test_the_state_label_names_the_revisions_own_comparison() -> None:
+    """L201 revision 4 was written against #34 while the leaf's live comparison is #37.
+
+    The page shows revision 4, so the state's label says #34. The live binding's newer comparison is
+    the reason the page is stale; it reaches the reader through the staleness record and the top
+    bar's badge, never through this label.
+    """
+
+    def manifest(number: int | None) -> FrameManifest:
+        return cast(
+            FrameManifest, SimpleNamespace(binding=SimpleNamespace(comparison_number=number))
+        )
+
+    record: dict[str, Any] = {"label": "#37", "present": True, "generation": 6}
+
+    labelled = _labelled_for_the_revision(record, manifest(34))
+
+    assert labelled["label"] == "#34"
+    assert labelled["present"] is True and labelled["generation"] == 6
+    assert record["label"] == "#37", "the state record itself is not mutated"
+
+    # A revision with no comparison of its own, and no revision at all, keep the live label.
+    assert _labelled_for_the_revision(record, manifest(None))["label"] == "#37"
+    assert _labelled_for_the_revision(record, None)["label"] == "#37"

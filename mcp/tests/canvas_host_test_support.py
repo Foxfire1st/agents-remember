@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,14 +16,20 @@ from typing import Any
 import pytest
 from _user_settings_guard import user_settings_path_for_write
 from agents_remember.application.review_evidence_packet import SideState, build_evidence_packet
-from agents_remember.application.review_evidence_read import DEFAULT_READ_LIMITS
 from agents_remember.application.review_frame_store import (
     begin_draft,
     frame_scope,
     publish_revision,
 )
-from agents_remember.canvas import policy, proof_record
+from agents_remember.canvas.paths import presenter_working_root
 from agents_remember.canvas.presenter import RunnerReceipt
+from agents_remember.canvas.presenter_store import (
+    PresenterAttempt,
+    digest_bytes,
+    receipt_changes,
+)
+from agents_remember.cli.role_instructions import compose_capability_capsule
+from agents_remember.kernel.canonical_json import canonical_json_bytes
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.models.knowledge.review_evidence import (
     ClaimBasis,
@@ -32,7 +37,7 @@ from agents_remember.models.knowledge.review_evidence import (
     EvidenceMap,
     SupplementalReceipt,
 )
-from agents_remember.models.knowledge.review_frame import FrameAuthoring, FrameLimits
+from agents_remember.models.knowledge.review_frame import FrameAuthoring, FrameBinding, FrameLimits
 from agents_remember.models.knowledge.review_trees import (
     ReviewKnowledgeSide,
     ReviewTreeComparisonRecord,
@@ -55,41 +60,6 @@ ASSETS: dict[str, bytes] = {
         b"<rect width='8' height='8' fill='#123'/></svg>"
     ),
 }
-
-
-@pytest.fixture
-def proof_frontend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A concrete consumer-only frontend, independent of ignored build output.
-
-    Source binding and digest calculations remain real. Only the package location is
-    redirected: its enforcement module is an exact byte copy, and its frontend is
-    this explicitly fabricated file. This fixture is never browser proof evidence.
-    """
-
-    source = Path(proof_record.__file__)
-    shadow = tmp_path / "consumer-package" / "canvas" / "proof_record.py"
-    shadow.parent.mkdir(parents=True)
-    shutil.copyfile(source, shadow)
-    frontend = shadow.parent.parent / "package_data" / "dashboard"
-    frontend.mkdir(parents=True)
-    (frontend / "index.html").write_text("<!doctype html><title>consumer fixture</title>")
-    monkeypatch.setattr(proof_record, "__file__", str(shadow))
-    return frontend
-
-
-@pytest.fixture
-def proof_bundle(proof_frontend: Path, tmp_path: Path) -> Path:
-    """Shipped observation shapes rebound to the concrete consumer fixture, not a run."""
-
-    template = Path(__file__).resolve().parents[1] / "src/agents_remember/package_data/canvas"
-    record = json.loads((template / "isolation-proof.json").read_text())
-    record["source"].update(proof_record.source_bindings())
-    record["policyDigest"] = policy.policy_digest()
-    record["detail"] = "fabricated consumer fixture; not browser evidence"
-    bundle = tmp_path / "consumer-proof"
-    bundle.mkdir()
-    (bundle / "isolation-proof.json").write_text(json.dumps(record))
-    return bundle
 
 
 def record(number: int = 7) -> ReviewTreeComparisonRecord:
@@ -170,7 +140,6 @@ def packet(
         memory_before=SideState("available", index_state="complete"),
         memory_after=SideState("available", index_state="complete"),
         evidence_map=EvidenceMap(coverage="the selected change"),
-        limits=DEFAULT_READ_LIMITS,
         supplemental=supplemental,
         claims=named,
         recorded_at=AT,
@@ -361,3 +330,59 @@ def swap_on_scandir(monkeypatch, directory: Path, decoy: Path) -> list[str]:
 
     monkeypatch.setattr(os, "scandir", scan)
     return foreign
+
+
+def stored_attempt(
+    presenter, *, evidence=None, request="req-start", focus="the change to src/app.py"
+):
+    """Seed a historical record for read/message/publication tests; no product start exists.
+
+    Only a supplied deterministic fixture runner creates the local session bytes needed by
+    host-operation tests. This fixture does not implement launch admission or reconciliation.
+    """
+
+    evidence = evidence if evidence is not None else packet(record())
+    existing = presenter.by_request(request)
+    if existing is not None:
+        return existing
+    at = presenter._clock()
+    attempt_id = "att-" + digest_bytes(request.encode())[:16]
+    working = presenter_working_root(
+        presenter._config,
+        repository_id=presenter._repository_id,
+        task=presenter._task,
+        leaf_id=presenter._leaf_id,
+        frame_id=presenter._frame_id,
+        attempt_id=attempt_id,
+    )
+    working.mkdir(parents=True)
+    evidence_bytes = canonical_json_bytes(json.loads(evidence.model_dump_json(by_alias=True)))
+    instructions, _ = compose_capability_capsule("review-presenter", {})
+    attempt = PresenterAttempt(
+        attempt_id=attempt_id,
+        request_id=request,
+        caller="dashboard",
+        repository_id=presenter._repository_id,
+        task=presenter._task,
+        leaf_id=presenter._leaf_id,
+        frame_id=presenter._frame_id,
+        comparison=FrameBinding.from_packet(evidence.comparison),
+        evidence_digest=digest_bytes(evidence_bytes),
+        focus=focus,
+        state="started",
+        created_at=at,
+        updated_at=at,
+        working_directory=str(working),
+        model="historical-test-model",
+        design_source="default",
+        design_sha256="1" * 64,
+        design_words=3,
+        instructions_sha256=digest_bytes(instructions.encode()),
+    )
+    with presenter._store.locked():
+        presenter._store.evidence_path(attempt_id).write_bytes(evidence_bytes)
+        presenter._store.write_locked(attempt)
+    receipt = presenter._runner.start(attempt, instructions, working)
+    return presenter._store.mutate(
+        attempt_id, lambda current: receipt_changes(current, receipt, attempt.model or "")
+    )

@@ -86,7 +86,7 @@ from agents_remember.tasks import TASK_DOCUMENT_SCHEMA
 from agents_remember.tasks.task_paths import (
     ARCHIVE_DIR,
     ENCLOSURES_DIR,
-    SERIES_CONTRACT_FILENAME,
+    canonical_contract_place,
 )
 from pydantic import BaseModel
 
@@ -109,7 +109,7 @@ class ProjectionDomain(StrEnum):
     # L190-R1-F10/F11: the two native stores the attention queue reads beside the host
     # publication -- one small activation record per series contract plus the terminal notice
     # store, and the held-message queue the delivery machinery names its holders in. Both have
-    # real watcher roots (see ``change_watcher.projection_input_roots``), and their values are
+    # real watcher roots (see ``change_watcher.projection_watch_plan``), and their values are
     # exactly the invalidation tokens the native reader gates its file reads on.
     ATTENTION_CONTROLPLANE = "attention-controlplane"
     ATTENTION_HELD = "attention-held"
@@ -221,19 +221,15 @@ def _subtree_paths(root: Path, paths: tuple[str, ...]) -> list[Path]:
 def _is_enclosure_contract(tasks_root: Path, path: Path) -> bool:
     """Whether ``path`` is a live leaf enclosure contract candidate (F09).
 
-    Mirrors the enumerator's shape rule (``enclosures/<leaf>/series-contract.md``)
-    without walking: the scoped contract build applies the same archive/notes
-    exclusions per path.
+    The caller passes the coordination tasks root, so a leaf contract has the
+    five-component tail ``repo/task/enclosures/leaf/series-contract.md``. The task
+    owner remains the authority for the canonical contract place.
     """
     try:
         relative = path.relative_to(tasks_root)
     except ValueError:
         return False
-    return (
-        len(relative.parts) == 3
-        and relative.parts[0] == ENCLOSURES_DIR
-        and relative.parts[2] == SERIES_CONTRACT_FILENAME
-    )
+    return len(relative.parts) == 5 and canonical_contract_place(path)
 
 
 def _is_canonical_task_doc(tasks_root: Path, path: Path) -> bool:

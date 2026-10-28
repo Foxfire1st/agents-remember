@@ -31,6 +31,8 @@ export type ExplainerStepState = 'waiting' | 'running' | 'done' | 'failed';
 export interface ExplainerBuildStep {
   name: string;
   state: ExplainerStepState;
+  /** The server's own percentage for this step, when its record carries one. */
+  percent?: number;
   counts?: ExplainerCounts;
   detail?: string;
   reason?: string;
@@ -40,9 +42,13 @@ export interface ExplainerBuild {
   attempt: string;
   state: 'running' | 'done' | 'failed';
   startedAt: string;
+  /** The server's own percentage for the whole build, when its record carries one. */
+  percent?: number;
   steps: ExplainerBuildStep[];
   failedStep: string | null;
   reason: string | null;
+  /** The server-authored detail; kept separate from its machine-readable reason. */
+  error?: string;
 }
 
 export interface ExplainerBindingView {
@@ -199,11 +205,13 @@ function readStepRecord(value: Record<string, unknown>): ExplainerBuildStep | nu
   const state = STEP_STATES.get(text(value.state) ?? 'running');
   if (!name || !state) return null;
   const counts = readCounts(value.counts ?? value);
+  const percent = finiteNumber(value.percent);
   const detail = text(value.detail);
   const reason = text(value.reason);
   return {
     name,
     state,
+    ...(percent === null ? {} : { percent: Math.min(100, Math.max(0, percent)) }),
     ...(counts ? { counts } : {}),
     ...(detail ? { detail } : {}),
     ...(reason ? { reason } : {}),
@@ -220,17 +228,74 @@ function readSteps(value: unknown): ExplainerBuildStep[] {
   return value.map(readStep).filter((step): step is ExplainerBuildStep => step !== null);
 }
 
-function readBuild(value: unknown): ExplainerBuild | null {
+/**
+ * The server appends rows as real stages start and finish, so one step can
+ * arrive many times. The panel wants one row per step, at that step's last word: the map keeps the
+ * steps in the order they first appeared and the last record of each.
+ */
+function distinctSteps(steps: ExplainerBuildStep[]): ExplainerBuildStep[] {
+  const byName = new Map<string, ExplainerBuildStep>();
+  for (const step of steps) byName.set(step.name, { ...byName.get(step.name), ...step });
+  return [...byName.values()];
+}
+
+/**
+ * The step the build stopped at, marked failed, so the panel's ✗ is on the right row. The steps it
+ * reached before that one are done — the server's step rows carry no state of their own.
+ */
+function markFailedStep(
+  steps: ExplainerBuildStep[],
+  failedStep: string | null,
+): ExplainerBuildStep[] {
+  if (failedStep === null) return steps;
+  const stopped = steps.map((step) => step.name).lastIndexOf(failedStep);
+  if (stopped < 0) return steps;
+  return steps.map((step, index) => {
+    if (index === stopped) return { ...step, state: 'failed' };
+    return index < stopped && step.state === 'running' ? { ...step, state: 'done' } : step;
+  });
+}
+
+/** The step a build stopped at: the record's own `failedStep`, or the `step` it died on. */
+function failedStepOf(value: Record<string, unknown>, state: string): string | null {
+  const named = firstString([value.failedStep, value.failed_step]);
+  if (named) return named;
+  return state === 'failed' ? text(value.step) : null;
+}
+
+/** A clamped percentage, or null when the record carries none. */
+function percentOf(value: Record<string, unknown>): number | null {
+  const percent = finiteNumber(value.percent);
+  return percent === null ? null : Math.min(100, Math.max(0, percent));
+}
+
+/**
+ * One build record, as `GET …/state` and both press answers carry it.
+ *
+ * A failed build's words are the server's own: `explainer_service.py` writes
+ * `build_state["failedStep"] = …` and `build_state["error"] = str(error)`, and `serving/explainer.py`
+ * returns the record under both `build` and (while it runs) `building`. So `error` is the reason
+ * here. Keep it separately when `reason` also carries a machine-readable code. `reason` and
+ * `detail` stay readable for the shapes other answers use. A step the server names in `failedStep`
+ * is marked failed even when its own record carries no state, because the server's step rows do not.
+ */
+export function parseExplainerBuild(value: unknown): ExplainerBuild | null {
   if (!isRecord(value)) return null;
   const state = text(value.state);
   if (!state || !BUILD_STATES.has(state)) return null;
+  const failedStep = failedStepOf(value, state);
+  const steps = distinctSteps(readSteps(value.steps ?? value.progress));
+  const percent = percentOf(value);
+  const error = nonEmptyText(value.error);
   return {
-    attempt: text(value.attempt) ?? '',
+    attempt: firstString([value.attempt, value.requestId, value.request_id]) ?? '',
     state: state as ExplainerBuild['state'],
-    startedAt: text(value.startedAt) ?? '',
-    steps: readSteps(value.steps),
-    failedStep: text(value.failedStep),
-    reason: text(value.reason),
+    startedAt: firstString([value.startedAt, value.started_at]) ?? '',
+    ...(percent === null ? {} : { percent }),
+    steps: state === 'failed' ? markFailedStep(steps, failedStep) : steps,
+    failedStep,
+    reason: firstString([value.reason, value.error, value.detail]),
+    ...(error === null ? {} : { error }),
   };
 }
 
@@ -315,7 +380,7 @@ function buildingSteps(value: Record<string, unknown>, state: ExplainerBuild['st
   const singleName = firstString([value.step, value.failedStep]);
   if (!singleName) return [];
   const counts = readCounts(value.counts ?? value);
-  const reason = firstString([value.reason, value.detail]);
+  const reason = firstString([value.reason, value.error, value.detail]);
   const stepState: ExplainerStepState = state === 'done' ? 'done' : state === 'failed' ? 'failed' : 'running';
   return [{ name: singleName, state: stepState, ...(counts ? { counts } : {}), ...(reason ? { reason } : {}) }];
 }
@@ -324,13 +389,15 @@ function readBuilding(value: unknown): ExplainerBuild | null {
   if (!isRecord(value)) return null;
   const state = BUILDING_STATES.get(text(value.state) ?? '');
   if (!state) return null;
+  const error = nonEmptyText(value.error);
   return {
-    attempt: text(value.attempt) ?? '',
+    attempt: firstString([value.attempt, value.requestId, value.request_id]) ?? '',
     state,
-    startedAt: text(value.startedAt) ?? '',
+    startedAt: firstString([value.startedAt, value.started_at]) ?? '',
     steps: buildingSteps(value, state),
-    failedStep: text(value.failedStep) ?? (state === 'failed' ? text(value.step) : null),
-    reason: firstString([value.reason, value.detail]),
+    failedStep: firstString([value.failedStep, value.failed_step]) ?? (state === 'failed' ? text(value.step) : null),
+    reason: firstString([value.reason, value.error, value.detail]),
+    ...(error === null ? {} : { error }),
   };
 }
 
@@ -383,9 +450,9 @@ function stalePartsOf(answer: Record<string, unknown>): ExplainerStalePart[] {
 
 function buildOf(answer: Record<string, unknown>, explainer: Record<string, unknown> | null): ExplainerBuild | null {
   return (
-    readBuild(answer.build) ??
+    parseExplainerBuild(answer.build) ??
     readBuilding(answer.building) ??
-    (explainer ? readBuild(explainer.build) ?? readBuilding(explainer.building) : null)
+    (explainer ? parseExplainerBuild(explainer.build) ?? readBuilding(explainer.building) : null)
   );
 }
 

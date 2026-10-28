@@ -3,10 +3,10 @@
 // in mint and the removed count in alarm red, each with its sign in its text so colour is never the only
 // signal, at the head's 0.72rem. Until the file's hunks are read the head keeps its muted hunk count.
 // On L181 #8 (reviewPage.test-utils.tsx) the lane holds one added file of 45 lines.
-import { cleanup, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-import { engage, renderPage, servePage, stubInViewAtFirstPaint } from './reviewPage.test-utils';
+import { engage, renderPage, servePage, stubInViewAtFirstPaint, waitForOpening } from './reviewPage.test-utils';
 
 beforeEach(() => window.localStorage.clear());
 
@@ -21,6 +21,9 @@ it("draws a lane file head's line counts in mint and alarm red at the head's siz
   stubInViewAtFirstPaint();
   servePage();
   renderPage();
+  // The lane is drawn in the column when it is selected (MIK-R211 v4 rule 10).
+  await waitForOpening();
+  fireEvent.click(screen.getByTestId('review-tree-lane'));
   await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
   engage();
   await waitFor(() => expect(screen.getByTestId('review-lane-file').dataset.laneRead).toBe('ready'));

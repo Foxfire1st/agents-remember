@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
@@ -78,7 +78,7 @@ def _iter_task_json(tasks_root: Path) -> list[Path]:
     """
     return sorted(
         path
-        for task in _task_directories(tasks_root)
+        for task in task_directories(tasks_root)
         for path in _json_entries(task)
         if _outside_archive_and_enclosures(path)
     )
@@ -100,14 +100,16 @@ def _canonical_task_json_candidates(tasks_root: Path, relative_paths: Iterable[s
             wanted.setdefault(parts[0], set()).add(parts[1])
     return sorted(
         path
-        for task in _task_directories(tasks_root)
+        for task in task_directories(tasks_root)
         if task.name in wanted
         for path in _json_entries(task)
         if path.name in wanted[task.name] and _outside_archive_and_enclosures(path)
     )
 
 
-def _task_directories(tasks_root: Path) -> list[Path]:
+def task_directories(
+    tasks_root: Path, *, on_error: Callable[[OSError], None] | None = None
+) -> list[Path]:
     """Every ``tasks/<repository>/<task>/`` folder, descended the way ``rglob`` descends.
 
     Symlinked directories are not followed, and a folder that cannot be listed
@@ -115,8 +117,8 @@ def _task_directories(tasks_root: Path) -> list[Path]:
     """
     return [
         task
-        for repository in _walked_directories(tasks_root)
-        for task in _walked_directories(repository)
+        for repository in walked_directories(tasks_root, on_error=on_error)
+        for task in walked_directories(repository, on_error=on_error)
     ]
 
 
@@ -124,13 +126,17 @@ def _outside_archive_and_enclosures(path: Path) -> bool:
     return ARCHIVE_DIR not in path.parts and ENCLOSURES_DIR not in path.parts
 
 
-def _walked_directories(directory: Path) -> list[Path]:
+def walked_directories(
+    directory: Path, *, on_error: Callable[[OSError], None] | None = None
+) -> list[Path]:
     try:
         with body_input(directory), os.scandir(directory) as entries:
             return [
                 directory / entry.name for entry in entries if entry.is_dir(follow_symlinks=False)
             ]
-    except OSError:
+    except OSError as error:
+        if on_error is not None:
+            on_error(error)
         return []
 
 

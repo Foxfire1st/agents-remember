@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agents_remember.application.review_candidate_resolution import (
     ReviewCandidateResolution,
@@ -14,7 +15,10 @@ from agents_remember.application.review_committed_leaf import resolve_review_com
 from agents_remember.application.review_comparison_generation import leaf_generation_root
 from agents_remember.application.review_intent_summary import summarize_review
 from agents_remember.application.review_tree_comparison import comparison_directory
+from agents_remember.kernel.git_command import memo_git_object_lookups
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.recorded_reads import recorded_reads, replay_reads
+from agents_remember.models.knowledge.review import ReviewRefusal
 from agents_remember.serving.changeset_cache import (
     ContentRead,
     DirectoryRead,
@@ -24,6 +28,9 @@ from agents_remember.serving.changeset_cache import (
 )
 from agents_remember.serving.intent_summary_cache import Observe, ReviewIntentSummaryPort
 from agents_remember.worktrees.modules.capture_baseline import memo_capture_baselines
+
+if TYPE_CHECKING:
+    from agents_remember.application.review_answer_preparation import RecordedReviewAnswers
 
 
 def _repository(path: Path, *, working: bool = False) -> ReadInput:
@@ -81,13 +88,30 @@ def _resolved(resolved: ReviewCandidateResolution) -> tuple[ReadInput, ...]:
     return tuple(dict.fromkeys(inputs))
 
 
-def review_intent_summary_port(config: McpRuntimeConfig) -> ReviewIntentSummaryPort:
+def review_intent_summary_port(
+    config: McpRuntimeConfig, *, recorded_answers: RecordedReviewAnswers | None = None
+) -> ReviewIntentSummaryPort:
     def read(repo: str, master: str, leaf: str, number: int | None, observe: Observe):
-        # The leaf's own resolution, or its recorded comparison ``number`` (MIK-R89 v2 rule 10).
         resolve = partial(resolve_review_comparison, config, repo, master, leaf, number)
-        with memo_capture_baselines(on_capture=observe_repository_capture):
-            return summarize_review(
-                resolve, repo, master, leaf, observe=lambda resolved: observe(_resolved(resolved))
+        with (
+            memo_capture_baselines(on_capture=observe_repository_capture),
+            memo_git_object_lookups(),
+        ):
+            with recorded_reads() as selection_reads:
+                resolved = resolve()
+            replay_reads(selection_reads)
+
+            def produce():
+                return summarize_review(lambda: resolved, repo, master, leaf)
+
+            if isinstance(resolved, ReviewRefusal):
+                return produce()
+            sources = _resolved(resolved)
+            observe(sources)
+            if recorded_answers is None:
+                return produce()
+            return recorded_answers.summary(
+                (repo, master, leaf, number), resolved, (sources, selection_reads), produce
             )
 
     return ReviewIntentSummaryPort(

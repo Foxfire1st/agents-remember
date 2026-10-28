@@ -36,7 +36,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
-from typing import Any, Literal, overload
+from typing import Any, BinaryIO, Literal, overload
 
 from agents_remember.kernel.git_object_memo_keys import _memo_cat_file, _memo_rev_parse
 from agents_remember.kernel.git_preparation import (
@@ -48,6 +48,12 @@ from agents_remember.kernel.git_preparation import (
     PrivateGitPreparationObservation,
     require_git_object_id,
     require_physical_tree,
+)
+from agents_remember.kernel.read_cancellation import (
+    CancellationToken,
+    ReadCancelled,
+    raise_if_read_cancelled,
+    read_cancellation,
 )
 
 GIT_REPOSITORY_SELECTOR_ENV = (
@@ -234,6 +240,39 @@ def run_git_bytes(
     return _run_git(repo_root, args, _git_run(settings, repo_root), raw_output=True)
 
 
+def run_git_into(
+    repo_root: Path,
+    args: list[str],
+    output: BinaryIO,
+    options: GitRunnerOptions | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run ``git args`` with its exact stdout written into ``output``, never through a pipe.
+
+    A read that only has to frame a large output -- a closure's every body -- need not carry
+    those bytes through this process: Git writes the file itself and the caller frames it in
+    place. The child runs in its own session, so a timeout or an abandoned read stops it with
+    its process group, exactly as for a piped command.
+    """
+
+    execution = _git_run(options or GitRunnerOptions(), repo_root)
+    argv = _git_argv(repo_root, args, execution.work_dir)
+    stdin_input = None if execution.input_text is None else execution.input_text.encode("utf-8")
+    raise_if_read_cancelled()
+    process = subprocess.Popen(
+        argv,
+        cwd=execution.work_dir,
+        stdout=output,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL if stdin_input is None else subprocess.PIPE,
+        env=execution.environment,
+        start_new_session=True,
+    )
+    _output, error_output = _wait_process(
+        process, stdin_input, execution.timeout, _GIT_CANCELLATION.get(), read_cancellation()
+    )
+    return subprocess.CompletedProcess(argv, process.returncode, None, error_output)
+
+
 def object_input_environment(object_inputs: Path | None) -> dict[str, str]:
     """The environment that makes a read see objects held outside the repository."""
 
@@ -370,7 +409,11 @@ def _run_git(
     )
     argv = _git_argv(repo_root, args, execution.work_dir)
     cancellation = _GIT_CANCELLATION.get()
-    if not execution.new_session and cancellation is None:
+    # A read whose client went away launches no further Git child (D569 mean 4), and the one
+    # it is running is stopped with its process group by ``_wait_process``.
+    reader = read_cancellation()
+    raise_if_read_cancelled()
+    if not execution.new_session and cancellation is None and reader is None:
         result = subprocess.run(
             argv,
             cwd=execution.work_dir,
@@ -401,7 +444,7 @@ def _run_git(
             start_new_session=True,
         )
         output, error_output = _wait_process(
-            process, stdin_input, execution.timeout, cancellation, argv
+            process, stdin_input, execution.timeout, cancellation, reader
         )
         code = process.returncode
         result = subprocess.CompletedProcess(argv, code, output, error_output)
@@ -428,16 +471,20 @@ def _wait_process(
     stdin_input: str | bytes | None,
     timeout: float | None,
     cancellation: Event | None,
-    argv: list[str],
+    reader: CancellationToken | None = None,
 ) -> tuple[Any, Any]:
     """Wait for one Git child, ending it on its timeout or when its reader abandoned it.
 
     Without a cancellation this is ``communicate`` with the caller's timeout. With one,
     the wait is polled: the process group is killed as soon as the reader goes away, and
-    the child's own timeout still applies when it never does.
+    the child's own timeout still applies when it never does. ``cancellation`` (the change-set
+    reads') answers the killed child's result; ``reader`` (a cancellable read's,
+    :mod:`agents_remember.kernel.read_cancellation`) reaps the child and raises
+    :class:`ReadCancelled`, so no caller can mistake the kill for a failed Git read.
     """
 
-    if cancellation is None:
+    argv = process.args
+    if cancellation is None and reader is None:
         try:
             return process.communicate(
                 input=stdin_input if stdin_input is not None else None, timeout=timeout
@@ -463,7 +510,11 @@ def _wait_process(
             )
         except subprocess.TimeoutExpired:
             sent = True
-        if cancellation.is_set():
+        if reader is not None and reader.is_set():
+            _kill_process_group(process)
+            process.communicate()
+            raise ReadCancelled
+        if cancellation is not None and cancellation.is_set():
             _kill_process_group(process)
             return process.communicate()
 

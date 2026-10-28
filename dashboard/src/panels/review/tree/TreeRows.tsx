@@ -1,5 +1,7 @@
-// The tree's rows (MIK-R86 v2 rules 1-4; mockup app.js:202-227). Every row is one line: a caret, a
-// name cut with an ellipsis, and one reason. A family heading may also carry `kept`. Nothing else.
+// The tree's rows (MIK-R86 v2 rules 1-4; mockup app.js:202-227). Every row is one line and three
+// cells: a caret, a name cut with an ellipsis, and one trailing cell — its reason, and, on a graded
+// location, the explainer's grade chip beside it (MIK-R211 v1 rule 5). A family heading may also
+// carry `kept`. Nothing else.
 // The accessible name keeps the title and the change badge (INV-W09GQM), the tooltip the whole title
 // (INV-PKFP2R).
 import { useId } from 'react';
@@ -117,15 +119,34 @@ export function FamilyRow({
   );
 }
 
+function subjectCaret(node: SubjectNode): string {
+  if (!node.first || !(node.counts?.changed ?? node.changed.length)) return '';
+  return node.locationsKnown ? '▾' : '▸';
+}
+
+// D576: the latest move changed this invariant and its detail has not been read again since.
+const STALE_TITLE = 'Changed by the latest move; read again when opened';
+
+export function StaleMark({ stale }: { stale?: boolean }) {
+  if (!stale) return null;
+  return (
+    <span className={styles.stale} data-testid="review-stale-mark" title={STALE_TITLE}>
+      ●<span className={css({ srOnly: true })}> changed by the move</span>
+    </span>
+  );
+}
+
 export function SubjectRow({
   node,
   nested,
   current,
+  stale,
   onSelect,
 }: {
   node: SubjectNode;
   nested: boolean;
   current: boolean;
+  stale?: boolean;
   onSelect: () => void;
 }) {
   const { row } = node;
@@ -143,16 +164,18 @@ export function SubjectRow({
       data-subject-id={row.selectorId}
       data-change-primary={row.badge}
       data-meaning={meaning}
+      data-stale={stale ? 'true' : undefined}
       aria-current={current || undefined}
-      aria-label={[row.title, row.badge, meaning, node.reason === row.badge ? '' : node.reason]
+      aria-label={[row.title, row.badge, meaning, node.reason === row.badge ? '' : node.reason, stale ? 'changed by the move' : '']
         .filter(Boolean)
         .join(' ')}
       title={row.title}
       onClick={onSelect}
       onKeyDown={treeArrow}
     >
-      <span className={styles.caret} aria-hidden="true">{node.first && node.changed.length ? '▾' : ''}</span>
+      <span className={styles.caret} aria-hidden="true">{subjectCaret(node)}</span>
       <span className={styles.name}>
+        <StaleMark stale={stale} />
         <span className={styles.id}>{row.id}</span>
         {summary}
       </span>
@@ -171,6 +194,7 @@ const judgmentChip = css({
   borderRadius: '2px',
   color: 'purple',
   whiteSpace: 'nowrap',
+  flexShrink: 0,
   '&[data-stale="true"]': {
     borderStyle: 'dashed',
     borderColor: 'amber',
@@ -190,6 +214,20 @@ export function JudgmentChip({ judgment }: { judgment?: LocationJudgment }) {
       title={judgment.hoverText}
     >
       {judgment.chipLabel}
+    </span>
+  );
+}
+
+// A location row's trailing cell: its reason, and — when the block is graded — the explainer's grade
+// chip beside it. One cell either way, so a graded row keeps the row's three grid cells and changes no
+// other row's columns (MIK-R211 v1 rule 5).
+function LocationTail({ judgment, text }: { judgment?: LocationJudgment; text: string }) {
+  const reason = <CountsReason text={text} />;
+  if (!judgment) return reason;
+  return (
+    <span className={styles.reasonCell}>
+      <JudgmentChip judgment={judgment} />
+      {reason}
     </span>
   );
 }
@@ -254,13 +292,12 @@ export function LocationRow({
         onKeyDown={treeArrow}
       >
         <span className={styles.caret} aria-hidden="true" />
-        <JudgmentChip judgment={node.judgment} />
         <span className={styles.name}>
           {node.role === 'proof' ? <span className={styles.proof} aria-hidden="true">✓</span> : null}
           {label}
           <span className={styles.dim}>{detail}</span>
         </span>
-        <CountsReason text={node.reason || ROLE_LABEL[node.role]} />
+        <LocationTail judgment={node.judgment} text={node.reason || ROLE_LABEL[node.role]} />
       </button>
     </>
   );
@@ -281,8 +318,8 @@ export function GroupRows({
   onOpenGroup: (node: SubjectNode, group: TreeGroupName) => void;
 }) {
   const rows: [TreeGroupName, number, string][] = [
-    ['unchanged', node.unchanged.length, 'unchanged'],
-    ['undetermined', node.notComparable.length, 'not comparable'],
+    ['unchanged', node.counts?.unchanged ?? node.unchanged.length, 'unchanged'],
+    ['undetermined', node.counts?.not_comparable ?? node.notComparable.length, 'not comparable'],
   ];
   return (
     <>

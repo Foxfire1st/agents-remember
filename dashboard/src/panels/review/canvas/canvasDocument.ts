@@ -26,6 +26,10 @@ export function useDocumentPresence(
       if (departed) return;
       departed = true;
       clearTimeout(timeout);
+      // The departed document's port is closed at departure, before its channel is revoked, not
+      // later when React runs this effect's cleanup: nothing reads the port once departed.
+      port?.close();
+      port = null;
       onDeparture();
     };
     inspect.current = () => {

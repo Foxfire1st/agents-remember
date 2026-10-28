@@ -3,7 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { subscribeReviewExplainerMoved } from "./reviewMemoryWatch";
 import type { ReviewExplainerMovedEvent } from "./reviewMemoryWatch";
 import { dashboardStore } from "./store";
-import { STATE_STREAM_OPEN_DEADLINE_MS, connectEvents, connectState } from "./stream";
+import {
+  STATE_STREAM_OPEN_DEADLINE_MS,
+  STREAM_REOPEN_FIRST_MS,
+  STREAM_REOPEN_LAST_MS,
+  connectEvents,
+  connectState,
+} from "./stream";
 
 // connectState and the sleep/wake half-open-corpse class
 // (data/streamLiveness.ts): after an OS sleep the open EventSource never fires `error`, so the
@@ -11,9 +17,13 @@ import { STATE_STREAM_OPEN_DEADLINE_MS, connectEvents, connectState } from "./st
 // projection forever. The watchdog cycles a judged corpse to a fresh subscribe — quietly: the
 // re-snapshot rides the identity-preserving merge and conn never leaves "live".
 class ControlledSource {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
   static instances: ControlledSource[] = [];
   listeners: Record<string, Array<(event: unknown) => void>> = {};
   closed = false;
+  readyState = 0;
   constructor(public url: string) {
     ControlledSource.instances.push(this);
   }
@@ -58,6 +68,28 @@ describe("connectState liveness (260723 sleep/wake)", () => {
 
     ControlledSource.instances[1].fire("open");
     expect(dashboardStore.getState().conn).toBe("live");
+    dispose();
+  });
+
+  // D569: the server names a quiet stream alive every 15 s, because its transport keepalive is a
+  // comment frame an EventSource never surfaces. Before, a healthy quiet stream was judged dead by
+  // the 90 s backstop and reopened; with the named event only a silent transport is cycled.
+  it("never cycles a quiet stream that names itself alive, and still cycles a silent one", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("EventSource", ControlledSource);
+    ControlledSource.instances = [];
+    const dispose = connectState();
+    ControlledSource.instances[0].fire("open");
+    for (let at = 0; at < 300_000; at += 15_000) {
+      vi.advanceTimersByTime(15_000);
+      ControlledSource.instances[0].fire("alive");
+    }
+    expect(ControlledSource.instances).toHaveLength(1);
+    expect(ControlledSource.instances[0].closed).toBe(false);
+
+    vi.advanceTimersByTime(100_000); // the transport goes silent: no alive, no frame
+    expect(ControlledSource.instances[0].closed).toBe(true);
+    expect(ControlledSource.instances).toHaveLength(2);
     dispose();
   });
 
@@ -238,5 +270,83 @@ describe("connectEvents ready marker (MIK-R114 rule 8)", () => {
     ControlledSource.instances[0].fire("ready", { data: "not json" });
     expect(seen).toEqual([undefined]);
     dispose();
+  });
+});
+
+// The browser gives up on a stream answered with an error status -- a server shutting down answers
+// one -- and a closed EventSource never retries. The page reopens it itself, with a doubling wait,
+// and the badge says SIGNAL LOST until a stream opens again.
+describe("a stream the browser gave up on is reopened by the page", () => {
+  const closedBy = (source: ControlledSource) => {
+    source.readyState = ControlledSource.CLOSED;
+    source.fire("error");
+  };
+
+  it("reopens the state stream after an error status, waiting longer each time, until one opens", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("EventSource", ControlledSource);
+    ControlledSource.instances = [];
+    const dispose = connectState();
+    ControlledSource.instances[0].fire("open");
+    closedBy(ControlledSource.instances[0]);
+    expect(dashboardStore.getState().conn).toBe("signal-lost");
+    const waits: number[] = [];
+    for (let attempt = 1; attempt <= 6; attempt++) {
+      const before = ControlledSource.instances.length;
+      let waited = 0;
+      while (ControlledSource.instances.length === before && waited < 4 * STREAM_REOPEN_LAST_MS) {
+        vi.advanceTimersByTime(250);
+        waited += 250;
+      }
+      waits.push(waited);
+      expect(dashboardStore.getState().conn).toBe("signal-lost");
+      closedBy(ControlledSource.instances.at(-1)!);
+    }
+    expect(waits).toEqual([1, 2, 4, 8, 15, 15].map((s) => s * 1000));
+    expect(waits[0]).toBe(STREAM_REOPEN_FIRST_MS);
+    expect(Math.max(...waits)).toBe(STREAM_REOPEN_LAST_MS);
+
+    vi.advanceTimersByTime(STREAM_REOPEN_LAST_MS);
+    const live = ControlledSource.instances.at(-1)!;
+    live.fire("open");
+    expect(dashboardStore.getState().conn).toBe("live");
+    // An open starts the waits again: the next failure is reopened after the first wait.
+    closedBy(live);
+    vi.advanceTimersByTime(STREAM_REOPEN_FIRST_MS);
+    expect(ControlledSource.instances.at(-1)).not.toBe(live);
+    dispose();
+  });
+
+  it("leaves a stream the browser still retries to the browser", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("EventSource", ControlledSource);
+    ControlledSource.instances = [];
+    const dispose = connectState();
+    ControlledSource.instances[0].fire("open");
+    ControlledSource.instances[0].readyState = ControlledSource.CONNECTING;
+    ControlledSource.instances[0].fire("error"); // a dropped connection: the native retry owns it
+    vi.advanceTimersByTime(STREAM_REOPEN_LAST_MS);
+    expect(ControlledSource.instances).toHaveLength(1);
+    dispose();
+  });
+
+  it("reopens the river from the last event it had, and a disposed one stays closed", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("EventSource", ControlledSource);
+    ControlledSource.instances = [];
+    const lines: string[] = [];
+    const dispose = connectEvents((line) => lines.push(line));
+    const first = ControlledSource.instances[0];
+    first.fire("event", { data: "one", lastEventId: "cursor-1" });
+    closedBy(first);
+    vi.advanceTimersByTime(STREAM_REOPEN_FIRST_MS);
+    expect(ControlledSource.instances).toHaveLength(2);
+    expect(ControlledSource.instances[1].url).toBe("/api/events?lastEventId=cursor-1");
+    ControlledSource.instances[1].fire("event", { data: "two", lastEventId: "cursor-2" });
+    expect(lines).toEqual(["one", "two"]);
+    dispose();
+    closedBy(ControlledSource.instances[1]);
+    vi.advanceTimersByTime(STREAM_REOPEN_LAST_MS);
+    expect(ControlledSource.instances).toHaveLength(2);
   });
 });

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application.review_source_inventory import is_text_path
-from agents_remember.application.review_tree_comparison import comparison_records
+from agents_remember.application.review_tree_comparison import numbered_record
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.git_command import PARSED_DIFF_OPTIONS
 from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
@@ -16,9 +16,9 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 def recorded_comparison(contract: WorktreeContract, number: int) -> ReviewTreeComparisonRecord:
-    for record in comparison_records(contract.task_root, contract.leaf_id or contract.task_name):
-        if record.number == number:
-            return record
+    record = numbered_record(contract.task_root, contract.leaf_id or contract.task_name, number)
+    if record is not None:
+        return record
     raise FileNotFoundError(f"leaf {contract.leaf_id} records no tree comparison {number}")
 
 

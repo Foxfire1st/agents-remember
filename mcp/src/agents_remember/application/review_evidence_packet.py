@@ -31,7 +31,7 @@ from agents_remember.models.knowledge.review_evidence import (
     EvidenceCollection,
     EvidenceComparisonBinding,
     EvidenceConvertedBase,
-    EvidenceLimits,
+    EvidenceGroupMap,
     EvidenceMap,
     EvidenceMemorySide,
     EvidenceOmission,
@@ -227,45 +227,26 @@ def _default_collections(
     )
 
 
-def _admit_populations(
-    collections: Sequence[EvidenceCollection],
-    claims: Sequence[EvidenceClaim],
-    limits: EvidenceLimits,
-) -> None:
-    """Refuse a packet whose supplied populations exceed its own admitted bounds (rule 4).
+def _admit_populations(collections: Sequence[EvidenceCollection]) -> None:
+    """A collection may carry fewer records than its count only if it names the bound that cut them.
 
-    The model checks the same numbers; this check happens before the packet exists, so a caller
-    learns which collection or path set broke the bound rather than only that the packet is invalid.
+    Ruling 6085456d, addenda (a) and (c), and MIK-R211 v4 rules 1-2: no count and no size cuts a
+    collection any more, so the per-packet and per-collection ceilings are gone with the limits that
+    declared them. What stays is honesty -- a collection that
+    states a count larger than the records it carries must say which bound left the rest out, so a
+    reader is never shown a short collection that looks complete.
     """
 
-    paths = {
-        str(item["path"])
-        for collection in collections
-        for item in collection.items
-        if isinstance(item.get("path"), str)
-    } | {basis.path for claim in claims for basis in claim.bases if basis.path}
-    if len(paths) > limits.paths_per_packet:
-        raise ValueError(
-            f"the packet would name {len(paths)} distinct path(s), beyond the admitted "
-            f"{limits.paths_per_packet} per packet; select a narrower scope or page the evidence"
-        )
     for collection in collections:
-        if collection.count is not None and collection.count > limits.records_per_collection:
+        if (
+            collection.count is not None
+            and len(collection.items) < collection.count
+            and not (collection.limit or "").strip()
+        ):
             raise ValueError(
-                f"collection {collection.name!r} holds {collection.count} record(s), beyond the "
-                f"admitted {limits.records_per_collection} per collection"
+                f"collection {collection.name!r} carries {len(collection.items)} of "
+                f"{collection.count} record(s) and does not name the bound that cut them"
             )
-    paths = {
-        str(item["path"])
-        for collection in collections
-        for item in collection.items
-        if isinstance(item.get("path"), str)
-    } | {basis.path for claim in claims for basis in claim.bases if basis.path}
-    if len(paths) > limits.paths_per_packet:
-        raise ValueError(
-            f"the packet would name {len(paths)} distinct path(s), beyond the admitted "
-            f"{limits.paths_per_packet} per packet; select a narrower scope or page the evidence"
-        )
 
 
 def _omissions_for(
@@ -308,7 +289,6 @@ def build_evidence_packet(  # noqa: PLR0913 -- one call states one packet's own 
     memory_before: SideState,
     memory_after: SideState,
     evidence_map: EvidenceMap,
-    limits: EvidenceLimits,
     collections: Mapping[str, EvidenceCollection] | None = None,
     supplemental: Sequence[SupplementalReceipt] = (),
     claims: Sequence[EvidenceClaim] = (),
@@ -317,18 +297,21 @@ def build_evidence_packet(  # noqa: PLR0913 -- one call states one packet's own 
     skipped_reason: str = "preparation selected no producer for this collection",
     comparison_owner: str = COMPARISON_OWNER,
     comparison_reference_value: str | None = None,
+    group_map: EvidenceGroupMap | None = None,
 ) -> EvidencePacket:
     """One comparison's packet, with every collection and claim accounted for.
 
     The evidence map is the caller's, because scope and omissions are judged facts. The omissions
     this builder adds are the mechanical ones: each collection preparation skipped. Everything else
-    -- an unexamined sibling, a truncated read, a contradictory judgment -- is the caller's to name,
-    and a caller that names none of them is saying it found none.
+    -- an unexamined sibling, a contradictory judgment -- is the caller's to name, and a caller that
+    names none of them is saying it found none. The packet declares no read limits: it holds the
+    complete map, and no byte budget or count shapes it (MIK-R211 v4 rules 1-2).
     """
 
     built = _default_collections(collections or {}, skipped_reason)
-    _admit_populations(built, claims, limits)
-    named = evidence_map.omissions + _omissions_for(built, supplemental)
+    _admit_populations(built)
+    built, budget_omissions, budget_line = _fit_to_budget(built)
+    named = evidence_map.omissions + _omissions_for(built, supplemental) + budget_omissions
     return EvidencePacket(
         comparison=comparison_binding(
             record,
@@ -344,6 +327,7 @@ def build_evidence_packet(  # noqa: PLR0913 -- one call states one packet's own 
         scope=scope,
         question=question,
         collections=built,
+        map=group_map,
         supplemental=tuple(supplemental),
         claims=ClaimMap(claims=tuple(claims)),
         evidence_map=EvidenceMap(
@@ -353,9 +337,20 @@ def build_evidence_packet(  # noqa: PLR0913 -- one call states one packet's own 
             edge_meanings=evidence_map.edge_meanings,
             coverage=evidence_map.coverage,
         ),
-        limits=limits,
-        limitations=tuple(limitations),
+        limitations=(*tuple(limitations), *((budget_line,) if budget_line else ())),
     )
+
+
+def _fit_to_budget(
+    collections: Sequence[EvidenceCollection],
+) -> tuple[tuple[EvidenceCollection, ...], tuple[EvidenceOmission, ...], str | None]:
+    """The map as it is built: no budget collapses or omits a group for size.
+
+    Ruling 6085456d, addendum (c): nothing is collapsed to fit a budget, so this takes no limits and
+    no collapse order -- there is nothing left for either to decide.
+    """
+
+    return tuple(collections), (), None
 
 
 def same_comparison(packet: EvidencePacket, record: ReviewTreeComparisonRecord) -> bool:

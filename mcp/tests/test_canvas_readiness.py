@@ -44,6 +44,14 @@ def test_an_admitted_self_contained_page_is_ready() -> None:
     assert report.part_map.implicit
     assert [entry.part_id for entry in report.part_map.parts] == ["page"]
 
+    # No size or count bounds a page (MIK-R211 v4 rule 3, D567): past the old 4 MiB page and 400
+    # references, a page that keeps to its own assets is still ready.
+    large = _assets()
+    large["index.html"] = (
+        PAGE + b"<img src='img/plot.svg'>" * 450 + b"<!--" + b"x" * (4 * 1024 * 1024) + b"-->"
+    )
+    assert check_page(large, entrypoint="index.html", packet=packet(record())).ready
+
 
 def test_a_page_that_requests_the_network_is_not_ready() -> None:
     assets = _assets()
@@ -67,10 +75,13 @@ def test_a_page_that_escapes_its_revision_or_names_a_missing_asset_is_not_ready(
     assert "outside its own admitted assets" in report.failures[0].detail
 
     missing = _assets()
-    missing["index.html"] = b"<!doctype html><img src='img/gone.svg'>"
+    missing["index.html"] = b"<!doctype html>" + b"".join(
+        f"<img src='img/gone-{index}.svg'>".encode() for index in range(7)
+    )
     report = check_page(missing, entrypoint="index.html", packet=packet(record()))
     assert not report.ready
     assert "does not carry" in report.failures[0].detail
+    assert all(f"gone-{index}.svg" in report.failures[0].detail for index in range(7))  # all named
 
 
 def test_an_evidence_reference_must_be_one_the_admitted_packet_carries() -> None:

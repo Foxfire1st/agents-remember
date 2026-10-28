@@ -29,6 +29,16 @@ function disclosureContract(root: HTMLElement) {
     expect(element.querySelector('[data-review-content]')).toBeNull();
   }
 }
+// A family opens its members' overview (MIK-R211 v4 rule 10), drawn from the catalogue before the
+// family's own answer; the disclosures are counted once that answer fills the overview's slot.
+async function familyAnswered(view: ReturnType<typeof render>, familyId: string) {
+  await waitFor(() => {
+    const overview = view.getByTestId('review-family-overview');
+    expect(overview.dataset.family).toBe(familyId);
+    expect(within(overview).getByTestId('review-subject-slot').dataset.slotState).toBe('answered');
+    expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined();
+  });
+}
 // The family and subject rows the tree shows (its pinned rows and location rows aside).
 const subjectRows = (rail: HTMLElement) =>
   [...rail.querySelectorAll<HTMLElement>('[data-tree-node]')].filter((node) =>
@@ -95,14 +105,15 @@ it('opens each offered viewer filter, draws its first diff, and returns without 
 });
 it('shows the persisted worklist as its own open view and preserves the named subject', async () => {
   serve();
+  const familyId = firstOutlineChange(catalogue.outline!, 'priority')!.selectorId;
   const view = render(
     <ReviewSurface
       {...target}
       selectorKind="family"
-      selectorId={firstOutlineChange(catalogue.outline!, 'priority')!.selectorId}
+      selectorId={familyId}
     />,
   );
-  await view.findByTestId('review-center-family');
+  await familyAnswered(view, familyId);
   const rail = view.getByTestId('review-tree');
   const worklist = view.getByTestId('review-tree-worklist');
   await waitFor(() => expect(worklist.getAttribute('aria-label')).toBe('Worklist 518 open'));
@@ -115,7 +126,7 @@ it('shows the persisted worklist as its own open view and preserves the named su
   disclosureContract(view.getByTestId('review-surface'));
   expect(rail.querySelector('[aria-current="true"]')).toBe(selection);
   fireEvent.click(selection!);
-  await view.findByTestId('review-center-family');
+  await familyAnswered(view, familyId);
   expect(view.queryByTestId('review-worklist-view')).toBeNull();
   disclosureContract(view.getByTestId('review-surface'));
 });

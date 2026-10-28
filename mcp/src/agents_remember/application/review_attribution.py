@@ -48,6 +48,7 @@ from typing import Literal
 
 import apsw
 
+from agents_remember.kernel.read_cancellation import raise_if_read_cancelled
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.diff_display import (
     MappingFact,
@@ -254,6 +255,7 @@ def _registered_mappings(
     matches, established = _subject_matcher(connection, namespace, subject)
     facts: list[MappingFact] = []
     for path in paths:
+        raise_if_read_cancelled()  # one query and its anchors' observations per measured path
         for row in fetch_realizations_at_path(connection, namespace, path):
             observation = resolver(row)
             # A resolver that observed nothing at all is the state the surface already renders for a

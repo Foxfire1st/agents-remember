@@ -48,10 +48,13 @@ import {
   type FirstRequestBody,
 } from './request';
 import { publishExplainerSeat } from './ExplainerTaskDocument';
+import { useRetireReceipt } from './retireReceipt';
 
 // The build is a read at this cadence while it runs; the cadence is the dashboard's, not the
 // server's, and a read starts no turn.
 export const BUILD_POLL_MS = 1_000;
+// How long a page keeps asking after a Send whose own answer never arrived.
+export const BUILD_FOLLOW_MS = 120_000;
 
 const NO_PREFILL: ExplainerStalePart[] = [];
 const NO_GRADES: string[] = [];
@@ -66,6 +69,17 @@ export interface FormState {
 export interface Failure {
   step: string;
   reason: string;
+}
+
+/**
+ * The failure the column shows: the Send's own refusal, or the build `/state` reports as stopped.
+ * The server keeps a stopped build under `/state` with its own `error`, and the client reads that as
+ * the reason, so a failure found by a later read (or already there when the page opened) reaches the
+ * form and the build box the same way the Send's own answer does.
+ */
+function failureOf(state: ExplainerState | null, failure: Failure | null): Failure | null {
+  if (failure) return failure;
+  return state?.build ? buildFailure(state.build) : null;
 }
 
 /** What this Send carried. The build panel shows it as waiting to go out, even after the tray empties. */
@@ -111,19 +125,46 @@ export function useExplainerRead(address: ExplainerAddress, active: boolean) {
   return { read, setRead, refresh };
 }
 
-/** A build that ran is polled until it stops; each read is a read, never a turn. */
-export function useBuildPolling(read: ExplainerRead | null, refresh: () => void, active: boolean, sending = false) {
-  const building = (read?.kind === 'state' && read.value.build?.state === 'running') || sending;
+/**
+ * A build that ran is polled until it stops; each read is a read, never a turn.
+ *
+ * `following` covers the one Send whose answer never arrives: an http-500 from a build that is still
+ * writing a snapshot, or a connection that dropped while it ran. The page keeps reading `/state` for
+ * `BUILD_FOLLOW_MS` instead of freezing on the failure text, so a build that carried on is seen and a
+ * build that died shows its own reason (MIK-R211 v2 rules 4 and 5).
+ */
+export function useBuildPolling(
+  read: ExplainerRead | null,
+  refresh: () => void,
+  active: boolean,
+  sending = false,
+  following = false,
+) {
+  const running = read?.kind === 'state' && read.value.build?.state === 'running';
+  const building = running || sending || following;
   useEffect(() => {
     if (!active || !building) return;
-    const timer = setInterval(refresh, BUILD_POLL_MS);
+    const started = Date.now();
+    const timer = setInterval(() => {
+      // A follow that never finds a build stops at its window rather than polling for ever.
+      if (following && Date.now() - started > BUILD_FOLLOW_MS) return;
+      refresh();
+    }, BUILD_POLL_MS);
     return () => clearInterval(timer);
-  }, [active, building, refresh]);
+  }, [active, building, following, refresh]);
 }
 
-function useColumnRead(address: ExplainerAddress, active: boolean, sending: boolean) {
+function useColumnRead(
+  address: ExplainerAddress,
+  active: boolean,
+  sending: boolean,
+  sendFailed: boolean,
+) {
   const { read, setRead, refresh } = useExplainerRead(address, active);
-  useBuildPolling(read, refresh, active, sending);
+  // Once `/state` names a build at all, the ordinary rules take over: a running build polls, an
+  // ended one is what the failure box shows.
+  const following = sendFailed && !(read?.kind === 'state' && read.value.build);
+  useBuildPolling(read, refresh, active, sending, following);
   const state = read?.kind === 'state' ? read.value : null;
   return { read, setRead, refresh, state };
 }
@@ -313,6 +354,9 @@ function useSend(ctx: SendContext, sending: boolean, setSending: Dispatch<SetSta
     setSending(false);
     if (answer.kind === 'refused') {
       setFailure({ step: 'The build', reason: `${answer.reason}: ${answer.detail}` });
+      // The answer a build gives can go missing while the build itself carries on (a 500, or a
+      // dropped connection), so the page reads `/state` again instead of freezing on that text.
+      ctxRef.current.refresh();
       return;
     }
     if (settleAcceptedBuild(answer.answer, body, picksNow, ctxRef.current)) {
@@ -324,15 +368,16 @@ function useSend(ctx: SendContext, sending: boolean, setSending: Dispatch<SetSta
 
 interface RetireContext {
   address: ExplainerAddress;
+  state: ExplainerState | null;
   refresh: () => void;
   setForm: SetForm;
   setFailure: SetFailure;
 }
 
 /** Retire's confirmation and its one call (MIK-R106 rule 7). */
-function useRetire({ address, refresh, setForm, setFailure }: RetireContext) {
+function useRetire({ address, state, refresh, setForm, setFailure }: RetireContext) {
   const [retireOpen, setRetireOpen] = useState(false);
-  const [receipt, setReceipt] = useState<ExplainerRetireAnswer | null>(null);
+  const [receipt, setReceipt] = useRetireReceipt(state);
   const receiptIdRef = useRef<string | null>(null);
   const toggle = useCallback(() => setRetireOpen((open) => !open), []);
   const cancel = useCallback(() => setRetireOpen(false), []);
@@ -351,7 +396,7 @@ function useRetire({ address, refresh, setForm, setFailure }: RetireContext) {
     if (!incomplete) receiptIdRef.current = null;
     setRetireOpen(incomplete);
     refresh();
-  }, [address, refresh, setFailure, setForm]);
+  }, [address, refresh, setFailure, setForm, setReceipt]);
   return { retireOpen, receipt, toggle, cancel, retire };
 }
 
@@ -533,9 +578,9 @@ export function useExplainerColumn(
 ): ExplainerColumnState {
   const target = useExplainerAddress(address);
   const [sending, setSending] = useState(false);
-  const { read, setRead, refresh, state } = useColumnRead(target, active, sending);
-  const { form, setForm, picks } = useColumnForm(target, read, state, active);
   const [failure, setFailure] = useState<Failure | null>(null);
+  const { read, setRead, refresh, state } = useColumnRead(target, active, sending, failure !== null);
+  const { form, setForm, picks } = useColumnForm(target, read, state, active);
   const [held, setHeld] = useState<ExplainerHeldDelivery | null>(null);
   const [sent, setSent] = useState<SentRequest | null>(null);
   const { selectedAgentId, setSelectedAgentId, selectAgent } = useSelectedAgent(target, active, state);
@@ -547,7 +592,7 @@ export function useExplainerColumn(
     sending,
     setSending,
   );
-  const retire = useRetire({ address: target, refresh, setForm, setFailure });
+  const retire = useRetire({ address: target, state, refresh, setForm, setFailure });
   const explain = useExplain(target, state, task, setForm, setSelectedAgentId);
   const cancel = useCancel(target, setForm, setFailure, resetRequestId);
   const openForm = useCallback(() => setForm({ prefill: [], staleGrades: [] }), [setForm]);
@@ -572,7 +617,7 @@ export function useExplainerColumn(
     selectAgent,
     frameTarget,
     showFrame,
-    failure,
+    failure: failureOf(state, failure),
     held,
     activeBuild: state?.build ?? null,
     sent,

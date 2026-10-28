@@ -1,8 +1,8 @@
 """Evidence addresses and claim resolution (MIK-R102 rules 7, 8, 9).
 
 A claim's reference is an address, and an address is only evidence when the packet that cites it
-actually holds the object. This module reads a ``side:path#L1-L2`` reference through the same bounded
-read the investigation uses, and resolves each typed basis against the packet's own comparison, its
+actually holds the object. This module reads a ``side:path#L1-L2`` reference through the same read
+the investigation uses, and resolves each typed basis against the packet's own comparison, its
 collections and its receipts. A judgment row whose owner the packet does not carry stays unresolved
 even when the text says ``present``; a proof entry with no established execution result cannot
 support a recorded claim. None of this judges whether a claim's prose is true -- only whether the
@@ -14,13 +14,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from agents_remember.application.review_evidence_read import (
-    DEFAULT_READ_LIMITS,
-    read_bound_source,
-)
+from agents_remember.application.review_evidence_read import read_bound_source
 from agents_remember.models.knowledge.review_evidence import (
     ClaimBasis,
-    EvidenceLimits,
     EvidencePacket,
 )
 from agents_remember.models.knowledge.review_evidence_read import (
@@ -67,12 +63,9 @@ def evidence_address(reference: str) -> EvidenceAddress | None:
 
 
 def read_claim_basis(
-    record: ReviewTreeComparisonRecord,
-    basis: EvidenceAddress | str,
-    *,
-    limits: EvidenceLimits = DEFAULT_READ_LIMITS,
+    record: ReviewTreeComparisonRecord, basis: EvidenceAddress | str
 ) -> EvidenceReadReceipt | None:
-    """Read exactly what one claim cites, through the same bounded read (rule 8)."""
+    """Read exactly what one claim cites, through the same read the investigation uses (rule 8)."""
 
     address = basis if isinstance(basis, EvidenceAddress) else evidence_address(basis)
     if address is None:
@@ -83,7 +76,6 @@ def read_claim_basis(
         address.path,
         start_line=address.start_line,
         end_line=address.end_line,
-        limits=limits,
     )
 
 

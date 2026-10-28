@@ -566,14 +566,15 @@ def test_a_capture_that_detects_a_moved_head_refuses_instead_of_publishing_a_sta
     source_world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     world = source_world
-    original = capture_owner.worktree_candidate_tree
+    # A review read captures through the worktree's kept index (D569); a commit lands during it.
+    original = capture_owner.kept_candidate_tree
 
-    def capture_then_move(repo: Path, index_path: Path, **kwargs: object) -> str:
-        tree = original(repo, index_path, **kwargs)  # type: ignore[arg-type]
+    def capture_then_move(root: Path, repo: Path, **kwargs: object) -> str:
+        tree = original(root, repo, **kwargs)  # type: ignore[arg-type]
         _commit(world.code_worktree, "commit during capture")
         return tree
 
-    monkeypatch.setattr(capture_owner, "worktree_candidate_tree", capture_then_move)
+    monkeypatch.setattr(capture_owner, "kept_candidate_tree", capture_then_move)
     outcome = resolve_review_candidate(world.config, REPO, MASTER, LEAF)
     assert not isinstance(outcome, ReviewCandidateResolution)
     assert outcome.code == "candidate_unresolved" and outcome.offending_input == "candidate"
@@ -864,26 +865,27 @@ def test_a_file_changed_after_write_tree_cannot_be_certified_by_a_later_snapshot
     source_world: World, monkeypatch: pytest.MonkeyPatch, side: str
 ) -> None:
     world = source_world
+    # Each side's review read captures through the worktree's kept index (D569).
     owner = (
         capture_owner
         if side == "code"
         else __import__(
             "agents_remember.application.review_tree_comparison",
-            fromlist=["worktree_candidate_tree"],
+            fromlist=["kept_candidate_tree"],
         )
     )
-    original = owner.worktree_candidate_tree
+    original = owner.kept_candidate_tree
     worktree = world.code_worktree if side == "code" else world.memory_worktree
     path = CODE_FILE if side == "code" else "changed-during-capture.txt"
 
-    def capture_then_edit(repo: Path, index_path: Path, **kwargs: object) -> str:
-        tree = original(repo, index_path, **kwargs)  # type: ignore[arg-type]
+    def capture_then_edit(root: Path, repo: Path, **kwargs: object) -> str:
+        tree = original(root, repo, **kwargs)  # type: ignore[arg-type]
         (repo / path).write_text("changed after Git captured the tree\n")
         return tree
 
     with memo_capture_baselines():
         with monkeypatch.context() as patch:
-            patch.setattr(owner, "worktree_candidate_tree", capture_then_edit)
+            patch.setattr(owner, "kept_candidate_tree", capture_then_edit)
             resolved = _public_resolution(world)
         assert resolved.candidate_identity is not None and resolved.trees is not None
         tree = (

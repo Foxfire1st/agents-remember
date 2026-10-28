@@ -5,12 +5,13 @@ Four small durable facts live here, each with exactly one writer:
 * **the binding** (``binding.json``) says which comparison the environment serves -- recorded, or
   the typed planned comparison of a leaf whose work has not started. Only the build and an Update
   write it, last, atomically (rules 4 and 6);
-* **the generation** (``<leaf>.generation``) only grows, and it is raised under the leaf lock, so
-  two Sends cannot make one seat (rule 5);
-* **the retired marker** (``<leaf>/retired.json``) names the receipt a finished Retire wrote
-  (rule 8);
+* **the generation** only grows, and it is raised under the leaf lock, so two Sends cannot make one
+  seat (rule 5). It lies with the task's explainer records, not in the workspace, so a removal never
+  resets it (MIK-R211 v5 rule 12);
+* **the seat attempts** (``<leaf>/state/seat-attempts``) name the create attempts of the
+  workspace's seat, and go with the workspace;
 * **the retire receipt** lies with the task's records, so removing the workspace removes no
-  evidence of what was retired.
+  evidence of what was retired, and nothing of a removed workspace stays under the explainer folder.
 
 The seat's identity is derived, never stored: ``uuid5`` of the workspace path and the generation
 (rule 5). A host that lost a create reply therefore reconciles the same seat, and a new generation
@@ -33,29 +34,34 @@ import uuid
 from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import AliasChoices, ConfigDict, Field
 from pydantic import ValidationError as _ValidationError
 
+from agents_remember.canvas.explainer_errors import ExplainerRefused, ExplainerStateError
 from agents_remember.canvas.explainer_paths import (
     binding_path,
     explainer_task_root,
     guard_explainer_path,
     receipt_id_segment,
     receipt_path,
-    retired_marker,
+    seat_counter_path,
+    state_directory,
 )
 from agents_remember.canvas.paths import PathRefused, path_segment
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.recorded_reads import observed_text, record_read
 from agents_remember.models.knowledge.base import KnowledgeModel
 from agents_remember.models.knowledge.review_frame import FrameBinding
 
 __all__ = [
     "AGENT_MARKER",
     "BINDING_SCHEMA",
+    "SEAT_ATTEMPTS_NAME",
     "ExplainerBinding",
     "ExplainerRefused",
     "ExplainerStateError",
@@ -68,9 +74,9 @@ __all__ = [
     "end_processes",
     "find_pending_receipt",
     "generation",
+    "latest_build_failure",
     "ledger_entry",
     "ledger_path",
-    "mark_retired",
     "process_tree",
     "raise_generation",
     "read_binding",
@@ -80,7 +86,6 @@ __all__ = [
     "record_request",
     "request_message_id",
     "restore_generation",
-    "retired",
     "same_binding",
     "write_binding",
     "write_inflight_create",
@@ -101,19 +106,6 @@ AGENT_MARKER = "PASEO_AGENT_ID"
 BUSY = "explainer-busy"
 
 
-class ExplainerRefused(ValueError):
-    """A named refusal. The reason is a value the page or the tool shows; never a server error."""
-
-    def __init__(self, reason: str, detail: str) -> None:
-        self.reason = reason
-        self.detail = detail
-        super().__init__(f"{reason}: {detail}")
-
-
-class ExplainerStateError(ValueError):
-    """A durable explainer fact could not be read or is not what it claims."""
-
-
 class PlannedIdentity(KnowledgeModel):
     """The typed planned comparison a leaf before its go is bound to (rule 4).
 
@@ -129,14 +121,16 @@ class PlannedIdentity(KnowledgeModel):
 
 
 class ExplainerBinding(KnowledgeModel):
-    """What one environment serves: the binding, its packet, and the snapshot that matches it."""
+    """What one environment serves: the binding, its packet, and the tree-container address that matches it."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
 
     schema_: Literal["ar-explainer-binding/v1"] = Field(default=BINDING_SCHEMA, alias="schema")
     binding: FrameBinding
     planned: PlannedIdentity | None = None
-    snapshot: str = Field(min_length=1, max_length=64)
+    #: The retired read-only snapshot's folder name: still read from an old ``binding.json``, never
+    #: written (MIK-R211 v5 rule 3 -- the candidate trees are plain checkouts under ``trees/``).
+    snapshot: str | None = Field(default=None, max_length=64, exclude=True)
     prepared_at: str = Field(min_length=1, max_length=64)
     packet_digest: str = Field(min_length=1, max_length=128)
     #: The comparison record the packet was prepared from. A planned binding has none.
@@ -236,9 +230,10 @@ def read_binding(workspace: Path) -> ExplainerBinding | None:
 
     target = binding_path(workspace)
     if not target.is_file():
+        record_read(target)  # no binding is an input too (D570)
         return None
     try:
-        payload = json.loads(target.read_text(encoding="utf-8"))
+        payload = json.loads(observed_text(target))
     except (OSError, UnicodeDecodeError) as error:
         raise ExplainerStateError(f"the binding at {target} cannot be read: {error}") from error
     try:
@@ -302,10 +297,89 @@ def find_pending_receipt(receipts_root: Path, receipt_id: str) -> RetireReceipt 
     return None
 
 
-def agent_id(workspace: Path, generation_number: int) -> str:
-    """The seat's stable id: the workspace and the generation, never an attempt folder (rule 5)."""
+#: The workspace's seat attempts, inside its ``state/`` (MIK-R211 v5 rule 12).
+SEAT_ATTEMPTS_NAME = "seat-attempts"
 
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{workspace.as_posix()}#{generation_number}"))
+
+def agent_id(workspace: Path, generation_number: int, attempt: str = "") -> str:
+    """The seat's id: the workspace, the generation, and the attempt that minted it (rule 5).
+
+    A generation names one seat, but the host keeps a seat id for ever once it has seen it -- an
+    archived seat's id included -- so a create that failed after the host had made the seat would
+    spend that id for the generation and refuse every retry. The attempt is recorded in the
+    workspace, so a retry mints a new id while a resume derives the id the seat was made with; the
+    generation itself lies with the task, so a reopened workspace never derives an archived id.
+    """
+
+    suffix = f"#{attempt}" if attempt else ""
+    return str(
+        uuid.uuid5(uuid.NAMESPACE_URL, f"{workspace.as_posix()}#{generation_number}{suffix}")
+    )
+
+
+def _attempts_path(workspace: Path) -> Path:
+    """Where a workspace records the attempts its seat has spent."""
+
+    return state_directory(workspace) / SEAT_ATTEMPTS_NAME
+
+
+def seat_attempts(workspace: Path) -> tuple[str, ...]:
+    """The attempts this workspace has recorded, oldest first; empty when it has none."""
+
+    path = _attempts_path(workspace)
+    if not path.is_file():
+        return ()
+    try:
+        recorded = path.read_text(encoding="utf-8").split()
+    except OSError as error:
+        raise ExplainerStateError(f"the seat attempts at {path} cannot be read: {error}") from error
+    return tuple(recorded)
+
+
+def seat_attempt(workspace: Path) -> str:
+    """The attempt the workspace's seat was made with: the last one recorded, or ``""``."""
+
+    attempts = seat_attempts(workspace)
+    return attempts[-1] if attempts else ""
+
+
+def seat_for_workspace(workspace: Path, number: int) -> str:
+    """The seat id of the generation a workspace holds, read from the workspace's own attempts."""
+
+    return agent_id(workspace, number, seat_attempt(workspace))
+
+
+def seat_ids_for(workspace: Path, number: int) -> tuple[str, ...]:
+    """Every id this generation has named: the un-attempted one first, then each attempt.
+
+    A binding written before attempts existed names the un-attempted id, and a binding written since
+    names the attempt that made it; both are this generation's seat, so both are admitted.
+    """
+
+    ids = [agent_id(workspace, number)]
+    ids.extend(agent_id(workspace, number, attempt) for attempt in seat_attempts(workspace))
+    return tuple(dict.fromkeys(ids))
+
+
+def mint_seat_attempt(workspace: Path, attempt: str) -> str:
+    """Record one more attempt for this workspace's seat and answer it. Caller holds the leaf lock.
+
+    The host never forgets a seat id, so every create attempt needs its own; recording it before
+    the create is what lets a later read, resume or retire derive the id the seat actually has.
+    """
+
+    path = _attempts_path(workspace)
+    guard_explainer_path(path, root=workspace.parent, label="explainer seat attempts")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    recorded = (*seat_attempts(workspace), attempt)
+    atomic_write_text(path, "".join(f"{name}\n" for name in recorded))
+    return attempt
+
+
+def seat_counter(workspace: Path) -> Path:
+    """The generation counter of ``workspace``'s seats, kept with the task (MIK-R211 v5 rule 12)."""
+
+    return seat_counter_path(workspace)
 
 
 def request_message_id(leaf_id: str, request_id: str) -> str:
@@ -315,8 +389,10 @@ def request_message_id(leaf_id: str, request_id: str) -> str:
 
 
 def ledger_path(config: McpRuntimeConfig, repository_id: str, task: str, leaf_id: str) -> Path:
+    """``<leaf>/state/requests.json`` -- the Send ledger, inside the workspace (v5 rule 12)."""
+
     root = explainer_task_root(config, repository_id, task)
-    return root / f"{path_segment(leaf_id, name='leaf')}.{REQUEST_LEDGER}"
+    return state_directory(root / path_segment(leaf_id, name="leaf")) / REQUEST_LEDGER
 
 
 def _guard_ledger_paths(path: Path) -> None:
@@ -361,10 +437,46 @@ def record_request(path: Path, leaf_id: str, request_id: str, entry: Mapping[str
 
     ledger = read_ledger(path)
     requests: dict[str, Any] = ledger["requests"]
-    requests[f"{leaf_id}:{request_id}"] = {**dict(entry), "leaf": leaf_id, "requestId": request_id}
+    key = f"{leaf_id}:{request_id}"
+    requests[key] = {
+        **dict(entry),
+        "leaf": leaf_id,
+        "requestId": request_id,
+    }
+    # The pointer selects the latest terminal build result even though serialized
+    # request keys are sorted. A subsequent normal request clears it atomically.
+    if entry.get("beforeCreate") is True:
+        ledger["latestBuildFailure"] = key
+    else:
+        ledger.pop("latestBuildFailure", None)
     while len(requests) > MAX_LEDGER_ENTRIES:
-        requests.pop(next(iter(requests)))
+        # A restored ledger can already exceed the bound. Preserve its selected
+        # failure even when sorted serialization placed that request first.
+        oldest = next(key for key in requests if key != ledger.get("latestBuildFailure"))
+        requests.pop(oldest)
     _write_ledger(path, ledger)
+
+
+def latest_build_failure(
+    path: Path, generation_number: int, retired_at: str | None = None
+) -> dict[str, Any] | None:
+    """The current terminal pre-create failure, never a seat or a delivery receipt."""
+    ledger = read_ledger(path)
+    key = ledger.get("latestBuildFailure")
+    row = ledger["requests"].get(key) if isinstance(key, str) else None
+    if not isinstance(row, dict) or not (
+        row.get("beforeCreate") is True
+        and row.get("state") == "failed"
+        and row.get("generation") == generation_number
+    ):
+        return None
+    if retired_at is not None:
+        try:
+            if datetime.fromisoformat(str(row["at"])) <= datetime.fromisoformat(retired_at):
+                return None
+        except (KeyError, TypeError, ValueError):
+            return None
+    return dict(row)
 
 
 def read_inflight_create(path: Path) -> dict[str, Any] | None:
@@ -381,40 +493,6 @@ def write_inflight_create(path: Path, inflight: dict[str, Any] | None) -> None:
     _write_ledger(path, ledger)
 
 
-def retired(workspace: Path) -> dict[str, object] | None:
-    """The marker a finished Retire left, or ``None``."""
-
-    marker = retired_marker(workspace)
-    if not marker.is_file():
-        return None
-    try:
-        payload = json.loads(marker.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return {"receipt": None, "unreadable": True}
-    return payload if isinstance(payload, dict) else {"receipt": None, "unreadable": True}
-
-
-def mark_retired(workspace: Path, receipt_id: str, *, at: str) -> None:
-    """Leave the one marker a retired environment keeps (rule 8 step 5)."""
-
-    admitted_id = receipt_id_segment(receipt_id)
-    target = retired_marker(workspace)
-    guard_explainer_path(target, root=workspace.parent, label="retire marker")
-    atomic_write_text(
-        target,
-        json.dumps({"schema": "ar-explainer-retired/v1", "receipt": admitted_id, "at": at}) + "\n",
-    )
-
-
-def clear_retired(workspace: Path) -> None:
-    """A new first request clears the marker and builds anew (rule 8)."""
-
-    marker = retired_marker(workspace)
-    guard_explainer_path(marker, root=workspace.parent, label="retire marker")
-    if marker.exists():
-        marker.unlink()
-
-
 def write_receipt(root: Path, receipt: RetireReceipt) -> Path:
     """Write or replace one retire receipt atomically."""
 
@@ -423,7 +501,8 @@ def write_receipt(root: Path, receipt: RetireReceipt) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     guard_explainer_path(target, root=root.parent, label="retire receipt")
     atomic_write_text(
-        target, json.dumps(receipt.model_dump(mode="json", by_alias=True), indent=2) + "\n"
+        target,
+        json.dumps(receipt.model_dump(mode="json", by_alias=True), indent=2) + "\n",
     )
     return target
 
@@ -443,7 +522,12 @@ def read_receipt(root: Path, receipt_id: str) -> RetireReceipt | None:
         ):
             raw = {key: value for key, value in raw.items() if key != "measured_memory_bytes"}
         return RetireReceipt.model_validate(raw)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, _ValidationError) as error:
+    except (
+        OSError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        _ValidationError,
+    ) as error:
         raise ExplainerStateError(
             f"the retire receipt at {target} is unreadable: {error}"
         ) from error

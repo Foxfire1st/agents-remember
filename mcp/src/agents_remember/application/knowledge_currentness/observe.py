@@ -48,13 +48,15 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Literal
 
 from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees
 from agents_remember.errors import GrammarUnavailableError
+from agents_remember.memory.conversion.code_objects import CodeObjectError
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge_index import Entry
 from agents_remember.memory_quality.style.citations import grammars
@@ -137,6 +139,37 @@ def open_code_tree(tree: CodeTree | None) -> OpenedCodeTree:
             problem=f"the code tree {tree.tree} in {tree.repository} cannot be read: {error}",
         )
     return OpenedCodeTree(tree=tree, trees=trees, files=files, problem=None)
+
+
+def prefetch_observed_blobs(entries: Iterable[Entry], code: OpenedCodeTree) -> None:
+    """Read in batches the observed blobs :func:`observe_entry` will read for ``entries``.
+
+    A symbol entry's blob is decoded for the UTF-8 check and a changed blob is resolved; without
+    this each blob costs its own Git process. A changed line range asks whether the store holds
+    the blob it was recorded against, so those are asked at once too. A failed batch is left to
+    each entry's own read, which reports its own failure as before.
+    """
+
+    if code.problem is not None or code.trees is None:
+        return
+    wanted: set[str] = set()
+    recorded_against: set[str] = set()
+    for entry in entries:
+        recorded = _Recorded.of(entry)
+        observed = code.files.get(entry.path)
+        if observed is not None and (
+            recorded.locator.get("kind") == "symbol" or observed != recorded.blob
+        ):
+            wanted.add(observed)
+        if (
+            observed is not None
+            and observed != recorded.blob
+            and recorded.locator.get("kind") == "line_range"
+        ):
+            recorded_against.add(recorded.blob)
+    with suppress(CodeObjectError):
+        code.trees.objects.prefetch(wanted)
+    code.trees.objects.prefetch_presence(recorded_against)
 
 
 @dataclass(frozen=True)

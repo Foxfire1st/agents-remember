@@ -30,6 +30,8 @@
 //
 // Order (rule 3's table). Priority: the recorded effect (several: the highest), the change kind, the
 // changed locations, the summed spans of the changed entries, the id. Authored: the outline's order.
+// A per-area read keeps Priority ties by id, and Currentness from read 4, so visiting an invariant
+// never moves the tree. Complete comparison reads retain the location-count and span ties below.
 // Memory currentness: the subject's shown currentness, the least current of its read-4 state and its
 // entries' states (read 5; an entry: the least current side that records it), in the order stale,
 // unverifiable, unrealized, current, then not measured; ties in Priority's order (MIK-R89 v2 rule 3,
@@ -37,338 +39,21 @@
 // Priority's order (W8). Inside a subject (W9): changed locations, ordered by role (app.js:120), then
 // the largest span; unchanged and not comparable locations go to the subject's two groups in the same
 // order.
-import type {
-  ReviewEntry,
-  ReviewFamilyContextEntry,
-  ReviewOutline,
-  ReviewOutlineMeaning,
-} from '../../data/review';
-import type {
-  InvariantCurrentnessState,
-  ReviewCodeChange,
-  ReviewEntryMemory,
-  ReviewEntryMemoryState,
-  ReviewTreeComparison,
-  ReviewTreeEntry,
-  ReviewTreeEntrySide,
-  ReviewTreesResult,
-} from '../../data/reviewTrees';
-import {
-  blockIdentityOf,
-  blockKey,
-  matchesBlockReference,
-  type BlockIdentity,
-} from './blockIdentity';
-import { outlineCounts, outlineGroups, realChange, type OutlineBadge, type OutlineRow } from './changeTriage';
+import type { ReviewOutline } from '../../data/review';
+import type { ReviewTreeComparison, ReviewTreeEntry, ReviewTreeEntrySide, ReviewSubjectSummary } from '../../data/reviewTrees';
+import { blockIdentityOf, blockKey, matchesBlockReference, type BlockIdentity } from './blockIdentity';
+import { outlineCounts, outlineGroups, realChange, type OutlineRow } from './changeTriage';
 import type { ExplainerCategory, ExplainerGrade } from './explainer/explainerApi';
-import type { CardChange, ExpressionCard } from './focusedCards';
+import type { ExpressionCard } from './focusedCards';
 import { meaningBadgeText } from './MeaningEffects';
-import {
-  isJudgmentSort,
-  judgmentCategoryOf,
-  judgmentSortFor,
-  MEMORY_SORTS,
-  REVIEW_SORTS,
-  SORT_LABELS,
-  type DeterministicSort,
-  type ReviewSelection,
-  type ReviewSort,
-} from './reviewSelection';
+import { isJudgmentSort, judgmentCategoryOf, judgmentSortFor, MEMORY_SORTS, REVIEW_SORTS, SORT_LABELS, type ReviewSelection, type ReviewSort } from './reviewSelection';
 import type { TreeView } from './triageViewPreference';
-
-// ---- types (stable names: the reading column codes against them) ----
-
-// Read 5, the cards of the shown subjects, merged over its chunks.
-export type ChangeSetCards =
-  | { state: 'reading' }
-  | { state: 'unavailable'; reason: string }
-  | {
-      state: 'ready';
-      entries: readonly ReviewTreeEntry[];
-      comparison: ReviewTreeComparison;
-      // The card read's memory values state (`entry_memory`); absent when the answer carries none.
-      memory?: ReviewEntryMemoryState;
-    };
-
-export interface ChangeSetInputs {
-  // Read 3: the outline, and the catalogue for a comparison without one (MIK-R86 v1 rule 11).
-  outline: ReviewOutline | undefined;
-  catalogue: readonly ReviewEntry[];
-  // Read 4's code facts by `invariant_key` (codeFacts.ts `codeFacts`): `null` when read 4 answered
-  // without them, `undefined` when it was not read (the walked families' own facts then apply).
-  code?: ReadonlyMap<string, ReviewCodeChange> | null;
-  // Read 4's leaf-wide currentness of the comparison shown.
-  currentness?: ReviewTreesResult['currentness'];
-  cards: ChangeSetCards;
-  // The explainer's judgment categories and block grades (MIK-R187 rules 2–6).
-  categories?: readonly ExplainerCategory[];
-  grades?: readonly ExplainerGrade[];
-}
-
-export interface LocationGradeEntry {
-  category: string;
-  grade: string;
-  reason: string;
-  stale: boolean;
-  staleReason?: string | null;
-}
-
-export interface LocationJudgment {
-  chipLabel: string;
-  activeCategory: string | null;
-  activeGrade: string | null;
-  scaleRank: number | null;
-  stale: boolean;
-  grades: LocationGradeEntry[];
-  hoverText: string;
-}
-
-// What keeps a row shown in Changed beside its real change (MIK-R86 v1 rule 5).
-export interface ChangeSetKeep {
-  selection: ReviewSelection | null;
-  // The walked tree (MIK-R39): walked families stay, a kept one with its `kept` tag.
-  walked?: { entries: readonly ReviewFamilyContextEntry[]; kept: ReadonlyMap<string, string> };
-}
-
-export type LocationRole =
-  | 'primary-authority'
-  | 'enforcement'
-  | 'propagation-persistence'
-  | 'support'
-  | 'presentation'
-  | 'unclassified'
-  | 'proof';
-
-// A location's MIK-R03 currentness: the least current side that records it.
-export type EntryCurrentness = 'stale' | 'unverifiable' | 'current' | 'not measured';
-export type SubjectCurrentness = InvariantCurrentnessState | 'not measured';
-
-export interface LocationNode {
-  // blockKey(identity): one block, one key (URL selection, j/k, ⊕, DOM ids, React keys).
-  key: string;
-  identity: BlockIdentity;
-  entry: ReviewTreeEntry;
-  // The card that draws the entry, for the existing card renderer: the entry alone (W1), or every
-  // entry of its shared region, the drawing location's first.
-  card: ExpressionCard;
-  // The keys of the locations this one draws as one row and one card: its own, then those of the
-  // entries at its region; empty when the first location of its region draws it.
-  draws: string[];
-  // The subject invariant's selector id (`invariant_key`).
-  subject: string;
-  change: CardChange;
-  role: LocationRole;
-  // The short role word of the row ("enforce"; mockup app.js:24).
-  roleLabel: string;
-  // The identity side's path, range label ("L12–40", or its state) and span in lines (0 without a
-  // range).
-  path: string;
-  range: string;
-  span: number;
-  symbol?: string;
-  // W10: "+a −r" from a line diff of the two excerpts (a side with no file has no lines), else the
-  // range.
-  lines: string;
-  currentness: EntryCurrentness;
-  memory?: ReviewEntryMemory;
-  // The tree row's one reason (MIK-R86 v2 rule 3).
-  reason: string;
-  // The explainer's judgment on this block, when graded (MIK-R187 rules 5 and 6).
-  judgment?: LocationJudgment;
-  // Present on the first ungraded changed location of a subject under a judgment sort (MIK-R187 rule 6).
-  ungradedGroupCount?: number;
-}
-
-export interface SubjectNode {
-  // The occurrence: `<family selector id or ->/<invariant selector id>`.
-  key: string;
-  // The outline row: kind 'invariant', id, selectorId, title, badge, meaning, familyId.
-  row: OutlineRow;
-  // The invariant's first place in display order: the reading column renders it there, and only
-  // there do its locations, groups and blocks appear.
-  first: boolean;
-  // The recorded effect labels (MIK-R43) when its meaning has steps.
-  effects: string[];
-  cards: ChangeSetCards['state'];
-  changed: LocationNode[];
-  unchanged: LocationNode[];
-  // The not-comparable group: entries whose change is `undetermined`.
-  notComparable: LocationNode[];
-  currentness: SubjectCurrentness;
-  reason: string;
-  // Under a judgment sort, the ungraded changed locations and their heading label `Ungraded (n)`.
-  ungradedChanged?: LocationNode[];
-  ungradedLabel?: string;
-}
-
-export interface FamilyHeading {
-  row: OutlineRow;
-  reason: string;
-  // The subject the family was last read for, when the walk keeps it (MIK-R39).
-  kept?: string;
-}
-
-export interface SubjectGroup {
-  key: string;
-  // Undefined: "Without a family".
-  family?: FamilyHeading;
-  subjects: SubjectNode[];
-}
-
-export interface SortOption {
-  sort: ReviewSort;
-  label: string;
-  hint: string;
-  available: boolean;
-  reason?: string;
-}
-
-export interface ChangeSetCounts {
-  // Outline invariants whose own change is added, removed or changed; undefined without an outline.
-  invariantsChanged: number | undefined;
-  // W11: the distinct effects of the changed invariants, in Priority order.
-  effects: string[];
-  // Over the shown subjects, from read 5; undefined until it answered.
-  changedLocations: number | undefined;
-  changedFiles: number | undefined;
-  // Unchanged plus not comparable locations of the shown subjects.
-  folded: number | undefined;
-  subjects: number;
-}
-
-export interface ChangeSetModel {
-  // The sort applied: a memory sort falls back to Priority while its values are unavailable.
-  sort: ReviewSort;
-  // The stored choice.
-  requested: ReviewSort;
-  // The view applied: All without an outline (MIK-R86 v1 rule 11).
-  view: TreeView;
-  outlined: boolean;
-  cards: ChangeSetCards['state'];
-  groups: SubjectGroup[];
-  subjects: SubjectNode[];
-  blocks: LocationNode[];
-  shownInvariantIds: string[];
-  sorts: SortOption[];
-  counts: ChangeSetCounts;
-  // Changed view of an outline in which nothing changed: "This leaf changed no recorded meaning."
-  noChange: boolean;
-}
-
-// A subject's two groups: its unchanged locations and its not comparable (`undetermined`) ones.
-export type FoldedGroup = 'unchanged' | 'undetermined';
-
-export interface FilteredSubject {
-  node: SubjectNode;
-  // The location rows the tree draws under the subject row: one per drawn location (`draws`).
-  locations: LocationNode[];
-  // The group rows drawn (only where a count is above 0): both, and while filtering only a group
-  // holding a location the filter matches.
-  groups: FoldedGroup[];
-}
-
-export interface FilteredGroup {
-  group: SubjectGroup;
-  subjects: FilteredSubject[];
-}
-
-export interface TreeFilterResult {
-  query: string;
-  groups: FilteredGroup[];
-  // A query is set and nothing matches: "Nothing matches “q”."
-  empty: boolean;
-}
-
-// ---- ranks ----
-
-export const EFFECT_RANK: Readonly<Record<string, number>> = {
-  retire: 0,
-  weaken: 0,
-  replace: 0,
-  strengthen: 1,
-  restore: 1,
-  introduce: 1,
-  split: 1,
-  merge: 1,
-  clarify: 2,
-};
-const EFFECT_ORDER = Object.keys(EFFECT_RANK);
-const NO_EFFECT = 3;
-
-const CHANGE_RANK: Readonly<Record<string, number>> = {
-  removed: 0,
-  changed: 1,
-  added: 2,
-  'code changed': 3,
-  joined: 4,
-  left: 4,
-  unknown: 5,
-  unchanged: 6,
-};
-
-export const ROLE_ORDER: readonly LocationRole[] = [
-  'primary-authority',
-  'enforcement',
-  'propagation-persistence',
-  'support',
-  'presentation',
-  'unclassified',
-  'proof',
-];
-export const ROLE_LABEL: Readonly<Record<LocationRole, string>> = {
-  'primary-authority': 'primary',
-  enforcement: 'enforce',
-  'propagation-persistence': 'persist',
-  support: 'support',
-  presentation: 'present',
-  unclassified: '—',
-  proof: 'proof',
-};
-
-const CURRENTNESS_RANK: Readonly<Record<SubjectCurrentness, number>> = {
-  stale: 0,
-  unverifiable: 1,
-  unrealized: 2,
-  current: 3,
-  'not measured': 4,
-};
-
-// The Sort popup's short reasons (mockup app.js:243-246). Each of the first three ends its one-line row
-// in the popup's 350 px (d9a1ec8f item 4); Memory currentness's order is `CURRENTNESS_RANK`.
-const DETERMINISTIC_SORT_HINTS: Readonly<Record<DeterministicSort, string>> = {
-  priority: 'retire/weaken first, then size',
-  authored: 'order the curator wrote',
-  currentness: 'least current first',
-  'invariants-at-location': 'invariants recorded at the location’s path',
-  'incoming-links': 'links into the location’s invariant',
-  'without-proof': 'invariants the index lists without proof',
-  'open-weaknesses': 'open weaknesses recorded at the location’s path',
-};
-
-export const SORT_HINTS: Readonly<Record<ReviewSort, string>> = new Proxy(
-  DETERMINISTIC_SORT_HINTS as Record<ReviewSort, string>,
-  {
-    get(target, prop) {
-      if (typeof prop === 'string') {
-        if (prop in target) return target[prop as DeterministicSort];
-        if (isJudgmentSort(prop)) return 'highest grade first, then Priority';
-      }
-      return Reflect.get(target, prop);
-    },
-  },
-);
-
-export function effectRank(meaning: ReviewOutlineMeaning | undefined): number {
-  if (meaning?.state !== 'steps') return NO_EFFECT;
-  return Math.min(NO_EFFECT, ...meaning.labels.map((label) => EFFECT_RANK[label] ?? NO_EFFECT));
-}
-
-export function changeRank(badge: OutlineBadge | undefined): number {
-  if (badge === undefined) return CHANGE_RANK.unknown;
-  if (badge in CHANGE_RANK) return CHANGE_RANK[badge];
-  // A family's "N changed" ranks as changed.
-  return /^\d+ changed$/.test(badge) ? CHANGE_RANK.changed : CHANGE_RANK.unknown;
-}
+export type * from './changeSetTypes';
+import type { ChangeSetCards, ChangeSetInputs, LocationGradeEntry, LocationJudgment, ChangeSetKeep, LocationRole, EntryCurrentness, SubjectCurrentness, LocationNode, SubjectNode, SubjectGroup, SortOption, ChangeSetCounts, ChangeSetModel } from './changeSetTypes';
+export { filterTree, laneFileMatches } from './changeSetFilter';
+export { EFFECT_RANK, ROLE_LABEL, ROLE_ORDER, SORT_HINTS, effectRank, changeRank } from './changeSetRanks';
+import { EFFECT_ORDER, EFFECT_RANK, NO_EFFECT, CURRENTNESS_RANK, ROLE_LABEL, ROLE_ORDER, SORT_HINTS, effectRank, changeRank } from './changeSetRanks';
+import { completeSummary, entrySummary } from './changeSetOverview';
 
 // ---- locations ----
 
@@ -389,66 +74,8 @@ function rangeText(range: BlockIdentity['range'], side: ReviewTreeEntrySide): st
   return range.start === range.end ? `L${range.start}` : `L${range.start}–${range.end}`;
 }
 
-// A side's lines: none where it has no file, the excerpt's lines where the whole range was read, and
-// undefined where its text is not known (unresolved, unreadable, not read or cut).
-function excerptLines(side: ReviewTreeEntrySide): string[] | undefined {
-  if (side.state === 'absent') return [];
-  if (side.state !== 'resolved' || side.excerpt === undefined || side.excerpt_truncated) return undefined;
-  const text = side.excerpt.endsWith('\n') ? side.excerpt.slice(0, -1) : side.excerpt;
-  return text === '' ? [] : text.split('\n');
-}
-
-// The two lists without their common head and tail.
-function trimCommon(before: readonly string[], after: readonly string[]): [string[], string[]] {
-  let head = 0;
-  while (head < before.length && head < after.length && before[head] === after[head]) head += 1;
-  let tail = 0;
-  const rest = Math.min(before.length, after.length) - head;
-  while (tail < rest && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail += 1;
-  return [before.slice(head, before.length - tail), after.slice(head, after.length - tail)];
-}
-
-// The furthest point on diagonal k after one more edit, then along its run of common lines.
-function extend(furthest: number[], offset: number, k: number, d: number, a: readonly string[], b: readonly string[]): number {
-  const down = k === -d || (k !== d && furthest[offset + k - 1] < furthest[offset + k + 1]);
-  let x = down ? furthest[offset + k + 1] : furthest[offset + k - 1] + 1;
-  while (x < a.length && x - k < b.length && a[x] === b[x - k]) x += 1;
-  return x;
-}
-
-// Myers' O(ND) walk: the least number of inserted plus removed lines, or undefined past `limit`.
-function editDistance(a: readonly string[], b: readonly string[], limit: number): number | undefined {
-  const offset = a.length + b.length;
-  const furthest = new Array<number>(2 * offset + 2).fill(0);
-  for (let d = 0; d <= Math.min(offset, limit); d += 1) {
-    for (let k = -d; k <= d; k += 2) {
-      const x = extend(furthest, offset, k, d, a, b);
-      furthest[offset + k] = x;
-      if (x >= a.length && x - k >= b.length) return d;
-    }
-  }
-  return undefined;
-}
-
-// Inserted and removed lines between two line lists. `undefined` when the edit distance exceeds
-// `limit`, which no bounded excerpt meets.
-export function lineChanges(
-  before: readonly string[],
-  after: readonly string[],
-  limit = 4000,
-): { added: number; removed: number } | undefined {
-  const [a, b] = trimCommon(before, after);
-  if (a.length === 0 || b.length === 0) return { added: b.length, removed: a.length };
-  const distance = editDistance(a, b, limit);
-  if (distance === undefined) return undefined;
-  // d edits: every common line is matched, so the rest of each side is the change.
-  const common = (a.length + b.length - distance) / 2;
-  return { added: b.length - common, removed: a.length - common };
-}
-
-// W10: a location row's line counts (MIK-R86 v2 rule 2). "+a −r" from a line diff of the entry's two
-// excerpts, a side with no file counting as no lines (an added file's lines are all added); when a
-// side's text is not known (`excerptLines`), the span of the named side ("L s–e").
+// W10: show the producer's full-range line changes, including for bounded/truncated excerpts.
+// When that measurement is unavailable, show the named range; excerpts are never a count source.
 export function lineCounts(entry: ReviewTreeEntry, identity?: BlockIdentity): string {
   const side = identity ? namedSide(entry, identity) : entry.after;
   const range =
@@ -456,10 +83,7 @@ export function lineCounts(entry: ReviewTreeEntry, identity?: BlockIdentity): st
     (side.state === 'resolved' && side.start_line !== undefined && side.end_line !== undefined
       ? { start: side.start_line, end: side.end_line }
       : null);
-  const before = excerptLines(entry.before);
-  // An unchanged entry carries its text on the after side only.
-  const after = excerptLines(entry.after);
-  const counted = before && after ? lineChanges(before, after) : undefined;
+  const counted = entry.line_changes;
   return counted ? `+${counted.added} −${counted.removed}` : rangeText(range, side);
 }
 
@@ -576,6 +200,7 @@ interface SubjectFacts {
   entries: LocationNode[];
   invariantState: SubjectCurrentness;
   authored: number;
+  summary?: ReviewSubjectSummary;
 }
 
 function memoryValue(sort: ReviewSort, node: LocationNode): number {
@@ -587,29 +212,30 @@ function memoryValue(sort: ReviewSort, node: LocationNode): number {
   return memory.open_weaknesses;
 }
 
-function priorityKey(facts: SubjectFacts): number[] {
-  const changed = facts.entries.filter((node) => node.change === 'changed');
+function priorityKey(facts: SubjectFacts, scoped: boolean): number[] {
+  const changed = scoped ? [] : facts.entries.filter((node) => node.change === 'changed');
   return [
     effectRank(facts.row.meaning),
     changeRank(facts.row.badge),
-    -changed.length,
-    -changed.reduce((total, node) => total + node.span, 0),
+    -(facts.summary?.changed ?? changed.length),
+    -(facts.summary?.changed_span ?? changed.reduce((total, node) => total + node.span, 0)),
   ];
 }
 
 function leastCurrent(facts: SubjectFacts): number {
+  if (facts.summary) return CURRENTNESS_RANK[facts.summary.entry_currentness];
   return Math.min(
     CURRENTNESS_RANK['not measured'],
     ...facts.entries.map((node) => CURRENTNESS_RANK[node.currentness]),
   );
 }
 
-function sortKey(sort: ReviewSort, facts: SubjectFacts): number[] {
+function sortKey(sort: ReviewSort, facts: SubjectFacts, scoped: boolean): number[] {
   if (sort === 'authored') return [facts.authored];
-  const priority = priorityKey(facts);
+  const priority = priorityKey(facts, scoped);
   if (sort === 'priority' || isJudgmentSort(sort)) return priority;
   // The state the subject's row shows, then Priority (MIK-R89 v2 rule 3, e9b9d515).
-  if (sort === 'currentness') return [CURRENTNESS_RANK[subjectCurrentness(facts)], ...priority];
+  if (sort === 'currentness') return [CURRENTNESS_RANK[scoped ? facts.invariantState : subjectCurrentness(facts)], ...priority];
   return [-Math.max(-1, ...facts.entries.map((node) => memoryValue(sort, node))), ...priority];
 }
 
@@ -647,7 +273,7 @@ function effectsOf(row: OutlineRow): string[] {
 function subjectReason(
   row: OutlineRow,
   sort: ReviewSort,
-  cards: ChangeSetCards['state'],
+  cards: SubjectNode['cards'],
   changed: number,
   currentness: SubjectCurrentness,
 ): string {
@@ -695,28 +321,42 @@ function familyShown(row: OutlineRow, members: number, rules: ShownRules): boole
 
 // ---- the model ----
 
-function readSort(requested: ReviewSort, sorts: readonly SortOption[]): ReviewSort {
+function readSort(requested: ReviewSort, sorts: readonly SortOption[], complete: boolean): ReviewSort {
+  if (MEMORY_SORTS.has(requested) && !complete) return 'priority';
   return sorts.find((option) => option.sort === requested)?.available ? requested : 'priority';
+}
+
+function memorySortReason(cards: ChangeSetCards, complete: boolean): string | undefined {
+  if (cards.state === 'unavailable') return cards.reason;
+  if (cards.state === 'reading') return undefined;
+  if (cards.memory?.state === 'unavailable') return cards.memory.reason;
+  if (complete && cards.memory?.state !== 'available') return 'the card read gave no memory values';
 }
 
 export function sortOptions(
   cards: ChangeSetCards,
   categories: readonly ExplainerCategory[] = [],
+  complete = cards.state === 'ready' && !cards.coverage,
+  scoped = cards.state === 'ready' && cards.coverage !== undefined,
 ): SortOption[] {
-  const memoryReason =
-    cards.state === 'unavailable'
-      ? cards.reason
-      : cards.state === 'ready' && cards.memory?.state !== 'available'
-        ? (cards.memory?.reason ?? 'the card read gave no memory values')
-        : undefined;
+  const memoryReason = memorySortReason(cards, complete);
+  const hints = scoped
+    ? { ...SORT_HINTS, priority: 'retire/weaken first, then change kind and id' }
+    : SORT_HINTS;
   const deterministic: SortOption[] = REVIEW_SORTS.map((sort) => {
     const unavailable = MEMORY_SORTS.has(sort) ? memoryReason : undefined;
+    const pending = MEMORY_SORTS.has(sort) && !complete
+      ? cards.state === 'reading' || (cards.state === 'ready' && cards.coverage?.pending.length)
+        ? 'Reading memory values for the shown invariants'
+        : 'Loads location values for this comparison'
+      : undefined;
+    const reason = unavailable ?? pending;
     return {
       sort,
       label: SORT_LABELS[sort],
-      hint: SORT_HINTS[sort],
+      hint: hints[sort],
       available: unavailable === undefined,
-      ...(unavailable === undefined ? {} : { reason: unavailable }),
+      ...(reason === undefined ? {} : { reason }),
     };
   });
   const judgment: SortOption[] = categories.map((category) => {
@@ -750,15 +390,27 @@ function changedEffects(outline: ReviewOutline | undefined): string[] {
   );
 }
 
+function entriesOf(inputs: ChangeSetInputs): Map<string, ReviewTreeEntry> {
+  const cards = inputs.cards;
+  const entries = new Map((inputs.inventory ?? []).map((entry) => [entry.id, entry]));
+  if (cards.state === 'ready') {
+    for (const entry of cards.entries) entries.set(entry.id, entry);
+  }
+  return entries;
+}
+
 function locationsBySubject(
-  cards: ChangeSetCards,
+  inputs: ChangeSetInputs,
+  entries: ReadonlyMap<string, ReviewTreeEntry>,
   sort: ReviewSort,
 ): Map<string, LocationNode[]> {
   const bySubject = new Map<string, LocationNode[]>();
-  if (cards.state !== 'ready') return bySubject;
+  const cards = inputs.cards;
+  const comparison = cards.state === 'ready' ? cards.comparison : inputs.comparison;
+  if (!comparison) return bySubject;
   const seen = new Set<string>();
-  for (const entry of cards.entries) {
-    const node = locationNode(entry, cards.comparison, sort);
+  for (const entry of entries.values()) {
+    const node = locationNode(entry, comparison, sort);
     if (seen.has(node.key)) continue;
     seen.add(node.key);
     const list = bySubject.get(node.subject) ?? [];
@@ -795,17 +447,18 @@ function draftGroups(
       entries: locations.get(row.selectorId) ?? [],
       invariantState: invariantState(inputs.currentness, row.id),
       authored: authored++,
+      summary: completeSummary(inputs.overview, row.selectorId),
     })),
   }));
 }
 
-function groupKey(sort: ReviewSort, draft: GroupDraft, members: SubjectFacts[]): number[] {
+function groupKey(sort: ReviewSort, draft: GroupDraft, members: SubjectFacts[], scoped: boolean): number[] {
   if (sort === 'authored') return [draft.family?.authored ?? Number.MAX_SAFE_INTEGER];
-  const keys = members.map((member) => sortKey(sort, member));
+  const keys = members.map((member) => sortKey(sort, member, scoped));
   const family = draft.family;
   // A family whose own record changed ranks by its own change too; "N changed" is its members'.
   if (family && ['added', 'removed', 'changed'].includes(family.row.badge ?? ''))
-    keys.push(sortKey(sort, { row: family.row, entries: [], invariantState: 'not measured', authored: 0 }));
+    keys.push(sortKey(sort, { row: family.row, entries: [], invariantState: 'not measured', authored: 0 }, scoped));
   return keys.length
     ? keys.reduce((best, key) => (compareKeys(key, best) < 0 ? key : best))
     : [Number.MAX_SAFE_INTEGER];
@@ -960,14 +613,24 @@ function attachJudgmentsAndOrder(
   return { changed: [...graded, ...ungraded, ...followers], ungraded };
 }
 
+function subjectCountFacts(facts: SubjectFacts, known: boolean, cards: SubjectNode['cards'], count: number) {
+  return {
+    counts: facts.summary ?? (known ? entrySummary(facts.row.selectorId, facts.entries) : undefined),
+    cards: facts.summary || known ? 'ready' as const : cards,
+    count: facts.summary?.changed ?? count,
+  };
+}
+
 function subjectNode(
   facts: SubjectFacts,
   family: string | undefined,
   first: boolean,
   sort: ReviewSort,
-  cards: ChangeSetCards['state'],
+  cards: SubjectNode['cards'],
   categories: ReadonlyMap<string, ExplainerCategory>,
   grades: readonly ExplainerGrade[],
+  locationsKnown: boolean,
+  failure?: string,
 ): SubjectNode {
   const ordered = [...facts.entries].sort(compareLocations);
   const rawChanged = drawnRegions(ordered.filter((node) => node.change === 'changed'));
@@ -991,17 +654,20 @@ function subjectNode(
         })
     : [];
   const currentness = subjectCurrentness(facts);
+  const counted = subjectCountFacts(facts, locationsKnown, cards, rawChanged.length);
   return {
     key: `${family ?? '-'}/${facts.row.selectorId}`,
     row: facts.row,
     first,
     effects: effectsOf(facts.row),
     cards,
+    locationsKnown,
+    counts: counted.counts,
     changed,
     unchanged,
     notComparable,
     currentness,
-    reason: subjectReason(facts.row, sort, cards, rawChanged.length, currentness),
+    reason: failure ?? subjectReason(facts.row, sort, counted.cards, counted.count, currentness),
     ...(isJudgmentSort(sort)
       ? {
           ungradedChanged: ungraded,
@@ -1018,9 +684,8 @@ function familyReason(row: OutlineRow): string {
 function shownRules(
   view: TreeView,
   keep: ChangeSetKeep,
-  cards: ChangeSetCards,
+  entries: ReadonlyMap<string, ReviewTreeEntry>,
 ): ShownRules {
-  const entries = new Map(cards.state === 'ready' ? cards.entries.map((entry) => [entry.id, entry]) : []);
   const family = keep.selection?.kind === 'subject' && keep.selection.subject.kind === 'family';
   return {
     all: view === 'all',
@@ -1037,9 +702,9 @@ interface ShownDraft {
 
 // The active view's rows in the active sort: members inside each group, then the groups, each
 // taking the place of its first member.
-function orderedDrafts(drafts: readonly GroupDraft[], sort: ReviewSort, rules: ShownRules): ShownDraft[] {
+function orderedDrafts(drafts: readonly GroupDraft[], sort: ReviewSort, rules: ShownRules, scoped: boolean): ShownDraft[] {
   const compare = (left: SubjectFacts, right: SubjectFacts) =>
-    compareKeys(sortKey(sort, left), sortKey(sort, right)) || compareText(left.row.id, right.row.id);
+    compareKeys(sortKey(sort, left, scoped), sortKey(sort, right, scoped)) || compareText(left.row.id, right.row.id);
   const shown = drafts
     .map((draft) => {
       const members = draft.members.filter((member) => subjectShown(member.row, rules));
@@ -1052,7 +717,7 @@ function orderedDrafts(drafts: readonly GroupDraft[], sort: ReviewSort, rules: S
   if (sort === 'authored') return shown;
   return shown.sort(
     (left, right) =>
-      compareKeys(groupKey(sort, left.draft, left.members), groupKey(sort, right.draft, right.members)) ||
+      compareKeys(groupKey(sort, left.draft, left.members, scoped), groupKey(sort, right.draft, right.members, scoped)) ||
       compareText(groupTie(left.draft, left.members), groupTie(right.draft, right.members)),
   );
 }
@@ -1061,11 +726,15 @@ function subjectGroups(
   shown: readonly ShownDraft[],
   keep: ChangeSetKeep,
   sort: ReviewSort,
-  cards: ChangeSetCards['state'],
+  cards: ChangeSetCards,
   categories: ReadonlyMap<string, ExplainerCategory>,
   grades: readonly ExplainerGrade[],
+  inventoryKnown: boolean,
 ): SubjectGroup[] {
   const placed = new Set<string>();
+  const coverage = cards.state === 'ready' ? cards.coverage : undefined;
+  const loaded = new Set(coverage?.loaded);
+  const pending = new Set(coverage?.pending);
   return shown.map(({ draft, members }) => ({
     key: draft.key,
     family: draft.family
@@ -1078,7 +747,10 @@ function subjectGroups(
     subjects: members.map((facts) => {
       const first = !placed.has(facts.row.selectorId);
       placed.add(facts.row.selectorId);
-      return subjectNode(facts, draft.family?.row.selectorId, first, sort, cards, categories, grades);
+      const id = facts.row.selectorId;
+      const failure = coverage && Object.hasOwn(coverage.failures, id) ? coverage.failures[id] : undefined;
+      const state = !coverage ? cards.state : loaded.has(id) ? 'ready' : pending.has(id) ? 'reading' : failure !== undefined ? 'unavailable' : 'unread';
+      return subjectNode(facts, draft.family?.row.selectorId, first, sort, state, categories, grades, inventoryKnown || state === 'ready', state === 'unavailable' ? failure : undefined);
     }),
   }));
 }
@@ -1088,20 +760,51 @@ function modelCounts(
   subjects: readonly SubjectNode[],
   ready: boolean,
 ): ChangeSetCounts {
-  const blocks = subjects.flatMap((node) => node.changed);
-  const folded = subjects.reduce((total, node) => total + node.unchanged.length + node.notComparable.length, 0);
+  const summaries = subjects.map((node) => node.counts);
+  const known = ready && summaries.every((summary) => summary !== undefined);
+  const changed = summaries.reduce((total, item) => total + (item?.changed ?? 0), 0);
+  const folded = summaries.reduce((total, item) => total + (item?.unchanged ?? 0) + (item?.not_comparable ?? 0), 0);
+  const paths = summaries.flatMap((item) => item?.changed_paths ?? []);
   return {
     invariantsChanged: outlineCounts(outline)?.invariants,
     effects: changedEffects(outline),
-    changedLocations: ready ? blocks.length : undefined,
-    changedFiles: ready ? new Set(blocks.map((node) => node.path)).size : undefined,
-    folded: ready ? folded : undefined,
+    changedLocations: known ? changed : undefined,
+    changedFiles: known ? new Set(paths).size : undefined,
+    folded: known ? folded : undefined,
     subjects: subjects.length,
   };
 }
 
 const hasChange = (draft: GroupDraft) =>
   realChange(draft.family?.row.badge) || draft.members.some((member) => realChange(member.row.badge));
+
+function completeCards(cards: ChangeSetCards, drafts: readonly GroupDraft[], rules: ShownRules): boolean {
+  if (cards.state !== 'ready') return false;
+  if (!cards.coverage) return true;
+  const loaded = new Set(cards.coverage.loaded);
+  return drafts.every((draft) => draft.members.every((member) =>
+    !subjectShown(member.row, rules) || loaded.has(member.row.selectorId),
+  ));
+}
+
+function inventoryKnown(inputs: ChangeSetInputs): boolean {
+  return inputs.inventory !== undefined && (inputs.cards.state === 'ready' || inputs.comparison !== undefined);
+}
+
+function locationState(inputs: ChangeSetInputs, complete: boolean): ChangeSetCards['state'] {
+  if (inventoryKnown(inputs)) return 'ready';
+  if (inputs.inventoryProblem !== undefined) return 'unavailable';
+  if (complete) return 'ready';
+  return inputs.cards.state === 'unavailable' ? 'unavailable' : 'reading';
+}
+
+function overviewKnown(inputs: ChangeSetInputs): boolean { return inputs.overview?.state === 'ready'; }
+function scopedInputs(inputs: ChangeSetInputs, inventory: boolean): boolean {
+  return inputs.cards.state === 'ready' && inputs.cards.coverage !== undefined && !inventory && !overviewKnown(inputs);
+}
+function knownCounts(inputs: ChangeSetInputs, inventory: boolean, complete: boolean): boolean {
+  return inventory || complete || overviewKnown(inputs);
+}
 
 export function changeSetModel(
   inputs: ChangeSetInputs,
@@ -1114,17 +817,24 @@ export function changeSetModel(
   const categoriesList = inputs.categories ?? [];
   const gradesList = inputs.grades ?? [];
   const categoriesMap = new Map(categoriesList.map((cat) => [cat.name, cat]));
-  const sorts = sortOptions(inputs.cards, categoriesList);
-  const sort = readSort(requested, sorts);
-  const drafts = draftGroups(inputs, keep, locationsBySubject(inputs.cards, sort));
-  const shown = orderedDrafts(drafts, sort, shownRules(appliedView, keep, inputs.cards));
+  const inventory = inventoryKnown(inputs);
+  const scoped = scopedInputs(inputs, inventory);
+  const entries = entriesOf(inputs);
+  // Complete inventory keeps the tree order stable before any code details have been read.
+  const drafts = draftGroups(inputs, keep, locationsBySubject(inputs, entries, requested));
+  const rules = shownRules(appliedView, keep, entries);
+  const complete = completeCards(inputs.cards, drafts, rules);
+  const sorts = sortOptions(inputs.cards, categoriesList, complete, scoped);
+  const sort = readSort(requested, sorts, complete);
+  const shown = orderedDrafts(drafts, sort, rules, scoped);
   const groups = subjectGroups(
     shown,
     keep,
     sort,
-    inputs.cards.state,
+    inputs.cards,
     categoriesMap,
     gradesList,
+    inventory,
   );
   const subjects = groups.flatMap((group) => group.subjects.filter((node) => node.first));
   return {
@@ -1133,78 +843,13 @@ export function changeSetModel(
     view: appliedView,
     outlined,
     cards: inputs.cards.state,
+    locations: locationState(inputs, complete),
     groups,
     subjects,
     blocks: subjects.flatMap((node) => node.changed.filter(drawsItself)),
     shownInvariantIds: subjects.map((node) => node.row.selectorId).sort(compareText),
     sorts,
-    counts: modelCounts(inputs.outline, subjects, inputs.cards.state === 'ready'),
+    counts: modelCounts(inputs.outline, subjects, knownCounts(inputs, inventory, complete)),
     noChange: outlined && appliedView === 'changed' && !drafts.some(hasChange),
   };
-}
-
-// ---- the filter (W12: id, title, symbol, path, role, effect; the tree only) ----
-
-const needleOf = (query: string) => query.trim().toLowerCase();
-
-function subjectText(node: SubjectNode): string {
-  return `${node.row.id} ${node.row.title} ${node.effects.join(' ')}`.toLowerCase();
-}
-
-function locationText(node: LocationNode): string {
-  return `${node.path} ${node.symbol ?? ''} ${node.role} ${node.roleLabel}`.toLowerCase();
-}
-
-const FOLDED: Readonly<Record<FoldedGroup, (node: SubjectNode) => LocationNode[]>> = {
-  unchanged: (node) => node.unchanged,
-  undetermined: (node) => node.notComparable,
-};
-
-// A subject's rows: one per drawn location, and each group row whose count is above 0 (W13).
-function unfiltered(node: SubjectNode): FilteredSubject {
-  return {
-    node,
-    locations: node.changed.filter(drawsItself),
-    groups: (['unchanged', 'undetermined'] as const).filter((group) => FOLDED[group](node).length > 0),
-  };
-}
-
-// A subject under the filter: its rows without the group rows when its id, title or effect matches;
-// else the rows of the locations that match: a changed one by its row (a row matches when an entry it
-// draws does), an unchanged or not comparable one by its group's row, which opens that group in the
-// reading column, so a folded location stays reachable without a disclosure in the tree (MIK-R89 v2
-// rules 3 and 5; MIK-R86 v2 rules 4 and 9).
-function filteredSubject(node: SubjectNode, needle: string): FilteredSubject | undefined {
-  const rows = unfiltered(node);
-  if (subjectText(node).includes(needle)) return { ...rows, groups: [] };
-  const matches = (location: LocationNode) => locationText(location).includes(needle);
-  const found = new Set(node.changed.filter(matches).map((location) => location.key));
-  const locations = rows.locations.filter((location) => location.draws.some((key) => found.has(key)));
-  const groups = rows.groups.filter((group) => FOLDED[group](node).some(matches));
-  return locations.length || groups.length ? { node, locations, groups } : undefined;
-}
-
-export function filterTree(model: ChangeSetModel, query: string): TreeFilterResult {
-  const needle = needleOf(query);
-  if (needle === '')
-    return {
-      query,
-      groups: model.groups.map((group) => ({ group, subjects: group.subjects.map(unfiltered) })),
-      empty: false,
-    };
-  const groups = model.groups.flatMap((group): FilteredGroup[] => {
-    const family = group.family?.row;
-    // A family that matches is shown with its members of the view (MIK-R86 v1 rule 9).
-    if (family && `${family.id} ${family.title}`.toLowerCase().includes(needle))
-      return [{ group, subjects: group.subjects.map((node) => ({ ...unfiltered(node), groups: [] })) }];
-    const subjects = group.subjects.flatMap((node) => filteredSubject(node, needle) ?? []);
-    return subjects.length ? [{ group, subjects }] : [];
-  });
-  return { query, groups, empty: groups.length === 0 };
-}
-
-// A lane file row matches on its path and on "code without invariant" (mockup app.js:227).
-export function laneFileMatches(path: string, query: string): boolean {
-  const needle = needleOf(query);
-  return needle === '' || `${path} code without invariant`.toLowerCase().includes(needle);
 }

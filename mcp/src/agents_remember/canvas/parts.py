@@ -27,7 +27,6 @@ from html.parser import HTMLParser
 
 __all__ = [
     "MAX_PART_ID_LENGTH",
-    "MAX_PART_TITLE_LENGTH",
     "PARTS_ATTRIBUTE",
     "PART_ATTRIBUTE",
     "PART_TITLE_ATTRIBUTE",
@@ -43,7 +42,6 @@ PART_TITLE_ATTRIBUTE = "data-part-title"
 PARTS_ATTRIBUTE = "data-evidence-claim"
 WHOLE_PAGE_PART = "page"
 MAX_PART_ID_LENGTH = 64
-MAX_PART_TITLE_LENGTH = 120
 
 _PART_ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 #: Tags that never enclose anything, so they never open a part even when they carry the attribute.
@@ -77,7 +75,10 @@ def part_id_problem(part_id: object) -> str | None:
     if not isinstance(part_id, str) or not part_id:
         return "a part id is a non-empty string"
     if len(part_id) > MAX_PART_ID_LENGTH:
-        return f"the part id {part_id!r} is {len(part_id)} characters, beyond {MAX_PART_ID_LENGTH}"
+        return (
+            f"the part id {part_id!r} is {len(part_id)} characters, beyond {MAX_PART_ID_LENGTH}: "
+            f"shorten it to {MAX_PART_ID_LENGTH} characters or fewer in its data-part attribute"
+        )
     if not _PART_ID.match(part_id):
         return (
             f"the part id {part_id!r} is not written from [a-z0-9-] starting with a letter or digit"
@@ -194,8 +195,6 @@ class _PartWalker(HTMLParser):
         self.saw_part = True
         part_id = part_id.strip()
         title = (values.get(PART_TITLE_ATTRIBUTE) or "").strip() or part_id
-        if len(title) > MAX_PART_TITLE_LENGTH:
-            title = title[:MAX_PART_TITLE_LENGTH]
         problem = part_id_problem(part_id)
         if problem:
             self.problems.append(problem)
@@ -260,8 +259,7 @@ def derive_part_map(document: str) -> PartMap:
     ordered = _document_order(walker.parts, walker.open_order)
     if walker.outside:
         problems.append(
-            "the page marks claim(s) outside every part: "
-            + ", ".join(sorted(set(walker.outside))[:5])
+            "the page marks claim(s) outside every part: " + ", ".join(sorted(set(walker.outside)))
         )
     _check_cross_part_claims(ordered, problems)
     return PartMap(

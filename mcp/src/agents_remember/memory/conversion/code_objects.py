@@ -9,11 +9,22 @@ Symbols are bound by the shipped extractor (``memory_quality/style/citations``) 
 :func:`extents.qualified_spans`, the same rule the curator writer (MIK-R12) uses: a name resolves only
 when the file's language has a grammar and exactly one construct binds it. Parsing is cached per
 (blob, grammar, path), since test-case eligibility also depends on the exact filename.
+
+**Symbol answers across reads (D569).** Which extents bind a name in a blob is a function of the
+blob's bytes, the path (its grammar and its test-case eligibility) and the name, so the answer --
+:func:`extents.qualified_spans` over the blob's definitions -- is also kept per process in
+:data:`SYMBOL_SPANS`, keyed by the repository, the complete blob id, the path and the name. A later
+read of a comparison that changed one blob parses only that blob. The memo holds answers only, and
+the blob is still read from the store before an answer is used, so whether the store holds it is
+asked exactly as before. The table is also kept on disk between processes
+(:mod:`agents_remember.application.review_memo_store`).
 """
 
 from __future__ import annotations
 
 import os
+import re
+import subprocess
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +38,7 @@ from agents_remember.kernel.git_command import (
     read_git_tree_bytes,
     run_git,
 )
+from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo, is_complete_object_id
 from agents_remember.memory_quality.style.citations import extents, grammars
 from agents_remember.models.knowledge_files import anchor_content
 from agents_remember.models.knowledge_files.anchor_content import (
@@ -46,6 +58,22 @@ _BLOB_BATCH: Final = 1500
 # ``git cat-file -e``: "Exit with zero status if <object> exists and is a valid object"; a valid name
 # of an object the store does not hold exits 1 without an error, any failure exits 128.
 _GIT_NOT_FOUND: Final = 1
+# The names :meth:`CodeObjects.prefetch_presence` asks about in one batch: full object IDs, which
+# ``cat-file --batch-check`` and ``cat-file -e``/``-t`` read as the same object. Any other spelling
+# is left to :meth:`CodeObjects.has_blob`'s own two reads.
+_FULL_OBJECT_ID: Final = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+_OBJECT_TYPES: Final = frozenset({"blob", "tree", "commit", "tag"})
+_BATCH_CHECK: Final = ("cat-file", "--batch-check=%(objectname) %(objecttype)")
+
+
+Spans = tuple[tuple[int, int], ...]
+SymbolKey = tuple[str, str, str, str]
+"""The repository, the complete blob id, the path and the name one symbol answer is a function of."""
+
+SYMBOL_SPANS: BoundedMemo[SymbolKey, Spans] = BoundedMemo(65_536)
+"""Each name's extents in one blob, as :func:`extents.qualified_spans` binds them (one answer per
+entry; well above the symbol anchors of several comparisons, so a review does not evict what the
+next comparison is about to reuse)."""
 
 
 class CodeObjectError(ValueError):
@@ -65,6 +93,9 @@ class CodeObjects:
     """Tree entry modes by path, for each tree :meth:`tree` read (MIK-R53 rule 3)."""
     _blobs: dict[str, bytes] = field(default_factory=dict)
     _lines: dict[str, list[bytes]] = field(default_factory=dict)
+    _presence: dict[str, bool] = field(default_factory=dict)
+    """:meth:`has_blob` answers for objects the store holds: ``True`` for a blob, ``False`` for
+    another type. A missing object or a failed read is never kept, so it is asked again."""
     _definitions: dict[tuple[str, str, str], dict[str, list[extents.Extent]]] = field(
         default_factory=dict
     )
@@ -187,17 +218,29 @@ class CodeObjects:
             self.prefetch((blob_id,))
         return self._blobs[blob_id]
 
+    def holds(self, blob_id: str) -> bool:
+        """Whether this store has already read ``blob_id``, or found it held as a blob, in this run.
+
+        Nothing is asked of Git: a kept answer about the blob is used only behind this fact.
+        """
+
+        return blob_id in self._blobs or self._presence.get(blob_id) is True
+
     def has_blob(self, blob_id: str) -> bool:
         """Answer whether the object store holds ``blob_id`` as a blob.
 
         A missing object is Git's documented not-found answer (``cat-file -e`` exits 1): ``False``.
         Any other failure is Git's, never taken for a missing object: it raises
         :class:`CodeObjectError` naming it (a timeout raises ``subprocess.TimeoutExpired``), so a
-        caller reports an unreadable input rather than an absent one (L09 review R3-2).
+        caller reports an unreadable input rather than an absent one (L09 review R3-2). The
+        answer for an object the store holds is kept (an ID names its bytes); a missing object
+        and a failure are asked again on the next call.
         """
 
         if blob_id in self._blobs:
             return True
+        if blob_id in self._presence:
+            return self._presence[blob_id]
         options = GitRunnerOptions(
             timeout=GIT_METADATA_TIMEOUT_SECONDS, object_inputs=self.object_inputs
         )
@@ -214,7 +257,60 @@ class CodeObjects:
             raise CodeObjectError(
                 f"the object store cannot say whether it holds {blob_id}: {detail}"
             )
-        return kind.stdout.strip() == "blob"
+        self._presence[blob_id] = kind.stdout.strip() == "blob"
+        return self._presence[blob_id]
+
+    def prefetch_presence(self, blob_ids: Iterable[str]) -> None:
+        """Answer :meth:`has_blob` ahead for many IDs, with two ``cat-file --batch-check`` reads.
+
+        ``has_blob`` asks ``cat-file -e``, which looks at the stored object itself, and then
+        ``cat-file -t``, which reports the type through any replace ref. The two batches ask the
+        same two questions for every ID at once: one with ``--no-replace-objects`` (is the object
+        itself stored), one as ``-t`` reads (its type). Only an object both batches find is kept;
+        a missing object, an unreadable one, an unexpected reply or a failed batch keeps nothing,
+        so ``has_blob`` asks Git one by one and answers or raises exactly where it did before.
+        """
+
+        wanted = sorted(
+            {
+                blob
+                for blob in blob_ids
+                if blob not in self._blobs
+                and blob not in self._presence
+                and _FULL_OBJECT_ID.fullmatch(blob)
+            }
+        )
+        if not wanted:
+            return
+        stored = self._batch_types(wanted, ["--no-replace-objects", *_BATCH_CHECK])
+        typed = self._batch_types(wanted, list(_BATCH_CHECK)) if stored else None
+        if not stored or not typed:
+            return
+        for blob in wanted:
+            if stored[blob] in _OBJECT_TYPES and typed[blob] in _OBJECT_TYPES:
+                self._presence[blob] = typed[blob] == "blob"
+
+    def _batch_types(self, blob_ids: list[str], args: list[str]) -> dict[str, str] | None:
+        """Each ID's ``%(objecttype)`` (or ``missing``) in one batch; ``None`` when it fails."""
+
+        try:
+            result = run_git(
+                self.repository,
+                args,
+                GitRunnerOptions(
+                    timeout=GIT_METADATA_TIMEOUT_SECONDS,
+                    input_text="".join(f"{blob}\n" for blob in blob_ids),
+                    object_inputs=self.object_inputs,
+                ),
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        rows = [line.split(" ") for line in result.stdout.splitlines()]
+        if result.returncode != 0 or len(rows) != len(blob_ids):
+            return None
+        if any(len(row) != 2 or row[0] != blob for row, blob in zip(rows, blob_ids, strict=True)):
+            return None
+        return {row[0]: row[1] for row in rows}
 
     def symbol_span(
         self,
@@ -244,23 +340,61 @@ class CodeObjects:
         grammar = grammars.grammar_of(path)
         if grammar is None:
             return None
+        try:
+            spans = self.qualified_spans(path, blob_id, name)
+            if len(spans) != 1 and top_level:
+                spans = _outermost(spans, self._bound(path, blob_id, grammar))
+        except GrammarUnavailableError as error:
+            raise CodeObjectError(f"the grammar for {path!r} is unavailable: {error}") from error
+        return spans[0] if len(spans) == 1 else None
+
+    def qualified_spans(self, path: str, blob_id: str, name: str) -> Spans:
+        """:func:`extents.qualified_spans` of ``name`` in ``blob_id`` read at ``path``.
+
+        The blob is read first, as a parse needs it, so a store that no longer holds it fails here
+        whether or not the answer is kept. A kept answer (:data:`SYMBOL_SPANS`) is the same
+        function of the same bytes; a grammar that will not load raises
+        :class:`GrammarUnavailableError` and keeps nothing.
+        """
+
+        data = self.blob(blob_id)
+        key = (str(self.repository), blob_id, path, name)
+        remembered = SYMBOL_SPANS.get(key) if is_complete_object_id(blob_id) else None
+        if remembered is not None:
+            return remembered[0]
+        grammar = grammars.grammar_of(path)
+        if grammar is None:
+            return ()
+        spans = extents.qualified_spans(name, self._bound(path, blob_id, grammar, data))
+        if is_complete_object_id(blob_id):
+            SYMBOL_SPANS.put(key, spans)
+        return spans
+
+    def known_spans(self, path: str, blob_id: str, name: str) -> Spans | None:
+        """The kept answer of :meth:`qualified_spans`, if one is kept; nothing is read or parsed."""
+
+        remembered = SYMBOL_SPANS.get((str(self.repository), blob_id, path, name))
+        return None if remembered is None else remembered[0]
+
+    def _bound(
+        self, path: str, blob_id: str, grammar: str, data: bytes | None = None
+    ) -> dict[str, list[extents.Extent]]:
         key = (blob_id, grammar, path)
         if key not in self._definitions:
-            lines = self.blob(blob_id).decode("utf-8", errors="surrogateescape").split("\n")
-            try:
-                self._definitions[key] = extents.definitions(path, lines)
-            except GrammarUnavailableError as error:
-                raise CodeObjectError(
-                    f"the grammar for {path!r} is unavailable: {error}"
-                ) from error
-        bound = self._definitions[key]
-        spans = extents.qualified_spans(name, bound)
-        if len(spans) != 1 and top_level:
-            spans = _outermost(spans, bound)
-        return spans[0] if len(spans) == 1 else None
+            source = self.blob(blob_id) if data is None else data
+            self._definitions[key] = extents.definitions(path, extents.source_lines(source))
+        return self._definitions[key]
 
     def line_count(self, blob_id: str) -> int:
         return len(self._blob_lines(blob_id))
+
+    def blob_lines(self, blob_id: str) -> list[bytes]:
+        """The blob's lines as :func:`anchor_content.blob_lines` splits them, split once per blob.
+
+        The list is this store's own: a caller reads it and never changes it.
+        """
+
+        return self._blob_lines(blob_id)
 
     def _blob_lines(self, blob_id: str) -> list[bytes]:
         """Split each blob once for this conversion, shared across paths and anchors."""

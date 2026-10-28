@@ -3,8 +3,13 @@
 // globals. Per-test code may still override these (e.g. useShouldAnimate.test stubs matchMedia).
 import { afterEach } from "vitest";
 import { configure } from "@testing-library/react";
+import { detachInFlightReads } from "../data/abortableRead";
 
 configure({ asyncUtilTimeout: 20_000 });
+
+// Identical reads in flight are shared process-wide (data/abortableRead.ts `sharedRead`). A test's
+// unsettled stub must never be joined by the next test's read of the same URL.
+afterEach(() => detachInFlightReads());
 
 // The setup-level unhandled-error trap (L8-R10): a green suite must never hide a live exception.
 // Errors reported through the window, unhandled promise rejections, and console.error are all

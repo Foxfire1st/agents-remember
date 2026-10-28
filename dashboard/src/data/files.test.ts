@@ -4,6 +4,7 @@ import {
   FilesApiError,
   FILES_REPOS_REQUEST_TIMEOUT_MS,
   fetchRepos,
+  getJson,
   listDir,
   readFile,
   resolveForward,
@@ -49,6 +50,37 @@ describe("data/files client", () => {
   it("throws FilesApiError carrying the server status code on a non-ok response", async () => {
     stubFetch({ status: "bad-path" }, false, 400);
     await expect(listDir("r", "mainline", "..")).rejects.toBeInstanceOf(FilesApiError);
+  });
+});
+
+describe("owned JSON reads", () => {
+  it("sends nothing for an already aborted owner", async () => {
+    const fetch = stubFetch({});
+    const owner = new AbortController();
+    owner.abort();
+    await expect(getJson('/notes', 100, owner.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each(['caller', 'timeout'] as const)("keeps both caller cancellation and the timeout (%s)", async (trigger) => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn(hungSocketImplementation);
+      vi.stubGlobal('fetch', fetch);
+      const owner = new AbortController();
+      const read = getJson('/notes', 100, owner.signal);
+      const rejected = expect(read).rejects.toMatchObject({ name: 'AbortError' });
+      await Promise.resolve();
+      expect(fetch).toHaveBeenCalledTimes(1);
+      if (trigger === 'caller') owner.abort();
+      else await vi.advanceTimersByTimeAsync(100);
+      await rejected;
+      expect(fetch.mock.calls[0][1]?.signal?.aborted).toBe(true);
+      expect(owner.signal.aborted).toBe(trigger === 'caller');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

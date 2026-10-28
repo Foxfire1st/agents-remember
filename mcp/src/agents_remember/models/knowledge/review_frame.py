@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import ConfigDict, Field, model_validator
 
@@ -58,10 +58,12 @@ __all__ = [
     "FrameBinding",
     "FrameDraft",
     "FrameEntrypoint",
+    "FrameInteractionCoverage",
     "FrameLimits",
     "FrameManifest",
     "FrameOpening",
     "FramePart",
+    "FramePassCoverage",
     "FramePointer",
     "FrameReclamation",
     "FrameRegeneration",
@@ -69,6 +71,7 @@ __all__ = [
     "FrameStaleness",
     "artifacts_digest",
     "comparison_reference",
+    "coverage_summary",
     "four_tree_digest",
     "planned_reference",
 ]
@@ -96,13 +99,11 @@ FRAME_RECLAMATION_SCHEMA: Literal["ar-review-frame-reclamation/v1"] = (
     "ar-review-frame-reclamation/v1"
 )
 
-# The admitted ceilings (rule 8). They are design ceilings, not measured performance claims; a leaf
-# that proves one too tight or too loose proposes a change with its evidence.
-MAX_FILES = 64
-MAX_REVISION_BYTES = 16 * 1024 * 1024
-MAX_MANIFEST_BYTES = 1024 * 1024
-MAX_TASK_BYTES = 512 * 1024 * 1024
-MAX_DRAFT_BYTES = 16 * 1024 * 1024
+# The store's one ceiling: the task's whole store, kept as MIK-R103 v2's task byte total. No
+# revision has a file or byte ceiling of its own, no draft has a quota and no manifest a size:
+# what the explainer authors is refused nothing for its size (MIK-R211 v4 rule 3, D567). A caller
+# may still name one.
+MAX_TASK_BYTES = 512 * 1024 * 1024  # MIK-R103 v2: the task's byte total, the store's one ceiling
 
 _MEDIA_BY_SUFFIX: dict[str, str] = {
     ".html": "text/html",
@@ -120,13 +121,17 @@ _MEDIA_BY_SUFFIX: dict[str, str] = {
 
 
 class FrameLimits(KnowledgeModel):
-    """The finite ceilings one frame store enforces (rule 8)."""
+    """The ceilings one frame store enforces (rule 8); ``None`` is no ceiling.
 
-    files_per_revision: int = Field(default=MAX_FILES, gt=0)
-    bytes_per_revision: int = Field(default=MAX_REVISION_BYTES, gt=0)
-    manifest_bytes: int = Field(default=MAX_MANIFEST_BYTES, gt=0)
+    A revision's files and bytes and a draft's bytes have no ceiling unless a caller names one
+    (MIK-R211 v4 rule 3, D567: the explainer is refused no size for being the explainer).
+    """
+
+    files_per_revision: int | None = Field(default=None, gt=0)
+    bytes_per_revision: int | None = Field(default=None, gt=0)
+    manifest_bytes: int | None = Field(default=None, gt=0)
     task_bytes: int = Field(default=MAX_TASK_BYTES, gt=0)
-    draft_bytes: int = Field(default=MAX_DRAFT_BYTES, gt=0)
+    draft_bytes: int | None = Field(default=None, gt=0)
     draft_lease_seconds: int = Field(default=900, gt=0)
 
 
@@ -450,7 +455,7 @@ class FramePart(KnowledgeModel):
     """
 
     part: str = Field(min_length=1, max_length=64)
-    title: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1)
     claims: tuple[str, ...] = ()
 
 
@@ -467,7 +472,7 @@ def _parts_are_true(part_map: tuple[FramePart, ...], evidence: EvidencePacket) -
         if unknown:
             raise ValueError(
                 f"part {part.part!r} carries claim(s) the revision's claim map does not hold: "
-                + ", ".join(sorted(unknown)[:5])
+                + ", ".join(sorted(unknown))
             )
         if len(part.claims) != len(set(part.claims)):
             raise ValueError(f"part {part.part!r} lists a claim id more than once")
@@ -480,7 +485,7 @@ def _parts_are_true(part_map: tuple[FramePart, ...], evidence: EvidencePacket) -
                 )
             seen_claims[claim_id] = part.part
     if any(part.claims for part in part_map) and set(seen_claims) != claims:
-        missing = sorted(claims - set(seen_claims))[:5]
+        missing = sorted(claims - set(seen_claims))
         raise ValueError(
             "every claim of the revision belongs to one part in the part map; unmapped: "
             + ", ".join(missing)
@@ -502,6 +507,61 @@ def _supplemental_is_true(
             "the revision's supplemental receipts are the evidence packet's own receipts; a "
             "second copy would be a second identity for the same bytes"
         )
+
+
+class FramePassCoverage(KnowledgeModel):
+    """One interaction pass of the render a revision was published from: what it reached."""
+
+    name: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
+    controls: int = Field(ge=0)
+    visited: int = Field(ge=0)
+    complete: bool
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class FrameInteractionCoverage(KnowledgeModel):
+    """How much of its interaction observation a published revision carries (MIK-R211 v5).
+
+    A revision states its coverage in the artifact, so a page whose interactions are 2 of 5 says
+    2 of 5 where the reader sees it. A render that made no interaction report has no passes and
+    says it was not checked; a revision published before coverage was recorded has none at all.
+    ``window`` is the runner's own words for the one bound on the run, naming whose limit it is
+    (the browser load process's, not a page limit or a product cap; the Manager's 15:54Z ruling).
+    """
+
+    passes_total: int = Field(ge=0)
+    passes_complete: int = Field(ge=0)
+    complete: bool
+    passes: tuple[FramePassCoverage, ...] = ()
+    window: str | None = Field(default=None, min_length=1, max_length=PROSE_MAX_LENGTH)
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    def summary(self) -> str:
+        """One line for the reader: ``all 5 passes``, ``2 of 5 passes``, or ``not checked``.
+
+        An incomplete observation also names its window in the runner's words: what it stopped
+        before, or ``none: ...`` when the run had no time limit.
+        """
+
+        if self.passes_total == 0:
+            return "not checked"
+        unit = "pass" if self.passes_total == 1 else "passes"
+        if self.complete:
+            return f"all {self.passes_total} {unit}"
+        line = f"{self.passes_complete} of {self.passes_total} {unit}"
+        if self.window is None:
+            return line
+        if self.window.startswith("none"):
+            return f"{line} — window {self.window}"
+        return f"{line} — stopped before {self.window}"
+
+
+def coverage_summary(coverage: FrameInteractionCoverage | None) -> str:
+    """The reader's line for a revision's coverage; ``not recorded`` for one that carries none."""
+
+    return "not recorded" if coverage is None else coverage.summary()
 
 
 class FrameManifest(KnowledgeModel):
@@ -527,8 +587,36 @@ class FrameManifest(KnowledgeModel):
     # The page's parts and their claims, derived from the page's own document at publication. An
     # empty map is a page without parts: it is one part, and its staleness is whole-page.
     part_map: tuple[FramePart, ...] = ()
+    # The interaction coverage of the render it was published from (MIK-R211 v5); None for a
+    # revision published before coverage was recorded, or by a frame that renders no interactions.
+    interaction_coverage: FrameInteractionCoverage | None = None
 
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _earlier_revisions_carry_retired_limits(cls, data: Any) -> Any:
+        """Read a revision published while the packet still declared two size limits.
+
+        Revisions of a leaf written before the limits were removed carry ``evidence.map.budget_bytes``
+        and ``evidence.limits.packet_bytes``. A published revision is a record, so removing a limit
+        must not orphan it: those two keys are dropped here, unread, and every other unknown key still
+        fails against ``extra="forbid"``. Nothing writes them back -- the models no longer have them.
+        """
+
+        if not isinstance(data, dict):
+            return data
+        evidence = data.get("evidence")
+        if not isinstance(evidence, dict):
+            return data
+        retired = {"limits": "packet_bytes", "map": "budget_bytes"}
+        changed = False
+        for section, key in retired.items():
+            block = evidence.get(section)
+            if isinstance(block, dict) and key in block:
+                evidence = {**evidence, section: {k: v for k, v in block.items() if k != key}}
+                changed = True
+        return {**data, "evidence": evidence} if changed else data
 
     @model_validator(mode="after")
     def _manifest_is_internally_true(self) -> FrameManifest:
@@ -669,7 +757,7 @@ class FrameStalePart(KnowledgeModel):
     """
 
     part: str = Field(min_length=1, max_length=64)
-    title: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1)
     reasons: tuple[str, ...] = ()
 
 

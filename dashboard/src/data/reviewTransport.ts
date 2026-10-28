@@ -16,6 +16,8 @@
 // semantics are untouched: `getJson` keeps throwing on a non-2xx for the routes that use it.
 
 import { FilesApiError } from './files';
+import { sharedRead } from './abortableRead';
+import { openingFetch } from './reviewOpen';
 
 // What a reader has to be able to tell apart, as one token per answer that is not a review. The
 // surface's `loading` and `known-empty` states are not failures and are rendered as themselves; these
@@ -163,16 +165,27 @@ function networkFailure(cause: unknown): ReviewFailure {
 // route's `state` *is* the answer (a payload, a subject list, or a typed refusal), and anything else
 // is a failure. The caller admits the states it knows; an unadmitted one is reported, not rendered.
 //
-// A caller whose answer may be superseded passes a `signal`: aborting it cancels the request itself,
-// which the server notices as a disconnect and stops the work it was doing for it.
-export async function getReviewJson<T>(url: string, signal?: AbortSignal): Promise<T> {
-  let response: Response;
-  try {
-    response = await (signal === undefined ? fetch(url) : fetch(url, { signal }));
-  } catch (cause) {
-    throw new ReviewTransportError(networkFailure(cause));
-  }
-  return decodeReviewJson<T>(response);
+// Identical reads in flight are one request (`sharedRead`): a StrictMode remount, or a second reader
+// of the same URL, joins the request already asked for instead of sending another. A caller whose
+// answer may be superseded passes a `signal`: once no consumer of the request wants its answer the
+// request itself is cancelled, which the server notices as a disconnect and stops the work it was
+// doing for it; a consumer that leaves while another still waits only stops its own wait.
+export function getReviewJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  return sharedRead<T>(
+    `review:${url}`,
+    async (shared) => {
+      let response: Response;
+      try {
+        response = await openingFetch(url, shared === undefined ? undefined : { signal: shared });
+      } catch (cause) {
+        throw new ReviewTransportError(networkFailure(cause));
+      }
+      return decodeReviewJson<T>(response);
+    },
+    signal,
+    // As before: an owner released in the same pass, with nobody re-joining, sends nothing.
+    true,
+  );
 }
 
 /** The same response classification for conditional summary reads. */

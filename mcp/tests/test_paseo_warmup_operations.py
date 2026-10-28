@@ -67,7 +67,11 @@ class _World:
         self.memory = WARMUP_MEMORY_FLOOR_BYTES * 2
         self.runtime = cast(
             _ServingRuntime,
-            SimpleNamespace(config=self.config, background_ledger=BackgroundLedger()),
+            SimpleNamespace(
+                launcher_catalog_prepare=None,
+                config=self.config,
+                background_ledger=BackgroundLedger(),
+            ),
         )
 
     def patches(self) -> contextlib.ExitStack:

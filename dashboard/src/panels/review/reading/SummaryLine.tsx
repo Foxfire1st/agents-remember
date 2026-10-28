@@ -2,7 +2,7 @@
 // words (data-authored.js:173, rendered at app.js:321): "1 invariant changed · weaken · 13 changed
 // locations in 5 files · 2 files without invariant · 58 unchanged or not comparable, folded · sorted:
 // Priority". It counts changed invariant records once (from the outline), the shown subjects' locations
-// (from the card read, W1: a location is an entry), and the files without an invariant (W14: the
+// (from the complete location inventory, W1: a location is an entry), and the files without an invariant (W14: the
 // lane's two buckets). A part still being read shows "…", and a part that cannot be measured names
 // itself as unavailable ("changed invariants: unavailable"), never as a count: nothing here is ever
 // an invented zero (INV-QAR0F3).
@@ -60,7 +60,7 @@ function invariantsCount(model: ChangeSetModel, catalogue: ReviewCatalogueRead):
 
 function cardCount(model: ChangeSetModel, value: number | undefined): Count {
   if (value !== undefined) return value;
-  return model.cards === 'unavailable' ? 'unavailable' : '…';
+  return model.locations === 'reading' ? '…' : 'unavailable';
 }
 
 function summaryLaneFiles(summary: IntentSummaryRead): number | undefined {

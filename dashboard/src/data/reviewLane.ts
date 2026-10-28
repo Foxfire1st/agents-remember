@@ -221,15 +221,17 @@ function useLaneAnswer(url: string | null): AnswerRead | null {
   useEffect(() => {
     if (url === null) return undefined;
     let mounted = true;
+    const controller = new AbortController();
     const apply = (next: AnswerRead) => {
       if (mounted) setRead({ url, read: next });
     };
-    void getReviewJson<ReviewLaneAnswer>(url).then(
+    void getReviewJson<ReviewLaneAnswer>(url, controller.signal).then(
       (answer) => apply({ phase: 'answered', answer }),
       (cause: unknown) => apply({ phase: 'unavailable', problem: reviewProblemFromCause(cause) }),
     );
     return () => {
       mounted = false;
+      controller.abort();
     };
   }, [url]);
   if (url === null) return null;

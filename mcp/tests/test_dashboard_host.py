@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 import threading
 import uuid
 from argparse import Namespace
@@ -268,3 +270,49 @@ def test_discovered_config_path_is_named_in_normal_and_transition_outcomes(tmp_p
     changed = ensure_host(cfg, runner=fake, reader=fake.reader, probe=free)
     assert "--config " + str(path) in changed.line
     assert "<harness" not in changed.line and not fake.mutations()
+
+
+def test_both_serve_paths_hand_uvicorn_the_package_log_config(monkeypatch, tmp_path):
+    cfg = config(tmp_path)
+    served = []
+    monkeypatch.setattr(dashboard, "declare_process_role", lambda role: None)
+    monkeypatch.setattr(dashboard, "bind_worktree_services", lambda services: None)
+    monkeypatch.setattr(
+        dashboard, "build_default_worktree_services", lambda *, leaf_agent_archive: None
+    )
+    monkeypatch.setattr(
+        dashboard, "_resolve_settings", lambda arguments: (str(cfg.config_path), cfg)
+    )
+    monkeypatch.setattr(
+        dashboard, "_build_app", lambda arguments, cfg: dashboard._DashboardApp(object(), None)
+    )
+    monkeypatch.setattr(dashboard, "_start_host_background", lambda cfg: None)
+    monkeypatch.setattr(dashboard.uvicorn, "run", lambda *a, **k: served.append(k["log_config"]))
+    for name in (
+        dashboard._DEV_CONFIG_ENV,
+        dashboard._DEV_INTERVAL_ENV,
+        dashboard._DEV_HEARTBEAT_ENV,
+    ):
+        monkeypatch.setenv(name, "")  # the reload path writes these; restored afterwards
+    assert dashboard.run(args(host_start_owner=4242)) == 0
+    assert dashboard.run(args(reload=True, host_start_owner=4242)) == 0
+    assert served == [dashboard.dashboard_log_config()] * 2
+
+
+def test_the_package_log_config_prints_the_packages_info_lines_once():
+    """Applied in a child interpreter: the suite's own logging is never configured here."""
+
+    script = (
+        "import logging, logging.config\n"
+        "from agents_remember.cli.dashboard import dashboard_log_config\n"
+        "logging.config.dictConfig(dashboard_log_config())\n"
+        "logging.getLogger().addHandler(logging.StreamHandler())\n"
+        "logging.getLogger('agents_remember.serving.leaf_worktree_watch').info('the plan')\n"
+        "logging.getLogger('agents_remember.x').debug('not this')\n"
+        "logging.getLogger('elsewhere').info('nor this')\n"
+    )
+    child = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, check=True
+    )
+    lines = child.stderr.splitlines()
+    assert lines == ["INFO:     agents_remember.serving.leaf_worktree_watch: the plan"]

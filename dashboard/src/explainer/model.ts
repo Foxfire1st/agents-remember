@@ -149,22 +149,31 @@ export function firstRequestLine(references: readonly FormReference[], message: 
     notes ? `${notes} note${notes === 1 ? '' : 's'}` : '',
     message.trim() ? 'your text' : '',
   ].filter(Boolean);
-  return parts.length ? `One message: ${parts.join(', ')}.` : 'Nothing to send yet: add a reference or write your request.';
+  return parts.length
+    ? `One message: ${parts.join(', ')}.`
+    : END_TO_END_LINE;
 }
 
-/** Send is refused until there is something to send: a reference, stale work, or his words. */
+/**
+ * What an empty Send asks for: the end-to-end review. `explainer_service.py` composes the same ask in
+ * `END_TO_END_REQUEST` when a Send carries no words, so the form's line and the seat's first turn
+ * say one thing (MIK-R211 v2 rule 5, and the developer's F1).
+ */
+export const END_TO_END_LINE = 'One message: the end-to-end review of the comparison on screen.';
+
+/**
+ * Send is always possible: an empty request is the end-to-end review, so none of the request's facts
+ * is a gate any more. The parameters stay because every caller passes them, and what they carry is
+ * still what the seat receives.
+ */
 export function canSend(
-  references: readonly FormReference[],
-  message: string,
+  references: readonly FormReference[] = [],
+  message = '',
   staleParts: readonly ExplainerStalePart[] = [],
   staleGrades: readonly string[] = [],
 ): boolean {
-  return (
-    references.length > 0 ||
-    message.trim() !== '' ||
-    staleParts.length > 0 ||
-    staleGrades.length > 0
-  );
+  void [references, message, staleParts, staleGrades];
+  return true;
 }
 
 /** What goes out: the role capsule with the first request only, and never again (MIK-R106 rule 5). */
@@ -179,8 +188,12 @@ export const STEP_MARK: Record<ExplainerBuildStep['state'], string> = {
   failed: '✗',
 };
 
-/** A step's own percentage, for a step that counts files or bytes; null when it counts nothing. */
+/**
+ * A step's own percentage: the server's, when its record carries one, else the share of a count.
+ * Null when the step says neither.
+ */
 export function stepPercent(step: ExplainerBuildStep): number | null {
+  if (typeof step.percent === 'number') return step.percent;
   const counts = step.counts;
   if (!counts || counts.total <= 0) return null;
   const share = Math.min(1, Math.max(0, counts.done / counts.total));
@@ -194,8 +207,12 @@ function stepShare(step: ExplainerBuildStep): number {
   return 0;
 }
 
-/** The whole build's percentage: each step's share, equally weighted. */
+/**
+ * The whole build's percentage: the server's own when its record carries one (a running build writes
+ * `percent`), else each step's share, equally weighted.
+ */
 export function buildPercent(build: ExplainerBuild): number {
+  if (typeof build.percent === 'number') return build.percent;
   if (build.steps.length === 0) return build.state === 'done' ? 100 : 0;
   const total = build.steps.reduce((sum, step) => sum + stepShare(step), 0);
   return Math.round((total / build.steps.length) * 100);
@@ -219,7 +236,7 @@ export function buildFailure(build: ExplainerBuild): { step: string; reason: str
   const failed = build.steps.find((step) => step.state === 'failed');
   return {
     step: build.failedStep ?? failed?.name ?? 'the build',
-    reason: build.reason ?? failed?.reason ?? 'no reason was given',
+    reason: build.error ?? build.reason ?? failed?.reason ?? 'no reason was given',
   };
 }
 
@@ -267,28 +284,29 @@ export interface RetireConfirmation {
   line: string;
 }
 
-/** The confirmation names what ends and what stays (MIK-R106 rule 7). */
+/** The confirmation says exactly what the removal does and what it leaves (MIK-R211 v5 rule 12). */
 export function retireConfirmation(task: string, state: ExplainerState | null): RetireConfirmation {
   const marker = state?.workspaceId ?? 'this leaf’s explainer workspace';
   return {
-    headline: `Retire the explainer of ${task}?`,
+    headline: `Remove the explainer of ${task}?`,
     ends: [
-      'The seat: this chat, and the explainer’s agent in Paseo.',
-      'Every process the seat started, ended by its recorded process tree and by the marker AR_EXPLAINER_WORKSPACE.',
-      `Its workspace (${marker}): its binding, its snapshot, its scratch and its drafts.`,
+      'The seat: this chat is archived in Paseo, and every process it started ends, by its recorded process tree and by the marker AR_EXPLAINER_WORKSPACE.',
+      `Its workspace (${marker}), deleted completely: its code and memory worktrees, removed and pruned, its copied documents and revisions, its drafts, renders and scratch. Nothing is left behind.`,
+      'A draft that was never published is discarded with it.',
     ],
     stays: [
-      'The saved explanation pages, readable and marked “from a retired explainer”.',
-      'The grades, readable as they are.',
+      'Every published revision of the explanation, in the task: the review page keeps showing it, and Compare still works.',
+      'The grades and the reports, in the task.',
     ],
     line:
-      'Its chat and its workspace are archived and its process ends. The saved explanation and the grades stay readable, marked as from a retired explainer. You can start a new explainer later with ✦ Explain.',
+      'The chat is archived and the workspace is removed completely. The published revisions and the grades stay with the task. ✦ Explain later opens a fresh explainer whose draft starts from the latest revision.',
   };
 }
 
-/** Whether the column offers Retire at all: a seat exists to retire. */
+/** Whether the column offers removal: a seat in any state, or a workspace still bound on disk. */
 export function canRetire(state: ExplainerState | null): boolean {
-  return state?.seat === 'live' || state?.seat === 'closed';
+  if (state === null) return false;
+  return state.seat === 'live' || state.seat === 'closed' || state.binding !== null;
 }
 
 // ---- the header's agent menu (MIK-R106 rule 1) ----

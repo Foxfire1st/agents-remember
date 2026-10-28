@@ -23,6 +23,7 @@ from agents_remember.application.review_final_output_receipt import (
 )
 from agents_remember.errors import FutureCodeCandidateError
 from agents_remember.kernel.canonical_json import canonical_json_bytes, decoded_json
+from agents_remember.kernel.recorded_reads import ABSENT, bytes_identity, record_read
 from agents_remember.memory.knowledge.durable_evidence import (
     DurableEvidencePublication,
     EvidenceReadBack,
@@ -281,9 +282,11 @@ def read_review_sync_rebinding(
     task_root: Path, leaf_id: str, generation_id: str
 ) -> ReviewSyncRebindingRead:
     destination = durable_reports_root(task_root) / rebinding_file_name(leaf_id, generation_id)
+    # The record, or its absence, is an input of whatever answer reads it (D570).
     try:
         raw = destination.read_bytes()
     except FileNotFoundError:
+        record_read(destination, ABSENT)
         return ReviewSyncRebindingRead(
             "not-recorded",
             leaf_id,
@@ -294,9 +297,11 @@ def read_review_sync_rebinding(
             f"no rebinding is recorded at {destination}",
         )
     except OSError as error:
+        record_read(destination, f"unreadable ({type(error).__name__})")
         return ReviewSyncRebindingRead(
             "unreadable", leaf_id, generation_id, destination, None, None, str(error)
         )
+    record_read(destination, bytes_identity(raw))
     try:
         data = decoded_json(raw.decode("utf-8"))
         if not isinstance(data, dict):

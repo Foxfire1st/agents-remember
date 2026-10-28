@@ -290,12 +290,19 @@ export async function step(view: View, key: typeof J, requestsMade: number) {
 
 // The shared member's review shows both families, in the displayed order `shown`; a click on the
 // second family's own row selects that family and (MIK-R39) leaves the first family in the tree as a
-// kept family.
+// kept family. The family opens its overview in the column (MIK-R211 v4 rule 10).
 export async function clickedSecondFamily(view: View, shown = [R6R_ID, HBJ_ID]) {
   await waitFor(() => expect(families(view)).toEqual(shown));
   fireEvent.click(within(familyBlock(view, HBJ_ID)).getByTestId('review-family-open'));
   await waitFor(
-    () => expect(view.getByTestId('review-center-family').dataset.family).toBe(HBJ_ID),
+    () => expect(view.getByTestId('review-family-overview').dataset.family).toBe(HBJ_ID),
   );
   await settled(view);
 }
+
+// A member's summary row in the selected family's overview (MIK-R211 v4 rule 10), by its subject id.
+export const overviewMember = (view: View, subjectId: string) =>
+  within(view.getByTestId('review-family-overview'))
+    .getAllByTestId('review-member-summary')
+    .find((row) => row.dataset.subject === subjectId)!
+    .querySelector<HTMLButtonElement>('button')!;

@@ -27,8 +27,9 @@ export const listTaskReports = (
   master: string,
   doc: string,
   base = "",
+  signal?: AbortSignal,
 ): Promise<TaskReports> =>
-  getJson<TaskReports>(`${base}/api/role-launch/reports?${qs({ repo, master, doc })}`);
+  getJson<TaskReports>(`${base}/api/role-launch/reports?${qs({ repo, master, doc })}`, undefined, signal);
 
 // Dashboard doc paths carry the "/tasks/<repo>/" prefix while recorded task references
 // are root-relative inside the repository task root; the reader scope must name the

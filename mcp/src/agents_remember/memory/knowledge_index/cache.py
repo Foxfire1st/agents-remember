@@ -12,8 +12,10 @@
   (:meth:`KnowledgeIndexCache.for_directory`); the index opened is the one for that key and is
   checked against it on open, so an answer built for different content is never served.
 * **Eviction.** After a build, files unused for longer than ``max_age`` are removed, then the oldest
-  until the directory fits ``max_bytes``. Reuse refreshes a file's time. The file just built or
-  opened is never evicted.
+  until the directory fits ``max_bytes``. Reuse refreshes a zero-byte ``.sqlite.used`` marker,
+  preserving the index bytes and timestamps for readers. Existing markerless indexes retain
+  their recorded mtime until first reuse creates the marker. The file just built or opened is
+  never evicted; the byte budget still counts the SQLite files.
 
 Deleting the directory, or any file in it, loses nothing: every index is rebuilt from its tree.
 """
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,6 +49,7 @@ CACHE_DIRECTORY_PARTS: Final = ("runtime", "knowledge-index")
 DEFAULT_MAX_AGE_SECONDS: Final = 14 * 24 * 60 * 60
 DEFAULT_MAX_BYTES: Final = 1024 * 1024 * 1024
 _SUFFIX: Final = ".sqlite"
+_USAGE_SUFFIX: Final = ".used"
 
 
 def default_cache_directory(coordination_root: Path) -> Path:
@@ -119,6 +123,7 @@ class KnowledgeIndexCache:
     def evict(self, *, keep: Path | None = None) -> list[Path]:
         """Remove files unused past ``max_age``, then the oldest until the cache fits ``max_bytes``."""
 
+        self._prune_usage()
         now = time.time()
         files = sorted(
             (path for path in self.directory.glob(f"*{_SUFFIX}") if path != keep),
@@ -127,7 +132,7 @@ class KnowledgeIndexCache:
         removed: list[Path] = []
         for path in list(files):
             if now - _last_used(path) > self.max_age_seconds:
-                _unlink(path)
+                _remove_index(path)
                 removed.append(path)
                 files.remove(path)
         total = sum(_size(path) for path in files) + (_size(keep) if keep is not None else 0)
@@ -135,7 +140,7 @@ class KnowledgeIndexCache:
             if total <= self.max_bytes:
                 break
             total -= _size(path)
-            _unlink(path)
+            _remove_index(path)
             removed.append(path)
         return removed
 
@@ -149,8 +154,7 @@ class KnowledgeIndexCache:
             index = KnowledgeIndex(path, expected_key=key)
         except IndexMismatchError:
             return None
-        with contextlib.suppress(OSError):
-            os.utime(path)
+        _touch_usage(path)
         self.last_outcome = CacheOutcome(key=key, reused=True, report=None)
         return index
 
@@ -162,14 +166,57 @@ class KnowledgeIndexCache:
             os.replace(temporary, destination)
         finally:
             _unlink(temporary)
+        _touch_usage(destination)
         self.last_outcome = CacheOutcome(key=snapshot.key, reused=False, report=report)
         self.evict(keep=destination)
         return KnowledgeIndex(destination, expected_key=snapshot.key)
 
+    def _prune_usage(self) -> None:
+        """A usage hint has no life after its index; deletion is safe for links too."""
+        for marker in self.directory.glob(f"*{_SUFFIX}{_USAGE_SUFFIX}"):
+            index = marker.with_name(marker.name.removesuffix(_USAGE_SUFFIX))
+            if not index.is_file():
+                with contextlib.suppress(OSError):
+                    _unlink(marker)
+
+
+def _usage_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}{_USAGE_SUFFIX}")
+
+
+def _touch_usage(path: Path) -> None:
+    """Update only our private regular marker; an unavailable hint never fails a read."""
+    with contextlib.suppress(OSError):
+        descriptor = os.open(
+            _usage_path(path),
+            os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+            0o600,
+        )
+        try:
+            current = os.fstat(descriptor)
+            if stat.S_ISREG(current.st_mode) and current.st_nlink == 1:
+                os.utime(descriptor, None)
+        finally:
+            os.close(descriptor)
+
+
+def _remove_index(path: Path) -> None:
+    _unlink(path)
+    with contextlib.suppress(OSError):
+        _unlink(_usage_path(path))
+
 
 def _last_used(path: Path) -> float:
     try:
-        return path.stat().st_mtime
+        marker = _usage_path(path).lstat()
+        return marker.st_mtime if stat.S_ISREG(marker.st_mode) and marker.st_nlink == 1 else 0.0
+    except FileNotFoundError:
+        # Runtime indexes created before usage markers stored recency in their own mtime.
+        # Read that value only until their first successful reuse creates a marker.
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
     except OSError:
         return 0.0
 

@@ -4,11 +4,11 @@
 // carry the "Changed files" label; a file's head boxes its status. A hunk's row stays the selectable
 // unit MIK-R89 v2 rule 13 names (⊕, URL selection, j and k), drawn as quiet text, not as a box.
 // On L181 #8 (reviewPage.test-utils.tsx) the lane holds one added file of 45 lines, one hunk.
-import { cleanup, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { badge, subjectId, sublabel } from './readingStyles';
-import { engage, renderPage, servePage, stubInViewAtFirstPaint } from './reviewPage.test-utils';
+import { engage, renderPage, servePage, stubInViewAtFirstPaint, waitForOpening } from './reviewPage.test-utils';
 
 beforeEach(() => window.localStorage.clear());
 
@@ -33,6 +33,8 @@ it("draws the lane's heading, its files' label and its file heads with the mocku
   stubInViewAtFirstPaint();
   servePage();
   renderPage();
+  await waitForOpening();
+  fireEvent.click(screen.getByTestId('review-tree-lane'));
   await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
   engage();
   await waitFor(() => expect(screen.getByTestId('review-lane-file').dataset.laneRead).toBe('ready'));

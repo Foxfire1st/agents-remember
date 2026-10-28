@@ -1,4 +1,4 @@
-"""Bounded investigation reads at a comparison's exact trees (MIK-R102 rules 3, 4, 5, 7, 8, 12).
+"""Investigation reads at a comparison's exact trees (MIK-R102 rules 3, 5, 7, 8, 12; MIK-R211 v4).
 
 The operand is the comparison's own tree, never something the caller can choose:
 
@@ -6,17 +6,23 @@ The operand is the comparison's own tree, never something the caller can choose:
   the **effective converted tree**, with the stored tree named beside it (rules 1, 3, 5);
 * a symbolic revision, a branch, a URL, an absolute path, a ``..`` segment or Git pathspec magic is
   refused by name rather than repaired (rule 3);
-* the bytes are read through a bounded ``git cat-file --batch`` window, so the declared byte bound
-  limits the work actually done instead of truncating a fully materialized blob (rule 4);
-* a line range is reached by a bounded scan that reports how far it got and where the next read
-  starts, so a continuation always makes progress and an unexamined remainder is never called empty
-  (rules 4, 12); a read that reaches the object's end inside the requested range ends at its last
-  line and is complete, and a remainder is counted only where the read measured it;
+* the object is read whole through ``git cat-file --batch`` and the read answers in full: no byte
+  window, page or scan bound shapes it (MIK-R211 v4 rule 3). A line range is an optional offset and
+  length into that whole object, and the receipt states the object's true size and line count;
+* a range that runs past the object's end ends at its last line and is complete, and a start line
+  past the end is a measured range absence with the real line count (rules 3, 12);
+* a symlink inside the tree is inside the tree, so it is followed -- through chains and through a
+  linked directory, guarded only by the set of paths already visited -- and the entry it ends at
+  is read exactly as a regular one; only a link whose target lies outside the tree is refused, as
+  a path outside the tree naming the link and its target (ruling K3);
 * relationships are read through the landed owners' own schemas -- family members, record links and
   supersession, sidecar realizations and proofs, history rows -- with their direction, revision,
   origin leaf and attempt, and a lookup that failed is not a measured absence (rule 5);
 * a claim basis is resolved against the packet that cites it, so a recorded authority rests on an
   object the packet actually holds (rules 7, 8).
+
+The refusals that stay are about the request, never its size: a path outside the tree, an
+unreadable entry and a wrong-request operand; a binary object is stated as binary.
 
 Nothing here writes, starts a process of the compared repository, runs a test or launches a role.
 """
@@ -24,6 +30,7 @@ Nothing here writes, starts a process of the compared repository, runs a test or
 from __future__ import annotations
 
 import contextlib
+import posixpath
 import re
 import subprocess
 from dataclasses import dataclass
@@ -32,10 +39,6 @@ from typing import Any
 
 from agents_remember.application.review_evidence_packet import comparison_reference
 from agents_remember.kernel.git_command import git_environment, run_git
-from agents_remember.models.knowledge.review_evidence import (
-    EvidenceLimitMeasurement,
-    EvidenceLimits,
-)
 from agents_remember.models.knowledge.review_evidence_read import (
     EVIDENCE_SIDES,
     EvidenceReadReceipt,
@@ -43,41 +46,20 @@ from agents_remember.models.knowledge.review_evidence_read import (
 from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
 
 __all__ = [
-    "DEFAULT_READ_LIMITS",
-    "MAX_PAGE_LINES",
-    "MAX_READ_BYTES",
     "SideOperand",
-    "measured_limits",
     "read_bound_source",
+    "read_whole_source",
     "side_operand",
 ]
 
-# The shipped bounds. They are a *ceiling per read*, not a claim of performance: a packet that uses
-# them without measuring records them as an approval gap (rule 4), which is why
-# :func:`measured_limits` exists for the surface that measures real inputs.
-MAX_READ_BYTES = 256 * 1024
-MAX_PAGE_LINES = 400
-MAX_PAGES = 4
-MAX_PATHS = 64
-MAX_RECORDS = 200
-MAX_DEPTH = 2
-# The scan that reaches a requested line is bounded separately, and its own bound is what a
-# continuation reports when the line was not reached.
-MAX_SCAN_BYTES = 4 * MAX_READ_BYTES
+# How much of the blob stream one pipe read takes. It is the stream's granularity, not a bound: a
+# read takes as many of these as the object holds.
 _CHUNK = 64 * 1024
-_MAX_LISTED_PATHS = 5000
-
-DEFAULT_READ_LIMITS = EvidenceLimits(
-    bytes_per_read=MAX_READ_BYTES,
-    paths_per_packet=MAX_PATHS,
-    records_per_collection=MAX_RECORDS,
-    relationship_depth=MAX_DEPTH,
-    pages_per_read=MAX_PAGES,
-)
 
 _SUBMODULE_MODE = "160000"
 _SYMLINK_MODE = "120000"
 _TREE_MODE = "040000"
+# How far into an object a NUL byte marks it binary (Git's own heuristic).
 _BINARY_SNIFF_BYTES = 8000
 _RECORD_FILE = re.compile(r"^(?P<id>[A-Z]{2,4}-[A-Z0-9]{4,})-[^/]*\.json$")
 _PATH_ADDRESS = re.compile(
@@ -113,16 +95,6 @@ class EvidenceAddress:
     end_line: int | None = None
 
 
-def measured_limits(
-    measurement: EvidenceLimitMeasurement,
-    *,
-    limits: EvidenceLimits = DEFAULT_READ_LIMITS,
-) -> EvidenceLimits:
-    """The same bounds with the measurement that earns them recorded (rule 4, evidence 8)."""
-
-    return limits.model_copy(update={"measurement": measurement})
-
-
 def side_operand(
     record: ReviewTreeComparisonRecord, side: str
 ) -> SideOperand | EvidenceReadReceipt:
@@ -156,100 +128,352 @@ def side_operand(
     return SideOperand(side=side, repository=Path(chosen.repository), tree=chosen.tree)
 
 
-# --- bounded blob access ------------------------------------------------------------------------
+# --- one read -----------------------------------------------------------------------------------
 
 
-class _Blob:
-    """One blob read through a bounded ``cat-file --batch`` stream, never materialized whole."""
+def read_bound_source(
+    record: ReviewTreeComparisonRecord,
+    side: str,
+    path: str,
+    *,
+    start_line: int | None = None,
+    end_line: int | None = None,
+) -> EvidenceReadReceipt:
+    """Read one path at one bound side, in full, from ``start_line`` to ``end_line`` (rules 3, 12).
 
-    def __init__(self, process: subprocess.Popen[bytes], size: int) -> None:
-        self._process = process
-        self._cursor = 0
-        self._last_byte: bytes = b""
-        # The last chunk read, so a scan that landed inside it can be read again without rewinding
-        # the stream: one chunk is all the slack a line position ever needs.
-        self._buffer: bytes = b""
-        self._buffer_start = 0
-        # Every byte this read pulled from the stream, so a resumed scan's discarded prefix is
-        # counted as work rather than reported as a 16-byte read.
-        self.consumed = 0
-        self.read_calls = 0
-        self.size = size
+    No ``end_line`` reads to the object's end; no ``start_line`` starts at its first line. The whole
+    object is examined either way, so the receipt states the object's true line count beside the
+    lines it returns.
+    """
 
-    @classmethod
-    def open(cls, repository: Path, object_id: str) -> _Blob | str:
-        """Ask the repository for one blob's length, keeping the stream for bounded reads."""
+    found = _locate(record, side, path, start_line=start_line, end_line=end_line)
+    if isinstance(found, EvidenceReadReceipt):
+        return found
+    return _through(
+        found.through, _entry_state(found) or _range_receipt(found, start_line or 1, end_line)
+    )
 
-        try:
-            process = subprocess.Popen(
-                ["git", "cat-file", "--batch"],
-                cwd=repository,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                env=git_environment(),
-            )
-        except OSError as failure:
-            return f"Git could not be run for object {object_id} ({failure})"
-        assert process.stdin is not None and process.stdout is not None
-        process.stdin.write(f"{object_id}\n".encode())
-        process.stdin.flush()
-        header = process.stdout.readline()
-        fields = header.split()
-        if len(fields) != 3 or fields[1] != b"blob":
-            _dispose(process)
-            return (
-                f"the object {object_id} is not a blob this repository can read "
-                f"({header.decode('utf-8', 'replace').strip() or 'no header'})"
-            )
-        try:
-            size = int(fields[2])
-        except ValueError:
-            _dispose(process)
-            return f"the object {object_id} reported no readable size"
-        return cls(process, size)
 
-    def read_at(self, offset: int, length: int) -> bytes | str:
-        """A bounded window at ``offset``; the cursor only moves forward within one blob."""
+def read_whole_source(
+    record: ReviewTreeComparisonRecord, side: str, path: str
+) -> EvidenceReadReceipt:
+    """Read one path at one bound side to its end, whole (rules 3, 12; MIK-R211 v4 rule 3).
 
-        if offset < self._cursor:
-            if self._buffer and self._buffer_start <= offset:
-                start = offset - self._buffer_start
-                return self._buffer[start : start + length]
-            return "a bounded read cannot rewind inside one blob"
-        try:
-            while self._cursor < offset:
-                step = min(_CHUNK, offset - self._cursor)
-                discard = self._read(step)
-                if isinstance(discard, str):
-                    return discard
-                if not discard:
-                    return b""
-            return self._read(min(length, self.size - offset))
-        except OSError as failure:
-            return f"the blob stream failed ({failure})"
+    The operand, the refusal of an unreadable path, the links followed, the entry's own kind and the
+    binary and empty-object states are exactly :func:`read_bound_source`'s. What differs is the answer: its
+    ``text`` is the object's every byte, trailing newline included, so a collection whose rows are
+    the population of one file -- a changed history file's judgments -- counts them all.
+    """
+
+    found = _locate(record, side, path, start_line=None, end_line=None)
+    if isinstance(found, EvidenceReadReceipt):
+        return found
+    return _through(found.through, _entry_state(found) or _whole_receipt(found))
+
+
+@dataclass(frozen=True)
+class _Object:
+    """One located entry and every byte of its object, with the facts every receipt states."""
+
+    entry: _Entry
+    payload: bytes
+    base: dict[str, Any]
+    # The ``link → target`` hops the read went through, when the requested path was a link.
+    through: str | None = None
 
     @property
-    def ends_with_newline(self) -> bool:
-        """Whether the object's last byte is a newline; the line count says how many exist."""
+    def text(self) -> str | None:
+        """The object as lossless UTF-8 text, or ``None`` when it is binary."""
 
-        return self._last_byte == b"\n"
+        if b"\x00" in self.payload[:_BINARY_SNIFF_BYTES]:
+            return None
+        try:
+            return self.payload.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
 
-    def _read(self, length: int) -> bytes:
-        assert self._process.stdout is not None
-        payload = self._process.stdout.read(length)
-        self.read_calls += 1
-        self.consumed += len(payload)
-        if payload:
-            self._buffer, self._buffer_start = payload, self._cursor
-            self._last_byte = payload[-1:]
-        self._cursor += len(payload)
-        return payload
 
-    def close(self) -> None:
-        """End the stream and both pipes, so no descriptor outlives the read."""
+def _locate(
+    record: ReviewTreeComparisonRecord,
+    side: str,
+    path: str,
+    *,
+    start_line: int | None,
+    end_line: int | None,
+) -> _Object | EvidenceReadReceipt:
+    """The entry one read names and its whole object, or the receipt that ends the read."""
 
-        _dispose(self._process)
+    operand = side_operand(record, side)
+    if isinstance(operand, EvidenceReadReceipt):
+        return operand
+    refusal = _path_refusal(record, side, path, start_line=start_line, end_line=end_line)
+    if refusal is not None:
+        return refusal
+    followed = _follow(operand.repository, operand.tree, path)
+    if isinstance(followed, _Unfollowed):
+        return _unfollowed(record, operand, path, followed)
+    found = followed.entry
+    if found.mode in {_TREE_MODE, _SUBMODULE_MODE} or found.kind in {"tree", "commit"}:
+        return _through(followed.through, _not_a_file(record, operand, path, found))
+    payload = _fetch_blob(operand.repository, found.object_id)
+    if isinstance(payload, str):
+        return _unavailable(record, operand, path, payload)
+    return _Object(
+        entry=found,
+        payload=payload,
+        base=_base_fields(record, operand, path, found.object_id, len(payload)),
+        through=followed.through,
+    )
+
+
+def _entry_state(found: _Object) -> EvidenceReadReceipt | None:
+    """The receipt of an entry that holds no text lines -- an empty or a binary object."""
+
+    if not found.payload:
+        return _measured_empty(found.base)
+    if found.text is None:
+        return _binary(found.base, len(found.payload))
+    return None
+
+
+def _range_receipt(found: _Object, start: int, end_line: int | None) -> EvidenceReadReceipt:
+    """The requested lines of a whole text object, with its true line count (rules 3, 12)."""
+
+    text = found.text or ""
+    lines = text.split("\n")
+    if text.endswith("\n"):
+        lines.pop()
+    total = len(lines)
+    if start > total:
+        return EvidenceReadReceipt(
+            state="absent",
+            requested_range=(start, end_line or start),
+            examined_bytes=len(found.payload),
+            object_lines=total,
+            detail=(
+                f"the object holds {total} line(s), so line {start} lies past its end: a measured "
+                "range absence, not an empty file"
+            ),
+            **found.base,
+        )
+    last = total if end_line is None else min(end_line, total)
+    returned = "\n".join(lines[start - 1 : last])
+    start_byte = sum(len(line.encode()) + 1 for line in lines[: start - 1])
+    returned_bytes = len(returned.encode())
+    ended = last < total or text.endswith("\n")
+    detail = (
+        f"requested {start}-{end_line or 'end of object'}; returned {start}-{last} of the object's "
+        f"{total} line(s) and {len(found.payload)} byte(s)"
+    )
+    return EvidenceReadReceipt(
+        state="present",
+        requested_range=(start, end_line or total),
+        returned_range=(start, last),
+        start_byte=start_byte,
+        next_byte=start_byte + returned_bytes + (1 if ended else 0),
+        examined_bytes=len(found.payload),
+        returned_bytes=returned_bytes,
+        remaining_state="known",
+        remaining_lines=0,
+        object_lines=total,
+        text=returned,
+        detail=(
+            detail
+            + f"; the object's last line is line {total} and the requested range runs past it"
+            if end_line is not None and end_line > total
+            else detail + "; the requested source is complete"
+        ),
+        **found.base,
+    )
+
+
+def _whole_receipt(found: _Object) -> EvidenceReadReceipt:
+    """Every byte of a whole text object, with its own size and line count beside them."""
+
+    text = found.text or ""
+    total = text.count("\n") + (0 if text.endswith("\n") else 1)
+    return EvidenceReadReceipt(
+        state="present",
+        examined_bytes=len(found.payload),
+        returned_bytes=len(found.payload),
+        next_byte=len(found.payload),
+        object_lines=total,
+        text=text,
+        detail=f"the whole object was read: {len(found.payload)} byte(s) in {total} line(s)",
+        **found.base,
+    )
+
+
+def _through(through: str | None, receipt: EvidenceReadReceipt) -> EvidenceReadReceipt:
+    """The receipt, saying the read reached its entry through the link chain when it did."""
+
+    if through is None:
+        return receipt
+    return receipt.model_copy(
+        update={"detail": f"read through the link {through}: {receipt.detail}"}
+    )
+
+
+# --- symlinks inside the tree (ruling K3) -------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _Followed:
+    """The entry a path names once every link inside the tree is followed, and the hops taken."""
+
+    entry: _Entry
+    chain: tuple[str, ...]
+
+    @property
+    def through(self) -> str | None:
+        """The ``link → target`` hops, or ``None`` when the path named its entry directly."""
+
+        return " → ".join(self.chain) if len(self.chain) > 1 else None
+
+
+@dataclass(frozen=True)
+class _Unfollowed:
+    """Why a path names no readable entry: ``unavailable``, ``absent`` or ``outside`` the tree."""
+
+    state: str
+    detail: str
+
+
+def _follow(repository: Path, tree: str, path: str) -> _Followed | _Unfollowed:
+    """Follow ``path`` through every link inside the tree; the visited set is the only guard."""
+
+    chain = [path]
+    visited = {path}
+    while True:
+        step = _step(repository, tree, chain)
+        if isinstance(step, _Followed):
+            return step
+        if isinstance(step, _Unfollowed):
+            if len(chain) == 1:
+                return step
+            return _Unfollowed(step.state, f"through the links {' → '.join(chain)}: {step.detail}")
+        if step in visited:
+            return _Unfollowed(
+                "unavailable",
+                f"{' → '.join([*chain, step])} returns to {step}: a symlink loop, so no entry "
+                "ends the chain and no bytes were read",
+            )
+        visited.add(step)
+        chain.append(step)
+
+
+def _step(repository: Path, tree: str, chain: list[str]) -> _Followed | _Unfollowed | str:
+    """One hop: the entry the last path names, the path a link there leads to, or why neither."""
+
+    current = chain[-1]
+    if current == ".":
+        return _Followed(_Entry(mode=_TREE_MODE, kind="tree", object_id=tree), tuple(chain))
+    found = _tree_entry(repository, tree, current)
+    if isinstance(found, str):
+        return _Unfollowed("unavailable", found)
+    if found is None:
+        return _linked_directory(repository, tree, current)
+    if found.mode == _SYMLINK_MODE:
+        return _link_target(repository, current, found.object_id, "")
+    return _Followed(found, tuple(chain))
+
+
+def _linked_directory(repository: Path, tree: str, path: str) -> _Unfollowed | str:
+    """A path the tree does not hold continues through its leading directory when that is a link."""
+
+    parts = path.split("/")
+    for depth in range(1, len(parts)):
+        prefix = "/".join(parts[:depth])
+        found = _tree_entry(repository, tree, prefix)
+        if isinstance(found, str):
+            return _Unfollowed("unavailable", found)
+        if found is not None and found.mode == _SYMLINK_MODE:
+            return _link_target(repository, prefix, found.object_id, "/".join(parts[depth:]))
+        if found is None or found.kind != "tree":
+            break
+    return _Unfollowed("absent", _NO_ENTRY)
+
+
+def _link_target(repository: Path, link: str, object_id: str, rest: str) -> _Unfollowed | str:
+    """The tree path one link leads to, resolved against the link's own directory (ruling K3)."""
+
+    payload = _fetch_blob(repository, object_id)
+    if isinstance(payload, str):
+        return _Unfollowed("unavailable", payload)
+    target = payload.decode("utf-8", "replace")
+    resolved = posixpath.normpath(posixpath.join(posixpath.dirname(link), target, rest))
+    if posixpath.isabs(target) or resolved == ".." or resolved.startswith("../"):
+        return _Unfollowed(
+            "outside",
+            f"{link} is a symlink to {target}, a path outside the tree: a link that leaves the "
+            "comparison's tree is refused rather than followed",
+        )
+    return resolved
+
+
+def _unfollowed(
+    record: ReviewTreeComparisonRecord, operand: SideOperand, path: str, stop: _Unfollowed
+) -> EvidenceReadReceipt:
+    """An outside link is refused as a path outside the tree; the rest is absent or unavailable."""
+
+    if stop.state == "outside":
+        return _refused(record, operand.side, "path-escape", stop.detail)
+    if stop.state == "absent":
+        return _absent(record, operand, path, stop.detail)
+    return _unavailable(record, operand, path, stop.detail)
+
+
+# --- the blob stream ----------------------------------------------------------------------------
+
+
+def _fetch_blob(repository: Path, object_id: str) -> bytes | str:
+    """One blob's every byte through ``git cat-file --batch``, or why it could not be read."""
+
+    try:
+        process = subprocess.Popen(
+            ["git", "cat-file", "--batch"],
+            cwd=repository,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=git_environment(),
+        )
+    except OSError as failure:
+        return f"Git could not be run for object {object_id} ({failure})"
+    try:
+        return _stream_blob(process, object_id)
+    except OSError as failure:
+        return f"the blob stream failed ({failure})"
+    finally:
+        _dispose(process)
+
+
+def _stream_blob(process: subprocess.Popen[bytes], object_id: str) -> bytes | str:
+    """Ask the stream for one object and take its bytes in ``_CHUNK`` steps until its end."""
+
+    assert process.stdin is not None and process.stdout is not None
+    process.stdin.write(f"{object_id}\n".encode())
+    process.stdin.flush()
+    header = process.stdout.readline()
+    fields = header.split()
+    if len(fields) != 3 or fields[1] != b"blob":
+        return (
+            f"the object {object_id} is not a blob this repository can read "
+            f"({header.decode('utf-8', 'replace').strip() or 'no header'})"
+        )
+    try:
+        size = int(fields[2])
+    except ValueError:
+        return f"the object {object_id} reported no readable size"
+    chunks: list[bytes] = []
+    taken = 0
+    while taken < size:
+        chunk = process.stdout.read(min(_CHUNK, size - taken))
+        if not chunk:
+            return f"the blob stream for {object_id} ended after {taken} of its {size} byte(s)"
+        chunks.append(chunk)
+        taken += len(chunk)
+    return b"".join(chunks)
 
 
 def _dispose(process: subprocess.Popen[bytes]) -> None:
@@ -267,607 +491,6 @@ def _dispose(process: subprocess.Popen[bytes]) -> None:
                 stream.close()
 
 
-# --- one read -----------------------------------------------------------------------------------
-
-
-def read_bound_source(  # noqa: PLR0913, PLR0911 - one read's own operands, bounds and states
-    record: ReviewTreeComparisonRecord,
-    side: str,
-    path: str,
-    *,
-    start_line: int | None = None,
-    end_line: int | None = None,
-    start_byte: int | None = None,
-    resume_line: int | None = None,
-    page: int = 0,
-    limits: EvidenceLimits = DEFAULT_READ_LIMITS,
-) -> EvidenceReadReceipt:
-    """Read one path at one bound side, within the declared bounds (rules 3, 4, 12)."""
-
-    operand = side_operand(record, side)
-    if isinstance(operand, EvidenceReadReceipt):
-        return operand
-    refusal = _path_refusal(
-        record,
-        side,
-        path,
-        start_line=start_line,
-        end_line=end_line,
-        page=page,
-        limits=limits,
-    )
-    if refusal is not None:
-        return refusal
-    if start_byte is not None and (start_byte < 0 or start_byte > MAX_SCAN_BYTES):
-        return _refused(
-            record,
-            side,
-            "read-beyond-limit",
-            f"the byte offset {start_byte} exceeds the admitted scan bound "
-            f"0..{MAX_SCAN_BYTES}; no blob bytes were read; select a nearer range",
-        )
-    found = _tree_entry(operand.repository, operand.tree, path)
-    if isinstance(found, str):
-        return _unavailable(record, operand, path, found)
-    if found is None:
-        return _absent_entry(record, operand, path)
-    if found.mode == _TREE_MODE or found.kind == "tree":
-        return _unavailable(
-            record, operand, path, "this path is a tree at this endpoint rather than a file"
-        )
-    if found.mode == _SUBMODULE_MODE or found.kind == "commit":
-        return _submodule(record, operand, path, found.object_id)
-    blob = _Blob.open(operand.repository, found.object_id)
-    if isinstance(blob, str):
-        return _unavailable(record, operand, path, blob)
-    try:
-        return _blob_read(
-            record,
-            operand,
-            path,
-            entry=found,
-            blob=blob,
-            start_line=start_line,
-            end_line=end_line,
-            start_byte=start_byte or 0,
-            resume_line=resume_line,
-            page=page,
-            limits=limits,
-            symlink=found.mode == _SYMLINK_MODE,
-        )
-    finally:
-        blob.close()
-
-
-def _blob_read(  # noqa: PLR0913, PLR0911 - one blob states its own operands and its states
-    record: ReviewTreeComparisonRecord,
-    operand: SideOperand,
-    path: str,
-    *,
-    entry: _Entry,
-    blob: _Blob,
-    start_line: int | None,
-    end_line: int | None,
-    start_byte: int,
-    resume_line: int | None,
-    page: int,
-    limits: EvidenceLimits,
-    symlink: bool,
-) -> EvidenceReadReceipt:
-    """One blob as a bounded, range-addressed window of text (rules 3, 4, 12)."""
-
-    base = _base_fields(record, operand, path, entry.object_id, blob.size, page)
-    located = _located_start(
-        record,
-        operand,
-        path,
-        blob=blob,
-        requested_start=start_line or 1,
-        start_byte=start_byte,
-        resume_line=resume_line,
-        base=base,
-    )
-    if isinstance(located, EvidenceReadReceipt):
-        return located
-    offset, scanned = located
-    window = blob.read_at(offset, limits.bytes_per_read)
-    if isinstance(window, str):
-        return _unavailable(record, operand, path, window)
-    if symlink:
-        return _symlink_receipt(base, window, start_byte, limits).model_copy(
-            update={"examined_bytes": blob.consumed}
-        )
-    if blob.size == 0:
-        return _measured_empty(base)
-    if b"\x00" in window[:_BINARY_SNIFF_BYTES]:
-        return _binary(base, blob.size)
-    letter = _TextWindow.open(blob, offset, window, limits)
-    if letter is None:
-        return _binary(base, blob.size)
-    if letter.end == offset and window:
-        return _refused(
-            record,
-            operand.side,
-            "read-beyond-limit",
-            "the byte window holds no complete UTF-8 character; increase bytes_per_read",
-        )
-    return _window_receipt(
-        blob=blob,
-        window=letter,
-        start_line=start_line,
-        end_line=end_line,
-        limits=limits,
-        scanned=scanned,
-        base=base,
-    )
-
-
-def _located_start(  # noqa: PLR0913 - one read's own operands and its located byte
-    record: ReviewTreeComparisonRecord,
-    operand: SideOperand,
-    path: str,
-    *,
-    blob: _Blob,
-    requested_start: int,
-    start_byte: int,
-    resume_line: int | None,
-    base: dict[str, Any],
-) -> tuple[int, int] | EvidenceReadReceipt:
-    """Where the requested line starts in the blob, or the receipt that ends the read (rules 3, 12).
-
-    A caller that starts at the object's end asks for a line no byte can hold, so it gets the
-    measured range absence rather than an empty line; a scan that could not reach the requested
-    line reports what it measured instead of certifying a range it never read.
-    """
-
-    offset, scanned = start_byte, 0
-    ended = _object_end_absence(blob, offset, requested_start, base)
-    if ended is not None:
-        return ended
-    if requested_start <= 1:
-        return offset, scanned
-    reached = _scan_to_line(
-        blob,
-        requested_start,
-        MAX_SCAN_BYTES - start_byte,
-        start=offset,
-        start_line=resume_line if offset > 0 and resume_line else 1,
-    )
-    if isinstance(reached, str):
-        return _unavailable(record, operand, path, reached)
-    offset, scanned, position, line_count, at_end = reached
-    if position is not None:
-        return offset, scanned
-    return _scan_cut(
-        line_count,
-        offset,
-        blob.consumed,
-        requested_start,
-        base,
-        start=start_byte,
-        at_end=at_end,
-    )
-
-
-def _symlink_receipt(
-    base: dict[str, Any],
-    window: bytes,
-    start_byte: int,
-    limits: EvidenceLimits,
-) -> EvidenceReadReceipt:
-    payload = window[: limits.bytes_per_read]
-    end = start_byte + len(payload)
-    return EvidenceReadReceipt(
-        state="symlink",
-        returned_bytes=len(payload),
-        text=payload.decode("utf-8", "replace"),
-        next_byte=end,
-        detail=(
-            "this endpoint's entry is a symlink: the target recorded in the tree is shown, and the "
-            "link is not followed"
-        ),
-        **base,
-    )
-
-
-# --- the text window ----------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class _TextWindow:
-    """The decoded bytes of one window and where it starts and ends inside the object."""
-
-    text: str
-    offset: int
-    end: int
-    cut: bool
-    examined: int
-
-    @classmethod
-    def open(
-        cls, blob: _Blob, offset: int, window: bytes, limits: EvidenceLimits
-    ) -> _TextWindow | None:
-        """Decode a window, trimming a trailing partial character; ``None`` when it is not text."""
-
-        payload = window
-        try:
-            text = payload.decode("utf-8")
-        except UnicodeDecodeError:
-            trimmed = _trim_to_boundary(payload)
-            if trimmed is None:
-                return None
-            payload = trimmed
-            text = payload.decode("utf-8")
-        if b"\x00" in payload[:_BINARY_SNIFF_BYTES]:
-            return None
-        wanted = min(limits.bytes_per_read, blob.size - offset)
-        return cls(
-            text=text,
-            offset=offset,
-            end=offset + len(payload),
-            cut=len(payload) < wanted,
-            examined=len(window),
-        )
-
-
-def _trim_to_boundary(payload: bytes) -> bytes | None:
-    """The longest prefix of ``payload`` that ends on a UTF-8 character boundary."""
-
-    for back in range(1, min(5, len(payload) + 1)):
-        candidate = payload[: len(payload) - back]
-        try:
-            candidate.decode("utf-8")
-        except UnicodeDecodeError:
-            continue
-        return candidate
-    return None
-
-
-def _window_receipt(  # noqa: PLR0913 - one window states its own bounds and facts
-    *,
-    blob: _Blob,
-    window: _TextWindow,
-    start_line: int | None,
-    end_line: int | None,
-    limits: EvidenceLimits,
-    scanned: int = 0,
-    base: dict[str, Any],
-) -> EvidenceReadReceipt:
-    """Turn one decoded window into lines, with an honest remainder and a progressing continuation."""
-
-    requested_start = start_line or 1
-    lines = window.text.split("\n")
-    if window.text.endswith("\n"):
-        lines = lines[:-1]
-    complete = len(lines)
-    line_open = not window.text.endswith("\n") and window.end < blob.size
-    if line_open and lines:
-        complete -= 1
-    take, next_byte, line_cut = _take_window(
-        window, lines, complete, requested_start=requested_start, end_line=end_line, limits=limits
-    )
-    returned_end = requested_start + len(take) - 1 if take else requested_start - 1
-    remaining, state, object_last_line = _remainder(
-        returned_end,
-        end_line,
-        bool(take),
-        measured_through=requested_start + complete - 1 if complete else requested_start - 1,
-        reached_end=window.end >= blob.size,
-        line_cut=line_cut,
-    )
-    return _receipt_from_window(
-        window=window,
-        take=take,
-        requested_start=requested_start,
-        returned_end=returned_end,
-        next_byte=next_byte,
-        remaining=remaining,
-        state=state,
-        scanned=scanned,
-        end_line=end_line,
-        size=blob.size,
-        consumed=blob.consumed,
-        line_cut=line_cut,
-        object_last_line=object_last_line,
-        base=base,
-    )
-
-
-def _receipt_from_window(  # noqa: PLR0913 - one window's measured facts, stated once
-    *,
-    window: _TextWindow,
-    take: list[str],
-    requested_start: int,
-    returned_end: int,
-    next_byte: int | None,
-    remaining: int | None,
-    state: str,
-    scanned: int,
-    end_line: int | None,
-    size: int,
-    base: dict[str, Any],
-    consumed: int = 0,
-    line_cut: bool = False,
-    object_last_line: int | None = None,
-) -> EvidenceReadReceipt:
-    truncated = state == "truncated"
-    return EvidenceReadReceipt(
-        state=state,  # type: ignore[arg-type]
-        requested_range=(requested_start, end_line or requested_start),
-        returned_range=(requested_start, returned_end) if take else None,
-        start_byte=window.offset,
-        next_byte=next_byte,
-        # The stream's own consumption is the floor: a resumed read's discarded prefix is work.
-        examined_bytes=max(scanned + window.examined, consumed),
-        returned_bytes=len("\n".join(take).encode()),
-        continuation=(
-            f"start_byte={next_byte};resume_line={returned_end if line_cut else returned_end + 1};"
-            f"start_line={returned_end if line_cut else returned_end + 1}"
-            + (f";end_line={end_line}" if end_line is not None else "")
-            if truncated and next_byte is not None
-            else None
-        ),
-        remaining_state=(
-            "known" if remaining is not None else ("unknown" if truncated else "none")
-        ),
-        remaining_lines=remaining,
-        limit=(
-            "page_lines"
-            if truncated and not line_cut and len(take) >= MAX_PAGE_LINES
-            else "bytes_per_read"
-            if truncated
-            else None
-        ),
-        text="\n".join(take),
-        detail=_window_detail(
-            requested_start,
-            end_line,
-            returned_end,
-            window_length=len(window.text),
-            size=size,
-            remaining=remaining,
-            truncated=truncated,
-            object_last_line=object_last_line,
-        ),
-        **base,
-    )
-
-
-def _window_detail(  # noqa: PLR0913 - one window's measured facts, each its own field
-    requested_start: int,
-    end_line: int | None,
-    returned_end: int,
-    *,
-    window_length: int,
-    size: int,
-    remaining: int | None,
-    truncated: bool,
-    object_last_line: int | None = None,
-) -> str:
-    detail = (
-        f"requested {requested_start}-{end_line or 'end of object'}; returned "
-        f"{requested_start}-{returned_end} from a {window_length}-character window of a {size}-byte "
-        "object"
-    )
-    if object_last_line is not None:
-        return (
-            detail + f"; the object's last line is line {object_last_line} and the requested range "
-            "runs past it"
-        )
-    if remaining is not None:
-        return detail + f"; {remaining} line(s) remain in the requested range"
-    if truncated:
-        return detail + "; the object holds unexamined bytes and their line count was not measured"
-    return detail + "; the requested source is complete"
-
-
-def _take_window(  # noqa: PLR0913 - one window, its lines and its three bounds
-    window: _TextWindow,
-    lines: list[str],
-    complete: int,
-    *,
-    requested_start: int,
-    end_line: int | None,
-    limits: EvidenceLimits,
-) -> tuple[list[str], int | None, bool]:
-    """The lines this read returns, the byte the next read starts at, and whether a line was cut.
-
-    A line longer than the admitted window is returned as the prefix this read examined, marked as
-    cut, so the receipt says *truncated* with a continuation inside the same line rather than
-    certifying a prefix as the whole requested line.
-    """
-
-    take = lines[:complete][:MAX_PAGE_LINES]
-    if end_line is not None:
-        take = take[: max(0, end_line - requested_start + 1)]
-    consumed = len("\n".join(take).encode())
-    if take and (len(take) < len(lines) or window.text.endswith("\n")):
-        consumed += 1
-    next_byte = window.offset + consumed
-    if not take and lines:
-        prefix = window.text[: limits.bytes_per_read]
-        return [prefix], window.offset + len(prefix.encode()), True
-    return take, next_byte, False
-
-
-def _remainder(  # noqa: PLR0913 - one window's returned range, bounds and cut
-    returned_end: int,
-    end_line: int | None,
-    returned: bool,
-    *,
-    measured_through: int,
-    reached_end: bool,
-    line_cut: bool = False,
-) -> tuple[int | None, str, int | None]:
-    """The state, the remainder when it was measured, and the object's last line when it ended.
-
-    A remaining count is exact only where the read measured it: the examined bytes hold the
-    requested range's end, or the object's end. The distance from the returned range to a
-    requested end line that was never read is not a count of lines that exist. A read that
-    reached the object's end before its requested end line, having returned every line from its
-    start to that end, is complete; ``object_last_line`` names that end for the detail.
-    """
-
-    if line_cut:
-        return None, "truncated", None
-    if not returned:
-        return None, "absent", None
-    if end_line is not None and returned_end >= end_line:
-        # The requested range was returned whole; bytes after it are not part of the request.
-        return 0, "present", None
-    if end_line is not None and measured_through >= end_line:
-        # The requested end line was read, so the rest of the request is exactly countable.
-        return end_line - returned_end, "truncated", None
-    if not reached_end:
-        return None, "truncated", None
-    return _measured_object_end(returned_end, end_line, measured_through)
-
-
-def _measured_object_end(
-    returned_end: int, end_line: int | None, measured_through: int
-) -> tuple[int | None, str, int | None]:
-    """The remainder of a read whose examined bytes hold the object's end (rules 1, 2).
-
-    Every line that exists was measured, so a page bound that held lines back leaves an exact
-    count, and a read that returned them all is complete even though its requested range runs
-    past the end. ``object_last_line`` names that end for the detail.
-    """
-
-    if returned_end < measured_through:
-        return measured_through - returned_end, "truncated", None
-    return 0, "present", measured_through if end_line is not None else None
-
-
-def _scan_to_line(
-    blob: _Blob, target: int, budget: int, *, start: int = 0, start_line: int = 1
-) -> tuple[int, int, str | None, int | None, bool] | str:
-    """Scan forward from ``start`` to the byte where ``target`` starts, within ``budget`` bytes.
-
-    ``start_line`` is the line the byte ``start`` begins, so a continuation that already sits on the
-    requested line is reached at once. Only a scan that began at byte zero knows the object's full
-    line count; a resumed one reports how far it got.
-    """
-
-    if start_line >= target:
-        return start, 0, "found", None, False
-    offset = start
-    line = start_line
-    scanned = 0
-    while line < target and offset < blob.size and scanned < budget:
-        chunk = blob.read_at(offset, min(_CHUNK, budget - scanned))
-        if isinstance(chunk, str):
-            return chunk
-        if not chunk:
-            return offset, scanned, None, line, True
-        remaining = target - line
-        count = chunk.count(b"\n")
-        if count >= remaining:
-            index = -1
-            for _ in range(remaining):
-                index = chunk.index(b"\n", index + 1)
-            position = offset + index + 1
-            if position < blob.size:
-                return position, scanned + len(chunk), "found", None, False
-            # The nth newline was the object's last byte: no line begins at that offset.
-            line += count
-            scanned += len(chunk)
-            offset = position
-            break
-        line += count
-        scanned += len(chunk)
-        offset += len(chunk)
-    if offset >= blob.size:
-        held = line - 1 if blob.ends_with_newline else line
-        return offset, scanned, None, held, True
-    return offset, scanned, None, line, False
-
-
-def _decode_at(blob: _Blob, offset: int, limits: EvidenceLimits) -> _TextWindow | None:
-    """Decode one window at a byte offset that the same blob stream has reached."""
-
-    window = blob.read_at(offset, limits.bytes_per_read)
-    if isinstance(window, str) or not window:
-        return None
-    return _TextWindow.open(blob, offset, window, limits)
-
-
-def _object_end_absence(
-    blob: _Blob, offset: int, requested_start: int, base: dict[str, Any]
-) -> EvidenceReadReceipt | None:
-    """The measured range absence for a read that starts at or past the object's end (rule 3).
-
-    No line begins at or after that byte, so the answer is an absence about the requested range,
-    never an empty line and never a continuation that reads no byte.
-    """
-
-    if blob.size == 0 or offset < blob.size:
-        return None
-    return _scan_cut(
-        None,
-        offset,
-        blob.consumed,
-        requested_start,
-        base,
-        start=offset,
-        at_end=True,
-    )
-
-
-def _scan_cut(  # noqa: PLR0913 - one scan's own bounds and its measured result
-    line_count: int | None,
-    offset: int,
-    scanned: int,
-    requested_start: int,
-    base: dict[str, Any],
-    *,
-    start: int = 0,
-    at_end: bool = False,
-) -> EvidenceReadReceipt:
-    """The requested line was not reached: a measured absence past the end, or a scan that stopped."""
-
-    if not at_end and offset <= start:
-        return EvidenceReadReceipt(
-            state="refused",
-            refusal_code="read-beyond-limit",
-            examined_bytes=scanned,
-            detail=f"line {requested_start} was not reached within the admitted "
-            f"{MAX_SCAN_BYTES} scan bytes; select a nearer range",
-            **base,
-        )
-
-    if at_end:
-        held = (
-            f"the object holds {line_count} line(s)"
-            if start == 0 and line_count is not None
-            else f"the object ends before any line {requested_start} at or after byte {start}"
-        )
-        return EvidenceReadReceipt(
-            state="absent",
-            requested_range=(requested_start, requested_start),
-            examined_bytes=scanned,
-            next_byte=offset,
-            detail=f"{held}, so line {requested_start} lies past its end: a measured range "
-            "absence, not an empty file",
-            **base,
-        )
-    return EvidenceReadReceipt(
-        state="truncated",
-        requested_range=(requested_start, requested_start),
-        start_byte=offset,
-        next_byte=offset,
-        examined_bytes=scanned,
-        continuation=f"start_byte={offset};resume_line={line_count};start_line={requested_start}",
-        remaining_state="unknown",
-        limit="scan_bytes",
-        detail=(
-            f"reaching line {requested_start} needs a scan longer than the admitted "
-            f"{MAX_SCAN_BYTES} byte(s); {scanned} byte(s) were examined and the continuation "
-            "resumes the scan at the reported byte"
-        ),
-        **base,
-    )
-
-
 # --- entry states -------------------------------------------------------------------------------
 
 
@@ -880,13 +503,12 @@ class _Entry:
     object_id: str
 
 
-def _base_fields(  # noqa: PLR0913, PLR0917 - the six facts every receipt of one read states
+def _base_fields(
     record: ReviewTreeComparisonRecord,
     operand: SideOperand,
     path: str,
     object_id: str,
     size: int,
-    page: int,
 ) -> dict[str, Any]:
     return {
         "side": operand.side,
@@ -898,7 +520,6 @@ def _base_fields(  # noqa: PLR0913, PLR0917 - the six facts every receipt of one
         "path": path,
         "object_id": object_id,
         "object_size": size,
-        "page": page,
     }
 
 
@@ -925,12 +546,16 @@ def _binary(base: dict[str, Any], size: int) -> EvidenceReadReceipt:
     )
 
 
-def _submodule(
-    record: ReviewTreeComparisonRecord,
-    operand: SideOperand,
-    path: str,
-    object_id: str,
+def _not_a_file(
+    record: ReviewTreeComparisonRecord, operand: SideOperand, path: str, entry: _Entry
 ) -> EvidenceReadReceipt:
+    """A tree is not a file at this endpoint; a submodule is a pointer with no bytes of its own."""
+
+    if entry.mode == _TREE_MODE or entry.kind == "tree":
+        return _unavailable(
+            record, operand, path, "this path is a tree at this endpoint rather than a file"
+        )
+    object_id = entry.object_id
     return EvidenceReadReceipt(
         state="submodule",
         side=operand.side,
@@ -948,9 +573,17 @@ def _submodule(
     )
 
 
-def _absent_entry(
-    record: ReviewTreeComparisonRecord, operand: SideOperand, path: str
+_NO_ENTRY = (
+    "the requested tree holds no entry at this path: a measured fact about this side, not an empty "
+    "file and not a failed read"
+)
+
+
+def _absent(
+    record: ReviewTreeComparisonRecord, operand: SideOperand, path: str, detail: str
 ) -> EvidenceReadReceipt:
+    """A lookup that answered with no entry: a measured absence at this side."""
+
     return EvidenceReadReceipt(
         state="absent",
         side=operand.side,
@@ -960,10 +593,7 @@ def _absent_entry(
         tree=operand.tree,
         stored_tree=operand.stored_tree,
         path=path,
-        detail=(
-            "the requested tree holds no entry at this path: a measured fact about this side, not "
-            "an empty file and not a failed read"
-        ),
+        detail=detail,
     )
 
 
@@ -1002,28 +632,19 @@ def _refused(
 # --- the requested operand ----------------------------------------------------------------------
 
 
-def _path_refusal(  # noqa: PLR0913 - the read's own operands and bounds, checked once
+def _path_refusal(
     record: ReviewTreeComparisonRecord,
     side: str,
     path: str,
     *,
     start_line: int | None,
     end_line: int | None,
-    page: int,
-    limits: EvidenceLimits,
 ) -> EvidenceReadReceipt | None:
-    """Why this read's operand or bound is inadmissible, or ``None`` when it is admissible."""
+    """Why this read's operand or range is inadmissible, or ``None`` when it is admissible."""
 
     reason = _path_problem(path)
     if reason is not None:
         return _refused(record, side, reason[0], reason[1])
-    if page < 0 or page >= limits.pages_per_read:
-        return _refused(
-            record,
-            side,
-            "read-beyond-limit",
-            f"page {page} is beyond the declared bound of {limits.pages_per_read} page(s) per read",
-        )
     for bound in (start_line, end_line):
         if bound is not None and bound < 1:
             return _refused(

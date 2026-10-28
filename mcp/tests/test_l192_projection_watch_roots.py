@@ -43,10 +43,12 @@ def _coordinated(tmp_path: Path):
     return config, root
 
 
-def test_retired_provider_display_roots_are_not_projection_inputs(tmp_path: Path) -> None:
+def test_retired_provider_display_roots_are_not_projection_inputs(
+    tmp_path: Path,
+) -> None:
     config, root = _coordinated(tmp_path)
 
-    roots = watcher.projection_input_roots(config)
+    roots = watcher.projection_watch_plan(config).roots
 
     providers = root / "logs" / "providers"
     assert not [path for path in roots if path == providers or providers in path.parents], (
@@ -56,7 +58,7 @@ def test_retired_provider_display_roots_are_not_projection_inputs(tmp_path: Path
 
 def test_genuine_projection_roots_keep_their_own_domain(tmp_path: Path) -> None:
     config, root = _coordinated(tmp_path)
-    roots = watcher.projection_input_roots(config)
+    roots = watcher.projection_watch_plan(config).roots
 
     expected = {
         root / "tasks": watcher.ProjectionDomain.TASKS,

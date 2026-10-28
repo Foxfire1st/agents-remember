@@ -19,6 +19,7 @@ import {
   type RoleTasklessActiveRequest,
   type SavedRoleCatalog,
 } from "./roleLaunchModel";
+import { rememberRoleDefaults } from "./launcherDefaultsMemory";
 import type { ActiveRequestsRef, ExecutionErrorState, ResultFlowState } from "./roleChatResult";
 
 // How soon the options are read again after the backend answered that a launch is in progress.
@@ -161,6 +162,7 @@ function applyOptionsSuccess(
   // active execution authority. A delayed options reply settling after a newer
   // Result receipt leaves that newer receipt in charge.
   if (value.execution) writers.rememberFailureExecution(requestScope, value.execution);
+  rememberRoleDefaults(requestScope, value.roleDefaults);
   stores.setOptionsState({ scope: requestScope, value });
   writers.setExecutionErrorState((current) =>
     refreshAgentCatalog || retryOptions || !current?.sticky ? null : current,
@@ -232,7 +234,8 @@ interface OptionsLoadContext {
   explicitOptionsRefresh: { current: boolean };
 }
 
-// This snapshot is presentation-only while the fresh options request is pending.
+// While the fresh options request is pending, this snapshot is what the launcher offers: its
+// choices are selectable and a start reads them, silently (MIK-R215); the fresh answer replaces it.
 function readSavedCatalog(ctx: OptionsLoadContext, scope: RoleOptionsScope, signal: AbortSignal, pending: () => boolean): void {
   void fetch("/api/role-launch/saved-catalog", { signal, cache: "no-store" }).then(async (response) => {
     if (!response.ok) return;

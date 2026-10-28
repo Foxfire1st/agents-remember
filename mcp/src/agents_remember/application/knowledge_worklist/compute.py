@@ -403,6 +403,8 @@ class _Run:
     # -- scope ---------------------------------------------------------------------------------
 
     def _classify(self, classifier: Classifier, entries: Iterable[str]) -> None:
+        entries = list(entries)
+        classifier.prepare([entry for entry in entries if entry not in self.classified])
         for entry in entries:
             if entry not in self.classified:
                 self.classified[entry] = classifier.classify(entry)

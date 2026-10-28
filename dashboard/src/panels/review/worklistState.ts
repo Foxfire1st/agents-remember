@@ -3,7 +3,12 @@ import type {
   ReviewItemVerdict,
   ReviewWorklistItem,
   ReviewWorklistView,
+  ReviewWorklistSummary,
 } from '../../data/reviewTrees';
+
+function isSummary(value?: ReviewWorklistView | ReviewWorklistSummary): value is ReviewWorklistSummary {
+  return value !== undefined && 'file_open_counts' in value;
+}
 
 export function itemAnswer(
   worklist: ReviewWorklistView | undefined,
@@ -36,7 +41,11 @@ function openCount(
   if (answers.some((answer) => !answer || answer.state === 'undecided')) return undefined;
   return answers.filter((answer) => answer?.state === 'open').length;
 }
-export function worklistAnswer(worklist?: ReviewWorklistView): string | undefined {
+export function worklistAnswer(worklist?: ReviewWorklistView | ReviewWorklistSummary): string | undefined {
+  if (isSummary(worklist)) {
+    const count = worklist.open_count;
+    return count === undefined ? undefined : count ? `${count} open` : 'all answered';
+  }
   const count = openCount(worklist, worklist?.items ?? []);
   return count === undefined ? undefined : count ? `${count} open` : 'all answered';
 }
@@ -48,7 +57,7 @@ export function fileAnswer(
 }
 
 // Group once for an entire changeset list. The gate's supplied states remain the only authority.
-export function fileAnswers(worklist?: ReviewWorklistView): Map<string, string> {
+function groupedFiles(worklist?: ReviewWorklistView): Map<string, ReviewWorklistItem[]> {
   const groups = new Map<string, ReviewWorklistItem[]>();
   for (const item of worklist?.items ?? []) {
     const path = item.facts.path;
@@ -57,6 +66,12 @@ export function fileAnswers(worklist?: ReviewWorklistView): Map<string, string> 
     group.push(item);
     groups.set(path, group);
   }
+  return groups;
+}
+
+export function fileAnswers(worklist?: ReviewWorklistView | ReviewWorklistSummary): Map<string, string> {
+  if (isSummary(worklist)) return new Map(Object.entries(worklist.file_open_counts).map(([path, count]) => [path, count ? `${count} open` : 'answered']));
+  const groups = groupedFiles(worklist);
   const answers = new Map<string, string>();
   for (const [path, items] of groups) {
     const count = openCount(worklist, items);

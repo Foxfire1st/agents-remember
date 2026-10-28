@@ -8,7 +8,8 @@ one line the page and the stream show. It composes four things and owns none of 
 * the comparison owner's capture, called **without recording** -- it writes Git objects, and this
   module never pins a ref and never writes a comparison record. Update is what records (rule 6);
 * the per-block change count over the changed blocks, from the review lane's own hunk and non-text
-  classification (the same subjects MIK-R187 fingerprints), never a second diff engine;
+  classification (the same subjects MIK-R187 fingerprints), never a second diff engine. A pair of
+  candidate states is counted once and kept by its four trees' object ids (D569);
 * the master line's two tip commits, read from the series contract, for a ``planning`` leaf's
   planned binding -- that path captures nothing.
 
@@ -26,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import threading
 from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
@@ -35,23 +37,24 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from agents_remember.canvas.explainer_paths import (
-    GENERATION_SUFFIX,
     explainer_roots,
     leaf_workspace,
     repository_path,
+    seat_counter_path,
 )
-from agents_remember.canvas.explainer_staleness import moved_sides
 from agents_remember.canvas.explainer_state import (
     ExplainerBinding,
     ExplainerStateError,
     PlannedIdentity,
-    agent_id,
     generation,
     read_binding,
+    seat_for_workspace,
 )
 from agents_remember.canvas.paths import PathRefused, task_root
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.read_cancellation import SharedFlights
+from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge.tree_observation import TreeChange
 from agents_remember.models.knowledge.review_frame import PLANNED_OWNER, FrameBinding
 from agents_remember.models.knowledge.review_refusal import ReviewRefusal
@@ -65,6 +68,7 @@ from agents_remember.models.knowledge.review_trees import (
 from agents_remember.models.role_identity import LEAF_ROLES
 from agents_remember.serving.paseo.paseo_plugin_files import read_role_agents
 from agents_remember.serving.projections.host_activity import activity_directory
+from agents_remember.tasks.leaf_doc import find_leaf_doc
 from agents_remember.tasks.planned_comparison import (
     contract_branch_lines,
     master_is_organizational,
@@ -118,13 +122,17 @@ class WatcherApplicationPorts:
     """
 
     recorded_leaf_contract: Callable[[McpRuntimeConfig, str, str, str], WorktreeContract | None]
-    comparison_records: Callable[[Path, str], Sequence[ReviewTreeComparisonRecord]]
+    latest_comparison: Callable[[Path, str], ReviewTreeComparisonRecord | None]
     memory_converted: Callable[[WorktreeContract], bool | str]
     draft_live_comparison: Callable[[Path, WorktreeContract, Path, str], ReviewTreeComparisonRecord]
     open_tree_lane: Callable[[ReviewTrees], AbstractContextManager[TreeLanePort]]
     execution_receipts: Callable[[Path, str], Sequence[Mapping[str, object]]]
     capture_errors: tuple[type[BaseException], ...] = ()
     lane_errors: tuple[type[BaseException], ...] = ()
+    #: Handed each turn end's capture, to compute its leaf-wide view before the page asks.
+    turn_end_captured: Callable[[LeafSelection, ReviewTreeComparisonRecord], None] | None = None
+    #: Handed the leaves the moved watcher tracks, each with why, to keep their worktrees watched.
+    coverage: Callable[[Mapping[tuple[str, str, str], frozenset[str]]], None] | None = None
 
 
 __all__ = [
@@ -137,6 +145,7 @@ __all__ = [
     "MoveNoticeChannel",
     "MovedNotice",
     "blocks_changed",
+    "is_landed",
     "is_planned",
     "leaf_seats",
     "master_tips",
@@ -144,6 +153,7 @@ __all__ = [
     "notice_event",
     "notice_for",
     "notices",
+    "tracked_leaves",
     "unexplained_turn_notice",
 ]
 
@@ -279,7 +289,10 @@ def _number(value: int | None, fallback: str) -> str:
 
 def _binding_key(binding: ExplainerBinding) -> str:
     held = binding.binding
-    return f"{held.comparison_owner}:{held.comparison_reference}:{held.four_tree_digest}:{binding.snapshot}"
+    return (
+        f"{held.comparison_owner}:{held.comparison_reference}:{held.four_tree_digest}:"
+        f"{binding.packet_digest}"
+    )
 
 
 @dataclass(frozen=True)
@@ -299,6 +312,8 @@ def measure_notice(
 ) -> tuple[Literal["moved", "clean", "unreadable"], MovedNotice | None, str | None]:
     """Measure whether one leaf's environment moved, is clean, or could not be read."""
 
+    if is_landed(config, selection, ports):
+        return ("clean", None, None)
     measurement = measurement or ComparisonMeasurement()
     state, binding = _binding_state(config, selection)
     if state == "unreadable":
@@ -361,6 +376,17 @@ def is_planned(binding: ExplainerBinding) -> bool:
     return binding.planned is not None or binding.binding.comparison_owner == PLANNED_OWNER
 
 
+def is_landed(
+    config: McpRuntimeConfig, selection: LeafSelection, ports: WatcherApplicationPorts
+) -> bool:
+    """A completed integration has fixed trees, even after its worktrees are cleaned up."""
+
+    contract = ports.recorded_leaf_contract(
+        config, selection.repository_id, selection.master, selection.leaf_id
+    )
+    return contract is not None and contract.integration_status == "completed"
+
+
 def _measure_comparison_moved(
     config: McpRuntimeConfig,
     selection: LeafSelection,
@@ -372,7 +398,7 @@ def _measure_comparison_moved(
     if not isinstance(captured, CapturedComparison):
         return ("unreadable", None)
     held = binding.binding
-    if not moved_sides(held, _current_binding(held, captured.record)):
+    if _bound_record(binding).same_trees(captured.record):
         return ("clean", None)
     blocks = (measurement.counter or partial(blocks_changed, ports=ports))(held, captured.record)
     if blocks is None:
@@ -389,18 +415,42 @@ def _measure_comparison_moved(
     )
 
 
-def _current_binding(bound: FrameBinding, record: ReviewTreeComparisonRecord) -> FrameBinding:
-    """The capture as a binding of the same identity, so only the sides can differ.
+def _bound_record(binding: ExplainerBinding) -> ReviewTreeComparisonRecord:
+    """The bound trees under the comparison owner's notice equality.
 
-    The capture is not a record and carries no number of its own; borrowing the bound number and
-    reference keeps the identity test about the four sides (and the conversion) alone.
+    A recording pin can be absent from a fresh capture of the same tree. Refs and commits
+    remain part of the shared binding's stricter staleness identity; this notice and its
+    displayed number both use the owner's ``same_trees`` criterion instead.
     """
 
-    numbered = record.model_copy(update={"number": bound.comparison_number})
-    return FrameBinding.from_record(
-        numbered,
-        comparison_owner=bound.comparison_owner,
-        comparison_reference=bound.comparison_reference,
+    bound = binding.binding
+    conversion = (
+        {
+            "commit": bound.converted_base_commit,
+            "version": bound.converted_base_version,
+            "code_commit": bound.converted_base_code_commit,
+            "tree": bound.converted_base_tree,
+        }
+        if bound.converted_base_tree is not None
+        else None
+    )
+    return ReviewTreeComparisonRecord.model_validate(
+        {
+            "task_id": bound.task_id,
+            "leaf_id": bound.leaf_id,
+            "number": bound.comparison_number,
+            "recorded_at": binding.prepared_at,
+            "converted_base": conversion,
+            **{
+                name: {
+                    "repository": getattr(bound, f"{name}_repository"),
+                    "tree": getattr(bound, f"{name}_tree"),
+                    "commit": getattr(bound, f"{name}_commit"),
+                    "ref": getattr(bound, f"{name}_ref"),
+                }
+                for name in ("code_base", "code_candidate", "memory_base", "memory_candidate")
+            },
+        }
     )
 
 
@@ -416,10 +466,9 @@ def _recorded_number(
         root = task_root(config, selection.repository_id, selection.master)
     except (PathRefused, OSError):
         return None
-    records = ports.comparison_records(root, selection.leaf_id)
-    if not records:
+    latest = ports.latest_comparison(root, selection.leaf_id)
+    if latest is None:
         return None
-    latest = records[-1]
     return latest.number if latest.same_trees(captured) else None
 
 
@@ -570,14 +619,20 @@ class GitComparisonOwner:
 
     def capture(self, selection: LeafSelection) -> CapturedComparison | None:
         contract = self._resolve(selection)
-        if contract is None or not self._ports.memory_converted(contract):
+        if (
+            contract is None
+            or contract.integration_status == "completed"
+            or contract.code_worktree is None
+            or not contract.code_worktree.exists()
+            or not self._ports.memory_converted(contract)
+        ):
             return None
         worktree = contract.memory_worktree
         repository = contract.memory_repo_path or worktree
         if worktree is None or repository is None:
             return None
         try:
-            code_tree = capture_future_code_candidate(contract).codeCandidateTree
+            code_tree = capture_future_code_candidate(contract, kept=True).codeCandidateTree
             record = self._ports.draft_live_comparison(
                 self._config.coordination_root, contract, repository, code_tree
             )
@@ -608,10 +663,55 @@ def blocks_changed(
 
     try:
         trees = changes_between(binding, captured)
-        return _count_blocks(trees, ports)
     except (*ports.lane_errors, OSError, RuntimeError, ValueError) as error:
         logger.warning("the moved watcher cannot count its blocks: %s", error)
         return None
+    record = trees.record
+    key = (
+        ports.open_tree_lane,
+        *(
+            (side.repository, side.tree)
+            for side in (
+                record.code_base,
+                record.code_candidate,
+                record.memory_base,
+                record.memory_candidate,
+            )
+        ),
+    )
+    held = _BLOCK_COUNTS.get(key)
+    if held is not None:
+        return held[0]
+    count, _owner = _BLOCK_COUNT_FLIGHTS.share(key, lambda: _counted_once(key, trees, ports))
+    return count
+
+
+#: How many pairs of candidate states' block counts are kept; an evicted pair is counted again.
+BLOCK_COUNTS_CAPACITY = 256
+
+#: The block count of two candidate states, by the identity of their four trees (D569): a Git
+#: tree named by its object id is the same tree for as long as it can be read, so its pair's count
+#: is the same count. The watcher, the page's badge and the background build ask the same question
+#: for every leaf that moved; the first to count it answers them all, and one in flight is joined.
+#: A count that could not be read is not kept.
+_BLOCK_COUNTS: BoundedMemo[tuple[object, ...], int] = BoundedMemo(BLOCK_COUNTS_CAPACITY)
+_BLOCK_COUNT_FLIGHTS: SharedFlights[tuple[object, ...], int | None] = SharedFlights()
+
+
+def _counted_once(
+    key: tuple[object, ...], trees: ReviewTrees, ports: WatcherApplicationPorts
+) -> int | None:
+    held = _BLOCK_COUNTS.get(key)
+    if held is not None:
+        return held[0]
+    try:
+        count = _count_blocks(trees, ports)
+    except (*ports.lane_errors, OSError, RuntimeError, ValueError) as error:
+        logger.warning("the moved watcher cannot count its blocks: %s", error)
+        return None
+    if count is not None:
+        _BLOCK_COUNTS.put(key, count)
+    return count
 
 
 def changes_between(
@@ -899,6 +999,67 @@ def _watched_leaf(
     return workspace.is_dir()
 
 
+#: How many leaves' document names are kept; an evicted one is looked up again.
+LEAF_DOCUMENT_NAMES_CAPACITY = 1024
+
+type _FolderWitness = tuple[tuple[str, tuple[int, ...]], ...]
+
+_LEAF_DOCUMENT_NAMES: BoundedMemo[tuple[str, str], tuple[_FolderWitness, str | None]] = BoundedMemo(
+    LEAF_DOCUMENT_NAMES_CAPACITY
+)
+
+
+def _folder_witness(master_root: Path) -> _FolderWitness | None:
+    """The identity of every task document in the master's own folder, by name; ``None`` unread."""
+
+    try:
+        entries = sorted(
+            (entry.name, entry.stat(follow_symlinks=False))
+            for entry in os.scandir(master_root)
+            if entry.name.endswith(".json")
+        )
+    except OSError:
+        return None
+    return tuple(
+        (name, (st.st_dev, st.st_ino, st.st_mode, st.st_size, st.st_mtime_ns, st.st_ctime_ns))
+        for name, st in entries
+    )
+
+
+def leaf_document_name(master_root: Path, leaf_id: str) -> str | None:
+    """The file stem of the task document of the leaf named ``leaf_id``, or ``None``.
+
+    A receipt names its leaf by the document it was started on (``taskDocumentRef``); the watcher
+    names it by its id. The task tier's own rule (:func:`find_leaf_doc`: id, enclosure leaf id or
+    stem) decides which document is the leaf's. The answer is kept against the identity of every
+    document in the folder, observed before and after the lookup, and looked up again on any
+    difference.
+    """
+
+    key = (master_root.as_posix(), leaf_id)
+    witness = _folder_witness(master_root)
+    held = _LEAF_DOCUMENT_NAMES.get(key)
+    if witness is not None and held is not None and held[0][0] == witness:
+        return held[0][1]
+    found = find_leaf_doc(master_root, leaf_id)
+    name = None if found is None else found[0].stem
+    if witness is not None and _folder_witness(master_root) == witness:
+        _LEAF_DOCUMENT_NAMES.put(key, (witness, name))
+    return name
+
+
+def _leaf_receipts(
+    master_root: Path, leaf_id: str, ports: WatcherApplicationPorts
+) -> list[Mapping[str, object]]:
+    """The receipts of one leaf, named by its id or by the stem of its task document."""
+
+    names = [leaf_id]
+    document = leaf_document_name(master_root, leaf_id)
+    if document is not None and document != leaf_id:
+        names.append(document)
+    return [receipt for name in names for receipt in ports.execution_receipts(master_root, name)]
+
+
 def _execution_receipt_seats(
     config: McpRuntimeConfig,
     active_leaves: set[tuple[str, str, str]],
@@ -920,7 +1081,7 @@ def _execution_receipt_seats(
             master_root = task_root(config, repository_id, master)
         except (PathRefused, OSError):
             continue
-        for receipt in ports.execution_receipts(master_root, leaf_id):
+        for receipt in _leaf_receipts(master_root, leaf_id, ports):
             agent = receipt.get("agentId")
             if not isinstance(agent, str) or not agent:
                 execution = receipt.get("execution")
@@ -996,13 +1157,46 @@ def leaf_seats(
             selection = LeafSelection(repository_id, master, child.name)
             active_leaves.add(selection.as_key())
             try:
-                number = generation(folder / (child.name + GENERATION_SUFFIX))
+                number = generation(seat_counter_path(child))
+                seat = seat_for_workspace(child, number) if number > 0 else None
             except (ExplainerStateError, OSError):
                 number = 0
-            if number > 0:
-                found[agent_id(child, number)] = selection
+            if number > 0 and seat is not None:
+                found[seat] = selection
     found.update(_receipt_leaf_seats(config, active_leaves, active_streams, ports))
     return found
+
+
+def tracked_leaves(
+    config: McpRuntimeConfig, ports: WatcherApplicationPorts
+) -> dict[tuple[str, str, str], frozenset[str]]:
+    """The leaves the moved watcher tracks, each with why: an explainer environment, a seat.
+
+    A landed leaf's trees are fixed, so it is not tracked. An open review stream is a reason too,
+    given by the stream itself while it is open (the worktree watch's subscription).
+    """
+
+    reasons: dict[tuple[str, str, str], set[str]] = {}
+    for folder in explainer_roots(config.coordination_root):
+        try:
+            children = sorted(folder.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if child.is_dir() and not child.is_symlink():
+                key = (folder.parent.name, folder.name, child.name)
+                reasons.setdefault(key, set()).add("environment")
+    for selection in leaf_seats(config, ports).values():
+        reasons.setdefault(selection.as_key(), set()).add("seat")
+    tracked: dict[tuple[str, str, str], frozenset[str]] = {}
+    for key, why in reasons.items():
+        try:
+            landed = is_landed(config, LeafSelection(*key), ports)
+        except (OSError, ValueError):
+            landed = False
+        if not landed:
+            tracked[key] = frozenset(why)
+    return tracked
 
 
 def unexplained_turn_notice(
@@ -1015,6 +1209,9 @@ def unexplained_turn_notice(
 ) -> MovedNotice | None:
     """Measure code/memory movement for a live leaf that has no explainer environment yet."""
 
+    if is_landed(config, selection, ports):
+        baselines.pop(selection.as_key(), None)
+        return None
     measurement = measurement or ComparisonMeasurement()
     captured = (measurement.owner or GitComparisonOwner(config, ports)).capture(selection)
     if not isinstance(captured, CapturedComparison):
@@ -1024,8 +1221,7 @@ def unexplained_turn_notice(
     if previous is None:
         try:
             root = task_root(config, selection.repository_id, selection.master)
-            records = ports.comparison_records(root, selection.leaf_id)
-            previous = records[-1] if records else None
+            previous = ports.latest_comparison(root, selection.leaf_id)
         except (PathRefused, OSError):
             previous = None
     baselines[key] = captured.record

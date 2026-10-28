@@ -628,7 +628,9 @@ class ToolEventRiverTests(unittest.TestCase):
         # Since MIK-R71/R117 the send path reads the caller's launch binding
         # (role plus task references) and addresses the sender line from the
         # started agent (role, subject, agent id): the fakes carry the current
-        # shapes, a taskless manager serving Projects.
+        # shapes, a taskless manager serving Projects. Since D607 that binding is
+        # read by ``_message_caller``, which answers a role caller exactly as
+        # ``_caller`` did and adds only a leaf explainer's launch binding.
         caller_binding = AgentBinding(
             agent_id="agent-1",
             role="manager",
@@ -637,7 +639,7 @@ class ToolEventRiverTests(unittest.TestCase):
         )
         caller_sender = StartingAgent(agent_id="agent-1", role="manager", subject="Projects")
         with (
-            mock.patch.object(paseo_role_tools, "_caller", return_value=caller_binding),
+            mock.patch.object(paseo_role_tools, "_message_caller", return_value=caller_binding),
             mock.patch.object(paseo_role_tools, "starting_agent", return_value=caller_sender),
             mock.patch.object(paseo_role_tools, "_resolve_recipient", return_value=resolve)
             if not isinstance(receipt, BaseException)

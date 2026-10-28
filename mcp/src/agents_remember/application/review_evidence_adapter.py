@@ -11,8 +11,9 @@ with its measured side/index states, reads the landed schemas at that exact tree
   side, path, line range, record id and revision, judgment row and attempt, or proof id that a
   consumer needs to reopen exactly what the explanation cites.
 
-Reading is the bounded read of :mod:`review_evidence_read`, so the adapter inherits its exact-tree
-operand, its byte and page bounds and its distinct absent/binary/unavailable states. It starts no
+Reading is the read of :mod:`review_evidence_read`, so the adapter inherits its exact-tree operand,
+its full answers and its distinct absent/binary/unavailable states; every collection carries every
+record it counts (MIK-R211 v4 rules 1-2). It starts no
 role, launches no page and writes nothing: it prepares evidence for a consumer that already exists.
 
 One refusal belongs to the *binding* rather than to the claim model: on a planned comparison, a
@@ -23,31 +24,27 @@ claim resting only on receipts of the leaf's packets, task document or reference
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from pathlib import Path
 
+from agents_remember.application import review_evidence_map as evidence_mapping
 from agents_remember.application.review_evidence_packet import (
     COMPARISON_OWNER,
     PLANNED_OWNER,
     SideState,
-    build_evidence_packet,
     comparison_reference,
     intended_receipt_ids,
     same_comparison,
 )
 from agents_remember.application.review_evidence_read import (
-    DEFAULT_READ_LIMITS,
     read_bound_source,
+    read_whole_source,
 )
 from agents_remember.application.review_evidence_relations import read_bound_relationships
 from agents_remember.application.review_tree_comparison import ReviewTrees
-from agents_remember.kernel.git_command import run_git
 from agents_remember.models.knowledge.review_evidence import (
     ClaimBasis,
     EvidenceClaim,
     EvidenceCollection,
-    EvidenceLimits,
     EvidenceMap,
     EvidencePacket,
     SupplementalReceipt,
@@ -58,10 +55,6 @@ from agents_remember.models.knowledge.review_trees import (
 )
 
 __all__ = [
-    "NAME_FAMILY",
-    "NAME_JUDGMENTS",
-    "NAME_PROOFS",
-    "NAME_SOURCES",
     "IntendedAuthorityRefusal",
     "PreparedAddress",
     "PreparedEvidence",
@@ -70,13 +63,6 @@ __all__ = [
     "require_intended_authority",
     "require_intended_packet",
 ]
-
-NAME_SOURCES = "source-inventory-and-linked-locations"
-NAME_FAMILY = "family-guarantees-and-membership"
-NAME_JUDGMENTS = "judgments"
-NAME_PROOFS = "proofs"
-
-_MAX_HISTORY_FILES = 200
 
 
 @dataclass(frozen=True)
@@ -217,7 +203,6 @@ def prepare_evidence(  # noqa: PLR0913 - one preparation states its own scope an
     claims: tuple[EvidenceClaim, ...] = (),
     paths: tuple[str, ...] = (),
     family_path: str | None = None,
-    limits: EvidenceLimits = DEFAULT_READ_LIMITS,
     supplemental: tuple[SupplementalReceipt, ...] = (),
     comparison_owner: str = COMPARISON_OWNER,
     comparison_reference: str | None = None,
@@ -246,39 +231,41 @@ def prepare_evidence(  # noqa: PLR0913 - one preparation states its own scope an
             "preparation requires the comparison owner's measured code sides; a comparison with "
             "no measured side cannot be explained, and nothing is substituted for it"
         )
-    if claims:
-        cited = {
-            basis.path for claim in claims for basis in claim.bases if isinstance(basis.path, str)
-        }
-        if len(cited | set(paths)) > limits.paths_per_packet:
-            raise EvidencePrecondition(
-                f"the prepared scope names more than {limits.paths_per_packet} path(s); select a "
-                "narrower scope or page the evidence"
-            )
-    sources = _source_collection(record, paths, limits)
-    family = _family_collection(record, family_path, limits)
-    judgments, addresses = _judgment_collections(record, limits)
-    proofs, proof_addresses = _proof_collection(record, limits)
+    # Ruling 6085456d, addendum (c): a scope is never refused for naming many paths. The count is
+    # measured by the collections that carry it; it does not decide what preparation admits.
+    sources = _source_collection(record, paths)
+    family = _family_collection(record, family_path)
+    # Every collection reads what its own files hold and carries all of it (ruling 6085456d,
+    # addendum c; MIK-R211 v4 rules 1-2).
+    judgments, addresses = _judgment_collections(record, owner=comparison_owner)
+    proofs, proof_addresses = _proof_collection(record, owner=comparison_owner)
+    # The map is built from the rows and the index this preparation already read, so it adds no read
+    # of its own; a comparison whose memory index cannot be opened has no map, and says so through
+    # the sides it states rather than through a map of nothing (MIK-R211 v2 rule 1).
+    groups = evidence_mapping._group_map(
+        trees,
+        rows=judgments.items,
+        supplemental=supplemental,
+        owner=comparison_owner,
+    )
     collections = (sources, family, judgments, proofs)
-    packet = build_evidence_packet(
+    packet = evidence_mapping._fit_packet(
         record,
-        repository_id=record.task_id,
+        collections=collections,
+        groups=groups,
+        sides={
+            "base": states["base"],
+            "candidate": states["candidate"],
+            "before": before,
+            "after": after,
+        },
         scope=scope,
         question=question,
-        code_base=states["base"],
-        code_candidate=states["candidate"],
-        memory_before=before,
-        memory_after=after,
         evidence_map=evidence_map,
-        limits=limits,
-        collections={collection.name: collection for collection in collections},
         claims=claims,
-        limitations=_limitations(record, collections)
-        + tuple(side.detail for side in (before, after) if side.detail),
-        recorded_at=record.recorded_at,
         supplemental=supplemental,
         comparison_owner=comparison_owner,
-        comparison_reference_value=comparison_reference,
+        comparison_reference=comparison_reference,
     )
     prepared = tuple(
         PreparedAddress(
@@ -318,11 +305,21 @@ def prepare_evidence(  # noqa: PLR0913 - one preparation states its own scope an
 
 
 def _memory_state(side: ReviewKnowledgeSide) -> SideState:
+    """One side's measured state, with a partial index stated by count and every path it failed.
+
+    A real memory repository can leave thousands of files unreadable to the index. The detail names
+    each of them (MIK-R211 v4 rule 1): the count is the measurement and the paths are the evidence,
+    and no prose bound stands between the reader and either.
+    """
+
     detail = side.detail
     if side.index_state == "partial":
+        problems = side.problems or ()
+        named = ", ".join(path for path, _ in problems)
         detail = (
-            f"the {side.side} memory index at {side.tree} is partial: {side.problems}; "
-            "valid records remain usable, but absence of an omitted record is unknown"
+            f"the {side.side} memory index at {side.tree} is partial: {len(problems)} file(s) "
+            f"failed ({named}); valid records remain usable, but absence of an omitted record is "
+            "unknown"
         )
     return SideState(state=side.state, index_state=side.index_state, detail=detail)
 
@@ -330,7 +327,7 @@ def _memory_state(side: ReviewKnowledgeSide) -> SideState:
 def consume_address(
     record: ReviewTreeComparisonRecord, prepared: PreparedEvidence, address_id: str
 ) -> AddressRead:
-    """Resolve one prepared address for *this* comparison, through the preparation's own bounds.
+    """Resolve one prepared address for *this* comparison, through the same read the packet used.
 
     The address belongs to the packet that prepared it. A record for another comparison -- another
     task, leaf, number, repository or conversion -- is refused before any read, and an address whose
@@ -385,7 +382,6 @@ def consume_address(
         address.path,
         start_line=address.start_line,
         end_line=address.end_line,
-        limits=prepared.packet.limits,
     )
     return AddressRead(
         address_id=address_id,
@@ -401,9 +397,9 @@ def _carried(prepared: PreparedEvidence, address: PreparedAddress) -> bool:
     """Whether the prepared packet holds the item this address names, by its own identity."""
 
     names = {
-        "judgment-row": (NAME_JUDGMENTS,),
-        "history-event": (NAME_JUDGMENTS,),
-        "proof-entry": (NAME_PROOFS,),
+        "judgment-row": (evidence_mapping.NAME_JUDGMENTS,),
+        "history-event": (evidence_mapping.NAME_JUDGMENTS,),
+        "proof-entry": (evidence_mapping.NAME_PROOFS,),
     }.get(address.kind, ())
     for name in names:
         collection = prepared.packet.collection(name)
@@ -430,13 +426,13 @@ def _carried(prepared: PreparedEvidence, address: PreparedAddress) -> bool:
 
 
 def _source_collection(
-    record: ReviewTreeComparisonRecord, paths: tuple[str, ...], limits: EvidenceLimits
+    record: ReviewTreeComparisonRecord, paths: tuple[str, ...]
 ) -> EvidenceCollection:
     """The supplied paths, each read at the memory candidate, with its own state kept."""
 
     if not paths:
         return EvidenceCollection(
-            name=NAME_SOURCES,
+            name=evidence_mapping.NAME_SOURCES,
             producer=comparison_reference(record),
             population="the scope named no source path",
             state="not-selected",
@@ -444,8 +440,8 @@ def _source_collection(
         )
     items: list[dict[str, object]] = []
     states: list[str] = []
-    for path in paths[: limits.paths_per_packet]:
-        receipt = read_bound_source(record, "memory-candidate", path, limits=limits)
+    for path in paths:
+        receipt = read_bound_source(record, "memory-candidate", path)
         states.append(receipt.state)
         items.append(
             {
@@ -461,7 +457,7 @@ def _source_collection(
     present = sum(1 for state in states if state == "present")
     if present:
         return EvidenceCollection(
-            name=NAME_SOURCES,
+            name=evidence_mapping.NAME_SOURCES,
             producer=comparison_reference(record),
             population=f"the {len(paths)} source path(s) named for this comparison",
             state="present",
@@ -469,7 +465,7 @@ def _source_collection(
             items=tuple(items),
         )
     return EvidenceCollection(
-        name=NAME_SOURCES,
+        name=evidence_mapping.NAME_SOURCES,
         producer=comparison_reference(record),
         population=f"the {len(paths)} source path(s) named for this comparison",
         state="measured-empty" if all(state == "absent" for state in states) else "unavailable",
@@ -482,22 +478,22 @@ def _source_collection(
 
 
 def _family_collection(
-    record: ReviewTreeComparisonRecord, family_path: str | None, limits: EvidenceLimits
+    record: ReviewTreeComparisonRecord, family_path: str | None
 ) -> EvidenceCollection:
     """One family's recorded membership and links, followed at its exact tree (rule 5)."""
 
     if family_path is None:
         return EvidenceCollection(
-            name=NAME_FAMILY,
+            name=evidence_mapping.NAME_FAMILY,
             producer=comparison_reference(record),
             population="no family was named",
             state="not-selected",
             reason="the explanation's scope names no family to read",
         )
-    relations = read_bound_relationships(record, "memory-candidate", family_path, limits=limits)
+    relations = read_bound_relationships(record, "memory-candidate", family_path)
     if relations.state != "records":
         return EvidenceCollection(
-            name=NAME_FAMILY,
+            name=evidence_mapping.NAME_FAMILY,
             producer=comparison_reference(record),
             population=f"the family at {family_path}",
             state="unavailable",
@@ -516,7 +512,7 @@ def _family_collection(
         for edge in relations.edges
     )
     return EvidenceCollection(
-        name=NAME_FAMILY,
+        name=evidence_mapping.NAME_FAMILY,
         producer=comparison_reference(record),
         population=f"the family at {family_path} and the records it names",
         state="present" if items else "measured-empty",
@@ -527,101 +523,233 @@ def _family_collection(
 
 
 def _judgment_collections(
-    record: ReviewTreeComparisonRecord, limits: EvidenceLimits
+    record: ReviewTreeComparisonRecord, *, owner: str
 ) -> tuple[EvidenceCollection, tuple[PreparedAddress, ...]]:
-    """The historical judgment rows of the memory candidate, with their row and attempt identity."""
+    """The judgment rows of the history files the comparison changed (rule 1, rule 2).
 
-    names = _history_paths(record, limits)
+    A planned binding has no changed memory side to read, so its rows are the leaf's own history
+    file's -- the leaf's recorded judgments about its own change -- and a leaf without one does not
+    get another task's file. A recorded binding reads the history files the comparison *changed*,
+    each to its end so the rows it holds are counted rather than sampled, the leaf's own file first
+    and the changed invariants' rows before the rest. The collection carries every row in that one
+    order (MIK-R211 v4 rules 1-2).
+    """
+
+    planned = owner == PLANNED_OWNER
+    leaf_path = f"knowledge/history/{record.leaf_id}.json"
+    if planned:
+        names: list[str] | None = [leaf_path]
+        scope = f"the leaf's own history file {leaf_path}"
+    else:
+        names = evidence_mapping._changed_memory_paths(record, "knowledge/history")
+        scope = (
+            "the history files the comparison changed at the memory candidate"
+            if names is not None
+            else "the comparison's changed history files"
+        )
+        if names is not None:
+            names = [leaf_path] + [name for name in names if name != leaf_path]
     if names is None:
         return (
             EvidenceCollection(
-                name=NAME_JUDGMENTS,
+                name=evidence_mapping.NAME_JUDGMENTS,
                 producer=comparison_reference(record),
-                population="the memory candidate's judgment history",
+                population=scope,
                 state="unavailable",
-                reason="the memory candidate's history listing did not answer at this tree",
+                reason="the comparison's changed history files could not be listed at this tree",
             ),
             (),
         )
-    items: list[dict[str, object]] = []
-    addresses: list[PreparedAddress] = []
-    for path in names[:_MAX_HISTORY_FILES]:
-        receipt = read_bound_source(record, "memory-candidate", path, limits=limits)
+    rows, found = _read_history_rows(record, names, planned=planned)
+    if not planned and not names:
+        return (
+            EvidenceCollection(
+                name=evidence_mapping.NAME_JUDGMENTS,
+                producer=comparison_reference(record),
+                population=scope,
+                state="measured-empty",
+                count=0,
+                reason="the comparison changed no history file, so it records no judgment row",
+            ),
+            (),
+        )
+    if planned and not found:
+        return (
+            EvidenceCollection(
+                name=evidence_mapping.NAME_JUDGMENTS,
+                producer=comparison_reference(record),
+                population=scope,
+                state="not-selected",
+                reason=(
+                    f"the leaf records no knowledge/history/{record.leaf_id}.json at this tree, so "
+                    "a planned binding has no judgment file of its own to read and another task's "
+                    "history is not read in its place"
+                ),
+            ),
+            (),
+        )
+    ordered = _admitted_rows(record, rows)
+    items = tuple(item for item, _address in ordered)
+    collection = EvidenceCollection(
+        name=evidence_mapping.NAME_JUDGMENTS,
+        producer=comparison_reference(record),
+        population=(
+            f"{scope}: {len(rows)} judgment row(s) in {len({row.path for row in rows})} file(s)"
+            if rows
+            else scope
+        ),
+        state="present" if items else "measured-empty",
+        count=len(rows) if rows else 0,
+        reason=None if items else "the history files hold no judgment row",
+        items=items,
+    )
+    return collection, tuple(address for _item, address in ordered)
+
+
+@dataclass(frozen=True)
+class _HistoryRow:
+    """One recorded judgment row, with the file and attempt that give it its identity."""
+
+    path: str
+    attempt: int
+    row: dict[str, object]
+
+
+def _read_history_rows(
+    record: ReviewTreeComparisonRecord, names: list[str], *, planned: bool
+) -> tuple[list[_HistoryRow], bool]:
+    """Every row of every named history file, each file read whole, in the one stated order.
+
+    ``found`` says whether any named file was readable at all, which is what separates a planned
+    leaf with no history file of its own from a planned leaf whose file is merely empty.
+    """
+
+    rows: list[_HistoryRow] = []
+    for path in names:
+        receipt = read_whole_source(record, "memory-candidate", path)
         if receipt.state != "present" or not receipt.text:
+            if receipt.state == "absent" and planned:
+                return [], False
             continue
-        document = _json(receipt.text)
-        rows = document.get("rows") if isinstance(document, dict) else None
+        document = evidence_mapping._json(receipt.text)
+        recorded = document.get("rows") if isinstance(document, dict) else None
         attempt = document.get("attempt") if isinstance(document, dict) else None
         attempt = attempt if isinstance(attempt, int) else 1
-        if not isinstance(rows, list):
+        if not isinstance(recorded, list):
             continue
-        for row in rows:
-            if not isinstance(row, dict) or not row.get("id"):
-                continue
-            subject = str(row.get("subject") or "")
-            items.append(
+        rows.extend(
+            _HistoryRow(path=path, attempt=attempt, row=row)
+            for row in recorded
+            if isinstance(row, dict) and row.get("id")
+        )
+    return rows, bool(names)
+
+
+def _admitted_rows(
+    record: ReviewTreeComparisonRecord, rows: list[_HistoryRow]
+) -> list[tuple[dict[str, object], PreparedAddress]]:
+    """Every row this packet carries, in one stated order (MIK-R211 v4 rules 1-2).
+
+    The order is stated in the requirement: the leaf's own history file first, then the rows of the
+    invariants the comparison changed, then every other row in the order its file records. Each
+    carried row keeps its row id, attempt, path and revision, which is the address a consumer opens.
+    """
+
+    changed = evidence_mapping._changed_invariant_ids(record)
+    ordered = sorted(
+        rows,
+        key=lambda row: (
+            0 if row.path == f"knowledge/history/{record.leaf_id}.json" else 1,
+            0 if evidence_mapping._names_changed_invariant(row.row, changed) else 1,
+        ),
+    )
+    admitted: list[tuple[dict[str, object], PreparedAddress]] = []
+    for row in ordered:
+        subject = str(row.row.get("subject") or "") or None
+        revision = row.row.get("revision")
+        row_id = str(row.row["id"])
+        admitted.append(
+            (
                 {
-                    "record_id": subject or None,
-                    "row_id": str(row["id"]),
-                    "attempt": attempt,
-                    "path": path,
+                    "record_id": subject,
+                    "row_id": row_id,
+                    "attempt": row.attempt,
+                    "path": row.path,
                     "side": "memory-candidate",
                     "tree": record.memory_candidate.tree,
-                    "record_revision": row.get("revision"),
+                    "record_revision": revision,
                     "state": "present",
-                }
-            )
-            addresses.append(
+                },
                 PreparedAddress(
-                    address_id=f"judgment-row:{path}#{row['id']}@{attempt}",
+                    address_id=f"judgment-row:{row.path}#{row_id}@{row.attempt}",
                     kind="judgment-row",
-                    reference=f"memory-candidate:{path}",
+                    reference=f"memory-candidate:{row.path}",
                     side="memory-candidate",
-                    path=path,
-                    record_id=subject or None,
-                    record_revision=(
-                        row.get("revision") if isinstance(row.get("revision"), int) else None
-                    ),
-                    row_id=str(row["id"]),
-                    attempt=attempt,
-                )
+                    path=row.path,
+                    record_id=subject,
+                    record_revision=revision if isinstance(revision, int) else None,
+                    row_id=row_id,
+                    attempt=row.attempt,
+                ),
             )
-    collection = EvidenceCollection(
-        name=NAME_JUDGMENTS,
-        producer=comparison_reference(record),
-        population=f"the {len(names)} history file(s) at the memory candidate",
-        state="present" if items else "measured-empty",
-        count=len(items) if items else 0,
-        reason=None if items else "the history files hold no judgment row",
-        items=tuple(items),
-    )
-    return collection, tuple(addresses)
+        )
+    return admitted
 
 
 def _proof_collection(
-    record: ReviewTreeComparisonRecord, limits: EvidenceLimits
+    record: ReviewTreeComparisonRecord, *, owner: str
 ) -> tuple[EvidenceCollection, tuple[PreparedAddress, ...]]:
-    """The proof entries the memory candidate records, with execution left as it was recorded."""
+    """The proof entries of the sidecars the comparison changed (rule 1, rule 2).
 
-    names = _sidecar_paths(record, limits)
+    A planned binding changed no memory side, so it has no changed sidecar to read and says so
+    rather than reading another task's proofs. A recorded binding reads every changed sidecar whole
+    and in path order, with no count stopping it (ruling 6085456d, addendum c).
+    """
+
+    planned = owner == PLANNED_OWNER
+    if planned:
+        return (
+            EvidenceCollection(
+                name=evidence_mapping.NAME_PROOFS,
+                producer=comparison_reference(record),
+                population="the sidecars the comparison changed",
+                state="measured-empty",
+                count=0,
+                reason="a planned binding compares the leaf against itself, so it changed no sidecar",
+            ),
+            (),
+        )
+    names = evidence_mapping._changed_memory_paths(record, "onboarding")
     if names is None:
         return (
             EvidenceCollection(
-                name=NAME_PROOFS,
+                name=evidence_mapping.NAME_PROOFS,
                 producer=comparison_reference(record),
-                population="the memory candidate's proof sidecars",
+                population="the sidecars the comparison changed",
                 state="unavailable",
-                reason="the memory candidate's onboarding listing did not answer at this tree",
+                reason="the comparison's changed sidecars could not be listed at this tree",
+            ),
+            (),
+        )
+    if not names:
+        return (
+            EvidenceCollection(
+                name=evidence_mapping.NAME_PROOFS,
+                producer=comparison_reference(record),
+                population="the sidecars the comparison changed",
+                state="measured-empty",
+                count=0,
+                reason="the comparison changed no onboarding sidecar",
             ),
             (),
         )
     items: list[dict[str, object]] = []
     addresses: list[PreparedAddress] = []
-    for path in names[: limits.paths_per_packet]:
-        receipt = read_bound_source(record, "memory-candidate", path, limits=limits)
+    for path in names:
+        receipt = read_whole_source(record, "memory-candidate", path)
         if receipt.state != "present" or not receipt.text:
             continue
-        document = _json(receipt.text)
+        document = evidence_mapping._json(receipt.text)
         proofs = document.get("proves") if isinstance(document, dict) else None
         for entry in proofs if isinstance(proofs, list) else ():
             if not isinstance(entry, dict) or not entry.get("invariant"):
@@ -651,48 +779,18 @@ def _proof_collection(
                 )
             )
     collection = EvidenceCollection(
-        name=NAME_PROOFS,
+        name=evidence_mapping.NAME_PROOFS,
         producer=comparison_reference(record),
-        population=f"the {len(names)} sidecar file(s) at the memory candidate",
+        population=(
+            f"the {len(names)} sidecar file(s) the comparison changed, each read whole: "
+            f"{len(items)} proof entr(ies)"
+        ),
         state="present" if items else "measured-empty",
-        count=len(items) if items else 0,
-        reason=None if items else "the sidecars record no proof entry",
+        count=len(items),
+        reason=None if items else "the changed sidecars record no proof entry",
         items=tuple(items),
     )
     return collection, tuple(addresses)
-
-
-def _history_paths(record: ReviewTreeComparisonRecord, limits: EvidenceLimits) -> list[str] | None:
-    return _listed(record, "knowledge/history", limits)
-
-
-def _sidecar_paths(record: ReviewTreeComparisonRecord, limits: EvidenceLimits) -> list[str] | None:
-    return _listed(record, "onboarding", limits)
-
-
-def _listed(
-    record: ReviewTreeComparisonRecord, prefix: str, limits: EvidenceLimits
-) -> list[str] | None:
-    """The memory candidate's file names under one prefix, or ``None`` when listing failed."""
-
-    try:
-        result = run_git(
-            Path(record.memory_candidate.repository),
-            ["ls-tree", "-r", "--name-only", "-z", record.memory_candidate.tree, "--", prefix],
-        )
-    except OSError:
-        return None
-    if result.returncode != 0:
-        return None
-    names = [name for name in result.stdout.split("\0") if name.endswith(".json")]
-    return names[: limits.paths_per_packet * 4]
-
-
-def _json(text: str) -> object:
-    try:
-        return json.loads(text)
-    except ValueError:
-        return None
 
 
 def _claim_ids(claims: tuple[EvidenceClaim, ...], address: PreparedAddress) -> tuple[str, ...]:
@@ -717,29 +815,3 @@ def _basis_names(basis: ClaimBasis, address: PreparedAddress) -> bool:
     if address.record_id is not None and basis.record_id not in {None, address.record_id}:
         return False
     return not (address.path is not None and basis.path not in {None, address.path})
-
-
-def _limitations(
-    record: ReviewTreeComparisonRecord, collections: tuple[EvidenceCollection, ...]
-) -> tuple[str, ...]:
-    """What this preparation could not establish, stated beside the packet (rule 10)."""
-
-    found: list[str] = [
-        "the packet describes this comparison only: an answer about another comparison, "
-        "repository or task is not evidence about this one"
-    ]
-    for collection in collections:
-        if collection.state == "not-selected":
-            found.append(f"{collection.name}: not selected for this scope")
-        elif collection.state != "present":
-            found.append(
-                f"{collection.name}: {collection.state}"
-                + (f" ({collection.reason})" if collection.reason else "")
-            )
-    if record.converted_base is not None:
-        found.append(
-            "the memory base is read as the comparison's converted tree "
-            f"{record.converted_base.tree}; the stored tree {record.memory_base.tree} is named "
-            "beside it and is not what these reads examined"
-        )
-    return tuple(found)

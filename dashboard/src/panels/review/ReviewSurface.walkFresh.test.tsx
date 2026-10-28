@@ -21,7 +21,6 @@ import {
   type View,
   bodyOf,
   captured,
-  clickedSecondFamily,
   families,
   familyBlock,
   installWorld,
@@ -60,6 +59,14 @@ afterEach(() => {
 
 const ZS9 = bodyOf('INV-ZS9ZS878');
 const ZS9_SUBJECT = ZS9.payload!.knowledge.revision_selection!.record_id;
+
+// A family opens its overview; member code is read only after an invariant is selected.
+async function clickedSecondFamily(view: View, shown = [R6R_ID, HBJ_ID]) {
+  await waitFor(() => expect(families(view)).toEqual(shown));
+  fireEvent.click(within(familyBlock(view, HBJ_ID)).getByTestId('review-family-open'));
+  await waitFor(() => expect(view.getByTestId('review-family-overview').dataset.family).toBe(HBJ_ID));
+  await settled(view);
+}
 
 // The kept state: the second family selected, the first one kept.
 async function keptState() {
@@ -279,12 +286,13 @@ function serveTreeRoutes() {
 }
 
 it('starts afresh at a followed intent marker, and its return does not bring the kept family back', async () => {
-  // The cards are the opening's read, so the card routes are served before the page opens.
+  // Card routes are served before the reader explicitly opens the invariant that owns the range.
   serveTreeRoutes();
   const view = await keptState();
-  // A file marker now belongs to a card. Select the family that records this range first;
+  // A family opens only its overview. Open the invariant that records this range to read its card;
   // the other read family remains kept until the marker is followed.
   fireEvent.click(treeRow(view, R6R_ID));
+  fireEvent.click(memberRow(view, R6R_ID, 'INV-ZS9ZS878'));
   await view.findByTestId('review-card-excerpt', undefined);
   const mark = await waitFor(() => {
     const found = view.getAllByTestId('review-hunk-mark');
@@ -336,6 +344,9 @@ it('opens with nothing selected, reads no subject, and a late catalogue selects 
   expect(selectedNode(view)).toBeNull();
   expect(view.queryByTestId('review-subject-slot')).toBeNull();
   expect(world.requests.reviews()).toHaveLength(1);
+  // This historical capture predates entry_inventory; absence is unavailable, never zero.
+  await waitFor(() => expect(view.getByTestId('review-summary-locations').textContent).toBe('changed locations: unavailable'));
+  expect(view.getByTestId('review-summary-folded').textContent).toBe('unchanged or not comparable: unavailable');
 });
 
 it('keeps the families and states the subject when the answer composes no family context', async () => {
@@ -385,7 +396,7 @@ it('keeps the walked tree at the actions rule 9 says change nothing', async () =
   await view.findByTestId('review-worklist-view', undefined);
   expect(shown()).toEqual(initial);
   fireEvent.click(treeRow(view, HBJ_ID));
-  await view.findByTestId('review-center-family', undefined);
+  await view.findByTestId('review-family-overview', undefined);
   expect(shown()).toEqual(initial);
   // The change-set page opens over the mounted page and returns to it. (This scratch leaf's lane holds
   // no file without an invariant, so the tree offers no lane destination; All changes is the way.)
@@ -553,6 +564,27 @@ it('waits for the answer of a refresh asked before the effects of the previous a
 });
 
 it('forgets the scroll a refresh asked for when its read fails, so a later page of the subject leaves the rail alone', async () => {
+  // Synthetic paging metadata isolates scroll recovery; a whole review has no collection picker.
+  const answerBeforePaging = world.answer;
+  world.answer = (url, asked) => {
+    const answer = answerBeforePaging(url, asked) as import('../../data/review').ReviewResult;
+    if (url.pathname !== '/api/review/intent' || !answer?.payload) return answer;
+    return {
+      ...answer,
+      payload: {
+        ...answer.payload,
+        page: {
+          collection: 'knowledge',
+          state: 'first_page',
+          total: 2,
+          returned: 1,
+          remaining: 1,
+          continuation: 'scroll-recovery-probe',
+          scope: ['page_size=1'],
+        },
+      },
+    };
+  };
   const view = await keptState();
   await recordingReveals(async (scrolled) => {
     const previous = world.answer;
@@ -560,7 +592,7 @@ it('forgets the scroll a refresh asked for when its read fails, so a later page 
     fireEvent.click(view.getByTestId('review-refresh'));
     // The comparison last read stays on screen, with the failure stated beside it.
     await view.findByTestId('review-failure', undefined);
-    expect(view.getByTestId('review-center-family').dataset.family).toBe(HBJ_ID);
+    expect(view.getByTestId('review-family-overview').dataset.family).toBe(HBJ_ID);
     world.answer = previous;
     // A page of the subject on screen is then read: an answer that is no selection and no refresh.
     // The scroll mechanics are collection-agnostic, so the surviving knowledge walk stands in

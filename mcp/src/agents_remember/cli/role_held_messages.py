@@ -52,16 +52,16 @@ from agents_remember.cli.paseo_launch import run_launch_call
 from agents_remember.cli.paseo_status import read_agent
 from agents_remember.cli.role_activity import publish_receipt_role_agent, resume_role_agent
 from agents_remember.cli.role_launch_receipts import (
-    EXECUTIONS_DIRECTORY,
     _read_receipt,
     _restore_launch_handover,
     _write_receipt,
 )
 from agents_remember.controlplane.held_store_discovery import (
-    ReceiptWalk as _CandidateWalk,
+    EXECUTIONS_DIRECTORY,
+    receipt_roots,
 )
 from agents_remember.controlplane.held_store_discovery import (
-    receipt_roots,
+    ReceiptWalk as _CandidateWalk,
 )
 from agents_remember.controlplane.held_store_layout import (
     MAX_HELD_PER_RECIPIENT,

@@ -142,10 +142,6 @@ OTHER_ATTRIBUTES_ALLOWED = {
 # A module name computed at run time cannot be checked, so each module that imports one is named.
 # None of them may spell a SQLite module's name in any string.
 COMPUTED_IMPORTS_ALLOWED = {
-    "canvas/proof_record.py": (
-        "hashes the running enforcement modules named by the policy's finite "
-        "ENFORCEMENT_SOURCES tuple; the name never comes from an author or a request"
-    ),
     "memory_quality/style/citations/grammars.py": (
         "loads the tree-sitter grammar package its own GRAMMAR_PACKAGES table names"
     ),
@@ -184,7 +180,7 @@ HELPER_CALLERS: dict[str, dict[str, str]] = {
     "open_read_only_database": {
         "memory/knowledge_index/query.py": "the index's reader opens the index file of one tree",
         "memory/knowledge/store.py": "the store's two opens of one derived index",
-        "memory/knowledge/logical.py": "the logical identity of one dataset file",
+        "memory/knowledge/dataset_identity_memo.py": "the memo identifies one dataset file by its index",
         "memory/knowledge/view_source.py": "the reader port reads the rows of one dataset file",
         "application/knowledge_read.py": "the mounted read of the dataset its request resolved",
         "application/knowledge_views.py": "the three query views over one index snapshot",

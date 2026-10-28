@@ -21,6 +21,10 @@ one place it can be read and refused:
 * **scope, omissions and counted populations travel with the claims** (:class:`EvidenceMap`): a
   count states its denominator, filters and limits, and unassessed items are never counted as passed.
 
+The packet holds the complete map and declares no read limits (MIK-R211 v4 rules 1-3). Prose,
+address and path fields carry no length bound (MIK-R211 v4, Q6): a detail that names every unread
+file is the answer and is never refused for its length. Identifiers and enum-like labels keep theirs.
+
 The packet is a value: it grants no write authority, starts nothing, and changes no comparison,
 judgment, gate or task record (rule 13).
 """
@@ -34,8 +38,6 @@ from pydantic import ConfigDict, Field, model_validator
 from agents_remember.models.knowledge.base import (
     GIT_OBJECT_PATTERN,
     LABEL_MAX_LENGTH,
-    PATH_MAX_LENGTH,
-    PROSE_MAX_LENGTH,
     REFERENCE_MAX_LENGTH,
     SHA256_PATTERN,
     KnowledgeModel,
@@ -155,9 +157,23 @@ OmissionKind = Literal[
     "partial-index",
     "truncated-read",
     "not-selected-collection",
+    # No producer writes this kind any more (MIK-R211 v4 rules 1-2: every collection carries every
+    # record); it stays so a packet stored before then still validates.
+    "bounded-collection",
 ]
 
 EvidenceSide = Literal["code-base", "code-candidate", "memory-base", "memory-candidate"]
+
+# The map's groups, in the priority the requirement gives them (highest first, MIK-R211 v2 rule 1):
+# the agreed plan, the changed invariants, the other changed files by folder, and the counts of what
+# is unchanged or not comparable. `EVIDENCE_GROUP_PRIORITY` is the order they are listed in, and its
+# reverse is the order they collapse in when the map is over its budget.
+EvidenceGroupKind = Literal["plan", "invariant", "folder", "counts"]
+EVIDENCE_GROUP_PRIORITY: tuple[str, ...] = ("plan", "invariant", "folder", "counts")
+
+# What one group counts: the addresses it holds of each kind.
+EvidenceItemKind = Literal["location", "proof", "history", "document"]
+_GROUP_COUNT_KEYS: frozenset[str] = frozenset({"locations", "proofs", "history", "documents"})
 KindOfBasis = Literal[
     "comparison-field",
     "tree-blob",
@@ -218,11 +234,11 @@ BasisKind = Literal[
 
 
 class EvidenceLimits(KnowledgeModel):
-    """The finite limits one packet and its reads declare (rule 4).
+    """The read limits a packet stored before MIK-R211 v4 declared; read, never written.
 
-    ``measurement`` is what keeps a new number from becoming an implementation default: rule 4 makes
-    an unmeasured limit an approval gap, and :attr:`approval_gap` is the field a consumer reads to
-    say so instead of presenting the bound as settled.
+    Reads answer in full and the packet holds the complete map (MIK-R211 v4 rules 1-3), so no
+    packet declares limits any more. A stored packet that carries them still validates, and nothing
+    reads these numbers as a bound or reports them as an approval gap.
     """
 
     bytes_per_read: int = Field(gt=0)
@@ -230,13 +246,10 @@ class EvidenceLimits(KnowledgeModel):
     records_per_collection: int = Field(gt=0)
     relationship_depth: int = Field(ge=0)
     pages_per_read: int = Field(gt=0)
+    # No size budget is declared: ruling 6085456d removed the map's one, and a declaration nothing
+    # enforces is a stale number the reader would take for a limit (the Manager measured it: a
+    # 536,465-byte packet still stating 102,400 with ``measurement: null``).
     measurement: EvidenceLimitMeasurement | None = None
-
-    @property
-    def approval_gap(self) -> bool:
-        """Whether these numbers are unmeasured and therefore still an approval gap."""
-
-        return self.measurement is None
 
 
 class EvidenceLimitMeasurement(KnowledgeModel):
@@ -267,12 +280,12 @@ class EvidenceCodeSide(KnowledgeModel):
     """One code side of the comparison as the comparison owner reports it."""
 
     side: Literal["base", "candidate"]
-    repository: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
+    repository: str = Field(min_length=1)
     tree: str = Field(pattern=GIT_OBJECT_PATTERN)
     commit: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
     ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     state: Literal["available", "unavailable-history"]
-    detail: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+    detail: str | None = None
 
     @model_validator(mode="after")
     def _unavailable_is_named(self) -> EvidenceCodeSide:
@@ -285,13 +298,13 @@ class EvidenceMemorySide(KnowledgeModel):
     """One memory side: its tree, its state and its derived index's state."""
 
     side: Literal["before", "after"]
-    repository: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
+    repository: str = Field(min_length=1)
     tree: str = Field(pattern=GIT_OBJECT_PATTERN)
     commit: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
     ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     state: Literal["available", "unavailable-history", "legacy-unavailable"]
     index_state: Literal["complete", "partial"] | None = None
-    detail: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+    detail: str | None = None
 
     @model_validator(mode="after")
     def _unread_side_is_named(self) -> EvidenceMemorySide:
@@ -368,7 +381,7 @@ class SupplementalReceipt(KnowledgeModel):
     """
 
     receipt_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    canonical_source: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
+    canonical_source: str = Field(min_length=1)
     producer: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     authority: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     digest: str | None = Field(default=None, pattern=SHA256_PATTERN)
@@ -376,8 +389,8 @@ class SupplementalReceipt(KnowledgeModel):
     read_state: Literal["present", "changed", "unavailable"]
     capture_identity: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     source_version: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    establishes: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    limitation: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+    establishes: str = Field(min_length=1)
+    limitation: str | None = None
     supplemental: Literal[True] = True
 
     @model_validator(mode="after")
@@ -400,10 +413,10 @@ class EvidenceCollection(KnowledgeModel):
 
     name: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     producer: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    population: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    population: str = Field(min_length=1)
     state: EvidenceState
     count: int | None = Field(default=None, ge=0)
-    reason: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+    reason: str | None = None
     items: tuple[dict[str, Any], ...] = ()
     truncated: bool = False
     continuation: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
@@ -424,6 +437,15 @@ class EvidenceCollection(KnowledgeModel):
             )
         if self.count is not None and len(self.items) > self.count:
             raise ValueError("a collection cannot carry more items than its stated count")
+        if (
+            self.count is not None
+            and len(self.items) < self.count
+            and not (self.limit or "").strip()
+        ):
+            raise ValueError(
+                "a collection that carries fewer items than its stated count names the bound that "
+                "cut them, so no bound cuts silently"
+            )
         if self.truncated and not self.state == "truncated":
             raise ValueError("a truncated collection says so in its state")
         if self.state == "truncated" and not self.continuation:
@@ -443,14 +465,14 @@ class ClaimBasis(KnowledgeModel):
     """
 
     kind: KindOfBasis
-    reference: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
+    reference: str = Field(min_length=1)
     state: EvidenceState
-    limitation: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+    limitation: str | None = None
     # The identity the reference is checked against.
     comparison_number: int | None = Field(default=None, ge=0)
     side: EvidenceSide | None = None
     tree: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
-    path: str | None = Field(default=None, max_length=PATH_MAX_LENGTH)
+    path: str | None = None
     start_line: int | None = Field(default=None, ge=1)
     end_line: int | None = Field(default=None, ge=1)
     record_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
@@ -516,11 +538,11 @@ class EvidenceClaim(KnowledgeModel):
     claim_id: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     authoring_revision: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     classification: ClaimClassification
-    subject: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    applicability: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    statement: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    subject: str = Field(min_length=1)
+    applicability: str = Field(min_length=1)
+    statement: str = Field(min_length=1)
     bases: tuple[ClaimBasis, ...] = ()
-    limit: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+    limit: str | None = None
 
     @model_validator(mode="after")
     def _classification_earns_its_bases(self) -> EvidenceClaim:
@@ -597,10 +619,10 @@ class ClaimMap(KnowledgeModel):
 class EvidenceOmission(KnowledgeModel):
     """One relevant thing the explanation does not cover, and what kind of gap it is (rule 10)."""
 
-    item: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    item: str = Field(min_length=1)
     kind: OmissionKind
-    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    witness: str | None = Field(default=None, max_length=PATH_MAX_LENGTH)
+    detail: str = Field(min_length=1)
+    witness: str | None = None
 
 
 class CoverageCount(KnowledgeModel):
@@ -614,9 +636,9 @@ class CoverageCount(KnowledgeModel):
     subject: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     counted: int = Field(ge=0)
     population: int = Field(ge=0)
-    denominator: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    denominator: str = Field(min_length=1)
     filters: tuple[str, ...] = ()
-    limits: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    limits: str = Field(min_length=1)
     unassessed: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
@@ -636,13 +658,131 @@ class EvidenceMap(KnowledgeModel):
     omissions: tuple[EvidenceOmission, ...] = ()
     counts: tuple[CoverageCount, ...] = ()
     edge_meanings: tuple[tuple[str, str], ...] = ()
-    coverage: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    coverage: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def _edge_meanings_are_distinct(self) -> EvidenceMap:
         names = [name for name, _meaning in self.edge_meanings]
         if len(names) != len(set(names)):
             raise ValueError("each graph edge meaning is named once")
+        return self
+
+
+class EvidenceGroupAddress(KnowledgeModel):
+    """The call that opens one group: the explainer's tool and its exact arguments (rule 1).
+
+    A group that does not fit the budget is one line naming its count and this call, so the detail a
+    collapsed group leaves out is always reachable by a named tool with named arguments, never by a
+    reader's guess at a path.
+    """
+
+    tool: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
+    # A tool's arguments are not always one string: `read_ar_files` takes a list of paths. The values
+    # are what the model serialises into the packet's JSON, so they stay JSON values.
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class EvidenceGroupItem(KnowledgeModel):
+    """One address inside a group: a location's path and range, a proof's id, a history row's file."""
+
+    kind: EvidenceItemKind
+    label: str = Field(min_length=1)
+    address: str = Field(min_length=1)
+    detail: str = ""
+
+
+class EvidenceGroup(KnowledgeModel):
+    """One group of the map: its name, its counts, the addresses that fit and the call for the rest.
+
+    ``count`` is the number of changed items in the group, and it holds whether or not the group
+    carries their addresses: a collapsed group keeps its count, its ``counts`` breakdown and its
+    ``address``, and loses only ``items``. So the map is complete -- every changed item is counted in
+    some group -- even where its detail is one line (rule 2).
+    """
+
+    name: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
+    kind: EvidenceGroupKind
+    count: int = Field(ge=0)
+    counts: dict[str, int] = Field(default_factory=dict)
+    items: tuple[EvidenceGroupItem, ...] = ()
+    limit: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
+    address: EvidenceGroupAddress | None = None
+    collapsed: bool = False
+
+    @model_validator(mode="after")
+    def _counts_and_items_agree(self) -> EvidenceGroup:
+        unknown = set(self.counts) - set(_GROUP_COUNT_KEYS)
+        if unknown:
+            raise ValueError(
+                f"a group counts only {sorted(_GROUP_COUNT_KEYS)}; got {sorted(unknown)}"
+            )
+        if self.counts and sum(self.counts.values()) != self.count:
+            raise ValueError(
+                f"group {self.name!r} counts {sum(self.counts.values())} item(s) but states a "
+                f"count of {self.count}"
+            )
+        if len(self.items) > self.count:
+            raise ValueError(f"group {self.name!r} carries more items than its stated count")
+        # A counts group states a population rather than carrying its items: it is the map's own
+        # line for what the comparison did not change, so it holds no addresses by construction.
+        if len(self.items) < self.count and self.kind != "counts":
+            if not (self.limit or "").strip():
+                raise ValueError(
+                    f"group {self.name!r} carries {len(self.items)} of {self.count} item(s) and "
+                    "does not name the budget or bound that cut them"
+                )
+            if self.address is None:
+                raise ValueError(
+                    f"group {self.name!r} is cut and does not name the call that reads the rest"
+                )
+        if self.collapsed and (self.items or self.address is None):
+            raise ValueError(
+                f"a collapsed group {self.name!r} carries no addresses of its own and names the "
+                "call that opens it"
+            )
+        return self
+
+
+class EvidenceGroupMap(KnowledgeModel):
+    """The packet's map: its groups in priority order, its one budget and what it states (rules 1-2).
+
+    ``measured_bytes`` is the map's own JSON, so the packet states the size it reached. There is no
+    ``budget_bytes``: ruling 6085456d's addendum stopped the map omitting for size, and a budget set
+    from the output it measures can never bind -- it only restates ``measured_bytes``.
+    ``total_items`` is every changed item the groups count, and it equals the sum of their counts:
+    the map is complete, and a collapsed group is a group whose detail was left to a call.
+    """
+
+    groups: tuple[EvidenceGroup, ...]
+    measured_bytes: int = Field(ge=0)
+    total_items: int = Field(ge=0)
+    collapsed: tuple[str, ...] = ()
+    # Set when the map is at its level-1 counts -- one line per kind, every group's addresses gone --
+    # and is still over its budget. It is a stated overrun, not a refusal: with any budget a reader
+    # would set, the level-1 counts fit, and a budget smaller than its own counts is a setting this
+    # packet reports rather than a build this packet blocks (rule 2's last clause).
+    fallback: bool = False
+
+    @model_validator(mode="after")
+    def _the_map_is_complete_and_within_its_budget(self) -> EvidenceGroupMap:
+        names = [group.name for group in self.groups]
+        if len(names) != len(set(names)):
+            raise ValueError("each group of the map is named once")
+        # The unchanged and not-comparable group states a population that is not a count of changed
+        # items, so it is not part of ``total_items``: the total is every *changed* item, and a
+        # changed item is never left out of a group.
+        total = sum(group.count for group in self.groups if group.kind != "counts")
+        if total != self.total_items:
+            raise ValueError(
+                f"the map states {self.total_items} changed item(s) but its groups count {total}: "
+                "every changed item is counted in some group"
+            )
+        marked = {group.name for group in self.groups if group.collapsed}
+        if set(self.collapsed) != marked:
+            raise ValueError(
+                "the map names exactly the groups it collapsed: "
+                f"named {sorted(self.collapsed)}, marked {sorted(marked)}"
+            )
         return self
 
 
@@ -653,13 +793,18 @@ class EvidencePacket(KnowledgeModel):
         default=EVIDENCE_PACKET_SCHEMA, alias="schema"
     )
     comparison: EvidenceComparisonBinding
-    scope: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    question: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    scope: str = Field(min_length=1)
+    question: str = Field(min_length=1)
     collections: tuple[EvidenceCollection, ...]
+    # The map: the bound comparison's changed items, grouped, counted and held to one budget (rule
+    # 1-2). Optional so a packet built before the map existed still reads; a packet that carries it
+    # carries the whole comparison in it, collapsed groups included.
+    map: EvidenceGroupMap | None = None
     supplemental: tuple[SupplementalReceipt, ...] = ()
     claims: ClaimMap = ClaimMap()
     evidence_map: EvidenceMap
-    limits: EvidenceLimits
+    # Legacy only: a packet stored before MIK-R211 v4 carries its old read limits, and still reads.
+    limits: EvidenceLimits | None = None
     limitations: tuple[str, ...] = ()
 
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
@@ -678,23 +823,15 @@ class EvidencePacket(KnowledgeModel):
         for collection in self.collections:
             if (
                 collection.count is not None
-                and collection.count > self.limits.records_per_collection
+                and len(collection.items) < collection.count
+                and not (collection.limit or "").strip()
             ):
                 raise ValueError(
-                    f"collection {collection.name!r} holds {collection.count} record(s), beyond the "
-                    f"admitted {self.limits.records_per_collection} per collection"
+                    f"collection {collection.name!r} carries {len(collection.items)} of "
+                    f"{collection.count} record(s) and does not name the bound that cut them"
                 )
-        paths = {
-            str(item["path"])
-            for collection in self.collections
-            for item in collection.items
-            if isinstance(item.get("path"), str)
-        } | {basis.path for claim in self.claims.claims for basis in claim.bases if basis.path}
-        if len(paths) > self.limits.paths_per_packet:
-            raise ValueError(
-                f"the packet names {len(paths)} distinct path(s), beyond the admitted "
-                f"{self.limits.paths_per_packet} per packet"
-            )
+        # Ruling 6085456d, addendum (c): the packet names as many distinct paths as its evidence
+        # holds. The count is still measured by the collections; it refuses nothing.
         _validate_supplemental_and_claims(self.supplemental, self.claims.claims)
         return self
 
@@ -744,8 +881,9 @@ def packet_errors(packet: EvidencePacket) -> tuple[str, ...]:
     """Everything this packet still owes a reader, as sentences (empty when it owes nothing).
 
     The models refuse the individual lies. These are the *cross-entry* ones: a collection left
-    silently out of the evidence map, an omission the map never names, and a limit presented as
-    settled while it is still an approval gap.
+    silently out of the evidence map, an omission the map never names, and an empty count that does
+    not say it was measured empty. A packet's stored read limits are not one of them: nothing reads
+    them as a bound (MIK-R211 v4 rule 3).
     """
 
     problems: list[str] = []
@@ -756,11 +894,15 @@ def packet_errors(packet: EvidencePacket) -> tuple[str, ...]:
                 f"collection {collection.name!r} is {collection.state} and the evidence map does "
                 "not name it as an omission"
             )
-    if packet.limits.approval_gap:
-        problems.append(
-            "the packet's read limits are unmeasured, so they remain an approval gap rather than "
-            "an admitted bound"
-        )
+        if (
+            collection.count is not None
+            and len(collection.items) < collection.count
+            and collection.name not in omitted
+        ):
+            problems.append(
+                f"collection {collection.name!r} carries {len(collection.items)} of "
+                f"{collection.count} record(s) and the evidence map does not name what it left out"
+            )
     for count in packet.evidence_map.counts:
         if count.population == 0 and count.counted == 0 and "empty" not in count.limits.lower():
             problems.append(

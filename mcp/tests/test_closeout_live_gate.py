@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -137,13 +138,13 @@ class CloseoutLiveGateTests(unittest.TestCase):
                 [row.model_dump() for row in read_closeout_queues(fixture.coord, now=when)],
             )
 
-    def test_tasks_tree_digest_moves_on_any_write(self) -> None:
+    def test_tasks_tree_digest_moves_on_input_write(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = QueueFixture(Path(tmp))
             tasks = fixture.coord / "tasks"
             before = tasks_tree_digest(tasks)
             self.assertIsNotNone(before)
-            probe = tasks / "probe-note.md"
+            probe = fixture.tasks / "sprint" / "new-leaf.json"
             probe.write_text("note\n", encoding="utf-8")
             try:
                 self.assertNotEqual(tasks_tree_digest(tasks), before)
@@ -352,6 +353,88 @@ class CloseoutLiveGateTests(unittest.TestCase):
                 git(contract.code_repo_path, "rm", "-q", "tip-advance.txt")
                 git(contract.code_repo_path, "commit", "-q", "-m", "restore the source line")
 
+    def test_an_unmoved_sprint_reads_its_census_once(self) -> None:
+        """Stat first: unchanged documents and contracts are not read again (F13, D569)."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = QueueFixture(Path(tmp))
+            fixture.declare(MASTER_A)
+            _, cache = refresh_closeout_queues(fixture.coord, now=datetime.now(UTC), cache=None)
+            sprint_ref = cache.queues[0].sprintRef
+            _settled(fixture.root)
+            with mock.patch.object(
+                queue_module, "_task_census", wraps=queue_module._task_census
+            ) as census:
+                first = sprint_live_fingerprint(fixture.coord, sprint_ref, cache.overrides)
+                second = sprint_live_fingerprint(fixture.coord, sprint_ref, cache.overrides)
+            self.assertIsNotNone(first)
+            self.assertEqual(second, first)
+            self.assertEqual(census.call_count, 1)
+
+    def test_every_moved_input_recounts_and_a_code_edit_still_recomputes(self) -> None:
+        """The gate is not a stub: a moved document or contract reads the census again, and an
+        edit under the worktree still moves the fingerprint and recomputes its sprint."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = QueueFixture(Path(tmp))
+            fixture.declare(MASTER_A)
+            now = datetime.now(UTC)
+            queues, cache = refresh_closeout_queues(fixture.coord, now=now, cache=None)
+            sprint_ref = cache.queues[0].sprintRef
+            census = queue_module._task_census(fixture.coord, sprint_ref, [], cache.overrides)
+            leaf_document = census.leafs[0][0].path
+            contract = fixture.contracts[MASTER_A].contract_path
+            for moved in (leaf_document, contract):
+                with self.subTest(moved=moved.name):
+                    _settled(fixture.root)
+                    held = sprint_live_fingerprint(fixture.coord, sprint_ref, cache.overrides)
+                    moved.write_bytes(moved.read_bytes())  # the same bytes, a new write
+                    with mock.patch.object(
+                        queue_module, "_task_census", wraps=queue_module._task_census
+                    ) as recount:
+                        again = sprint_live_fingerprint(fixture.coord, sprint_ref, cache.overrides)
+                    self.assertEqual(recount.call_count, 1, "a moved input reads the census again")
+                    self.assertEqual(again, held)
+            _settled(fixture.root)
+            held = sprint_live_fingerprint(fixture.coord, sprint_ref, cache.overrides)
+            self._write_code_file(fixture)
+            with mock.patch.object(
+                queue_module, "_task_census", wraps=queue_module._task_census
+            ) as unread:
+                edited = sprint_live_fingerprint(fixture.coord, sprint_ref, cache.overrides)
+            self.assertEqual(unread.call_count, 0, "the documents did not move")
+            self.assertIsNotNone(edited)
+            self.assertNotEqual(edited, held, "the held census still reads the live inputs")
+            with mock.patch.object(
+                queue_module, "_project_queue", wraps=queue_module._project_queue
+            ) as projected:
+                reread, _ = refresh_closeout_queues(fixture.coord, now=now, cache=cache)
+            self.assertEqual(projected.call_count, 1, "the edited sprint recomputes")
+            self.assertIsNot(reread[0], queues[0])
+
+    def test_an_input_written_just_before_its_read_is_never_held(self) -> None:
+        """A write that may land while the census reads leaves nothing held (racy, as Git's).
+
+        Building the fixture takes seconds, so its files are older than the racy window by the
+        time they are read; the window is widened instead, making every input a recent write.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = QueueFixture(Path(tmp))
+            fixture.declare(MASTER_A)
+            _, cache = refresh_closeout_queues(fixture.coord, now=datetime.now(UTC), cache=None)
+            sprint_ref = cache.queues[0].sprintRef
+            queue_module._held_door_sources.clear()
+            with (
+                mock.patch.object(queue_module, "_RACY_NS", 10**18),
+                mock.patch.object(
+                    queue_module, "_task_census", wraps=queue_module._task_census
+                ) as census,
+            ):
+                sprint_live_fingerprint(fixture.coord, sprint_ref, cache.overrides)
+                sprint_live_fingerprint(fixture.coord, sprint_ref, cache.overrides)
+            self.assertEqual(census.call_count, 2)
+
     def _write_code_file(self, fixture: QueueFixture) -> Path:
         """An unstaged edit under the sprint's code worktree (real dirs or fresh init)."""
 
@@ -433,3 +516,12 @@ class CloseoutLiveGateTests(unittest.TestCase):
                 }
             ),
         )
+
+
+def _settled(root: Path) -> None:
+    """Every fixture file last written well before the next read (past the racy margin)."""
+
+    settled = time.time() - 10
+    for directory, _dirs, files in os.walk(root):
+        for name in (*files, ""):
+            os.utime(Path(directory) / name, (settled, settled), follow_symlinks=False)

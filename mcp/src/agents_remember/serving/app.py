@@ -27,6 +27,7 @@ at their defaults; ``cli.dashboard`` passes a replay clock + fixture feeder unde
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -51,11 +52,8 @@ from agents_remember.serving.build_info import process_serving_build
 from agents_remember.serving.canvas import canvas_hosts, register_canvas_routes
 from agents_remember.serving.change_watcher import ProjectionInputWatcher
 from agents_remember.serving.changeset import register_changeset_routes
-from agents_remember.serving.explainer import (
-    ExplainerWiring,
-    explainer_composition,
-    register_explainer_routes,
-)
+from agents_remember.serving.explainer import ExplainerWiring, explainer_composition
+from agents_remember.serving.explainer_routes import register_explainer_routes
 from agents_remember.serving.files import register_files_routes
 from agents_remember.serving.knowledge_reader import register_knowledge_reader_route
 from agents_remember.serving.notes import register_notes_routes
@@ -70,8 +68,13 @@ from agents_remember.serving.projector import (
 )
 from agents_remember.serving.requirements import register_requirements_routes
 from agents_remember.serving.review import register_review_routes
+from agents_remember.serving.review_open_observation import install_review_open
 from agents_remember.serving.review_summary import register_review_summary_route
-from agents_remember.serving.review_trees import register_review_trees_route
+from agents_remember.serving.review_trees import (
+    register_review_detail_order_route,
+    register_review_invariant_changes_route,
+    register_review_trees_route,
+)
 from agents_remember.serving.static import mount_static
 from agents_remember.serving.write_guard import RefuseCrossOriginWrites, RefuseForeignHosts
 
@@ -131,6 +134,7 @@ def _build_serving_runtime(
         interval=cadence.interval,
         review_memory_root=collaborators.review_memory_root,
         review_trees_shutdown=collaborators.review_trees_shutdown,
+        launcher_catalog_prepare=collaborators.launcher_catalog_prepare,
         background_ledger=ledger,
         usage_read=collaborators.usage_read,
         explainer_application=collaborators.explainer_application,
@@ -204,7 +208,6 @@ def create_app(
     )
     app = FastAPI(
         title="Agents Remember dashboard",
-        lifespan=_serving_lifespan(runtime, metrics_store),
     )
     # Gzip the multi-hundred-KB JSON bodies (/api/state ~1.3 MB, the files
     # catalog) for the clients that negotiate it. compresslevel=6: on a ~1.3 MB JSON body it
@@ -216,6 +219,12 @@ def create_app(
     _register_action_routes(app, runtime)
     register_files_routes(app, config)
     changeset_cache = register_changeset_routes(app, config)
+    preparation = changeset_cache.master_preparation
+    if preparation is not None:
+        preparation.bind_ledger(runtime.background_ledger)
+        runtime.projector.bind_series_changed(preparation.offer_master)
+    runtime = replace(runtime, master_preparation=preparation)
+    app.router.lifespan_context = _serving_lifespan(runtime, metrics_store)
     register_notes_routes(app, config)
     register_requirements_routes(app, config)
     register_review_routes(
@@ -227,6 +236,10 @@ def create_app(
     )
     register_review_summary_route(app, collaborators.review_intent_summary, changeset_cache)
     register_review_trees_route(app, collaborators.review_trees)
+    register_review_invariant_changes_route(app, collaborators.review_invariant_changes)
+    register_review_detail_order_route(app, collaborators.review_detail_order)
+    # One observation per open of the review page, shared by that open's reads (D569).
+    install_review_open(app)
     register_knowledge_reader_route(app, collaborators.knowledge_reader)
     if collaborators.extra_api_routes is not None:
         collaborators.extra_api_routes(app)
@@ -250,10 +263,13 @@ def create_app(
                 None
                 if collaborators.explainer_host is None
                 or collaborators.explainer_application is None
+                or collaborators.explainer_preparation is None
                 else ExplainerWiring(
                     host=collaborators.explainer_host,
                     application=collaborators.explainer_application,
+                    comparison_prepare=collaborators.explainer_preparation,
                     contract_for=collaborators.explainer_contract_for,
+                    stale_answers=collaborators.explainer_stale_answers,
                 )
             ),
         ),

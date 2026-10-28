@@ -19,6 +19,7 @@ from agents_remember.worktrees.modules.git import (
     head_commit,
     worktree_candidate_tree,
 )
+from agents_remember.worktrees.modules.kept_capture import kept_candidate_tree
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -32,8 +33,14 @@ class FutureCodeCandidateIdentity(BaseModel):
     codeCandidateTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")
 
 
-def capture_future_code_candidate(contract: WorktreeContract) -> FutureCodeCandidateIdentity:
-    """Derive the full add-all leaf tree without mutating its real Git index."""
+def capture_future_code_candidate(
+    contract: WorktreeContract, *, kept: bool = False
+) -> FutureCodeCandidateIdentity:
+    """Derive the full add-all leaf tree without mutating its real Git index.
+
+    ``kept`` captures through the worktree's kept index (:mod:`.kept_capture`): the same tree,
+    with only the paths that moved since the last capture written. A review read asks for it.
+    """
 
     if contract.kind != "leaf":
         raise FutureCodeCandidateError(
@@ -49,7 +56,7 @@ def capture_future_code_candidate(contract: WorktreeContract) -> FutureCodeCandi
     try:
         observed_head = head_commit(contract.code_worktree)
         before = begin_capture_baseline(contract.code_worktree)
-        candidate_tree = _candidate_tree(contract, observe)
+        candidate_tree = _candidate_tree(contract, observe, kept=observed_head if kept else None)
         if head_commit(contract.code_worktree) != observed_head:
             raise FutureCodeCandidateError(
                 "future-code-candidate-head-moved",
@@ -93,8 +100,16 @@ def require_current_future_code_candidate(
 
 
 def _candidate_tree(
-    contract: WorktreeContract, captured: Callable[[Path], None] | None = None
+    contract: WorktreeContract,
+    captured: Callable[[Path], None] | None = None,
+    *,
+    kept: str | None = None,
 ) -> str:
+    """The add-all tree; through the worktree's kept index when ``kept`` names the observed head."""
+    if kept is not None:
+        return kept_candidate_tree(
+            contract.coordination_root, contract.code_worktree, head=kept, captured=captured
+        )
     # The scratch index lives in the system temporary directory, never in the worktree group:
     # a read creates no directory except to hold a file of MIK-R74 rule 6 (a) to (c), and this
     # capture is none of those until a comparison records it.

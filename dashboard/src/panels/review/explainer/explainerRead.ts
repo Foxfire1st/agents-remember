@@ -10,10 +10,11 @@
  * never an empty page.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   subscribeReviewExplainerMoved,
+  subscribeReviewPublication,
   type ReviewExplainerMovedEvent,
 } from '../../../data/reviewMemoryWatch';
 import type { ReviewEntry } from '../../../data/review';
@@ -31,6 +32,7 @@ import type { ReviewSelection } from '../reviewSelection';
 import {
   ExplainerRefusal,
   readExplainerRevisions,
+  readExplainerStale,
   readExplainerState,
   readPlannedReview,
   refusalInfo,
@@ -40,11 +42,12 @@ import {
   type BindingOwner,
   type ClaimLink,
   type ExplainerRevisions,
+  type ExplainerStaleBadge,
   type ExplainerState,
   type ExplainerStateQuery,
   type ExplainerTarget,
+  type ExplainerMoved,
   type ExplainerUpdate,
-  type MovedNoticeData,
   type RefusalInfo,
 } from './explainerApi';
 import type { PlannedPage } from './planned/plannedPage';
@@ -130,31 +133,23 @@ function numOrNull(value: unknown): number | null {
   return typeof value === 'number' ? value : null;
 }
 
-function attachMovedStrings(result: MovedNoticeData, event: ReviewExplainerMovedEvent) {
-  if (event.kind === 'master-moved' || event.kind === 'comparison-moved') result.kind = event.kind;
+/** The newer comparison a stream event names, for the top line's badge (F18); null once cleared. */
+function movedFromEvent(event: ReviewExplainerMovedEvent): ExplainerMoved | null {
+  if (isClearedMoveEvent(event)) return null;
+  const result: ExplainerMoved = {
+    from: numOrNull(event.from),
+    to: numOrNull(event.to),
+    blocks: numOrNull(event.blocksChanged) ?? numOrNull(event.blocks) ?? 0,
+  };
   if (typeof event.commitFrom === 'string') result.commitFrom = event.commitFrom;
   if (typeof event.commitTo === 'string') result.commitTo = event.commitTo;
   if (typeof event.text === 'string') result.text = event.text;
-}
-
-function movedFromEvent(event: ReviewExplainerMovedEvent): MovedNoticeData | null {
-  if (isClearedMoveEvent(event)) return null;
-  const blocksChanged = numOrNull(event.blocksChanged) ?? undefined;
-  const blocks = blocksChanged ?? numOrNull(event.blocks) ?? 0;
-  const result: MovedNoticeData = {
-    from: numOrNull(event.from),
-    to: numOrNull(event.to),
-    blocks,
-  };
-  if (blocksChanged !== undefined) result.blocksChanged = blocksChanged;
-  if (typeof event.updateOffered === 'boolean') result.updateOffered = event.updateOffered;
-  attachMovedStrings(result, event);
   return result;
 }
 
 function applyMovedToState(
   previous: ExplainerState | null,
-  nextMoved: MovedNoticeData | null,
+  nextMoved: ExplainerMoved | null,
 ): ExplainerState | null {
   if (!previous) {
     if (!nextMoved) return previous;
@@ -176,6 +171,17 @@ function applyMovedToState(
   return { ...previous, moved: nextMoved };
 }
 
+// The comparison a read asks about. The host reads a numbered comparison by its number and owner
+// alone (`_query_int(request, "comparisonNumber", "comparison")`), so once the number is known the
+// reference is left off the read: the page learns the same comparison's reference later (from the
+// subject's payload), and that must not make it ask the same answer a second time (D569).
+function readComparison(
+  comparison: string | undefined,
+  comparisonNumber: number | undefined,
+): string | undefined {
+  return comparisonNumber === undefined ? comparison : undefined;
+}
+
 function buildStateQuery(query: ExplainerStateQuery): ExplainerStateQuery | undefined {
   const { revision, comparison, comparisonNumber, comparisonOwner } = query;
   const hasAny =
@@ -186,24 +192,60 @@ function buildStateQuery(query: ExplainerStateQuery): ExplainerStateQuery | unde
   return hasAny ? { revision, comparison, comparisonNumber, comparisonOwner } : undefined;
 }
 
-/** The two reads, dropped if the view unmounts or a newer read starts. */
+function joinedExplainerRead(perform: (signal: AbortSignal) => Promise<void>) {
+  let inFlight: Promise<void> | null = null;
+  let again = false;
+  let active = true;
+  let controller: AbortController | null = null;
+  const run = (): Promise<void> => {
+    if (inFlight) { again = true; return inFlight; }
+    inFlight = (async () => {
+      do {
+        again = false;
+        const aborter = new AbortController();
+        controller = aborter;
+        try { await perform(aborter.signal); }
+        finally {
+          aborter.abort();
+          if (controller === aborter) controller = null;
+        }
+      } while (again && active);
+    })().finally(() => { inFlight = null; });
+    return inFlight;
+  };
+  return Object.assign(run, {
+    activate: () => { active = true; },
+    cancel: () => { active = false; again = false; controller?.abort(); },
+  });
+}
+
+/** Joined reads abort on unmount or selection change; publication earns one trailing read. */
 function useExplainerAnswer(
   target: ExplainerTarget,
   query: ExplainerStateQuery,
   enabled: boolean,
+  watchWhileDisabled: boolean,
 ) {
   const { repository, master, leaf } = target;
-  const { revision, comparison, comparisonNumber, comparisonOwner } = query;
+  const { revision, comparisonNumber, comparisonOwner } = query;
+  const comparison = readComparison(query.comparison ?? undefined, comparisonNumber ?? undefined);
   const [state, setState] = useState<ExplainerState | null>(null);
   const [revisions, setRevisions] = useState<ExplainerRevisions | null>(null);
   const [problem, setProblem] = useState<RefusalInfo | null>(null);
   const [phase, setPhase] = useState<'reading' | 'idle'>('reading');
   const live = useRef(true);
   const sequence = useRef(0);
+  // F17: a publication of this leaf's explainer is worth one read even when the column's own read is
+  // disabled. Measured before the fix: the review page's six /api/stream connections between 16:41Z
+  // and 17:17Z carried no `publication` parameter at all, so the server never opened its publication
+  // watcher and `review.explainer.changed` was never sent -- a new revision could not be seen without
+  // a manual reload, while the backend process (pid 2649395) never restarted.
+  const forced = useRef(false);
 
-  const read = useCallback(async () => {
-    if (!enabled) return;
+  const read = useMemo(() => joinedExplainerRead(async (signal) => {
+    if ((!enabled && !forced.current) || signal.aborted) return;
     const token = (sequence.current += 1);
+    const current = () => !signal.aborted && isCurrent(live, token, sequence.current);
     setPhase('reading');
     const stateQuery = buildStateQuery({
       revision,
@@ -213,36 +255,60 @@ function useExplainerAnswer(
     });
     try {
       const [nextState, nextRevisions] = await Promise.all([
-        readExplainerState({ repository, master, leaf }, stateQuery),
-        readExplainerRevisions({ repository, master, leaf }),
+        readExplainerState({ repository, master, leaf }, stateQuery, signal),
+        readExplainerRevisions({ repository, master, leaf }, signal),
       ]);
-      if (!isCurrent(live, token, sequence.current)) return;
+      if (!current()) return;
       setState(nextState);
       setRevisions(nextRevisions);
       setProblem(problemOfState(nextState));
     } catch (error) {
-      if (!isCurrent(live, token, sequence.current)) return;
+      if (!current()) return;
       setProblem(problemOfError(error));
     } finally {
-      if (isCurrent(live, token, sequence.current)) setPhase('idle');
+      forced.current = false;
+      if (current()) setPhase('idle');
     }
-  }, [repository, master, leaf, revision, comparison, comparisonNumber, comparisonOwner, enabled]);
+  }), [repository, master, leaf, revision, comparison, comparisonNumber, comparisonOwner, enabled]);
 
   useEffect(() => {
     live.current = true;
+    read.activate();
     void read();
     return () => {
       live.current = false;
+      read.cancel();
       sequence.current += 1;
     };
   }, [read]);
+
+  // The subscriptions hold the leaf only and call the latest read: re-subscribing whenever the read's
+  // inputs change would move the stream's review scope, and every move reopens the stream.
+  const latestRead = useRef(read);
+  latestRead.current = read;
+  const watching = useRef(enabled || watchWhileDisabled);
+  watching.current = enabled || watchWhileDisabled;
 
   useEffect(() => {
     if (!enabled) return undefined;
     return subscribeReviewExplainerMoved({ repo: repository, master, leaf }, (event) => {
       setState((previous) => applyMovedToState(previous, movedFromEvent(event)));
+      if (event.cleared) void latestRead.current();
     });
   }, [repository, master, leaf, enabled]);
+
+  useEffect(() => {
+    // F17: the subscription is never gated on `enabled`. A mounted review surface watches this
+    // leaf's publications even while its own read is off; the callback forces one read, which is what
+    // makes a newly published revision appear on an open page without a reload. A reader whose
+    // publication is followed by another read on the page (the Review tab's badge, a view handed the
+    // surface's read) opts out of the forced read: subscribed, so the stream carries the leaf, but
+    // asking nothing until its own read is enabled.
+    return subscribeReviewPublication({ repo: repository, master, leaf },
+      () => { if (!watching.current) return; forced.current = true; void latestRead.current(); },
+      (detail) => { setProblem({ reason: 'publication-watch-failed', detail }); },
+    );
+  }, [repository, master, leaf]);
 
   const clearMoved = useCallback(() => {
     setState((previous) => (previous ? { ...previous, moved: null } : previous));
@@ -387,6 +453,7 @@ export function useExplainer(
   comparison?: ExplainerComparisonInput,
   enabled = true,
   revision?: number | null,
+  options: { watchWhileDisabled?: boolean } = {},
 ): ExplainerRead {
   const normalized = normalizeComparison(comparison);
   const answer = useExplainerAnswer(
@@ -398,6 +465,7 @@ export function useExplainer(
       comparisonOwner: normalized.comparisonOwner,
     },
     enabled,
+    options.watchWhileDisabled ?? true,
   );
   const presses = useExplainerPresses(
     target,
@@ -414,6 +482,107 @@ export function useExplainer(
     refresh: answer.read,
     ...presses,
   };
+}
+
+export interface ExplainerBadgeRead {
+  /** The last `/stale` answer for the comparison on screen; null before the first one. */
+  badge: ExplainerStaleBadge | null;
+  /** The read itself failed: the badge claims nothing. */
+  problem: RefusalInfo | null;
+  /** Whether a `/stale` read has answered or failed yet; a notice applied before it is no answer. */
+  settled: boolean;
+  refresh: () => Promise<void>;
+}
+
+function movedIntoBadge(
+  previous: ExplainerStaleBadge | null,
+  moved: ExplainerMoved | null,
+): ExplainerStaleBadge | null {
+  if (previous) return { ...previous, moved };
+  return moved
+    ? { state: 'ok', stale: null, explanation: null, moved, building: null, retired: false }
+    : previous;
+}
+
+/**
+ * The top bar's badge on the Review tab (F18): one `/stale` read for the comparison on screen,
+ * renewed by this leaf's publication (F17) and a cleared notice, with a moved notice applied as it
+ * arrives. It reads no seat, no part map and no revision list: those are the Explanation tab's, and
+ * are read when that tab opens.
+ */
+export function useExplainerBadge(
+  target: ExplainerTarget,
+  comparison: ExplainerComparisonInput,
+  enabled: boolean,
+): ExplainerBadgeRead {
+  const { repository, master, leaf } = target;
+  const normalized = normalizeComparison(comparison);
+  const { comparisonNumber, comparisonOwner } = normalized;
+  const reference = readComparison(normalized.comparison, comparisonNumber);
+  const [badge, setBadge] = useState<ExplainerStaleBadge | null>(null);
+  const [problem, setProblem] = useState<RefusalInfo | null>(null);
+  const [settled, setSettled] = useState(false);
+  const live = useRef(true);
+  const sequence = useRef(0);
+
+  const read = useMemo(
+    () =>
+      joinedExplainerRead(async (signal) => {
+        if (!enabled || signal.aborted) return;
+        const token = (sequence.current += 1);
+        const current = () => !signal.aborted && isCurrent(live, token, sequence.current);
+        const query = buildStateQuery({ comparison: reference, comparisonNumber, comparisonOwner });
+        try {
+          const next = await readExplainerStale({ repository, master, leaf }, query, signal);
+          if (!current()) return;
+          setBadge(next);
+          setProblem(null);
+          setSettled(true);
+        } catch (error) {
+          if (!current()) return;
+          setProblem(problemOfError(error));
+          setSettled(true);
+        }
+      }),
+    [repository, master, leaf, reference, comparisonNumber, comparisonOwner, enabled],
+  );
+
+  useEffect(() => {
+    live.current = true;
+    read.activate();
+    void read();
+    return () => {
+      live.current = false;
+      read.cancel();
+      sequence.current += 1;
+    };
+  }, [read]);
+
+  const latestRead = useRef(read);
+  latestRead.current = read;
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    return subscribeReviewExplainerMoved({ repo: repository, master, leaf }, (event) => {
+      setBadge((previous) => movedIntoBadge(previous, movedFromEvent(event)));
+      if (event.cleared) void latestRead.current();
+    });
+  }, [repository, master, leaf, enabled]);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    return subscribeReviewPublication(
+      { repo: repository, master, leaf },
+      () => {
+        void latestRead.current();
+      },
+      (detail) => {
+        setProblem({ reason: 'publication-watch-failed', detail });
+      },
+    );
+  }, [repository, master, leaf, enabled]);
+
+  return { badge, problem, settled, refresh: read };
 }
 
 /** The refusal a view shows: the host's own `limit` on the saved state, else the last press's. */

@@ -15,8 +15,9 @@ the run is ``incomplete``, naming every file that failed.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
+from typing import Any
 
 from agents_remember.memory.knowledge_index import (
     MemoryTreeSnapshot,
@@ -58,6 +59,9 @@ class KnowledgeSide:
     converted: bool
     parsed: ParsedTree
     files: Mapping[str, bytes]
+    whole: bool = False
+    """Whether this side is the whole parse of the tree ``key`` names (:meth:`from_snapshot`), so a
+    fact computed from it is a function of ``key`` alone."""
 
     @classmethod
     def from_snapshot(cls, label: str, snapshot: MemoryTreeSnapshot) -> KnowledgeSide:
@@ -70,6 +74,7 @@ class KnowledgeSide:
             converted=parsed.layout is not None,
             parsed=parsed,
             files=snapshot.files,
+            whole=True,
         )
 
     @classmethod
@@ -78,7 +83,8 @@ class KnowledgeSide:
 
         files = with_prose_companions(tree.files)
         snapshot = MemoryTreeSnapshot(key=key, source="git", location=tree.label, files=files)
-        return cls.from_snapshot(label, snapshot)
+        # The caller names the key: these files are not known to be the whole tree it names.
+        return replace(cls.from_snapshot(label, snapshot), whole=False)
 
     @cached_property
     def invariants(self) -> dict[str, InvariantRecord]:
@@ -148,6 +154,22 @@ class KnowledgeSide:
 
     def history(self, owner_id: str) -> HistoryFile | None:
         return self.parsed.histories.get(owner_id)
+
+    @cached_property
+    def route_chains(self) -> dict[str, tuple[tuple[str, Any, tuple[str, ...]], ...]]:
+        """Each path's mechanical route chain on this side, as it was first walked (D569).
+
+        :func:`~.route_context.route_chain` fills it: a chain is a function of this side's parsed
+        records and the path, so one walk per path serves every item that names the path.
+        """
+
+        return {}
+
+    @cached_property
+    def chain_records(self) -> dict[str, Any]:
+        """The route chain's record answers on this side, by record ID, as first asked (D569)."""
+
+        return {}
 
     @cached_property
     def linked_from(self) -> dict[str, tuple[str, ...]]:

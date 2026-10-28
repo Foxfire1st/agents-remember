@@ -57,11 +57,13 @@ describe("the page's card read", () => {
   it('sends no second request when the same set remounts through pending and answer', async () => {
     const { calls, resolve } = serveDeferred();
     const first = cardsOf(['INV-B', 'INV-A']);
-    expect(first.result.current).toEqual({ phase: 'loading' });
+    await act(async () => {});
+    expect(first.result.current).toMatchObject({ phase: 'cards', coverage: { loaded: [], pending: ['INV-B', 'INV-A'] } });
     expect(calls).toEqual(['INV-A,INV-B']);
     first.unmount();
     const second = cardsOf(['INV-A', 'INV-B']);
-    expect(second.result.current).toEqual({ phase: 'loading' });
+    await act(async () => {});
+    expect(second.result.current).toMatchObject({ phase: 'cards', coverage: { loaded: [], pending: ['INV-A', 'INV-B'] } });
     expect(calls).toEqual(['INV-A,INV-B']);
     await act(async () => {
       resolve(treesBody('first'));
@@ -78,6 +80,7 @@ describe("the page's card read", () => {
     const { calls, resolve } = serveDeferred();
     const wanted = Array.from({ length: CARD_CHUNK * 2 + 1 }, (_, index) => `INV-${String(index).padStart(4, '0')}`);
     const mounted = cardsOf(wanted);
+    await act(async () => {});
     expect(calls.map((call) => call.split(',').length)).toEqual([CARD_CHUNK, CARD_CHUNK, 1]);
     await act(async () => {
       resolve(treesBody('chunks'));
@@ -85,7 +88,7 @@ describe("the page's card read", () => {
     await waitFor(() => expect(mounted.result.current).toEqual(expect.objectContaining({ phase: 'cards' })));
   });
 
-  it('never shows an old answer under a new question', async () => {
+  it('keeps visited locations without calling a new selection answered', async () => {
     const { calls, resolve } = serveDeferred();
     const rendered = cardsOf(['INV-A']);
     await act(async () => {
@@ -93,7 +96,8 @@ describe("the page's card read", () => {
     });
     await waitFor(() => expect(rendered.result.current).toEqual(expect.objectContaining({ phase: 'cards' })));
     rendered.rerender({ wanted: ['INV-B'] });
-    expect(rendered.result.current).toEqual({ phase: 'loading' });
+    expect(rendered.result.current).toMatchObject({ coverage: { loaded: ['INV-A'], pending: ['INV-B'] } });
+    await act(async () => {});
     expect(calls).toEqual(['INV-A', 'INV-B']);
   });
 
@@ -107,7 +111,7 @@ describe("the page's card read", () => {
       }),
     );
     const first = cardsOf(['INV-A']);
-    await waitFor(() => expect(first.result.current).toEqual(expect.objectContaining({ phase: 'unavailable' })));
+    await waitFor(() => expect(first.result.current).toMatchObject({ coverage: { failures: { 'INV-A': expect.any(String) } } }));
     first.unmount();
     cardsOf(['INV-A']);
     await waitFor(() => expect(calls).toEqual(['INV-A', 'INV-A']));

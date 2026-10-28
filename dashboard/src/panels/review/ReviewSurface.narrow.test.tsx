@@ -248,22 +248,22 @@ describe("ReviewSurface narrow-width shape (B7, round 3; layout B)", () => {
   // MIK-R89 v2 rules 1 and 11, evidence 15. A wheel or a touch moves the nearest scroll container
   // that can scroll its way; an `overflow: hidden` one moves only by script. So the stacked page
   // needs one `auto` scroller, and nothing between it and the column may scroll on its own.
-  it("makes the review's main the stacked page's one scroller, under the column's sticky head", async () => {
+  it("keeps the toolbar outside the column and the stacked page on one scroller", async () => {
     const surface = await mount(true);
     const main = surface.closest("main")!;
-    const head = surface.querySelector<HTMLElement>("[data-reading-head]")!;
+    const head = surface.querySelector<HTMLElement>("[data-testid=\"review-top-line\"]")!;
+    expect(surface.querySelector("[data-reading-head]")).toBeNull();
     const column = surface.querySelector<HTMLElement>("[data-review-scroller]")!;
     expect(main.dataset.view).toBe("intent-review");
     // At 40rem and narrower: the head's first scroll container is the main, which the reader moves
-    // up and down and never sideways. The column clips sideways without becoming a scroller, so the
-    // head sticks to the top of the screen while the column passes under it.
+    // up and down and never sideways. The column clips sideways without becoming a second scroller.
     expect(scrollers(head, true)[0]).toBe(main);
     expect(overflowOf(main, true)).toEqual({ x: "hidden", y: "auto", scrolls: true });
     expect(overflowOf(column, true)).toEqual({ x: "clip", y: "visible", scrolls: false });
     for (let node: HTMLElement | null = head; node && node !== main; node = node.parentElement)
       expect([node.style.overflow, node.style.overflowX, node.style.overflowY].join("")).toBe("");
     // Above 40rem nothing moves: the column is the page scroller and the main stays still.
-    expect(scrollers(head, false)[0]).toBe(column);
+    expect(scrollers(head, false)).not.toContain(column);
     expect(overflowOf(column, false)).toEqual({ x: "hidden", y: "auto", scrolls: true });
     expect(overflowOf(main, false)).toEqual({ x: "hidden", y: "hidden", scrolls: true });
   });

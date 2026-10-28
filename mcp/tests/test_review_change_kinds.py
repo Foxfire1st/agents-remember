@@ -851,6 +851,34 @@ def test_leaf_facts_equal_every_walked_family_without_reading_rosters(tmp_path, 
             )
 
 
+def test_leaf_facts_reuse_entries_without_loading_full_invariants(tmp_path, monkeypatch):
+    world = build_world(tmp_path)
+    cases = []
+    for orphan in (False, True):
+        if orphan:
+            (world.memory_worktree / "knowledge" / "invariants" / f"{E}-{E.lower()}.json").unlink()
+        trees = _resolve(world).trees
+        assert trees is not None
+        expected = code_changes(trees)
+        assert expected.state == "facts"
+        assert next(f for f in expected.invariants if f.invariant == E).implementation == (
+            "not_established"
+        )
+        cases.append((trees, expected))
+
+    def unrelated_read(*_args):
+        pytest.fail("leaf implementation facts must not load invariant records, history or links")
+
+    monkeypatch.setattr(KnowledgeIndex, "invariant", unrelated_read)
+    for trees, expected in cases:
+        assert code_changes(trees) == expected
+
+    (world.memory_worktree / "onboarding" / "pkg" / "b.py.json").write_text("{")
+    trees = _resolve(world).trees
+    assert trees is not None
+    assert code_changes(trees).state == "unavailable"
+
+
 def test_unreadable_code_facts_are_unavailable_not_empty(tmp_path):
 
     world = build_world(tmp_path)

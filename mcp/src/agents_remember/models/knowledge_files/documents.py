@@ -199,7 +199,12 @@ def owner_history_attempt(path: str, owner_id: str) -> int | None:
 def parse_history_document(path: str, text: str) -> HistoryFile:
     """Parse the history file at ``path``, refusing one not named ``history_path(<its owner>)``."""
 
-    document = parse_document_text(text)
+    return history_document(path, parse_document_text(text))
+
+
+def history_document(path: str, document: FileModel) -> HistoryFile:
+    """``document``, parsed from the file at ``path``, as the history file it must be there."""
+
     if not isinstance(document, HistoryFile):
         raise ValueError(f"{path} is not an {HISTORY_SCHEMA} document")
     expected = history_path(document.owner_id, document.attempt)

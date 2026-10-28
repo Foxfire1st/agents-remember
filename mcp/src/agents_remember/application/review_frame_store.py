@@ -44,10 +44,7 @@ from typing import Any
 
 from agents_remember.application.review_evidence_adapter import require_intended_packet
 from agents_remember.application.review_evidence_packet import comparison_reference
-from agents_remember.application.review_frame_read import (
-    read_frame_bytes,
-    validate_asset_read_bounds,
-)
+from agents_remember.application.review_frame_read import read_frame_bytes
 from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.kernel.canonical_json import canonical_json_bytes
 from agents_remember.kernel.file_lock import (
@@ -67,6 +64,7 @@ from agents_remember.models.knowledge.review_frame import (
     FrameBinding,
     FrameDraft,
     FrameEntrypoint,
+    FrameInteractionCoverage,
     FrameLimits,
     FrameManifest,
     FrameOpening,
@@ -495,13 +493,13 @@ def _check_assets(assets: Mapping[str, bytes], limits: FrameLimits, *, draft: bo
     """Refuse a draft whose files the ceilings or the task discovery would not take (rules 2, 3)."""
 
     ceiling = limits.draft_bytes if draft else limits.bytes_per_revision
-    if len(assets) > limits.files_per_revision:
+    if limits.files_per_revision is not None and len(assets) > limits.files_per_revision:
         raise FrameRefused(
             f"the attempt holds {len(assets)} file(s), beyond the admitted "
             f"{limits.files_per_revision} per revision"
         )
     total = sum(len(payload) for payload in assets.values())
-    if total > ceiling:
+    if ceiling is not None and total > ceiling:
         raise FrameRefused(
             f"the attempt holds {total} byte(s), beyond the admitted {ceiling} for a "
             f"{'draft' if draft else 'revision'}",
@@ -662,8 +660,13 @@ def publish_revision(  # noqa: PLR0913 - one publication states a draft's own in
     asset_ancestry: tuple[int, ...] = (),
     part_map: tuple[FramePart, ...] = (),
     binding_source: Callable[[], FrameBinding | None] | None = None,
+    interaction_coverage: FrameInteractionCoverage | None = None,
 ) -> FramePublication:
-    """Admit and record one new ready revision, atomically and idempotently (rules 3, 8, 9, 14)."""
+    """Admit and record one new ready revision, atomically and idempotently (rules 3, 8, 9, 14).
+
+    ``interaction_coverage`` is written into the manifest as the revision's stated coverage
+    (MIK-R211 v5); a frame that renders no interactions passes none.
+    """
 
     scope.verify()
     draft = read_draft(scope, request_id)
@@ -720,6 +723,7 @@ def publish_revision(  # noqa: PLR0913 - one publication states a draft's own in
             ancestry=asset_ancestry,
             part_map=part_map,
             binding_source=binding_source,
+            interaction_coverage=interaction_coverage,
         )
 
 
@@ -736,6 +740,7 @@ def _publish_locked(  # noqa: PLR0913 - the admission's own decided inputs
     ancestry: tuple[int, ...],
     part_map: tuple[FramePart, ...] = (),
     binding_source: Callable[[], FrameBinding | None] | None = None,
+    interaction_coverage: FrameInteractionCoverage | None = None,
 ) -> FramePublication:
     """The validated publication, executed only after every admission check has passed."""
 
@@ -764,7 +769,7 @@ def _publish_locked(  # noqa: PLR0913 - the admission's own decided inputs
             ),
         )
     draft_total = sum(asset.byte_size for asset in draft.assets)
-    if draft_total > limits.bytes_per_revision:
+    if limits.bytes_per_revision is not None and draft_total > limits.bytes_per_revision:
         raise FrameRefused(
             f"the attempt holds {draft_total} byte(s), beyond the admitted "
             f"{limits.bytes_per_revision} for a revision",
@@ -802,9 +807,10 @@ def _publish_locked(  # noqa: PLR0913 - the admission's own decided inputs
         supplemental=supplemental,
         ancestry=ancestry,
         part_map=part_map,
+        interaction_coverage=interaction_coverage,
     )
     encoded = _canonical(json.loads(manifest.model_dump_json(by_alias=True)))
-    if len(encoded) > limits.manifest_bytes:
+    if limits.manifest_bytes is not None and len(encoded) > limits.manifest_bytes:
         raise FrameRefused(
             f"the manifest is {len(encoded)} byte(s), beyond the admitted {limits.manifest_bytes}; "
             "nothing was published"
@@ -906,6 +912,7 @@ def _manifest(  # noqa: PLR0913 - one manifest's own decided fields
     supplemental: tuple[SupplementalReceipt, ...],
     ancestry: tuple[int, ...],
     part_map: tuple[FramePart, ...] = (),
+    interaction_coverage: FrameInteractionCoverage | None = None,
 ) -> FrameManifest:
     return FrameManifest(
         frame_id=scope.frame_id,
@@ -922,6 +929,7 @@ def _manifest(  # noqa: PLR0913 - one manifest's own decided fields
         supplemental=supplemental,
         asset_ancestry=ancestry,
         part_map=part_map,
+        interaction_coverage=interaction_coverage,
     )
 
 
@@ -929,15 +937,6 @@ def _draft_assets(scope: FrameScope, request_id: str) -> dict[str, bytes]:
     draft = read_draft(scope, request_id)
     if draft is None:
         raise FrameRefused(f"draft {request_id!r} is unavailable")
-    try:
-        validate_asset_read_bounds(draft.assets)
-    except ValueError as failure:
-        oversized = (
-            sum(asset.byte_size for asset in draft.assets) > FrameLimits().bytes_per_revision
-        )
-        raise FrameRefused(
-            str(failure), reason="revision-too-large" if oversized else None
-        ) from failure
     working = _working_directory(scope, Path(draft.working_directory))
     root = working / ASSETS_DIRECTORY
     _guard_working(working, root)
@@ -1069,7 +1068,6 @@ def _snapshot(scope: FrameScope, revision: int) -> FrameSnapshot | str:
         return f"the manifest of revision {revision} could not be read ({failure})"
     try:
         manifest = FrameManifest.model_validate_json(encoded)
-        validate_asset_read_bounds(manifest.assets)
     except ValueError as failure:
         return f"the manifest of revision {revision} is not a readable frame manifest ({failure})"
     root = scope.frame_dir / REVISIONS_DIRECTORY / str(revision) / ASSETS_DIRECTORY
@@ -1438,8 +1436,12 @@ def regeneration_request(
 # --- usage and bounded reclamation --------------------------------------------------------------
 
 
-def usage(area: Path, *, now: str | None = None) -> dict[str, Any]:
-    """What one leaf's frame area holds, counted from the files themselves (rules 8, 10)."""
+def usage(area: Path, *, now: str | None = None, include_frames: bool = True) -> dict[str, Any]:
+    """Count the same stored bytes and held paths, optionally describing each frame.
+
+    Scalar consumers omit display-only pointer and draft reads. The lineage traversal,
+    reserved draft bytes and refusal checks are shared with the detailed view.
+    """
 
     frames: list[dict[str, Any]] = []
     held: list[dict[str, Any]] = []
@@ -1463,6 +1465,8 @@ def usage(area: Path, *, now: str | None = None) -> dict[str, Any]:
                 held.append({"frame_id": child.name, "reason": str(refusal)})
                 continue
             total += lineage["total"]
+            if not include_frames:
+                continue
             pointer = _pointer(child)
             drafts = [
                 draft.state
@@ -2013,9 +2017,16 @@ def _remove_draft(
 
 
 def reclaim_task_frames(
-    task_root: Path, *, dry_run: bool = False, now: str | None = None
+    task_root: Path,
+    *,
+    dry_run: bool = False,
+    now: str | None = None,
+    keep: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
-    """Remove every published frame of one archived task, recording intent and outcome (rule 10)."""
+    """Remove every published frame of one archived task, recording intent and outcome (rule 10).
+
+    A frame whose id is in ``keep`` is not the archive's to remove: it is neither listed nor touched.
+    """
 
     reports = durable_reports_root(Path(task_root))
     area = reports / FRAMES_DIRECTORY
@@ -2031,7 +2042,7 @@ def reclaim_task_frames(
     if not area.is_dir():
         return outcome
     if dry_run:
-        found = _archived_frames(area, outcome)
+        found = _archived_frames(area, outcome, keep)
         outcome["state"] = "would-delete"
         outcome["would_remove"] = [
             {"path": str(frame), "bytes": _lineage_usage(frame)["total"]} for frame, _entry in found
@@ -2050,7 +2061,7 @@ def reclaim_task_frames(
             )
             return outcome
     with exclusive_file_lock(area / TASK_LOCK_NAME, "review frame store"):
-        found = _archived_frames(area, outcome)
+        found = _archived_frames(area, outcome, keep)
         prior = _prior_archive(receipt)
         intent = _archive_receipt(
             found,
@@ -2102,8 +2113,10 @@ def reclaim_task_frames(
     return outcome
 
 
-def _archived_frames(area: Path, outcome: dict[str, Any]) -> list[tuple[Path, dict[str, Any]]]:
-    """Every frame directory under an archived area, refusing to follow a symlinked level."""
+def _archived_frames(
+    area: Path, outcome: dict[str, Any], keep: frozenset[str] = frozenset()
+) -> list[tuple[Path, dict[str, Any]]]:
+    """Every frame directory under an archived area but the kept ones, never following a symlink."""
 
     root = area.resolve()
     found: list[tuple[Path, dict[str, Any]]] = []
@@ -2116,7 +2129,7 @@ def _archived_frames(area: Path, outcome: dict[str, Any]) -> list[tuple[Path, di
             )
             continue
         for frame in sorted(leaf.iterdir()):
-            if not frame.is_dir():
+            if not frame.is_dir() or frame.name in keep:
                 continue
             try:
                 FrameScope(task_root=area, area=leaf, frame_id=frame.name, frame_dir=frame).verify()

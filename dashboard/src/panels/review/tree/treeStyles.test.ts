@@ -17,6 +17,8 @@ import {
   menuWhy,
   pinned,
   popover,
+  reasonCell,
+  row,
   scroller,
   segment,
   sortKey,
@@ -25,6 +27,21 @@ import {
 } from './treeStyles';
 
 const names = (className: string) => className.split(' ');
+
+// MIK-R211 v1 rule 5: the sidebar renders as before L183. A row is three cells — the caret, the name
+// that takes what is left, and the trailing reason — so the reason (or "changed" chip) is whole at the
+// right. A location row's grade chip joins that trailing cell instead of taking a column of its own,
+// which would give every row's name its max-content width and collapse the reason to nothing.
+it('keeps a row three cells wide, its name the one that gives way', () => {
+  expect(names(row).filter((name) => name.startsWith('grid-tc_'))).toEqual([
+    'grid-tc_0.9rem_minmax(0,_1fr)_auto',
+  ]);
+  expect(names(row)).toEqual(expect.arrayContaining(['d_grid', 'white-space_nowrap']));
+  // The trailing cell holds the chip and the reason on the row's one line, the chip keeping its size.
+  expect(names(reasonCell)).toEqual(
+    expect.arrayContaining(['d_flex', 'ai_baseline', 'gap_0.35rem', 'min-w_0']),
+  );
+});
 
 it("caps the tree's scroller at 45dvh only on the stacked layout", () => {
   const capped = scroller.split(' ').filter((name) => name.includes('45dvh'));

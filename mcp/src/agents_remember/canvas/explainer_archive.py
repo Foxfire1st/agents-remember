@@ -4,11 +4,11 @@ Master retirement and sprint archive end the explainer seats of the task's leave
 their folders, in this order:
 
 * **retire** every environment -- record the seat's process tree, archive the seat, end its
-  processes by the tree and by both markers, and remove the workspace down to its ``retired.json``
-  marker, all under the leaf's own lock (rule 8's steps, shared with the developer's Retire);
+  processes by the tree and by both markers, and remove the workspace completely, all under the
+  leaf's own lock (rule 8's steps, shared with the developer's removal; MIK-R211 v5 rule 12);
 * **remove** what the cleanup removes afterwards: the leaf's workspace, its generation counter, its
-  grades file and its retire receipts, inside the explainer's own confinement. The leaf lock file
-  is kept, because a lock is never removed (rule 2).
+  grades file and its retire receipts, inside the explainer's own confinement, and any side file
+  an older layout left beside the workspace (its counter, lock, ledger or seat attempts).
 
 Two promises shape the code. A dry run lists and retires nothing, so a preview can say what the
 archive would end without touching a seat, a process or a file. And a retire left ``pending`` keeps
@@ -31,24 +31,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.canvas.explainer_grades import grades_path
+from agents_remember.canvas.explainer_grades import GRADES_DIRECTORY, grades_path
 from agents_remember.canvas.explainer_paths import (
     GENERATION_SUFFIX,
     LOCK_RESOURCE,
-    RETIRED_NAME,
+    LOCK_SUFFIX,
+    RETIRE_RECEIPTS_DIRECTORY,
+    explainer_records_root,
     explainer_roots,
     guard,
     guard_explainer_path,
     leaf_lock_resource,
     retire_receipts_root,
+    seat_counter_path,
 )
 from agents_remember.canvas.explainer_state import (
     ExplainerStateError,
     RetireReceipt,
-    agent_id,
     generation,
     read_receipt,
-    retired,
+    seat_for_workspace,
 )
 from agents_remember.canvas.explainer_workspace import (
     RetireOutcome,
@@ -59,6 +61,7 @@ from agents_remember.canvas.explainer_workspace import (
 )
 from agents_remember.canvas.paths import PathRefused
 from agents_remember.kernel.file_lock import exclusive_file_lock
+from agents_remember.memory.knowledge.durable_evidence import durable_reports_root
 
 __all__ = [
     "ARCHIVE_CALL_SECONDS",
@@ -67,6 +70,7 @@ __all__ = [
     "environments",
     "guard_problem",
     "host_seat_archive",
+    "reclaimable_environments",
     "remove_environment",
     "retire_environments",
     "seat_ids",
@@ -108,11 +112,11 @@ class LeafEnvironment:
 
     @property
     def counter(self) -> Path:
-        return self.root / f"{self.leaf}{GENERATION_SUFFIX}"
+        return seat_counter_path(self.workspace)
 
     @property
     def agent(self) -> str:
-        return agent_id(self.workspace, self.generation)
+        return seat_for_workspace(self.workspace, self.generation)
 
     def record(self) -> dict[str, Any]:
         """What a preview or a receipt says about this environment."""
@@ -126,9 +130,9 @@ class LeafEnvironment:
 
     @property
     def retired(self) -> bool:
-        """Whether a finished Retire left its marker and nothing else to end."""
+        """Whether nothing is left to end: no pending retire, and no workspace on disk."""
 
-        return not self.pending and retired(self.workspace) is not None
+        return not self.pending and not self.workspace.exists()
 
 
 def _environment(
@@ -139,7 +143,7 @@ def _environment(
     problems: list[dict[str, str]] = []
     number = 0
     blocked = False
-    counter = root / f"{leaf}{GENERATION_SUFFIX}"
+    counter = seat_counter_path(root / leaf)
     if counter.exists() or counter.is_symlink():
         try:
             number = generation(counter)
@@ -181,12 +185,31 @@ def _pending_receipts(
     return tuple(pending), problems
 
 
+#: The side files an older layout kept beside a workspace, each naming its leaf by its prefix.
+_LEGACY_SIDE_SUFFIXES = (
+    f"{GENERATION_SUFFIX}.seat-attempts",
+    GENERATION_SUFFIX,
+    ".requests.json",
+    LOCK_SUFFIX,
+)
+
+
+def _legacy_side_file_leaf(name: str) -> str | None:
+    """The leaf a side file of the older layout names, or ``None`` for any other file."""
+
+    for suffix in _LEGACY_SIDE_SUFFIXES:
+        if name.endswith(suffix) and len(name) > len(suffix):
+            return name[: -len(suffix)]
+    return None
+
+
 def environments(
     root: Path, task_root: Path | None = None
 ) -> tuple[list[LeafEnvironment], list[dict[str, str]]]:
     """Every environment of one task's explainer folder, and every path held on the way.
 
-    A leaf is named by its workspace folder, by its generation counter, or by both. A symlinked
+    A leaf is named by its workspace folder, by a side file an older layout kept beside it, or by
+    both (MIK-R211 v5 rule 12 keeps nothing beside the folder). A symlinked
     entry of the task's explainer folder is held and reported; nothing behind it is read.
     """
 
@@ -204,13 +227,46 @@ def environments(
             continue
         if child.is_dir():
             leaves.add(child.name)
-        elif child.name.endswith(GENERATION_SUFFIX):
-            leaves.add(child.name[: -len(GENERATION_SUFFIX)])
+            continue
+        named = _legacy_side_file_leaf(child.name)
+        if named is not None:
+            leaves.add(named)
     found: list[LeafEnvironment] = []
     for leaf in sorted(leaves):
         environment, held = _environment(root, task_root, leaf)
         found.append(environment)
         problems.extend(held)
+    return found, problems
+
+
+def reclaimable_environments(
+    root: Path, task_root: Path
+) -> tuple[list[LeafEnvironment], list[dict[str, str]]]:
+    """Every environment the cleanup reclaims: the folder's, and every leaf the task has records of.
+
+    A retire removes the workspace completely (MIK-R211 v5 rule 12), so a leaf retired by this
+    archive, or removed by the developer before it, is named only by its grades or its retire
+    receipts in the task; the cleanup still reclaims them.
+    """
+
+    found, problems = environments(root, task_root)
+    if root.is_symlink():
+        return found, problems
+    known = {environment.leaf for environment in found}
+    reports = durable_reports_root(task_root)
+    for folder in (
+        reports / GRADES_DIRECTORY,
+        explainer_records_root(task_root) / RETIRE_RECEIPTS_DIRECTORY,
+    ):
+        if folder.is_symlink() or not folder.is_dir():
+            continue
+        for child in sorted(folder.iterdir()):
+            if child.name in known or child.name.startswith(".") or not child.is_dir():
+                continue
+            environment, held = _environment(root, task_root, child.name)
+            found.append(environment)
+            problems.extend(held)
+            known.add(child.name)
     return found, problems
 
 
@@ -245,10 +301,11 @@ def retire_environments(root: Path, run: ArchiveRun) -> dict[str, Any]:
     return {"environments": entries, "failures": problems}
 
 
-def _retire_one(environment: LeafEnvironment, run: ArchiveRun) -> dict[str, Any]:
-    """Retire one environment under its own leaf lock, or say what a dry run would do."""
+def _settled_without_lock(
+    environment: LeafEnvironment, run: ArchiveRun, entry: dict[str, Any]
+) -> dict[str, Any] | None:
+    """The answer for an environment that needs no lock: a dry run, a held leaf, or a removed one."""
 
-    entry = environment.record()
     if run.dry_run:
         live = bool(environment.pending) or (not environment.retired and _has_body(environment))
         return {**entry, "state": "would-retire" if live else "already-retired"}
@@ -260,6 +317,19 @@ def _retire_one(environment: LeafEnvironment, run: ArchiveRun) -> dict[str, Any]
         )
     except PathRefused as refused:
         return {**entry, "state": "held", "detail": str(refused)}
+    if environment.retired:
+        # Taking the lock would make the folder again (its ``state/``): a removed one is left alone.
+        return {**entry, "state": "already-retired"}
+    return None
+
+
+def _retire_one(environment: LeafEnvironment, run: ArchiveRun) -> dict[str, Any]:
+    """Retire one environment under its own leaf lock, or say what a dry run would do."""
+
+    entry = environment.record()
+    settled = _settled_without_lock(environment, run, entry)
+    if settled is not None:
+        return settled
     with exclusive_file_lock(leaf_lock_resource(environment.workspace), LOCK_RESOURCE):
         current, problems = _environment(environment.root, run.task_root, environment.leaf)
         if problems:
@@ -303,11 +373,9 @@ def _end_seat(environment: LeafEnvironment, run: ArchiveRun) -> RetireOutcome | 
 
 
 def _has_body(environment: LeafEnvironment) -> bool:
-    """Whether anything of the environment is left beyond a finished retire's marker."""
+    """Whether anything of the environment is left on disk (a removal leaves nothing)."""
 
-    if not environment.workspace.is_dir():
-        return False
-    return any(child.name != RETIRED_NAME for child in environment.workspace.iterdir())
+    return environment.workspace.is_dir()
 
 
 def remove_environment(
@@ -353,11 +421,20 @@ def remove_environment(
 
 
 def _removals(environment: LeafEnvironment, task_root: Path) -> list[tuple[Path, str]]:
-    """What the cleanup removes for one leaf, workspace first and receipts last."""
+    """What the cleanup removes for one leaf, workspace first and receipts last.
 
+    The side files an older layout kept beside the workspace go too, so nothing of the leaf stays
+    under the explainer folder (MIK-R211 v5 rule 12).
+    """
+
+    beside = environment.root / environment.leaf
     return [
         (environment.workspace, "workspace"),
         (environment.counter, "generation"),
+        (beside.with_name(f"{environment.leaf}{GENERATION_SUFFIX}"), "generation"),
+        (beside.with_name(f"{environment.leaf}{GENERATION_SUFFIX}.seat-attempts"), "seat-attempts"),
+        (beside.with_name(f"{environment.leaf}.requests.json"), "requests"),
+        (beside.with_name(f"{environment.leaf}{LOCK_SUFFIX}"), "lock"),
         (grades_path(task_root, environment.leaf).parent, "grades"),
         (retire_receipts_root(task_root, environment.leaf), "retire-receipts"),
     ]

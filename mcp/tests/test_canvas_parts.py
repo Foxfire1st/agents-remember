@@ -33,8 +33,11 @@ def _page(body: str) -> dict[str, bytes]:
 
 
 def test_a_claim_belongs_to_the_innermost_part() -> None:
+    # A title is content: one past the old 120-character cut is kept whole (the Manager's 14:29Z
+    # ruling); a view may wrap it, the map does not shorten it.
+    title = "The change " + "and why it matters " * 10
     part_map = derive_part_map(
-        "<div data-part='outer' data-part-title='The change'>"
+        f"<div data-part='outer' data-part-title='{title}'>"
         "<span>intro</span><div><p>nested</p></div>"
         "<span data-evidence-claim='c-present'>x</span>"
         "<div data-part='inner'><span data-evidence-claim='c-gone'>y</span></div>"
@@ -45,7 +48,7 @@ def test_a_claim_belongs_to_the_innermost_part() -> None:
     )
     assert not part_map.problems
     assert [entry.part_id for entry in part_map.parts] == ["outer", "inner", "same"]
-    assert part_map.parts[0].title == "The change"
+    assert part_map.parts[0].title == title.strip()
     assert part_map.parts[0].claims == ("c-present", "c-after")
     assert part_map.parts[1].claims == ("c-gone",)
     assert part_map.parts[2].claims == ("c-same",)
@@ -106,7 +109,11 @@ def test_a_part_id_readiness_cannot_name_is_refused() -> None:
     assert part_id_problem("the-change") is None
     assert part_id_problem("") is not None
     assert part_id_problem("Two") is not None
-    assert part_id_problem("a" * 65) is not None
+    # An id is the page's address: past 64 characters it is refused, naming the id and how to
+    # shorten it (the Manager's 14:29Z ruling, K on its three conditions).
+    too_long = part_id_problem("a" * 65)
+    assert too_long is not None and repr("a" * 65) in too_long
+    assert "shorten it to 64 characters or fewer" in too_long
     assert part_id_problem("page") is not None
     twice = derive_part_map("<div data-part='a'></div><div data-part='a'></div>")
     assert any("declared twice" in problem for problem in twice.problems)
@@ -118,6 +125,13 @@ def test_a_claim_outside_every_part_is_a_problem_and_a_page_with_no_parts_is_one
     )
     assert outside.problems
     assert outside.claims_outside_parts == ("c-present",)
+    # The problem names every claim outside the parts, not the first five of them.
+    many = derive_part_map(
+        "".join(f"<span data-evidence-claim='c-{n}'>x</span>" for n in range(7))
+        + "<div data-part='a'></div>"
+    )
+    named = next(problem for problem in many.problems if "outside every part" in problem)
+    assert all(f"c-{n}" in named for n in range(7)), named
     whole = derive_part_map("<span data-evidence-claim='c-present'>x</span>")
     assert whole.implicit
     assert whole.parts[0].part_id == "page"

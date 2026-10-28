@@ -24,7 +24,7 @@
 // (no tree comparison and no unreadable side; nothing here applies). A body that is none of these,
 // and a request that never reached the server, are failures in the shared review vocabulary.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { qs } from './files';
 import { useIntentEntryGeneration } from './intentEntryRevalidation';
@@ -36,6 +36,16 @@ import {
   reviewProblemFromRefusal,
   unreadableAnswer,
 } from './review';
+import {
+  askInvariantChanges,
+  clearStale,
+  invariantScope,
+  loadedStale,
+  markStale,
+  moveSettled,
+  resetStaleInvariantsForTests,
+  type ReviewInvariantChanges,
+} from './staleInvariants';
 
 export type ReviewTreeSideState = 'available' | 'unavailable-history' | 'legacy-unavailable';
 
@@ -210,6 +220,8 @@ export interface ReviewTreeEntry {
   before: ReviewTreeEntrySide;
   after: ReviewTreeEntrySide;
   change: 'changed' | 'unchanged' | 'undetermined';
+  // Counts of the complete resolved ranges, independent of the bounded displayed excerpt.
+  line_changes?: { added: number; removed: number } | null;
   memory?: ReviewEntryMemory;
 }
 
@@ -254,6 +266,27 @@ export interface ReviewDeliveredComparison {
   detail?: string;
 }
 
+export interface ReviewSubjectSummary {
+  invariant_key: string;
+  changed: number;
+  unchanged: number;
+  not_comparable: number;
+  changed_span: number;
+  changed_paths: string[];
+  entry_currentness: 'stale' | 'unverifiable' | 'current' | 'not measured';
+  proofs: Partial<Record<'stale' | 'unverifiable' | 'current' | 'not measured', number>>;
+}
+export interface ReviewOverview {
+  state: 'ready' | 'unavailable';
+  subjects: ReviewSubjectSummary[];
+  reason?: string;
+}
+export interface ReviewWorklistSummary {
+  open_count?: number;
+  planning: Record<string, string>;
+  file_open_counts: Record<string, number>;
+}
+
 export interface ReviewTreesResult {
   state: 'trees' | 'not-converted' | 'refused';
   repository_id: string;
@@ -270,8 +303,11 @@ export interface ReviewTreesResult {
   code_sides?: ReviewCodeSide[];
   currentness?: Partial<Record<'before' | 'after', ReviewSideCurrentness>>;
   worklist?: ReviewWorklistView;
+  overview?: ReviewOverview;
+  worklist_summary?: ReviewWorklistSummary;
   code_changes?: ReviewCodeChanges;
   entries?: ReviewTreeEntry[];
+  entry_inventory?: { state: 'ready' | 'unavailable'; entries: ReviewTreeEntry[]; reason?: string };
   entry_memory?: ReviewEntryMemoryState;
   refusal?: ReviewRefusal;
 }
@@ -279,11 +315,15 @@ export interface ReviewTreesResult {
 // Which comparison a read addresses: the live one (nothing named), the leaf's latest record
 // (`recorded`), or one recorded comparison by its number -- never a path or a tree id.
 export interface ReviewTreesAddress {
+  view?: 'complete' | 'overview';
   comparison?: number;
   recorded?: boolean;
   // Naming invariants asks for their entries only (MIK-R31's cards), by the identities the landed
   // review payload addresses them with.
   invariants?: string[];
+  // Resolve a saved block link through its bound memory side without reading every invariant.
+  entry?: string;
+  entry_side?: 'before' | 'after';
 }
 
 export const reviewTrees = (
@@ -296,8 +336,11 @@ export const reviewTrees = (
 ): Promise<ReviewTreesResult> => {
   const params: Record<string, string> = { repo, master, leaf };
   if (address.comparison !== undefined) params.comparison = String(address.comparison);
+  if (address.view) params.view = address.view;
   if (address.recorded) params.history = 'recorded';
   if (address.invariants?.length) params.invariants = address.invariants.join(',');
+  if (address.entry) params.entry = address.entry;
+  if (address.entry_side) params.entry_side = address.entry_side;
   return getReviewJson<ReviewTreesResult>(`${base}/api/review/trees?${qs(params)}`, signal);
 };
 
@@ -407,9 +450,14 @@ export function treeComparisonNumber(limitations: string[]): number | undefined 
 // card request (L81-R1-F18).
 const CARD_ANSWERS_MAX = 20;
 const cardAnswers = new Map<string, ReviewTreesRead>();
-const cardInflight = new Map<string, Promise<ReviewTreesRead>>();
+interface CardFlight {
+  answer: Promise<ReviewTreesRead>;
+  controller: AbortController;
+  readers: number;
+}
+const cardInflight = new Map<string, CardFlight>();
 
-function cardsKey(repo: string, master: string, leaf: string, comparison: number, wanted: string) {
+function cardsKey(repo: string, master: string, leaf: string, comparison: number | string, wanted: string) {
   return `${repo}/${master}/${leaf}/${comparison}/${wanted}`;
 }
 
@@ -424,51 +472,192 @@ function keepableCardAnswer(result: ReviewTreesResult): boolean {
   return !result.knowledge_sides.some((side) => side.side === 'after' && side.state === 'available');
 }
 
-function keepCardAnswer(key: string, read: ReviewTreesRead): void {
+// Each kept answer's leaf, comparison number and question, so a move can carry it (D576).
+interface CardScope {
+  leaf: string;
+  number: number;
+  wanted: string;
+}
+const cardScopes = new Map<string, CardScope>();
+
+type CardAddress = Pick<ReviewTreesAddress, 'invariants' | 'entry' | 'entry_side'>;
+
+// The question part of a card key: `cardAddress` read backwards.
+const wantedOf = (address: CardAddress) =>
+  address.entry ? `entry:${address.entry_side}:${address.entry}` : (address.invariants ?? []).join(',');
+
+function keepCardAnswer(key: string, read: ReviewTreesRead, scope: CardScope): void {
   if (read.phase !== 'trees' || !keepableCardAnswer(read.trees)) return;
   cardAnswers.set(key, read);
+  cardScopes.set(key, scope);
   while (cardAnswers.size > CARD_ANSWERS_MAX) {
     const oldest = cardAnswers.keys().next();
     if (oldest.done) break;
     cardAnswers.delete(oldest.value);
+    cardScopes.delete(oldest.value);
   }
+  loadedStale(scope.leaf, scope.number, answerIds(scope.wanted, read));
+}
+
+function startCardRead(
+  key: string, repo: string, master: string, leaf: string, comparison: number, address: CardAddress,
+): CardFlight {
+  const controller = new AbortController();
+  const flight: CardFlight = { controller, readers: 0, answer: Promise.resolve({ phase: 'loading' }) };
+  const scope = { leaf: invariantScope(repo, master, leaf), number: comparison, wanted: wantedOf(address) };
+  flight.answer = reviewTrees(repo, master, leaf, { comparison, ...address }, '', controller.signal).then(
+    (result) => reviewTreesRead(result),
+    (cause: unknown) => ({ phase: 'unavailable', problem: reviewProblemFromCause(cause) }) as ReviewTreesRead,
+  ).then((read) => {
+    if (cardInflight.get(key) === flight) cardInflight.delete(key);
+    if (!controller.signal.aborted) keepCardAnswer(key, read, scope);
+    return read;
+  });
+  cardInflight.set(key, flight);
+  return flight;
 }
 
 function fetchCardEntries(
-  key: string,
-  repo: string,
-  master: string,
-  leaf: string,
-  comparison: number,
-  invariants: string[],
-): Promise<ReviewTreesRead> {
-  const held = cardInflight.get(key);
-  if (held) return held;
-  // No abort: the fetch is shared across mounts, and aborting on one unmount would cancel the
-  // answer a remount is about to reuse. A superseded selection never draws it -- the hook only
-  // ever shows the answer whose key matches its own question.
-  const fetch = reviewTrees(repo, master, leaf, { comparison, invariants }).then(
-    (result) => reviewTreesRead(result),
-    (cause: unknown) =>
-      ({ phase: 'unavailable', problem: reviewProblemFromCause(cause) }) as ReviewTreesRead,
-  );
-  const tracked = fetch.then((read) => {
-    cardInflight.delete(key);
-    // Only an answered read is kept: a failed fetch, or an answer that names a failed read, stays
-    // uncached, so a remount or a refresh retries it instead of showing one transient failure
-    // forever.
-    keepCardAnswer(key, read);
-    return read;
-  });
-  cardInflight.set(key, tracked);
-  return tracked;
+  key: string, repo: string, master: string, leaf: string, comparison: number, address: CardAddress,
+): { answer: Promise<ReviewTreesRead>; release: () => void } {
+  const flight = cardInflight.get(key) ?? startCardRead(key, repo, master, leaf, comparison, address);
+  flight.readers += 1;
+  return {
+    answer: flight.answer,
+    release: () => {
+      flight.readers -= 1;
+      // A StrictMode remount in this turn can retain the same request. Once no view needs it,
+      // abort on the wire; another mounted reader of this exact question still owns its request.
+      queueMicrotask(() => {
+        if (flight.readers !== 0 || cardInflight.get(key) !== flight) return;
+        cardInflight.delete(key);
+        flight.controller.abort();
+      });
+    },
+  };
+}
+
+// A full renewal drops every kept answer and request, and the marks waiting for one; the moves
+// already asked about stay answered, so the renewed page does not ask its move again.
+export function forgetCardAnswers(repo: string, master: string, leaf: string): void {
+  cardAnswers.clear();
+  cardScopes.clear();
+  cardCarries.clear();
+  cardInflight.forEach((flight) => flight.controller.abort());
+  cardInflight.clear();
+  clearStale(invariantScope(repo, master, leaf));
 }
 
 // A new test (or dev session) drops the kept answers: each test renders a fresh session, and a
 // kept answer from another test's fetch would hide the request the test asserts.
 export function resetCardCachesForTests(): void {
   cardAnswers.clear();
+  cardScopes.clear();
+  cardCarries.clear();
+  cardInflight.forEach((flight) => flight.controller.abort());
   cardInflight.clear();
+  resetStaleInvariantsForTests();
+}
+
+// A move whose changed invariants the server named (D576): the kept answers of `from` are carried
+// to `to` once the page reads `to` (`adoptCarriedCards`), except those holding a changed invariant.
+interface CardCarry {
+  from: number;
+  to: number;
+  changed: ReadonlySet<string>;
+}
+const cardCarries = new Map<string, CardCarry>();
+const cardListeners = new Set<() => void>();
+// The kept answers as a reader last saw them: a new object when a carried or re-asked answer lands.
+let keptCards: { answers: ReadonlyMap<string, ReviewTreesRead> } = { answers: cardAnswers };
+
+function cardsChanged(): void {
+  keptCards = { answers: cardAnswers };
+  cardListeners.forEach((listener) => listener());
+}
+
+function useKeptCards(): { answers: ReadonlyMap<string, ReviewTreesRead> } {
+  return useSyncExternalStore(
+    (listener) => {
+      cardListeners.add(listener);
+      return () => cardListeners.delete(listener);
+    },
+    () => keptCards,
+  );
+}
+
+function applyMove(scope: string, answer: ReviewInvariantChanges): void {
+  if (answer.state !== 'named') return;
+  const { from_comparison: from, to_comparison: to, invariants } = answer;
+  cardCarries.set(scope, { from, to, changed: new Set(invariants) });
+  markStale(scope, to, invariants);
+}
+
+// Ask which invariants the move from the shown comparison to a newer one changed: once per move.
+// A named answer plans the carry and marks the changed invariants; any other answer changes nothing.
+export function followInvariantMove(
+  repo: string, master: string, leaf: string, from: number, to: number,
+): Promise<ReviewInvariantChanges> {
+  const scope = invariantScope(repo, master, leaf);
+  return askInvariantChanges(repo, master, leaf, from, to, (answer) => applyMove(scope, answer));
+}
+
+// Which shown comparison a moved notice to `to` moves from; undefined: the move cannot be asked and
+// the page renews as before. A page already showing `to` follows only a move into it already asked.
+function noticeMove(scope: string, shown: number | undefined, from: number | null | undefined, to: number | null | undefined) {
+  if (shown === undefined || to == null) return undefined;
+  if (to !== shown) return shown;
+  return from != null && moveSettled(scope, from, to) ? from : undefined;
+}
+
+// A moved notice (D576). A named answer re-reads only the question on screen, and only when the
+// move changed an invariant -- the cards follow at the newer comparison, carried or asked again;
+// an empty list reads and renews nothing. `unavailable`, a failed request, or a move that cannot
+// be asked renews everything, as before.
+export function followMovedNotice(
+  repo: string, master: string, leaf: string, shown: number | undefined,
+  notice: { from?: number | null; to?: number | null }, ways: { renew: () => void; reread: () => void },
+): void {
+  const from = noticeMove(invariantScope(repo, master, leaf), shown, notice.from, notice.to);
+  if (from === undefined) return ways.renew();
+  void followInvariantMove(repo, master, leaf, from, notice.to!).then((answer) => {
+    if (answer.state !== 'named') ways.renew();
+    else if (answer.invariants.length && notice.to !== shown) ways.reread();
+  });
+}
+
+// A visited changed invariant is asked again at the newer comparison, in place; its answer lands in
+// the store, which clears its mark.
+function reaskCard(key: string, repo: string, master: string, leaf: string, number: number, wanted: string): void {
+  const request = fetchCardEntries(key, repo, master, leaf, number, cardAddress(wanted));
+  void request.answer.then(() => {
+    request.release();
+    cardsChanged();
+  });
+}
+
+const carriedTo = (read: ReviewTreesRead, comparison: ReviewTreeComparison): ReviewTreesRead =>
+  read.phase === 'trees' ? { ...read, trees: { ...read.trees, comparison } } : read;
+
+// The page now reads `number` under `identity`: a carry planned for it moves every kept answer of
+// the shown comparison whose chunk holds no changed invariant to this key, with no read, and asks
+// the others again. Unchanged visited invariants keep their revealed changes.
+export function adoptCarriedCards(
+  repo: string, master: string, leaf: string, number: number, identity: string, comparison: ReviewTreeComparison,
+): void {
+  const scope = invariantScope(repo, master, leaf);
+  const carry = cardCarries.get(scope);
+  if (!carry || carry.to !== number) return;
+  cardCarries.delete(scope);
+  const keyComparison = `${number}/${identity}`;
+  for (const [key, kept] of [...cardScopes]) {
+    const read = cardAnswers.get(key);
+    if (kept.leaf !== scope || kept.number !== carry.from || !read) continue;
+    const target = cardsKey(repo, master, leaf, keyComparison, kept.wanted);
+    if (answerIds(kept.wanted, read).some((id) => carry.changed.has(id))) reaskCard(target, repo, master, leaf, number, kept.wanted);
+    else keepCardAnswer(target, carriedTo(read, comparison), { leaf: scope, number, wanted: kept.wanted });
+  }
+  cardsChanged();
 }
 
 // The cards of the review page's shown subjects: the opening's read 5 (MIK-R89 v2 rule 2). The route
@@ -485,6 +674,11 @@ export type ChangeSetCardsRead =
       comparison: ReviewTreeComparison | null;
       entries: ReviewTreeEntry[];
       memory?: ReviewEntryMemoryState;
+      coverage?: {
+        loaded: readonly string[];
+        pending: readonly string[];
+        failures: Readonly<Record<string, string>>;
+      };
     }
   | { phase: 'not-converted' }
   | { phase: 'unavailable'; problem: ReviewFailure };
@@ -505,16 +699,59 @@ function mergedMemory(results: ReviewTreesResult[]): ReviewEntryMemoryState | un
   return states.find((one) => one.state === 'unavailable') ?? states[0];
 }
 
-function mergedCards(reads: ReviewTreesRead[]): ChangeSetCardsRead {
-  const failed = reads.find((read) => read.phase === 'unavailable');
-  if (failed?.phase === 'unavailable') return failed;
-  if (reads.some((read) => read.phase === 'not-converted')) return { phase: 'not-converted' };
-  const results = reads.flatMap((read) => (read.phase === 'trees' ? [read.trees] : []));
+// Answers remain scoped to one leaf and comparison; a later selection only adds its own read.
+function availableCards(
+  prefix: string, seen: ReadonlyMap<string, ReviewTreesRead>, kept: ReadonlyMap<string, ReviewTreesRead> = cardAnswers,
+): Map<string, ReviewTreesRead> {
+  return new Map([...seen, ...kept].filter(([key]) => key.startsWith(prefix)).map(([key, read]) => [key.slice(prefix.length), read]));
+}
+
+function answerIds(wanted: string, read: ReviewTreesRead): string[] {
+  if (read.phase !== 'trees') return [];
+  return [
+    ...(wanted.startsWith('entry:') ? [] : wanted.split(',')),
+    ...(read.trees.entries ?? []).map((one) => one.invariant_key),
+  ];
+}
+
+function alreadyRead(wanted: string, available: ReadonlyMap<string, ReviewTreesRead>, entry?: string): boolean {
+  const reads = [...available.values()].filter((read) => read.phase === 'trees' && keepableCardAnswer(read.trees));
+  if (wanted.startsWith('entry:'))
+    return reads.some((read) => read.phase === 'trees' && read.trees.entries?.some((one) => one.id === entry));
+  const known = new Set([...available].flatMap(([key, read]) =>
+    read.phase === 'trees' && keepableCardAnswer(read.trees) ? answerIds(key, read) : []));
+  return wanted.split(',').every((id) => known.has(id));
+}
+
+function cardAddress(wanted: string): Pick<ReviewTreesAddress, 'entry' | 'entry_side' | 'invariants'> {
+  if (!wanted.startsWith('entry:')) return { invariants: wanted.split(',') };
+  return { entry: wanted.slice(wanted.indexOf(':', 6) + 1), entry_side: wanted.split(':')[1] as 'before' | 'after' };
+}
+
+function entryReadState(available: ReadonlyMap<string, ReviewTreesRead>, entryKey: string, entry?: string): ChangeSetCardsRead | null {
+  if (!entryKey || alreadyRead(entryKey, available, entry)) return null;
+  const read = available.get(entryKey);
+  if (!read) return { phase: 'loading' };
+  return read.phase === 'trees' ? null : read;
+}
+
+function scopedCards(available: ReadonlyMap<string, ReviewTreesRead>, invariants: readonly string[], entryKey: string, entry?: string): ChangeSetCardsRead {
+  const entryState = entryReadState(available, entryKey, entry);
+  if (entryState) return entryState;
+  const loaded = new Set([...available].flatMap(([key, read]) => answerIds(key, read)));
+  const failures: Record<string, string> = {};
+  for (const [key, read] of available) {
+    if (key.startsWith('entry:')) continue;
+    if (read.phase === 'not-converted' && key.split(',').some((id) => invariants.includes(id))) return read;
+    if (read.phase === 'unavailable')
+      for (const id of key.split(',')) failures[id] = `${read.problem.code}: ${read.problem.detail}`;
+  }
+  const results = [...available.values()].flatMap((read) => read.phase === 'trees' ? [read.trees] : []);
   return {
-    phase: 'cards',
-    comparison: results[0]?.comparison ?? null,
-    entries: results.flatMap((result) => result.entries ?? []),
+    phase: 'cards', comparison: results[0]?.comparison ?? null,
+    entries: [...new Map(results.flatMap((one) => one.entries ?? []).map((one) => [one.id, one])).values()],
     memory: mergedMemory(results),
+    coverage: { loaded: [...loaded], pending: invariants.filter((id) => !loaded.has(id) && failures[id] === undefined), failures },
   };
 }
 
@@ -525,10 +762,16 @@ export function useChangeSetCards(
   comparison: number | undefined,
   invariants: readonly string[],
   enabled: boolean,
+  // Selected-area reads keep visited invariants in the sidebar without fetching unvisited ones.
+  // A saved block names its entry and side, so the server resolves only that entry's owner.
+  scoped: { entry?: string; side?: 'before' | 'after'; identity?: string } = {},
 ): ChangeSetCardsRead | null {
-  const signature = cardChunks(invariants)
+  const keyComparison = scoped.identity ? `${comparison}/${scoped.identity}` : comparison;
+  const invariantSignature = cardChunks(invariants)
     .map((chunk) => chunk.join(','))
     .join('|');
+  const entryKey = scoped.entry && scoped.side ? `entry:${scoped.side}:${scoped.entry}` : '';
+  const signature = [invariantSignature, entryKey].filter(Boolean).join('|');
   // The chunk answers this mount saw. A failed chunk is not kept in the shared store (a remount asks
   // again); this mount shows it. An answer kept in the store from an earlier mount needs no read.
   const [seen, setSeen] = useState<ReadonlyMap<string, ReviewTreesRead>>(() => new Map());
@@ -538,28 +781,36 @@ export function useChangeSetCards(
   useEffect(() => {
     if (!enabled || comparison === undefined) return undefined;
     let alive = true;
+    const releases: (() => void)[] = [];
     for (const joined of signature ? signature.split('|') : []) {
-      const key = cardsKey(repo, master, leaf, comparison, joined);
+      const key = cardsKey(repo, master, leaf, keyComparison!, joined);
       if (cardAnswers.has(key)) continue;
-      void fetchCardEntries(key, repo, master, leaf, comparison, joined.split(',')).then((read) => {
+      const available = availableCards(cardsKey(repo, master, leaf, keyComparison!, ''), seen);
+      if (alreadyRead(joined, available, scoped.entry)) continue;
+      const address = cardAddress(joined);
+      const request = fetchCardEntries(key, repo, master, leaf, comparison, address);
+      releases.push(request.release);
+      void request.answer.then((read) => {
         if (alive) setSeen((previous) => new Map(previous).set(key, read));
       });
     }
     return () => {
       alive = false;
+      releases.forEach((release) => release());
     };
-  }, [repo, master, leaf, comparison, signature, enabled, refreshed]);
+    // Answers are deliberately absent from this dependency list: a failed read waits for Refresh,
+    // not a retry loop caused by storing its result. Selection/comparison changes start new reads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo, master, leaf, comparison, keyComparison, signature, enabled, refreshed]);
   // One merged answer per set of chunk answers, so a render that changes nothing here hands the same
   // object on (the page's model is derived from it).
+  const kept = useKeptCards();
   return useMemo(() => {
     if (!enabled || comparison === undefined) return null;
-    const reads = (signature ? signature.split('|') : []).map((joined) => {
-      const key = cardsKey(repo, master, leaf, comparison, joined);
-      return cardAnswers.get(key) ?? seen.get(key);
-    });
-    if (reads.some((read) => read === undefined)) return { phase: 'loading' };
-    return mergedCards(reads as ReviewTreesRead[]);
-  }, [enabled, comparison, signature, repo, master, leaf, seen]);
+    return scopedCards(
+      availableCards(cardsKey(repo, master, leaf, keyComparison!, ''), seen, kept.answers), invariants, entryKey, scoped.entry,
+    );
+  }, [enabled, comparison, keyComparison, repo, master, leaf, seen, kept, scoped, entryKey, invariants]);
 }
 
 // The tree view read for one task context. A superseded read (the props moved while it was in
@@ -572,9 +823,10 @@ export function useReviewTrees(
   leaf: string,
   address: ReviewTreesAddress = {},
   enabled = true,
+  generation = 0,
 ): ReviewTreesRead | null {
-  const { comparison, recorded } = address;
-  const key = `${repo}/${master}/${leaf}/${comparison ?? ''}/${recorded ? 'recorded' : ''}`;
+  const { comparison, recorded, view } = address;
+  const key = `${repo}/${master}/${leaf}/${comparison ?? ''}/${recorded ? 'recorded' : ''}/${view ?? 'complete'}/${generation}`;
   const [read, setRead] = useState<{ key: string; read: ReviewTreesRead } | null>(null);
   const reads = useRef(0);
   useEffect(() => {
@@ -588,14 +840,14 @@ export function useReviewTrees(
       repo,
       master,
       leaf,
-      { comparison, recorded },
+      { comparison, recorded, view },
       superseded.signal,
     ).then(
       (result) => apply(reviewTreesRead(result)),
       (cause: unknown) => apply({ phase: 'unavailable', problem: reviewProblemFromCause(cause) }),
     );
     return () => superseded.abort();
-  }, [repo, master, leaf, comparison, recorded, key, enabled]);
+  }, [repo, master, leaf, comparison, recorded, view, key, enabled, generation]);
   if (!enabled) return null;
   return read?.key === key ? read.read : { phase: 'loading' };
 }

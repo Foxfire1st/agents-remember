@@ -510,7 +510,9 @@ def test_a_diff_failure_after_validation_is_refused_never_reported_as_zero(
     def fail_diff(repo: Path, base: str, head: str | None = None) -> list[dict[str, object]]:
         raise RuntimeError("simulated unreadable tree between the pinned endpoints")
 
-    monkeypatch.setattr("agents_remember.serving.changeset.changed_files_with_counts", fail_diff)
+    monkeypatch.setattr(
+        "agents_remember.serving.changeset.master_changed_files_with_counts", fail_diff
+    )
     with pytest.raises(MasterEndpointAbsent) as caught:
         master_changeset(master_fixture.config, REPO, MASTER, include_leaves=False)
     assert caught.value.kind == "unresolvable"
@@ -751,10 +753,10 @@ def test_a_master_net_is_served_again_from_its_endpoint_commits(
 
     net_calls: list[tuple[Path, str, str | None]] = []
     sidecar_reads: list[str] = []
-    real_diff = changeset_module.changed_files_with_counts
+    real_diff = changeset_module.master_changed_files_with_counts
     real_sidecar = changeset_module.route_sidecar_status
 
-    def witness_diff(root: Path, base: str, head: str | None = None) -> list[dict[str, Any]]:
+    def witness_diff(root: Path, base: str, head: str) -> list[dict[str, Any]]:
         net_calls.append((root, base, head))
         return real_diff(root, base, head)
 
@@ -762,7 +764,7 @@ def test_a_master_net_is_served_again_from_its_endpoint_commits(
         sidecar_reads.append(rel)
         return real_sidecar(onboarding_root, rel, *args, **kwargs)
 
-    monkeypatch.setattr(changeset_module, "changed_files_with_counts", witness_diff)
+    monkeypatch.setattr(changeset_module, "master_changed_files_with_counts", witness_diff)
     monkeypatch.setattr(changeset_module, "route_sidecar_status", witness_sidecar)
 
     app = FastAPI()

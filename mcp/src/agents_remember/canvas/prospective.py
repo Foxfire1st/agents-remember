@@ -66,11 +66,11 @@ __all__ = [
 DEFAULT_LOAD_SCRIPT = "canvas-prospective-load.mjs"
 _SCRIPT_ENV = "AR_CANVAS_PROSPECTIVE_LOAD"
 
-#: How long one browser load may take before it is reported as not having finished.
+#: The browser load process's own window: how long one load (one node child) may run before it is
+#: reported as not having finished. It bounds a process, not a page and not the product: the
+#: interaction observation is told it (``--time-limit``) and stops resumably just before it, naming
+#: what it left, and the next render of the same draft visits only that (MIK-R211 v5).
 DEFAULT_TIMEOUT_SECONDS = 180.0
-
-#: How much of a child's stderr a diagnostic keeps.
-_STDERR_TAIL = 400
 
 
 def default_load_script() -> Path:
@@ -101,6 +101,7 @@ class ProspectiveResult:
     evidence_references: tuple[str, ...] = ()
     claim_ids: tuple[str, ...] = ()
     detail: str = ""
+    interactive: dict[str, object] | None = None
 
     @property
     def loaded(self) -> bool:
@@ -196,11 +197,24 @@ class BrowserProspectiveLoad:
         node: str = "node",
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         screenshot: Path | None = None,
+        interactive_directory: Path | None = None,
     ) -> None:
         self._script = script if script is not None else default_load_script()
         self._node = node
         self._timeout = timeout_seconds
         self._screenshot = screenshot
+        self._interactive_directory = interactive_directory
+        self._interactive_resume: Path | None = None
+
+    def resuming(self, report: Path | None) -> BrowserProspectiveLoad:
+        """Resume the earlier run whose interactive report is ``report`` (MIK-R211 v5).
+
+        That run left passes or controls unvisited when its time ran out; the runner carries what
+        it saw and visits only the rest. ``None`` observes afresh.
+        """
+
+        self._interactive_resume = report
+        return self
 
     def load(
         self, *, assets: dict[str, bytes], entrypoint: str, packet: EvidencePacket
@@ -236,6 +250,17 @@ class BrowserProspectiveLoad:
                     detail="the revision names an asset path that leaves its own staging directory",
                 )
             invocation = self._invoke(directory, entrypoint)
+            interactive = None
+            if self._interactive_directory is not None:
+                # D565/D518: a second observation, never another publication gate. In particular,
+                # its timeout or malformed result cannot erase the reduced-motion observation.
+                extra = self._invoke(
+                    directory,
+                    entrypoint,
+                    interactive=True,
+                    comparison=packet.comparison.comparison_number,
+                )
+                interactive = _interactive_report(extra)
         finally:
             shutil.rmtree(directory, ignore_errors=True)
         if not invocation.ran:
@@ -245,16 +270,31 @@ class BrowserProspectiveLoad:
                 errors=(invocation.problem,),
                 detail="the load did not run, so nothing about the page was observed",
             )
-        result = _read_result(invocation)
+        result = replace(_read_result(invocation), interactive=interactive)
         return _validate_rendered_citations(
             result, assets=assets, entrypoint=entrypoint, packet=packet
         )
 
-    def _invoke(self, directory: Path, entrypoint: str) -> _Invocation:
+    def _invoke(
+        self, directory: Path, entrypoint: str, *, interactive: bool = False, comparison: int = 0
+    ) -> _Invocation:
         """Run the child once, answering ``ran=False`` with a named reason when it did not."""
 
         command = [self._node, str(self._script), "--dir", str(directory), "--entry", entrypoint]
-        if self._screenshot is not None:
+        if interactive:
+            command.extend(
+                [
+                    "--interactive-dir",
+                    str(self._interactive_directory),
+                    "--comparison",
+                    str(comparison),
+                ]
+            )
+            if self._interactive_resume is not None:
+                command.extend(["--interactive-resume", str(self._interactive_resume)])
+            # The observation stops only before this load's own limit, never on a clock of its own.
+            command.extend(["--time-limit", f"{self._timeout:g}"])
+        elif self._screenshot is not None:
             command.extend(["--screenshot", str(self._screenshot)])
         try:
             completed = subprocess.run(
@@ -289,6 +329,25 @@ class BrowserProspectiveLoad:
         )
 
 
+def _interactive_report(invocation: _Invocation) -> dict[str, object]:
+    """Keep diagnostic failures outside the prospective load's refusal state."""
+
+    if invocation.ran:
+        try:
+            payload = json.loads(invocation.stdout)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict) and payload.get("reportOnly") is True:
+            return payload
+    return {
+        "reportOnly": True,
+        "state": "unavailable",
+        "errors": [invocation.problem or invocation.stderr or "unreadable report"],
+        "coverage": "No complete control inventory was returned; unvisited controls are unknown.",
+        "passes": [],
+    }
+
+
 def _stage(assets: dict[str, bytes], directory: Path) -> None:
     """Write the exact prospective bytes below ``directory``, refusing a path that leaves it."""
 
@@ -310,15 +369,15 @@ def _stage(assets: dict[str, bytes], directory: Path) -> None:
 def _unreadable(invocation: _Invocation, extra: str = "") -> ProspectiveResult:
     """The child ran but its answer cannot be read: that is an unavailable load, never a pass."""
 
-    tail = invocation.stderr.strip()[-_STDERR_TAIL:]
+    stderr = invocation.stderr.strip()
     parts = [f"the browser load answered with no readable result (exit {invocation.returncode})"]
     if extra:
         parts.append(extra)
-    if tail:
-        parts.append(f"stderr: {tail}")
+    if stderr:
+        parts.append(f"stderr: {stderr}")
     stdout = invocation.stdout.strip()
     if stdout and not extra:
-        parts.append(f"stdout: {stdout[:200]}")
+        parts.append(f"stdout: {stdout}")
     detail = "; ".join(parts)
     return ProspectiveResult(
         state="unavailable",
@@ -350,7 +409,7 @@ def _read_result(invocation: _Invocation) -> ProspectiveResult:
     references = payload.get("evidenceReferences")
     claim_ids = payload.get("claimIds", [])
     if not (_valid_inventory(references) and _valid_inventory(claim_ids)):
-        return _unreadable(invocation, extra="no bounded rendered evidence-reference inventory")
+        return _unreadable(invocation, extra="no rendered evidence-reference inventory of strings")
     detail = payload.get("detail")
     result = ProspectiveResult(
         state=declared,
@@ -367,11 +426,9 @@ def _read_result(invocation: _Invocation) -> ProspectiveResult:
 
 
 def _valid_inventory(items: object) -> TypeGuard[list[str]]:
-    return (
-        isinstance(items, list)
-        and len(items) <= 400
-        and all(isinstance(item, str) and len(item) <= 512 for item in items)
-    )
+    """A list of strings, of any length and count: every rendered reference is checked (MIK-R211 v5)."""
+
+    return isinstance(items, list) and all(isinstance(item, str) for item in items)
 
 
 def _validate_rendered_citations(
@@ -441,6 +498,7 @@ def _consistent(result: ProspectiveResult) -> ProspectiveResult:
         reduced_motion_ok=result.reduced_motion_ok,
         unresolved_references=result.unresolved_references,
         detail=f"the load called itself loaded while naming {', '.join(faults)}; {detail}",
+        interactive=result.interactive,
     )
 
 

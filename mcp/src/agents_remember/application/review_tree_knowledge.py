@@ -35,15 +35,25 @@ process that also answers every click, so it is built not to compete with them:
 * the worklist is kept in a bounded in-process memo keyed by exact identities
   (:mod:`.review_leaf_view_memo`), so a repeat for unchanged trees computes nothing;
 * each uncached worklist runs in the exact package's child interpreter (MIK-R42), so parsing
-  knowledge trees and cyclic collection do not compete with the dashboard's subject reads.
+  knowledge trees and cyclic collection do not compete with the dashboard's subject reads;
+* while the child computes, the entry inventory and the currentness -- the view's two other pure
+  parts -- are computed beside it in a thread of this process (D569). Each is taken where the view
+  always took it, with the reads it made replayed there, so the answer and its recorded reads are
+  those of the sequential view. That thread also fills the blob-keyed memos from their store
+  before its first computation and stores what it added afterwards (:mod:`.review_memo_store`).
 
 The shared knowledge_tree_diff helper remains here for the public knowledge_diff reader; its file diff is served there and is not included in this tree-view response or its memo."""
 
 from __future__ import annotations
 
+import contextvars
 import json
+import logging
 import re
+import threading
+import time
 from collections.abc import Callable, Iterator, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final, Literal, cast
@@ -58,6 +68,7 @@ from agents_remember.application.review_delivered_comparison import (
     recorded_latest,
 )
 from agents_remember.application.review_leaf_view_memo import (
+    LeafViewKey,
     LeafViewParts,
     leaf_view_key,
     moved_inputs,
@@ -65,11 +76,18 @@ from agents_remember.application.review_leaf_view_memo import (
     remembered,
 )
 from agents_remember.application.review_legacy_comparison import knowledge_unavailable_refusal
+from agents_remember.application.review_memo_store import restore_review_memos, save_review_memos
 from agents_remember.application.review_tree_comparison import (
     ReviewTrees,
     reopen_review_trees,
 )
-from agents_remember.application.review_tree_entries import CardEntries, tree_entries
+from agents_remember.application.review_tree_entries import (
+    CardEntries,
+    tree_entries,
+    tree_entry_cards,
+    tree_entry_inventory,
+)
+from agents_remember.application.review_tree_overview import summarize_inventory, summarize_worklist
 from agents_remember.application.review_tree_state import history_rows as _history_rows
 from agents_remember.application.review_tree_state import side_currentness
 from agents_remember.application.review_unexplained_lane import (
@@ -88,6 +106,7 @@ from agents_remember.kernel.git_command import (
 )
 from agents_remember.kernel.git_preparation import GitPreparationError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.read_cancellation import SharedFlights, raise_if_read_cancelled
 from agents_remember.kernel.recorded_reads import recorded_reads, replay_reads
 from agents_remember.kernel.reviewer_worklist_process import (
     ReviewerWorklistProcesses,
@@ -103,6 +122,7 @@ from agents_remember.models.knowledge.review_lane import (
     ReviewUnexplainedLane,
 )
 from agents_remember.models.knowledge.review_trees import (
+    ReviewEntryInventory,
     ReviewKnowledgeFileChange,
     ReviewKnowledgeRecordGroup,
     ReviewKnowledgeSourceGroup,
@@ -114,15 +134,22 @@ from agents_remember.models.knowledge_files.documents import (
     KNOWLEDGE_ROOT,
     ONBOARDING_ROOT,
 )
+from agents_remember.serving.build_info import process_serving_build
 from agents_remember.serving.review_trees import ReviewTreesQuery
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 __all__ = [
+    "CardsCarry",
+    "carried_cards_view",
     "knowledge_tree_diff",
+    "read_prepared_review_trees",
     "read_review_trees",
+    "resolve_tree_comparison",
     "side_currentness",
     "snake_keys",
 ]
+
+logger = logging.getLogger(__name__)
 
 # One computation, and at most one more when an input the view read changed meanwhile.
 _COMPUTE_ATTEMPTS: Final = 2
@@ -141,11 +168,16 @@ _IDENTIFIER_KEY = re.compile(r"^[a-z][A-Za-z0-9]*$")
 _CAMEL_HUMP = re.compile(r"(?<=[a-z0-9])([A-Z])")
 
 
+#: The cards of an invariant carried from an earlier comparison onto these trees, or ``None`` (D574).
+type CardsCarry = Callable[[ReviewTreesQuery, ReviewTrees], ReviewTreesResult | None]
+
+
 def read_review_trees(
     config: McpRuntimeConfig,
     query: ReviewTreesQuery,
     *,
     processes: ReviewerWorklistProcesses | None = None,
+    carry: CardsCarry | None = None,
 ) -> ReviewTreesResult:
     """The tree view of one leaf: its comparison, currentness and worklist.
 
@@ -156,7 +188,7 @@ def read_review_trees(
     """
 
     with memo_git_object_lookups(), shared_blob_reads():
-        return _read_review_trees(config, query, processes=processes)
+        return _read_review_trees(config, query, processes=processes, carry=carry)
 
 
 def _read_review_trees(
@@ -164,8 +196,20 @@ def _read_review_trees(
     query: ReviewTreesQuery,
     *,
     processes: ReviewerWorklistProcesses | None = None,
+    carry: CardsCarry | None = None,
 ) -> ReviewTreesResult:
-    found = _comparison(config, query)
+    found = resolve_tree_comparison(config, query)
+    return read_prepared_review_trees(query, found, processes=processes, carry=carry)
+
+
+def read_prepared_review_trees(
+    query: ReviewTreesQuery,
+    found: tuple[WorktreeContract, ReviewTrees] | ReviewRefusal | None,
+    *,
+    processes: ReviewerWorklistProcesses | None = None,
+    carry: CardsCarry | None = None,
+) -> ReviewTreesResult:
+    """Project one already admitted native comparison without resolving it again."""
     if isinstance(found, ReviewRefusal):
         return ReviewTreesResult(
             state="refused",
@@ -186,12 +230,39 @@ def _read_review_trees(
         return _file_view(query, trees)
     if query.lane:
         return _focused(query, trees, lane=unexplained_lane(trees))
-    if query.invariants:
-        return _focused(query, trees, cards=tree_entries(trees, query.invariants))
+    if query.invariants or query.entry is not None:
+        carried = None if carry is None or query.entry is not None else carry(query, trees)
+        return carried if carried is not None else _cards_view(query, trees)
     return _view(query, contract, trees, processes=processes)
 
 
-def _comparison(
+def carried_cards_view(
+    query: ReviewTreesQuery, trees: ReviewTrees, kept: ReviewTreesResult
+) -> ReviewTreesResult:
+    """These trees' answer around the entries ``kept`` holds for the same invariants (D574)."""
+
+    assert kept.entry_memory is not None  # a carry needs the kept cards' memory state
+    return _focused(query, trees, cards=CardEntries(entries=kept.entries, memory=kept.entry_memory))
+
+
+def _cards_view(query: ReviewTreesQuery, trees: ReviewTrees) -> ReviewTreesResult:
+    cards = (
+        tree_entries(trees, query.invariants)
+        if query.entry is None
+        else tree_entry_cards(trees, query.entry, query.entry_side)
+    )
+    if isinstance(cards, ReviewRefusal):
+        return ReviewTreesResult(
+            state="refused",
+            repository_id=query.repository_id,
+            master=query.master,
+            leaf_id=query.leaf_id,
+            refusal=cards,
+        )
+    return _focused(query, trees, cards=cards)
+
+
+def resolve_tree_comparison(
     config: McpRuntimeConfig, query: ReviewTreesQuery
 ) -> tuple[WorktreeContract, ReviewTrees] | ReviewRefusal | None:
     """The comparison a query names: a recorded number, or the review's own resolution.
@@ -254,6 +325,7 @@ def _view(
     processes: ReviewerWorklistProcesses | None = None,
 ) -> ReviewTreesResult:
     record = trees.record
+    beside = _Beside(contract, trees)
     parts = _leaf_wide_parts(contract, trees, processes=processes)
     if isinstance(parts, ReviewRefusal):
         return ReviewTreesResult(
@@ -263,6 +335,8 @@ def _view(
             leaf_id=record.leaf_id,
             refusal=parts,
         )
+    inventory = beside.inventory()
+    overview = query.view == "overview"
     return ReviewTreesResult(
         state="trees",
         repository_id=query.repository_id,
@@ -273,10 +347,80 @@ def _view(
         delivered=delivered_notice(contract, record),
         knowledge_sides=trees.sides(),
         code_sides=trees.code_sides,
-        currentness=snake_keys(side_currentness(trees)),
-        worklist=parts.worklist,
+        currentness=snake_keys(beside.currentness()),
+        worklist=None if overview else parts.worklist,
+        worklist_summary=summarize_worklist(parts.worklist) if overview else None,
         code_changes=parts.code_changes,
+        entry_inventory=None if overview else inventory,
+        overview=summarize_inventory(inventory) if overview else None,
     )
+
+
+class _Beside:
+    """The view's entry inventory and currentness, computed in another thread meanwhile (D569).
+
+    Both are pure functions of the comparison's trees. They run in a copy of the request's context
+    (so a read whose askers left stops them too) under their own read recorder, beside the worklist
+    child the view waits for. Each part is *taken* where the sequential view computed it: its reads
+    are replayed into the
+    request's recorder there, and an exception it raised is raised there. A view refused before
+    then never takes them, so neither their reads nor their failures reach it, as before. When the
+    thread cannot start, each part is computed where it is taken, exactly as the sequential view did.
+    """
+
+    def __init__(self, contract: WorktreeContract, trees: ReviewTrees) -> None:
+        self._done = threading.Event()
+        self._parts: dict[str, tuple[Any, BaseException | None, dict[str, str]]] = {}
+        self._inline: ReviewTrees | None = None
+        context = contextvars.copy_context()
+        try:
+            threading.Thread(
+                target=context.run,
+                args=(self._compute, contract, trees),
+                name="review-view-beside",
+                daemon=True,
+            ).start()
+        except RuntimeError:  # no thread: the parts are computed in the request, where taken
+            self._inline = trees
+
+    def _compute(self, contract: WorktreeContract, trees: ReviewTrees) -> None:
+        try:
+            restore_review_memos(contract.coordination_root, process_serving_build().source_digest)
+            for name, part in (
+                ("inventory", tree_entry_inventory),
+                ("currentness", side_currentness),
+            ):
+                value: Any = None
+                failure: BaseException | None = None
+                with recorded_reads() as reads:
+                    try:
+                        value = part(trees)
+                    except BaseException as error:  # raised where the part is taken
+                        failure = error
+                self._parts[name] = (value, failure, dict(reads))
+        finally:
+            self._done.set()
+        # After both parts were handed over: what they added to the memos is queued for the answer
+        # writer (nothing waits for it).
+        save_review_memos()
+
+    def _take(self, name: str) -> Any:
+        self._done.wait()
+        value, failure, reads = self._parts[name]
+        replay_reads(reads)
+        if failure is not None:
+            raise failure
+        return value
+
+    def inventory(self) -> ReviewEntryInventory:
+        if self._inline is not None:
+            return tree_entry_inventory(self._inline)
+        return cast(ReviewEntryInventory, self._take("inventory"))
+
+    def currentness(self) -> dict[str, Any]:
+        if self._inline is not None:
+            return side_currentness(self._inline)
+        return cast(dict[str, Any], self._take("currentness"))
 
 
 def _leaf_wide_parts(
@@ -304,20 +448,12 @@ def _leaf_wide_parts(
         kept = None if key is None else remembered(key)
         if kept is not None:
             return kept
-        try:
-            parts, settled, reads = _compute_leaf_parts(contract, trees, processes=processes)
-        except WorklistProcessError as error:
-            return ReviewRefusal(
-                code=cast(ReviewRefusalCode, error.code),
-                detail=str(error)[:PROSE_MAX_LENGTH],
-                next_action=error.next_action,
-                offending_input="reviewer worklist process",
-            )
-        moved = moved_inputs(key, reads)
-        if not moved:
-            if key is not None and settled:
-                remember(key, parts, reads)
-            return parts
+        if key is None:
+            answered, moved = _leaf_parts_once(contract, trees, None, processes)
+        else:
+            answered, moved = _joined_leaf_parts(contract, trees, key, processes)
+        if answered is not None:
+            return answered
     return ReviewRefusal(
         code="inputs_changing",
         detail=(
@@ -327,6 +463,78 @@ def _leaf_wide_parts(
         next_action="retry once the named inputs stop changing",
         offending_input="; ".join(moved)[:REFERENCE_MAX_LENGTH],
     )
+
+
+#: One leaf-wide computation per exact view key in flight (D569): an open that arrives while the
+#: same trees' view is being built -- by a turn end or a watched change, or by another open --
+#: waits for that computation instead of starting a second, and replays the reads it consumed.
+_LEAF_PARTS_FLIGHTS: SharedFlights[
+    LeafViewKey,
+    tuple[tuple[LeafViewParts | ReviewRefusal | None, tuple[str, ...]], dict[str, str]],
+] = SharedFlights()
+
+
+def _joined_leaf_parts(
+    contract: WorktreeContract,
+    trees: ReviewTrees,
+    key: LeafViewKey,
+    processes: ReviewerWorklistProcesses | None,
+) -> tuple[LeafViewParts | ReviewRefusal | None, tuple[str, ...]]:
+    """One attempt, shared with every asker of the same view key while it is in flight.
+
+    A waiter's wait is logged with its length: an open that joined a build reports the time it
+    waited, never a computation it did not run.
+    """
+
+    def owned() -> tuple[
+        tuple[LeafViewParts | ReviewRefusal | None, tuple[str, ...]], dict[str, str]
+    ]:
+        with recorded_reads() as consumed:
+            answered = _leaf_parts_once(contract, trees, key, processes)
+        return answered, dict(consumed)
+
+    started = time.monotonic()
+    (answered, reads), owner = _LEAF_PARTS_FLIGHTS.share(key, owned)
+    replay_reads(reads)
+    if owner:
+        return answered
+    logger.info(
+        "joined the leaf-wide view in flight for %s; waited %.2f s",
+        contract.leaf_id or contract.task_name,
+        time.monotonic() - started,
+    )
+    return deepcopy(answered)
+
+
+def _leaf_parts_once(
+    contract: WorktreeContract,
+    trees: ReviewTrees,
+    key: LeafViewKey | None,
+    processes: ReviewerWorklistProcesses | None,
+) -> tuple[LeafViewParts | ReviewRefusal | None, tuple[str, ...]]:
+    """One computation attempt: its answer, or ``None`` with the inputs that moved meanwhile."""
+
+    try:
+        parts, settled, reads = _compute_leaf_parts(contract, trees, processes=processes)
+    except WorklistProcessError as error:
+        return (
+            ReviewRefusal(
+                code=cast(ReviewRefusalCode, error.code),
+                detail=str(error)[:PROSE_MAX_LENGTH],
+                next_action=error.next_action,
+                offending_input="reviewer worklist process",
+            ),
+            (),
+        )
+    moved = moved_inputs(key, reads)
+    if moved:
+        return None, moved
+    # A computation whose every asker is gone -- a superseded build whose child landed -- keeps
+    # nothing (D569 mean 4).
+    raise_if_read_cancelled()
+    if key is not None and settled:
+        remember(key, parts, reads)
+    return parts, ()
 
 
 def _compute_leaf_parts(
@@ -406,13 +614,23 @@ def _file_view(query: ReviewTreesQuery, trees: ReviewTrees) -> ReviewTreesResult
 
 
 def snake_keys(value: Any) -> Any:
-    """``value`` with every identifier-shaped camelCase key re-spelled in snake_case, recursively."""
+    """``value`` with every identifier-shaped camelCase key re-spelled in snake_case, recursively.
 
-    if isinstance(value, Mapping):
+    A worklist's documents run to hundreds of thousands of values, so the plain JSON types are
+    told apart by their exact type first; anything else is classified as before (D569).
+    """
+
+    kind = type(value)
+    if kind in _PLAIN_SCALARS:
+        return value
+    if kind is dict or (kind is not list and kind is not tuple and isinstance(value, Mapping)):
         return {_snake(key): snake_keys(item) for key, item in value.items()}
-    if isinstance(value, list | tuple):
+    if kind is list or kind is tuple or isinstance(value, list | tuple):
         return [snake_keys(item) for item in value]
     return value
+
+
+_PLAIN_SCALARS: Final = frozenset({str, int, float, bool, type(None)})
 
 
 def _snake(key: object) -> object:

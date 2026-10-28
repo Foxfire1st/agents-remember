@@ -37,15 +37,28 @@ from agents_remember.application.review_comparison_publication import (
     publication_refusal,
     publish_comparison_record,
 )
+from agents_remember.application.review_comparison_records import (
+    REVIEW_COMPARISONS_DIRECTORY,
+    comparison_directory,
+    comparison_records,
+    latest_record,
+    latest_record_at,
+    numbered_record,
+    record_bytes,
+)
 from agents_remember.kernel.canonical_json import canonical_json_bytes
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
     GitRunnerOptions,
     run_git,
 )
+from agents_remember.kernel.recorded_reads import (
+    bytes_identity,
+    observed_json_files,
+    record_read,
+)
 from agents_remember.memory.conversion.base import own_paired_code_commit
 from agents_remember.memory.conversion.code_objects import CodeObjects
-from agents_remember.memory.knowledge.durable_evidence import durable_reports_root
 from agents_remember.memory.knowledge_index import (
     KnowledgeIndexCache,
     MemoryTreeError,
@@ -65,7 +78,6 @@ from agents_remember.models.knowledge.review_trees import (
 )
 from agents_remember.models.knowledge_files.canonical import parse_json
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
-from agents_remember.tasks.task_paths import slugify
 from agents_remember.worktrees.modules.capture_baseline import (
     begin_capture_baseline,
     capture_baseline_unchanged,
@@ -77,6 +89,7 @@ from agents_remember.worktrees.modules.git import (
     head_commit,
     worktree_candidate_tree,
 )
+from agents_remember.worktrees.modules.kept_capture import kept_candidate_tree
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only; the resolution module imports this one
@@ -93,8 +106,11 @@ __all__ = [
     "comparison_directory",
     "comparison_records",
     "converted_base_side",
+    "drafted_review_trees",
+    "latest_record",
     "live_review_trees",
     "memory_converted",
+    "numbered_record",
     "official_line_converted",
     "recheck_memory_candidate",
     "reopen_review_trees",
@@ -106,7 +122,6 @@ __all__ = [
     "tree_sides_refusal",
 ]
 
-REVIEW_COMPARISONS_DIRECTORY: Final = "review-comparisons"
 _ZERO_OBJECT: Final = "0" * 40
 # A pin another reader of the same new comparison is creating holds Git's ref lock for moments.
 _RECORDING: Final = threading.Lock()
@@ -189,30 +204,6 @@ def review_ref(task_id: str, leaf_id: str, number: int) -> str:
     return f"{REVIEW_REF_NAMESPACE}/{task_id}/{leaf_id}/{number}"
 
 
-def comparison_directory(task_root: Path, leaf_id: str) -> Path:
-    """Where one leaf's comparison records live, beside the task's other durable reports."""
-
-    return durable_reports_root(task_root) / REVIEW_COMPARISONS_DIRECTORY / slugify(leaf_id)
-
-
-def comparison_records(task_root: Path, leaf_id: str) -> tuple[ReviewTreeComparisonRecord, ...]:
-    """Every readable record of one leaf, by number. An unreadable file is skipped, not guessed."""
-
-    directory = comparison_directory(task_root, leaf_id)
-    if not directory.is_dir():
-        return ()
-    records: list[ReviewTreeComparisonRecord] = []
-    for path in sorted(directory.glob("*.json")):
-        try:
-            records.append(ReviewTreeComparisonRecord.model_validate_json(path.read_bytes()))
-        except (OSError, ValidationError):
-            continue
-    return tuple(sorted(records, key=lambda record: record.number))
-
-
-# -- the live comparison ---------------------------------------------------------------------------
-
-
 def live_review_trees(
     coordination_root: Path, contract: WorktreeContract, code_candidate_tree: str
 ) -> ReviewTrees | ReviewRefusal | None:
@@ -242,6 +233,28 @@ def live_review_trees(
     if isinstance(recorded, ReviewRefusal):
         return recorded
     record, path = recorded
+    return _opened_live(coordination_root, record, memory_repository, worktree, path)
+
+
+def drafted_review_trees(
+    coordination_root: Path, contract: WorktreeContract, record: ReviewTreeComparisonRecord
+) -> ReviewTrees | None:
+    """A drafted live comparison's trees, opened as the live review opens them; never recorded."""
+
+    worktree = contract.memory_worktree
+    memory_repository = contract.memory_repo_path or worktree
+    if worktree is None or memory_repository is None:
+        return None
+    return _opened_live(coordination_root, record, memory_repository, worktree, None)
+
+
+def _opened_live(
+    coordination_root: Path,
+    record: ReviewTreeComparisonRecord,
+    memory_repository: Path,
+    worktree: Path,
+    path: Path | None,
+) -> ReviewTrees:
     verified = [(Path(record.code_base.repository).as_posix(), record.code_base.tree)]
     if record.code_candidate.commit is not None or record.code_candidate.ref is not None:
         verified.append(
@@ -252,7 +265,7 @@ def live_review_trees(
         trees = _open_sides(coordination_root, record, memory_repository, path)
     finally:
         _VERIFIED_CODE_TREES.reset(token)
-    return replace(trees, live=True, memory_worktree=worktree)
+    return replace(trees, live=True, memory_worktree=worktree, coordination_root=coordination_root)
 
 
 class TreeSideUnreadable(Exception):
@@ -289,7 +302,7 @@ def _live_draft(
         raise TreeSideUnreadable("memory base", str(error)) from error
     memory_base_tree = _require(memory_repository, f"{memory_base}^{{tree}}", "memory base")
     assert contract.memory_worktree is not None
-    candidate_tree = _capture(contract.memory_worktree)
+    candidate_tree = _capture(contract.memory_worktree, coordination_root)
     leaf_id = contract.leaf_id or contract.task_name
     conversion = _conversion(
         memory_repository,
@@ -334,7 +347,8 @@ def _live_draft(
     )
 
 
-def _capture(memory_worktree: Path) -> str:
+def _capture(memory_worktree: Path, coordination_root: Path | None = None) -> str:
+    """The memory worktree's candidate tree; through its kept index under ``coordination_root``."""
     captured: tuple[tuple[str, int, int, int, int], ...] | None = None
 
     def observe(index: Path) -> None:
@@ -344,10 +358,15 @@ def _capture(memory_worktree: Path) -> str:
     try:
         head_before = head_commit(memory_worktree)
         before = begin_capture_baseline(memory_worktree)
-        with TemporaryDirectory(prefix="ar-review-memory-") as scratch:
-            tree = worktree_candidate_tree(
-                memory_worktree, Path(scratch) / "index", captured=observe
+        if coordination_root is not None:
+            tree = kept_candidate_tree(
+                coordination_root, memory_worktree, head=head_before, captured=observe
             )
+        else:
+            with TemporaryDirectory(prefix="ar-review-memory-") as scratch:
+                tree = worktree_candidate_tree(
+                    memory_worktree, Path(scratch) / "index", captured=observe
+                )
         head_after = head_commit(memory_worktree)
     except (RuntimeError, OSError) as error:
         raise TreeSideUnreadable(
@@ -373,7 +392,7 @@ def recheck_memory_candidate(trees: ReviewTrees) -> ReviewRefusal | None:
         # file stats. The re-derivation below would capture this same tree.
         return None
     try:
-        current = _capture(trees.memory_worktree)
+        current = _capture(trees.memory_worktree, trees.coordination_root)
     except TreeSideUnreadable as error:
         return _unresolved(error.side, error.detail)
     if current == recorded:
@@ -545,7 +564,7 @@ def _latest_converted_base(task_root: Path, leaf_id: str) -> ReviewConvertedBase
     )
     for _number, path in reversed(numbered):
         try:
-            return ReviewTreeComparisonRecord.model_validate_json(path.read_bytes()).converted_base
+            return ReviewTreeComparisonRecord.model_validate_json(record_bytes(path)).converted_base
         except (OSError, ValidationError):
             continue
     return None
@@ -638,14 +657,20 @@ def _recorded(
     contract: WorktreeContract, draft: ReviewTreeComparisonRecord
 ) -> tuple[ReviewTreeComparisonRecord, Path] | ReviewRefusal:
     directory = comparison_directory(contract.task_root, draft.leaf_id)
-    existing = comparison_records(contract.task_root, draft.leaf_id)
-    if existing and existing[-1].same_trees(draft):
+    # This owner may append exactly its new record. Keep consumed bytes, bracket its own
+    # listing change, then observe the resulting listing; an external append/removal refuses.
+    paths = tuple(sorted(directory.glob("*.json")))
+    latest = latest_record_at(paths)
+    if latest is not None and latest.same_trees(draft):
         # The same four trees as the latest record: reuse it, re-creating a pin that has gone.
-        latest = existing[-1]
         repinned = _pin(latest)
         if repinned is not None:
             return repinned
-        return latest, directory / f"{latest.number}.json"
+        return (
+            (latest, directory / f"{latest.number}.json")
+            if observed_json_files(directory) == paths
+            else publication_refusal(draft.leaf_id, latest.number)
+        )
     listed = _listed_pin_shas(
         draft,
         branches={
@@ -679,7 +704,7 @@ def _recorded(
     )
     number = 1 + max(
         [
-            *(record.number for record in existing),
+            *(() if latest is None else (latest.number,)),
             *_ref_numbers(draft, listed=listed),
         ],
         default=0,
@@ -706,13 +731,20 @@ def _recorded(
         # Another process published this number first. A record is immutable, so the bytes that won
         # are the comparison: this reader answers with that record, never with a second write of the
         # same number (MIK-R195 F05). A number now naming other trees is refused, not overwritten.
-        raced = comparison_records(contract.task_root, draft.leaf_id)
-        winner = (
-            raced[-1]
-            if raced and raced[-1].number == number and raced[-1].same_trees(draft)
-            else None
-        )
+        raced = numbered_record(contract.task_root, draft.leaf_id, number)
+        winner = raced if raced is not None and raced.same_trees(draft) else None
         return (winner, path) if winner is not None else publication_refusal(draft.leaf_id, number)
+    return _published_record(record, path, paths)
+
+
+def _published_record(
+    record: ReviewTreeComparisonRecord, path: Path, previous: tuple[Path, ...]
+) -> tuple[ReviewTreeComparisonRecord, Path] | ReviewRefusal:
+    if observed_json_files(path.parent) != tuple(sorted((*previous, path))):
+        return publication_refusal(record.leaf_id, record.number)
+    record_read(
+        path, bytes_identity(canonical_json_bytes(record.model_dump(mode="json", by_alias=True)))
+    )
     return record, path
 
 
@@ -959,9 +991,8 @@ def reopen_review_trees(
     """
 
     leaf_id = contract.leaf_id or contract.task_name
-    records = comparison_records(contract.task_root, leaf_id)
     if number is not None:
-        chosen = next((record for record in records if record.number == number), None)
+        chosen = numbered_record(contract.task_root, leaf_id, number)
         if chosen is None:
             return ReviewRefusal(
                 code="candidate_unresolved",
@@ -969,10 +1000,10 @@ def reopen_review_trees(
                 next_action="name a comparison this leaf recorded, or open the live review",
                 offending_input=str(number),
             )
-    elif records:
-        chosen = records[-1]
     else:
-        return None
+        chosen = latest_record(contract.task_root, leaf_id)
+        if chosen is None:
+            return None
     return reopened_trees(
         coordination_root, chosen, comparison_directory(contract.task_root, leaf_id)
     )

@@ -25,7 +25,6 @@ from agents_remember.canvas.presenter import (
     Presenter,
     PresenterRefused,
     RunnerReceipt,
-    UnconfiguredPresenterRunner,
 )
 from agents_remember.canvas.presenter_host import (
     SESSION_SCHEMA,
@@ -43,6 +42,7 @@ from canvas_host_test_support import (
     config,
     packet,
     record,
+    stored_attempt,
     task,
     write_settings,
 )
@@ -89,16 +89,10 @@ def _presenter(settings, *, runner=None) -> Presenter:
 
 
 def _start(presenter: Presenter, *, request: str = "req-host"):
-    return presenter.start(
-        caller="dashboard",
-        request_id=request,
-        activation="explicit",
-        evidence=packet(record()),
-        focus="the change to src/app.py",
-    )
+    return stored_attempt(presenter, evidence=packet(record()), request=request)
 
 
-def test_start_authors_a_confined_draft_and_persists_the_host_receipt(tmp_path: Path) -> None:
+def test_stored_attempt_fixture_has_a_confined_draft_and_host_receipt(tmp_path: Path) -> None:
     """Rules 1, 4, 14: one prepared folder, exact grants, and a named draft result."""
 
     settings = config(tmp_path)
@@ -116,7 +110,7 @@ def test_start_authors_a_confined_draft_and_persists_the_host_receipt(tmp_path: 
     assert (working / "host" / "session.json").is_file()
 
     grants = json.loads((working / "host" / "inputs.json").read_text())
-    assert [grant["role"] for grant in grants] == ["evidence", "design", "instructions"]
+    assert [grant["role"] for grant in grants] == ["evidence", "instructions"]
     assert all(len(grant["sha256"]) == 64 for grant in grants)
 
     render = presenter.draft(attempt.attempt_id)
@@ -252,24 +246,6 @@ def test_archive_stores_the_transcript_beside_the_session(tmp_path: Path) -> Non
     assert not (Path(attempt.working_directory) / "assets" / "archive.json").exists()
 
 
-def test_a_replacement_archives_the_predecessor_session(tmp_path: Path) -> None:
-    """Rule 14/B16: replacement settles the old session through the host, not beside it."""
-
-    settings = config(tmp_path)
-    task(settings)
-    write_settings(settings, LAUNCH)
-    presenter = _presenter(settings)
-    first = _start(presenter, request="req-first")
-    presenter.say(first.attempt_id, role="developer", text="what function was gained?")
-
-    replaced = presenter.replace(first.attempt_id, request_id="req-second", reason="another form")
-    assert replaced.predecessor_attempt == first.attempt_id
-    assert replaced.session_id != first.session_id
-    stored = presenter.read(first.attempt_id)
-    assert stored is not None and "host archive:" in (stored.detail or "")
-    assert (Path(first.working_directory) / "host" / "archive.json").is_file()
-
-
 def test_a_native_scope_write_escape_is_refused_by_name(tmp_path: Path) -> None:
     """Rules 4, 5, 17: presentation output has one write area, and no other target exists."""
 
@@ -403,19 +379,6 @@ def test_a_start_only_runner_keeps_the_conversation_local_and_says_so(tmp_path: 
     assert status["source"] == "local"
     assert "no host operations" in status["detail"]
     assert presenter.transcript(attempt.attempt_id) == said.conversation
-
-
-def test_the_unconfigured_runner_still_refuses_by_name(tmp_path: Path) -> None:
-    """The refusal vocabulary survives: a build with no confined harness authors nothing."""
-
-    settings = config(tmp_path)
-    task(settings)
-    write_settings(settings, LAUNCH)
-    presenter = _presenter(settings, runner=UnconfiguredPresenterRunner())
-
-    attempt = _start(presenter, request="req-unconfigured")
-    assert attempt.state == "failed"
-    assert "no-confined-harness" in (attempt.detail or "")
 
 
 def _record_files(settings) -> list[Path]:

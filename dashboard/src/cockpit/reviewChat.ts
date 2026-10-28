@@ -75,6 +75,16 @@ export function reviewChatUnknownLine(review: Pick<ChangeSetTarget, 'repo' | 'ma
 export interface ReviewChatControl {
   open: boolean;
   toggle: () => void;
+  /**
+   * Open the column, and never close it.
+   *
+   * A press that asks for the first request (`✦ Explain`, a ⊕ with no seat) opens the column: the
+   * ask's own listener does that, and the press then has to *open* it too, not toggle it. Toggling
+   * there ran against the state the press started from (`open: false`), so the ask's open and the
+   * press's toggle cancelled out in one batch and the column stayed closed: the explainer column
+   * existed inside a `display: none` rail with a 0×0 box, and the press looked like it did nothing.
+   */
+  expand?: () => void;
 }
 
 export interface ReviewExplainerTarget extends ExplainerColumnTarget {
@@ -101,21 +111,48 @@ export interface ReviewChatColumn extends ReviewChatControl {
   explainer: ReviewExplainerTarget | null;
 }
 
+/**
+ * The task list's entry for one review's leaf, or `undefined` while the list does not name it.
+ *
+ * The master is matched by its folder name (`dirName`), the same way the review entry names it.
+ */
+function findTaskEntry(
+  review: Pick<ChangeSetTarget, 'repo' | 'master' | 'leaf'> | null,
+  tasks: Record<string, TaskEntry>,
+): TaskEntry | undefined {
+  if (!review) return undefined;
+  return Object.values(tasks).find(
+    (task) =>
+      task.id === review.leaf &&
+      task.reference?.repository === review.repo &&
+      dirName(task.reference.path) === review.master,
+  );
+}
+
+/**
+ * Whether the task list says this leaf is planning, or `null` while it does not say.
+ *
+ * The review payload carries no planning fact, and the explainer's `/planned` route refuses a leaf
+ * that is not planning -- so a page that asked anyway earned a 4xx on every open of every leaf
+ * (MIK-R211 v2 rule 7). The leaf's own stage in the task list is that fact: `planned` means the leaf
+ * has not published yet. `null` is "not known yet", which asks nothing rather than asking wrongly.
+ */
+export function useLeafPlanned(
+  review: Pick<ChangeSetTarget, 'repo' | 'master' | 'leaf'> | null,
+): boolean | null {
+  const tasks = useDashboard((state) => state.tasks);
+  const hydrated = useDashboard((state) => state.generatedAt !== null);
+  return useMemo(() => {
+    if (!hydrated) return null;
+    const entry = findTaskEntry(review, tasks);
+    return entry ? entry.stage === 'planned' : null;
+  }, [hydrated, review, tasks]);
+}
+
 function useReviewChatTask(review: ChangeSetTarget | null) {
   const tasks = useDashboard((state) => state.tasks);
   const hydrated = useDashboard((state) => state.generatedAt !== null);
-  const entry = useMemo(
-    () =>
-      review
-        ? Object.values(tasks).find(
-            (task) =>
-              task.id === review.leaf &&
-              task.reference?.repository === review.repo &&
-              dirName(task.reference.path) === review.master,
-          )
-        : undefined,
-    [review, tasks],
-  );
+  const entry = useMemo(() => findTaskEntry(review, tasks), [review, tasks]);
   const task = useMemo(
     () => (review ? reviewChatTask(review, tasks, hydrated) : null),
     [review, tasks, hydrated],
@@ -196,6 +233,7 @@ export function useReviewChat(review: ChangeSetTarget | null): ReviewChatColumn 
   return {
     open,
     toggle,
+    expand: openColumn,
     ...width,
     placement,
     documentRef: task.documentRef,

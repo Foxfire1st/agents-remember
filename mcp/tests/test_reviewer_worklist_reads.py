@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path, PosixPath
@@ -44,6 +43,7 @@ from agents_remember_test_support.testing.review_git_trees import (
     commit,
     git,
 )
+from reviewer_worklist_process_test_support import one_shot_worklist_child as _child_script
 from test_review_git_trees import world
 from test_review_read_latency import _body, _live, _ports, _query
 
@@ -51,8 +51,22 @@ from test_review_read_latency import _body, _live, _ports, _query
 @pytest.fixture(autouse=True)
 def _fresh_memo() -> Iterator[None]:
     review_leaf_view_memo.LEAF_VIEW_MEMO.clear()
-    yield
-    review_leaf_view_memo.LEAF_VIEW_MEMO.clear()
+    owners: list[process_owner.ReviewerWorklistProcesses] = []
+    initialize = process_owner.ReviewerWorklistProcesses.__init__
+
+    def initialized(owner: process_owner.ReviewerWorklistProcesses, **options: Any) -> None:
+        initialize(owner, **options)
+        owners.append(owner)
+
+    # _ports exposes the read callables without the app lifecycle that normally shuts their
+    # owners down. Keep that lifecycle in the fixture now that a successful child remains idle.
+    with mock.patch.object(process_owner.ReviewerWorklistProcesses, "__init__", initialized):
+        try:
+            yield
+        finally:
+            for owner in owners:
+                owner.shutdown()
+            review_leaf_view_memo.LEAF_VIEW_MEMO.clear()
 
 
 def test_child_consumed_task_bytes_survive_aba_conflict_absence_and_read_errors(
@@ -126,13 +140,13 @@ if mode == 'conflict':
         path.write_text(original)
         return result
     leaf.leaf_expected_effects = restore
-request = json.load(sys.stdin)
+request = json.loads(sys.stdin.readline())
 answer = child._run(request)
 if mode == 'absent':
     path.unlink()
 else:
     path.write_text(original)
-json.dump(answer, sys.stdout)
+print(json.dumps(answer), flush=True)
 """
         with (
             _child_script(script),
@@ -161,24 +175,6 @@ json.dump(answer, sys.stdout)
     assert domain.worklist.state == "incomplete" and domain.worklist.incomplete
     assert domain.worklist.incomplete[0]["input"] == "leaf task document"
     assert len(review_leaf_view_memo.LEAF_VIEW_MEMO) == 0
-
-
-@contextmanager
-def _child_script(script: str) -> Iterator[list[subprocess.Popen[Any]]]:
-    """Test-only child faults; the product continues to use its fixed package module entry."""
-
-    actual = subprocess.Popen
-    children: list[subprocess.Popen[Any]] = []
-
-    def spawn(argv: list[str], *args: Any, **kwargs: Any) -> Any:
-        if argv[1:] == ["-P", "-m", process_owner.CHILD_MODULE]:
-            child = actual([argv[0], "-P", "-c", script], *args, **kwargs)
-            children.append(child)
-            return child
-        return actual(argv, *args, **kwargs)
-
-    with mock.patch.object(subprocess, "Popen", spawn):
-        yield children
 
 
 def _settings_reads(fixture: World) -> None:
@@ -247,13 +243,13 @@ def selected(source):
     return result
 onboarding_trace.resolver.parse_coordination_settings = selected
 try:
-    answer = child._run(json.load(sys.stdin))
+    answer = child._run(json.loads(sys.stdin.readline()))
 except Exception as error:
     print(repr(error), file=sys.stderr)
     raise
 if answer['document'] is not None:
     answer['document']['_test_settings_defaults'] = parsed
-json.dump(answer, sys.stdout)
+print(json.dumps(answer), flush=True)
 """
             with _child_script(script), mock.patch.object(process_owner, "_reply", observed):
                 refused = ports.trees(_query())
@@ -358,9 +354,9 @@ def loaded(source):
     branches.append(result.code_work_branch)
     return result
 contract_reader.load_contract = loaded
-answer = child._run(json.load(sys.stdin))
+answer = child._run(json.loads(sys.stdin.readline()))
 answer['document']['_test_contract_branches'] = branches
-json.dump(answer, sys.stdout)
+print(json.dumps(answer), flush=True)
 """
     review_leaf_view_memo.LEAF_VIEW_MEMO.clear()
     with _child_script(script), mock.patch.object(process_owner, "_reply", observed):
@@ -391,7 +387,7 @@ def text(self, *args, **kwargs):
         return altered.decode('utf-8')
     return read_text(self, *args, **kwargs)
 Path.read_bytes, Path.read_text = consumed, text
-json.dump(child._run(json.load(sys.stdin)), sys.stdout)
+print(json.dumps(child._run(json.loads(sys.stdin.readline()))), flush=True)
 """
     review_leaf_view_memo.LEAF_VIEW_MEMO.clear()
     with _child_script(script), mock.patch.object(process_owner, "_reply", observed):
@@ -513,7 +509,7 @@ def text(self, *args, **kwargs):
         return altered.decode('utf-8')
     return read_text(self, *args, **kwargs)
 Path.read_bytes, Path.read_text = consumed, text
-json.dump(child._run(json.load(sys.stdin)), sys.stdout)
+print(json.dumps(child._run(json.loads(sys.stdin.readline()))), flush=True)
 """
         with _child_script(script), mock.patch.object(process_owner, "_reply", captured):
             refused = ports.trees(_query())
@@ -648,7 +644,7 @@ def read(path):
         alias.unlink(); alias.symlink_to(first)
     return result
 contract_reader.load_contract = read
-json.dump(child._run(json.load(sys.stdin)), sys.stdout)
+print(json.dumps(child._run(json.loads(sys.stdin.readline()))), flush=True)
 """
     review_leaf_view_memo.LEAF_VIEW_MEMO.clear()
     with _observations() as replies:
@@ -751,7 +747,7 @@ def denied(path):
         raise PermissionError('controlled actual root predicate')
     return exists(path)
 Path.exists = denied
-json.dump(child._run(json.load(sys.stdin)), sys.stdout)
+print(json.dumps(child._run(json.loads(sys.stdin.readline()))), flush=True)
 """
         with _child_script(script):
             answer = ports.trees(_query())
@@ -814,7 +810,7 @@ def consumed(path):
         return {altered!r}
     return read(path)
 Path.read_bytes = consumed
-json.dump(child._run(json.load(sys.stdin)), sys.stdout)
+print(json.dumps(child._run(json.loads(sys.stdin.readline()))), flush=True)
 """
         review_leaf_view_memo.LEAF_VIEW_MEMO.clear()
         with _child_script(script):
@@ -838,7 +834,7 @@ def denied(path):
         raise PermissionError('controlled actual ledger read')
     return read(path)
 Path.read_bytes = denied
-json.dump(child._run(json.load(sys.stdin)), sys.stdout)
+print(json.dumps(child._run(json.loads(sys.stdin.readline()))), flush=True)
 """
         with _child_script(script):
             failed = ports.trees(_query())
@@ -986,7 +982,7 @@ from pathlib import Path
 from agents_remember.application import reviewer_worklist_child as child
 Path({str(own)!r}).write_text(json.dumps({{**json.loads({_task_document(LEAF)!r}),
                                          "title": {{"stable": "T", "moving": str(time.time_ns())}}[{{MODE}}]}}))
-json.dump(child._run(json.load(sys.stdin)), sys.stdout)
+print(json.dumps(child._run(json.loads(sys.stdin.readline()))), flush=True)
 """
     with _observations() as replies:
         with _child_script(script.replace("{MODE}", "'stable'")):
@@ -1014,7 +1010,7 @@ def test_a_worklist_that_reads_no_task_document_is_not_refused_as_changed(world:
 import json, sys
 from agents_remember.application import reviewer_worklist_child as child
 child.leaf_worklist = lambda *args, **kwargs: None
-json.dump(child._run(json.load(sys.stdin)), sys.stdout)
+print(json.dumps(child._run(json.loads(sys.stdin.readline()))), flush=True)
 """
     with _child_script(script):
         answer = ports.trees(_query())
@@ -1113,10 +1109,10 @@ if bad is None:
 else:
     own.write_text(bad)
 try:
-    answer = child._run(json.load(sys.stdin))
+    answer = child._run(json.loads(sys.stdin.readline()))
 finally:
     own.write_text({declared!r})
-json.dump(answer, sys.stdout)
+print(json.dumps(answer), flush=True)
 """
             with _observations() as replies, _child_script(script):
                 raced = ports.trees(_query())

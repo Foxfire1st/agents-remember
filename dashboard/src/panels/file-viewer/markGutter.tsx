@@ -173,9 +173,8 @@ export interface Revealed {
   scrollToLine: () => void;
 }
 
-// The reader's own actions that end a hold: a pointer, a key, or a wheel or trackpad scroll -- which
-// fires neither of the other two (review R3-F1).
-const HOLD_RELEASES = ['pointerdown', 'keydown', 'wheel'] as const;
+// The reader's own actions that end a reveal: pointer, keyboard, wheel/trackpad or touch scroll.
+const HOLD_RELEASES = ['pointerdown', 'keydown', 'wheel', 'touchmove'] as const;
 
 // One frame of the hold: an undrawn mark's line is scrolled to again; a drawn one is refocused if a
 // redraw left focus on the body, and brought back into view if it moved out.
@@ -217,10 +216,32 @@ export function holdRevealed(revealed: Revealed): void {
   requestAnimationFrame(() => frame(0));
 }
 
-// Bring a mark's line into view in its editor, then focus the mark once CodeMirror has drawn it, and
-// keep it focused and in view while the editor settles.
-function revealMark(editor: DrawnEditor, mark: PaneMark, host: HTMLElement, done: () => void) {
+// Bring a mark's line into view, unless the reader moves on before CodeMirror draws it. A pending
+// return must not scroll a detached pane or pull the reader back after their next action.
+// Exported for the same frame-by-frame checks as holdRevealed.
+export function revealMark(editor: DrawnEditor, mark: PaneMark, host: HTMLElement, done: () => void): () => void {
   const { view, first } = editor;
+  const doc = host.ownerDocument;
+  let active = true;
+  let frameRequest = 0;
+  const cancel = () => {
+    if (!active) return;
+    active = false;
+    cancelAnimationFrame(frameRequest);
+    for (const name of HOLD_RELEASES) doc.removeEventListener(name, release, true);
+    doc.removeEventListener('focusin', focusMoved, true);
+  };
+  const release = () => {
+    if (!active) return;
+    cancel();
+    done();
+  };
+  const focusMoved = (event: FocusEvent) => {
+    if (event.target instanceof Node && !host.contains(event.target)) release();
+  };
+  for (const name of HOLD_RELEASES)
+    doc.addEventListener(name, release, { capture: true, once: true, passive: true });
+  doc.addEventListener('focusin', focusMoved, true);
   const scrollToLine = () => {
     const at = docLine(view.state.doc, mark.line, first);
     if (at !== null)
@@ -230,17 +251,25 @@ function revealMark(editor: DrawnEditor, mark: PaneMark, host: HTMLElement, done
   };
   scrollToLine();
   const settle = (frame: number) => {
-    if (!host.isConnected && frame < REVEAL_FRAMES) {
-      requestAnimationFrame(() => settle(frame + 1));
+    if (!active) return;
+    if (!view.dom.isConnected) {
+      cancel();
       return;
     }
+    if (!host.isConnected) {
+      if (frame < REVEAL_FRAMES) frameRequest = requestAnimationFrame(() => settle(frame + 1));
+      else release();
+      return;
+    }
+    cancel();
     const target = host.querySelector<HTMLElement>('button');
     target?.focus({ preventScroll: true });
     host.scrollIntoView?.({ block: 'center', inline: 'nearest' });
     if (target) holdRevealed({ view, host, target, scrollToLine });
     done();
   };
-  requestAnimationFrame(() => settle(0));
+  frameRequest = requestAnimationFrame(() => settle(0));
+  return cancel;
 }
 
 // CodeMirror hides its whole gutter column from assistive technology. The marks are controls the
@@ -326,21 +355,24 @@ export function useMarkedPane(marks: PaneMarks | undefined): MarkedPane {
   const hosts = useMemo(() => new Map((ids ? ids.split('\n') : []).map(hostEntry)), [ids]);
   const latest = useRef(marks);
   const editors = useRef<DrawnEditors | null>(null);
+  const cancelReveal = useRef<(() => void) | undefined>(undefined);
   useEffect(() => {
     latest.current = marks;
   });
   const reveal = useCallback(() => {
+    cancelReveal.current?.();
     const current = latest.current;
     const mark = current?.marks.find((one) => one.id === current.reveal);
     const host = mark && hosts.get(mark.id);
     const drawn = editors.current;
     if (!current || !mark || !host || !drawn) return;
     const editor = mark.side === 'before' && drawn.before ? drawn.before : drawn.after;
-    revealMark(editor, mark, host, () => current.onRevealed?.());
+    cancelReveal.current = revealMark(editor, mark, host, () => current.onRevealed?.());
   }, [hosts]);
   const wanted = marks?.reveal;
   useEffect(() => {
     if (wanted) reveal();
+    return () => cancelReveal.current?.();
   }, [wanted, reveal]);
   const gutterFor = useCallback(
     (side: MarkSide, first: number) =>
@@ -354,7 +386,10 @@ export function useMarkedPane(marks: PaneMarks | undefined): MarkedPane {
   const drawn = useCallback(
     (next: DrawnEditors | null) => {
       editors.current = next;
-      if (!next) return;
+      if (!next) {
+        cancelReveal.current?.();
+        return;
+      }
       for (const editor of [next.before, next.after]) if (editor) exposeMarks(editor.view);
       expandMarkedRuns(next, latest.current?.marks ?? []);
       reveal();

@@ -80,6 +80,26 @@ function summaryOf(body: ReviewResult) {
 }
 const family = (body: ReviewResult) => body.payload!.family_context!.entries[0];
 const selected = (body: ReviewResult) => body.payload!.knowledge.revision_selection!;
+// Explicitly synthetic member answers, not captures: IDENTICAL's and ONE_SIDED's members were never
+// read by invariant selector. MEMBER's real invariant answer is re-addressed to the family's first
+// member and carries that family's own captured context, so the member's reading, opened from the
+// family's overview on the page, draws that family's guarantee after its code.
+function memberAnswerOf(body: ReviewResult): ReviewResult {
+  const answer = structuredClone(MEMBER);
+  const entry = family(body);
+  const id = [...entry.after.members, ...entry.before.members][0].invariant_id;
+  const revision = (side: 'before' | 'after') =>
+    entry[side].members.find((row) => row.invariant_id === id)?.invariant_revision_id ?? null;
+  answer.payload!.family_context = structuredClone(body.payload!.family_context);
+  Object.assign(answer.payload!.knowledge.revision_selection!, {
+    record_id: id,
+    before_revision_id: revision('before'),
+    after_revision_id: revision('after'),
+  });
+  return answer;
+}
+const IDENTICAL_MEMBER = memberAnswerOf(IDENTICAL);
+const ONE_SIDED_MEMBER = memberAnswerOf(ONE_SIDED);
 const response = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as Response;
 let catalogue = syntheticCatalogue([FAMILY, IDENTICAL]);
 vi.mock('../../data/useReviewCatalogue', async (importOriginal) => {
@@ -102,7 +122,7 @@ function serving(first: ReviewResult = FAMILY, next: ReviewResult[] = []) {
   treeOrderStore.getState().setOrder('authored');
   const urls: URL[] = [];
   const subjects = new Map(
-    [first, FAMILY, MEMBER, IDENTICAL, ONE_SIDED, EMPTY].map((body) => [
+    [first, FAMILY, MEMBER, IDENTICAL, ONE_SIDED, EMPTY, IDENTICAL_MEMBER, ONE_SIDED_MEMBER].map((body) => [
       `${selected(body).record_kind}:${selected(body).record_id}`,
       body,
     ]),
@@ -119,6 +139,11 @@ function serving(first: ReviewResult = FAMILY, next: ReviewResult[] = []) {
       if (url.pathname === '/api/review/intent/summary')
         return new Response(JSON.stringify(summaryOf(first)), { status: 200 });
       if (url.pathname.endsWith('/trees')) {
+        // A filter reads the complete location inventory first (MIK-R211 v4 rule 10;
+        // useReviewSearch.ts). TREES predates `entry_inventory`: an explicitly synthetic ready,
+        // empty inventory stands in for it on that read only.
+        if (!url.searchParams.has('invariants') && !url.searchParams.has('lane') && url.searchParams.get('view') !== 'overview')
+          return response({ ...(TREES as object), entry_inventory: { state: 'ready', entries: [] } });
         if (!url.searchParams.has('invariants'))
           return response(url.searchParams.has('lane') ? LANE : TREES);
         const expected = [
@@ -187,6 +212,21 @@ function roster(body: ReviewResult, memberRevisionId?: string) {
 }
 const familyButton = (view: ReturnType<typeof render>, id: string) =>
   view.getAllByTestId('review-family-open').find((button) => button.dataset.family === id)!;
+// A family selection opens its members' overview (MIK-R211 v4 rule 10); a member's row opens that
+// invariant's own reading, which carries the family's guarantee after its code.
+const overviewOf = async (view: ReturnType<typeof render>, id: string) => {
+  await waitFor(() => expect(view.getByTestId('review-family-overview').dataset.family).toBe(id));
+  return view.getByTestId('review-family-overview');
+};
+const openOverviewMember = (view: ReturnType<typeof render>, invariant: string) =>
+  fireEvent.click(
+    within(view.getByTestId('review-family-overview'))
+      .getAllByTestId('review-member-summary')
+      .find((row) => row.dataset.subject === invariant)!
+      .querySelector('button')!,
+  );
+const memberIds = (body: ReviewResult) =>
+  [...new Set([...family(body).before.members, ...family(body).after.members].map((row) => row.invariant_id))];
 
 // Recover the text actually drawn by the word-diff, without its opposite edits
 // or screen-reader-only announcements. It must equal the producer's entire statement.
@@ -205,34 +245,36 @@ function displayedSide(passage: HTMLElement, side: 'before' | 'after') {
 it('renders the real family, its authored guarantee and full member statements', async () => {
   serving();
   const view = mount();
-  const center = await view.findByTestId('review-center-family');
+  const overview = await overviewOf(view, family(FAMILY).family_id);
   expect(view.getAllByTestId('review-family')).toHaveLength(2);
   expect(view.getByTestId('review-tree').querySelector('details')).toBeNull();
-  expect(center.dataset.family).toBe(family(FAMILY).family_id);
-  expect(view.getByTestId('review-center-guarantee-label').textContent).toBe(
+  // The family's overview names every member invariant by its label, and mounts no member reading.
+  const rows = within(overview).getAllByTestId('review-member-summary');
+  expect(rows.map((row) => row.dataset.subject).sort()).toEqual(memberIds(FAMILY).sort());
+  for (const member of [...family(FAMILY).before.members, ...family(FAMILY).after.members])
+    expect(rows.find((row) => row.dataset.subject === member.invariant_id)!.textContent).toContain(member.display_label);
+  expect(within(overview).queryByTestId('review-subject-meta')).toBeNull();
+  expect(view.queryByTestId('review-center-member')).toBeNull();
+  // A member's own reading holds its full statement, and after its code the family's guarantee.
+  openOverviewMember(view, selected(MEMBER).record_id);
+  const own = await view.findByTestId('review-center-member');
+  const before = family(MEMBER).before.members.find((row) => row.invariant_id === selected(MEMBER).record_id)!;
+  const after = family(MEMBER).after.members.find((row) => row.invariant_id === selected(MEMBER).record_id)!;
+  if (before.statement === after.statement) {
+    expect(own.textContent).toContain(before.statement);
+  } else {
+    const statement = within(own)
+      .getAllByTestId('intent-diff')
+      .find((node) => node.dataset.field === 'statement')!;
+    expect(displayedSide(statement, 'before')).toBe(before.statement);
+    expect(displayedSide(statement, 'after')).toBe(after.statement);
+  }
+  const details = await view.findByTestId('review-center-member-details');
+  expect(details.dataset.family).toBe(family(FAMILY).family_id);
+  expect(within(details).getByTestId('review-center-guarantee-label').textContent).toBe(
     'Changed guarantee · revision r1 → r3',
   );
-  // The members follow the family's content and its members' code (MIK-R89 v2 rule 1, 9dde2b09).
-  const members = within(view.getByTestId('review-center-family-details')).getByTestId('review-center-family-members');
-  expect(within(members).getAllByTestId('review-center-open-member')).toHaveLength(5);
-  for (const before of family(FAMILY).before.members) {
-    const after = family(FAMILY).after.members.find(
-      (row) => row.invariant_id === before.invariant_id,
-    )!;
-    const row = within(members)
-      .getAllByTestId('review-center-open-member')
-      .find((button) => button.dataset.revision === before.invariant_revision_id)!
-      .closest('li')!;
-    expect(row.textContent).toContain(before.display_label);
-    if (before.statement === after.statement) {
-      expect(row.textContent).toContain(before.statement);
-    } else {
-      const passage = within(row).getByTestId('intent-diff');
-      expect(displayedSide(passage, 'before')).toBe(before.statement);
-      expect(displayedSide(passage, 'after')).toBe(after.statement);
-    }
-  }
-  const guarantee = within(center).getByTestId('review-center-guarantee-changed');
+  const guarantee = within(details).getByTestId('review-center-guarantee-changed');
   const passage = within(guarantee).getByTestId('intent-diff');
   expect(displayedSide(passage, 'before')).toBe(family(FAMILY).before.guarantee!.joint_guarantee);
   expect(displayedSide(passage, 'after')).toBe(family(FAMILY).after.guarantee!.joint_guarantee);
@@ -241,10 +283,21 @@ it('renders the real family, its authored guarantee and full member statements',
 it('draws changed and unchanged guarantees according to their actual revision pairs', async () => {
   serving();
   const view = mount();
-  await view.findByTestId('review-center-family');
-  expect(view.getByTestId('review-center-guarantee-changed').dataset.wordDiff).toBe('true');
+  await overviewOf(view, family(FAMILY).family_id);
+  openOverviewMember(view, selected(MEMBER).record_id);
+  const details = await view.findByTestId('review-center-member-details');
+  expect(within(details).getByTestId('review-center-guarantee-changed').dataset.wordDiff).toBe('true');
+  // Another family opens its own overview; the previous member's guarantee goes with its reading.
   fireEvent.click(familyButton(view, family(IDENTICAL).family_id));
-  const unchanged = await view.findByTestId('review-center-guarantee-unchanged');
+  await overviewOf(view, family(IDENTICAL).family_id);
+  expect(view.queryByTestId('review-center-guarantee-changed')).toBeNull();
+  // Its member's reading (synthetic answer, above) draws the unchanged guarantee after its code.
+  openOverviewMember(view, selected(IDENTICAL_MEMBER).record_id);
+  const identical = await view.findByTestId('review-center-member-details');
+  expect(identical.dataset.family).toBe(family(IDENTICAL).family_id);
+  const after = identical.closest<HTMLElement>('[data-testid="review-subject-after-code"]')!;
+  expect(after).not.toBeNull();
+  const unchanged = within(after).getByTestId('review-center-guarantee-unchanged');
   expect(unchanged.textContent).toContain('Guarantee unchanged · same recorded revision');
   expect(unchanged.textContent).toContain(family(IDENTICAL).after.guarantee!.joint_guarantee);
   expect(view.queryByTestId('review-center-guarantee-changed')).toBeNull();
@@ -253,12 +306,8 @@ it('draws changed and unchanged guarantees according to their actual revision pa
 it('reads a member owner, retains its family and keeps the five independent facts distinct', async () => {
   const server = serving();
   const view = mount();
-  await view.findByTestId('review-center-family');
-  fireEvent.click(
-    view
-      .getAllByTestId('review-center-open-member')
-      .find((button) => button.dataset.revision === selected(MEMBER).after_revision_id)!,
-  );
+  await overviewOf(view, family(FAMILY).family_id);
+  openOverviewMember(view, selected(MEMBER).record_id);
   const center = await view.findByTestId('review-center-member');
   expect(center.dataset.family).toBe(family(MEMBER).family_id);
   expect(
@@ -286,7 +335,7 @@ it('keeps All changes and the complete source population independent of family s
   const total = `All changes ${FAMILY.payload!.source.inventory.listed_total}`;
   await waitFor(() => expect(all.textContent).toBe(total));
   fireEvent.click(familyButton(view, family(IDENTICAL).family_id));
-  await view.findByTestId('review-center-guarantee-unchanged');
+  await overviewOf(view, family(IDENTICAL).family_id);
   expect(view.getByTestId('review-all-changes')).toBe(all);
   expect(all.textContent).toBe(total);
   expect(view.getByTestId('review-workspace')).toBe(workspace);
@@ -299,12 +348,8 @@ it('sends the published family cursor and rejects a response from another walk',
   await view.findByTestId('review-center-member');
   expect(REVIEW_PAGED_COLLECTIONS).toContain('family_members');
   expect(REVIEW_WALKABLE_COLLECTIONS).not.toContain('family_members');
-  const picker = view.getByTestId('review-page-collection');
-  expect(
-    within(picker)
-      .getAllByTestId('review-page-option')
-      .map((node) => (node as HTMLOptionElement).value),
-  ).toEqual([...REVIEW_WALKABLE_COLLECTIONS]);
+  // The family owns its roster continuation; unpaged whole-review collections need no picker.
+  expect(view.queryByTestId('review-page-collection')).toBeNull();
   const next = view.getAllByTestId('review-center-roster-next')[0];
   const cursor = next.dataset.continuation!;
   expect(cursor).toBe(family(TRUNCATED).before.page!.continuation);
@@ -320,48 +365,86 @@ it('sends the published family cursor and rejects a response from another walk',
   expect(view.getByTestId('review-retained-generation')).toBeTruthy();
 });
 
-// MIK-R89 v2 rules 1 and 6, amended 9dde2b09 (D396): a selected subject reads content first. The
-// family's meta line, its guarantee's word diff, its recorded steps and judgment stand under its
-// heading; its members' sections follow, then its member roster; its state sentences, its origin
-// and its revision ids are in the closed Technical details.
+// MIK-R89 v2 rules 1 and 6, amended 9dde2b09 (D396): a selected subject reads content first. Under
+// MIK-R211 v4 rule 10 a selected family opens its members' overview without its members' readings;
+// after the member summaries the family read's own slot draws its guarantee change, recorded steps
+// and judgment, then the read's facts (FamilyState), and its record stays in the closed Technical
+// details. A member's meta line, statement diff, recorded steps and judgment stand under its
+// heading, then its code, then the family's guarantee; its state sentences, its origin and its
+// revision ids are in Technical details.
 const follows = (first: Node, second: Node) =>
   Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
 
 describe('a selected family reads content first', () => {
-  it('opens with its meta line, guarantee diff, steps and judgment, then its members, then its roster', async () => {
+  it('opens as its members\' overview, and a member with its meta line, statement, steps and judgment before its code and the family guarantee', async () => {
     serving();
     const view = mount();
-    const content = await view.findByTestId('review-center-family');
     const entry = family(FAMILY);
-    const heading = view.getAllByTestId('review-family-heading').find((node) => node.dataset.family === entry.family_id)!;
-    const slot = within(heading).getByTestId('review-subject-slot');
-    const meta = within(slot).getByTestId('review-subject-meta');
-    // Read in full and written by the reviewed task: nothing beyond the kind and the revisions.
-    expect(meta.textContent).toBe('family · revision 1 → 3');
-    const order = [
-      meta,
-      within(content).getByTestId('review-center-guarantee-changed'),
-      within(content).getByTestId('intent-diff-layout-control'),
-      within(content).getByTestId('review-recorded-steps'),
-      within(content).getByTestId('review-family-judgment'),
+    const overview = await overviewOf(view, entry.family_id);
+    // The family's own read answers, for its record on demand.
+    await waitFor(() => expect(view.getByTestId('review-surface').dataset.comparison).toBe(FAMILY.payload!.comparison!.reference));
+    const heading = within(overview).getByTestId('review-family-heading');
+    const counts = within(overview).getByTestId('review-family-counts');
+    const summaries = within(overview).getByTestId('review-member-summaries');
+    expect(follows(heading, counts)).toBe(true);
+    expect(follows(counts, summaries)).toBe(true);
+    expect(counts.textContent).toContain(`${memberIds(FAMILY).length} invariants`);
+    // After the members, the family read's answered slot: its guarantee change, steps and judgment.
+    const familySlot = within(overview).getByTestId('review-subject-slot');
+    expect(familySlot.dataset.slotState).toBe('answered');
+    const familyOrder = [
+      summaries,
+      within(familySlot).getByTestId('review-guarantee-change'),
+      within(familySlot).getByTestId('review-recorded-steps'),
+      within(familySlot).getByTestId('review-family-judgment'),
+      // The read's facts close it, as an invariant's facts follow its code.
+      within(familySlot).getByTestId('review-main-facts'),
     ];
-    const group = heading.closest<HTMLElement>('[data-testid="review-subject-group"]')!;
-    const members = within(group).getAllByTestId('review-subject-section');
-    const after = within(group).getByTestId('review-subject-after-code');
-    order.push(members[0], after, within(after).getByTestId('review-center-family-members'));
-    for (let index = 1; index < order.length; index += 1) expect(follows(order[index - 1], order[index])).toBe(true);
-    // Before the members: no state sentence, origin, revision id, frame or writer line.
-    const before = slot.textContent!;
+    for (let index = 1; index < familyOrder.length; index += 1)
+      expect(follows(familyOrder[index - 1], familyOrder[index])).toBe(true);
+    expect(within(familySlot).getAllByTestId('review-guarantee-change')).toHaveLength(1);
+    expect(within(familySlot).getByTestId('review-guarantee-change').dataset.changeKind).toBe(entry.change_kinds!.guarantee);
+    expect(within(familySlot).getAllByTestId('review-family-judgment')).toHaveLength(1);
+    // No meta line, family reading or member reading.
+    for (const id of ['review-subject-meta', 'review-center-family', 'review-center-member', 'review-subject-section'])
+      expect(within(overview).queryByTestId(id)).toBeNull();
+    // The overview up to those facts, its slot's guarantee, steps and judgment included: no state
+    // sentence, origin, revision id, frame or writer line.
+    const ahead = overview.cloneNode(true) as HTMLElement;
+    ahead.querySelector('[data-testid="review-main-facts"]')!.remove();
     for (const text of [entry.detail, entry.selection.statement, entry.after.family_revision_id!, 'origin', 'introduced by', 'Family comparison details', 'family contexts read', 'Selected'])
-      expect(before).not.toContain(text);
-    expect(within(slot).queryByTestId('review-subject-family-chip')).toBeNull();
-    expect(within(slot).queryByTestId('review-subject-carried')).toBeNull();
-    // All of it stays reachable in the closed fold.
+      expect(ahead.textContent).not.toContain(text);
+    expect(within(overview).queryByTestId('review-subject-family-chip')).toBeNull();
+    expect(within(overview).queryByTestId('review-subject-carried')).toBeNull();
+    // All of the family's record stays reachable in the closed fold.
     const fold = view.getByTestId('review-details') as HTMLDetailsElement;
     expect(fold.open).toBe(false);
     const provenance = within(fold).getByTestId('review-subject-provenance').textContent!;
     for (const text of [entry.detail, entry.selection.statement, entry.after.family_revision_id!, 'introduced by'])
       expect(provenance).toContain(text);
+
+    openOverviewMember(view, selected(MEMBER).record_id);
+    const content = await view.findByTestId('review-center-member');
+    const section = content.closest<HTMLElement>('[data-testid="review-subject-section"]')!;
+    const slot = within(section).getByTestId('review-subject-slot');
+    const meta = within(slot).getByTestId('review-subject-meta');
+    const after = await within(section).findByTestId('review-subject-after-code');
+    const order = [
+      meta,
+      within(content).getByTestId('review-center-statement-label'),
+      within(content).getByTestId('intent-diff-layout-control'),
+      within(content).getByTestId('review-recorded-steps'),
+      within(content).getByTestId('review-center-judgment'),
+      after,
+      within(after).getByTestId('review-center-guarantee-changed'),
+    ];
+    for (let index = 1; index < order.length; index += 1) expect(follows(order[index - 1], order[index])).toBe(true);
+    // Before the code: no state sentence, revision id, frame or writer line.
+    const before = slot.textContent!;
+    for (const text of [family(MEMBER).detail, family(MEMBER).selection.statement, selected(MEMBER).after_revision_id!, 'origin', 'introduced by', 'Family comparison details', 'family contexts read', 'Selected'])
+      expect(before).not.toContain(text);
+    expect(within(slot).queryByTestId('review-subject-family-chip')).toBeNull();
+    expect(within(slot).queryByTestId('review-subject-carried')).toBeNull();
   });
 
   it('shows a partial family read as one short chip that continues the roster walk', async () => {
@@ -383,53 +466,57 @@ describe('a selected family reads content first', () => {
   });
 
   // The source is the after revision's writer, as its tree's history files record it (MIK-R89 v2
-  // rules 1 and 6, 9dde2b09); a writer no file records is said as that, never guessed.
+  // rules 1 and 6, 9dde2b09); a writer no file records is said as that, never guessed. A family's
+  // overview carries no meta line (MIK-R211 v4 rule 10), so the chip is read on a member's.
   const CARRIED: [string, ReviewRevisionWriter, string][] = [
-    ['its recorded writer', { state: 'recorded', owners: ['260928-MIK-L181'], detail: 'revision 3 of FAM-68H10P is the changed row of 260928-MIK-L181' }, 'carried in from 260928-MIK-L181'],
-    ['no recorded writer', { state: 'not_recorded', owners: [], detail: 'no history file records writing revision 3 of FAM-68H10P' }, 'carried in · source not recorded'],
+    ['its recorded writer', { state: 'recorded', owners: ['260928-MIK-L181'], detail: 'the after revision of INV-1XKX9ERN is the changed row of 260928-MIK-L181' }, 'carried in from 260928-MIK-L181'],
+    ['no recorded writer', { state: 'not_recorded', owners: [], detail: 'no history file records writing the after revision of INV-1XKX9ERN' }, 'carried in · source not recorded'],
     ['an unread history', { state: 'unavailable', owners: [], detail: 'the after memory index is incomplete (1 file(s) failed)' }, 'carried in · source unavailable'],
   ];
 
-  function carriedFamily(writer: ReviewRevisionWriter | null): ReviewResult {
-    const carried = structuredClone(FAMILY);
+  function carriedMember(writer: ReviewRevisionWriter | null): ReviewResult {
+    const carried = structuredClone(MEMBER);
     const payload = carried.payload!;
     payload.judgment = { ...payload.judgment, state: 'none', rows: [], detail: 'This leaf recorded no judgment about this record' };
-    const steps = payload.meaning_effects!.records.find((record) => record.record === family(FAMILY).family_id)!;
+    const steps = payload.meaning_effects!.records.find((record) => record.record === selected(MEMBER).record_id)!;
     Object.assign(steps, { state: 'none', steps: [], detail: 'No meaning effect recorded by this leaf' });
     if (writer) payload.knowledge.revision_selection!.after_writer = writer;
     return carried;
   }
 
+  const memberMeta = async (view: ReturnType<typeof render>) => {
+    await view.findByTestId('review-center-member');
+    return within(view.getByTestId('review-subject-slot')).getByTestId('review-subject-meta');
+  };
+  const MEMBER_META = 'invariant · knowledge-write-and-publication-foundation · revision 2 → 4';
+
   it.each(CARRIED)('names a change the reviewed task did not write by its source: %s', async (_, writer, text) => {
-    const carried = carriedFamily(writer);
+    const carried = carriedMember(writer);
     serving(carried);
     const view = mount(carried);
-    await view.findByTestId('review-center-family');
-    const meta = within(view.getByTestId('review-subject-slot')).getByTestId('review-subject-meta');
+    const meta = await memberMeta(view);
     const chip = within(meta).getByTestId('review-subject-carried');
     expect(chip.textContent).toBe(text);
     expect(chip.getAttribute('title')).toBe(writer.detail);
-    expect(meta.textContent).toBe(`family · revision 1 → 3 · ${text}`);
+    expect(meta.textContent).toBe(`${MEMBER_META} · ${text}`);
   });
 
   it('shows no chip for a revision the reviewed task wrote, nor a writer', async () => {
-    const carried = carriedFamily(null);
+    const carried = carriedMember(null);
     const leaf = carried.payload!.candidate.leaf_id;
-    carried.payload!.knowledge.revision_selection!.after_writer = { state: 'recorded', owners: [leaf], detail: `revision 3 is the changed row of ${leaf}` };
+    carried.payload!.knowledge.revision_selection!.after_writer = { state: 'recorded', owners: [leaf], detail: `the after revision is the changed row of ${leaf}` };
     serving(carried);
     const view = mount(carried);
-    await view.findByTestId('review-center-family');
-    const meta = within(view.getByTestId('review-subject-slot')).getByTestId('review-subject-meta');
+    const meta = await memberMeta(view);
     expect(within(meta).queryByTestId('review-subject-carried')).toBeNull();
-    expect(meta.textContent).toBe('family · revision 1 → 3');
+    expect(meta.textContent).toBe(MEMBER_META);
   });
 
   it('names an unread source when the read carries no writer', async () => {
-    const carried = carriedFamily(null);
+    const carried = carriedMember(null);
     serving(carried);
     const view = mount(carried);
-    await view.findByTestId('review-center-family');
-    const meta = within(view.getByTestId('review-subject-slot')).getByTestId('review-subject-meta');
+    const meta = await memberMeta(view);
     expect(within(meta).getByTestId('review-subject-carried').textContent).toBe('carried in · source not read');
   });
 });
@@ -437,7 +524,7 @@ describe('a selected family reads content first', () => {
 it('marks the selection and traverses the intact tree by keyboard', async () => {
   serving();
   const view = mount();
-  await view.findByTestId('review-center-family');
+  await overviewOf(view, family(FAMILY).family_id);
   expect(familyButton(view, family(FAMILY).family_id).getAttribute('aria-current')).toBe('true');
   const members = view.getAllByTestId('review-family-member-open');
   members[0].focus();
@@ -454,7 +541,8 @@ it('filters by the actual captured label without restating comparison totals', a
   fireEvent.change(view.getByTestId('review-family-filter'), {
     target: { value: family(FAMILY).display_label!.replaceAll('-', ' ') },
   });
-  expect(view.getAllByTestId('review-family')).toHaveLength(1);
+  // The filter first reads the complete location inventory (MIK-R211 v4 rule 10).
+  await waitFor(() => expect(view.getAllByTestId('review-family')).toHaveLength(1));
   expect(view.getAllByTestId('review-family-member').length).toBeGreaterThan(0);
   expect(view.queryByTestId('review-family-filter-scope')).toBeNull();
   fireEvent.change(view.getByTestId('review-family-filter'), {
@@ -496,8 +584,13 @@ it('does not call a deliberately uncarried bounded roster a measured zero (synth
 
 it('says measured zero only for the genuinely empty scratch-authored family capture', async () => {
   serving(EMPTY);
-  const view = mount(EMPTY);
-  const empty = await view.findByTestId('review-center-family-empty');
+  const page = mount(EMPTY);
+  // The overview counts the outline's members (MIK-R211 v4 rule 10); the family read's answered
+  // slot after them says the zero was measured.
+  const overview = await overviewOf(page, family(EMPTY).family_id);
+  expect(within(overview).getByTestId('review-family-counts').textContent).toBe('0 invariants · 0 changed locations');
+  expect(within(overview).queryAllByTestId('review-member-summary')).toHaveLength(0);
+  const empty = await within(overview).findByTestId('review-center-family-empty');
   expect(empty.textContent).toBe(emptyRosterSentence(family(EMPTY)));
   expect(empty.textContent).toContain(
     'the read measured zero memberships for the selected family revision',
@@ -573,17 +666,19 @@ it('retains a bounded before-only revision without claiming the invariant was re
 
 it('prints the shared empty-roster sentence once in the reading path, never again in the tree', async () => {
   serving(EMPTY);
-  const view = mount(EMPTY);
-  await view.findByTestId('review-center-family');
-  expect(view.getAllByTestId('review-center-family-empty')).toHaveLength(1);
-  expect(view.getByTestId('review-center-family-empty').textContent).toBe(
+  const page = mount(EMPTY);
+  await overviewOf(page, family(EMPTY).family_id);
+  await waitFor(() => expect(page.getByTestId('review-surface').dataset.comparison).toBe(EMPTY.payload!.comparison!.reference));
+  // The reading path, the family's overview (MIK-R211 v4 rule 10), prints it once; the tree never.
+  expect(page.getAllByTestId('review-center-family-empty')).toHaveLength(1);
+  expect(page.getByTestId('review-center-family-empty').textContent).toBe(
     emptyRosterSentence(family(EMPTY)),
   );
+  expect(page.getByTestId('review-center-family-empty').closest('[data-testid="review-family-overview"]')).not.toBeNull();
   expect(
-    view
-      .getByTestId('review-tree')
-      .querySelector('[data-testid="review-center-family-empty"]'),
+    page.getByTestId('review-tree').querySelector('[data-testid="review-center-family-empty"]'),
   ).toBeNull();
+  expect(page.getByTestId('review-tree').textContent).not.toContain(emptyRosterSentence(family(EMPTY)));
 });
 
 it('states a final bounded page as completing its walk, not as the whole selection', () => {
@@ -649,13 +744,20 @@ it('deduplicates real changed family expressions without losing the recorded mem
 
 it('states the actual added-family side as not recorded, not unreadable or a measured empty family', async () => {
   serving(ONE_SIDED);
-  const view = mount(ONE_SIDED);
-  await view.findByTestId('review-center-family');
+  const page = mount(ONE_SIDED);
+  const overview = await overviewOf(page, family(ONE_SIDED).family_id);
+  expect(within(overview).getAllByTestId('review-member-summary').map((row) => row.dataset.subject).sort()).toEqual(memberIds(ONE_SIDED).sort());
+  expect(page.queryByTestId('review-center-family-empty')).toBeNull();
+  // The added family's guarantee is drawn after a member's code (synthetic member answer, above).
+  openOverviewMember(page, selected(ONE_SIDED_MEMBER).record_id);
+  const details = await page.findByTestId('review-center-member-details');
+  expect(details.dataset.family).toBe(family(ONE_SIDED).family_id);
+  expect(details.closest('[data-testid="review-subject-after-code"]')).not.toBeNull();
   expect(family(ONE_SIDED).before.state).toBe('not_recorded');
-  expect(view.getByTestId('review-center-guarantee-one-sided').textContent).toContain(
+  expect(within(details).getByTestId('review-center-guarantee-one-sided').textContent).toContain(
     family(ONE_SIDED).after.guarantee!.joint_guarantee,
   );
-  expect(view.queryByTestId('review-center-family-empty')).toBeNull();
+  expect(page.queryByTestId('review-center-family-empty')).toBeNull();
 });
 
 it('renders deliberately omitted family context as unavailable, never as a measured zero', async () => {
@@ -682,12 +784,10 @@ it('labels whole roster selections as whole, not as continued final pages', () =
 
 // MIK-R86 rule 20 holds one view's closed disclosures at the cap and draws its Identifiers once per
 // group, so the count does not grow with rows, proofs, files, cards or members; MIK-R57 rule 3 keeps
-// a row's identifiers and history path in that disclosure and its judgment text in the open.
-it('keeps a whole family view at the disclosure cap with every judgment and proof identifier listed', async () => {
-  serving(ONE_SIDED);
-  const view = mount(ONE_SIDED);
-  await view.findByTestId('review-center-family');
-  await waitFor(() => expect(view.getAllByTestId('review-judgment-proof')).toHaveLength(18));
+// a row's identifiers and history path in that disclosure and its judgment text in the open. A
+// family's overview draws the family read's judgment after its member summaries (FamilyState,
+// MIK-R211 v4 rule 10): the captured added family's 18-proof judgment on its own page.
+function disclosureCap(view: ReturnType<typeof render>, judged: ReviewResult) {
   const root = view.getByTestId('review-surface');
   const details = [...root.querySelectorAll('details')];
   expect(details.length).toBeLessThanOrEqual(20);
@@ -696,12 +796,40 @@ it('keeps a whole family view at the disclosure cap with every judgment and proo
   const listed = [...root.querySelectorAll('details[data-disclosure="identifiers"]')]
     .map((element) => element.textContent ?? '')
     .join('\n');
-  for (const proof of ONE_SIDED.payload!.judgment.proofs) expect(listed).toContain(proof.id);
-  for (const row of ONE_SIDED.payload!.judgment.rows) expect(listed).toContain(row.row_id);
+  for (const proof of judged.payload!.judgment.proofs) expect(listed).toContain(proof.id);
+  for (const row of judged.payload!.judgment.rows) expect(listed).toContain(row.row_id);
   for (const node of [
     ...root.querySelectorAll('[data-testid="review-judgment-row"], [data-testid="review-judgment-proof"]'),
   ])
     expect(node.closest('details')).toBeNull();
+}
+
+it('keeps a whole family view at the disclosure cap with every judgment and proof identifier listed', async () => {
+  serving(ONE_SIDED);
+  const view = mount(ONE_SIDED);
+  const overview = await overviewOf(view, family(ONE_SIDED).family_id);
+  await waitFor(() =>
+    expect(within(within(overview).getByTestId('review-family-judgment')).getAllByTestId('review-judgment-proof')).toHaveLength(18),
+  );
+  expect(view.getAllByTestId('review-judgment-proof')).toHaveLength(18);
+  disclosureCap(view, ONE_SIDED);
+});
+
+// The same cap for an invariant's whole view: the captured added family's judgment, moved onto the
+// member's answer (labelled synthetic).
+function withJudgmentOf(body: ReviewResult, judged: ReviewResult): ReviewResult {
+  const moved = structuredClone(body);
+  moved.payload!.judgment = structuredClone(judged.payload!.judgment);
+  return moved;
+}
+const JUDGED = withJudgmentOf(MEMBER, ONE_SIDED);
+
+it('keeps a whole invariant view at the disclosure cap with every judgment and proof identifier listed', async () => {
+  serving(JUDGED);
+  const view = mount(JUDGED);
+  await view.findByTestId('review-center-member');
+  await waitFor(() => expect(view.getAllByTestId('review-judgment-proof')).toHaveLength(18));
+  disclosureCap(view, JUDGED);
 });
 
 // Labeled synthetic growth probe over the capture's own payload, not a new capture: it separates a
@@ -724,16 +852,16 @@ function grownJudgment(body: ReviewResult, rowCount: number, proofCount: number)
 }
 
 it('holds that disclosure count for a subject with far more rows and proofs than the capture', async () => {
-  serving(ONE_SIDED);
-  const capturedView = mount(ONE_SIDED);
-  await capturedView.findByTestId('review-center-family');
+  serving(JUDGED);
+  const capturedView = mount(JUDGED);
+  await capturedView.findByTestId('review-center-member');
   await waitFor(() => expect(capturedView.getAllByTestId('review-judgment-proof')).toHaveLength(18));
   const captured = capturedView.getByTestId('review-surface').querySelectorAll('details').length;
   cleanup();
-  const grown = grownJudgment(ONE_SIDED, 9, 57);
+  const grown = grownJudgment(JUDGED, 9, 57);
   serving(grown);
   const grownView = mount(grown);
-  await grownView.findByTestId('review-center-family');
+  await grownView.findByTestId('review-center-member');
   await waitFor(() => expect(grownView.getAllByTestId('review-judgment-proof')).toHaveLength(57));
   expect(grownView.getByTestId('review-surface').querySelectorAll('details').length).toBe(captured);
 });

@@ -8,44 +8,36 @@ without reaching up into ``worktrees`` (``layers.toml`` ranks ``tasks`` below
 
 ``agents_remember.worktrees.task_resolver`` remains the published import site --
 it re-exports every name here -- so this module is the single definition and no
-caller has to change.
+caller has to change. The two exceptions are ``ARCHIVE_DIR`` and ``task_folder_steps``: they are
+defined in ``kernel.coordination_context.task_folders``, so that the control plane can walk task
+folders without importing ``tasks``, and this module re-exports them.
 """
 
 from __future__ import annotations
 
 import os
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
+
+from agents_remember.kernel.coordination_context.task_folders import ARCHIVE_DIR, task_folder_steps
 
 SERIES_CONTRACT_FILENAME = "series-contract.md"
 TASK_DOCUMENT_FILENAME = "task.json"
-ARCHIVE_DIR = "0_archive"
 ENCLOSURES_DIR = "enclosures"
 NOTES_DIR = "notes"
+# The receipt one review-artifact cleanup writes into its task's notes/reports (a task-owned path,
+# so serving and application both name it from here).
+CLEANUP_REPORT_NAME = "review-artifact-cleanup.json"
 
 
-def iter_task_folders(tasks_root: Path) -> Iterator[Path]:
-    """Every live task folder of one repository's tasks root (MIK-R83 rule 1).
-
-    A task folder is a direct child directory of ``tasks/<repository>/``; the
-    archive segment is not one. This is the single walk: the five lookups that
-    used to walk the whole task tree each enumerate the canonical places of the
-    folders this yields, so a copy under ``notes/``, ``requirements/`` or any
-    deeper folder is never met by a lookup at all (MIK-R83 rule 2).
-    """
-
-    if not tasks_root.is_dir():
-        return
-    for child in sorted(tasks_root.iterdir()):
-        if child.name == ARCHIVE_DIR:
-            continue
-        try:
-            if not child.is_dir():
-                continue
-        except OSError:
-            continue
-        yield child
+def iter_task_folders(
+    tasks_root: Path, *, on_error: Callable[[OSError], None] | None = None
+) -> Iterator[Path]:
+    """Every live task folder directly below one repository's tasks root (MIK-R83)."""
+    yield from sorted(
+        path for path in task_folder_steps(tasks_root, on_error=on_error) if path is not None
+    )
 
 
 def iter_task_documents(tasks_root: Path) -> Iterator[Path]:
@@ -81,22 +73,37 @@ def iter_task_contracts(tasks_root: Path) -> Iterator[Path]:
         yield from _enclosure_contracts(folder)
 
 
-def _enclosure_contracts(task_folder: Path) -> Iterator[Path]:
+def iter_enclosure_folders(
+    task_folder: Path, *, on_error: Callable[[OSError], None] | None = None
+) -> Iterator[Path]:
+    """Existing direct enclosure folders, with the contract reader's symlink policy."""
     enclosures = task_folder / ENCLOSURES_DIR
     try:
         if not enclosures.is_dir():
             return
         leaves = sorted(enclosures.iterdir())
-    except OSError:
+    except OSError as error:
+        if on_error is not None:
+            on_error(error)
         return
     for leaf in leaves:
+        try:
+            if leaf.is_dir():
+                yield leaf
+        except OSError as error:
+            if on_error is not None:
+                on_error(error)
+            continue
+
+
+def _enclosure_contracts(task_folder: Path) -> Iterator[Path]:
+    for leaf in iter_enclosure_folders(task_folder):
         candidate = leaf / SERIES_CONTRACT_FILENAME
         try:
-            if not leaf.is_dir() or not os.path.lexists(candidate):
-                continue
+            if os.path.lexists(candidate):
+                yield candidate
         except OSError:
             continue
-        yield candidate
 
 
 def canonical_contract_place(path: Path) -> bool:
@@ -285,40 +292,54 @@ def iter_leaf_enclosure_contracts(tasks_root: Path) -> Iterator[Path]:
 
     found = {
         path
-        for folder in _task_folders_below(tasks_root)
+        for folder in task_folders_below(tasks_root)
         for path in _enclosure_contracts(folder)
         if not is_archived_path(path)
     }
     yield from sorted(found)
 
 
-def _task_folders_below(root: Path) -> Iterator[Path]:
+def task_folders_below(
+    root: Path,
+    *,
+    on_directory: Callable[[Path], None] | None = None,
+    on_error: Callable[[OSError], None] | None = None,
+) -> Iterator[Path]:
     """The task folders below a tasks root, a repository's tasks root, or one task folder."""
-
+    visit = on_directory or (lambda _path: None)
+    visit(root)
     try:
         if not root.is_dir():
             return
-    except OSError:
+    except OSError as error:
+        if on_error is not None:
+            on_error(error)
         return
     if _is_task_folder(root):
         yield root
         return
-    for child in _child_directories(root):
+    for child in _child_directories(root, on_error=on_error):
+        visit(child)
         if _is_task_folder(child):
             yield child
             continue
         # A repository's tasks root: its direct children are the task folders.
-        for folder in iter_task_folders(child):
+        for folder in iter_task_folders(child, on_error=on_error):
+            visit(folder)
             if _is_task_folder(folder):
                 yield folder
 
 
-def _child_directories(root: Path) -> list[Path]:
+def _child_directories(
+    root: Path, *, on_error: Callable[[OSError], None] | None = None
+) -> list[Path]:
     """The child directories of ``root``, sorted, the archive segment left out."""
 
     try:
         entries = sorted(root.iterdir())
-    except OSError:
+    except OSError as error:
+        if on_error is not None:
+            on_error(error)
         return []
     children: list[Path] = []
     for entry in entries:
@@ -327,7 +348,9 @@ def _child_directories(root: Path) -> list[Path]:
         try:
             if entry.is_dir():
                 children.append(entry)
-        except OSError:
+        except OSError as error:
+            if on_error is not None:
+                on_error(error)
             continue
     return children
 

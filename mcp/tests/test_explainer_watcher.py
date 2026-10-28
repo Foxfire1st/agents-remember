@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +28,7 @@ from agents_remember.application.review_planned_comparison import (
     planned_comparison,
 )
 from agents_remember.application.review_tree_comparison import comparison_directory
-from agents_remember.canvas.explainer_paths import leaf_workspace
+from agents_remember.canvas.explainer_paths import leaf_workspace, seat_counter_path
 from agents_remember.canvas.explainer_state import (
     ExplainerBinding,
     PlannedIdentity,
@@ -39,10 +40,11 @@ from agents_remember.controlplane import held_store_layout
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.models.knowledge.review_frame import FrameBinding
 from agents_remember.models.knowledge.review_trees import (
+    ReviewConvertedBase,
     ReviewTreeComparisonRecord,
     ReviewTreeSide,
 )
-from agents_remember.serving.change_watcher import MoveNoticeWatch, WatchOptions
+from agents_remember.serving.explainer_move_watch import MoveNoticeWatch, WatchOptions
 from agents_remember.serving.explainer_watcher import (
     CapturedComparison,
     ComparisonMeasurement,
@@ -50,6 +52,7 @@ from agents_remember.serving.explainer_watcher import (
     LeafSelection,
     MovedNotice,
     MoveNoticeChannel,
+    blocks_changed,
     changes_between,
     master_tips,
     notice_event,
@@ -539,9 +542,9 @@ def test_no_path_sends_holds_or_writes_a_message(
     monkeypatch.setattr(role_held_messages, "deliver_ended_turns", _refuse)
     monkeypatch.setattr(role_held_messages, "drain_held", _refuse)
     workspace = leaf_workspace(config, REPO, TASK, LEAF)
-    (tmp_path / "explainer" / REPO / TASK / f"{LEAF}.generation").write_text(
-        "1\n", encoding="utf-8"
-    )
+    counter = seat_counter_path(workspace)
+    counter.parent.mkdir(parents=True, exist_ok=True)
+    counter.write_text("1\n", encoding="utf-8")
     store = role_held_messages.store_path_for(workspace, agent_id(workspace, 1))
     store.parent.mkdir(parents=True, exist_ok=True)
     store.write_text('{"schema": "ar-held-messages/v1", "messages": []}\n', encoding="utf-8")
@@ -679,6 +682,96 @@ def test_the_capture_writes_objects_and_no_ref_or_record(tmp_path: Path) -> None
     assert (_git(code, "status", "--porcelain"), _git(memory, "status", "--porcelain")) == status
 
 
+def test_a_landed_leaf_with_cleaned_worktrees_is_current_without_a_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    code = _repository(tmp_path, "repo", "main")
+    _commit(code, "code base", {"src/app.py": "one\n"})
+    memory = _repository(tmp_path, "memory", "ar/memory")
+    _commit(memory, "memory base", {"knowledge/layout.json": '{"conversion": "1"}'})
+    contract = replace(
+        _contract(tmp_path, code, memory),
+        code_worktree=tmp_path / "cleaned-code",
+        memory_worktree=tmp_path / "cleaned-memory",
+        integration_status="completed",
+    )
+    current_contract = replace(contract, integration_status="not-started")
+    ports = replace(WATCHER_PORTS, recorded_leaf_contract=lambda *_args: current_contract)
+    config = _config(tmp_path)
+    workspace = _environment(config, LEAF, _binding(_record(7)))
+    owner = FakeOwner(_record(8, code_candidate="e" * 40))
+    channel = MoveNoticeChannel()
+    watch = MoveNoticeWatch(
+        config,
+        ports,
+        options=WatchOptions(
+            channel=channel,
+            cooldown=60,
+            measurement=ComparisonMeasurement(owner=owner, counter=FakeCounter(1)),
+        ),
+    )
+    # The moved notice comes from a real change source (the turn end's check); an open captures
+    # nothing and is sent the notice the watch holds (D569).
+    assert watch.check(_selection()) is not None
+    assert watch.page_opened(_selection()) is not None
+    assert owner.calls == 1
+    current_contract = contract
+
+    def refuse_capture(*_args: Any) -> None:
+        raise AssertionError("a landed leaf has no moving candidate to capture")
+
+    monkeypatch.setattr(
+        "agents_remember.serving.explainer_watcher.capture_future_code_candidate", refuse_capture
+    )
+    assert GitComparisonOwner(config, ports).capture(_selection()) is None
+    # The completed landing clears even a notice cached within the page-open cooldown.
+    assert watch.page_opened(_selection()) is None
+    assert watch.check(_selection()) is None
+    assert channel.latest(_selection()) is None
+    assert notice_for(config, _selection(), ports) is None
+    assert owner.calls == 1
+
+    # An open stream with no environment must not capture the cleaned worktree either.
+    (workspace / "binding.json").unlink()
+    monkeypatch.setattr(channel, "has_subscribers", lambda _: True)
+    channel.publish(_selection(), MovedNotice("comparison-moved", 7, 8, 1, True))
+    assert watch.page_opened(_selection()) is None
+    assert channel.latest(_selection()) is None
+    channel.publish(_selection(), MovedNotice("comparison-moved", 7, 8, 1, True))
+    monkeypatch.setattr(watch, "seats", lambda: {"ended-worker": _selection()})
+    assert watch.after_turn_ends(["ended-worker"]) == []
+    assert channel.latest(_selection()) is None
+    assert owner.calls == 1
+    assert "cannot capture" not in caplog.text
+
+
+def test_an_absent_worktree_is_quiet_but_a_live_capture_failure_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    code = _repository(tmp_path, "repo", "main")
+    _commit(code, "code base", {"src/app.py": "one\n"})
+    memory = _repository(tmp_path, "memory", "ar/memory")
+    _commit(memory, "memory base", {"knowledge/layout.json": '{"conversion": "1"}'})
+    live = _contract(tmp_path, code, memory)
+    contract = replace(live, code_worktree=tmp_path / "missing-code")
+    owner = GitComparisonOwner(
+        _config(tmp_path), WATCHER_PORTS, resolve_contract=lambda _: contract
+    )
+
+    def failed_capture(*_args: Any, **_kwargs: Any) -> None:
+        raise ValueError("the active capture failed")
+
+    monkeypatch.setattr(
+        "agents_remember.serving.explainer_watcher.capture_future_code_candidate", failed_capture
+    )
+    assert owner.capture(_selection()) is None
+    assert "cannot capture" not in caplog.text
+    contract = live
+    assert owner.capture(_selection()) is None
+    assert "the moved watcher cannot capture" in caplog.text
+    assert "the active capture failed" in caplog.text
+
+
 def test_the_master_notice_follows_the_line_the_planned_binding_came_from(
     tmp_path: Path,
 ) -> None:
@@ -810,11 +903,11 @@ def test_role_session_turn_end_bypasses_cooldown_and_caught_up_check_clears_chan
 
     assert watch.seats().get(worker_agent) == _selection()
     assert watch.page_opened(_selection()) is None
-    assert owner.calls == 1
+    assert owner.calls == 0, "opening a page's stream never captures (D569)"
 
     owner.record = moved_record
     published = watch.after_turn_ends([worker_agent])
-    assert owner.calls == 2
+    assert owner.calls == 1
     assert len(published) == 1
     assert channel.latest(_selection()) == published[0]
 
@@ -863,3 +956,200 @@ def test_a_bound_view_is_read_through_its_record_not_as_a_bare_record() -> None:
     again = changes_between(binding, view)
     assert again.record.code_candidate.tree == record.code_candidate.tree
     assert again.record.memory_candidate.tree == record.memory_candidate.tree
+
+
+@pytest.mark.parametrize("side", ["code_base", "code_candidate", "memory_base", "memory_candidate"])
+@pytest.mark.parametrize("anchor", ["ref", "commit"])
+def test_notice_ignores_candidate_anchor_change_when_repository_trees_are_identical(
+    tmp_path: Path, side: str, anchor: str
+) -> None:
+    """A pin/commit is provenance, not a new visible tree for the moved notice."""
+    config = _config(tmp_path)
+    _task_root(tmp_path)
+    initial = _record(7)
+    value = getattr(initial, side)
+    previous = "refs/ar/old-candidate" if anchor == "ref" else "8" * 40
+    current = "refs/ar/new-candidate" if anchor == "ref" else "9" * 40
+    held = initial.model_copy(update={side: value.model_copy(update={anchor: previous})})
+    captured = initial.model_copy(
+        update={"number": 1, side: value.model_copy(update={anchor: current})}
+    )
+    recorded = captured.model_copy(update={"number": 9})
+    _environment(config, LEAF, _binding(held))
+    _write_record(config, recorded)
+    assert held.same_trees(captured)
+    counter = FakeCounter(0)
+
+    notice = notice_for(
+        config,
+        _selection(),
+        WATCHER_PORTS,
+        measurement=ComparisonMeasurement(owner=FakeOwner(captured), counter=counter),
+    )
+
+    assert notice is None
+    assert counter.calls == 0
+
+
+def test_notice_keeps_real_tree_change_and_its_matching_record_number(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    _task_root(tmp_path)
+    held = _record(7)
+    _environment(config, LEAF, _binding(held))
+    captured = _record(1, code_candidate="e" * 40)
+    captured = captured.model_copy(
+        update={
+            "code_candidate": captured.code_candidate.model_copy(update={"ref": "refs/ar/new-pin"})
+        }
+    )
+    _write_record(config, captured.model_copy(update={"number": 9}))
+    counter = FakeCounter(2)
+
+    notice = notice_for(
+        config,
+        _selection(),
+        WATCHER_PORTS,
+        measurement=ComparisonMeasurement(owner=FakeOwner(captured), counter=counter),
+    )
+
+    assert notice is not None
+    assert (notice.from_number, notice.to_number, notice.blocks_changed) == (7, 9, 2)
+    assert counter.calls == 1
+
+
+def test_notice_ignores_bound_comparison_pin_absent_from_same_tree_capture(tmp_path: Path) -> None:
+    """The live L201 comparison pin is absent from the non-recording capture."""
+    config = _config(tmp_path)
+    _task_root(tmp_path)
+    captured = _record(27)
+    held = captured.model_copy(
+        update={
+            "code_candidate": captured.code_candidate.model_copy(
+                update={
+                    "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L201/27"
+                }
+            )
+        }
+    )
+    _environment(config, LEAF, _binding(held))
+    _write_record(config, held)
+    counter = FakeCounter(0)
+    owner = FakeOwner(captured)
+
+    notice = notice_for(
+        config,
+        _selection(),
+        WATCHER_PORTS,
+        measurement=ComparisonMeasurement(owner=owner, counter=counter),
+    )
+
+    assert notice is None
+    assert owner.calls == 1
+    assert counter.calls == 0
+
+
+@pytest.mark.parametrize("side", ["code_base", "code_candidate", "memory_base", "memory_candidate"])
+@pytest.mark.parametrize("field", ["tree", "repository"])
+def test_notice_preserves_every_changed_tree_and_repository(
+    tmp_path: Path, side: str, field: str
+) -> None:
+    config = _config(tmp_path)
+    _task_root(tmp_path)
+    held = _record(7)
+    _environment(config, LEAF, _binding(held))
+    value = getattr(held, side)
+    replacement = "e" * 40 if field == "tree" else "/repo/other"
+    captured = held.model_copy(
+        update={"number": 1, side: value.model_copy(update={field: replacement})}
+    )
+    _write_record(config, captured.model_copy(update={"number": 9}))
+    owner = FakeOwner(captured)
+    counter = FakeCounter(0)
+
+    notice = notice_for(
+        config,
+        _selection(),
+        WATCHER_PORTS,
+        measurement=ComparisonMeasurement(owner=owner, counter=counter),
+    )
+
+    assert notice is not None
+    assert (notice.from_number, notice.to_number, notice.blocks_changed) == (7, 9, 0)
+    assert owner.calls == counter.calls == 1
+
+
+@pytest.mark.parametrize("field", ["commit", "version", "code_commit", "tree"])
+def test_notice_preserves_every_conversion_input(tmp_path: Path, field: str) -> None:
+    config = _config(tmp_path)
+    _task_root(tmp_path)
+    conversion = ReviewConvertedBase(
+        commit="5" * 40, version="1", code_commit="6" * 40, tree="7" * 40
+    )
+    held = _record(7).model_copy(update={"converted_base": conversion})
+    _environment(config, LEAF, _binding(held))
+    replacement = "2" if field == "version" else "8" * 40
+    captured = held.model_copy(
+        update={"number": 1, "converted_base": conversion.model_copy(update={field: replacement})}
+    )
+    _write_record(config, captured.model_copy(update={"number": 9}))
+    owner = FakeOwner(captured)
+    counter = FakeCounter(0)
+
+    notice = notice_for(
+        config,
+        _selection(),
+        WATCHER_PORTS,
+        measurement=ComparisonMeasurement(owner=owner, counter=counter),
+    )
+
+    assert notice is not None
+    assert (notice.from_number, notice.to_number, notice.blocks_changed) == (7, 9, 0)
+    assert owner.calls == counter.calls == 1
+
+
+# --- the block count, kept by its trees' identity (D569) -----------------------------------------
+
+
+def _state_tree(repo: Path, files: dict[str, str]) -> str:
+    _commit(repo, "state", files)
+    return _git(repo, "rev-parse", "HEAD^{tree}")
+
+
+def test_a_pair_of_candidate_states_is_counted_once_and_a_new_tree_is_counted_again(
+    tmp_path: Path,
+) -> None:
+    code = _repository(tmp_path, "code", "main")
+    memory = _repository(tmp_path, "memory", "main")
+    bound_tree = _state_tree(code, {"pkg/a.py": "A = 1\n"})
+    moved_tree = _state_tree(code, {"pkg/a.py": "A = 2\n", "pkg/b.py": "B = 1\n"})
+    later_tree = _state_tree(code, {"pkg/a.py": "A = 1\n"})  # only pkg/b.py differs now
+    knowledge = _state_tree(memory, {"knowledge/layout.json": "{}\n"})
+    opened: list[str] = []
+    original = WATCHER_PORTS.open_tree_lane
+
+    def counted_lane(trees: Any) -> Any:
+        opened.append(trees.record.code_candidate.tree)
+        return original(trees)
+
+    ports = replace(WATCHER_PORTS, open_tree_lane=counted_lane)
+
+    def record(candidate: str) -> ReviewTreeComparisonRecord:
+        held = _record(1, code_candidate=candidate, memory_candidate=knowledge)
+        return held.model_copy(
+            update={
+                "code_candidate": _side(candidate, str(code)),
+                "memory_candidate": _side(knowledge, str(memory)),
+            }
+        )
+
+    binding = _binding(record(bound_tree)).binding
+    first = blocks_changed(binding, record(moved_tree), ports=ports)
+    assert first == blocks_changed(binding, record(moved_tree), ports=ports) == 2
+    assert opened == [moved_tree], "the same pair of trees was counted twice"
+    assert blocks_changed(binding, record(later_tree), ports=ports) == 1
+    assert opened == [moved_tree, later_tree]
+
+    gone = "0" * 40  # no such tree: unreadable, so nothing is kept and the next ask counts again
+    assert blocks_changed(binding, record(gone), ports=ports) is None
+    assert blocks_changed(binding, record(gone), ports=ports) is None
+    assert opened[2:] == [gone, gone]

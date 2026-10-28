@@ -1,7 +1,7 @@
 // The review page's column is the leaf's explainer (MIK-R106 v2 rule 1): the rail hands the column
 // the leaf's address, the pane shows the explainer or its placeholder, and the task's Worker is
 // never the default. Every other page keeps the document's own chat, unchanged.
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CockpitShell, RightRail } from './Cockpit';
@@ -9,7 +9,8 @@ import { dashboardStore } from '../data/store';
 import { chatLeaf, chatMaster, chatSprint } from '../test/fixtures/documentChat';
 import { projection } from '../test/fixtures/wire';
 import { DocumentChat } from './document-chat/DocumentChat';
-import { explainerAddress, type ReviewChatColumn } from './reviewChat';
+import { explainerAddress, useReviewChat, type ReviewChatColumn } from './reviewChat';
+import type { ChangeSetTarget } from '../panels/changeset/ChangeSetViewer';
 import { resetExplainerSeats } from '../explainer/ExplainerTaskDocument';
 import { askFirstRequest, resetFirstRequest } from '../explainer/request';
 import { ADDRESS, RETIRE, STATE, backend, explainerState, invariantPick, resetTray } from '../explainer/testSupport';
@@ -261,5 +262,31 @@ describe('the pane shows the explainer column for a review leaf (rule 1)', () =>
     expect(panel.queryByTestId('explainer-column')).toBeNull();
     await act(async () => {});
     expect(server.paths()).not.toContain(STATE);
+  });
+});
+
+// MIK-R211 rule 4: "pressing either Explain control shows something". The press asks for the first
+// request, the ask opens the column, and the press must not toggle it shut again from the state it
+// started in — which is what left the column inside a `display: none` rail with a 0×0 box.
+describe('a press that asks opens the chat column and never closes it (MIK-R211 rule 4)', () => {
+  it('opens on the ask, stays open on the press’s own open, and only the toggle closes it', () => {
+    const review: ChangeSetTarget = {
+      repo: ADDRESS.repository,
+      master: ADDRESS.master,
+      leaf: ADDRESS.leaf,
+      review: {},
+    };
+    const view = renderHook(() => useReviewChat(review));
+
+    expect(view.result.current.open).toBe(false);
+    // The ask opens the column by itself (the shell's listener).
+    act(() => askFirstRequest(ADDRESS));
+    expect(view.result.current.open).toBe(true);
+    // The press then opens it again, idempotently: an open, never a toggle.
+    act(() => view.result.current.expand?.());
+    expect(view.result.current.open).toBe(true);
+    // The side bar's own control is still the one thing that closes it.
+    act(() => view.result.current.toggle());
+    expect(view.result.current.open).toBe(false);
   });
 });

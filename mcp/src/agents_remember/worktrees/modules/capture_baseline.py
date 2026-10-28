@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.read_cancellation import raise_if_read_cancelled
 from agents_remember.worktrees.modules.capture_index import (
     _index_copy_has_trust_flags,
     _index_entries,
@@ -93,6 +94,17 @@ def begin_capture_baseline(
     if scope is None:
         return None
     scope.pop(repo.as_posix(), None)
+    return bracket_real_index(repo)
+
+
+def bracket_real_index(
+    repo: Path,
+) -> tuple[tuple[int, int, int], frozenset[str]] | None:
+    """The real index's stamp and tracked paths before a capture, or ``None`` when no proof.
+
+    The scope-free half of :func:`begin_capture_baseline`, for a capture owner that keeps its
+    own baseline beyond one request (:mod:`~agents_remember.worktrees.modules.kept_capture`).
+    """
     try:
         index, _top = _real_index(repo)
         before = index.stat()
@@ -124,18 +136,38 @@ def note_capture_baseline(
     the capture seeds its private index from HEAD rather than from staged additions/removals.
     """
     scope = _CAPTURE_BASELINES.get()
-    if scope is None or entries is None or before is None:
+    if scope is None:
         return
+    baseline = admitted_baseline(repo, tree=tree, entries=entries, before=before, head=head)
+    if baseline is None:
+        return
+    scope[repo.as_posix()] = baseline
+    observer = _CAPTURE_OBSERVER.get()
+    if observer is not None:
+        observer(repo)
+
+
+def admitted_baseline(
+    repo: Path,
+    *,
+    tree: str,
+    entries: tuple[_CapturedEntry, ...] | None,
+    before: tuple[tuple[int, int, int], frozenset[str]] | None,
+    head: str | None = None,
+) -> WorktreeCaptureBaseline | None:
+    """The baseline :func:`note_capture_baseline` admits, or ``None``; scope-free."""
+    if entries is None or before is None:
+        return None
     try:
         real_index, top = _real_index(repo)
         stamp = real_index.stat()
     except (OSError, RuntimeError, _IndexCopyUnusable):
-        return
+        return None
     index_stamp, tracked = before
     paths = frozenset(entry[0] for entry in entries)
     if index_stamp != (stamp.st_size, stamp.st_mtime_ns, stamp.st_ctime_ns) or not tracked <= paths:
-        return
-    scope[repo.as_posix()] = WorktreeCaptureBaseline(
+        return None
+    return WorktreeCaptureBaseline(
         tree=tree,
         index_stat=index_stamp,
         entries=entries,
@@ -143,9 +175,12 @@ def note_capture_baseline(
         head=head,
         root=top.as_posix(),
     )
-    observer = _CAPTURE_OBSERVER.get()
-    if observer is not None:
-        observer(repo)
+
+
+def baseline_still_captures(repo: Path, baseline: WorktreeCaptureBaseline) -> bool:
+    """Whether ``baseline``'s worktree provably still captures to its tree (scope-free)."""
+
+    return _still_captures(repo, baseline, head=baseline.head)
 
 
 def capture_baseline_unchanged(repo: Path, *, tree: str, head: str | None = None) -> bool:
@@ -227,6 +262,10 @@ def _index_stamp_unchanged(repo: Path, baseline: WorktreeCaptureBaseline) -> boo
     )
 
 
+#: How many captured entries are stat'ed between two looks at the read's cancellation (D585).
+_CHECK_EVERY = 256
+
+
 def _entries_unchanged(top: Path, entries: tuple[_CapturedEntry, ...]) -> bool:
     """Whether every captured path still carries the stat the capture recorded for it.
 
@@ -235,7 +274,9 @@ def _entries_unchanged(top: Path, entries: tuple[_CapturedEntry, ...]) -> bool:
     is gone cannot be read at all. An unreadable path is a doubt.
     """
 
-    for relative, mode, size, mtime_ns, ctime_ns in entries:
+    for index, (relative, mode, size, mtime_ns, ctime_ns) in enumerate(entries):
+        if not index % _CHECK_EVERY:
+            raise_if_read_cancelled()  # tens of thousands of entries: a read that left stops here
         try:
             info = os.lstat(top / relative)
         except OSError:
@@ -247,3 +288,27 @@ def _entries_unchanged(top: Path, entries: tuple[_CapturedEntry, ...]) -> bool:
         if info.st_mtime_ns != mtime_ns or info.st_ctime_ns != ctime_ns:
             return False
     return True
+
+
+@dataclass(frozen=True)
+class WorktreeCaptureWitness:
+    """An immutable native capture proof retained across one preparation and its build.
+
+    Constructed only from the capture owner's current request scope. It is never deserialized
+    from disk: a fresh process must perform its own native capture before keeping this proof.
+    """
+
+    repository: Path
+    baseline: WorktreeCaptureBaseline
+
+    def current(self) -> bool:
+        return _still_captures(self.repository, self.baseline, head=self.baseline.head)
+
+
+def capture_witness(repository: Path, *, tree: str) -> WorktreeCaptureWitness | None:
+    """Export the complete proof for this native capture, never guess one from a tree id."""
+    scope = _CAPTURE_BASELINES.get()
+    baseline = None if scope is None else scope.get(repository.as_posix())
+    if baseline is None or baseline.tree != tree:
+        return None
+    return WorktreeCaptureWitness(repository, baseline)

@@ -60,11 +60,10 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.read_queries import (
     fetch_family_revisions,
-    fetch_identity_rows,
     fetch_invariant_revisions,
     fetch_memberships_of_families_full,
     fetch_realizations_for_invariants,
-    fetch_revision_ids,
+    fetch_revision_populations,
 )
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.review import ReviewRefusal
@@ -274,16 +273,7 @@ def _populations(
 ) -> dict[str, tuple[str, ...]]:
     """Every identity of one kind with its retained revision ids, through the shipped readers."""
 
-    identity_table, revision_table, identity_column = tables
-    identities = fetch_identity_rows(
-        connection, namespace, identity_table, identity_column, "display_label"
-    )
-    return {
-        identity: fetch_revision_ids(
-            connection, namespace, revision_table, identity_column, identity
-        )
-        for identity in identities
-    }
+    return fetch_revision_populations(connection, namespace, *tables)
 
 
 def _heads(

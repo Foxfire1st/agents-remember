@@ -4,6 +4,7 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RoleChatsPane } from './RoleChats';
+import { forgetRememberedRoleDefaults } from './launcherDefaultsMemory';
 import {
   launchChoiceProblem,
   roleAgentOverrideFor,
@@ -60,6 +61,7 @@ beforeEach(() => {
   optionsBarrier = null;
   savedCatalogReply = null;
   sessionStorage.clear();
+  forgetRememberedRoleDefaults();
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
@@ -421,7 +423,7 @@ describe('R214 fresh launcher views', () => {
 
 
 describe('R214 cold saved preview', () => {
-  it('shows the shared disk answer before fresh options settle, then replaces it', async () => {
+  it('offers the shared disk answer silently before fresh options settle, then replaces it (R215)', async () => {
     let releaseFresh: (() => void) | undefined;
     optionsBarrier = new Promise<void>((resolve) => { releaseFresh = resolve; });
     savedCatalogReply = { status: 200, body: {
@@ -434,21 +436,22 @@ describe('R214 cold saved preview', () => {
       catalogDiscovery: { source: 'fresh', readAt: '2026-10-26T16:00:00Z' }, catalogOrigin: 'paseo:fresh-origin', executions: [],
     } }];
     const view = renderLauncher();
-    await view.findByText(/Saved Paseo choices.*paseo:saved-origin.*Saved Agent.*Saved Model/);
-    expect(view.getByText(/Agents: saved answer from 2026-10-26T14:20:00Z/)).toBeTruthy();
+    await waitFor(() => expect((view.getByLabelText('Role agent override') as HTMLSelectElement).textContent).toContain('Saved Agent'));
+    expect(view.queryByRole('status', { name: 'Paseo catalog status' })).toBeNull();
     expect(optionsRequests.length).toBeGreaterThan(0);
-    expect((view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((view.getByLabelText('Role agent override') as HTMLSelectElement).disabled).toBe(false);
+    expect((view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement).disabled).toBe(false);
     await act(async () => releaseFresh?.());
-    await waitFor(() => expect((view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement).disabled).toBe(false));
-    expect(view.queryByText(/Saved Paseo choices/)).toBeNull();
-    expect((view.getByLabelText('Role agent override') as HTMLSelectElement).textContent).toContain('Fresh Agent');
+    await waitFor(() => expect((view.getByLabelText('Role agent override') as HTMLSelectElement).textContent).toContain('Fresh Agent'));
+    expect((view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(view.queryByRole('status', { name: 'Paseo catalog status' })).toBeNull();
     expect((view.getByLabelText('Role agent override') as HTMLSelectElement).textContent).not.toContain('Saved Agent');
   });
 });
 
 
 describe('R5 pending launcher provenance', () => {
-  it.each(['agent change', 'same-scope refresh'])('replaces the previous fresh display with the disk snapshot on %s', async (change) => {
+  it.each(['agent change', 'same-scope refresh'])('replaces the previous fresh display with the disk snapshot on %s, silently (R215)', async (change) => {
     optionsReplies = [optionsReply({ agent: 'codex', model: 'gpt-a', available: true })];
     const view = renderLauncher();
     const start = view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement;
@@ -456,7 +459,7 @@ describe('R5 pending launcher provenance', () => {
     let releaseFresh: (() => void) | undefined;
     optionsBarrier = new Promise<void>((resolve) => { releaseFresh = resolve; });
     savedCatalogReply = { status: 200, body: {
-      agents: [{ id: 'disk', label: 'Disk Agent', models: [] }],
+      agents: [{ id: 'disk', label: 'Disk Agent', models: [] }, { id: 'eve', label: 'Disk Eve', models: [] }],
       catalogDiscovery: { source: 'saved', readAt: '2026-10-26T16:20:00Z' }, catalogOrigin: 'paseo:disk',
     } };
     if (change === 'agent change') {
@@ -464,12 +467,138 @@ describe('R5 pending launcher provenance', () => {
     } else {
       fireEvent.click(view.getByRole('button', { name: 'Refresh role agents' }));
     }
-    await view.findByText(/Saved Paseo choices.*paseo:disk.*Disk Agent/);
-    expect(view.getByText(/Agents: saved answer from 2026-10-26T16:20:00Z/)).toBeTruthy();
-    expect(view.queryByText(/Saved Paseo choices.*Codex/)).toBeNull();
-    expect(start.disabled).toBe(true);
+    const agent = view.getByLabelText('Role agent override') as HTMLSelectElement;
+    await waitFor(() => expect(agent.textContent).toContain('Disk Agent'));
+    expect(agent.textContent).not.toContain('Codex');
+    expect(view.queryByRole('status', { name: 'Paseo catalog status' })).toBeNull();
+    expect(start.disabled).toBe(false);
     await act(async () => releaseFresh?.());
+    await waitFor(() => expect(agent.textContent).toContain('Codex'));
+    expect(start.disabled).toBe(false);
+    expect(view.queryByRole('status', { name: 'Paseo catalog status' })).toBeNull();
+  });
+});
+
+
+// MIK-R215: Paseo's last answer is used silently, nothing on the page moves for it, and the fallback
+// offers every choice that answer had; only a real error speaks.
+const SAVED_ANSWER = {
+  agents: AGENTS,
+  catalogDiscovery: { source: 'saved', readAt: '2026-10-27T06:00:00Z' },
+  catalogOrigin: 'paseo:saved',
+};
+
+function savedCatalogReads(): number {
+  return vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/role-launch/saved-catalog').length;
+}
+
+// What the launcher row lays out, in order: its controls and any status line.
+function launcherLayout(view: ReturnType<typeof renderLauncher>): (string | null)[] {
+  const row = view.getByTestId('role-launcher');
+  return Array.from(row.querySelectorAll('select,button,[role="status"]')).map((node) =>
+    node.getAttribute('aria-label'),
+  );
+}
+
+function optionLabels(select: HTMLElement): string[] {
+  return Array.from((select as HTMLSelectElement).options).map((option) => option.text);
+}
+
+describe('R215 the launcher speaks only of real errors', () => {
+  it('offers the saved choices with the role defaults, none blocked and no notice, while a fresh answer is on its way', async () => {
+    optionsReplies = [optionsReply({ agent: 'codex', model: 'gpt-a', available: true })];
+    const view = renderLauncher();
+    const start = view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement;
     await waitFor(() => expect(start.disabled).toBe(false));
-    expect(view.queryByText(/Saved Paseo choices/)).toBeNull();
+    const settled = launcherLayout(view);
+    const settledModels = optionLabels(view.getByLabelText('Role model override'));
+    let releaseFresh: (() => void) | undefined;
+    optionsBarrier = new Promise<void>((resolve) => { releaseFresh = resolve; });
+    savedCatalogReply = { status: 200, body: SAVED_ANSWER };
+    fireEvent.click(view.getByRole('button', { name: 'Refresh role agents' }));
+    await waitFor(() => expect(savedCatalogReads()).toBeGreaterThan(1));
+    await act(async () => {});
+
+    expect(view.queryByRole('status', { name: 'Paseo catalog status' })).toBeNull();
+    for (const label of ['Role', 'Role agent override', 'Role model override', 'Role effort override']) {
+      expect((view.getByLabelText(label) as HTMLSelectElement).disabled, label).toBe(false);
+    }
+    expect(optionLabels(view.getByLabelText('Role model override'))).toEqual(settledModels);
+    expect(optionLabels(view.getByLabelText('Role effort override'))).toEqual(['Low · default', 'Low', 'High']);
+    expect(start.disabled).toBe(false);
+    expect(launcherLayout(view)).toEqual(settled);
+
+    await act(async () => releaseFresh?.());
+    await waitFor(() => expect(optionsRequests.length).toBe(2));
+    expect(launcherLayout(view)).toEqual(settled);
+    expect(view.queryByRole('status', { name: 'Paseo catalog status' })).toBeNull();
+  });
+
+  it('opened cold while Paseo does not answer, shows the saved choices selectable and silent, and a start passes unchecked', async () => {
+    optionsBarrier = new Promise<void>(() => {});
+    // Model labels only the disk answer has: what the model select lists can come from nowhere else.
+    const diskAgents = AGENTS.map((row) => ({
+      ...row,
+      models: row.models.map((model) => ({ ...model, label: `Saved ${model.label}` })),
+    }));
+    savedCatalogReply = { status: 200, body: { ...SAVED_ANSWER, agents: diskAgents } };
+    const dispatched: Record<string, unknown>[] = [];
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url !== '/api/role-launch/dispatch') return base(url, init);
+      dispatched.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({ requestId: dispatched.at(-1)?.requestId, status: 'rejected', detail: 'fixture', canStart: true, canRevive: false }), { status: 200 });
+    }));
+    const view = renderLauncher();
+    await waitFor(() => expect(savedCatalogReads()).toBe(1));
+    await act(async () => {});
+
+    expect(view.queryByRole('status', { name: 'Paseo catalog status' })).toBeNull();
+    const agent = view.getByLabelText('Role agent override') as HTMLSelectElement;
+    expect(agent.disabled).toBe(false);
+    expect(optionLabels(agent)).toEqual(['Role default', 'Codex', 'Eve', 'Pi']);
+    expect((view.getByLabelText('Role') as HTMLSelectElement).disabled).toBe(false);
+    // With no agent known the model select asks for one; it is a step, not a refusal (rule 2).
+    const model = view.getByLabelText('Role model override') as HTMLSelectElement;
+    expect(optionLabels(model)).toEqual(['Pick an agent first']);
+    expect(view.queryByRole('alert')).toBeNull();
+    const start = view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement;
+    expect(start.disabled).toBe(false);
+
+    fireEvent.click(start);
+    await waitFor(() => expect(dispatched).toHaveLength(1));
+    expect(dispatched[0].role).toBe('architect');
+    expect(dispatched[0]).not.toHaveProperty('agentOverride');
+
+    // Picking an agent lists its models from the saved answer alone: the fresh question the new
+    // scope asks never answers, and the saved one is read again from disk for it.
+    const readsBeforePick = savedCatalogReads();
+    fireEvent.change(agent, { target: { value: 'codex' } });
+    await waitFor(() => expect(savedCatalogReads()).toBeGreaterThan(readsBeforePick));
+    await waitFor(() => expect(optionLabels(view.getByLabelText('Role model override'))).toEqual(['Agent default', 'Saved GPT A', 'Saved GPT B']));
+    expect((view.getByLabelText('Role model override') as HTMLSelectElement).disabled).toBe(false);
+    expect(optionsRequests.at(-1)?.agentId).toBe('codex');
+    expect(view.queryByRole('status', { name: 'Paseo catalog status' })).toBeNull();
+  });
+
+  it('answers from the saved parts without a word, and a refusal still speaks', async () => {
+    const saved = { source: 'saved', readAt: '2026-10-27T06:00:00Z', error: 'paseo_daemon_unreachable' };
+    const savedAgents = AGENTS.map((row) => ({
+      ...row,
+      discovery: { models: saved, modes: saved, acceptsToolServers: saved },
+      models: row.models.map((model) => ({ ...model, discovery: { efforts: saved, features: saved, serviceTiers: saved } })),
+    }));
+    optionsReplies = [
+      { status: 200, body: { roleDefaults: { agent: 'codex', model: 'gpt-a', available: true }, agents: savedAgents, catalogDiscovery: saved, catalogOrigin: 'paseo:1', executions: [] } },
+      { status: 409, body: { detail: 'The Paseo runtime does not offer agent codex.' } },
+    ];
+    const view = renderLauncher();
+    const start = view.getByRole('button', { name: 'Start role' }) as HTMLButtonElement;
+    await waitFor(() => expect(start.disabled).toBe(false));
+    expect(view.queryByRole('status', { name: 'Paseo catalog status' })).toBeNull();
+    expect(optionLabels(view.getByLabelText('Role model override'))).toEqual(['GPT A · default', 'GPT A', 'GPT B']);
+
+    fireEvent.click(view.getByRole('button', { name: 'Refresh role agents' }));
+    expect((await view.findByRole('alert')).textContent).toContain('(HTTP 409): The Paseo runtime does not offer agent codex.');
   });
 });

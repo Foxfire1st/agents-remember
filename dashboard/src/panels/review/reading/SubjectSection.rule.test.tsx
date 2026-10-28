@@ -1,15 +1,11 @@
-// Ruling 9498d6e4 (mockup styles.css `.subject + .subject`: a 1px grid rule and 1rem above): a rule
-// stands between consecutive sections of the reading column, subject to subject across family groups,
-// and above the lane when a subject section precedes it; none above the first. jsdom has no cascade,
-// so the case checks which sections carry the rule's mark and that the rule is declared on it. On
-// L181 #8 in All (reviewPage.test-utils.tsx; ReviewPage.order.test.tsx) the column holds three
-// subject sections, then the lane.
-import { cleanup, screen, waitFor } from '@testing-library/react';
+// Selected-area review supersedes consecutive central sections: every selected invariant or lane
+// starts its own area. Switching area must not retain a preceding subject's separator or content.
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { treeViewStore } from '../triageViewPreference';
 import { subjectBox } from './readingStyles';
-import { PLACE, renderPage, servePage, stubIntersection } from './reviewPage.test-utils';
+import { PLACE, renderPage, selectInvariant, servePage, stubIntersection } from './reviewPage.test-utils';
 
 const HASH = `#review?${new URLSearchParams({ repo: PLACE.repo, master: PLACE.master, leaf: PLACE.leaf })}`;
 
@@ -33,19 +29,22 @@ const ruleClasses = (condition: string) => [
   `${condition}:mt_1rem`,
 ];
 
-it('draws a rule between consecutive sections and above the lane, none above the first', async () => {
+it('starts each selected area without a separator left by the previous subject', async () => {
   stubIntersection();
   treeViewStore.getState().setView('all');
   servePage();
   renderPage();
-  await waitFor(() => expect(screen.getAllByTestId('review-subject-section')).toHaveLength(3));
-  await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+  await selectInvariant();
   const sections = screen.getAllByTestId('review-subject-section');
-  expect(sections.map((section) => section.hasAttribute('data-ruled'))).toEqual([false, true, true]);
+  expect(sections).toHaveLength(1);
+  expect(sections[0].hasAttribute('data-ruled')).toBe(false);
   expect(subjectBox.split(' ')).toEqual(expect.arrayContaining(ruleClasses('[&[data-ruled]]')));
-  // The lane follows the subjects' list, which marks that it drew a section.
+  expect(screen.queryByTestId('review-lane-section')).toBeNull();
+
+  fireEvent.click(screen.getByTestId('review-tree-lane'));
+  await waitFor(() => expect(screen.getByTestId('review-lane-section').dataset.laneState).toBe('ready'));
+  expect(screen.queryByTestId('review-subject-section')).toBeNull();
+  expect(screen.getByTestId('review-subjects').hasAttribute('data-subjects-drawn')).toBe(false);
   const lane = screen.getByTestId('review-lane-section');
-  expect(lane.previousElementSibling).toBe(screen.getByTestId('review-subjects'));
-  expect(screen.getByTestId('review-subjects').hasAttribute('data-subjects-drawn')).toBe(true);
-  expect(lane.className.split(' ')).toEqual(expect.arrayContaining(ruleClasses('[[data-subjects-drawn]_+_&]')));
+  expect(lane.matches('[data-subjects-drawn] + *')).toBe(false);
 });

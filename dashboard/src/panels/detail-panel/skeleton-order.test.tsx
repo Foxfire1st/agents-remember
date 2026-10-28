@@ -602,10 +602,11 @@ describe('objective after the rendered series line (MIK-R128 rule 15, evidence 1
     },
   );
   it.each(['sprint', 'master', 'task'] as const)(
-    'uses the shared titled-block spacing when %s has no series line',
+    'keeps %s summary spacing while its document body loads',
     (form) => {
       const view = pageFor(form, { objective: 'An objective.' }, 'loading');
-      expect(view.queryByTestId('open-changeset')).toBeNull();
+      if (form === 'master') expect(view.getByTestId('open-changeset').textContent).toContain('series');
+      else expect(view.queryByTestId('open-changeset')).toBeNull();
       const objective = view.getByTestId('objective-lead');
       expect(before(view.getByTestId('doc-head'), objective)).toBe(true);
       for (const className of block.split(' '))

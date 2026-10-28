@@ -9,6 +9,7 @@
 
 import { fetchWithTimeout } from "./fetchWithTimeout";
 import { shareInflight } from "./inflight";
+import { abortedRead } from "./abortableRead";
 
 export type Scope = string; // "mainline" | a worktree-group basename
 
@@ -92,8 +93,14 @@ export class FilesApiError extends Error {
 // against this class is unaffected.
 // `timeoutMs` bounds the socket for hung-transport-prone reads (see fetchRepos); omitted, the
 // request is unbounded exactly as before.
-export async function getJson<T>(url: string, timeoutMs?: number): Promise<T> {
-  const res = timeoutMs === undefined ? await fetch(url) : await fetchWithTimeout(url, timeoutMs);
+export async function getJson<T>(url: string, timeoutMs?: number, signal?: AbortSignal): Promise<T> {
+  if (signal) {
+    await Promise.resolve();
+    if (signal.aborted) throw abortedRead();
+  }
+  const res = timeoutMs === undefined
+    ? await (signal ? fetch(url, { signal }) : fetch(url))
+    : await fetchWithTimeout(url, timeoutMs, signal ? { signal } : undefined);
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { status?: string };
     throw new FilesApiError(res.status, body.status ?? res.statusText);

@@ -6,7 +6,7 @@ import asyncio
 import subprocess
 import threading
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
+from agents_remember.kernel import reviewer_worklist_process as process_owner
 from agents_remember_test_support.testing.waits import (
     HANG_GUARD_SECONDS,
     async_wait_until,
@@ -23,7 +24,7 @@ from agents_remember_test_support.testing.waits import (
 
 WORKLIST_REPLY = """
 import json, os, sys, time
-r = json.load(sys.stdin)
+r = json.loads(sys.stdin.readline())
 answer = {'operation': r['operation'], 'request': r['request'], 'source': r['source'],
           'module': r['source']['packageRoot'] + '/application/reviewer_worklist_child.py',
           'pid': os.getpid(), 'document': None, 'review': None, 'reads': {}, 'computation': [time.monotonic(), time.monotonic()], 'error': None}
@@ -172,3 +173,36 @@ def joined_requesters(threads: list[threading.Thread], children: list[Any]) -> i
 
 def _alive(children: list[subprocess.Popen[Any]]) -> int:
     return sum(child.poll() is None for child in children)
+
+
+@contextmanager
+def one_shot_worklist_child(script: str) -> Iterator[list[subprocess.Popen[Any]]]:
+    """Test-only child faults; the product continues to use its fixed package module entry."""
+
+    actual = subprocess.Popen
+    children: list[subprocess.Popen[Any]] = []
+
+    def spawn(argv: list[str], *args: Any, **kwargs: Any) -> Any:
+        if argv[1:] == ["-P", "-m", process_owner.CHILD_MODULE]:
+            child = actual([argv[0], "-P", "-c", script], *args, **kwargs)
+            children.append(child)
+            return child
+        return actual(argv, *args, **kwargs)
+
+    def fresh_child(
+        processes: process_owner.ReviewerWorklistProcesses, _environment: dict[str, str], _cwd: str
+    ) -> None:
+        # A pool from an earlier normal read must not bypass this test's injected program.
+        while processes._idle:
+            process = processes._idle.popleft()
+            process_owner._reap(process)
+            processes._bindings.pop(process, None)
+
+    # These injected programs describe one request/fault. Warm reuse is exercised separately
+    # against the persistent child entry; a one-shot fault must not stand in for that protocol.
+    with (
+        mock.patch.object(subprocess, "Popen", spawn),
+        mock.patch.object(process_owner.ReviewerWorklistProcesses, "_park", return_value=False),
+        mock.patch.object(process_owner.ReviewerWorklistProcesses, "_take_idle", fresh_child),
+    ):
+        yield children

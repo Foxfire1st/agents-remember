@@ -33,7 +33,7 @@ import subprocess
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 import apsw
 
@@ -47,7 +47,9 @@ from agents_remember.application.knowledge_currentness.observe import (
 )
 from agents_remember.application.knowledge_reader.marks import open_weakness_counts_in
 from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees, Resolved
+from agents_remember.application.review_line_changes import line_changes
 from agents_remember.application.review_tree_comparison import ReviewTrees, TreeKnowledge
+from agents_remember.kernel.read_cancellation import raise_if_read_cancelled
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge_index import (
     Entry,
@@ -57,18 +59,27 @@ from agents_remember.memory.knowledge_index import (
 )
 from agents_remember.memory_quality.style.citations import grammars
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
+from agents_remember.models.knowledge.review import ReviewRefusal
 from agents_remember.models.knowledge.review_tree_entries import (
     EXCERPT_MAX_CHARACTERS,
     EXCERPT_MAX_LINES,
     ReviewEntryChange,
     ReviewEntryMemory,
+    ReviewLineChanges,
     ReviewTreeEntry,
     ReviewTreeEntrySide,
 )
-from agents_remember.models.knowledge.review_trees import ReviewEntryMemoryState
-from agents_remember.models.knowledge_files.anchor_content import blob_lines
+from agents_remember.models.knowledge.review_trees import (
+    ReviewEntryInventory,
+    ReviewEntryMemoryState,
+)
+from agents_remember.models.knowledge_files.anchor_content import (
+    RangeOutsideBlobError,
+    blob_lines,
+    range_bytes,
+)
 
-__all__ = ["PLACEMENTS", "CardEntries", "tree_entries"]
+__all__ = ["PLACEMENTS", "CardEntries", "tree_entries", "tree_entry_cards", "tree_entry_inventory"]
 
 PLACEMENTS: Final[BoundedMemo[ObservationKey, Resolved | None]] = BoundedMemo(8_192)
 
@@ -80,6 +91,7 @@ class _Side:
     entries: Mapping[str, Entry] | None
     unreadable: str | None
     code: OpenedCodeTree
+    complete: bool = False
 
 
 @dataclass(frozen=True)
@@ -107,6 +119,35 @@ def tree_entries(trees: ReviewTrees, invariant_keys: Iterable[str]) -> CardEntri
     """
 
     wanted = frozenset(invariant_keys)
+    before, after, memory = _comparison_sides(trees, wanted, details=True)
+    assert memory is not None
+    return CardEntries(entries=_listed_entries(before, after, memory.values), memory=memory.state)
+
+
+def tree_entry_inventory(trees: ReviewTrees) -> ReviewEntryInventory:
+    """The complete comparison's exact locations, using the cards' placement and change rules."""
+
+    try:
+        before, after, _ = _comparison_sides(trees, None, details=False)
+        failures = [
+            side.unreadable or side.code.problem or "the knowledge index is partial"
+            for side in (before, after)
+            if side.unreadable or side.code.problem or not side.complete
+        ]
+        if failures:
+            return ReviewEntryInventory(
+                state="unavailable", reason="; ".join(failures)[:PROSE_MAX_LENGTH]
+            )
+        return ReviewEntryInventory(
+            state="ready", entries=_listed_entries(before, after, {}, details=False)
+        )
+    except (apsw.Error, IndexMismatchError, OSError) as error:
+        return ReviewEntryInventory(state="unavailable", reason=str(error)[:PROSE_MAX_LENGTH])
+
+
+def _comparison_sides(
+    trees: ReviewTrees, wanted: frozenset[str] | None, *, details: bool
+) -> tuple[_Side, _Side, _Memory | None]:
     record = trees.record
     before = _side(
         trees.before, CodeTree(Path(record.code_base.repository), record.code_base.tree), wanted
@@ -116,29 +157,106 @@ def tree_entries(trees: ReviewTrees, invariant_keys: Iterable[str]) -> CardEntri
         CodeTree(Path(record.code_candidate.repository), record.code_candidate.tree),
         wanted,
         before,
+        details=details,
     )
+    return before, after, memory
+
+
+def _listed_entries(
+    before: _Side,
+    after: _Side,
+    memory: Mapping[str, ReviewEntryMemory],
+    *,
+    details: bool = True,
+) -> tuple[ReviewTreeEntry, ...]:
+    paths = {entry.path for side in (before, after) for entry in (side.entries or {}).values()}
+    recorded = _line_range_blobs(before, after)
+    for side in (before, after):
+        if side.code.trees is not None:
+            side.code.trees.warm(paths)
+            side.code.trees.objects.prefetch_presence(recorded)
     known = set(before.entries or {}) | set(after.entries or {})
-    listed = [_entry(entry_id, before, after, memory.values) for entry_id in sorted(known)]
-    entries = tuple(sorted(listed, key=lambda one: (one.invariant, one.kind, _path(one), one.id)))
-    return CardEntries(entries=entries, memory=memory.state)
+    listed: list[ReviewTreeEntry] = []
+    for entry_id in sorted(known):
+        # One safe point per entry: a read whose askers left stops here (D569 mean 4).
+        raise_if_read_cancelled()
+        listed.append(_entry(entry_id, before, after, memory, details=details))
+    return tuple(sorted(listed, key=lambda one: (one.invariant, one.kind, _path(one), one.id)))
+
+
+def _line_range_blobs(*sides: _Side) -> set[str]:
+    """The blobs the sides' line-range entries were recorded against, which each entry asks the
+    store about (:func:`_unsupported`, the mapping and the currentness), read ahead in one batch."""
+
+    blobs: set[str] = set()
+    for side in sides:
+        for entry in (side.entries or {}).values():
+            anchor = entry.document.get("anchor") or {}
+            if (anchor.get("locator") or {}).get("kind") == "line_range":
+                blobs.add(str(anchor.get("blob", "")))
+    return blobs
+
+
+def tree_entry_cards(
+    trees: ReviewTrees, entry_id: str, side: Literal["before", "after"] | None
+) -> CardEntries | ReviewRefusal:
+    """Resolve one entry's owner on its named side, then read that invariant's cards."""
+
+    reason = "entry requires a before or after side"
+    owner_key = None
+    if side in ("before", "after"):
+        knowledge = trees.before if side == "before" else trees.after
+        reason = knowledge.wire.detail or f"the {side} knowledge side is unavailable"
+        if knowledge.database is not None:
+            try:
+                with KnowledgeIndex(knowledge.database) as index:
+                    entry = index.entry(entry_id).value
+                    if entry is not None:
+                        owner = index.record(entry.invariant).value
+                        if owner is not None and owner.kind == "invariant":
+                            owner_key = text_uuid("identity", entry.invariant)
+                        else:
+                            reason = f"entry {entry_id} has no readable invariant owner on the {side} side"
+                    elif index.state.complete:
+                        reason = f"entry {entry_id} is not recorded on the {side} side"
+                    else:
+                        reason = (
+                            f"the partial {side} index cannot establish entry {entry_id}'s owner"
+                        )
+            except (apsw.Error, IndexMismatchError, OSError) as error:
+                reason = f"entry {entry_id}'s {side} owner cannot be read: {error}"
+    if owner_key is not None:
+        return tree_entries(trees, (owner_key,))
+    return ReviewRefusal(
+        code="subject_unresolved",
+        detail=reason[:PROSE_MAX_LENGTH],
+        next_action="select an entry recorded on the named side of this comparison",
+        offending_input=entry_id,
+    )
 
 
 def _path(entry: ReviewTreeEntry) -> str:
     return entry.after.path if entry.after.recorded else entry.before.path
 
 
-def _side(knowledge: TreeKnowledge, code_tree: CodeTree, wanted: frozenset[str]) -> _Side:
+def _side(knowledge: TreeKnowledge, code_tree: CodeTree, wanted: frozenset[str] | None) -> _Side:
     code = open_code_tree(code_tree)
     if knowledge.database is None:
         return _Side(entries=None, unreadable=_unreadable(knowledge), code=code)
     with KnowledgeIndex(knowledge.database) as index:
         entries = {entry.id: entry for entry in _entries_of(index, wanted)}
-    return _Side(entries=entries, unreadable=None, code=code)
+        complete = index.state.complete
+    return _Side(entries=entries, unreadable=None, code=code, complete=complete)
 
 
 def _after_side(
-    knowledge: TreeKnowledge, code_tree: CodeTree, wanted: frozenset[str], before: _Side
-) -> tuple[_Side, _Memory]:
+    knowledge: TreeKnowledge,
+    code_tree: CodeTree,
+    wanted: frozenset[str] | None,
+    before: _Side,
+    *,
+    details: bool = True,
+) -> tuple[_Side, _Memory | None]:
     """The after side as :func:`_side` reads it, and the memory values read in the same open."""
 
     code = open_code_tree(code_tree)
@@ -149,8 +267,9 @@ def _after_side(
     with KnowledgeIndex(knowledge.database) as index:
         entries = {entry.id: entry for entry in _entries_of(index, wanted)}
         located = {**(before.entries or {}), **entries}
-        memory = _memory_values(index, located, tree)
-    return _Side(entries=entries, unreadable=None, code=code), memory
+        memory = _memory_values(index, located, tree) if details else None
+        complete = index.state.complete
+    return _Side(entries=entries, unreadable=None, code=code, complete=complete), memory
 
 
 def _unreadable(knowledge: TreeKnowledge) -> str:
@@ -197,24 +316,31 @@ def _unavailable(tree: str, reason: str) -> _Memory:
     return _Memory(state=state, values={})
 
 
-def _entries_of(index: KnowledgeIndex, wanted: frozenset[str]) -> Iterator[Entry]:
-    for invariant in index.record_ids("invariant").value:
-        if text_uuid("identity", invariant) not in wanted:
-            continue
-        knowledge = index.invariant(invariant).value
-        yield from knowledge.realizations
-        yield from knowledge.proofs
+def _entries_of(index: KnowledgeIndex, wanted: frozenset[str] | None) -> Iterator[Entry]:
+    identities = [
+        invariant
+        for invariant in index.record_ids("invariant").value
+        if wanted is None or text_uuid("identity", invariant) in wanted
+    ]
+    for entries in index.currentness_inputs(identities).value.entries.values():
+        yield from entries.realizations
+        yield from entries.proofs
 
 
 def _entry(
-    entry_id: str, before: _Side, after: _Side, memory: Mapping[str, ReviewEntryMemory]
+    entry_id: str,
+    before: _Side,
+    after: _Side,
+    memory: Mapping[str, ReviewEntryMemory],
+    *,
+    details: bool = True,
 ) -> ReviewTreeEntry:
     own_before = None if before.entries is None else before.entries.get(entry_id)
     own_after = None if after.entries is None else after.entries.get(entry_id)
     carried = own_after or own_before
     assert carried is not None  # listed from one side's entries
-    before_side = _located(own_before or carried, own_before, before)
-    after_side = _located(own_after or carried, own_after, after)
+    before_side = _located(own_before or carried, own_before, before, details=details)
+    after_side = _located(own_after or carried, own_after, after, details=details)
     change = _change(before_side, after_side)
     if change == "unchanged":  # one content identity: the same bytes, carried once
         before_side = before_side.model_copy(update={"excerpt": None, "excerpt_truncated": False})
@@ -227,7 +353,42 @@ def _entry(
         after=after_side,
         change=change,
         memory=memory.get(entry_id),
+        line_changes=_line_changes(before_side, after_side, before.code, after.code),
     )
+
+
+def _line_changes(
+    before: ReviewTreeEntrySide,
+    after: ReviewTreeEntrySide,
+    before_code: OpenedCodeTree,
+    after_code: OpenedCodeTree,
+) -> ReviewLineChanges | None:
+    if (
+        before.state == after.state == "resolved"
+        and before.content is not None
+        and before.content == after.content
+    ):
+        return ReviewLineChanges(added=0, removed=0)
+    try:
+        old = _range_text(before, before_code)
+        new = _range_text(after, after_code)
+    except (CodeReadError, UnicodeDecodeError, RangeOutsideBlobError, OSError):
+        return None
+    return None if old is None or new is None else line_changes(old, new)
+
+
+def _range_text(side: ReviewTreeEntrySide, code: OpenedCodeTree) -> str | None:
+    if side.state == "absent":
+        return ""
+    if side.state != "resolved" or code.trees is None or side.blob is None:
+        return None
+    if side.start_line is None or side.end_line is None:
+        return None
+    data = code.trees._blob(side.blob)
+    # The resolver represents an empty whole file as L1-1, although it holds no text lines.
+    if not data and side.start_line == side.end_line == 1:
+        return ""
+    return range_bytes(data, side.start_line, side.end_line).decode("utf-8")
 
 
 def _change(before: ReviewTreeEntrySide, after: ReviewTreeEntrySide) -> ReviewEntryChange:
@@ -239,11 +400,13 @@ def _change(before: ReviewTreeEntrySide, after: ReviewTreeEntrySide) -> ReviewEn
     return "undetermined"
 
 
-def _located(entry: Entry, own: Entry | None, side: _Side) -> ReviewTreeEntrySide:
+def _located(
+    entry: Entry, own: Entry | None, side: _Side, *, details: bool = True
+) -> ReviewTreeEntrySide:
     """``entry`` (the side's own, or the other side's when this side records none) on this side."""
 
     recorded = None if side.entries is None else own is not None
-    fields = _authored(own) if own is not None else {}
+    fields = _authored(own, details=details) if own is not None else {}
     symbol = _symbol(entry)
     if side.unreadable is not None and own is None:
         return ReviewTreeEntrySide(
@@ -253,7 +416,7 @@ def _located(entry: Entry, own: Entry | None, side: _Side) -> ReviewTreeEntrySid
             reason=side.unreadable,
             symbol=symbol,
         )
-    placed = _placed(entry, side.code)
+    placed = _placed(entry, side.code, details=details)
     currentness = _currentness(own, side.code)
     return ReviewTreeEntrySide(
         recorded=recorded, path=entry.path, symbol=symbol, **placed, **fields, **currentness
@@ -270,11 +433,14 @@ def _symbol(entry: Entry) -> str | None:
     return _text(locator.get("name"))
 
 
-def _authored(entry: Entry) -> dict[str, Any]:
+def _authored(entry: Entry, *, details: bool = True) -> dict[str, Any]:
     document = entry.document
     if entry.kind == "proof":
-        return {"facet": _text(document.get("facet"))}
-    return {"role": _text(document.get("role")), "rationale": _text(document.get("rationale"))}
+        return {"facet": _text(document.get("facet"))} if details else {}
+    return {
+        "role": _text(document.get("role")),
+        **({"rationale": _text(document.get("rationale"))} if details else {}),
+    }
 
 
 def _text(value: object) -> str | None:
@@ -288,7 +454,7 @@ def _currentness(own: Entry | None, code: OpenedCodeTree) -> dict[str, Any]:
     return {"currentness": observed.state, "currentness_reason": observed.reason}
 
 
-def _placed(entry: Entry, code: OpenedCodeTree) -> dict[str, Any]:
+def _placed(entry: Entry, code: OpenedCodeTree, *, details: bool = True) -> dict[str, Any]:
     """Where the entry's locator lands in this side's blob of its path (MIK-R08 definition 3)."""
 
     if code.problem is not None or code.trees is None:
@@ -296,10 +462,10 @@ def _placed(entry: Entry, code: OpenedCodeTree) -> dict[str, Any]:
     blob = code.files.get(entry.path)
     if blob is None:
         return {"state": "absent", "reason": "the code tree holds no regular file at the path"}
-    return {"blob": blob, **_in_blob(entry, code.trees, blob)}
+    return {"blob": blob, **_in_blob(entry, code.trees, blob, details=details)}
 
 
-def _in_blob(entry: Entry, trees: CodeTrees, blob: str) -> dict[str, Any]:
+def _in_blob(entry: Entry, trees: CodeTrees, blob: str, *, details: bool = True) -> dict[str, Any]:
     anchor = entry.document.get("anchor") or {}
     locator: Mapping[str, Any] = anchor.get("locator") or {}
     recorded_blob = str(anchor.get("blob", ""))
@@ -320,7 +486,7 @@ def _in_blob(entry: Entry, trees: CodeTrees, blob: str) -> dict[str, Any]:
         "start_line": start,
         "end_line": end,
         "content": resolved.content,
-        **_excerpt(trees, blob, start, end),
+        **(_excerpt(trees, blob, start, end) if details else {}),
     }
 
 

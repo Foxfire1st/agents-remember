@@ -6,7 +6,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-import { L181_SUBJECT, renderPage, servePage, stubIntersection } from './reviewPage.test-utils';
+import { L181_SUBJECT, renderPage, selectInvariant, servePage, stubIntersection } from './reviewPage.test-utils';
 
 beforeEach(() => window.localStorage.clear());
 
@@ -31,6 +31,8 @@ it("draws an opened group as the mockup's, its '… N more' a quiet line that st
   stubIntersection();
   servePage();
   renderPage();
+  // A subject's locations are its own detail (MIK-R211 v4 rule 10).
+  await selectInvariant();
   await waitFor(() => expect(screen.getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
   const section = screen.getAllByTestId('review-subject-section').find((node) => node.dataset.subject === L181_SUBJECT)!;
   const group = within(section).getAllByTestId('review-location-group').find((node) => node.dataset.group === 'unchanged')!;
@@ -58,6 +60,8 @@ it("names each location's full role in an opened group's rows", async () => {
   stubIntersection();
   servePage();
   renderPage();
+  // A subject's locations are its own detail (MIK-R211 v4 rule 10).
+  await selectInvariant();
   await waitFor(() => expect(screen.getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
   const section = screen.getAllByTestId('review-subject-section').find((node) => node.dataset.subject === L181_SUBJECT)!;
   const roles = new Set(['primary-authority', 'enforcement', 'propagation-persistence', 'support', 'presentation', 'unclassified', 'proof']);

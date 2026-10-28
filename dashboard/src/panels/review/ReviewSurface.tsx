@@ -9,18 +9,19 @@ import { ChangeSetViewer } from '../changeset/ChangeSetViewer';
 import { ReviewHeader, shortLeafId } from './ReviewHeader';
 import { recordLabelOf } from './ReviewScopeHeader';
 import { matchingTreeRead } from './codeFacts';
-import { resetCardCachesForTests, useReviewTrees } from '../../data/reviewTrees';
+import { followMovedNotice, forgetCardAnswers, useReviewTrees } from '../../data/reviewTrees';
 import { useRevalidateIntentEntry } from '../../data/intentEntryRevalidation';
 import { useReviewHistory } from './useReviewHistory';
 import {
   subscribeReviewExplainerMoved,
   useReviewMemoryWatch,
+  type ReviewExplainerMovedEvent,
 } from '../../data/reviewMemoryWatch';
 import { askFirstRequest } from '../../explainer/request';
 import type { ReviewChangeContext } from '../changeset/reviewChangeSet';
 import { ReviewChangeSetNavigation, type OpenReviewChanges } from './changeSetNavigation';
 import { RIGHT_RAIL_ID } from '../../cockpit/layout';
-import type { ReviewChatControl } from '../../cockpit/reviewChat';
+import { useLeafPlanned, type ReviewChatControl } from '../../cockpit/reviewChat';
 import { readReviewHashState } from '../../cockpit/reviewHash';
 import { SidebarToggle, useSidebar } from '../../grammar/SidebarToggle';
 import {
@@ -56,17 +57,14 @@ import {
 } from './ReviewReadCache';
 import type { EvidenceDestination } from './canvas/canvasApi';
 import { ExplanationSwitch, type ExplanationViewTab } from './explainer/ExplanationSwitch';
+import { ExplanationView, ReadingJudgmentMounts } from './explainer/ExplanationView';
+import { coldRegenerateItems, hasWork, staleBriefOf, staleGradesOf, type StaleFacts } from './explainer/explainerModel';
+import { readExplainerState, type ExplainerTarget } from './explainer/explainerApi';
+import { trayStore } from '../../tray/trayStore';
 import {
-  ExplanationView,
-  ReadingJudgmentMounts,
-  ReviewMovedBanner,
-} from './explainer/ExplanationView';
-import type { ClaimLink } from './explainer/explainerApi';
-import { hasWork, staleParts } from './explainer/explainerModel';
-import {
-  resolveClaimSelection,
   resolveEvidenceSelection,
   useExplainer,
+  useExplainerBadge,
   usePlannedReview,
   type ClaimResolutionContext,
   type ExplainerRead,
@@ -83,10 +81,11 @@ import {
 } from './ReviewOutcome';
 import { type ReadingStatus, useSelectionFocus, useWorkspaceState } from './ReviewWorkspace';
 import { useBlockTraversal } from './changeTraversal';
+import { readSubjectOf } from './reading/useReviewSelection';
 import { catalogueForComparison } from '../../data/useReviewCatalogue';
 import { IntentMarkerScope, markerInventory, useIntentMarkerScope } from './intentMarkerScope';
 import { MarkerReturn } from './IntentMarkers';
-import { LeafWorklistView } from './LeafKnowledgeChanges';
+import { WorklistView } from './reading/SelectedWorklist';
 import { workspaceMarkerMoves } from './markerNavigation';
 import type { ReviewSelection } from './reviewSelection';
 import { LaneSection } from './reading/LaneSection';
@@ -98,6 +97,7 @@ import { TechnicalDetails } from './reading/TechnicalDetails';
 import { bumpLeafMoveGeneration, usePublishLeafJudgments } from './reading/useChangeSet';
 import { useReadingLayout } from './reading/useReadingLayout';
 import { useReviewPage, type PageReads } from './reading/useReviewPage';
+import { useReviewShown } from './reviewShown';
 
 export interface ReviewTarget {
   repo: string;
@@ -256,19 +256,23 @@ function PageBoundsLine({
   page: ReviewCollectionPage | null | undefined;
   refused: boolean;
 }) {
-  if (refused) return null;
-  if (page) {
-    return (
-      <p style={{ margin: '0.3rem 0' }} data-testid="review-page-bounds">
-        {pageBounds(payload)}
-      </p>
-    );
-  }
+  // Only a paged collection has bounds to state. The whole-review case said "no bounded collection
+  // was paged", which is the absence of the control it sat under and took a line of the page's own
+  // height to say (F5 c).
+  if (refused || !page) return null;
   return (
-    <p style={{ margin: '0.3rem 0' }} data-testid="review-page-bounds">
-      whole review — no bounded collection was paged, so there is no remainder to reach
+    <p style={{ margin: '0.15rem 0' }} data-testid="review-page-bounds">
+      {pageBounds(payload)}
     </p>
   );
+}
+
+function SelectedPagePicker({ page, selection, onSelect }: {
+  page: ReviewCollectionPage | null | undefined;
+  selection: ReviewPageRequest | undefined;
+  onSelect: (page: ReviewPageRequest | undefined) => void;
+}) {
+  return page || selection ? <PagePicker selection={selection} onSelect={onSelect} /> : null;
 }
 
 function PageControls({
@@ -291,8 +295,10 @@ function PageControls({
       data-page-requested={selection?.of ?? ''}
       data-page-refused={refused === null ? 'false' : 'true'}
     >
-      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-        <PagePicker selection={selection} onSelect={onSelect} />
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'nowrap' }}>
+        {/* The picker is the way back from a page and the way to choose another collection; with
+            nothing paged it had one option and named it (F5 c). */}
+        <SelectedPagePicker page={page} selection={selection} onSelect={onSelect} />
         <PageActions next={next} page={page} selection={selection} onSelect={onSelect} />
       </div>
       {refused === null ? null : (
@@ -361,8 +367,10 @@ function sameChangeRead(
   current: CurrentChangeContext,
   worklist: ReviewChangeContext['worklist'],
 ): boolean {
-  return sameLane(context.lane, current.laneRead) && context.worklist === worklist;
+  return sameLane(context.lane, current.laneRead) && context.worklist === worklist
+    && context.worklistSummary === matchingTreeRead(current.leafTrees, current.comparison)?.worklist_summary;
 }
+function worklistSummaryOf(current: CurrentChangeContext) { return matchingTreeRead(current.leafTrees, current.comparison)?.worklist_summary; }
 function useHeldPageLane(
   state: OpenChangePage | null,
   setState: React.Dispatch<React.SetStateAction<OpenChangePage | null>>,
@@ -373,7 +381,7 @@ function useHeldPageLane(
     const matching = pageMatchesCurrent(state, current);
     const worklist = matchingTreeRead(current.leafTrees, current.comparison)?.worklist;
     if (matching && !sameChangeRead(state.context, current, worklist)) {
-      setState({ ...state, context: { ...state.context, lane: current.laneRead, worklist } });
+      setState({ ...state, context: { ...state.context, lane: current.laneRead, worklist, worklistSummary: worklistSummaryOf(current) } });
     } else if (!matching && state.context.lane?.phase === 'loading') {
       setState({
         ...state,
@@ -425,6 +433,7 @@ export function useReviewChangePage(current: CurrentChangeContext) {
         lane: current.laneRead,
         inventory: current.payload.source.inventory,
         worklist: matchingTreeRead(current.leafTrees, current.comparison)?.worklist,
+        worklistSummary: worklistSummaryOf(current),
       },
     });
   };
@@ -441,7 +450,9 @@ function UnavailableChangePage({
   problem: ReviewFailure;
   onBack: () => void;
 }) {
+  const shown = useReviewShown();
   useEffect(() => {
+    if (!shown) return undefined;
     const escape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -451,7 +462,7 @@ function UnavailableChangePage({
     };
     document.addEventListener('keydown', escape, true);
     return () => document.removeEventListener('keydown', escape, true);
-  }, [onBack]);
+  }, [onBack, shown]);
   return (
     <section
       data-testid="review-changes-unavailable"
@@ -687,12 +698,13 @@ function readingState(reading: ReadingStatus | null): 'pending' | 'unavailable' 
   return reading.problem === null ? 'pending' : 'unavailable';
 }
 
-function PageDetails({ props }: { props: PageProps & { reads: Surface } }) {
+function PageDetails({ props, placement }: { props: PageProps & { reads: Surface }; placement?: 'footer' | 'frame' }) {
   const { reads, page } = props;
   const { shown, navigation } = reads;
   const cards = page.changeSet.cards;
   return (
     <TechnicalDetails
+      placement={placement}
       repo={reads.repo}
       master={reads.master}
       leaf={reads.leaf}
@@ -710,19 +722,6 @@ function PageDetails({ props }: { props: PageProps & { reads: Surface } }) {
   );
 }
 
-// The leaf worklist view (MIK-R86 rule 21), in the column in place of the change set when chosen.
-function WorklistView({ props, open }: { props: PageProps; open: OpenReviewChanges }) {
-  const { changeSet } = props.page;
-  return (
-    <LeafWorklistView
-      read={changeSet.number === undefined ? { phase: 'not-converted' } : changeSet.leafTrees}
-      reviewComparison={changeSet.number}
-      onOpenChanges={() => open('all', undefined, 'memory')}
-      onOpenPath={(path) => open('all', path)}
-    />
-  );
-}
-
 interface PageReadingProps {
   props: PageProps & { reads: Surface };
   tree: ReturnType<typeof useSidebar>;
@@ -733,7 +732,6 @@ interface PageReadingProps {
   plannedPage: PlannedPage | null;
   comparisonInfo: { reference: string; number?: number; owner?: 'planned' | 'recorded' } | undefined;
   onExplain: () => void;
-  onOpenBlock: (claim: ClaimLink) => void;
   onEvidence: (destination: EvidenceDestination) => void;
 }
 
@@ -745,7 +743,6 @@ function readingReplacementOf({
   plannedPage,
   comparisonInfo,
   onExplain,
-  onOpenBlock,
   onEvidence,
 }: PageReadingProps): React.ReactNode | undefined {
   const { reads } = props;
@@ -757,8 +754,8 @@ function readingReplacementOf({
         read={explainer}
         taskLabel={shortLeafId(reads.leaf)}
         onExplain={onExplain}
-        onOpenBlock={onOpenBlock}
         onEvidence={onEvidence}
+        headerDetails={<PageDetails props={props} placement="frame" />}
       />
     );
   }
@@ -770,19 +767,16 @@ function readingReplacementOf({
 function ReadingNotes({
   props,
   viewTab,
-  explainer,
   plannedPage,
 }: {
   props: PageProps & { reads: Surface };
   viewTab: ExplanationViewTab;
-  explainer: ExplainerRead;
   plannedPage: PlannedPage | null;
 }) {
   const { reads, page } = props;
   const read = reads.read;
   return (
     <>
-      {viewTab === 'review' ? <ReviewMovedBanner read={explainer} /> : null}
       {plannedPage && viewTab === 'review' ? null : (
         <PageNotes
           page={page}
@@ -806,8 +800,18 @@ function ReadingNotes({
   );
 }
 
+function PageTreeToggle({ tree }: { tree: ReturnType<typeof useSidebar> }) {
+  return <SidebarToggle side="left" open={tree.open} onToggle={tree.toggle} name="Tree sidebar"
+    controls="review-tree" keyHint="[" testId="review-tree-toggle" />;
+}
+
+function PageChatToggle({ chat }: { chat?: ReviewChatControl }) {
+  return chat ? <SidebarToggle side="right" open={chat.open} onToggle={chat.toggle} name="Chat sidebar"
+    controls={RIGHT_RAIL_ID} keyHint="]" testId="review-chat-toggle" /> : null;
+}
+
 function PageReading(readingProps: PageReadingProps) {
-  const { props, tree, chat, viewTab, explainer, plannedPage } = readingProps;
+  const { props, viewTab, plannedPage } = readingProps;
   const { reads, page } = props;
   const { changeSet } = page;
   const layout = useReadingLayout(page.scroller);
@@ -821,40 +825,11 @@ function PageReading(readingProps: PageReadingProps) {
         scroller={page.scroller}
         context={context}
         model={changeSet.model}
-        treeToggle={
-          <SidebarToggle
-            side="left"
-            open={tree.open}
-            onToggle={tree.toggle}
-            name="Tree sidebar"
-            controls="review-tree"
-            keyHint="["
-            testId="review-tree-toggle"
-          />
-        }
-        chatToggle={
-          chat ? (
-            <SidebarToggle
-              side="right"
-              open={chat.open}
-              onToggle={chat.toggle}
-              name="Chat sidebar"
-              controls={RIGHT_RAIL_ID}
-              keyHint="]"
-              testId="review-chat-toggle"
-            />
-          ) : null
-        }
-        crumbText={crumbOf(page, reads.navigation.catalogue.entries)}
+        focusedSubject={readSubjectOf(page.selection, changeSet.cards, false)}
+        view={viewTab}
         orphan={<OrphanSlot props={props} layout={layout} />}
-        markerReturn={<MarkerReturn />}
         notes={
-          <ReadingNotes
-            props={props}
-            viewTab={viewTab}
-            explainer={explainer}
-            plannedPage={plannedPage}
-          />
+          <ReadingNotes props={props} viewTab={viewTab} plannedPage={plannedPage} />
         }
         summary={
           <SummaryLine
@@ -876,7 +851,7 @@ function PageReading(readingProps: PageReadingProps) {
           />
         }
         canvas={null}
-        details={<PageDetails props={props} />}
+        details={viewTab === 'explanation' ? null : <PageDetails props={props} />}
       />
       {showJudgments ? (
         <ReadingJudgmentMounts model={changeSet.model} scroller={page.scroller} />
@@ -917,29 +892,57 @@ function resolveComparisonInfo(
   return { reference: ref ?? '', number, owner: 'recorded' };
 }
 
-function useExplainerMovedRefresh(surface: Surface, explainer: ExplainerRead) {
+// Whether a moved notice renews the deterministic reads: always when it offers no update, else only
+// when no explainer work exists -- which needs the explainer's facts. `undefined`: not decidable yet.
+function movedRenews(event: ReviewExplainerMovedEvent, facts: StaleFacts | null, known: boolean) {
+  if (event.updateOffered === false) return true;
+  if (event.kind === 'master-moved') return false;
+  return known ? !hasWork(facts) : undefined;
+}
+
+/**
+ * A moved notice renews the page's deterministic reads when no explainer work exists. The stream
+ * replays the leaf's latest notice as soon as it opens, before the explainer's facts are read; that
+ * notice waits for them instead of being judged "no work" for want of an answer -- which renewed
+ * the opening's intent and tree reads once per open (D569).
+ */
+// `on`: the comparison on screen; while it is the latest, a move moves from it (D576).
+function useExplainerMovedRefresh(surface: Surface, facts: StaleFacts | null, known: boolean, on: { older: boolean; number?: number }) {
   const { repo, master, leaf, history } = surface;
+  const shown = on.older ? undefined : on.number;
   const revalidate = useRevalidateIntentEntry();
-  const explainerStateRef = useRef(explainer.state);
-  explainerStateRef.current = explainer.state;
-  const surfaceMemoryChangedRef = useRef(surface.memoryChanged);
-  surfaceMemoryChangedRef.current = surface.memoryChanged;
-  const revalidateRef = useRef(revalidate);
-  revalidateRef.current = revalidate;
+  const latest = useRef({ facts, known, memoryChanged: surface.memoryChanged, revalidate, shown });
+  latest.current = { facts, known, memoryChanged: surface.memoryChanged, revalidate, shown };
+  const pending = useRef<ReviewExplainerMovedEvent | null>(null);
+  const renew = useCallback((event: ReviewExplainerMovedEvent) => {
+    followMovedNotice(repo, master, leaf, latest.current.shown, event, {
+      renew: () => {
+        forgetCardAnswers(repo, master, leaf);
+        bumpLeafMoveGeneration(repo, master, leaf);
+        latest.current.memoryChanged();
+        latest.current.revalidate();
+      },
+      reread: () => latest.current.memoryChanged(),
+    });
+  }, [repo, master, leaf]);
 
   useEffect(() => {
+    pending.current = null;
     if (history === 'recorded') return undefined;
     return subscribeReviewExplainerMoved({ repo, master, leaf }, (event) => {
       if (event.cleared || event.kind === 'cleared') return;
-      const workExists = hasWork(explainerStateRef.current) || event.kind === 'master-moved';
-      if (!workExists || event.updateOffered === false) {
-        resetCardCachesForTests();
-        bumpLeafMoveGeneration(repo, master, leaf);
-        surfaceMemoryChangedRef.current();
-        revalidateRef.current();
-      }
+      const renews = movedRenews(event, latest.current.facts, latest.current.known);
+      pending.current = renews === undefined ? event : null;
+      if (renews) renew(event);
     });
-  }, [repo, master, leaf, history]);
+  }, [repo, master, leaf, history, renew]);
+
+  useEffect(() => {
+    const event = pending.current;
+    if (!event || !known) return;
+    pending.current = null;
+    if (movedRenews(event, facts, known)) renew(event);
+  }, [facts, known, renew]);
 }
 
 function useResolutionContext(
@@ -971,22 +974,50 @@ function useResolutionContext(
   ]);
 }
 
-function isPlannedReadEnabled(surface: Surface, hasInitialSubject: boolean): boolean {
+function isPlannedReadEnabled(
+  surface: Surface,
+  plannedLeaf: boolean | null,
+  hasInitialSubject: boolean,
+): boolean {
+  // Only a leaf the task list says is planning has a planned view to read (MIK-R211 v2 rule 7). The
+  // route refuses any other leaf, so asking anyway put a 4xx in the log for every review a developer
+  // opened; an unknown leaf asks nothing.
   return (
+    plannedLeaf === true &&
     surface.history !== 'recorded' &&
     !hasInitialSubject &&
     surface.read.phase === 'reviewed'
   );
 }
 
-function isExplainerReadEnabled(
-  viewTab: ExplanationViewTab,
-  comparisonInfo: { reference: string; number?: number; owner?: 'planned' | 'recorded' } | undefined,
+type ComparisonInfo = { reference: string; number?: number; owner?: 'planned' | 'recorded' };
+
+// Only what is on screen is read. The Review tab shows the top bar's badge and the cards' judgment
+// chips, which `/stale` answers; the full seat state and the revision list are the Explanation tab's,
+// read once that tab is first opened for this leaf -- and then kept current, not re-read per switch.
+// Either read waits for the comparison on screen, so it is asked once and not again for its number.
+function isBadgeReadEnabled(
+  comparisonInfo: ComparisonInfo | undefined,
   surface: Surface,
   hasInitialSubject: boolean,
 ): boolean {
-  if (viewTab === 'explanation' || comparisonInfo !== undefined) return true;
+  if (comparisonInfo !== undefined) return true;
   return !hasInitialSubject && surface.read.phase === 'reviewed';
+}
+
+function isExplanationReadEnabled(
+  opened: boolean,
+  comparisonInfo: ComparisonInfo | undefined,
+  surface: Surface,
+): boolean {
+  return opened && (comparisonInfo !== undefined || surface.read.phase !== 'loading');
+}
+
+// Whether the Explanation tab has been opened for this leaf: once opened, its reads stay enabled.
+function useExplanationOpened(viewTab: ExplanationViewTab, leafKey: string): boolean {
+  const [opened, setOpened] = useState<string | null>(null);
+  if (viewTab === 'explanation' && opened !== leafKey) setOpened(leafKey);
+  return opened === leafKey || viewTab === 'explanation';
 }
 
 function useSurfaceExplainer(
@@ -999,9 +1030,11 @@ function useSurfaceExplainer(
 ) {
   const { repo, master, leaf } = surface;
   const payload = surface.shown ?? surface.frame;
+  const address = useMemo(() => ({ repository: repo, master, leaf }), [repo, master, leaf]);
+  const plannedLeaf = useLeafPlanned(useMemo(() => ({ repo, master, leaf }), [repo, master, leaf]));
   const plannedPage = usePlannedReview(
-    { repository: repo, master, leaf },
-    isPlannedReadEnabled(surface, hasInitialSubject),
+    address,
+    isPlannedReadEnabled(surface, plannedLeaf, hasInitialSubject),
   );
   const comparisonInfo = useMemo(
     () =>
@@ -1014,30 +1047,41 @@ function useSurfaceExplainer(
       ),
     [plannedPage, payload?.comparison?.reference, page.changeSet.number, master, leaf],
   );
-  const explainer = useExplainer(
-    { repository: repo, master, leaf },
+  const opened = useExplanationOpened(viewTab, `${repo}/${master}/${leaf}`);
+  const explaining = isExplanationReadEnabled(opened, comparisonInfo, surface);
+  // The surface's full read follows publications only once it is enabled; until then the badge's
+  // own read is the one a publication renews (F17).
+  const explainer = useExplainer(address, comparisonInfo, explaining, undefined, {
+    watchWhileDisabled: false,
+  });
+  const badge = useExplainerBadge(
+    address,
     comparisonInfo,
-    isExplainerReadEnabled(viewTab, comparisonInfo, surface, hasInitialSubject),
+    !explaining && isBadgeReadEnabled(comparisonInfo, surface, hasInitialSubject),
   );
-  usePublishLeafJudgments(repo, master, leaf, explainer.state?.categories, explainer.state?.grades);
-  useExplainerMovedRefresh(surface, explainer);
+  // The full state is a superset of the badge's answer: once read it is the one the top bar shows.
+  const facts: StaleFacts | null = explainer.state ?? badge.badge;
+  usePublishLeafJudgments(repo, master, leaf, facts?.categories, facts?.grades);
+  // The facts are known once either read answered or failed (a failed read decides as "no work"); a
+  // notice applied to no answer yet is not one.
+  useExplainerMovedRefresh(
+    surface,
+    facts,
+    badge.settled || (explaining && explainer.phase === 'idle'),
+    page.changeSet,
+  );
   const resolutionContext = useResolutionContext(surface, page, payload, comparisonInfo);
 
   const select = page.select;
+  // A press of ✦ Explain asks for the first-request form and opens the column. It must not
+  // *toggle* it: the ask's own listener (`useFirstRequestOpens` in the shell) has opened it in the
+  // same batch, and a toggle would close it again from the state the press started in — the press
+  // then showed nothing at all. `expand` only ever opens.
   const onExplain = useCallback(() => {
     askFirstRequest({ repository: repo, master, leaf });
-    if (chat && !chat.open) chat.toggle();
+    if (chat?.expand) chat.expand();
+    else if (chat && !chat.open) chat.toggle();
   }, [repo, master, leaf, chat]);
-
-  const onOpenBlock = useCallback(
-    (claim: ClaimLink) => {
-      const resolved = resolveClaimSelection(claim, resolutionContext);
-      if (!resolved) return;
-      setViewTab('review');
-      select(resolved, { keepTree: true });
-    },
-    [resolutionContext, select, setViewTab],
-  );
 
   const onEvidence = useCallback(
     (destination: EvidenceDestination) => {
@@ -1053,28 +1097,111 @@ function useSurfaceExplainer(
     [repo, master, leaf, resolutionContext, select, setViewTab],
   );
 
-  return { plannedPage, comparisonInfo, explainer, onExplain, onOpenBlock, onEvidence };
+  return { plannedPage, comparisonInfo, explainer, facts, onExplain, onEvidence, address };
+}
+
+// The seat a press acts on: the full state when the Explanation tab has read it, else one `/state`
+// read at the press itself -- the Review tab never reads the seat just to draw the badge.
+async function seatAtPress(
+  explainer: ExplainerRead,
+  target: ExplainerTarget,
+  comparison: ComparisonInfo | undefined,
+): Promise<string> {
+  if (explainer.state) return explainer.state.seat.state;
+  // The same question the Explanation tab's read asks (a numbered comparison by its number), so a
+  // press while that read is in flight joins it.
+  const state = await readExplainerState(target, {
+    comparison: comparison?.number === undefined ? comparison?.reference : undefined,
+    comparisonNumber: comparison?.number,
+    comparisonOwner: comparison?.owner,
+  });
+  return state.seat.state;
+}
+
+/**
+ * The top line's staleness (F18): the count and the badge's own details -- which parts are stale,
+ * why, and whether a newer comparison exists -- all from one answer: the full state once the
+ * Explanation tab read it, else the Review tab's cheap `/stale` read, so the badge and the view can
+ * never disagree. Its refresh control is the one press that regenerates: a live seat gets the
+ * selective message, and a seat with no workspace gets the first-request form, prefilled with
+ * exactly the stale parts and grades (MIK-R187 rule 8).
+ */
+function useHeaderStaleness(
+  facts: StaleFacts | null,
+  explainer: ExplainerRead,
+  press: { target: ExplainerTarget; comparison: ComparisonInfo | undefined; onExplain: () => void },
+) {
+  const { target, comparison, onExplain } = press;
+  const revision = facts?.explanation?.revision ?? null;
+  const revisionExists = revision !== null || (explainer.revisions?.revisions.length ?? 0) > 0;
+  const brief = useMemo(
+    () => staleBriefOf(facts, revision, revisionExists),
+    [facts, revision, revisionExists],
+  );
+  const [problem, setProblem] = useState<string | null>(null);
+  const [pressing, setPressing] = useState(false);
+  const pressRegenerate = useCallback(() => {
+    const regeneration = brief.regeneration;
+    if (!facts || !regeneration) return;
+    setProblem(null);
+    setPressing(true);
+    void (async () => {
+      try {
+        const seat = await seatAtPress(explainer, target, comparison);
+        if (seat === 'live') {
+          const outcome = await explainer.regenerate({
+            message: regeneration.message,
+            stalePartIds: brief.parts.map((part) => part.id),
+            staleGrades: staleGradesOf(facts),
+          });
+          if (outcome.kind === 'refused') setProblem(`${outcome.reason}: ${outcome.detail}`);
+          return;
+        }
+        // Open the column first: its own ask names no parts and would replace the prefilled one.
+        onExplain();
+        askFirstRequest(target, coldRegenerateItems(facts));
+        trayStore.getState().setText(regeneration.message);
+      } catch (error) {
+        setProblem(error instanceof Error ? error.message : String(error));
+      } finally {
+        setPressing(false);
+      }
+    })();
+  }, [brief, facts, explainer, target, comparison, onExplain]);
+  return { brief, pressRegenerate, problem, pressing };
 }
 
 function HeaderExplanationSwitch({
   viewTab,
   setViewTab,
   explainer,
+  facts,
+  target,
+  comparison,
+  onExplain,
 }: {
   viewTab: ExplanationViewTab;
   setViewTab: (tab: ExplanationViewTab) => void;
   explainer: ExplainerRead;
+  facts: StaleFacts | null;
+  target: ExplainerTarget;
+  comparison: ComparisonInfo | undefined;
+  onExplain: () => void;
 }) {
-  const staleInfo = staleParts(explainer.state);
-  const isBuilding = Boolean(
-    explainer.state?.building && explainer.state.building.state !== 'idle',
-  );
+  const staleness = useHeaderStaleness(facts, explainer, { target, comparison, onExplain });
+  // The label's marks come from whichever answer is read: the full state, or the badge's /stale.
+  const building = explainer.state?.building ?? facts?.building;
+  const isBuilding = Boolean(building && building.state !== 'idle');
   return (
     <ExplanationSwitch
       view={viewTab}
-      stale={staleInfo.total}
+      stale={staleness.brief.total}
+      brief={staleness.brief}
+      regenerating={explainer.busy === 'regenerating' || staleness.pressing}
+      regenerationProblem={staleness.problem}
+      onRegenerate={staleness.pressRegenerate}
       building={isBuilding}
-      retired={explainer.state?.retired ?? false}
+      retired={explainer.state?.retired ?? facts?.retired ?? false}
       onSwitch={setViewTab}
     />
   );
@@ -1130,8 +1257,13 @@ export function ReviewSurface(props: ReviewTarget & { onBack: () => void; chat?:
               title={title}
               record={recordLabelOf(surface.frame, surface.history)}
               onBack={props.onBack}
+              treeToggle={<PageTreeToggle tree={tree} />}
+              chatToggle={<PageChatToggle chat={props.chat} />}
+              crumb={crumbOf(page, reads.navigation.catalogue.entries)}
+              contextDisabled={viewTab === 'explanation'}
+              markerReturn={<MarkerReturn />}
               chip={<TopLineControls props={parts} />}
-              comparison={<HeaderExplanationSwitch viewTab={viewTab} setViewTab={setViewTab} explainer={explainerCtrl.explainer} />}
+              comparison={<HeaderExplanationSwitch viewTab={viewTab} setViewTab={setViewTab} explainer={explainerCtrl.explainer} facts={explainerCtrl.facts} target={explainerCtrl.address} comparison={explainerCtrl.comparisonInfo} onExplain={explainerCtrl.onExplain} />}
               refresh={<ReviewRefresh onRefresh={surface.refreshReview} busy={read.phase === 'loading'} generation={generationOf(read, surface.carried, surface.shown)} />}
             />
             <ReviewGrid

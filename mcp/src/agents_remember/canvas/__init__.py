@@ -2,8 +2,8 @@
 
 Four decisions, each in its own module so it can be read and refused in one place:
 
-* :mod:`agents_remember.canvas.policy` -- the isolation policy, its finite limits, and the proof
-  gate that decides whether untrusted scripts may be served at all;
+* :mod:`agents_remember.canvas.policy` -- the isolation policy, its finite limits, and the sandbox
+  every served page runs inside;
 * :mod:`agents_remember.canvas.protocol` -- the closed host protocol, its envelope and its
   refusals;
 * :mod:`agents_remember.canvas.sessions` -- the host-created, bound and revocable sessions;

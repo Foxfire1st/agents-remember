@@ -2,15 +2,22 @@
 
 The adapter supplies only select_chain's three index queries. It opens no second store and
 uses the same parsed records as the worklist; context never changes item identity or reach.
+Each path's chain is walked once per side (:attr:`KnowledgeSide.route_chains`) and every item
+naming the path gets its own copy of it. A chain is a function of the memory tree and the path, so
+on a side that is the whole parse of a Git tree (:attr:`KnowledgeSide.whole`) it is also kept per
+process by that tree's id (:data:`ROUTE_CHAINS`): the next comparison over the same memory walks
+none again.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from copy import deepcopy
 from pathlib import PurePosixPath
 from typing import Any, cast
 
 from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
+from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo, is_complete_object_id
 from agents_remember.memory.knowledge_index import KnowledgeIndex, Record
 from agents_remember.memory.knowledge_index.query import Answer, FamilyKnowledge, IndexState
 from agents_remember.models.knowledge_files.records import record_status
@@ -22,6 +29,12 @@ class _ChainLookups:
         self.state = IndexState(side.key, "complete", side.converted, ())
 
     def record(self, record_id: str) -> Answer[Record | None]:
+        asked = self.side.chain_records
+        if record_id not in asked:
+            asked[record_id] = self._record(record_id)
+        return asked[record_id]
+
+    def _record(self, record_id: str) -> Answer[Record | None]:
         indexed = self.side.parsed.records.get(record_id)
         if indexed is None:
             return Answer(None, self.state)
@@ -68,22 +81,43 @@ class _ChainLookups:
         )
 
 
+Chain = tuple[tuple[str, Any, tuple[str, ...]], ...]
+"""One path's chain: each family's ID, title and routes, nearest route first."""
+
+ROUTE_CHAINS: BoundedMemo[tuple[str, str], Chain] = BoundedMemo(65_536)
+"""``(memory tree id, path)`` -> the path's chain on the whole parse of that tree (D569)."""
+
+
 def route_chain(side: KnowledgeSide, paths: Iterable[str]) -> dict[str, Any]:
     # The leaf package imports currentness, which imports this worklist package.
     from agents_remember.application.knowledge_leaf.chain import select_chain  # noqa: PLC0415
 
     # select_chain consumes these lookups, not the on-disk index's lifecycle/storage methods.
     index = cast(KnowledgeIndex, _ChainLookups(side))
+    walked = side.route_chains
+    kept = side.whole and is_complete_object_id(side.key)
+
+    def families(path: str) -> Chain:
+        if path in walked:
+            return walked[path]
+        remembered = ROUTE_CHAINS.get((side.key, path)) if kept else None
+        if remembered is not None:
+            walked[path] = remembered[0]
+            return walked[path]
+        walked[path] = tuple(
+            (family.id, deepcopy(family.record.document.get("title")), tuple(family.routes))
+            for family in select_chain(index, path, ())
+        )
+        if kept:
+            ROUTE_CHAINS.put((side.key, path), walked[path])
+        return walked[path]
+
     return {
         path: {
             "label": "mechanical",
             "families": [
-                {
-                    "id": family.id,
-                    "title": family.record.document.get("title"),
-                    "routes": list(family.routes),
-                }
-                for family in select_chain(index, path, ())
+                {"id": family, "title": deepcopy(title), "routes": list(routes)}
+                for family, title, routes in families(path)
             ],
         }
         for path in sorted(set(paths))

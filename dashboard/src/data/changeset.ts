@@ -92,6 +92,12 @@ export interface MasterChangesetOptions {
   pins?: MasterNetPins;
 }
 
+// The lean master endpoint measures the same net, without materializing file rows.
+export type MasterCounters = Pick<
+  MasterChangeset,
+  'master' | 'leaves' | 'counters' | 'generation' | 'currentness' | 'scope'
+>;
+
 // The refusal bodies this route family publishes (serving/response_contract.py): `StatusRefusal`
 // `{status, detail}`, `UnknownScopeRefusal` `{status, scope}`, and `MissingPathRefusal`
 // `{status, path}`. For THIS family the 404's `path` carries the reason in the owner's own words --
@@ -181,10 +187,11 @@ export interface ChangeSetAddress {
   mode?: LeafMode;
   generation?: MasterNetPins;
   comparison?: number;
+  includeLeaves?: boolean;
 }
 
 function listUrl(target: ChangeSetAddress, base = ''): string {
-  const { repo, scope, master, leaf, mode, generation, comparison } = target;
+  const { repo, scope, master, leaf, mode, comparison } = target;
   if (leaf || comparison !== undefined) {
     const params: Record<string, string> = { repo, master: master ?? '', leaf: leaf ?? '' };
     if (comparison === undefined) params.mode = mode ?? 'committed';
@@ -192,7 +199,11 @@ function listUrl(target: ChangeSetAddress, base = ''): string {
     return `${base}/api/changeset/task?${qs(params)}`;
   }
   if (!master) return `${base}/api/changeset/task?${qs({ repo, scope: scope ?? '' })}`;
-  return masterUrl(repo, master, { includeLeaves: true, pins: generation }, base);
+  return masterUrl(repo, master, masterListOptions(target), base);
+}
+
+function masterListOptions(target: ChangeSetAddress): MasterChangesetOptions {
+  return { includeLeaves: target.includeLeaves ?? true, pins: target.generation };
 }
 
 export const peekChangeSet = (
@@ -226,12 +237,35 @@ export const masterChangeset = (
   return getChangeSetJson<MasterChangeset>(masterUrl(repo, master, options, base));
 };
 
+export const loadMasterCounters = (
+  repo: string,
+  master: string,
+  options: MasterChangesetOptions = {},
+  signal?: AbortSignal,
+): Promise<MasterCounters> =>
+  getChangeSetJson<MasterCounters>(masterCountersUrl(repo, master, options), signal);
+
+export const peekMasterCounters = (
+  repo: string,
+  master: string,
+  options: MasterChangesetOptions = {},
+): MasterCounters | undefined =>
+  dashboardStore.getState().changeSets.peek(masterCountersUrl(repo, master, options));
+
+function masterCountersUrl(repo: string, master: string, options: MasterChangesetOptions): string {
+  return `/api/changeset/master/counters?${masterParameters(repo, master, { ...options, includeLeaves: options.includeLeaves ?? false })}`;
+}
+
 function masterUrl(
   repo: string,
   master: string,
   options: MasterChangesetOptions,
   base: string,
 ): string {
+  return `${base}/api/changeset/master?${masterParameters(repo, master, options)}`;
+}
+
+function masterParameters(repo: string, master: string, options: MasterChangesetOptions): string {
   const params: Record<string, string> = { repo, master };
   if (options.includeLeaves !== undefined) {
     params.includeLeaves = String(options.includeLeaves);
@@ -241,7 +275,7 @@ function masterUrl(
   for (const [key, value] of Object.entries(options.pins ?? {})) {
     if (value) params[key] = value;
   }
-  return `${base}/api/changeset/master?${qs(params)}`;
+  return qs(params);
 }
 
 // `masterFileDiff` — BEFORE (master base) + AFTER (selected result) content for one file in the

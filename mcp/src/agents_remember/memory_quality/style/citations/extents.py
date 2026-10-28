@@ -55,6 +55,12 @@ def definitions(path: str, lines: Sequence[str]) -> dict[str, list[Extent]]:
     }
 
 
+def source_lines(data: bytes) -> list[str]:
+    """A blob's lines as the symbol readers parse them: UTF-8, undecodable bytes kept as escapes."""
+
+    return data.decode("utf-8", errors="surrogateescape").split("\n")
+
+
 def qualified_spans(name: str, bound: dict[str, list[Extent]]) -> tuple[tuple[int, int], ...]:
     """The distinct extents binding ``name`` in one file's :func:`definitions`.
 

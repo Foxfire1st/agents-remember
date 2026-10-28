@@ -319,7 +319,7 @@ def require_current_candidate_identity(resolved: ReviewCandidateResolution) -> R
         ):
             # Git's status proof also reads HEAD fresh; the contract still owns the base.
             return None
-        current = capture_future_code_candidate(contract)
+        current = capture_future_code_candidate(contract, kept=True)
     except (FutureCodeCandidateError, OSError, RuntimeError) as error:
         failure = (
             error
@@ -479,7 +479,7 @@ def _captured_candidate(
     """
 
     try:
-        return capture_future_code_candidate(contract)
+        return capture_future_code_candidate(contract, kept=True)
     except FutureCodeCandidateError as error:
         return _capture_refusal(error)
 

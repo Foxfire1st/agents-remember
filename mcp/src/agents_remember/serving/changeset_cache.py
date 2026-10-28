@@ -7,8 +7,10 @@ with **no observation on a hit**, as MIK-R176 v2 rule 5 requires. Its first read
 fails as Git fails and is not kept. What is therefore not observed per hit:
 
 * objects it was computed from may be lost while the answer stays cached — it stays the
-  true diff of those ids until the cache evicts it (the R1-07 bound) or the server
-  restarts;
+  true diff of those ids until its retention bound evicts it. Generic task and
+  file-diff reads remain process-local and are forgotten on restart. The explicit
+  master range capability may retain those same immutable answers across restart,
+  within its disk capacity, byte, age and producing-source namespace bounds;
 * working-tree inputs that can change a diff's presentation (``.gitattributes``, diff
   configuration) are not observed per hit either.
 
@@ -27,11 +29,12 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event, RLock
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import Request
 from fastapi.responses import Response
 
+from agents_remember.kernel.recorded_reads import file_identity
 from agents_remember.serving.changeset_generation import (
     RepositoryLayout,
     configuration_identity,
@@ -42,6 +45,11 @@ from agents_remember.serving.changeset_generation import (
     working_generation,
 )
 from agents_remember.serving.conditional_read import if_none_match_matches
+from agents_remember.serving.review_open_observation import open_stamp
+
+if TYPE_CHECKING:
+    from agents_remember.serving.changeset_ranges import MasterRangeAnswers, RangeKey
+    from agents_remember.serving.master_preparation import MasterPreparation
 
 # A working view Git cannot describe (a repository whose HEAD tree is already gone)
 # is not "unchanged": the stamp records that it is unknown, and only a refusal may be
@@ -85,7 +93,19 @@ class DirectoryRead:
     path: Path
 
 
-type ReadInput = RepositoryRead | ObjectStoreRead | ContentRead | DirectoryRead | Path
+@dataclass(frozen=True)
+class ListingRead:
+    """The names a directory lists matching ``pattern``: never their contents or file identities.
+
+    A leaf's comparison records are written once, each under its own number, so a new or removed
+    record moves the names, while one record's bytes are an input only of the answers that read it.
+    """
+
+    path: Path
+    pattern: str = "*.json"
+
+
+type ReadInput = RepositoryRead | ObjectStoreRead | ContentRead | DirectoryRead | ListingRead | Path
 type Generation = tuple[tuple[ReadInput, str | None], ...]
 
 
@@ -121,6 +141,7 @@ class _Read:
     objects: OrderedDict[tuple[Path, bool], str] = field(default_factory=OrderedDict)
     # The read's own abandonment, so admission can be withdrawn mid-finish (L174-R1-02).
     abandoned: Event | None = None
+    master_pending: dict[RangeKey, list[dict[str, Any]]] = field(default_factory=dict)
 
     def generation(self, inputs: tuple[ReadInput, ...]) -> Generation:
         for source in inputs:
@@ -170,21 +191,52 @@ class _Read:
                 break
             self.cache.put(key, kept)
             admitted.append(key)
+        publications = ()
+        store = self.cache.master_ranges
+        if store is not None and (self.abandoned is None or not self.abandoned.is_set()):
+            eligible = {
+                key: value
+                for key, value in self.master_pending.items()
+                if ("master-range", *key) in admitted
+            }
+            publications = store.publish(eligible, self.abandoned)
         if self.abandoned is not None and self.abandoned.is_set():
             with self.cache._lock:
                 for key in admitted:
                     self.cache._values.pop(key, None)
+            if store is not None:
+                store.withdraw(publications)
 
 
 _active: ContextVar[_Read | None] = ContextVar("changeset_read", default=None)
 
+#: How many repositories' last object census (per tolerance) the process holds.
+OBJECT_HISTORY_CAPACITY = 1024
+# The last object census seen per repository and tolerance, with the revision it maps to: an
+# addition keeps the tolerant revision, a removal or a repack moves both. One history for the
+# process, so every cache names a store's revision alike -- a review open shares one stamp of
+# each input among the reads of all its caches (D569), and an answer kept by one cache is
+# re-observed under another's read.
+_OBJECT_HISTORY: OrderedDict[tuple[Path, bool], tuple[int, int, tuple[str, ...], str]] = (
+    OrderedDict()
+)
+_OBJECT_HISTORY_LOCK = RLock()
 
-def _file_snapshot(source: ContentRead | DirectoryRead | Path) -> str:
-    if isinstance(source, ContentRead):
-        try:
-            return hashlib.sha256(source.path.read_bytes()).hexdigest()
-        except FileNotFoundError:
+
+def _file_snapshot(source: ContentRead | DirectoryRead | ListingRead | Path) -> str:
+    if isinstance(source, ListingRead):
+        if not source.path.is_dir():
             return "absent"
+        names = sorted(path.name for path in source.path.glob(source.pattern))
+        return hashlib.sha256("\0".join(names).encode()).hexdigest()
+    if isinstance(source, ContentRead):
+        # The bytes' SHA-256, held against the file's stat once it is outside Git's racy window
+        # (:func:`file_identity`, the rule every recorded read keeps): an unchanged input -- a
+        # 12.5 MB worklist among them -- is not read and hashed again on each observation.
+        seen = file_identity(source.path)
+        if seen.startswith("unreadable ("):
+            raise OSError(seen)
+        return seen
     if isinstance(source, DirectoryRead):
         path = source.path
         children = sorted(path.iterdir()) if path.is_dir() else ()
@@ -205,16 +257,14 @@ class ChangesetCache:
     last answer wins, which is the same answer.
     """
 
-    def __init__(self, *, capacity: int = 1024) -> None:
+    def __init__(
+        self, *, capacity: int = 1024, master_ranges: MasterRangeAnswers | None = None
+    ) -> None:
         self.capacity = capacity
+        self.master_ranges = master_ranges
+        self.master_preparation: MasterPreparation | None = None
         self._values: OrderedDict[tuple[object, ...], _Kept] = OrderedDict()
         self._repositories: OrderedDict[Path, RepositoryLayout] = OrderedDict()
-        # The last object census seen per repository and tolerance, with the revision
-        # it maps to: an addition keeps the tolerant revision, a removal or a repack
-        # moves both.
-        self._objects: OrderedDict[tuple[Path, bool], tuple[int, int, tuple[str, ...], str]] = (
-            OrderedDict()
-        )
         self._lock = RLock()
 
     @contextmanager
@@ -230,9 +280,17 @@ class ChangesetCache:
         finally:
             _active.reset(token)
 
+    def open_snapshot(self, source: ReadInput) -> str | None:
+        """The review open's one stamp of ``source``, shared by that open's reads (D569).
+
+        A read in no open observes for itself (:meth:`snapshot`). This cache's own admission
+        (``_Read.finish``) keeps observing afresh.
+        """
+        return open_stamp(source, lambda: self.snapshot(source))
+
     def snapshot(self, source: ReadInput) -> str | None:
         try:
-            if isinstance(source, (ContentRead, DirectoryRead, Path)):
+            if isinstance(source, (ContentRead, DirectoryRead, ListingRead, Path)):
                 return _file_snapshot(source)
             layout = self._layout(source.root)
             if isinstance(source, ObjectStoreRead):
@@ -319,8 +377,8 @@ class ChangesetCache:
         """
         loose, packed, alternates = count_objects(root)
         key = (root, tolerate_additions)
-        with self._lock:
-            previous = self._objects.get(key)
+        with _OBJECT_HISTORY_LOCK:
+            previous = _OBJECT_HISTORY.get(key)
         census = (loose, packed, alternates)
         unchanged = previous is not None and census == previous[:3]
         additions_tolerated = (
@@ -336,11 +394,11 @@ class ChangesetCache:
             revision = hashlib.sha256(
                 repr((str(root), *census, previous[3] if previous else "")).encode()
             ).hexdigest()
-        with self._lock:
-            self._objects[key] = (loose, packed, alternates, revision)
-            self._objects.move_to_end(key)
-            while len(self._objects) > self.capacity:
-                self._objects.popitem(last=False)
+        with _OBJECT_HISTORY_LOCK:
+            _OBJECT_HISTORY[key] = (loose, packed, alternates, revision)
+            _OBJECT_HISTORY.move_to_end(key)
+            while len(_OBJECT_HISTORY) > OBJECT_HISTORY_CAPACITY:
+                _OBJECT_HISTORY.popitem(last=False)
         return revision
 
     def put(self, key: tuple[object, ...], kept: _Kept) -> None:
@@ -427,6 +485,29 @@ def cached_read[T](
     while len(read.pending) > cache.capacity:
         read.pending.pop(next(iter(read.pending)))
     return value
+
+
+def master_range_read(
+    root: Path, base: str, head: str, produce: Callable[[], list[dict[str, Any]]]
+) -> list[dict[str, Any]]:
+    """Read one immutable master range; publish only at this read's admission boundary."""
+    read = _active.get()
+    if read is None or read.cache.master_ranges is None:
+        return cached_read(("master-range", str(root), base, head), (), produce)
+    key = (str(root), base, head)
+    store = read.cache.master_ranges
+
+    def load_or_compute() -> list[dict[str, Any]]:
+        found = store.load(key)
+        if found is not None:
+            return found
+        value = produce()
+        read.master_pending[key] = deepcopy(value)
+        while len(read.master_pending) > read.cache.capacity:
+            read.master_pending.pop(next(iter(read.master_pending)))
+        return value
+
+    return cached_read(("master-range", *key), (), load_or_compute)
 
 
 def observe_inputs(inputs: tuple[ReadInput, ...]) -> None:

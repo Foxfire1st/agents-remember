@@ -2,16 +2,14 @@
 //
 // One case per promise the packets make and the view must not break: a planned binding is never
 // called #0; the agreed revision is pinned and the removal list never holds it; only the task total
-// offers removal; a moved leaf without work offers no Update; and a page with no part map is still
-// one part's worth of list.
+// offers removal; work exists only where a page or a grade does; and a page with no part map is
+// still one part's worth of list.
 import { describe, expect, it } from 'vitest';
 
 import type { ExplainerRevision, ExplainerState } from './explainerApi';
 import {
-  BASIS_LEGEND,
   TASK_TOTAL_REFUSAL,
   agreedRevision,
-  basisLabel,
   bindingLabel,
   clockOf,
   defaultComparePair,
@@ -27,7 +25,6 @@ import {
   staleParts,
   staleRegenerationOf,
   standfirstText,
-  updateOffered,
 } from './explainerModel';
 import {
   EXPLAINER_FRAME_ID,
@@ -117,14 +114,12 @@ describe('phaseOf', () => {
   });
 });
 
-describe('Update', () => {
-  it('is offered for a moved leaf that has work, and never for one that has none', () => {
+describe('the moved leaf', () => {
+  it('has work where a page exists, and none where neither a page nor a grade does', () => {
     const moved = { from: 8, to: 9, blocks: 4 };
-    expect(hasWork(state())).toBe(true);
-    expect(updateOffered(state({ moved }))).toBe(true);
-    // `moved-no-explainer`: no page exists, the view renews itself, and no control is offered.
-    expect(updateOffered(state({ moved, explanation: null }))).toBe(false);
-    expect(updateOffered(state({ moved: null }))).toBe(false);
+    expect(hasWork(state({ moved }))).toBe(true);
+    // `moved-no-explainer`: no page and no grade exists, so the view renews itself.
+    expect(hasWork(state({ moved, explanation: null }))).toBe(false);
   });
 
   it('names the moved comparison and its block count', () => {
@@ -143,19 +138,6 @@ describe('the trusted stale list', () => {
     );
     // No stale section at all is an empty list, not a guess.
     expect(staleParts(state({ stale: null }))).toEqual({ parts: [], total: 0, unavailable: null });
-  });
-});
-
-describe('the registry of bases', () => {
-  it('names the four MIK-R102 bases, inference marked as inference', () => {
-    expect(BASIS_LEGEND.map((entry) => entry.basis)).toEqual([
-      'recorded-fact',
-      'mechanical-signal',
-      'presenter-inference',
-      'intended',
-    ]);
-    expect(basisLabel('presenter-inference')).toContain('✦');
-    expect(basisLabel('intended')).toBe('intended');
   });
 });
 
@@ -261,6 +243,7 @@ describe('native serializer compatibility and revision ordering (MIK-R106 v2; MI
           at: '2026-10-19T13:10:00Z',
           kind: 'global',
           focus: 'Risks I see',
+          coverage: '2 of 5 passes',
           agreed: false,
           pinned: false,
         },
@@ -279,12 +262,21 @@ describe('native serializer compatibility and revision ordering (MIK-R106 v2; MI
     expect(parsedRevisions.revisions).toHaveLength(2);
     expect(parsedRevisions.revisions[0].kind).toBe('focused');
     expect(parsedRevisions.revisions[1].kind).toBe('global');
+    // Each revision says its interaction coverage; one without the field implies none (15:43Z).
+    expect(parsedRevisions.revisions.map((r) => r.coverage)).toEqual(['2 of 5 passes', undefined]);
+    expect(
+      parseState({ state: 'ok', explanation: { revision: 9, coverage: 'all 5 passes' } }).explanation
+        ?.coverage,
+    ).toBe('all 5 passes');
   });
 
   it('orders global revisions before focused revisions, selects global as default latest, and uses the selected row binding in standfirst', () => {
+    // An incomplete observation names whose limit stopped it, in the runner's words (15:54Z).
+    const stopped =
+      "2 of 5 passes — stopped before the browser load process's own 180 s window (canvas/prospective.py; not a limit on pages or a product cap)";
     const rows = [
       revision({ revision: 9, binding: binding('recorded', 9, '#9'), kind: 'focused', focus: 'Locking' }),
-      revision({ revision: 7, binding: binding('recorded', 7, '#7'), kind: 'global' }),
+      revision({ revision: 7, binding: binding('recorded', 7, '#7'), kind: 'global', coverage: stopped }),
       revision({ revision: 8, binding: binding('recorded', 8, '#8'), kind: 'global' }),
     ];
     const ordered = orderRevisions(rows);
@@ -295,7 +287,12 @@ describe('native serializer compatibility and revision ordering (MIK-R106 v2; MI
     ]);
     expect(defaultShownRevision(ordered, state({ explanation: { revision: 9, at: null, entrypoint: null, comparison: null } }))).toBe(8);
     expect(standfirstText(state({ binding: binding('recorded', 9, '#9') }), 7, ordered)).toContain(
-      'revision 7 · bound to #7 · global',
+      `revision 7 · interactions checked: ${stopped} · bound to #7 · global`,
+    );
+    // With no row, the saved explanation's own coverage stands next to its revision.
+    const saved = { revision: 8, at: null, entrypoint: null, comparison: null, coverage: 'all 5 passes' };
+    expect(standfirstText(state({ explanation: saved }), 8)).toContain(
+      'revision 8 · interactions checked: all 5 passes · bound to',
     );
     expect(EXPLAINER_FRAME_ID).toBe('explainer');
     expect(

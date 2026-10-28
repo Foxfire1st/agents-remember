@@ -27,8 +27,8 @@ identities during one evaluation makes the verdict unkeepable.
 Actual locator/root selections are checked first, before following a byte locator whose target
 may have changed since the computation.
 
-**Bounds, belt and braces.** At most :data:`CAPACITY` verdicts are kept, least recently used first
-out, and none is served after :data:`MAX_AGE_SECONDS`.
+**Bounds.** At most :data:`CAPACITY` verdicts are kept, least recently used first out. A kept
+verdict is reused while every read behind it re-observes identical, at any age; only size evicts.
 
 **What is never kept.** A verdict that carries an unreadable input or a run that failed (any
 ``incomplete`` finding, an unreadable validator input, or a worklist that is not ``complete``) is
@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -61,10 +60,9 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 if TYPE_CHECKING:
     from agents_remember.application.knowledge_gate.gate import GateResult
 
-__all__ = ["CAPACITY", "GATE_MEMO", "MAX_AGE_SECONDS", "GateMemoKey", "memo_key", "remember"]
+__all__ = ["CAPACITY", "GATE_MEMO", "GateMemoKey", "memo_key", "remember"]
 
 CAPACITY: Final = 16
-MAX_AGE_SECONDS: Final = 900.0
 
 
 @dataclass(frozen=True)
@@ -82,9 +80,8 @@ class GateMemoKey:
 
 @dataclass(frozen=True)
 class _Kept:
-    """One kept verdict: when it was computed, and the requirement files it read, as read."""
+    """One kept verdict and the requirement files it read, as read."""
 
-    at: float
     result: GateResult
     reads: tuple[tuple[str, str], ...]
 
@@ -145,15 +142,13 @@ def memo_key(
     )
 
 
-def remembered(key: GateMemoKey, *, now: float | None = None) -> GateResult | None:
-    """The verdict kept for ``key`` if it is younger than :data:`MAX_AGE_SECONDS`."""
+def remembered(key: GateMemoKey) -> GateResult | None:
+    """The verdict kept for ``key`` while every file it read re-observes identical."""
 
     held = GATE_MEMO.get(key)
     if held is None:
         return None
     kept = held[0]
-    if (time.monotonic() if now is None else now) - kept.at > MAX_AGE_SECONDS:
-        return None
     if not kept.still_read_the_same():
         return None  # an approval-state file changed since: recompute
     replay_reads(dict(kept.reads))
@@ -164,4 +159,4 @@ def remember(key: GateMemoKey, result: GateResult, reads: dict[str, str]) -> Non
     """Keep a verdict over complete inputs (:attr:`GateResult.memoisable`) with its read set."""
 
     if result.memoisable and not has_failed_observation(reads):
-        GATE_MEMO.put(key, _Kept(time.monotonic(), result, tuple(sorted(reads.items()))))
+        GATE_MEMO.put(key, _Kept(result, tuple(sorted(reads.items()))))

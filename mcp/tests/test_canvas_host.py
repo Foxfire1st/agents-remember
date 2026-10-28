@@ -3,7 +3,7 @@
 One case per rule the host owns, against the real policy, the real protocol validator and a real
 published revision in a temporary task:
 
-1. an unproven policy serves no script at all, and a proof is bound to the exact policy digest;
+1. every served document runs its own scripts, and only inside the frame's opaque sandbox;
 2. every frame and asset response carries its policy headers, and never ``allow-same-origin``;
 3. the envelope is bound to the session, revision and comparison it was served with;
 4. malformed, oversized and replayed requests are refused by name without an effect;
@@ -28,25 +28,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from urllib.parse import urlsplit
 
-import canvas_host_test_support as canvas_fixtures
 import pytest
 from agents_remember.application.review_frame_store import frame_scope, reopen_frame
 from agents_remember.canvas.evidence import resolve_evidence_reference
 from agents_remember.canvas.policy import (
     ASSET_PATH_PREFIX,
-    ORIGIN_ARRANGEMENT,
-    REQUIRED_CHECKS,
     asset_headers,
     document_headers,
     frame_sandbox,
-    load_isolation_proof,
-    policy_digest,
-    proof_gaps,
-    scripts_enabled,
 )
-from agents_remember.canvas.proof_record import source_bindings
 from agents_remember.canvas.protocol import (
     MAX_MESSAGE_BYTES,
     REFUSAL_REASONS,
@@ -80,9 +71,6 @@ from canvas_host_test_support import (
 )
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-# Expose shared pytest fixtures only to this consumer module.
-proof_frontend = canvas_fixtures.proof_frontend
 
 ORIGIN = "http://127.0.0.1:8765"
 
@@ -121,7 +109,7 @@ def _sent(opened: dict[str, object], **overrides: object) -> dict[str, object]:
 
 
 def _client(tmp_path: Path) -> tuple[TestClient, CanvasHosts, Path]:
-    """The host's own routes over a real task, with scripts disabled (rule 8, unproven capture)."""
+    """The host's own routes over a real task."""
 
     settings = config(tmp_path)
     root = task(settings)
@@ -149,7 +137,7 @@ def _post_message(client: TestClient, session: str, body: object) -> dict[str, o
 COMPARISON = "review-comparison:task/leaf/7"
 
 
-def _binding(*, frame_id: str = FRAME, revision: int = 1, scripts: bool = True) -> SessionBinding:
+def _binding(*, frame_id: str = FRAME, revision: int = 1) -> SessionBinding:
     """One session's own binding, as the open route composes it."""
 
     return SessionBinding(
@@ -161,159 +149,55 @@ def _binding(*, frame_id: str = FRAME, revision: int = 1, scripts: bool = True) 
         comparison=COMPARISON,
         evidence_digest="e" * 64,
         entrypoint="index.html",
-        scripts=scripts,
     )
-
-
-def _proof_observations() -> dict:
-    # A deliberate metadata fixture for consumer tests, never credited as an execution witness.
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "src/agents_remember/package_data/canvas/isolation-proof.json"
-    )
-    observed = json.loads(path.read_text())
-    observed["source"].update(source_bindings())  # Fabricated current-source consumer fixture only.
-    return {
-        name: observed[name]
-        for name in ("source", "servedPolicy", "artifacts", "assets", "requests")
-    }
-
-
-def _proof(tmp_path: Path, **overrides: object) -> Path:
-    """One proven record for this policy: a check table and the observations that answer it (rule 10)."""
-
-    root = tmp_path / "canvas"
-    root.mkdir(parents=True)
-    payload: dict[str, object] = {
-        "schema": "ar-canvas-isolation-proof/v1",
-        "state": "proven",
-        "policyDigest": policy_digest(),
-        "browser": "chromium",
-        "browserVersion": "1.0",
-        "originArrangement": ORIGIN_ARRANGEMENT,
-        "requiredChecks": [
-            {"name": name, "expected": expected} for name, expected in REQUIRED_CHECKS
-        ],
-        "failedChecks": [],
-        "observed": [f"{name}: {expected}" for name, expected in REQUIRED_CHECKS],
-        "detail": "fabricated consumer fixture; not browser evidence",
-        **_proof_observations(),
-    }
-    payload.update(overrides)
-    (root / "isolation-proof.json").write_text(json.dumps(payload), encoding="utf-8")
-    return root
-
-
-def test_an_unproven_policy_serves_no_script_at_all(tmp_path: Path) -> None:
-    """Rule 10: without a proof of this exact policy the page is served inert, not trusted."""
-
-    absent = load_isolation_proof(None)
-    assert absent.state == "absent"
-    assert scripts_enabled(absent) is False
-    headers = document_headers(ORIGIN, session="test-session", scripts=scripts_enabled(absent))
-    assert "script-src 'none'" in headers["Content-Security-Policy"]
-    assert frame_sandbox(scripts=False) == ""
-    assert "allow-same-origin" not in frame_sandbox(scripts=True)
-
-
-def test_missing_or_contradictory_browser_metadata_keeps_scripts_off(
-    tmp_path: Path, proof_frontend: Path
-) -> None:
-    """A PASS check table cannot replace source, served bytes, request or full matrix observations."""
-    paths = (
-        ("source", "modules"),
-        ("source", "frontend"),
-        ("source", "panelBundle"),
-        ("servedPolicy", "csp"),
-        ("artifacts", "assets"),
-        ("assets", "matrix"),
-        ("assets", "requests"),
-        ("requests", "externalSink"),
-    )
-    for number, (section, field) in enumerate(paths):
-        root = _proof(tmp_path / str(number))
-        record_path = root / "isolation-proof.json"
-        payload = json.loads(record_path.read_text())
-        del payload[section][field]
-        record_path.write_text(json.dumps(payload))
-        assert not scripts_enabled(load_isolation_proof(root)), (section, field)
-    root = _proof(tmp_path / "false-blocked")
-    record_path = root / "isolation-proof.json"
-    payload = json.loads(record_path.read_text())
-    target = payload["assets"]["targets"]["media:session"]
-
-    payload["assets"]["requests"]["host"].append(f"GET {urlsplit(target).path} -> 200")
-    record_path.write_text(json.dumps(payload))
-    assert not scripts_enabled(load_isolation_proof(root))
-
-
-def test_a_proof_is_bound_to_the_exact_policy_digest(tmp_path: Path, proof_frontend: Path) -> None:
-    """A record produced for another policy proves nothing about the one now served."""
-
-    proven = load_isolation_proof(_proof(tmp_path))
-    assert proven.proven is True
-    assert scripts_enabled(proven) is True
-    # A record that named a check it never observed proves nothing, and enables nothing (rule 10).
-    # A record that names the whole catalog but observed one check short proves nothing.
-    catalog = [{"name": name, "expected": expected} for name, expected in REQUIRED_CHECKS]
-    observed = [f"{name}: {expected}" for name, expected in REQUIRED_CHECKS][:-1]
-    unrun = load_isolation_proof(
-        _proof(tmp_path / "unrun", requiredChecks=catalog, observed=observed)
-    )
-    assert unrun.proven is False
-    assert scripts_enabled(unrun) is False
-    assert any("not observed as expected" in gap for gap in proof_gaps(unrun))
-    # L104-B05: the catalog is the policy's, not the record's. One matching pair out of forty-two
-    # used to enable scripts; it now names the omission.
-    trimmed = load_isolation_proof(
-        _proof(
-            tmp_path / "trimmed",
-            requiredChecks=[{"name": "documentOrigin", "expected": "null"}],
-            observed=["documentOrigin: null"],
-        )
-    )
-    assert trimmed.proven is False
-    assert scripts_enabled(trimmed) is False
-    assert any("omits" in gap and "enforcing checks" in gap for gap in proof_gaps(trimmed))
-    # A record that declares an enforcing check more weakly is refused too.
-    lowered = [dict(row) for row in catalog]
-    lowered[0]["expected"] = "allow-same-origin"
-    weakened = load_isolation_proof(_proof(tmp_path / "weakened", requiredChecks=lowered))
-    assert weakened.proven is False
-    assert any("more weakly" in gap for gap in proof_gaps(weakened))
-    stale = load_isolation_proof(_proof(tmp_path / "stale", policyDigest="0" * 64))
-    assert stale.proven is False
-    failed = load_isolation_proof(
-        _proof(tmp_path / "failed", failedChecks=["self-navigation was reachable"])
-    )
-    assert failed.proven is False
-
-
-def test_a_consumer_frontend_change_invalidates_its_bound_proof(
-    tmp_path: Path, proof_frontend: Path
-) -> None:
-    """The filesystem fixture does not replace the real binding or digest checks."""
-
-    bundle = _proof(tmp_path)
-    assert load_isolation_proof(bundle).proven is True
-    (proof_frontend / "index.html").write_text("changed after the observation")
-    stale = load_isolation_proof(bundle)
-    assert stale.proven is False
-    assert scripts_enabled(stale) is False
-    assert any("frontend" in gap for gap in stale.record_gaps)
 
 
 def test_every_response_carries_its_policy_headers() -> None:
-    """Rules 2-4: one origin allowlist, no network for data, no credential of the dashboard."""
+    """Rules 2-4: one origin allowlist, no network for data, no credential of the dashboard.
 
-    headers = document_headers(ORIGIN, session="test-session", scripts=True)
+    Every directive is asserted whole. Since D568 the suite, not a shipped browser record, is the
+    check of the isolation that stays, so the loads the browser matrix used to try (a foreign style,
+    image, font or media, a plugin, a nested frame, a form post, a base rewrite) are held here by the
+    exact directive that refuses them.
+    """
+
+    headers = document_headers(ORIGIN, session="test-session")
     csp = headers["Content-Security-Policy"]
+    directives: dict[str, str] = {}
+    for part in csp.split(";"):
+        name, _, value = part.strip().partition(" ")
+        if name:
+            directives[name] = value
+    own = f"{ORIGIN}{ASSET_PATH_PREFIX}test-session/"
+    assert directives == {
+        "sandbox": "allow-scripts",
+        "default-src": "'none'",
+        "script-src": f"{own} 'unsafe-inline'",
+        "style-src": f"{own} 'unsafe-inline'",
+        "img-src": f"{own} data:",
+        "font-src": f"{own} data:",
+        "media-src": own,
+        "manifest-src": own,
+        "connect-src": "'none'",
+        "frame-src": "'none'",
+        "child-src": "'none'",
+        "worker-src": "'none'",
+        "object-src": "'none'",
+        "frame-ancestors": "'self'",
+        "base-uri": "'none'",
+        "form-action": "'none'",
+    }
     assert "default-src 'none'" in csp
     assert f"{ORIGIN}{ASSET_PATH_PREFIX}" in csp
     assert "connect-src 'none'" in csp
     assert "frame-src 'none'" in csp
     assert "worker-src 'none'" in csp
     assert "frame-ancestors 'self'" in csp
+    # The document's own scripts are part of the served policy, inside the opaque sandbox.
+    assert csp.startswith("sandbox allow-scripts")
+    assert f"script-src {ORIGIN}{ASSET_PATH_PREFIX}test-session/ 'unsafe-inline'" in csp
+    assert "allow-same-origin" not in csp
+    assert frame_sandbox() == "allow-scripts"
     assert headers["Cache-Control"] == "no-store"
     assert headers["Cross-Origin-Opener-Policy"] == "same-origin"
     assert "clipboard-read=()" in headers["Permissions-Policy"]
@@ -423,16 +307,16 @@ def test_a_session_is_created_bounded_and_revoked_by_name() -> None:
 
     now = [0.0]
     registry = SessionRegistry(ttl=60.0, active=2, clock=lambda: now[0])
-    session, displaced = registry.open(_binding(scripts=True))
+    session, displaced = registry.open(_binding())
     assert displaced == ()
     assert registry.get(session.session) == session
     assert registry.get("nobody-was-given-this") is None
     now[0] = 61.0
     assert registry.get(session.session) is None
     assert registry.revocation(session.session) == "idle-timeout"
-    second, _ = registry.open(_binding(scripts=False))
-    third, _ = registry.open(_binding(frame_id="another-page", scripts=False))
-    _fourth, replaced = registry.open(_binding(frame_id="a-third-page", scripts=False))
+    second, _ = registry.open(_binding())
+    third, _ = registry.open(_binding(frame_id="another-page"))
+    _fourth, replaced = registry.open(_binding(frame_id="a-third-page"))
     assert [item.session for item in replaced] == [second.session]
     assert registry.revocation(second.session) == "disposed-lru"
     assert registry.revoke(third.session, "navigated") is not None
@@ -507,7 +391,6 @@ def test_the_session_record_carries_its_own_binding() -> None:
         comparison="review-comparison:task/leaf/7",
         evidence_digest="e" * 64,
         entrypoint="index.html",
-        scripts=False,
         created_at=0.0,
         expires_at=1.0,
     )
@@ -531,7 +414,10 @@ def test_one_session_serves_its_page_and_assets_under_the_page_prefix(tmp_path: 
     assert page == f"/canvas/page/{opened['session']}/"
     document = client.get(page)
     assert document.status_code == 200
-    assert document.content == ASSETS["index.html"]
+    # The admitted bytes are served as they are, with the host's binding in front of them.
+    assert document.content.startswith(b"<!doctype html>")
+    assert b"<title>comparison</title><p>the explained change</p>" in document.content
+    assert b"ar-canvas-binding/v1" in document.content
     assert document.headers["content-type"].startswith("text/html")
     assert "set-cookie" not in {name.lower() for name in document.headers}
     for path, media_type in (

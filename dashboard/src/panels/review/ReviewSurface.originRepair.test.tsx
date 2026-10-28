@@ -57,7 +57,12 @@ for (const width of [1280, 390]) {
     it(`keeps the supplied native ${kind} origins in the closed Technical details at ${width}px`, async () => {
       const body = raw as unknown as ReviewResult;
       const view = mount(body, width);
-      await waitFor(() => view.getByTestId(kind.startsWith('family') ? 'review-center-family' : 'review-center-member'));
+      // A family's reading is its members' overview (MIK-R211 v4 rule 10), an invariant's its slot.
+      const reading = await waitFor(() => {
+        view.getByTestId(kind.startsWith('family') ? 'review-family-overview' : 'review-center-member');
+        view.getByTestId('review-subject-provenance');
+        return kind.startsWith('family') ? view.getByTestId('review-family-overview') : view.getByTestId('review-subject-slot');
+      });
       const area = view.getByTestId('review-subject-provenance');
       const { before_origin: before, after_origin: after } = body.payload!.knowledge;
       expect(before).toBeDefined();
@@ -65,7 +70,7 @@ for (const width of [1280, 390]) {
       if (JSON.stringify(before) === JSON.stringify(after)) assertOrigin(area, 'review-origin', after!);
       else for (const [side, origin] of [['before', before!], ['after', after!]] as const) assertOrigin(area, `review-origin-${side}`, origin);
       // Nothing of the origin stands in the subject's reading before its content.
-      expect(within(view.getByTestId('review-subject-slot')).queryByText(/introduced by|origin:/)).toBeNull();
+      expect(within(reading).queryByText(/introduced by|origin:/)).toBeNull();
     });
   }
 }
@@ -75,7 +80,10 @@ it('keeps distinct family task, leaf/wave and hand-off entries on their own side
   body.payload!.knowledge.before_origin = { task: 'before-task', leaf: 'before-leaf', handoffEntry: 'before-entry' };
   body.payload!.knowledge.after_origin = { task: 'after-task', wave: 'after-wave', handoffEntry: 'after-entry', handoff: { path: 'after-handoff.json', evidence: ['after-evidence'] } };
   const view = mount(body, 390);
-  await waitFor(() => view.getByTestId('review-center-family'));
+  await waitFor(() => {
+    view.getByTestId('review-family-overview');
+    view.getByTestId('review-subject-provenance');
+  });
   const area = view.getByTestId('review-subject-provenance');
   for (const side of ['before', 'after'] as const) assertOrigin(area, `review-origin-${side}`, body.payload!.knowledge[`${side}_origin`]!);
   expect(within(area).getByTestId('review-origin-before').textContent).not.toContain('after-task');
