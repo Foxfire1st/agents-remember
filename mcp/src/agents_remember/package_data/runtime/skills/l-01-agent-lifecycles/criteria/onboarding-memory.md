@@ -12,9 +12,13 @@ evidence needed for its outstanding IDs; it does not recensus this catalog or ad
 
 ### OM-1 — Staleness diff vs as-landed code
 
-**Diff every body claim about current behavior against the as-landed code.** A sidecar or overview
-body that describes the present tense is checked against what the branch actually ships — deleted
-things still described, renamed things under old names, duplicated rows.
+**Check every present-tense sentence against the as-landed code, including dated change sections.**
+Check the affected card or overview body, paired notes and sibling cards found by a bounded search.
+The encountered false-claim class is repaired or withdrawn in every such current carrier. Past
+accounts leave cards for their history rows; true present-tense statements about retired things stay.
+Check each changed claim, count and prose line reference against code; a prose line reference lies inside its citation anchor. Green structural checks and authentic anchors do not prove prose true.
+
+A true paragraph added beside a claim it contradicts does not repair the body: read the whole affected body, not only the added text.
 
 - Catching evidence, two separate engagements: 260703-L8 cycle 6 (owner follow-up pass) — route
   overview bodies still described **deleted canvas models** (the panels overview's build-job/frame

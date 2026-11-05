@@ -12,8 +12,12 @@ proves no test source references a recorded payload path.
 
 from __future__ import annotations
 
+import gzip
 import re
+import sys
 from pathlib import Path
+
+import pytest
 
 TESTS = Path(__file__).resolve().parent
 FIXTURES = TESTS / "fixtures"
@@ -33,6 +37,14 @@ _DEVELOPER_LOCAL = (
 # not a developer's machine, so the guard lets them through.
 _SYNTHETIC_HOMES = frozenset({"/home/test", "/home/x"})
 _RECORDED_PAYLOAD = re.compile(r"/tmp/[A-Za-z0-9_.\-/]+")
+
+
+def fixture_text(path: Path) -> str:
+    """Inspect the complete payload; compressed container bytes are not fixture text."""
+    raw = path.read_bytes()
+    if path.suffix == ".gz":
+        raw = gzip.decompress(raw)
+    return raw.decode("utf-8", errors="replace")
 
 
 def find_developer_local_paths(text: str) -> list[str]:
@@ -69,9 +81,7 @@ def test_the_guard_flags_developer_homes_and_lets_recorded_payloads_through() ->
 def test_no_fixture_names_a_developer_local_path() -> None:
     assert FIXTURES.is_dir()
     offenders = {
-        str(path.relative_to(TESTS)): find_developer_local_paths(
-            path.read_bytes().decode("utf-8", errors="replace")
-        )
+        str(path.relative_to(TESTS)): find_developer_local_paths(fixture_text(path))
         for path in sorted(FIXTURES.rglob("*"))
         if path.is_file() and not path.is_symlink()
     }
@@ -85,7 +95,7 @@ def test_no_test_opens_a_recorded_payload_path() -> None:
         hit
         for path in sorted(FIXTURES.rglob("*"))
         if path.is_file() and not path.is_symlink()
-        for hit in recorded_payload_paths(path.read_bytes().decode("utf-8", errors="replace"))
+        for hit in recorded_payload_paths(fixture_text(path))
     }
     references = {}
     for path in sorted(TESTS.glob("*.py")):
@@ -96,3 +106,29 @@ def test_no_test_opens_a_recorded_payload_path() -> None:
             {hit for hit in payloads if hit in source}
         )
     assert {name: hits for name, hits in references.items() if hits} == {}
+
+
+def test_compressed_fixture_scans_the_decoded_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = tmp_path / "record.json.gz"
+    monkeypatch.setattr(sys.modules[__name__], "FIXTURES", tmp_path)
+    monkeypatch.setattr(sys.modules[__name__], "TESTS", tmp_path)
+    # A real home anywhere in decompressed data still violates the unchanged rule.
+    fixture.write_bytes(gzip.compress(b'{"source": "/home/alice/native.jsonl"}'))
+    with pytest.raises(AssertionError):
+        test_no_fixture_names_a_developer_local_path()
+    fixture.write_bytes(gzip.compress(b'{"source": "/tmp/recorded-native.jsonl"}'))
+    test_no_fixture_names_a_developer_local_path()
+    assert recorded_payload_paths(fixture_text(fixture)) == ["/tmp/recorded-native.jsonl"]
+
+
+def test_malformed_compressed_fixture_is_not_an_empty_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = tmp_path / "record.json.gz"
+    fixture.write_bytes(b"not a gzip stream")
+    monkeypatch.setattr(sys.modules[__name__], "FIXTURES", tmp_path)
+    monkeypatch.setattr(sys.modules[__name__], "TESTS", tmp_path)
+    with pytest.raises(gzip.BadGzipFile):
+        test_no_fixture_names_a_developer_local_path()

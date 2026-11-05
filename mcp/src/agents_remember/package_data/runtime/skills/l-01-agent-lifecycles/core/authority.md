@@ -1,13 +1,10 @@
 # Core — Seat Authority (shared by every role)
 
-The rules in this file apply to every seat in this skill. It is authored once and composed into a
-capsule; a role file states its own seat's side of a rule and never restates the whole of it.
+The five core files are authoring references; their actionable shared rules reach every started role through the admitted digest `core/every-role.md`, beside its role and operation capsule.
 
 ## One lifecycle per agent type
 
-Lifecycle and job are one entity. Every agent type runs its **own self-contained lifecycle**; this
-skill is the single roof over all of them. No role is defined by reference to another role's
-lifecycle, and no role reads another role's file to learn its own obligations.
+Lifecycle and job are one entity. Every role runs its own self-contained lifecycle under this skill. Its supplied role, operation and delivered details state its obligations; a started role does not load another role's file to invent its own duties.
 
 Authority in this system is **structural, never textual**: a seat's task document plus its role
 name is its address, and AR — not a prompt or a chat claim — records which agent holds it when
@@ -18,20 +15,15 @@ name is its address, and AR — not a prompt or a chat claim — records which a
 | Altitude | Canonical document | Ordinary occupants |
 | --- | --- | --- |
 | Projects | none — the start names no document; the sprint document holds the developer's request, and the developer names it to the architect in the dashboard | architect |
-| Sprint | the sprint (`kind:"master"`) document | orchestrator · strategist · designer · plan reviewer · super-exit reviewer |
-| Master | the master document | manager · master-exit reviewer |
-| Leaf | the leaf document | worker · curator · leaf route reviewer |
+| Sprint | the sprint document | orchestrator; Investigator when its selected concern binds the sprint |
+| Master | the master document | manager; Investigator when its selected concern binds the master |
+| Leaf | the leaf document | worker, curator and every Reviewer, including a review of a master or sprint seam |
 | Portfolio artifact | none — a notes draft only | strategist's draft before adoption |
 
-- A seat is bound when `role_start` starts its agent: **canonical task document
-  plus role**. The architect is the exception of the first row: its
-  start names no document, and a start that names one is refused. Different roles may coexist on
-  one document; only a second live occupant of the same `(task document, role)` seat collides.
+- A task-bound seat is its canonical document plus role; a second live occupant of that same seat collides. Architect and Bootstrap starts name no document. An Investigator takes the supplied taskless, sprint or master concern, never a leaf. Other starts carry the exact references their role requires.
 - A started agent's parent is the agent that called `role_start` for it; a role started from the
   dashboard or by a chat without a role has none.
-- **A seat that WEARS a hat runs that hat's file as its own.** Hat-collapse is sanctioned only for
-  the owner/developer-facing architect seat in solo or flat runs (see `roles/architect.md`). A
-  spawned role seat never wears another role's hat and never becomes a different role in place.
+- A spawned seat keeps its role. Architect direct coordination is only the developer-chosen exception and grants no Worker, Reviewer or Curator execution; it permits paired closeout only where the kept closeout procedure authorizes it.
 
 ## Role-seat immutability (dashboard-owned sessions)
 
@@ -49,12 +41,9 @@ When the dashboard owns a session, its role is fixed for the session lifetime.
 
 ## Starting a role agent
 
-A role that starts another calls `role_start` **once**, with the role, a request id it chooses and
-the task references the role requires. The same request id with the same selection reconciles the
-same agent and never creates a second. Agent kind, model and effort come from the role settings
-unless the call overrides them; a call cannot state a mode. A call that is not carried out answers
-`refused` with its reason, and a refusal never falls back to another tool. A leaf's Worker,
-Reviewer and Curator are started as a set with `role_start_set`.
+A role starts another with `role_start` once, the role, a chosen request ID and its exact required task references. The same ID and selection reconcile the same start. Settings supply harness, model and effort unless explicitly overridden; the call states no mode. Report a refusal and its reason without another-tool fallback. Start a leaf Worker first, its Reviewer when the build is ready, and its Curator after code PASS; `role_start_set` is not the stage-start route.
+
+Keep the per-start override route. After an override start, the starter checks the seat’s mode and features and sets them. The current code drops them; record that as a product issue rather than removing overrides.
 
 ## Developer-declared task-seat takeover
 
@@ -92,11 +81,7 @@ active queue first: the current leaf, parent/master, neighboring leaves, decisio
 questions, and in-flight branch state. The question is not whether a note is useful; it is whether
 the developer is effectively steering the work already in hand.
 
-- **Current implementation** — it names the same task/leaf/master, resolves a defect exposed by the
-  current work, or improves the same doctrine or code path. A small change that plainly fits the
-  current diff is a strong signal for immediate implementation even when the developer phrases it as
-  "maybe". Extend the current task surface/decision log enough to make the added scope visible, and
-  implement it now.
+- Current implementation names the current task, resolves its exposed defect or improves the same intended doctrine or code path. Make the scope visible in the task record; do not turn a proposed restriction or a changed promise into an approved requirement without the developer.
 - **Future queue** — it names a later release, a separate subsystem, a large scope jump, work whose
   correctness depends on another unfinished master, or a change that would reorder already-running
   leaves. Record it in the right durable queue or ask the owning seat to plan it later.
@@ -106,14 +91,7 @@ the developer is effectively steering the work already in hand.
 
 ## Delegated series authority
 
-Once the developer accepts an orchestrated series/portfolio plan, that acceptance is **standing
-authority** for the owning seats to execute the subordinate edges in that series. Managers govern
-their workers, leaf readiness, and released leaf closeouts. The orchestrator governs managers, the
-portfolio queue, organizational leaf → super releases, atomic master → super handovers, and the
-same closeout/finalize/cleanup mechanics when it wears a manager or worker hat in a flat/direct
-run. These edges do **not** stop for a new developer approval merely because a commit, lifecycle
-finalization, cleanup, or integration command is next: the owner runs the transaction preview,
-records the accepted-series authority in the intent note or decision log, and continues.
+Acceptance of a series plan authorizes its owners to execute its subordinate edges. Managers own leaf readiness, gate acceptance and released closeouts; Orchestrators own the portfolio and delegated master coordination. An Architect performs direct coordination only when the developer chose it. For authorized mechanical transactions, preview, record the standing authority and continue; do not request a fresh approval merely because the next step is integration or finalization.
 
 This does not weaken the ladder. Developer approval is still required for the final completed super
 integration branch / PR-carryover gate, for any human-pinned gate that is actually raised
@@ -127,8 +105,7 @@ it does not force a developer hand-off for mechanical closeout of in-scope work.
 A question for the developer goes up the chain with `role_message`; `operations/orientation.md`
 states how.
 
-- A seat sends the question to its parent, stating what is being decided, the options, the
-  consequences, and the durable evidence refs.
+- Send the developer question to your parent, naming the decision, what you hold, your recommendation and evidence; continue independent work. Without a parent, ask in your own chat.
 - The architect presents one item at the developer's pace, records the ruling in the durable task
   surface (`openQuestions` / decision logs, with notes for analysis), and returns the answer with
   `role_message`.
@@ -137,15 +114,14 @@ states how.
 
 ## Notify-and-stop is safe by design
 
-Ending a turn — simply stopping once your artifact is
-written and nothing is pending — is **never a liveness gap**. A turn that ends without a message
-to its parent wakes that parent with one line from the host, which names where the newest report
-lies; the parent reads the report and acts.
+A silent turn end is not an artifact handover. The host treats a Worker, Reviewer or Curator with no hand-off, block or declared helper wait as silent: after 60 seconds the first two consecutive ends wake that seat; from the third it sends the parent a marked line. Other roles ordinarily give the parent their end line; permission waits and the host-held helper states keep their own boundaries.
 
 **Watcher ban (uniform-mechanism ruling 2026-07-07):** no role watches, polls, nudges, or
 timer-loops on its own initiative — that is a banned seat-local watcher, and there is no per-seat
 variance. Every role's own liveness duty inverts to *passive*: you are woken by a message; answer
 it before ending your turn again.
+
+Collect helpers and continue ordinary work. Preserve native within-turn collection. On the declared ACP helper-wait path supplied at launch, end a waiting turn with `WAITING FOR SUBAGENTS:` and each helper's progress; answer the host's progress check in your own chat, collect completed work, then declare again or continue. Send no parent progress message while waiting and create no watcher, polling loop or second wake mechanism.
 
 ## Change authority
 
@@ -153,12 +129,6 @@ it before ending your turn again.
   a seat never rewrites its own role file or another role's file to resolve a disagreement.
 - **Requirements** are owned by the architecture seat that compiled them; a claimed contradiction
   or overconstraint is diagnosed and proposed, never self-approved, and never silently rewritten.
-- **Git code/memory transactions** are closeout/integration work owned by the owning seat. They
-  publish only the explicitly authorized code and prepared memory commits/merges. Closeout and
-  integration do **not** launch automatic code-quality, full-suite, or independent-review
-  operations; full code quality, full tests, and independent review run only after an explicit
-  developer request. Curation is never deferred that way: the curator runs the complete
-  memory-quality operation as part of curation, and closeout and integration carry that result as a
-  prerequisite instead of rerunning it. Worker targeted checks and the curator's complete onboarding
-  result remain truthful handoff evidence — failed or not-run checks are reported and never
-  relabeled as full green.
+- Authorized closeout and integration publish only their approved code and prepared memory pair. Run the focused checks the change touches, with truthful failed and not-run results. Full code quality, full-suite tests and independent review need an explicit task or developer request; curation still runs complete memory quality and closeout carries that result without rerunning it.
+
+Publishing—push to the sprint line, pull requests and release—belongs to the developer unless explicitly delegated.

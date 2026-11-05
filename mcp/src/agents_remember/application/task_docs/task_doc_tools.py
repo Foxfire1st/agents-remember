@@ -67,6 +67,7 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 from . import task_doc_steps, task_sprint_linkage
+from .alignment_sweep import alignment_sweep
 from .task_doc_content_edits import (
     _apply_set_field,
     _apply_set_status,
@@ -447,13 +448,14 @@ def _task_doc_tool_locked(
         selected_snapshot,
     )
     _validate_task_doc_candidate(candidate_context)
+    sweep = alignment_sweep(
+        task_root, doc, operation=operation, fields=payload_fields, original=original
+    )
+    result = _publish_task_doc_candidate(candidate_context, dry_run=call.dry_run)
+    if result.get("ok") is True and sweep is not None:
+        result["alignmentSweep"] = sweep
     return _with_file_rows(
-        with_review_lane_result(
-            _publish_task_doc_candidate(candidate_context, dry_run=call.dry_run),
-            doc,
-            operation,
-            edit.review,
-        ),
+        with_review_lane_result(result, doc, operation, edit.review),
         file_rows,
     )
 

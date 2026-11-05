@@ -117,7 +117,8 @@ def real_compilation(role: str = "worker", operation: str = "implementation"):
             parsed.skills[name].source
             for name in getattr(entry, "skills", ())
             if name in parsed.skills
-        ),
+        )
+        + tuple(detail.source for detail in parsed.detail_references if role in detail.roles),
     )
     binding = CapsuleBinding(
         operation=operation,  # type: ignore[arg-type]

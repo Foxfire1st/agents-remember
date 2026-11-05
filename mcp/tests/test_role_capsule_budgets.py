@@ -4,8 +4,9 @@ The matrix includes every role/operation and launcher capsule. Capsule size is t
 whitespace-split word count of render_instructions(), excluding task data and seals.
 Each declared step file is measured from its complete source text. The registry is
 skills/l-01-agent-lifecycles/capsule-budgets.json. Budgets are ceil(size * 11 / 10),
-capped at 3700 for capsules and 2500 for step files; neither size nor budget may
-exceed its ceiling. Missing and orphan entries fail. Growth remains a recorded
+capped at 4631 for Architect, 4513 for Manager, 4000 for Curator/Reviewer/Bootstrap,
+3700 for all other roles, and 2500 for step files (MIK-R62 rule 51, D656); neither size nor
+budget may exceed its ceiling. Missing and orphan entries fail. Growth remains a recorded
 decision; the seed control invokes this same guard rather than duplicating it.
 """
 
@@ -102,6 +103,11 @@ def detail_sizes() -> dict[str, int]:
     }
 
 
+def digest_size() -> int:
+    """The shared first-message block has its own literal word budget."""
+    return len((LIFECYCLE_ROOT / "core/every-role.md").read_text(encoding="utf-8").split())
+
+
 def _budget_findings(sizes: dict[str, int], entries: dict, ceiling: int) -> list[str]:
     findings = [f"{key}: missing budget" for key in sizes.keys() - entries.keys()]
     findings.extend(
@@ -122,19 +128,64 @@ def _budget_findings(sizes: dict[str, int], entries: dict, ceiling: int) -> list
     return findings
 
 
+def capsule_ceiling(key: str) -> int:
+    """D633/D656 literals apply to the role at every operation, not one stage."""
+    role = key.split("/", 1)[0]
+    # D656/v11 amendment2: ceil(4210*1.1)=4631 Architect (formerly4200);
+    # ceil(4102*1.1)=4513 Manager (formerly4000); no duty cut.
+    if role == "architect":
+        return 4631
+    if role == "manager":
+        return 4513
+    if role in {"curator", "reviewer", "bootstrap"}:
+        return 4000
+    return 3700
+
+
+def _capsule_findings(sizes: dict[str, int], entries: dict) -> list[str]:
+    return [
+        finding
+        for ceiling in (4631, 4513, 4000, 3700)
+        for finding in _budget_findings(
+            {key: size for key, size in sizes.items() if capsule_ceiling(key) == ceiling},
+            {key: entry for key, entry in entries.items() if capsule_ceiling(key) == ceiling},
+            ceiling,
+        )
+    ]
+
+
 def test_every_yielded_capsule_has_a_budget_and_no_other_key_does() -> None:
     budgets = json.loads(BUDGETS_PATH.read_text(encoding="utf-8"))
     assert budgets["schema"] == "ar-role-capsule-budgets/v1"
     assert sorted(budgets["capsules"]) == sorted(matrix_keys())
     assert sorted(budgets.get("step_details", {})) == sorted(detail_sizes())
+    assert set(budgets["digest"]) == {"size_words", "budget_words"}
 
 
 def test_no_capsule_exceeds_its_recorded_budget() -> None:
     budgets = json.loads(BUDGETS_PATH.read_text(encoding="utf-8"))
     sizes = {key: compiled_size(*key.split("/", 1)) for key in matrix_keys()}
-    findings = _budget_findings(sizes, budgets["capsules"], 3700)
+    findings = _capsule_findings(sizes, budgets["capsules"])
     findings += _budget_findings(detail_sizes(), budgets.get("step_details", {}), 2500)
+    findings += _budget_findings(
+        {"core/every-role.md": digest_size()},
+        {"core/every-role.md": budgets["digest"]} if "digest" in budgets else {},
+        1100,
+    )
     assert not findings, "\n".join(findings)
+    print(
+        json.dumps(
+            {
+                "capsules": sizes,
+                "step_details": detail_sizes(),
+                "capsule_ceilings": {key: capsule_ceiling(key) for key in sizes},
+                "step_detail_ceiling": 2500,
+                "digest_words": digest_size(),
+                "digest_ceiling": 1100,
+            },
+            sort_keys=True,
+        )
+    )
 
 
 def test_budget_guard_rejects_growth_ceiling_and_unregistered_details(
@@ -147,6 +198,7 @@ def test_budget_guard_rejects_growth_ceiling_and_unregistered_details(
     monkeypatch.setattr(module, "matrix_keys", lambda: ["worker/implementation"])
     observed = {"capsule": 100, "detail": 10}
     monkeypatch.setattr(module, "compiled_size", lambda *_: observed["capsule"])
+    monkeypatch.setattr(module, "digest_size", lambda: observed.get("digest", 10))
     monkeypatch.setattr(
         module, "detail_sizes", lambda: {"reference/example.md": observed["detail"]}, raising=False
     )
@@ -159,6 +211,7 @@ def test_budget_guard_rejects_growth_ceiling_and_unregistered_details(
                 {
                     "capsules": {"worker/implementation": capsule_entry},
                     "step_details": detail_entries,
+                    "digest": {"size_words": 10, "budget_words": 11},
                 }
             )
         )
@@ -191,3 +244,67 @@ def test_budget_guard_rejects_growth_ceiling_and_unregistered_details(
         write(entry, details)
         with pytest.raises(AssertionError, match=expected):
             test_no_capsule_exceeds_its_recorded_budget()
+
+    # Exercise the real guard at both literal ceilings, including recorded-budget
+    # attempts to raise one; no new test population or parameter budget is added.
+    for role, ceiling in (
+        ("architect", 4631),
+        ("curator", 4000),
+        ("reviewer", 4000),
+        ("bootstrap", 4000),
+        ("worker", 3700),
+        ("manager", 4513),
+        ("orchestrator", 3700),
+        ("designer", 3700),
+        ("investigator", 3700),
+        ("strategist", 3700),
+        ("launcher", 3700),
+    ):
+        for operation in ("orientation", "recovery"):
+            key = f"{role}/{operation}"
+            assert capsule_ceiling(key) == ceiling
+            monkeypatch.setattr(module, "matrix_keys", lambda key=key: [key])
+
+            def write_at_limit(size: int, budget: int, *, key: str = key) -> None:
+                path.write_text(
+                    json.dumps(
+                        {
+                            "capsules": {key: {"size_words": size, "budget_words": budget}},
+                            "step_details": {"reference/example.md": detail},
+                            "digest": {"size_words": 10, "budget_words": 11},
+                        }
+                    )
+                )
+
+            observed["capsule"] = ceiling
+            write_at_limit(ceiling, ceiling)
+            test_no_capsule_exceeds_its_recorded_budget()
+            observed["capsule"] = ceiling + 1
+            write_at_limit(ceiling, ceiling)
+            with pytest.raises(AssertionError, match="ceiling"):
+                test_no_capsule_exceeds_its_recorded_budget()
+            observed["capsule"] = ceiling
+            write_at_limit(ceiling + 1, ceiling + 1)
+            with pytest.raises(AssertionError, match="ceiling"):
+                test_no_capsule_exceeds_its_recorded_budget()
+
+    # A generous capsule budget cannot waive the separately delivered digest's
+    # literal1100-word ceiling (formerly1000 and900; D656/v11 amendment2)
+    # or its own eleven-tenths budget; ceil(1000*1.1)=1100.
+    observed["capsule"] = 100
+    monkeypatch.setattr(module, "matrix_keys", lambda: ["worker/implementation"])
+    for size, entry, expected in (
+        (1100, {"size_words": 1100, "budget_words": 1100}, None),
+        (1101, {"size_words": 1100, "budget_words": 1100}, "ceiling"),
+        (1100, {"size_words": 1101, "budget_words": 1101}, "ceiling"),
+    ):
+        observed["digest"] = size
+        write(capsule, {"reference/example.md": detail})
+        document = json.loads(path.read_text())
+        document["digest"] = entry
+        path.write_text(json.dumps(document))
+        if expected is None:
+            test_no_capsule_exceeds_its_recorded_budget()
+        else:
+            with pytest.raises(AssertionError, match=expected):
+                test_no_capsule_exceeds_its_recorded_budget()

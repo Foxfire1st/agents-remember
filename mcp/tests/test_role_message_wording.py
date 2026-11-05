@@ -19,21 +19,23 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from agents_remember.models.role_capsules.types import CapsuleRoleSeat
+from agents_remember.models.role_capsules.types import CapsuleOperation, CapsuleRole
 from agents_remember_test_support.testing.leaf_instruction_wording import (
     LEAF_CLAUSES,
+    MESSAGE_HANDOVER_SOURCE,
+    MESSAGE_HANDOVER_STEP,
     autonomy_clauses,
     delivered_step,
     missing_clauses,
     normalized,
 )
-from test_role_capsule_audiences import _compile_corpus_pair
 from test_role_instruction_wording import PACKAGED
 from test_role_instruction_wording_handover import HandoverTextWordingTests
 
@@ -102,18 +104,12 @@ HANDOVER_TEMPLATE_FILES = (
     "templates/conversation-handover-packet.md",
 )
 
-#: The one operation whose messaging passage MIK-R193 rule 8 keeps once, in the Worker role it is
-#: delivered with: the delivered Worker text is that role plus this operation, so its markers are
-#: read there (MIK-R203 rule 3). Every other surface file states them in its own words.
-DELIVERED_WITH_WORKER_ROLE = "operations/implementation.md"
-
-
-def delivered_text(root: Path, relative: str, text: str) -> str:
-    """What a seat reading one surface file actually receives (MIK-R203 rule 3)."""
-
-    if relative != DELIVERED_WITH_WORKER_ROLE:
-        return text
-    return f"{text}\n{(root / 'roles/worker.md').read_text()}"
+OPERATION_RECIPIENTS = {
+    "operations/coordination.md": ("architect", "orchestrator", "manager"),
+    "operations/implementation.md": ("worker",),
+    "operations/review.md": ("reviewer", "manager", "orchestrator", "architect"),
+    "operations/curation.md": ("curator", "manager"),
+}
 
 
 #: The roles whose handover the launch code compiles (seven public capsules).
@@ -149,19 +145,57 @@ CURATOR_MARKER_EQUIVALENTS = {
     "never pasted into a message": "never paste evidence, verdicts, lists or logs.",
 }
 
+RETIRED_REVIEWER_OUTPUT_CLAUSES = (
+    "hand it directly to the leaf's Worker as `../operations/review.md` §Outputs states",
+    "Write/record the verdict and hand it directly to the leaf\u2019s Worker per `../operations/review.md` §Outputs.",
+)
 
-def curator_message_step(root: Path) -> str:
-    """Read only the declared payload-field file at the sending step."""
+CURATION_HANDOFF_FACETS = (
+    ("operations/review.md", "memory extra approval"),
+    ("roles/curator.md", "memory to reviewer"),
+    ("roles/curator.md", "identity and whole stretch"),
+    ("roles/curator.md", "memory lane and count"),
+    ("roles/curator.md", "memory leaves code untouched"),
+    ("roles/curator.md", "memory ordinary limit"),
+)
+
+
+def reviewer_outputs_duplicates(source: str) -> list[str]:
+    """Require S-R1's deletion as well as the retained Process-8 duty."""
+    match = re.search(r"(?ms)^## Outputs\n(.*?)(?=^## |\Z)", source)
+    assert match is not None
+    reading = normalized(match[1])
+    return [clause for clause in RETIRED_REVIEWER_OUTPUT_CLAUSES if normalized(clause) in reading]
+
+
+def require_curation_handoff_targets(root: Path) -> None:
+    """Resolve the six corrected clause pointers to their complete real heading."""
+    for source, name in CURATION_HANDOFF_FACETS:
+        for clause in LEAF_CLAUSES[source][name]:
+            pointer = re.search(r"`([^`]+)` §([^.;\n]+)(?:[.;]|$)", clause)
+            assert pointer is not None, (source, name, clause)
+            target = ((root / source).parent / pointer[1]).resolve()
+            assert target.is_relative_to(root.resolve()), target
+            heading = pointer[2].strip()
+            assert re.search(r"(?m)^#{1,6} " + re.escape(heading) + r"\s*$", target.read_text()), (
+                source,
+                name,
+                str(target),
+                heading,
+            )
+
+
+def message_step(root: Path, role: str, operation: str = "orientation") -> tuple[str, str]:
+    """Read the payload rules only through their actual declared delivery."""
     with tempfile.TemporaryDirectory() as directory:
         instructions, text = delivered_step(
             root,
-            ("curator", "curation"),
-            "reference/curator-message-details.md",
-            "when you reach Curation workflow 1: Reconcile, not before",
+            (cast(CapsuleRole, role), cast(CapsuleOperation, operation)),
+            MESSAGE_HANDOVER_SOURCE,
+            MESSAGE_HANDOVER_STEP,
             Path(directory) / "report.md",
         )
-    assert "Read [message fields/location](" in instructions
-    return text
+    return instructions, text
 
 
 def missing_markers(relative: str, text: str) -> list[str]:
@@ -258,23 +292,12 @@ def scan(roots: list[Path], files: tuple[str, ...]) -> tuple[list[str], list[str
     for root in roots:
         label = root.relative_to(REPOSITORY_ROOT).as_posix()
         for relative in files:
-            if relative == "operations/curation.md":
-                # R125 keeps repeated messages once, in each receiving role.
-                # Check both actual addressed capsules, and only the named
-                # Curator payload step for body/attach, across all ten surfaces.
-                manifest = (root / "composition-manifest.json").read_bytes()
-                for seat in (
-                    CapsuleRoleSeat("curator", "leaf"),
-                    CapsuleRoleSeat("manager", "master"),
-                ):
-                    text = _compile_corpus_pair(
-                        root, manifest, seat, "curation"
-                    ).render_instructions()
-                    detail = curator_message_step(root) if seat.role == "curator" else ""
-                    short = f"{label}/{relative}/{seat.role}"
-                    for marker in missing_markers(f"roles/{seat.role}.md", text):
-                        if marker in {"`body`", "`attach`"} and marker in detail:
-                            continue
+            if relative in OPERATION_RECIPIENTS:
+                operation = Path(relative).stem
+                for role in OPERATION_RECIPIENTS[relative]:
+                    text, detail = message_step(root, role, operation)
+                    short = f"{label}/{relative}/{role}"
+                    for marker in missing_markers(f"roles/{role}.md", text + "\n" + detail):
                         missing.append(f"{short}: missing {marker!r}")
                     forbidden.extend(scan_lines(short, text.splitlines()))
                     forbidden.extend(scan_lines(short + "/message-step", detail.splitlines()))
@@ -282,12 +305,17 @@ def scan(roots: list[Path], files: tuple[str, ...]) -> tuple[list[str], list[str
             path = root / relative
             text = path.read_text()
             short = f"{label}/{relative}"
-            detail = curator_message_step(root) if relative == "roles/curator.md" else ""
-            # The operation's own file may leave the passage to the role it is delivered with
-            # (MIK-R203 rule 3); the forbidden scan still reads this file's own lines only.
-            for marker in missing_markers(relative, delivered_text(root, relative, text)):
-                if marker in {"`body`", "`attach`"} and marker in detail:
-                    continue
+            if relative == "roles/bootstrap.md":
+                for clause in (
+                    "Bootstrap starts no role and messages none.",
+                    "in your own chat",
+                ):
+                    if normalized(clause) not in normalized(text):
+                        missing.append(f"{short}: missing {clause!r}")
+                forbidden.extend(scan_lines(short, text.splitlines()))
+                continue
+            detail = message_step(root, Path(relative).stem)[1] if relative in ROLE_FILES else ""
+            for marker in missing_markers(relative, text + "\n" + detail):
                 missing.append(f"{short}: missing {marker!r}")
             forbidden.extend(scan_lines(short, text.splitlines()))
             forbidden.extend(scan_lines(short + "/message-step", detail.splitlines()))
@@ -367,14 +395,12 @@ class RoleMessageWordingTests(unittest.TestCase):
     def test_compiled_capsules_state_messages_as_files(self) -> None:
         forbidden: list[str] = []
         missing: list[str] = []
-        detail = curator_message_step(PACKAGED / LIFECYCLE)
-        forbidden.extend(scan_lines("compiled/curator/message-step", detail.splitlines()))
         for label, text in compiled_texts().items():
             if label.endswith("/prompt"):
                 role = label.split("/")[1]
-                for marker in missing_markers(f"roles/{role}.md", text):
-                    if role == "curator" and marker in {"`body`", "`attach`"} and marker in detail:
-                        continue
+                _, detail = message_step(PACKAGED / LIFECYCLE, role)
+                forbidden.extend(scan_lines(f"compiled/{role}/message-step", detail.splitlines()))
+                for marker in missing_markers(f"roles/{role}.md", text + "\n" + detail):
                     missing.append(f"{label}: missing {marker!r}")
             forbidden.extend(scan_lines(label, text.splitlines()))
         self.assertEqual(missing, [])
@@ -408,8 +434,36 @@ class RoleMessageWordingTests(unittest.TestCase):
         self.assertEqual(missing, [])
 
     def test_reviewer_equivalents_keep_positive_facets_and_reject_deletion(self) -> None:
-        reading = normalized((surfaces()[0] / "roles/reviewer.md").read_text())
+        source = (surfaces()[0] / "roles/reviewer.md").read_text()
+        reading = normalized(source)
         clauses = {**LEAF_CLAUSES["roles/reviewer.md"], **autonomy_clauses("reviewer")}
+        # Only this transport duty moved: all other Reviewer duties remain at
+        # their role home, so a missing role clause cannot hide in another file.
+        transport = {"busy retry": clauses.pop("busy retry")}
+        # S-R1 removed the duplicate Outputs sentence. Process step 8 remains
+        # the owner of the complete direct-verdict duty, not another section.
+        verdict = {"verdict to worker": clauses.pop("verdict to worker")}
+        self.assertEqual(
+            verdict["verdict to worker"],
+            ("Write and record the verdict, then hand it directly to the leaf's Worker.",),
+        )
+        step = re.search(r"(?m)^8\. (.+)$", source)
+        self.assertIsNotNone(step)
+        assert step is not None
+        step_reading = normalized(step[1])
+        self.assertEqual(missing_clauses(step_reading, verdict), [])
+        mutant = step_reading.replace(normalized(verdict["verdict to worker"][0]), "")
+        self.assertNotEqual(mutant, step_reading)
+        self.assertIn("verdict to worker", missing_clauses(mutant, verdict))
+        self.assertEqual(reviewer_outputs_duplicates(source), [])
+        for retired in RETIRED_REVIEWER_OUTPUT_CLAUSES:
+            with self.subTest(deleted_outputs_clause=retired):
+                # Neither a dead-only alternative nor a restored Outputs duplicate
+                # may satisfy the live-duty/deletion pair.
+                self.assertIn("verdict to worker", missing_clauses(retired, verdict))
+                restored = source.replace("## Outputs\n", "## Outputs\n\n" + retired + "\n")
+                self.assertNotEqual(restored, source)
+                self.assertIn(retired, reviewer_outputs_duplicates(restored))
         self.assertEqual(missing_clauses(reading, clauses), [])
         for name, alternatives in clauses.items():
             with self.subTest(obligation=name):
@@ -418,15 +472,64 @@ class RoleMessageWordingTests(unittest.TestCase):
                     mutant = mutant.replace(normalized(alternative), "")
                 self.assertNotEqual(mutant, reading, "control must remove real instructions")
                 self.assertIn(name, missing_clauses(mutant, clauses))
+        detail = message_step(surfaces()[0], "reviewer")[1]
+        self.assertEqual(missing_clauses(detail, transport), [])
+        for clause in transport["busy retry"]:
+            mutant = normalized(detail).replace(normalized(clause), "")
+            self.assertNotEqual(mutant, normalized(detail))
+            self.assertIn("busy retry", missing_clauses(mutant, transport))
+
+    def test_curation_handoff_clause_targets_resolve_and_reject_a_renamed_heading(self) -> None:
+        root = surfaces()[0]
+        require_curation_handoff_targets(root)
+        with tempfile.TemporaryDirectory() as directory:
+            copied = Path(directory) / LIFECYCLE
+            shutil.copytree(root, copied)
+            target = copied / "operations/curation.md"
+            text = target.read_text()
+            renamed = text.replace("## Handoff / exit\n", "## Renamed exit\n")
+            self.assertNotEqual(renamed, text)
+            target.write_text(renamed)
+            with self.assertRaises(AssertionError):
+                require_curation_handoff_targets(copied)
+
+    def test_message_step_requires_pointer_declaration_audience_and_exact_step(self) -> None:
+        for mutation in ("pointer", "declaration", "audience", "step"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory) / LIFECYCLE
+                shutil.copytree(surfaces()[0], root)
+                manifest_path = root / "composition-manifest.json"
+                manifest = json.loads(manifest_path.read_text())
+                if mutation == "pointer":
+                    for path in root.rglob("*.md"):
+                        path.write_text(
+                            path.read_text().replace(
+                                "{{detail:" + MESSAGE_HANDOVER_SOURCE + "}}", ""
+                            )
+                        )
+                elif mutation == "declaration":
+                    del manifest["references"]["message-handover"]
+                elif mutation == "audience":
+                    manifest["references"]["message-handover"]["roles"].remove("reviewer")
+                else:
+                    manifest["references"]["message-handover"]["step"] = "after the turn ends"
+                manifest_path.write_text(json.dumps(manifest))
+                with self.assertRaises(AssertionError):
+                    message_step(root, "reviewer")
 
     def test_reviewer_equivalents_keep_each_message_facet_and_reject_deletion(self) -> None:
-        text = (surfaces()[0] / "roles/reviewer.md").read_text()
-        self.assertEqual(missing_markers("roles/reviewer.md", text), [])
-        for marker, equivalent in REVIEWER_MARKER_EQUIVALENTS.items():
-            with self.subTest(marker=marker):
-                self.assertIn(equivalent, text)
-                mutant = text.replace(equivalent, "").replace(marker, "")
-                self.assertIn(marker, missing_markers("roles/reviewer.md", mutant))
+        # The shipped source now states every facet at the declared shared step.
+        # Delete each actual facet, not an obsolete inline spelling.
+        for role in ("reviewer", "curator"):
+            text = message_step(surfaces()[0], role)[1]
+            relative = f"roles/{role}.md"
+            self.assertEqual(missing_markers(relative, text), [])
+            for marker in REQUIRED_MARKERS:
+                with self.subTest(role=role, marker=marker):
+                    self.assertIn(marker, text)
+                    mutant = text.replace(marker, "")
+                    self.assertNotEqual(mutant, text)
+                    self.assertIn(marker, missing_markers(relative, mutant))
         # The same alternatives cannot silently replace an untouched role's wording.
         equivalents = " ".join((*REVIEWER_MARKER_EQUIVALENTS.values(), "`body`", "`attach`"))
         self.assertEqual(missing_markers("roles/reviewer.md", equivalents), [])
@@ -441,21 +544,6 @@ class RoleMessageWordingTests(unittest.TestCase):
                 self.assertEqual(
                     missing_markers(relative, equivalents), list(REVIEWER_MARKER_EQUIVALENTS)
                 )
-        curator = (surfaces()[0] / "roles/curator.md").read_text()
-        payload = curator_message_step(surfaces()[0])
-        self.assertEqual(missing_markers("roles/curator.md", curator), ["`body`", "`attach`"])
-        for marker, equivalent in CURATOR_MARKER_EQUIVALENTS.items():
-            with self.subTest(role="curator", marker=marker):
-                self.assertIn(equivalent, curator)
-                mutant = curator.replace(equivalent, "").replace(marker, "")
-                self.assertNotEqual(mutant, curator)
-                self.assertIn(marker, missing_markers("roles/curator.md", mutant))
-        for marker in ("`body`", "`attach`"):
-            with self.subTest(role="curator", marker=marker):
-                self.assertIn(marker, payload)
-                mutant = payload.replace(marker, "")
-                self.assertNotEqual(mutant, payload)
-                self.assertNotIn(marker, mutant)
         curator_equivalents = " ".join((*CURATOR_MARKER_EQUIVALENTS.values(), "`body`", "`attach`"))
         self.assertEqual(missing_markers("roles/curator.md", curator_equivalents), [])
         for relative in (*ROLE_FILES, *OPERATION_FILES, *HANDOVER_TEMPLATE_FILES):

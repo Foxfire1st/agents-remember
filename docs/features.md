@@ -9,8 +9,8 @@ not" facts — lives in people's heads, old PRs, and team habits, exactly where 
 agent never looks.
 
 Agents Remember turns that knowledge into durable, git-verified infrastructure:
-Markdown notes that live beside the code, prove which commit they were last
-checked against, and are trusted only when Git confirms they still match. One
+Markdown cards and JSON knowledge in an external memory repository, with code
+anchors checked against the selected Git tree before they are trusted. One
 idea carries the whole system — **a source file's memory lives at a
 deterministic mirror path** — and almost everything else on this page is what
 that single idea makes cheap, verifiable, and safe.
@@ -20,15 +20,15 @@ This page walks through what that buys:
 - **Notes retrieved by path, not by search** — a file's memory has a fixed
   address, so reads stay predictable and the context window never fills with
   loosely-related matches.
-- **Staleness you can prove** — a note records the commit it was checked against,
-  so whether it still holds is a Git fact, not a guess.
+- **Staleness you can measure** — recorded anchors are compared with the
+  selected code tree, so changed source is visible before a claim is trusted.
 - **Search that helps *find* memory without ever becoming the memory** — semantic
   and code-graph lookup were optional accelerators layered over the same
   reviewable Markdown; both providers are retired, so by-path reads carry the
   product.
 - **Memory that moves through Git like code** — isolated worktrees, an
-  all-or-nothing merge across code and memory, and provider indexes that clone
-  into a worktree instead of rebuilding.
+  paired publication of code and memory, and a disposable knowledge index
+  rebuilt from each selected text tree.
 - **Behavior that travels with the repo** — each project's own settings,
   commands, conventions, and landing rules ride along in the memory and are read
   the same way across different coding harnesses.
@@ -86,17 +86,20 @@ src/foo/bar.ts
 ar-coordination/memory-repos/ar-my-app/onboarding/src/foo/bar.ts.md
 ```
 
-Each note explains what the code cannot make obvious on its own. A short metadata
-header pins the note to the exact source commit it was last verified against; the
-body holds the file's **purpose**, the **logic** worth knowing, the local
-**conventions** it follows, the **invariants and boundaries** it must keep —
-including what it must *not* do — and durable **to-dos** that belong to the file
-rather than to any one task. Claims are kept honest by citation: pointers to
-domain docs, to other files in the repo, and to cross-repo edges each carry exact
-line ranges, and an append-only **update history** records why the knowledge
-changed over time. What a note leaves out matters just as much — it does not
-restate the implementation, duplicate type signatures, or hold task-specific
-planning. It captures the judgment, not the code.
+Each note explains what the code cannot make obvious on its own: its **purpose**,
+important **logic**, **conventions**, **invariants and boundaries**, and durable
+file-level concerns. In converted memory, the Markdown holds current prose and
+numbered citation markers. Its paired `onboarding/<source path>.json` sidecar holds
+references, realization claims and test proofs with code anchors. Route overviews
+have their own `overview.json` reference sidecars.
+
+Shared truths live once in `knowledge/<kind>/<ID>-<slug>.json` records: invariants,
+families, decisions and other knowledge. Git records their meaning changes;
+Curator-authored `knowledge/history/<owner>.json` rows record judgments about a
+leaf's changes. A recomputed worklist and exact-tree gate check that those judgments
+answer the candidate's changes before publication. The [knowledge-system
+reference](reference/knowledge-system.md) describes the files, reader, review and
+commands. Notes retain current truth without duplicating code or task plans.
 
 Because the path *is* the address, three things that are normally search problems
 become arithmetic:

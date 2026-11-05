@@ -57,9 +57,10 @@ def load_master_children(
     """Read only explicit listed files, never a directory census or inferred slug."""
     children: dict[str, TaskDocument] = {}
     for row in master.subTasks:
-        if not row.file:
+        reference = Path(row.file)
+        if not reference.name:
             continue
-        path = task_root / Path(row.file).with_suffix(".json")
+        path = task_root / reference.with_suffix(".json")
         try:
             child = (overrides or {}).get(path) or task_store.read_task_doc(path)
         except (OSError, ValueError, ValidationError):

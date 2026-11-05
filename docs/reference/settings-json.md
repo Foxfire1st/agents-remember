@@ -361,6 +361,13 @@ ids. It must be absolute.
 `transcriptRoot` is optional. If omitted, MCP logs default to
 `<coordinationRoot>/logs/mcp`.
 
+For an active leaf enclosure, tool-call receipts are written under that enclosure's `logs/`.
+Calls outside an active enclosure use the configured `transcriptRoot`; do not assume that the
+default coordination-root folder is the configured folder. Terminal lifecycle calls use the
+configured transcript root. Before claiming that a message was not sent, search the complete
+narrowest shared task's message folder and the applicable tool-call receipts, including their
+detail files. Message filing is documented in [MCP tools](mcp-tools.md#message-files-and-receipts).
+
 `toolLog.keepDays` is optional. It bounds the coordination-root tool-call log
 (MIK-R108 rule 3): the first call of a day removes the `ar-tools-<YYYY-MM-DD>`
 log files and detail folders older than it. When absent, 14 days are kept. In
@@ -1112,8 +1119,13 @@ Task documents are read as rendered Markdown with the harness's own file tools. 
 Worker, Reviewer and Curator starts, the product publishes a real copy of its own leaf document under `task-documents/` in the enclosure group before the first turn, preserving its canonical relative path. `INDEX.json` holds one row per copied file with its kind, reference, repository, source and copy SHA-256 digests, path, publication time, and a missing flag for named-but-absent files. Writes rendering that leaf refresh its
 copy in every existing enclosure for that leaf atomically per file;
 cleanup removes the copies with the enclosure. Copies stay outside code and memory Git worktrees.
-Change documents through `task_doc` only; edits to copies are never read back and are replaced by
-its next publication. Controllers read their own canonical rendered file without a copy; the
+task_doc first, then logged canonical amendment on correct-input refusal; owner's next publication
+refreshes renders/projections, rendered copies never parsed back. Follow the
+[correct-input write-refusal procedure](../../skills/l-01-agent-lifecycles/reference/refused-write.md)
+for the same tool/input class, recording the inputs, refusal and manual provenance and telling
+the record owner before amending its canonical document. Read/check/validation/sync, starts,
+product guards and commit gates retain stops; failed gates are repaired. Controllers read their
+own canonical rendered file without a copy; the
 start whole result (log file) names the paths and whether they sit outside the working folder. Taskless roles have no task
 file. The handover names the paths. `read_ar_files` keeps its existing behavior; task documents are read as rendered files, not through `task_doc`.
 `server_info` advertises read-only annotations; the other AR tools remain available under the mode.

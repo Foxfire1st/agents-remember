@@ -1,21 +1,52 @@
 # Curator — writer and authoring step detail
 
-Read this file when you reach **Curation workflow 2: Before ingest**, not before.
-Its family/external-reference formats and read-back call are used at **Curation workflow 3: Group only justified obligations**. The following passages and call fragment
-are retained verbatim from `operations/curation.md` under the L88 R125 sentence-classification ruling.
-The serving-build authority, authored outputs, report states and read-back obligation stay in the capsule.
+Read the serving-build command section before a CLI deciding run or write. Read the remaining
+authoring detail when you reach **Curation workflow 2: Before ingest**, not before.
+Its family/external-reference formats and read-back call are used at **Curation workflow 3: Group only justified obligations**.
+The operation owns serving-build authority; this file supplies the command and its report semantics.
 
-## Step 2 — command and options
+## Step 2 — serving-build command and options
 
-For the selected converted memory root, the admitted file-writer command is
-`agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <the hand-off list>
---authorization-ref <ref> --commit --json`.
-The CLI has no `--baseline`, `--publish` or `--publish-to` options; its parser rejects them before
-the file writer is invoked.
+Prefer the mounted `knowledge_write`. For a CLI deciding run or write, bind the command to the
+starting server's `server_info.servingBuild` as `operations/curation.md` requires. Obtain the
+original interpreter from the role launch receipt's `toolServer.command[0]`, or the selected
+server's startup definition's `command`. Preserve that spelling: `servingBuild.pythonExecutable`
+is resolved and may point through a virtual-environment symlink to an interpreter without its
+dependencies. If the admitted launch command is unavailable, report the CLI binding unavailable;
+do not infer it from the resolved path or install another build.
 
-Hand the same JSON hand-off list to
-   `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <the list>
-   --authorization-ref <the authorization this run is admitted under> --commit --json`.
+Fill these values from that launch and the starting `server_info`, then print the CLI's identity:
+
+```sh
+AR_SERVING_PYTHON='<original admitted launch interpreter>'
+AR_SERVING_PACKAGE='<server_info.servingBuild.packageRoot>'
+AR_SERVING_PARENT="$(dirname -- "$AR_SERVING_PACKAGE")"
+PYTHONPATH="$AR_SERVING_PARENT" "$AR_SERVING_PYTHON" -P -c \
+  'import json; from agents_remember.serving.build_info import process_serving_build; print(json.dumps(process_serving_build().payload().model_dump(mode="json", exclude_none=True)))'
+```
+
+Compare its `version`, `sourceDigest`, `packageRoot`, `pythonExecutable` and `commit` with the
+starting stamp before using this CLI to decide or write. A missing identity or a mismatch does
+not establish the serving build. Report it; use the mounted tool when it admits the operation.
+Keep an unreported commit unknown, never call it a verified clean checkout.
+
+Use the same interpreter and explicit package path for the public CLI commands:
+
+```sh
+PYTHONPATH="$AR_SERVING_PARENT" "$AR_SERVING_PYTHON" -P -m agents_remember.cli \
+  knowledge-worklist --contract '<this leaf enclosure contract>'
+PYTHONPATH="$AR_SERVING_PARENT" "$AR_SERVING_PYTHON" -P -m agents_remember.cli \
+  knowledge-ingest --contract '<this leaf enclosure contract>' \
+  --list '<the hand-off list>' --authorization-ref '<the admitted authorization>' --commit --json
+```
+
+The worklist command computes and persists the leaf's worklist beside its contract. The writer
+reads that worklist and the contract's code and memory roots. Without `--commit`, ingest plans,
+validates and writes no files; `--commit` authorizes file writes, never a Git commit or acceptance.
+The parser has no `--baseline`, `--publish` or `--publish-to` options. Read the actual report state,
+written paths, record/entry IDs and refusals: exit zero covers both a plan and a write, and even a
+`written` report with no written paths establishes no publication. A correct-input write refusal
+uses the procedure linked from the operation's **Failure handling** section.
 
 ## Step 2 — check messages
 

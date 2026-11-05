@@ -191,7 +191,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         timeout_seconds: Annotated[int, Field(ge=1, le=MAX_WAIT_SECONDS)] = DEFAULT_WAIT_SECONDS,
         withdraw_held_message_id: str | None = None,
     ) -> dict[str, object]:
-        """Send one text message to one role agent. Name the recipient by agent_id or by role plus task references. Only the host request is promised: without wait the call answers once the host accepted the message; with wait it answers when the consuming turn ends (finished, failed, cancelled, permission, timeout). A mid-turn recipient gets the message in its turn, which the host may cancel; a waiting, unstarted or unwritable recipient is answered `held` with reason, permission, counts and id. Only a full hold store (twenty) is refused as `recipient-busy`. Reference: docs/reference/mcp-tools.md."""
+        """Send one text message to one role agent, by agent_id or role plus task references. Only the host request is promised: without wait, host acceptance; with wait, the consuming turn ends, not AR acceptance. A mid-turn message reaches the running turn, which the host may cancel. Held means queued for delivery when the recipient can take it, not refusal; never resend held. Only a full hold store (twenty) is recipient-busy. Reference: docs/reference/mcp-tools.md."""
         call = RoleMessageCall(
             text=text,
             agent_id=agent_id,

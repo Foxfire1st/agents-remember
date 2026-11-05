@@ -152,8 +152,9 @@ must point to a requested developer-approved revision; it cannot be rewritten in
 
 The Reviewer records its own ordinary CODE round and result as `../roles/reviewer.md` states; the Manager keeps gate acceptance and the architect's or the developer's recorded approval beyond the settings limit. The task document remains the authority.
 
-Send the verdict directly to the Worker, including the sealed findings report on BLOCK; on PASS,
-send the passed freeze and verdict directly to the Curator. Keep the Curator's MEMORY review sealed and counted apart. Return memory findings/pass directly to the Curator. Only when both
+On code PASS, first tell the Manager to start the Curator, before peer handover. Send the verdict
+directly to the Worker, including the sealed findings report on BLOCK. Once the Curator exists, send
+it the passed freeze and code-PASS verdict directly. Keep the Curator's MEMORY review sealed and counted apart. Return memory findings/pass directly to the Curator. Only when both
 lanes pass, send the Manager one ready-for-closeout notice naming the freeze and both verdicts.
 ```
 

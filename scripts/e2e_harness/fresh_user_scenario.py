@@ -65,14 +65,14 @@ from agents_remember.memory_quality.check import (  # noqa: E402
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef  # noqa: E402
 from agents_remember.tasks import TaskDocument, write_task_doc  # noqa: E402
-from fresh_user_fixture import (  # noqa: E402  (the harness's flat module convention)
+from e2e_harness.fresh_user_fixture import (  # noqa: E402
     FreshUserFixture,
     create_fresh_user_fixture,
     git,
     write_exclusion_register,
     write_thin_bootstrap,
 )
-from reporting import CheckpointDefinition, CheckpointRecorder  # noqa: E402
+from e2e_harness.reporting import CheckpointDefinition, CheckpointRecorder  # noqa: E402
 
 STEP_INSTALL = "install-runtime"
 STEP_MEMORY_INIT = "memory-init"

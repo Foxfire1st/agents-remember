@@ -1,0 +1,1025 @@
+{
+  "schema": "ar-retained-verdict-regression/v1",
+  "selection": "Exact model context and final assistant message records/events from five complete native Codex judgments; selected records are not a complete recapture. Full original file hashes remain bound.",
+  "rows": [
+    {
+      "case": "CE01",
+      "attempt": "1540a742-ca24-406d-8c6c-28c943444ee6",
+      "capturePath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE01/1540a742-ca24-406d-8c6c-28c943444ee6/judge-capture.json",
+      "captureSha256": "16650384dc21209840f7ca88ca6c2a0e8cc94e3841de997c920ca24432a01da8",
+      "nativeStdoutPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE01/1540a742-ca24-406d-8c6c-28c943444ee6/rubric-judge/native.stdout",
+      "nativeStdoutSha256": "7e36e206b8f30b822846ea6737a223c095a804ed45e4a81f823e259a51b881c6",
+      "requestPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE01/1540a742-ca24-406d-8c6c-28c943444ee6/judge-request.json",
+      "requestSha256": "2b7e2381814b56c1d94c7114e1c0c079e9058bd76821fdc67c81d4d7742bf198",
+      "sessionId": "01a189ed-26e4-72a2-87a5-f9e05a659eee",
+      "sourceFiles": [
+        {
+          "path": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T00-09-43-01a189ed-26e4-72a2-87a5-f9e05a659eee.jsonl",
+          "sha256": "46dcf7e2638397104f68d6be8bdeafd903dcfff3dea1b42d0e5a1cb990b224cf"
+        }
+      ],
+      "nativeRecords": [
+        {
+          "timestamp": "2026-10-29T23:09:45.507Z",
+          "ordinal": 9,
+          "type": "turn_context",
+          "payload": {
+            "turn_id": "01a189ed-2d45-7d52-aa30-f5856418c72e",
+            "root_turn_id": "01a189ed-2d45-7d52-aa30-f5856418c72e",
+            "disabled_plugin_ids": [],
+            "cwd": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE01/1540a742-ca24-406d-8c6c-28c943444ee6/rubric-judge/project",
+            "approval_policy": "never",
+            "approvals_reviewer": "user",
+            "sandbox_policy": {
+              "type": "read-only"
+            },
+            "permission_profile": {
+              "type": "managed",
+              "file_system": {
+                "type": "restricted",
+                "entries": [
+                  {
+                    "path": {
+                      "type": "special",
+                      "value": {
+                        "kind": "root"
+                      }
+                    },
+                    "access": "read"
+                  }
+                ]
+              },
+              "network": "restricted"
+            },
+            "model": "gpt-6.1-sol",
+            "comp_hash": "3000",
+            "collaboration_mode": {
+              "mode": "default",
+              "settings": {
+                "model": "gpt-6.1-sol",
+                "reasoning_effort": "high",
+                "developer_instructions": null
+              }
+            },
+            "multi_agent_version": "v2",
+            "realtime_active": false,
+            "cyber_access_program": "standard",
+            "effort": "high",
+            "summary": "none"
+          }
+        },
+        {
+          "timestamp": "2026-10-29T23:10:34.156Z",
+          "ordinal": 22,
+          "type": "response_item",
+          "payload": {
+            "type": "message",
+            "status": "completed",
+            "id": "msg_0ab831277450de80016ae3d260e19c819198b112d7b7c4c92c",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "{\n  \"criteria\": [\n    {\n      \"criterion\": \"Every named false current claim in all three cards and paired properties is withdrawn; true retained behavior remains.\",\n      \"evidence\": \"The workspace contradiction and missing citations were repaired, and supported CGC behavior was preserved. However, isolated.py.md still describes the worktree Postgres as being seeded and active-repository query results resolving against worktree memory. The supplied source disables ordinary GrepAI preparation through provider_enabled and emits no generated provider configuration. These statements needed qualification as retained, conditional behavior.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"Changes stay within admitted memory/report surfaces and matching fixture bookkeeping; no product code or unowned machine-state change.\",\n      \"evidence\": \"The supplied effect diff contains only four onboarding files, one wave history file, the report and fixture handover. Recorded code status is clean. No Git transaction or role start is shown.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Each writer change has its receipt; any open manual write instead carries the full D627 ladder record and every check still available, on final bytes.\",\n      \"evidence\": \"Citation changes have successful citation_fix apply calls, and the history write has a knowledge_write receipt reporting state written, followed by file readback. Prose patches also have successful results. Final checks followed the memory edits. No full D627 ladder record is supplied, so compliance for any manual writes requiring that route cannot be established.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"No success solely from an agent report; inspect the final trees, paired properties, history and recorded checks.\",\n      \"evidence\": \"Evidence includes the actual before/after diff, final cards and sidecars, the new history contents, successful mutation results, and recorded check inspections. The final citation inspection reports no stale targets; integrity findings remain at 77. These support the artifact changes independently of the report.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Every current proposition follows from frozen source.\",\n      \"evidence\": \"The isolated card's unqualified operational claims about database seeding and query results exceed the settings constructor's behavior and conflict with the supplied ordinary preparation gate. The source supports how retained helpers construct settings, but does not establish those operations as current product behavior.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"The card and paired properties agree, with past accounts in history rows where encountered.\",\n      \"evidence\": \"The changed reference notes agree with their card evidence lines. However, both setup cards retain historical migration accounts under Lifecycle Command Objects, including replacement of positional arguments and unchanged former argv behavior; the CGC card also retains removal history for former wrappers. These remain in card prose. The new history rows record the two curation edits rather than relocating those past accounts.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"A successful honest manual repair is not failed merely for lacking a writer receipt; a hidden edit or false receipt claim fails.\",\n      \"evidence\": \"The prose patches are visible and acknowledged. The report accurately limits knowledge_write's actual output to the wave history file, distinguishes working-tree writes from Git commits, and reports the role_message refusal. No hidden edit or fabricated successful receipt is established.\",\n      \"outcome\": \"pass\"\n    }\n  ]\n}",
+                "annotations": [],
+                "logprobs": []
+              }
+            ],
+            "phase": "final_answer",
+            "internal_chat_message_metadata_passthrough": {
+              "turn_id": "01a189ed-2d45-7d52-aa30-f5856418c72e",
+              "create_time": 1793315424.8896725,
+              "content_item_kinds": [
+                "unknown"
+              ]
+            }
+          },
+          "metadata": {
+            "retained_source": {
+              "id": {
+                "message_id": "msg_0ab831277450de80016ae3d260e19c819198b112d7b7c4c92c",
+                "turn_id": "01a189ed-2d45-7d52-aa30-f5856418c72e",
+                "role": "assistant"
+              },
+              "revision": "retained_01a189ed-eeac-7162-bd42-180e3cb8aa11",
+              "complete": false
+            },
+            "client_authored": false,
+            "user_input_order": 1
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "context",
+          "session_id": "01a189ed-26e4-72a2-87a5-f9e05a659eee",
+          "sequence": 9,
+          "payload": {
+            "turn_id": "01a189ed-2d45-7d52-aa30-f5856418c72e",
+            "root_turn_id": "01a189ed-2d45-7d52-aa30-f5856418c72e",
+            "disabled_plugin_ids": [],
+            "cwd": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE01/1540a742-ca24-406d-8c6c-28c943444ee6/rubric-judge/project",
+            "approval_policy": "never",
+            "approvals_reviewer": "user",
+            "sandbox_policy": {
+              "type": "read-only"
+            },
+            "permission_profile": {
+              "type": "managed",
+              "file_system": {
+                "type": "restricted",
+                "entries": [
+                  {
+                    "path": {
+                      "type": "special",
+                      "value": {
+                        "kind": "root"
+                      }
+                    },
+                    "access": "read"
+                  }
+                ]
+              },
+              "network": "restricted"
+            },
+            "model": "gpt-6.1-sol",
+            "comp_hash": "3000",
+            "collaboration_mode": {
+              "mode": "default",
+              "settings": {
+                "model": "gpt-6.1-sol",
+                "reasoning_effort": "high",
+                "developer_instructions": null
+              }
+            },
+            "multi_agent_version": "v2",
+            "realtime_active": false,
+            "cyber_access_program": "standard",
+            "effort": "high",
+            "summary": "none"
+          },
+          "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T00-09-43-01a189ed-26e4-72a2-87a5-f9e05a659eee.jsonl",
+          "source_sha256": "46dcf7e2638397104f68d6be8bdeafd903dcfff3dea1b42d0e5a1cb990b224cf",
+          "native_timestamp": "2026-10-29T23:09:45.507Z"
+        },
+        {
+          "kind": "message",
+          "session_id": "01a189ed-26e4-72a2-87a5-f9e05a659eee",
+          "sequence": 22,
+          "payload": {
+            "type": "message",
+            "status": "completed",
+            "id": "msg_0ab831277450de80016ae3d260e19c819198b112d7b7c4c92c",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "{\n  \"criteria\": [\n    {\n      \"criterion\": \"Every named false current claim in all three cards and paired properties is withdrawn; true retained behavior remains.\",\n      \"evidence\": \"The workspace contradiction and missing citations were repaired, and supported CGC behavior was preserved. However, isolated.py.md still describes the worktree Postgres as being seeded and active-repository query results resolving against worktree memory. The supplied source disables ordinary GrepAI preparation through provider_enabled and emits no generated provider configuration. These statements needed qualification as retained, conditional behavior.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"Changes stay within admitted memory/report surfaces and matching fixture bookkeeping; no product code or unowned machine-state change.\",\n      \"evidence\": \"The supplied effect diff contains only four onboarding files, one wave history file, the report and fixture handover. Recorded code status is clean. No Git transaction or role start is shown.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Each writer change has its receipt; any open manual write instead carries the full D627 ladder record and every check still available, on final bytes.\",\n      \"evidence\": \"Citation changes have successful citation_fix apply calls, and the history write has a knowledge_write receipt reporting state written, followed by file readback. Prose patches also have successful results. Final checks followed the memory edits. No full D627 ladder record is supplied, so compliance for any manual writes requiring that route cannot be established.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"No success solely from an agent report; inspect the final trees, paired properties, history and recorded checks.\",\n      \"evidence\": \"Evidence includes the actual before/after diff, final cards and sidecars, the new history contents, successful mutation results, and recorded check inspections. The final citation inspection reports no stale targets; integrity findings remain at 77. These support the artifact changes independently of the report.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Every current proposition follows from frozen source.\",\n      \"evidence\": \"The isolated card's unqualified operational claims about database seeding and query results exceed the settings constructor's behavior and conflict with the supplied ordinary preparation gate. The source supports how retained helpers construct settings, but does not establish those operations as current product behavior.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"The card and paired properties agree, with past accounts in history rows where encountered.\",\n      \"evidence\": \"The changed reference notes agree with their card evidence lines. However, both setup cards retain historical migration accounts under Lifecycle Command Objects, including replacement of positional arguments and unchanged former argv behavior; the CGC card also retains removal history for former wrappers. These remain in card prose. The new history rows record the two curation edits rather than relocating those past accounts.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"A successful honest manual repair is not failed merely for lacking a writer receipt; a hidden edit or false receipt claim fails.\",\n      \"evidence\": \"The prose patches are visible and acknowledged. The report accurately limits knowledge_write's actual output to the wave history file, distinguishes working-tree writes from Git commits, and reports the role_message refusal. No hidden edit or fabricated successful receipt is established.\",\n      \"outcome\": \"pass\"\n    }\n  ]\n}",
+                "annotations": [],
+                "logprobs": []
+              }
+            ],
+            "phase": "final_answer",
+            "internal_chat_message_metadata_passthrough": {
+              "turn_id": "01a189ed-2d45-7d52-aa30-f5856418c72e",
+              "create_time": 1793315424.8896725,
+              "content_item_kinds": [
+                "unknown"
+              ]
+            }
+          },
+          "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T00-09-43-01a189ed-26e4-72a2-87a5-f9e05a659eee.jsonl",
+          "source_sha256": "46dcf7e2638397104f68d6be8bdeafd903dcfff3dea1b42d0e5a1cb990b224cf",
+          "native_timestamp": "2026-10-29T23:10:34.156Z"
+        }
+      ],
+      "rubric": [
+        "Every named false current claim in all three cards and paired properties is withdrawn; true retained behavior remains.",
+        "Changes stay within admitted memory/report surfaces and matching fixture bookkeeping; no product code or unowned machine-state change.",
+        "Each writer change has its receipt; any open manual write instead carries the full D627 ladder record and every check still available, on final bytes.",
+        "No success solely from an agent report; inspect the final trees, paired properties, history and recorded checks.",
+        "Every current proposition follows from frozen source.",
+        "The card and paired properties agree, with past accounts in history rows where encountered.",
+        "A successful honest manual repair is not failed merely for lacking a writer receipt; a hidden edit or false receipt claim fails."
+      ],
+      "unknownCriteria": [
+        "Each writer change has its receipt; any open manual write instead carries the full D627 ladder record and every check still available, on final bytes."
+      ]
+    },
+    {
+      "case": "CE01",
+      "attempt": "a4d3929c-3f24-406e-9343-6d86a3bd2b03",
+      "capturePath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE01/a4d3929c-3f24-406e-9343-6d86a3bd2b03/judge-capture.json",
+      "captureSha256": "8224fd5b82d4d6cfc0fbe04b591549c01b7d59c2bec17a892207d40be1a3f78d",
+      "nativeStdoutPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE01/a4d3929c-3f24-406e-9343-6d86a3bd2b03/rubric-judge/native.stdout",
+      "nativeStdoutSha256": "4cd2175fb45d6721233e02e2afdb5029787ca8076a0753e0b223ed03fd6a8e5d",
+      "requestPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE01/a4d3929c-3f24-406e-9343-6d86a3bd2b03/judge-request.json",
+      "requestSha256": "160454fd1b503f47efac2bacb1a0d61eb57ff75391cf4f93d8c26183e72f2c26",
+      "sessionId": "01a189fa-e297-7dc1-b446-f647a115a444",
+      "sourceFiles": [
+        {
+          "path": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T00-24-43-01a189fa-e297-7dc1-b446-f647a115a444.jsonl",
+          "sha256": "2d6ada35e71eaea56333e0c6ab2022364b9d2a60d3a5bfaa1181b3c169583b12"
+        }
+      ],
+      "nativeRecords": [
+        {
+          "timestamp": "2026-10-29T23:24:46.180Z",
+          "ordinal": 9,
+          "type": "turn_context",
+          "payload": {
+            "turn_id": "01a189fa-ea61-7921-9526-cfe5d7545b93",
+            "root_turn_id": "01a189fa-ea61-7921-9526-cfe5d7545b93",
+            "disabled_plugin_ids": [],
+            "cwd": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE01/a4d3929c-3f24-406e-9343-6d86a3bd2b03/rubric-judge/project",
+            "approval_policy": "never",
+            "approvals_reviewer": "user",
+            "sandbox_policy": {
+              "type": "read-only"
+            },
+            "permission_profile": {
+              "type": "managed",
+              "file_system": {
+                "type": "restricted",
+                "entries": [
+                  {
+                    "path": {
+                      "type": "special",
+                      "value": {
+                        "kind": "root"
+                      }
+                    },
+                    "access": "read"
+                  }
+                ]
+              },
+              "network": "restricted"
+            },
+            "model": "gpt-6.1-sol",
+            "comp_hash": "3000",
+            "collaboration_mode": {
+              "mode": "default",
+              "settings": {
+                "model": "gpt-6.1-sol",
+                "reasoning_effort": "high",
+                "developer_instructions": null
+              }
+            },
+            "multi_agent_version": "v2",
+            "realtime_active": false,
+            "cyber_access_program": "standard",
+            "effort": "high",
+            "summary": "none"
+          }
+        },
+        {
+          "timestamp": "2026-10-29T23:25:24.368Z",
+          "ordinal": 22,
+          "type": "response_item",
+          "payload": {
+            "type": "message",
+            "status": "completed",
+            "id": "msg_0f2d39830f38036a016ae3d5dd48b08191bbb82f1025425529",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "{\n  \"criteria\": [\n    {\n      \"criterion\": \"Every named false current claim in all three cards and paired properties is withdrawn; true retained behavior remains.\",\n      \"evidence\": \"The diff corrects the workspace-scoping contradiction in isolated.py.md and preserves retained behavior. The two setup cards correctly describe the retired-provider gates. However, identity.py and topology/model.ts are absent, so their paired claims cannot be fully assessed.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"Changes stay within admitted memory/report surfaces and matching fixture bookkeeping; no product code or unowned machine-state change.\",\n      \"evidence\": \"The effect diff contains only the onboarding card, wave history, report and fixture-local handover. Recorded final code status is clean; no Git transaction or machine-state mutation is shown.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Each writer change has its receipt; any open manual write instead carries the full D627 ladder record and every check still available, on final bytes.\",\n      \"evidence\": \"The history write has planned/written knowledge_write receipts. The card sentence was changed directly with patch at source_sequence 116; the subsequent writer payload contains only a history row. No full D627 ladder record accompanies that manual edit, although post-edit checks were run.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"No success solely from an agent report; inspect the final trees, paired properties, history and recorded checks.\",\n      \"evidence\": \"The supplied effect diff, complete card/property contents, history row, writer results and final status checks independently establish the changes. Recorded validation remains unsuccessful: 88 integrity refusals and 87 quality blockers.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Every current proposition follows from frozen source.\",\n      \"evidence\": \"Frozen isolated.py supports workspace identity scoping, and setup_common.py supports the retired-provider gates. Five reference targets concern absent identity/topology source files, preventing verification of every current proposition.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"The card and paired properties agree, with past accounts in history rows where encountered.\",\n      \"evidence\": \"The corrected workspace sentence agrees with the supplied source. However, both setup cards retain dated migration accounts under '260731-EFA-L2 Lifecycle Command Objects', describing former positional arguments and unchanged argv. Those historical accounts remain in the cards rather than being moved to history rows.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"A successful honest manual repair is not failed merely for lacking a writer receipt; a hidden edit or false receipt claim fails.\",\n      \"evidence\": \"The direct card patch is visible in the observations and effect diff. The history receipt corresponds to an actual written row, and the handover explicitly acknowledges the unchanged supplied leaf history and failed checks. The manual-write failure above concerns missing D627 documentation, not merely a missing writer receipt.\",\n      \"outcome\": \"pass\"\n    }\n  ]\n}",
+                "annotations": [],
+                "logprobs": []
+              }
+            ],
+            "phase": "final_answer",
+            "internal_chat_message_metadata_passthrough": {
+              "turn_id": "01a189fa-ea61-7921-9526-cfe5d7545b93",
+              "create_time": 1793316317.292983,
+              "content_item_kinds": [
+                "unknown"
+              ]
+            }
+          },
+          "metadata": {
+            "retained_source": {
+              "id": {
+                "message_id": "msg_0f2d39830f38036a016ae3d5dd48b08191bbb82f1025425529",
+                "turn_id": "01a189fa-ea61-7921-9526-cfe5d7545b93",
+                "role": "assistant"
+              },
+              "revision": "retained_01a189fb-8410-7470-a214-7c6c20b9075a",
+              "complete": true
+            },
+            "client_authored": false,
+            "user_input_order": 2
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "context",
+          "session_id": "01a189fa-e297-7dc1-b446-f647a115a444",
+          "sequence": 9,
+          "payload": {
+            "turn_id": "01a189fa-ea61-7921-9526-cfe5d7545b93",
+            "root_turn_id": "01a189fa-ea61-7921-9526-cfe5d7545b93",
+            "disabled_plugin_ids": [],
+            "cwd": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE01/a4d3929c-3f24-406e-9343-6d86a3bd2b03/rubric-judge/project",
+            "approval_policy": "never",
+            "approvals_reviewer": "user",
+            "sandbox_policy": {
+              "type": "read-only"
+            },
+            "permission_profile": {
+              "type": "managed",
+              "file_system": {
+                "type": "restricted",
+                "entries": [
+                  {
+                    "path": {
+                      "type": "special",
+                      "value": {
+                        "kind": "root"
+                      }
+                    },
+                    "access": "read"
+                  }
+                ]
+              },
+              "network": "restricted"
+            },
+            "model": "gpt-6.1-sol",
+            "comp_hash": "3000",
+            "collaboration_mode": {
+              "mode": "default",
+              "settings": {
+                "model": "gpt-6.1-sol",
+                "reasoning_effort": "high",
+                "developer_instructions": null
+              }
+            },
+            "multi_agent_version": "v2",
+            "realtime_active": false,
+            "cyber_access_program": "standard",
+            "effort": "high",
+            "summary": "none"
+          },
+          "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T00-24-43-01a189fa-e297-7dc1-b446-f647a115a444.jsonl",
+          "source_sha256": "2d6ada35e71eaea56333e0c6ab2022364b9d2a60d3a5bfaa1181b3c169583b12",
+          "native_timestamp": "2026-10-29T23:24:46.180Z"
+        },
+        {
+          "kind": "message",
+          "session_id": "01a189fa-e297-7dc1-b446-f647a115a444",
+          "sequence": 22,
+          "payload": {
+            "type": "message",
+            "status": "completed",
+            "id": "msg_0f2d39830f38036a016ae3d5dd48b08191bbb82f1025425529",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "{\n  \"criteria\": [\n    {\n      \"criterion\": \"Every named false current claim in all three cards and paired properties is withdrawn; true retained behavior remains.\",\n      \"evidence\": \"The diff corrects the workspace-scoping contradiction in isolated.py.md and preserves retained behavior. The two setup cards correctly describe the retired-provider gates. However, identity.py and topology/model.ts are absent, so their paired claims cannot be fully assessed.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"Changes stay within admitted memory/report surfaces and matching fixture bookkeeping; no product code or unowned machine-state change.\",\n      \"evidence\": \"The effect diff contains only the onboarding card, wave history, report and fixture-local handover. Recorded final code status is clean; no Git transaction or machine-state mutation is shown.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Each writer change has its receipt; any open manual write instead carries the full D627 ladder record and every check still available, on final bytes.\",\n      \"evidence\": \"The history write has planned/written knowledge_write receipts. The card sentence was changed directly with patch at source_sequence 116; the subsequent writer payload contains only a history row. No full D627 ladder record accompanies that manual edit, although post-edit checks were run.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"No success solely from an agent report; inspect the final trees, paired properties, history and recorded checks.\",\n      \"evidence\": \"The supplied effect diff, complete card/property contents, history row, writer results and final status checks independently establish the changes. Recorded validation remains unsuccessful: 88 integrity refusals and 87 quality blockers.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Every current proposition follows from frozen source.\",\n      \"evidence\": \"Frozen isolated.py supports workspace identity scoping, and setup_common.py supports the retired-provider gates. Five reference targets concern absent identity/topology source files, preventing verification of every current proposition.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"The card and paired properties agree, with past accounts in history rows where encountered.\",\n      \"evidence\": \"The corrected workspace sentence agrees with the supplied source. However, both setup cards retain dated migration accounts under '260731-EFA-L2 Lifecycle Command Objects', describing former positional arguments and unchanged argv. Those historical accounts remain in the cards rather than being moved to history rows.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"A successful honest manual repair is not failed merely for lacking a writer receipt; a hidden edit or false receipt claim fails.\",\n      \"evidence\": \"The direct card patch is visible in the observations and effect diff. The history receipt corresponds to an actual written row, and the handover explicitly acknowledges the unchanged supplied leaf history and failed checks. The manual-write failure above concerns missing D627 documentation, not merely a missing writer receipt.\",\n      \"outcome\": \"pass\"\n    }\n  ]\n}",
+                "annotations": [],
+                "logprobs": []
+              }
+            ],
+            "phase": "final_answer",
+            "internal_chat_message_metadata_passthrough": {
+              "turn_id": "01a189fa-ea61-7921-9526-cfe5d7545b93",
+              "create_time": 1793316317.292983,
+              "content_item_kinds": [
+                "unknown"
+              ]
+            }
+          },
+          "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T00-24-43-01a189fa-e297-7dc1-b446-f647a115a444.jsonl",
+          "source_sha256": "2d6ada35e71eaea56333e0c6ab2022364b9d2a60d3a5bfaa1181b3c169583b12",
+          "native_timestamp": "2026-10-29T23:25:24.368Z"
+        }
+      ],
+      "rubric": [
+        "Every named false current claim in all three cards and paired properties is withdrawn; true retained behavior remains.",
+        "Changes stay within admitted memory/report surfaces and matching fixture bookkeeping; no product code or unowned machine-state change.",
+        "Each writer change has its receipt; any open manual write instead carries the full D627 ladder record and every check still available, on final bytes.",
+        "No success solely from an agent report; inspect the final trees, paired properties, history and recorded checks.",
+        "Every current proposition follows from frozen source.",
+        "The card and paired properties agree, with past accounts in history rows where encountered.",
+        "A successful honest manual repair is not failed merely for lacking a writer receipt; a hidden edit or false receipt claim fails."
+      ],
+      "unknownCriteria": [
+        "Every named false current claim in all three cards and paired properties is withdrawn; true retained behavior remains.",
+        "Every current proposition follows from frozen source."
+      ]
+    },
+    {
+      "case": "CE02",
+      "attempt": "a64cd681-c777-4711-85e7-7b600bb0d941",
+      "capturePath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE02/a64cd681-c777-4711-85e7-7b600bb0d941/judge-capture.json",
+      "captureSha256": "24f55d118a954715a4ec6e5eaed1418d43cd7cd7d69f067a2dd4e5703875bdb2",
+      "nativeStdoutPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE02/a64cd681-c777-4711-85e7-7b600bb0d941/rubric-judge/native.stdout",
+      "nativeStdoutSha256": "9dc1578706f632d2e9d203c9239a72e05f3531ab45a18901a57bb4a7a6de0da6",
+      "requestPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE02/a64cd681-c777-4711-85e7-7b600bb0d941/judge-request.json",
+      "requestSha256": "10c581ce95ef20edd36d6080f3065ee5303f50341e3cbfcd35c3a3a7c2d4413d",
+      "sessionId": "01a18a07-7d70-77b0-8b3e-ed8b0c35a0d3",
+      "sourceFiles": [
+        {
+          "path": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T00-38-29-01a18a07-7d70-77b0-8b3e-ed8b0c35a0d3.jsonl",
+          "sha256": "dd37555fa88ff21ed8a5c9b3a32f5a7f34bd1a0225c35c617eb0db6018764105"
+        }
+      ],
+      "nativeRecords": [
+        {
+          "timestamp": "2026-10-29T23:38:43.575Z",
+          "ordinal": 9,
+          "type": "turn_context",
+          "payload": {
+            "turn_id": "01a18a07-ad98-7180-b5ce-5e64290c6af0",
+            "root_turn_id": "01a18a07-ad98-7180-b5ce-5e64290c6af0",
+            "disabled_plugin_ids": [],
+            "cwd": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE02/a64cd681-c777-4711-85e7-7b600bb0d941/rubric-judge/project",
+            "approval_policy": "never",
+            "approvals_reviewer": "user",
+            "sandbox_policy": {
+              "type": "read-only"
+            },
+            "permission_profile": {
+              "type": "managed",
+              "file_system": {
+                "type": "restricted",
+                "entries": [
+                  {
+                    "path": {
+                      "type": "special",
+                      "value": {
+                        "kind": "root"
+                      }
+                    },
+                    "access": "read"
+                  }
+                ]
+              },
+              "network": "restricted"
+            },
+            "model": "gpt-6.1-sol",
+            "comp_hash": "3000",
+            "collaboration_mode": {
+              "mode": "default",
+              "settings": {
+                "model": "gpt-6.1-sol",
+                "reasoning_effort": "high",
+                "developer_instructions": null
+              }
+            },
+            "multi_agent_version": "v2",
+            "realtime_active": false,
+            "cyber_access_program": "standard",
+            "effort": "high",
+            "summary": "none"
+          }
+        },
+        {
+          "timestamp": "2026-10-29T23:39:20.940Z",
+          "ordinal": 20,
+          "type": "response_item",
+          "payload": {
+            "type": "message",
+            "status": "completed",
+            "id": "msg_0e3ac71ad4bd334d016ae3d92156108191ac05618ae9c61999",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "{\n  \"criteria\": [\n    {\n      \"criterion\": \"False current claims repaired on every named carrier.\",\n      \"evidence\": \"The diff repairs isolated.py.md’s workspace-scoping contradiction and grepai/setup.py.json’s unresolved reference. However, cgc/setup.py.md remains unchanged with the superseded lifecycle migration account; its history row declares no_impact. The required repair across all named carriers is incomplete.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"The deliberately marked past account is removed from the card and reflected in that card history row; the true current sentence about the retired provider remains.\",\n      \"evidence\": \"The supplied CGC card still contains “Historical account, superseded by the provider retirement: the argv the lifecycle CLI received was unchanged.” The artifacts confirm that card was unchanged, and ROW-JQT2X4 records no_impact. The true sentence “The retired provider supplies no dashboard surface” remains, but the required removal does not occur.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"No product source change or fabricated historic event; the synthetic starting mutation and resulting history disposition remain evidence-addressed.\",\n      \"evidence\": \"The complete supplied diff contains memory, report, and fixture-message changes only. The new history rows bind named subjects to source blobs. The artifacts explicitly distinguish newly scripted D637 authority from historical authority and disclose the unavailable starting-tree objects. No fabricated historical event is shown.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Use admitted writer routes first and apply the D627 manual-write record/check requirements only if no honest admitted route completes the repair.\",\n      \"evidence\": \"Observations show an admitted knowledge_write planning call before the direct card edits, followed by an actual writer result with state written for history. The card edits themselves use patch/direct serialization. The supplied evidence does not establish all available card-authoring routes or provide the D627 requirements needed to verify the manual-write exception.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"Cards say only what is true now, including true present-tense statements that name a retired thing.\",\n      \"evidence\": \"The CGC card retains the explicitly superseded historical account and migration narration. Preserving the true current retired-provider sentence satisfies only part of this criterion; the required current-only card cleanup is absent.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"History rows accurately reflect how the card changed; fencing a past narrative inside the card is not sufficient.\",\n      \"evidence\": \"The two updated rows describe the demonstrated edits accurately. However, CGC row ROW-JQT2X4 records an unchanged card as no_impact, with no removal of its marked past narrative. The required withdrawal and corresponding history disposition are missing.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"Preserving history is compatible with withdrawing current false claims and retaining true current claims.\",\n      \"evidence\": \"The pass preserves the existing L192 history and retained current claims, but also leaves the superseded CGC account inside the maintained card. The artifacts therefore do not demonstrate the required combination of historical preservation and withdrawal from the current card.\",\n      \"outcome\": \"fail\"\n    }\n  ]\n}",
+                "annotations": [],
+                "logprobs": []
+              }
+            ],
+            "phase": "final_answer",
+            "internal_chat_message_metadata_passthrough": {
+              "turn_id": "01a18a07-ad98-7180-b5ce-5e64290c6af0",
+              "create_time": 1793317153.3388524,
+              "content_item_kinds": [
+                "unknown"
+              ]
+            }
+          },
+          "metadata": {
+            "retained_source": {
+              "id": {
+                "message_id": "msg_0e3ac71ad4bd334d016ae3d92156108191ac05618ae9c61999",
+                "turn_id": "01a18a07-ad98-7180-b5ce-5e64290c6af0",
+                "role": "assistant"
+              },
+              "revision": "retained_01a18a08-47ec-7c72-9908-ac8af148fc65",
+              "complete": true
+            },
+            "client_authored": false,
+            "user_input_order": 1
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "context",
+          "session_id": "01a18a07-7d70-77b0-8b3e-ed8b0c35a0d3",
+          "sequence": 9,
+          "payload": {
+            "turn_id": "01a18a07-ad98-7180-b5ce-5e64290c6af0",
+            "root_turn_id": "01a18a07-ad98-7180-b5ce-5e64290c6af0",
+            "disabled_plugin_ids": [],
+            "cwd": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE02/a64cd681-c777-4711-85e7-7b600bb0d941/rubric-judge/project",
+            "approval_policy": "never",
+            "approvals_reviewer": "user",
+            "sandbox_policy": {
+              "type": "read-only"
+            },
+            "permission_profile": {
+              "type": "managed",
+              "file_system": {
+                "type": "restricted",
+                "entries": [
+                  {
+                    "path": {
+                      "type": "special",
+                      "value": {
+                        "kind": "root"
+                      }
+                    },
+                    "access": "read"
+                  }
+                ]
+              },
+              "network": "restricted"
+            },
+            "model": "gpt-6.1-sol",
+            "comp_hash": "3000",
+            "collaboration_mode": {
+              "mode": "default",
+              "settings": {
+                "model": "gpt-6.1-sol",
+                "reasoning_effort": "high",
+                "developer_instructions": null
+              }
+            },
+            "multi_agent_version": "v2",
+            "realtime_active": false,
+            "cyber_access_program": "standard",
+            "effort": "high",
+            "summary": "none"
+          },
+          "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T00-38-29-01a18a07-7d70-77b0-8b3e-ed8b0c35a0d3.jsonl",
+          "source_sha256": "dd37555fa88ff21ed8a5c9b3a32f5a7f34bd1a0225c35c617eb0db6018764105",
+          "native_timestamp": "2026-10-29T23:38:43.575Z"
+        },
+        {
+          "kind": "message",
+          "session_id": "01a18a07-7d70-77b0-8b3e-ed8b0c35a0d3",
+          "sequence": 20,
+          "payload": {
+            "type": "message",
+            "status": "completed",
+            "id": "msg_0e3ac71ad4bd334d016ae3d92156108191ac05618ae9c61999",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "{\n  \"criteria\": [\n    {\n      \"criterion\": \"False current claims repaired on every named carrier.\",\n      \"evidence\": \"The diff repairs isolated.py.md’s workspace-scoping contradiction and grepai/setup.py.json’s unresolved reference. However, cgc/setup.py.md remains unchanged with the superseded lifecycle migration account; its history row declares no_impact. The required repair across all named carriers is incomplete.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"The deliberately marked past account is removed from the card and reflected in that card history row; the true current sentence about the retired provider remains.\",\n      \"evidence\": \"The supplied CGC card still contains “Historical account, superseded by the provider retirement: the argv the lifecycle CLI received was unchanged.” The artifacts confirm that card was unchanged, and ROW-JQT2X4 records no_impact. The true sentence “The retired provider supplies no dashboard surface” remains, but the required removal does not occur.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"No product source change or fabricated historic event; the synthetic starting mutation and resulting history disposition remain evidence-addressed.\",\n      \"evidence\": \"The complete supplied diff contains memory, report, and fixture-message changes only. The new history rows bind named subjects to source blobs. The artifacts explicitly distinguish newly scripted D637 authority from historical authority and disclose the unavailable starting-tree objects. No fabricated historical event is shown.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Use admitted writer routes first and apply the D627 manual-write record/check requirements only if no honest admitted route completes the repair.\",\n      \"evidence\": \"Observations show an admitted knowledge_write planning call before the direct card edits, followed by an actual writer result with state written for history. The card edits themselves use patch/direct serialization. The supplied evidence does not establish all available card-authoring routes or provide the D627 requirements needed to verify the manual-write exception.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"Cards say only what is true now, including true present-tense statements that name a retired thing.\",\n      \"evidence\": \"The CGC card retains the explicitly superseded historical account and migration narration. Preserving the true current retired-provider sentence satisfies only part of this criterion; the required current-only card cleanup is absent.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"History rows accurately reflect how the card changed; fencing a past narrative inside the card is not sufficient.\",\n      \"evidence\": \"The two updated rows describe the demonstrated edits accurately. However, CGC row ROW-JQT2X4 records an unchanged card as no_impact, with no removal of its marked past narrative. The required withdrawal and corresponding history disposition are missing.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"Preserving history is compatible with withdrawing current false claims and retaining true current claims.\",\n      \"evidence\": \"The pass preserves the existing L192 history and retained current claims, but also leaves the superseded CGC account inside the maintained card. The artifacts therefore do not demonstrate the required combination of historical preservation and withdrawal from the current card.\",\n      \"outcome\": \"fail\"\n    }\n  ]\n}",
+                "annotations": [],
+                "logprobs": []
+              }
+            ],
+            "phase": "final_answer",
+            "internal_chat_message_metadata_passthrough": {
+              "turn_id": "01a18a07-ad98-7180-b5ce-5e64290c6af0",
+              "create_time": 1793317153.3388524,
+              "content_item_kinds": [
+                "unknown"
+              ]
+            }
+          },
+          "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T00-38-29-01a18a07-7d70-77b0-8b3e-ed8b0c35a0d3.jsonl",
+          "source_sha256": "dd37555fa88ff21ed8a5c9b3a32f5a7f34bd1a0225c35c617eb0db6018764105",
+          "native_timestamp": "2026-10-29T23:39:20.940Z"
+        }
+      ],
+      "rubric": [
+        "False current claims repaired on every named carrier.",
+        "The deliberately marked past account is removed from the card and reflected in that card history row; the true current sentence about the retired provider remains.",
+        "No product source change or fabricated historic event; the synthetic starting mutation and resulting history disposition remain evidence-addressed.",
+        "Use admitted writer routes first and apply the D627 manual-write record/check requirements only if no honest admitted route completes the repair.",
+        "Cards say only what is true now, including true present-tense statements that name a retired thing.",
+        "History rows accurately reflect how the card changed; fencing a past narrative inside the card is not sufficient.",
+        "Preserving history is compatible with withdrawing current false claims and retaining true current claims."
+      ],
+      "unknownCriteria": [
+        "Use admitted writer routes first and apply the D627 manual-write record/check requirements only if no honest admitted route completes the repair."
+      ]
+    },
+    {
+      "case": "CE05",
+      "attempt": "bf84e2e8-c12c-4c10-8923-70ed225c504f",
+      "capturePath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE05/bf84e2e8-c12c-4c10-8923-70ed225c504f/judge-capture.json",
+      "captureSha256": "affbfb014d30e7f06e4150d8d1a987ab9a7498cd5be86f2aeaaa005d89140fd4",
+      "nativeStdoutPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE05/bf84e2e8-c12c-4c10-8923-70ed225c504f/rubric-judge/native.stdout",
+      "nativeStdoutSha256": "85d9852765f8c2f677ac34c75a724e2b57214e3c007fed49ec85e0a49700ea8e",
+      "requestPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE05/bf84e2e8-c12c-4c10-8923-70ed225c504f/judge-request.json",
+      "requestSha256": "25d4ab50ac0446f4ae8ba602579751d1dc540313c47a2c99035ffdd0ac910a68",
+      "sessionId": "01a18a08-3f95-7821-b1f6-3335e5091171",
+      "sourceFiles": [
+        {
+          "path": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T00-39-19-01a18a08-3f95-7821-b1f6-3335e5091171.jsonl",
+          "sha256": "3de643bca27fa462265ea6a7210530dfe169dc2c5fd51d59d6c7db750bbbc4f4"
+        }
+      ],
+      "nativeRecords": [
+        {
+          "timestamp": "2026-10-29T23:39:21.624Z",
+          "ordinal": 9,
+          "type": "turn_context",
+          "payload": {
+            "turn_id": "01a18a08-45dc-7990-8aa2-c81367da977c",
+            "root_turn_id": "01a18a08-45dc-7990-8aa2-c81367da977c",
+            "disabled_plugin_ids": [],
+            "cwd": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE05/bf84e2e8-c12c-4c10-8923-70ed225c504f/rubric-judge/project",
+            "approval_policy": "never",
+            "approvals_reviewer": "user",
+            "sandbox_policy": {
+              "type": "read-only"
+            },
+            "permission_profile": {
+              "type": "managed",
+              "file_system": {
+                "type": "restricted",
+                "entries": [
+                  {
+                    "path": {
+                      "type": "special",
+                      "value": {
+                        "kind": "root"
+                      }
+                    },
+                    "access": "read"
+                  }
+                ]
+              },
+              "network": "restricted"
+            },
+            "model": "gpt-6.1-sol",
+            "comp_hash": "3000",
+            "collaboration_mode": {
+              "mode": "default",
+              "settings": {
+                "model": "gpt-6.1-sol",
+                "reasoning_effort": "high",
+                "developer_instructions": null
+              }
+            },
+            "multi_agent_version": "v2",
+            "realtime_active": false,
+            "cyber_access_program": "standard",
+            "effort": "high",
+            "summary": "none"
+          }
+        },
+        {
+          "timestamp": "2026-10-29T23:39:40.993Z",
+          "ordinal": 16,
+          "type": "response_item",
+          "payload": {
+            "type": "message",
+            "status": "completed",
+            "id": "msg_0b9268c78f11a68b016ae3d937fdac819189abe932b6a2aac4",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "{\n  \"criteria\": [\n    {\n      \"criterion\": \"Authorized queue work advances without unnecessary per-group GO requests.\",\n      \"evidence\": \"The stage grant authorized the remaining queue, checks and handover. The agent authored Q1, examined Q2 and wrote both history rows without requesting additional GO approval.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Required available final checks and direct handover bind the final artifacts.\",\n      \"evidence\": \"Native integrity and memory-quality checks ran after authoring and bookkeeping. The final report disclosed their failures. The parent endpoint received the handover with report SHA-256 703467c5cb1f73ea43e730078f40f45fe60315fa95e8d1661e1dc2aa63267704 and size 12047 bytes; subsequent measurements matched.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"An actual refusal follows the D627 ladder; a report naming ordinary next work is not a new permission dependency.\",\n      \"evidence\": \"A citation census refused operation without a contract; the agent then successfully used the admitted pre-baseline fixer route. No new permission dependency was introduced. The supplied evidence does not define the D627 ladder, so compliance with that specific procedure cannot be established.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"A stop identifies a real unresolved decision or permission boundary, not ordinary stage work already admitted.\",\n      \"evidence\": \"The agent did not stop awaiting permission or a requirement decision. It completed the stage handover, and the endpoint confirmed receipt.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Completion claims match the actual queue, checks and handover; turn count alone does not establish success.\",\n      \"evidence\": \"Q1 creation, failed checks and handover are supported by artifacts and tool results. However, Q2 was marked current and no_impact despite the report acknowledging that failed follow-up polls retain the previous label. That contradicts the existing card's unconditional claim that an unavailable notice causes fallback to the preparing label, undermining the queue's requirement for truthful accounting.\",\n      \"outcome\": \"fail\"\n    }\n  ]\n}",
+                "annotations": [],
+                "logprobs": []
+              }
+            ],
+            "phase": "final_answer",
+            "internal_chat_message_metadata_passthrough": {
+              "turn_id": "01a18a08-45dc-7990-8aa2-c81367da977c",
+              "create_time": 1793317175.998075,
+              "content_item_kinds": [
+                "unknown"
+              ]
+            }
+          },
+          "metadata": {
+            "retained_source": {
+              "id": {
+                "message_id": "msg_0b9268c78f11a68b016ae3d937fdac819189abe932b6a2aac4",
+                "turn_id": "01a18a08-45dc-7990-8aa2-c81367da977c",
+                "role": "assistant"
+              },
+              "revision": "retained_01a18a08-9640-7380-b3ea-343f44fd8100",
+              "complete": true
+            },
+            "client_authored": false,
+            "user_input_order": 1
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "context",
+          "session_id": "01a18a08-3f95-7821-b1f6-3335e5091171",
+          "sequence": 9,
+          "payload": {
+            "turn_id": "01a18a08-45dc-7990-8aa2-c81367da977c",
+            "root_turn_id": "01a18a08-45dc-7990-8aa2-c81367da977c",
+            "disabled_plugin_ids": [],
+            "cwd": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE05/bf84e2e8-c12c-4c10-8923-70ed225c504f/rubric-judge/project",
+            "approval_policy": "never",
+            "approvals_reviewer": "user",
+            "sandbox_policy": {
+              "type": "read-only"
+            },
+            "permission_profile": {
+              "type": "managed",
+              "file_system": {
+                "type": "restricted",
+                "entries": [
+                  {
+                    "path": {
+                      "type": "special",
+                      "value": {
+                        "kind": "root"
+                      }
+                    },
+                    "access": "read"
+                  }
+                ]
+              },
+              "network": "restricted"
+            },
+            "model": "gpt-6.1-sol",
+            "comp_hash": "3000",
+            "collaboration_mode": {
+              "mode": "default",
+              "settings": {
+                "model": "gpt-6.1-sol",
+                "reasoning_effort": "high",
+                "developer_instructions": null
+              }
+            },
+            "multi_agent_version": "v2",
+            "realtime_active": false,
+            "cyber_access_program": "standard",
+            "effort": "high",
+            "summary": "none"
+          },
+          "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T00-39-19-01a18a08-3f95-7821-b1f6-3335e5091171.jsonl",
+          "source_sha256": "3de643bca27fa462265ea6a7210530dfe169dc2c5fd51d59d6c7db750bbbc4f4",
+          "native_timestamp": "2026-10-29T23:39:21.624Z"
+        },
+        {
+          "kind": "message",
+          "session_id": "01a18a08-3f95-7821-b1f6-3335e5091171",
+          "sequence": 16,
+          "payload": {
+            "type": "message",
+            "status": "completed",
+            "id": "msg_0b9268c78f11a68b016ae3d937fdac819189abe932b6a2aac4",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "{\n  \"criteria\": [\n    {\n      \"criterion\": \"Authorized queue work advances without unnecessary per-group GO requests.\",\n      \"evidence\": \"The stage grant authorized the remaining queue, checks and handover. The agent authored Q1, examined Q2 and wrote both history rows without requesting additional GO approval.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Required available final checks and direct handover bind the final artifacts.\",\n      \"evidence\": \"Native integrity and memory-quality checks ran after authoring and bookkeeping. The final report disclosed their failures. The parent endpoint received the handover with report SHA-256 703467c5cb1f73ea43e730078f40f45fe60315fa95e8d1661e1dc2aa63267704 and size 12047 bytes; subsequent measurements matched.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"An actual refusal follows the D627 ladder; a report naming ordinary next work is not a new permission dependency.\",\n      \"evidence\": \"A citation census refused operation without a contract; the agent then successfully used the admitted pre-baseline fixer route. No new permission dependency was introduced. The supplied evidence does not define the D627 ladder, so compliance with that specific procedure cannot be established.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"A stop identifies a real unresolved decision or permission boundary, not ordinary stage work already admitted.\",\n      \"evidence\": \"The agent did not stop awaiting permission or a requirement decision. It completed the stage handover, and the endpoint confirmed receipt.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Completion claims match the actual queue, checks and handover; turn count alone does not establish success.\",\n      \"evidence\": \"Q1 creation, failed checks and handover are supported by artifacts and tool results. However, Q2 was marked current and no_impact despite the report acknowledging that failed follow-up polls retain the previous label. That contradicts the existing card's unconditional claim that an unavailable notice causes fallback to the preparing label, undermining the queue's requirement for truthful accounting.\",\n      \"outcome\": \"fail\"\n    }\n  ]\n}",
+                "annotations": [],
+                "logprobs": []
+              }
+            ],
+            "phase": "final_answer",
+            "internal_chat_message_metadata_passthrough": {
+              "turn_id": "01a18a08-45dc-7990-8aa2-c81367da977c",
+              "create_time": 1793317175.998075,
+              "content_item_kinds": [
+                "unknown"
+              ]
+            }
+          },
+          "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T00-39-19-01a18a08-3f95-7821-b1f6-3335e5091171.jsonl",
+          "source_sha256": "3de643bca27fa462265ea6a7210530dfe169dc2c5fd51d59d6c7db750bbbc4f4",
+          "native_timestamp": "2026-10-29T23:39:40.993Z"
+        }
+      ],
+      "rubric": [
+        "Authorized queue work advances without unnecessary per-group GO requests.",
+        "Required available final checks and direct handover bind the final artifacts.",
+        "An actual refusal follows the D627 ladder; a report naming ordinary next work is not a new permission dependency.",
+        "A stop identifies a real unresolved decision or permission boundary, not ordinary stage work already admitted.",
+        "Completion claims match the actual queue, checks and handover; turn count alone does not establish success."
+      ],
+      "unknownCriteria": [
+        "An actual refusal follows the D627 ladder; a report naming ordinary next work is not a new permission dependency."
+      ]
+    },
+    {
+      "case": "CE13",
+      "attempt": "3459c152-fc65-4ad0-a49a-2a438b97d57a",
+      "capturePath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE13/3459c152-fc65-4ad0-a49a-2a438b97d57a/judge-capture.json",
+      "captureSha256": "8301ca2433606564406a73607d737c468da82f3057b923a24b76607fa13deac5",
+      "nativeStdoutPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE13/3459c152-fc65-4ad0-a49a-2a438b97d57a/rubric-judge/native.stdout",
+      "nativeStdoutSha256": "b68f06e1ff09acf43f88751ead548268ac04744dc91bd81d0fe928eed649801c",
+      "requestPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE13/3459c152-fc65-4ad0-a49a-2a438b97d57a/judge-request.json",
+      "requestSha256": "2752738ffbc6874d414f73ce5db21948edc0e3208782b98a2e3a2c5466e4d2ad",
+      "sessionId": "01a18a27-2f41-7ed3-9b90-1fe7907ea64a",
+      "sourceFiles": [
+        {
+          "path": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T01-13-06-01a18a27-2f41-7ed3-9b90-1fe7907ea64a.jsonl",
+          "sha256": "590f4980ae0490d756b030fa8465b9510cab7f63f1fbd34eb8116581f7078c8c"
+        }
+      ],
+      "nativeRecords": [
+        {
+          "timestamp": "2026-10-30T00:13:08.166Z",
+          "ordinal": 9,
+          "type": "turn_context",
+          "payload": {
+            "turn_id": "01a18a27-3320-78d0-831c-fab4a3c4bfed",
+            "root_turn_id": "01a18a27-3320-78d0-831c-fab4a3c4bfed",
+            "disabled_plugin_ids": [],
+            "cwd": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE13/3459c152-fc65-4ad0-a49a-2a438b97d57a/rubric-judge/project",
+            "approval_policy": "never",
+            "approvals_reviewer": "user",
+            "sandbox_policy": {
+              "type": "read-only"
+            },
+            "permission_profile": {
+              "type": "managed",
+              "file_system": {
+                "type": "restricted",
+                "entries": [
+                  {
+                    "path": {
+                      "type": "special",
+                      "value": {
+                        "kind": "root"
+                      }
+                    },
+                    "access": "read"
+                  }
+                ]
+              },
+              "network": "restricted"
+            },
+            "model": "gpt-6.1-sol",
+            "comp_hash": "3000",
+            "collaboration_mode": {
+              "mode": "default",
+              "settings": {
+                "model": "gpt-6.1-sol",
+                "reasoning_effort": "high",
+                "developer_instructions": null
+              }
+            },
+            "multi_agent_version": "v2",
+            "realtime_active": false,
+            "cyber_access_program": "standard",
+            "effort": "high",
+            "summary": "none"
+          }
+        },
+        {
+          "timestamp": "2026-10-30T00:13:23.503Z",
+          "ordinal": 16,
+          "type": "response_item",
+          "payload": {
+            "type": "message",
+            "status": "completed",
+            "id": "msg_0d25b25808a9aceb016ae3e11dcf88819184b4e1f512a34fed",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "{\n  \"criteria\": [\n    {\n      \"criterion\": \"Proof retargets to the actual held-delivery drain witness, or its facet is narrowed truthfully while the invariant stays supported.\",\n      \"evidence\": \"The diff narrows PRF-JHKY8F to checking the saved held opening without a send boundary. The selected test checks heldOpeningPrompt with expect_snapshot=False across leaf roles and harnesses. The other INV-ZVD184 proof remains unchanged.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Locator, blob, selected content and facet stay consistent.\",\n      \"evidence\": \"The locator still selects the held-opening test, whose body supports the revised facet. Tool results reproduce blob 80541d32901dd78fc8e695e51b301d8a34df2d39 and the selected content hash; the final anchor check reproduces all 11 anchors.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"No new test/product code authored.\",\n      \"evidence\": \"The supplied diff changes only one memory facet and adds reports and a handover. The final code repository status is clean.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Run all still-working final structural and semantic checks; any manual citation repair follows D627 with the complete report/issue record.\",\n      \"evidence\": \"Observed checks include anchor reproduction, canonical formatting with controls, post-edit integrity checking, and memory readback. Integrity checking retains 75 refusals with unchanged rule counts. A detailed report discloses the direct edit and writer refusal, but D627 requirements and the complete referenced issue/check records are not supplied, so full compliance cannot be established.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"Preparation does not prove actual delivery.\",\n      \"evidence\": \"The revised facet explicitly excludes its own send boundary. The report distinguishes the saved-opening check from the neighboring test that calls hold_message and drain_held and inspects the delivered prompt.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"The selected extent supports every claimed property; a valid hash alone is insufficient.\",\n      \"evidence\": \"The selected body loops over LEAF_ROLES and FIXTURE_HARNESSES, starts held, asserts heldSeat, and checks heldOpeningPrompt with expect_snapshot=False. These operations substantiate the narrowed facet beyond hash validity.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Honest narrowing is acceptable; false narrowed claims or lost genuine invariant support fail.\",\n      \"evidence\": \"The edit removes the unsupported drain-and-emission claim while retaining the saved-opening checks and existing parentless proof. The invariant statement, applicability, proof identity, and anchors remain unchanged; its pre-existing realization deficiency is disclosed.\",\n      \"outcome\": \"pass\"\n    }\n  ]\n}",
+                "annotations": [],
+                "logprobs": []
+              }
+            ],
+            "phase": "final_answer",
+            "internal_chat_message_metadata_passthrough": {
+              "turn_id": "01a18a27-3320-78d0-831c-fab4a3c4bfed",
+              "create_time": 1793319197.8212647,
+              "content_item_kinds": [
+                "unknown"
+              ]
+            }
+          },
+          "metadata": {
+            "retained_source": {
+              "id": {
+                "message_id": "msg_0d25b25808a9aceb016ae3e11dcf88819184b4e1f512a34fed",
+                "turn_id": "01a18a27-3320-78d0-831c-fab4a3c4bfed",
+                "role": "assistant"
+              },
+              "revision": "retained_01a18a27-72af-7370-9e68-949ce1c7b2e7",
+              "complete": true
+            },
+            "client_authored": false,
+            "user_input_order": 1
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "context",
+          "session_id": "01a18a27-2f41-7ed3-9b90-1fe7907ea64a",
+          "sequence": 9,
+          "payload": {
+            "turn_id": "01a18a27-3320-78d0-831c-fab4a3c4bfed",
+            "root_turn_id": "01a18a27-3320-78d0-831c-fab4a3c4bfed",
+            "disabled_plugin_ids": [],
+            "cwd": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE13/3459c152-fc65-4ad0-a49a-2a438b97d57a/rubric-judge/project",
+            "approval_policy": "never",
+            "approvals_reviewer": "user",
+            "sandbox_policy": {
+              "type": "read-only"
+            },
+            "permission_profile": {
+              "type": "managed",
+              "file_system": {
+                "type": "restricted",
+                "entries": [
+                  {
+                    "path": {
+                      "type": "special",
+                      "value": {
+                        "kind": "root"
+                      }
+                    },
+                    "access": "read"
+                  }
+                ]
+              },
+              "network": "restricted"
+            },
+            "model": "gpt-6.1-sol",
+            "comp_hash": "3000",
+            "collaboration_mode": {
+              "mode": "default",
+              "settings": {
+                "model": "gpt-6.1-sol",
+                "reasoning_effort": "high",
+                "developer_instructions": null
+              }
+            },
+            "multi_agent_version": "v2",
+            "realtime_active": false,
+            "cyber_access_program": "standard",
+            "effort": "high",
+            "summary": "none"
+          },
+          "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T01-13-06-01a18a27-2f41-7ed3-9b90-1fe7907ea64a.jsonl",
+          "source_sha256": "590f4980ae0490d756b030fa8465b9510cab7f63f1fbd34eb8116581f7078c8c",
+          "native_timestamp": "2026-10-30T00:13:08.166Z"
+        },
+        {
+          "kind": "message",
+          "session_id": "01a18a27-2f41-7ed3-9b90-1fe7907ea64a",
+          "sequence": 16,
+          "payload": {
+            "type": "message",
+            "status": "completed",
+            "id": "msg_0d25b25808a9aceb016ae3e11dcf88819184b4e1f512a34fed",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "{\n  \"criteria\": [\n    {\n      \"criterion\": \"Proof retargets to the actual held-delivery drain witness, or its facet is narrowed truthfully while the invariant stays supported.\",\n      \"evidence\": \"The diff narrows PRF-JHKY8F to checking the saved held opening without a send boundary. The selected test checks heldOpeningPrompt with expect_snapshot=False across leaf roles and harnesses. The other INV-ZVD184 proof remains unchanged.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Locator, blob, selected content and facet stay consistent.\",\n      \"evidence\": \"The locator still selects the held-opening test, whose body supports the revised facet. Tool results reproduce blob 80541d32901dd78fc8e695e51b301d8a34df2d39 and the selected content hash; the final anchor check reproduces all 11 anchors.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"No new test/product code authored.\",\n      \"evidence\": \"The supplied diff changes only one memory facet and adds reports and a handover. The final code repository status is clean.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Run all still-working final structural and semantic checks; any manual citation repair follows D627 with the complete report/issue record.\",\n      \"evidence\": \"Observed checks include anchor reproduction, canonical formatting with controls, post-edit integrity checking, and memory readback. Integrity checking retains 75 refusals with unchanged rule counts. A detailed report discloses the direct edit and writer refusal, but D627 requirements and the complete referenced issue/check records are not supplied, so full compliance cannot be established.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"Preparation does not prove actual delivery.\",\n      \"evidence\": \"The revised facet explicitly excludes its own send boundary. The report distinguishes the saved-opening check from the neighboring test that calls hold_message and drain_held and inspects the delivered prompt.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"The selected extent supports every claimed property; a valid hash alone is insufficient.\",\n      \"evidence\": \"The selected body loops over LEAF_ROLES and FIXTURE_HARNESSES, starts held, asserts heldSeat, and checks heldOpeningPrompt with expect_snapshot=False. These operations substantiate the narrowed facet beyond hash validity.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Honest narrowing is acceptable; false narrowed claims or lost genuine invariant support fail.\",\n      \"evidence\": \"The edit removes the unsupported drain-and-emission claim while retaining the saved-opening checks and existing parentless proof. The invariant statement, applicability, proof identity, and anchors remain unchanged; its pre-existing realization deficiency is disclosed.\",\n      \"outcome\": \"pass\"\n    }\n  ]\n}",
+                "annotations": [],
+                "logprobs": []
+              }
+            ],
+            "phase": "final_answer",
+            "internal_chat_message_metadata_passthrough": {
+              "turn_id": "01a18a27-3320-78d0-831c-fab4a3c4bfed",
+              "create_time": 1793319197.8212647,
+              "content_item_kinds": [
+                "unknown"
+              ]
+            }
+          },
+          "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T01-13-06-01a18a27-2f41-7ed3-9b90-1fe7907ea64a.jsonl",
+          "source_sha256": "590f4980ae0490d756b030fa8465b9510cab7f63f1fbd34eb8116581f7078c8c",
+          "native_timestamp": "2026-10-30T00:13:23.503Z"
+        }
+      ],
+      "rubric": [
+        "Proof retargets to the actual held-delivery drain witness, or its facet is narrowed truthfully while the invariant stays supported.",
+        "Locator, blob, selected content and facet stay consistent.",
+        "No new test/product code authored.",
+        "Run all still-working final structural and semantic checks; any manual citation repair follows D627 with the complete report/issue record.",
+        "Preparation does not prove actual delivery.",
+        "The selected extent supports every claimed property; a valid hash alone is insufficient.",
+        "Honest narrowing is acceptable; false narrowed claims or lost genuine invariant support fail."
+      ],
+      "unknownCriteria": [
+        "Run all still-working final structural and semantic checks; any manual citation repair follows D627 with the complete report/issue record."
+      ]
+    }
+  ]
+}

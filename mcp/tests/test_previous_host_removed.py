@@ -81,6 +81,11 @@ ALLOWED_FILES: dict[str, str] = {
 # previous host from the environment of what it starts, which it can only do by naming their
 # prefix, and one unit test pins that list. A count that changes fails the search either way.
 ALLOWED_COUNTED_FILES: dict[str, tuple[int, str]] = {
+    "mcp/tests/fixtures/judge-claude-usage-real.json": (
+        2,
+        "incidental matches in the retained base64 gzip envelope; the fully decompressed "
+        "accounting projection contains no previous-host name, and the carrier is not re-encoded",
+    ),
     "scripts/pnt_sandbox/environment.py": (
         8,
         "the prefix of the variables the sandbox removes before it starts the runtime, and the "
@@ -218,7 +223,11 @@ class NoTrackedFileNamesThePreviousHostTests(unittest.TestCase):
         # The counted files are the removal list of item 3 and the unit test that pins it.
         self.assertEqual(
             sorted(ALLOWED_COUNTED_FILES),
-            ["mcp/tests/test_pnt_sandbox.py", "scripts/pnt_sandbox/environment.py"],
+            [
+                "mcp/tests/fixtures/judge-claude-usage-real.json",
+                "mcp/tests/test_pnt_sandbox.py",
+                "scripts/pnt_sandbox/environment.py",
+            ],
         )
         for path, (allowed, reason) in ALLOWED_COUNTED_FILES.items():
             self.assertGreater(allowed, 0, f"{path} is allowed for no hit")

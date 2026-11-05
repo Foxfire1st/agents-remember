@@ -273,7 +273,7 @@ def object_name(value: str) -> str:
     """One revision as Git spells it: a name, a range or ``<rev>:<path>``, never a host path.
 
     An option is passed in ``options``, not in a revision's place, so a value starting with ``-``
-    names what it is; an absolute path or a drive is a path outside the tree (MIK-R211 v4 rule 3).
+    names what it is; an absolute path or a drive is a path outside the tree.
     """
 
     if not value or value.startswith("-"):

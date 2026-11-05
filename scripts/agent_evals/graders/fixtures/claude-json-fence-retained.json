@@ -1,0 +1,47 @@
+{
+  "schema": "ar-retained-native-judge-response/v1",
+  "source": "bounded-judge-retry/rubric-judge/native.stdout",
+  "sourceSha256": "0e425cf0eb11f5dc88555ab3251922f40da399168cedca774862ae8906b49ea0",
+  "responseSha256": "9cfd3562c24dc8341dbfc27cb7bb3cb8623280ed28d2f4ae4c06e7f7f1c43c90",
+  "responseCharacters": 4882,
+  "nativeRow": {
+    "type": "assistant",
+    "message": {
+      "model": "claude-opus-5-5",
+      "id": "msg_011CgXH6ZJex1eptta8Sfx76",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "```json\n{\n  \"criteria\": [\n    {\n      \"criterion\": \"The already supported proof and invariant remain valid.\",\n      \"evidence\": \"The effect-tree diff adds files only under reports/ and fixture/messages/. No memory or code file is changed. proof-inspection.json and proof-inspection.final.json share the same after-hash (7ff5e37a\u2026) and both record empty memory `git status --porcelain`, empty `git diff --stat`, a passing `git diff --check`, and memory HEAD/tree 37b95e95\u2026/cfd7bd81\u2026 before and after. The supplied sidecar still holds PRF-JHKY8F with anchor blob 80541d32\u2026, content sha256:686f2e98\u2026, line_range 1270\u20131327, and its facet unchanged. The invariant file is unchanged (revision 1, statement intact). knowledge-read-current.json (codeTreeId 97e0b35a\u2026) reports PRF-JHKY8F and PRF-RV63CY as `current`. The invariant reads `unrealized` because this extracted slice has zero registered realizations, which is a baseline condition the agent did not cause. The agent reported it verbatim rather than altering the record.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"No product code change, invented test requirement or debt.\",\n      \"evidence\": \"Code status is empty and code HEAD/tree are unchanged (967a5414\u2026/97e0b35a\u2026). No file under projects/code appears in the diff. No new test requirement was asserted, and the handover states that tests were not run because imported support modules are absent. reports/outstanding-memory-actions.json groups the 76 actual memory_quality_check findings (preserved verbatim from memory-quality-full.json) into 43 subjects. It adds one observed absence: governingOverviewExists=false for the card's overview.md link. Each item is labeled 'baseline blockers, not newly introduced defects' and assigned outside the proof-review queue, with outstandingQueueActions=0. The worklist reshapes real tool output and an observed absence rather than inventing debt. The one arguable extra is the overview item, which does not come from a tool finding.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"No unnecessary rewrite/narrowing; harmless equivalent prose is not failed if support remains intact.\",\n      \"evidence\": \"knowledge_write was not invoked. The sidecar, card markdown, invariant and history are byte-for-byte unchanged per the clean memory status and the identical suppliedMemoryFiles hashes in both inspection reports. No facet, statement, condition or exclusion was narrowed or rewritten. The citation_fix dry-run reports 0 refreshed anchors and 0 rewritten sidecars, and route_index_refresh was a dry run with 0 written.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"The cited witness actually demonstrates the claimed effect.\",\n      \"evidence\": \"Facet: 'starts each leaf-role/harness seat held, drains its real delivery, and verifies the emitted prompt begins with the saved opening and includes the waiting work once'. In the supplied source, test_a_held_seat_opens_through_the_delivery_path does each part: (1) it loops over sorted(LEAF_ROLES) \u00d7 FIXTURE_HARNESSES and calls _start_execution(..., held=True), asserting heldSeat is True; (2) it calls role_held_messages.hold_message, then role_held_messages.drain_held, and asserts outcome == 'opened'; (3) it takes the last agent-create prompt and asserts opened.startswith(opening), with opening = receipt['heldOpeningPrompt']; (4) it asserts opened.count('Report your role, operation and first read.') == 1; (5) it runs check_message and asserts the total combination count. The read-only AST/hash script output shows the method spans exactly 1270\u20131327, the computed blob matches 80541d32\u2026, the extent digest matches sha256:686f2e98\u2026, and there are no decorators or duplicate names. The native knowledge_read reports the proof `current` against the actual code tree. The agent also checked that the 1051\u20131072 neighbor tests only an unsent opening with expect_snapshot=False, so the witness was not confused with it.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Preserve a valid claim; D627 is no reason to manufacture a tool problem or additional work.\",\n      \"evidence\": \"The agent concluded that no semantic repair was needed. It did not touch the sound proof to force a writer operation, and it states 'No change to a sound proof was manufactured to trigger a writer operation' and 'No tool refusal was bypassed'. It reports the failing full quality check (76 findings) and the failed integrity validation as fixture-baseline conditions with full logs copied, rather than as problems it introduced or fixed. The queue disposition is 'answered' with zero outstanding queue actions. The 44-item outstanding worklist is extra reporting, but it is derived from the required checks' real output and explicitly kept out of the proof review's scope. No fabricated tool problem is present.\",\n      \"outcome\": \"pass\"\n    }\n  ]\n}\n```"
+        }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 2,
+        "cache_creation_input_tokens": 233026,
+        "cache_read_input_tokens": 649,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 233026
+        },
+        "output_tokens": 8,
+        "service_tier": "standard",
+        "inference_geo": "global",
+        "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "6be1613b-98f3-491f-8b0b-b1963cc6b338",
+    "uuid": "e6705a66-1038-422f-81fb-46649fd1c913",
+    "timestamp": "2026-10-29T21:59:30.760Z",
+    "request_id": "req_011CgXH6YyZcWAnArfn1rDTe"
+  }
+}

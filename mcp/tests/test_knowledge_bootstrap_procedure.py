@@ -66,9 +66,12 @@ WHAT THIS DOES NOT COVER (stated, not implied)
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+import shutil
 import tempfile
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -85,9 +88,12 @@ from agents_remember.application.skill_resources.responses import (
     skill_catalog_read_response,
 )
 from agents_remember.cli.__main__ import build_parser
+from agents_remember.cli.role_instruction_details import compose_launch_instructions
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.role_capsules.types import compute_content_digest
 from agents_remember.serving.capsule_delivery import CapsuleDelivery
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
+from agents_remember_test_support.testing.leaf_instruction_wording import normalized
 from test_capsule_launch_wiring import LEAF_REF, _scratch_world
 
 pytestmark = pytest.mark.evidence_unit
@@ -96,6 +102,112 @@ REPOSITORY_ROOT = Path(__file__).parents[2]
 CANONICAL_SKILLS = REPOSITORY_ROOT / "skills"
 PROCEDURE_SKILL = "c-14-knowledge-bootstrap"
 PROCEDURE_FILE = CANONICAL_SKILLS / PROCEDURE_SKILL / "SKILL.md"
+FOUNDATION_SOURCE = "reference/curator-repository-foundation.md"
+FOUNDATION_STEP = "when you reach a repository's first or resumed knowledge foundation, not before"
+FOUNDATION_HEADING = "# Curator \N{EM DASH} repository knowledge foundation"
+FOUNDATION_PROCEDURE_CLAUSES = (
+    "Repository foundation is regular task work.",
+    "After setup reports memory/baseline state, the user starts the Architect, which opens the real foundation task under a master.",
+    "Start this seat on that task document and use its actual enclosure contract.",
+    "Receive the repository id, resolved context, scope, sources and current knowledge state; no incidental code delta is required.",
+    "Run `c-14-knowledge-bootstrap`.",
+    "Onboarding is optional input, never a start prerequisite; this foundation procedure authors no onboarding.",
+)
+FOUNDATION_AUTHORITY_CLAUSES = (
+    "Without a task, Bootstrap reads and reports state and names the user-started Architect as the next step.",
+    "No instructed session substitutes for task admission.",
+    "Report a missing task; never fabricate a task, worktree or enclosure.",
+)
+
+
+def delivered_foundation(
+    capsule: CapsuleDelivery, root: Path, report_path: Path, clauses: tuple[str, ...]
+) -> str:
+    """Verify this compiled shape's declared, pointed-at, delivered foundation text.
+
+    The budget declaration is a guard assertion here, not a claimed compiler refusal.
+    """
+    budgets = json.loads((root / "capsule-budgets.json").read_text())
+    assert FOUNDATION_SOURCE in budgets["step_details"], "undeclared budget detail"
+    manifest = json.loads((root / "composition-manifest.json").read_text())
+    declared = manifest["references"]["curator-repository-foundation"]
+    assert declared["source"] == FOUNDATION_SOURCE
+    assert declared["step_detail"] is True
+    assert "curator" in declared["roles"]
+    assert declared["step"] == FOUNDATION_STEP
+    assert "]({{detail:" + FOUNDATION_SOURCE + "}})" in capsule.trusted_instructions
+    references = [r for r in capsule.detail_references if r.source_path == FOUNDATION_SOURCE]
+    assert len(references) == 1
+    reference = references[0]
+    assert reference.step == FOUNDATION_STEP
+    assert reference.content == (root / FOUNDATION_SOURCE).read_bytes()
+    instructions, record = compose_launch_instructions(capsule, str(report_path), {})
+    entries = [r for r in record["detailReferences"] if r["sourcePath"] == FOUNDATION_SOURCE]
+    assert len(entries) == 1
+    assert entries[0]["step"] == FOUNDATION_STEP
+    path = Path(entries[0]["path"])
+    assert f"]({path.as_posix()})" in instructions
+    assert "{{detail:" not in instructions
+    assert path.read_bytes() == reference.content
+    detail = path.read_text()
+    assert detail.splitlines()[0] == FOUNDATION_HEADING
+    for clause in clauses:
+        assert normalized(clause) in normalized(detail), clause
+    return detail
+
+
+def foundation_delivery_controls(
+    capsule: CapsuleDelivery,
+    root: Path,
+    output: Path,
+    clauses: tuple[str, ...],
+    sentence: str,
+) -> None:
+    """All four corruptions fail the same delivery proof, without editing shipped sources.
+
+    These are assertion-boundary controls on a captured capsule and copied declarations;
+    they make no claim that the compiler consumes the budget registry.
+    """
+    for mutation in ("step_details", "heading", "sentence", "undeclared-pointer"):
+        copied = output / mutation / "lifecycle"
+        for relative in ("capsule-budgets.json", "composition-manifest.json", FOUNDATION_SOURCE):
+            target = copied / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(root / relative, target)
+        changed_capsule = capsule
+        if mutation == "step_details":
+            target = copied / "capsule-budgets.json"
+            budgets = json.loads(target.read_text())
+            del budgets["step_details"][FOUNDATION_SOURCE]
+            target.write_text(json.dumps(budgets))
+        elif mutation == "undeclared-pointer":
+            changed = capsule.trusted_instructions.replace(
+                "{{detail:" + FOUNDATION_SOURCE + "}}", "{{detail:reference/undeclared.md}}"
+            )
+            assert changed != capsule.trusted_instructions
+            changed_capsule = replace(capsule, trusted_instructions=changed)
+        else:
+            target = copied / FOUNDATION_SOURCE
+            original = target.read_text()
+            changed = original.replace(
+                FOUNDATION_HEADING if mutation == "heading" else sentence,
+                "# Renamed foundation" if mutation == "heading" else "",
+            )
+            assert changed != original
+            target.write_text(changed)
+            content = target.read_bytes()
+            changed_capsule = replace(
+                capsule,
+                detail_references=tuple(
+                    replace(r, content=content, revision=compute_content_digest(content))
+                    if r.source_path == FOUNDATION_SOURCE
+                    else r
+                    for r in capsule.detail_references
+                ),
+            )
+        with pytest.raises(AssertionError):
+            delivered_foundation(changed_capsule, copied, output / mutation / "report.md", clauses)
+
 
 #: The shipped umbrella CLI's own program name, as the procedure prints it.
 PROGRAM = "agents-remember"
@@ -328,25 +440,30 @@ def test_every_invocation_the_procedure_prints_resolves_in_the_shipped_parser() 
     )
 
 
-def test_the_compiled_curator_shape_names_the_procedure_it_would_receive() -> None:
+def test_the_compiled_curator_shape_names_the_procedure_it_would_receive(tmp_path: Path) -> None:
     """The curator SHAPE's compiled instructions name the procedure — the compiler, not an admission.
 
     This case is deliberately named for the compiler, because that is all it measures: the launch
-    compiler builds a free-agent capsule for any declared role. An instructed session that authors
-    the foundation without a task document holds this capsule too — so this shape's instructions are
-    the ones it follows as well as a curator launched on a task document.
+    compiler builds a synthetic free-agent shape for any declared role. This measures its actual
+    pointer and delivered detail; it admits no taskless Curator or instructed foundation session.
+    Foundation work requires the real task admission stated in that detail.
     """
 
     capsule = free_agent_capsule("curator")
-    instructions = capsule.trusted_instructions
-    assert PROCEDURE_SKILL in instructions, (
-        "the curator shape's compiled instructions never name the knowledge-bootstrap procedure, so "
-        "a curator seat opened on a task document would not be told about it "
-        f"({capsule.binding.as_report()})"
+    detail = delivered_foundation(
+        capsule,
+        CANONICAL_SKILLS / "l-01-agent-lifecycles",
+        tmp_path / "report.md",
+        FOUNDATION_PROCEDURE_CLAUSES,
     )
-    assert "knowledge-bootstrap" in instructions, (
-        "the curator shape's instructions name no taskless bootstrap entry, leaving the only printed "
-        "route one that requires an enclosure contract"
+    assert PROCEDURE_SKILL in detail
+    assert "knowledge-bootstrap" in detail
+    foundation_delivery_controls(
+        capsule,
+        CANONICAL_SKILLS / "l-01-agent-lifecycles",
+        tmp_path / "controls",
+        FOUNDATION_PROCEDURE_CLAUSES,
+        "Run `c-14-knowledge-bootstrap`.",
     )
 
 

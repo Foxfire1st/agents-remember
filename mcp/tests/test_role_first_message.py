@@ -18,18 +18,20 @@ in :mod:`role_first_message_support`.
 
 from __future__ import annotations
 
+import json
+import shutil
 import unittest
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from agents_remember.application.agent_binding import AgentBinding
 from agents_remember.application.role_capsules import launch as role_capsules_launch
 from agents_remember.application.role_launch_context import LEAF_ROLES, TASKLESS_ROLES
+from agents_remember.application.skill_resources import capsule as skill_resources_capsule
 from agents_remember.cli import role_launch_routes
 from agents_remember.cli.paseo_role_tools import MAY_START, start_leaf_set
 from agents_remember.cli.role_brief_message import SHARED_BLOCK_HEADING
@@ -43,87 +45,85 @@ class FirstMessageMatrixTests(FirstMessageMatrixBase):
     # One test per kind of start.
 
     def test_the_shared_block_comes_from_the_compilation_on_both_start_paths(self) -> None:
-        """Rule 1 and amendment f23cfd6a: the block is read from the compiler's outcome.
+        """An admitted core source reaches both real first-message paths exactly once."""
 
-        The task-bound path (a leaf role) and the taskless path (the architect) are both built
-        with a source that fills the field, and with none. Nothing is patched after the compile,
-        so a start that drops the block fails here instead of passing past the defect.
-        """
-
-        block = "Every role reads the charter, the invariants and the route index first."
+        block = (
+            "Every role reads the charter, the invariants and the route index first.\n"
+            "Keep the task's authority and evidence together.\n"
+        )
         heading = f"## {SHARED_BLOCK_HEADING}\n\n{block}\n\n"
-        for role, title, kind in (
-            ("worker", "# Worker", "task-bound"),
-            ("architect", "# Architect", "taskless"),
-        ):
-            for harness in FIXTURE_HARNESSES[:1]:
-                where = f"{role}/{kind}/{harness}"
-                plain_request = self.request(role, harness)
-                role_launch_routes._start_execution(self.config, plain_request)
-                plain = self.sent_prompt(plain_request)
-                self.release(self.receipt(plain_request))
-                self.assertNotIn(SHARED_BLOCK_HEADING, plain, f"{where}: no source, yet a block")
+        with self.composition_corpus(block):
+            for role, title, kind in (
+                ("worker", "# Worker", "task-bound"),
+                ("architect", "# Architect", "taskless"),
+            ):
+                harness = FIXTURE_HARNESSES[0]
+                with self.subTest(role=role, kind=kind):
+                    request = self.request(role, harness)
+                    role_launch_routes._start_execution(self.config, request)
+                    receipt = self.receipt(request)
+                    message = self.sent_prompt(request)
+                    self.check_message(message, receipt, role=role, harness=harness, kind=kind)
+                    self.release(receipt)
+                    self.assertEqual(message.count(f"## {SHARED_BLOCK_HEADING}\n\n"), 1)
+                    self.assertEqual(message.count(heading), 1)
+                    self.assertEqual(message.count(block), 1)
+                    self.assertIn(f"{heading}{title}", message)
 
-                blocked_request = self.request(role, harness)
-                with self.shared_block(block):
-                    role_launch_routes._start_execution(self.config, blocked_request)
-                blocked = self.sent_prompt(blocked_request)
-                self.check_message(
-                    blocked,
-                    self.receipt(blocked_request),
-                    role=role,
-                    harness=harness,
-                    kind=kind,
-                )
-                self.release(self.receipt(blocked_request))
-                self.assertEqual(blocked.count(block), 1, f"{where}: the block does not stand once")
-                capsule_at = plain.index(title)
-                self.assertEqual(
-                    blocked.index(heading),
-                    capsule_at,
-                    f"{where}: the block does not stand where the capsule starts",
-                )
-                self.assertEqual(
-                    plain.index(title),
-                    blocked.index(title) - len(heading),
-                    f"{where}: the capsule moved rather than being preceded by the block",
-                )
+    def test_an_undeclared_shared_source_writes_no_block_on_both_start_paths(self) -> None:
+        """A legacy manifest with no shared source retains the existing first message."""
 
-                # An empty string is no block: same capsule position, no heading.
-                empty_request = self.request(role, harness)
-                with self.shared_block(""):
-                    role_launch_routes._start_execution(self.config, empty_request)
-                empty = self.sent_prompt(empty_request)
-                self.release(self.receipt(empty_request))
-                self.assertNotIn(SHARED_BLOCK_HEADING, empty, f"{where}: an empty block wrote one")
-                self.assertEqual(
-                    empty.index(title),
-                    plain.index(title),
-                    f"{where}: an empty block moved the capsule",
-                )
+        with self.composition_corpus(None):
+            for role, title, kind in (
+                ("worker", "# Worker", "task-bound"),
+                ("architect", "# Architect", "taskless"),
+            ):
+                harness = FIXTURE_HARNESSES[0]
+                with self.subTest(role=role, kind=kind):
+                    request = self.request(role, harness)
+                    role_launch_routes._start_execution(self.config, request)
+                    receipt = self.receipt(request)
+                    message = self.sent_prompt(request)
+                    self.check_message(message, receipt, role=role, harness=harness, kind=kind)
+                    self.release(receipt)
+                    self.assertNotIn(f"## {SHARED_BLOCK_HEADING}\n\n", message)
+                    self.assertIn(title, message)
 
     @contextmanager
-    def shared_block(self, text: str) -> Iterator[None]:
-        """Fill the block at the compiler, as a later source (L62) will fill it."""
+    def composition_corpus(self, block: str | None) -> Iterator[None]:
+        """Supply real corpus bytes, leaving admission and compilation untouched."""
 
-        real_task = role_capsules_launch.compile_task_capsule
-        real_admitted = role_capsules_launch.compile_admitted_capsule
+        with TemporaryDirectory(dir=self.root) as temporary:
+            corpus = Path(temporary) / "corpus"
+            with role_capsules_launch.shipped_composition_corpus() as (root, manifest):
+                shutil.copytree(root, corpus)
+            manifest_path = corpus / manifest
+            composition = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for role in composition["roles"].values():
+                role["core"] = [name for name in role["core"] if name != "every-role"]
+            source = corpus / "core/every-role.md"
+            if block is None:
+                composition["core"].pop("every-role", None)
+                source.unlink(missing_ok=True)
+            else:
+                source.write_text(block, encoding="utf-8")
+                composition["core"]["every-role"] = {
+                    "source": "core/every-role.md",
+                    "purpose": "The shared obligations each role receives in its first message.",
+                }
+                for role in composition["roles"].values():
+                    role["core"].append("every-role")
+            manifest_path.write_text(json.dumps(composition), encoding="utf-8")
 
-        def carrying_task(*args: Any, **kwargs: Any) -> Any:
-            outcome = cast(Any, real_task)(*args, **kwargs)
-            if outcome.compilation is None:
-                return outcome
-            return replace(outcome, compilation=replace(outcome.compilation, shared_block=text))
+            @contextmanager
+            def shipped_corpus() -> Iterator[tuple[Path, str]]:
+                yield corpus, manifest
 
-        def carrying_admitted(*args: Any, **kwargs: Any) -> Any:
-            outcome = cast(Any, real_admitted)(*args, **kwargs)
-            return replace(outcome, shared_block=text)
-
-        with (
-            patch.object(role_capsules_launch, "compile_task_capsule", carrying_task),
-            patch.object(role_capsules_launch, "compile_admitted_capsule", carrying_admitted),
-        ):
-            yield
+            with (
+                patch.object(role_capsules_launch, "shipped_composition_corpus", shipped_corpus),
+                patch.object(skill_resources_capsule, "shipped_composition_corpus", shipped_corpus),
+            ):
+                yield
 
     def test_the_system_specialist_alias_carries_the_projection(self) -> None:
         """The alias role starts for a taskless seat, and its projection is the investigator's."""

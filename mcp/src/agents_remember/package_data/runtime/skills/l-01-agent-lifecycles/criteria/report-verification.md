@@ -97,6 +97,12 @@ A green result or measurement without matching target provenance is not evidence
   worktree and was refused before cache creation; it therefore could not have produced the reported
   L6 snapshot. The command needed the L6 enclosure contract to exercise the artifact under review.
 
+### RV-6 — Check scope, carried runs and pre-existing failures *(standing by requirement; the ratchet does not demote it, only a developer ruling does)*
+
+A report that calls a check complete, or the gate, names what it ran and what it left out; compare that with the gate's own definition. A failure called pre-existing fails on the base with the same cause (message and subtest), not only under the same test name. A run carried over from an earlier freeze stands only where the files it exercises are byte-identical to those of its last run; a carried run whose files changed is an evidence gap.
+
+- Catching evidence: 260928-MIK-L54, where a comparison of failing test names let a capsule land over its budget; and checks called "the full gate" that left out the dashboard's unit tests.
+
 ## Candidate Criteria (seeded exploratory — one catching engagement each; promote at ≥2)
 
 Run under the exploratory mandate during a baseline review only; a candidate is proposed for

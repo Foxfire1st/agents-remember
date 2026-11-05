@@ -29,8 +29,10 @@ A converted card is two files at the mirrored path:
   refuses an overview whose first section after the title and the governing overview is not its
   purpose, one holding a leaf- or date-named section, and one whose citation lines do not stand
   together at its end.
-- **Never write sidecar JSON by hand.** The fixer authors `references` (below). The writer
+- **Use the fixer and writer first.** The fixer authors `references` (below). The writer
   (`knowledge-ingest`, the hand-off's `entries` section) authors `realizes` and `proves`.
+  For a correct-input refusal only, use the [same-tool write-refusal procedure](../../l-01-agent-lifecycles/reference/refused-write.md).
+  A missing admitted writer is not a refused correct write; report required records not written.
 
 ## Create a card for a new source file
 

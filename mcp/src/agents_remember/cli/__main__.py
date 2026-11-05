@@ -19,6 +19,7 @@ import sys
 
 from agents_remember.cli import (
     dashboard,
+    handoff_check,
     knowledge_bootstrap,
     knowledge_census,
     knowledge_convert,
@@ -70,6 +71,11 @@ def _register_memory_commands(sub: argparse._SubParsersAction) -> None:
 
 def _register_knowledge_commands(sub: argparse._SubParsersAction) -> None:
     """The knowledge maintenance commands."""
+    handoff = sub.add_parser(
+        "handoff-check", help="Check every producer handoff against a named candidate (read-only)."
+    )
+    handoff_check.add_arguments(handoff)
+    handoff.set_defaults(func=handoff_check.run)
     ingest = sub.add_parser(
         "knowledge-ingest",
         help=(

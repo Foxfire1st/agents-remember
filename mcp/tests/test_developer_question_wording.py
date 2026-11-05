@@ -1,12 +1,62 @@
 """Keep parent routing, refusal recovery and developer-answer provenance in each capsule."""
 
+import tempfile
+from pathlib import Path
+from typing import cast
+
 import test_role_instruction_wording_handover as handover_wording
 from agents_remember.cli.paseo_launch import StartingAgent
+from agents_remember.models.role_capsules.types import CapsuleRole
 from agents_remember_test_support.testing.curation_doctrine import (
     normalize_statement,
     retired_statement_findings,
 )
-from test_role_instruction_wording import LIFECYCLE, STARTERS, read, role_text
+from agents_remember_test_support.testing.leaf_instruction_wording import (
+    MESSAGE_HANDOVER_SOURCE,
+    MESSAGE_HANDOVER_STEP,
+    delivered_step,
+)
+from test_role_instruction_wording import CANONICAL, LIFECYCLE, STARTERS, read, role_text
+
+QUESTION_TRANSPORT_CLAUSES = (
+    "Full-store recipient-busy is a refusal",
+    "pending record, independent work, one resend before turn end, then remain pending",
+    "Held means queued eventual delivery, possibly many turns later: never resend it",
+    "consumption needs the recipient artifact",
+    "superseded held messages are withdrawn",
+)
+CHILD_QUESTION_SOURCE = "reference/child-questions.md"
+CHILD_QUESTION_STEP = (
+    "when you reach a child's question or the developer's answer to it, not before"
+)
+ANSWER_CLAUSES = (
+    "answer it yourself if it lies within your authority and say that the answer is your own",
+    "pass the question unchanged to your parent",
+    "naming the originating role, task and agent ID",
+    "add your own recommendation separately",
+    "Without a parent, put it to the developer in your own chat",
+    "Send the developer's answer to the agent that sent the question",
+    "your agent ID as the agent that received it",
+    "the developer's words in quotation marks",
+    "Each parent on the way down passes these three unchanged",
+)
+
+
+def question_step(role: str, source: str, step: str) -> str:
+    """Require the declared source, audience, pointer and precise delivery step."""
+    with tempfile.TemporaryDirectory() as directory:
+        _, text = delivered_step(
+            CANONICAL / LIFECYCLE,
+            (cast(CapsuleRole, role), "orientation"),
+            source,
+            step,
+            Path(directory) / "report.md",
+        )
+    return " ".join(text.split())
+
+
+def missing_question_clauses(text: str, clauses: tuple[str, ...]) -> list[str]:
+    return [clause for clause in clauses if clause not in text]
 
 
 def test_each_parentable_role_has_question_recovery_and_answer_provenance() -> None:
@@ -18,12 +68,7 @@ def test_each_parentable_role_has_question_recovery_and_answer_provenance() -> N
         "what you hold back until it is answered, and what you recommend and why",
         "do not end your turn on the question or hold a wait for the developer",
         "Without a parent, ask the developer in your own chat and end your turn",
-        "If delivery to your parent is refused as busy",
         "**Pending developer questions** in your report",
-        "send it again before ending your turn",
-        "A second refusal leaves it pending",
-        "If the answer says the message is held",
-        "do not send it again",
         "Having no work left does not open your own chat",
         "Only when your parent cannot be reached at all",
         "archived, not found, not resumable, no runtime configured, or host unreachable",
@@ -39,6 +84,8 @@ def test_each_parentable_role_has_question_recovery_and_answer_provenance() -> N
     for clause in clauses:
         assert clause in home, ("orientation", clause)
     for role in ("orchestrator", "manager", "worker", "reviewer", "curator", "investigator"):
+        transport = question_step(role, MESSAGE_HANDOVER_SOURCE, MESSAGE_HANDOVER_STEP)
+        assert not missing_question_clauses(transport, QUESTION_TRANSPORT_CLAUSES), role
         text = role_text(role)
         assert pointer in text, (role, "one-home pointer")
         assert "With a parent named in `host.parent`, send every question" not in text, (
@@ -55,46 +102,39 @@ def test_each_parent_has_upward_notice_and_unchanged_downward_answer_duties() ->
         "each parent passes that notice up unchanged",
         "tell the developer which chat to open",
         "never give only a count",
-        "do not ask the developer to confirm an answered prompt or send the message again",
+        "do not ask the developer to confirm an answered prompt",
     )
     for clause in notice:
         assert clause in home, ("coordination", clause)
     referral = "give the upward notice as `../operations/coordination.md` states"
-    held = (
-        "The product keeps the message and delivers it when the prompt is answered",
-        "do not send it again",
-    )
     for role in STARTERS:
         text = role_text(role)
         assert referral in text, (role, "one-home referral")
-        for clause in held:
-            assert clause in text, (role, clause)
+        transport = question_step(role, MESSAGE_HANDOVER_SOURCE, MESSAGE_HANDOVER_STEP)
+        assert not missing_question_clauses(transport, QUESTION_TRANSPORT_CLAUSES), role
         assert "its wait returns `permission-pending`, tell your parent at once" not in text, (
             role,
             "no full notice copy",
         )
-    clauses = (
-        "answer it yourself if it lies within your authority and say that the answer is your own",
-        "pass the question unchanged to your parent",
-        "naming the originating role, task and agent ID",
-        "add your own recommendation separately",
-        "Without a parent, put it to the developer in your own chat",
-        "Send the developer's answer to the agent that sent the question",
-        "your agent ID as the agent that received it",
-        "the developer's words in quotation marks",
-        "Each parent on the way down passes these three unchanged",
-    )
-    manager = role_text("manager")
-    for clause in clauses:
-        assert clause in manager, ("manager", clause)
-    pointer = "Questions received from children follow `roles/manager.md`"
-    for role in ("orchestrator", "architect"):
-        text = role_text(role)
-        assert pointer in text, (role, "one-home referral")
+        answer = question_step(role, CHILD_QUESTION_SOURCE, CHILD_QUESTION_STEP)
+        assert not missing_question_clauses(answer, ANSWER_CLAUSES), role
         assert "answer it yourself if it lies within your authority" not in text, (
             role,
             "no full questions copy",
         )
+
+
+def test_question_step_checks_reject_each_actual_transport_or_answer_deletion() -> None:
+    for source, step, clauses in (
+        (MESSAGE_HANDOVER_SOURCE, MESSAGE_HANDOVER_STEP, QUESTION_TRANSPORT_CLAUSES),
+        (CHILD_QUESTION_SOURCE, CHILD_QUESTION_STEP, ANSWER_CLAUSES),
+    ):
+        text = question_step("manager", source, step)
+        assert not missing_question_clauses(text, clauses)
+        for clause in clauses:
+            mutant = text.replace(clause, "")
+            assert mutant != text, (source, clause)
+            assert clause in missing_question_clauses(mutant, clauses), (source, clause)
 
 
 def test_question_operations_keep_conditional_routing_and_pending_recovery() -> None:

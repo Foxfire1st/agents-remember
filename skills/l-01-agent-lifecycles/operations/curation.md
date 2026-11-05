@@ -1,9 +1,8 @@
-
 <!-- ar:roles all -->
 # Operation — Curation
 
 <!-- ar:roles all -->
-**Scope:** reconcile a leaf's intended, current and implemented meaning; write affected onboarding. The Manager starts the Curator at the Worker's first freeze; Worker and Reviewer supply candidate-bound inputs directly. It also covers **first or resumed repository knowledge foundation** inside the real task the user-started Architect opens, with that task's leaf admission and scope.
+**Scope:** reconcile a leaf's intended, current and implemented meaning; write affected onboarding. The Manager starts the Curator after code PASS; Worker and Reviewer supply candidate-bound inputs directly. When an approved packet's prerequisite sync reaches memory reconciliation the Curator owns, the Manager starts the Curator for that reconciliation. Ordinary delivery curation and the knowledge check still follow code PASS. It also covers **first or resumed repository knowledge foundation** inside the real task the user-started Architect opens, with that task's leaf admission and scope.
 
 <!-- ar:roles all -->
 **Select:** leaf Worker freeze plus affected memory. The Manager assigns; the Worker sends its list; the Reviewer sends its passed code freeze.
@@ -57,22 +56,30 @@ For AR-launched Paseo, use your file tools to read rendered task and canonical J
 Read [scoped read signatures]({{detail:reference/curator-intake-details.md}}) when you reach **Curation workflow 1: Reconcile**, not before. Missing scope or refused capabilities block work; never switch AR servers or use unscoped commands. Read assignment-applicable packets, not unrelated roles or the whole hierarchy by default.
 
 <!-- ar:roles curator -->
+Before authoring an affected card or entity, read the [converted-card workflow](../../c-05-create-or-update-onboarding-files/workflows/converted-card-workflow.md) or [entity-catalog workflow](../../c-05-create-or-update-onboarding-files/workflows/repo-entity-catalog-workflow.md) at its affected removal, re-anchoring or fingerprint operation. Restores follow the case’s recorded authority and order.
+
 Preserve the immutable baseline; compare fully and read admitted records back.
-The MIK writer retains ownership. Use only the selected runtime's admitted source-bound command; if this Paseo capsule exposes no writer and admits none, report required records not written. This limits the capsule, not MIK. Never bypass refusal with another installation's command or an internal writer. Verify every output resolves inside the selected memory root.
+The MIK writer retains ownership. Use its mounted writer or an admitted CLI bound to the selected serving build. If this capsule exposes no writer and admits none, report the missing capability and required records not written: a missing capability is not a correct-input refusal. Verify every output resolves inside the selected memory root.
 
 
 <!-- ar:roles curator -->
 
 
 <!-- ar:roles all -->
-On development installs, only the serving build produces: the starting tool server or that same build's CLI. Use the clean main checkout; its serving commit is the ruler. Every run states its ruler. Leaf source never produces leaf memory, admitted or not. Prove leaf writer/check changes on fixtures and scratch copies; that evidences the build, not an ordered fixture procedure. Install nothing for a run, disable no guard, substitute no producer after refusal.
+Decide and write through the starting server or its serving-build CLI. Development uses clean main and its stated serving commit as ruler; name it. Leaf source never produces leaf memory: test leaf writer/check changes on fixtures or scratch. Install nothing; disable no guard.
+
+<!-- ar:roles curator -->
 
 <!-- ar:roles curator -->
 <!-- ar:roles curator -->
 ## Normal workflow
 
 <!-- ar:roles curator -->
+A report naming the next authorised step needs no new Manager go. Continue the normal workflow through the whole handover under `../roles/curator.md` §Where your stage ends: its own-input correction, three-own-repairs escalation and genuine stops apply here. Step 8 supplies the bounded encountered-memory repair.
+
+<!-- ar:roles curator -->
 1. **Reconcile** current intent, ruled intent and implemented reality; surface every material divergence.
+   Verify each card sentence against the code yourself; a memory line is a claim, not proof.
 <!-- ar:roles curator -->
 2. **Before ingest**, each invariant's `scope` states applicability, conditions and exclusions; provenance is not scope.
 <!-- ar:roles curator -->
@@ -99,7 +106,7 @@ Use `agents-remember-task`.
    findings are repaired before the closeout, with a re-run of the full operation after each repair.
    This is a lifecycle step: the closeout does not check it.
 <!-- ar:roles curator -->
-8. **Repair, then republish.**
+8. **Repair, then republish.** Apply the bounded encountered-memory repair in `../roles/curator.md` §Discovery routing. Report each repair and continue; make no broad sweep. Re-run the complete checks and independent fact-check before handover.
 
 <!-- ar:roles curator -->
 
@@ -114,17 +121,14 @@ Reviewer compares Git bases/candidates; Curator records no separate comparison.
 <!-- ar:roles all -->
 ## Authority gates
 
-<!-- ar:roles all -->
-- **Onboarding writes only.** The curator never writes code, never edits task docs, gates, lifecycle
+<!-- ar:roles manager -->
+- **Onboarding writes only.** The curator never writes code, task-doc edits follow scoped recovery; never edits gates, lifecycle
   state, worktree contracts, or closeout state, never mutates task-doc status, and never performs
   closeout/integration/finalization.
 <!-- ar:roles curator -->
 <!-- ar:roles curator -->
-- **Scope the MCP tools on `agents-remember-task` with the enclosure contract path.** Without it they resolve the **official**
-  memory repo — read-only for the diagnostics, but `route_index_refresh` writes, so an unscoped call
-  dirties a repository the curator does not own and blocks the next `worktree_start` until a human
-  reverts it.
-<!-- ar:roles all -->
+**Scope the MCP tools on `agents-remember-task` with the enclosure contract path** (`../roles/curator.md` §Inputs): an unscoped `route_index_refresh` also blocks the next `worktree_start` until a human reverts it.
+<!-- ar:roles manager -->
 - **Do not invent a future code commit hash**, advance fingerprints to an uncommitted tree, or add
   attestation prose to silence a finding. The closeout transaction records the actual code and
   memory commits after this handoff.
@@ -153,7 +157,7 @@ Tests do not prove intent coherence.
 <!-- ar:roles curator -->
 Historical oddities need causal applicability and a reconsideration condition.
 <!-- ar:roles curator -->
-- **Keep partial/refused hand-offs partial.** `planned` and `refused` wrote nothing; refusal names every problem/reason: correct the list and rerun.
+- **Keep partial/refused hand-offs partial.** `planned` and `refused` wrote nothing. Correct faulty input through the same tool; for a refused correct write, read [correct-write recovery]({{detail:reference/refused-write.md}}) when a covered writer or record tool refuses a correct write, not before. Validator and gate findings remain D229 repairs.
 
 <!-- ar:roles curator -->
 - **If any comparison side is missing or guesswork-level ambiguous**, ask the Worker directly about code or Reviewer about verdict; ask the Manager only for ownership/authority.
@@ -170,13 +174,13 @@ For AR-launched leaves, send directly to Reviewer via `role_message` on `agents-
 
 <!-- ar:roles curator -->
 Send the memory candidate directly to Reviewer for its whole memory check; use `../roles/curator.md` §Outputs.
-The coherence record/projection, not the transcript, are durable output. Write the record before turn end; terminal/finalizer evidence proves only turn end. Do not hand-write a curator certification.
+The coherence record/projection, not the transcript, are durable output. Write the record before turn end; terminal/finalizer evidence proves only turn end. Declare manual recovery; claim no tool-generated certification or acceptance.
 
 <!-- ar:roles curator -->
 Read [handoff procedures]({{detail:reference/curator-handoff-d301.md}}) when you reach **Curation workflow 7: Undergo the independent fact-check**, not before; reuse at **Curation workflow 8: Repair, then republish**. Each handover names leaf, code head/change hash, memory identity, report/verdict path and whole next stretch. Reviewer records `begin_review`/`record_review`, `reviewKind=memory`: separate sealed memory IDs/reports/count, code-review limit; code state unchanged. Extras need Manager-recorded architect/developer approval. Under-way reviews finish as begun; new lanes apply after landing.
 
 <!-- ar:roles curator -->
-Count a hand-over as taken and handle provider, seat, busy and unreachable-Manager refusals as `../operations/implementation.md` §Boundaries states.
+Handle non-work replies, empty or doubled seats and unreachable-Manager notices as `../operations/implementation.md` §Boundaries states.
 
 <!-- ar:roles curator -->
 If required Manager notice fails delivery, report it pending, continue independent work and retry via `role_message` on `agents-remember-task`; never ask the developer in your chat instead.
@@ -196,3 +200,6 @@ For a native memory-file sync conflict, repair only the memory content inside yo
 <!-- ar:roles curator -->
 <!-- ar:roles all -->
 Required input: the permission non-bypass boundary in `operations/orientation.md` — a denied or unanswered harness request is never worked around with another tool, command, helper seat, or later turn.
+
+<!-- ar:roles all -->
+Read [message handover]({{detail:reference/message-handover.md}}) when you reach a step another seat awaits, a handover, or a held/full-store receipt, not before.

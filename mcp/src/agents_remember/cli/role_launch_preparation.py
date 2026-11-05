@@ -359,7 +359,7 @@ def _task_document_read_metadata(
     first_read = (
         "Read this rendered task document first with your harness's own file tools: "
         + ", ".join(primary_files)
-        + ". Change documents through task_doc only; edits to a copy are never read back and are lost on the next publication."
+        + ". task_doc first, then logged canonical amendment on correct-input refusal; owner's next publication refreshes renders/projections, rendered copies never parsed back. Follow skills/l-01-agent-lifecycles/reference/refused-write.md for that same-tool recovery; read/check/validation/sync, starts, product guards and commit gates retain stops."
         if primary_files
         else "This taskless role has no task document to read."
     )

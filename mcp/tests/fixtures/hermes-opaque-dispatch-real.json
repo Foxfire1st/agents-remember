@@ -1,0 +1,454 @@
+{
+  "schema": "hermes-opaque-native-pairs/v1",
+  "provenance": "Selected parsed native event values copied from named retained attempt.json files, not byte-identical SQLite exports. Full wrapper inputs and all native paired outputs. Source row paths/hashes retained; no server logs present or cross-check claimed.",
+  "rows": [
+    {
+      "case": "CE02",
+      "attemptId": "4acb3fb0-1752-4310-ae5e-6e489db19202",
+      "originalAttemptPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-c3-hermes/hermes/CE02/4acb3fb0-1752-4310-ae5e-6e489db19202/attempt.json",
+      "originalAttemptSha256": "dd724aa3f75da2fafc49f8c36de1c1407a68c9d8a3336172e06627ea61dd159d",
+      "eventJsonPath": "$.capture.events[119]",
+      "sessionId": "dccbf3d0-a092-4187-9d8b-94253a3bf033",
+      "nativeRawExportSha256": "b85f07500ee3ff04a690adeb2ec4fec8a5828ebcbdd472d26db6fa8a676c0158",
+      "events": [
+        {
+          "kind": "tool_call",
+          "session_id": "dccbf3d0-a092-4187-9d8b-94253a3bf033",
+          "sequence": 119,
+          "payload": {
+            "call_id": "call_b314f9764168",
+            "name": "tool_call",
+            "arguments": "{\"calls\": [{\"name\": \"mcp__agents_remember_task__knowledge_read\", \"arguments\": {\"repo_root\": \"/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE02/trials/4acb3fb0-1752-4310-ae5e-6e489db19202/project/coordination/memory-repos/ar-code\", \"view\": \"layout\"}}]}",
+            "server": null
+          },
+          "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE02/trials/4acb3fb0-1752-4310-ae5e-6e489db19202/hermes/state.db",
+          "source_sha256": "3dc9f0157f6226f33e8e812d5d59d24d9ee8376050b082c4f1849a8bc3bd6550",
+          "native_timestamp": 1793351507.9343991
+        },
+        {
+          "kind": "tool_result",
+          "session_id": "dccbf3d0-a092-4187-9d8b-94253a3bf033",
+          "sequence": 123,
+          "payload": {
+            "call_id": "call_b314f9764168",
+            "name": "tool_call",
+            "output": "{\"error\": \"tool_call to 'mcp__agents_remember_task__knowledge_read' is missing required argument(s): memoryRoot. The tool was NOT invoked. Parameters schema: {\\\"properties\\\": {\\\"memoryRoot\\\": {\\\"title\\\": \\\"Memoryroot\\\", \\\"type\\\": \\\"string\\\"}, \\\"view\\\": {\\\"title\\\": \\\"View\\\", \\\"type\\\": \\\"string\\\"}, \\\"orderingInput\\\": {\\\"type\\\": \\\"string\\\", \\\"nullable\\\": true, \\\"title\\\": \\\"Orderinginput\\\", \\\"default\\\": null}, \\\"limit\\\": {\\\"default\\\": 32, \\\"title\\\": \\\"Limit\\\", \\\"type\\\": \\\"integer\\\"}, \\\"continuation\\\": {\\\"type\\\": \\\"string\\\", \\\"nullable\\\": true, \\\"title\\\": \\\"Continuation\\\", \\\"default\\\": null}, \\\"invariantRevisionId\\\": {\\\"type\\\": \\\"string\\\", \\\"nullable\\\": true, \\\"title\\\": \\\"Invariantrevisionid\\\", \\\"default\\\": null}, \\\"familyRevisionId\\\": {\\\"type\\\": \\\"string\\\", \\\"nullable\\\": true, \\\"title\\\": \\\"Familyrevisionid\\\", \\\"default\\\": null}, \\\"recordId\\\": {\\\"type\\\": \\\"string\\\", \\\"nullable\\\": true, \\\"title\\\": \\\"Recordid\\\", \\\"default\\\": null}, \\\"sourcePath\\\": {\\\"type\\\": \\\"string\\\", \\\"nullable\\\": true, \\\"title\\\": \\\"Sourcepath\\\", \\\"default\\\": null}, \\\"repositoryRoot\\\": {\\\"type\\\": \\\"string\\\", \\\"nullable\\\": true, \\\"title\\\": \\\"Repositoryroot\\\", \\\"default\\\": null}, \\\"codeTreeId\\\": {\\\"type\\\": \\\"string\\\", \\\"nullable\\\": true, \\\"title\\\": \\\"Codetreeid\\\", \\\"default\\\": null}, \\\"weaknessKind\\\": {\\\"type\\\": \\\"string\\\", \\\"nullable\\\": true, \\\"title\\\": \\\"Weaknesskind\\\", \\\"default\\\": null}, \\\"includeClosed\\\": {\\\"default\\\": false, \\\"title\\\": \\\"Includeclosed\\\", \\\"type\\\": \\\"boolean\\\"}, \\\"staleOnly\\\": {\\\"default\\\": false, \\\"title\\\": \\\"Staleonly\\\", \\\"type\\\": \\\"boolean\\\"}, \\\"standsOn\\\": {\\\"type\\\": \\\"string\\\", \\\"nullable\\\": true, \\\"title\\\": \\\"Standson\\\", \\\"default\\\": null}}, \\\"required\\\": [\\\"memoryRoot\\\", \\\"view\\\"], \\\"title\\\": \\\"knowledge_readArguments\\\", \\\"type\\\": \\\"object\\\"}. Retry tool_call with 'arguments' matching the parameters schema above.\"}"
+          },
+          "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE02/trials/4acb3fb0-1752-4310-ae5e-6e489db19202/hermes/state.db",
+          "source_sha256": "3dc9f0157f6226f33e8e812d5d59d24d9ee8376050b082c4f1849a8bc3bd6550",
+          "native_timestamp": 1793351510.0592768
+        }
+      ],
+      "sourceFiles": [
+        {
+          "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE02/trials/4acb3fb0-1752-4310-ae5e-6e489db19202/hermes/state.db",
+          "sha256": "3dc9f0157f6226f33e8e812d5d59d24d9ee8376050b082c4f1849a8bc3bd6550"
+        }
+      ],
+      "rawBindings": {
+        "calls": [
+          {
+            "jsonPath": "$.capture.raw_records[52].row.tool_calls (JSON string)[1]",
+            "rowId": 52,
+            "rowSha256": "9423d3e92afb0f9e8276a90f13c18e1914c30adcd6baf544eeda7e228a3fe2af",
+            "active": 1
+          }
+        ],
+        "results": [
+          {
+            "jsonPath": "$.capture.raw_records[54].row",
+            "rowId": 54,
+            "rowSha256": "b5e68de121b89ba460d0adbda5ac52252d6d84b80cfedf72c7270e11652dc983",
+            "active": 1,
+            "toolName": "tool_call",
+            "contentSha256": "d21c200cb9e0880f3cef624004bd09fedd3520c6cd268dcc37172760f5d8b8e8"
+          }
+        ]
+      }
+    },
+    {
+      "case": "CE05",
+      "attemptId": "5592a5b5-9ea5-43f9-bdfd-a183e6fb29d8",
+      "originalAttemptPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-c3-hermes/hermes/CE05/5592a5b5-9ea5-43f9-bdfd-a183e6fb29d8/attempt.json",
+      "originalAttemptSha256": "75aa56ae3df47a762ed65fa06594f7d2b4e61b098985e5fa793f7ba64efb6572",
+      "eventJsonPath": "$.capture.events[96]",
+      "sessionId": "5a82353a-f82a-444c-861b-e74f2a685e03",
+      "nativeRawExportSha256": "d0a12fa7635e89e1039fe11fc85711dbeb563e9970b29c334204fc1c3ca158e6",
+      "events": [
+        {
+          "kind": "tool_call",
+          "session_id": "5a82353a-f82a-444c-861b-e74f2a685e03",
+          "sequence": 96,
+          "payload": {
+            "call_id": "call_0f11d6c7075a4a96a46ee1cf",
+            "name": "tool_call",
+            "arguments": "{\"calls\":[{\"arguments\":{\"repo_id\":\"code\",\"mode\":\"sync\"},\"name\":\"mcp__agents_remember_task__memory_quality_check\"}]}",
+            "server": null
+          },
+          "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE05/trials/5592a5b5-9ea5-43f9-bdfd-a183e6fb29d8/hermes/state.db",
+          "source_sha256": "158d8b6246e78dd82f5ed7f905c218aeb096e73a41fd0c9a42959e85fc6a5294",
+          "native_timestamp": 1793350873.4497373
+        },
+        {
+          "kind": "tool_result",
+          "session_id": "5a82353a-f82a-444c-861b-e74f2a685e03",
+          "sequence": 99,
+          "payload": {
+            "call_id": "call_0f11d6c7075a4a96a46ee1cf",
+            "name": "tool_call",
+            "output": "{\"error\": \"tool_call to 'mcp__agents_remember_task__memory_quality_check' is missing required argument(s): request. The tool was NOT invoked. Parameters schema: {\\\"$defs\\\": {\\\"MemoryQualityCheckRequest\\\": {\\\"discriminator\\\": {\\\"mapping\\\": {\\\"poll\\\": \\\"#/$defs/MemoryQualityPollRequest\\\", \\\"start\\\": \\\"#/$defs/MemoryQualityStartRequest\\\", \\\"sync\\\": \\\"#/$defs/MemoryQualitySyncRequest\\\"}, \\\"propertyName\\\": \\\"mode\\\"}, \\\"oneOf\\\": [{\\\"$ref\\\": \\\"#/$defs/MemoryQualitySyncRequest\\\"}, {\\\"$ref\\\": \\\"#/$defs/MemoryQualityStartRequest\\\"}, {\\\"$ref\\\": \\\"#/$defs/MemoryQualityPollRequest\\\"}]}, \\\"MemoryQualityPollRequest\\\": {\\\"additionalProperties\\\": false, \\\"description\\\": \\\"Poll one repository-owned run through the same admitted scope.\\\", \\\"properties\\\": {\\\"mode\\\": {\\\"const\\\": \\\"poll\\\", \\\"title\\\": \\\"Mode\\\", \\\"type\\\": \\\"string\\\"}, \\\"repo_id\\\": {\\\"title\\\": \\\"Repo Id\\\", \\\"type\\\": \\\"string\\\"}, \\\"run_id\\\": {\\\"title\\\": \\\"Run Id\\\", \\\"type\\\": \\\"string\\\"}, \\\"contract_path\\\": {\\\"type\\\": \\\"string\\\", \\\"nullable\\\": true, \\\"title\\\": \\\"Contract Path\\\", \\\"default\\\": null}}, \\\"required\\\": [\\\"mode\\\", \\\"repo_id\\\", \\\"run_id\\\"], \\\"title\\\": \\\"MemoryQualityPollRequest\\\", \\\"type\\\": \\\"object\\\"}, \\\"MemoryQualityStartRequest\\\": {\\\"additionalProperties\\\": false, \\\"description\\\": \\\"Start one bounded asynchronous memory-quality request.\\\", \\\"properties\\\": {\\\"repo_id\\\": {\\\"title\\\": \\\"Repo Id\\\", \\\"type\\\": \\\"string\\\"}, \\\"checks\\\": {\\\"items\\\": {\\\"type\\\": \\\"string\\\"}, \\\"type\\\": \\\"array\\\", \\\"nullable\\\": true, \\\"title\\\": \\\"Checks\\\", \\\"default\\\": null}, \\\"detail_limit\\\": {\\\"default\\\": 50, \\\"title\\\": \\\"Detail Limit\\\", \\\"type\\\": \\\"integer\\\"}, \\\"contract_path\\\": {\\\"type\\\": \\\"string\\\", \\\"nullable\\\": true, \\\"title\\\": \\\"Contract Path\\\", \\\"default\\\": null}, \\\"mode\\\": {\\\"const\\\": \\\"start\\\", \\\"title\\\": \\\"Mode\\\", \\\"type\\\": \\\"string\\\"}}, \\\"required\\\": [\\\"repo_id\\\", \\\"mode\\\"], \\\"title\\\": \\\"MemoryQualityStartRequest\\\", \\\"type\\\": \\\"object\\\"}, \\\"MemoryQualitySyncRequest\\\": {\\\"additionalProperties\\\": false, \\\"description\\\": \\\"Run one memory-quality request synchronously.\\\", \\\"properties\\\": {\\\"repo_id\\\": {\\\"title\\\": \\\"Repo Id\\\", \\\"type\\\": \\\"string\\\"}, \\\"checks\\\": {\\\"items\\\": {\\\"type\\\": \\\"string\\\"}, \\\"type\\\": \\\"array\\\", \\\"nullable\\\": true, \\\"title\\\": \\\"Checks\\\", \\\"default\\\": null}, \\\"detail_limit\\\": {\\\"default\\\": 50, \\\"title\\\": \\\"Detail Limit\\\", \\\"type\\\": \\\"integer\\\"}, \\\"contract_path\\\": {\\\"type\\\": \\\"string\\\", \\\"nullable\\\": true, \\\"title\\\": \\\"Contract Path\\\", \\\"default\\\": null}, \\\"mode\\\": {\\\"const\\\": \\\"sync\\\", \\\"title\\\": \\\"Mode\\\", \\\"type\\\": \\\"string\\\"}}, \\\"required\\\": [\\\"repo_id\\\", \\\"mode\\\"], \\\"title\\\": \\\"MemoryQualitySyncRequest\\\", \\\"type\\\": \\\"object\\\"}}, \\\"properties\\\": {\\\"request\\\": {\\\"$ref\\\": \\\"#/$defs/MemoryQualityCheckRequest\\\"}}, \\\"required\\\": [\\\"request\\\"], \\\"title\\\": \\\"memory_quality_checkArguments\\\", \\\"type\\\": \\\"object\\\"}. Retry tool_call with 'arguments' matching the parameters schema above.\"}"
+          },
+          "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE05/trials/5592a5b5-9ea5-43f9-bdfd-a183e6fb29d8/hermes/state.db",
+          "source_sha256": "158d8b6246e78dd82f5ed7f905c218aeb096e73a41fd0c9a42959e85fc6a5294",
+          "native_timestamp": 1793350873.4624398
+        }
+      ],
+      "sourceFiles": [
+        {
+          "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE05/trials/5592a5b5-9ea5-43f9-bdfd-a183e6fb29d8/hermes/state.db",
+          "sha256": "158d8b6246e78dd82f5ed7f905c218aeb096e73a41fd0c9a42959e85fc6a5294"
+        }
+      ],
+      "rawBindings": {
+        "calls": [
+          {
+            "jsonPath": "$.capture.raw_records[44].row.tool_calls (JSON string)[0]",
+            "rowId": 44,
+            "rowSha256": "83037532ea427c8b09e7597efddb8f9ce441ac79eb1e2c4a1487489578275169",
+            "active": 1
+          }
+        ],
+        "results": [
+          {
+            "jsonPath": "$.capture.raw_records[45].row",
+            "rowId": 45,
+            "rowSha256": "b931e696167106ac7634ad0ab35ed463993707b128caf526f41dfe004633c20b",
+            "active": 1,
+            "toolName": "tool_call",
+            "contentSha256": "be75544f2b3a3082fd3253fb291d3574ddc3dddea56d06b3539100441d304f14"
+          }
+        ]
+      }
+    },
+    {
+      "case": "CE05",
+      "attemptId": "c318eb78-358a-48de-b9d1-8b524645869d",
+      "originalAttemptPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-c3-hermes/hermes/CE05/c318eb78-358a-48de-b9d1-8b524645869d/attempt.json",
+      "originalAttemptSha256": "44188324c640585fa9618ed593fdddb6aed3cdffd0634098aeacd651e2071948",
+      "eventJsonPath": "$.capture.events[130]",
+      "sessionId": "ceed9888-c560-4769-8b35-3d4c68a939c5",
+      "nativeRawExportSha256": "84967430aa7e1572e02542a19203e148d78417c89b8b06e38633f00af81c0c91",
+      "events": [
+        {
+          "kind": "tool_call",
+          "session_id": "ceed9888-c560-4769-8b35-3d4c68a939c5",
+          "sequence": 130,
+          "payload": {
+            "call_id": "call_8f3da0cbf66945b2b7e6f553",
+            "name": "tool_call",
+            "arguments": "{\"calls\":[{\"arguments\":{},\"name\":\"mcp__agents_remember_task__memory_baseline_status\"},{\"arguments\":{\"memoryRoot\":\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE05/trials/c318eb78-358a-48de-b9d1-8b524645869d/project/coordination/memory-repos/ar-code\",\"view\":\"source_context\"}}]}",
+            "server": null
+          },
+          "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE05/trials/c318eb78-358a-48de-b9d1-8b524645869d/hermes/state.db",
+          "source_sha256": "3b1f7dc67eaf8d17a399d736fcf969aec37fa220bba0365ce95ebd05a28adf44",
+          "native_timestamp": 1793351528.1718357
+        },
+        {
+          "kind": "tool_result",
+          "session_id": "ceed9888-c560-4769-8b35-3d4c68a939c5",
+          "sequence": 132,
+          "payload": {
+            "call_id": "call_8f3da0cbf66945b2b7e6f553",
+            "name": "tool_call",
+            "output": "{\"error\": \"tool_call calls[1] requires a 'name'\"}"
+          },
+          "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE05/trials/c318eb78-358a-48de-b9d1-8b524645869d/hermes/state.db",
+          "source_sha256": "3b1f7dc67eaf8d17a399d736fcf969aec37fa220bba0365ce95ebd05a28adf44",
+          "native_timestamp": 1793351528.1872292
+        }
+      ],
+      "sourceFiles": [
+        {
+          "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE05/trials/c318eb78-358a-48de-b9d1-8b524645869d/hermes/state.db",
+          "sha256": "3b1f7dc67eaf8d17a399d736fcf969aec37fa220bba0365ce95ebd05a28adf44"
+        }
+      ],
+      "rawBindings": {
+        "calls": [
+          {
+            "jsonPath": "$.capture.raw_records[58].row.tool_calls (JSON string)[0]",
+            "rowId": 58,
+            "rowSha256": "29b52591bd89b3440157b596e379643969626e742e48889e34aa3f048de24b0f",
+            "active": 1
+          }
+        ],
+        "results": [
+          {
+            "jsonPath": "$.capture.raw_records[59].row",
+            "rowId": 59,
+            "rowSha256": "4e4da1291300768ba3aa5d7ae17f4ad86a6efeb821e4a5d5453c1abac88aa6b9",
+            "active": 1,
+            "toolName": "tool_call",
+            "contentSha256": "69f8246d992f6c1e92536bbcbe43209ec6b34514f24ebaecb58455e7e467513f"
+          }
+        ]
+      }
+    },
+    {
+      "case": "CE05",
+      "attemptId": "c318eb78-358a-48de-b9d1-8b524645869d",
+      "originalAttemptPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-c3-hermes/hermes/CE05/c318eb78-358a-48de-b9d1-8b524645869d/attempt.json",
+      "originalAttemptSha256": "44188324c640585fa9618ed593fdddb6aed3cdffd0634098aeacd651e2071948",
+      "eventJsonPath": "$.capture.events[134]",
+      "sessionId": "ceed9888-c560-4769-8b35-3d4c68a939c5",
+      "nativeRawExportSha256": "84967430aa7e1572e02542a19203e148d78417c89b8b06e38633f00af81c0c91",
+      "events": [
+        {
+          "kind": "tool_call",
+          "session_id": "ceed9888-c560-4769-8b35-3d4c68a939c5",
+          "sequence": 134,
+          "payload": {
+            "call_id": "call_0187cfa8aa41425187004706",
+            "name": "tool_call",
+            "arguments": "{\"calls\": [{\"name\": \"mcp__agents_remember_task__memory_baseline_status\", \"arguments\": {}}]}",
+            "server": null
+          },
+          "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE05/trials/c318eb78-358a-48de-b9d1-8b524645869d/hermes/state.db",
+          "source_sha256": "3b1f7dc67eaf8d17a399d736fcf969aec37fa220bba0365ce95ebd05a28adf44",
+          "native_timestamp": 1793351533.6347167
+        },
+        {
+          "kind": "tool_result",
+          "session_id": "ceed9888-c560-4769-8b35-3d4c68a939c5",
+          "sequence": 137,
+          "payload": {
+            "call_id": "call_0187cfa8aa41425187004706",
+            "name": "tool_call",
+            "output": "{\"error\": \"tool_call to 'mcp__agents_remember_task__memory_baseline_status' is missing required argument(s): repo_id. The tool was NOT invoked. Parameters schema: {\\\"properties\\\": {\\\"repo_id\\\": {\\\"title\\\": \\\"Repo Id\\\", \\\"type\\\": \\\"string\\\"}}, \\\"required\\\": [\\\"repo_id\\\"], \\\"title\\\": \\\"memory_baseline_statusArguments\\\", \\\"type\\\": \\\"object\\\"}. Retry tool_call with 'arguments' matching the parameters schema above.\"}"
+          },
+          "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE05/trials/c318eb78-358a-48de-b9d1-8b524645869d/hermes/state.db",
+          "source_sha256": "3b1f7dc67eaf8d17a399d736fcf969aec37fa220bba0365ce95ebd05a28adf44",
+          "native_timestamp": 1793351533.6461468
+        }
+      ],
+      "sourceFiles": [
+        {
+          "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE05/trials/c318eb78-358a-48de-b9d1-8b524645869d/hermes/state.db",
+          "sha256": "3b1f7dc67eaf8d17a399d736fcf969aec37fa220bba0365ce95ebd05a28adf44"
+        }
+      ],
+      "rawBindings": {
+        "calls": [
+          {
+            "jsonPath": "$.capture.raw_records[60].row.tool_calls (JSON string)[0]",
+            "rowId": 60,
+            "rowSha256": "b5dad66e07386b878b4b12e5dc30fb33bd3c75ca0670ada7bc8eecf03cc177f2",
+            "active": 1
+          }
+        ],
+        "results": [
+          {
+            "jsonPath": "$.capture.raw_records[61].row",
+            "rowId": 61,
+            "rowSha256": "039edbf9093ade5e6a314b77ef96a422f23a5371f7788842f64101a0af245d70",
+            "active": 1,
+            "toolName": "tool_call",
+            "contentSha256": "5994e7704dfd638cc41d2639aace5202877cb621c528d5879fe882caa48b2232"
+          }
+        ]
+      }
+    },
+    {
+      "case": "CE06",
+      "attemptId": "040e0df3-9a1a-4ab4-b0a5-e4dc2e380d7f",
+      "originalAttemptPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-c3-hermes/hermes/CE06/040e0df3-9a1a-4ab4-b0a5-e4dc2e380d7f/attempt.json",
+      "originalAttemptSha256": "1795f8cdde038d98b51940a3236003fc51ad8b9d66a7b751035f28d9b4f18f42",
+      "eventJsonPath": "$.capture.events[200]",
+      "sessionId": "5a2955be-4407-4ea9-829d-76d736b7e2e6",
+      "nativeRawExportSha256": "cd7bb2bdbf905296b711e1a7b3e7e29c1fa1b5e8c857b67788c570c1213c4379",
+      "events": [
+        {
+          "kind": "tool_call",
+          "session_id": "5a2955be-4407-4ea9-829d-76d736b7e2e6",
+          "sequence": 200,
+          "payload": {
+            "call_id": "call_f8b1891829e7438690d0fe45",
+            "name": "tool_call",
+            "arguments": "{\"calls\":[{\"arguments\":{\"authorizationRef\":\"CE06 fixture stage grant: inputs/authority.json (curation; memory: current-intent onboarding and matching knowledge bookkeeping on the queue subjects)\",\"commit\":false,\"handoff\":{\"history\":[{\"disposition\":\"updated\",\"reason\":\"Authored the missing current-intent card and its three code references for the new per-scope launcher-default memory module, and refreshed the route index to cover it.\",\"subject\":\"onboarding:dashboard/src/cockpit/launcherDefaultsMemory.ts\"},{\"disposition\":\"no_impact\",\"reason\":\"Examined the current 500 ms progress polling against its existing card and sidecar: the recorded symbol anchor still resolves to the same bytes in the settled tree, and the card's purpose, commentary and single evidence line still describe the hook, so the card stands unchanged.\",\"subject\":\"onboarding:dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts\"}]},\"handoffName\":\"ce06-curation-wave.json\",\"repoId\":\"code\",\"wave\":\"CE06-040e0df3-9a1a-4ab4-b0a5-e4dc2e380d7f\"}},\"name\"]}",
+            "server": null
+          },
+          "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE06/trials/040e0df3-9a1a-4ab4-b0a5-e4dc2e380d7f/hermes/state.db",
+          "source_sha256": "2e1288ff5b31740fa94f940453b77255ebb4b090ea9f56fe11d4004afb760025",
+          "native_timestamp": 1793351105.7409034
+        },
+        {
+          "kind": "tool_result",
+          "session_id": "5a2955be-4407-4ea9-829d-76d736b7e2e6",
+          "sequence": 202,
+          "payload": {
+            "call_id": "call_f8b1891829e7438690d0fe45",
+            "name": "tool_call",
+            "output": "{\"error\": \"tool_call calls[0] requires a 'name'\"}"
+          },
+          "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE06/trials/040e0df3-9a1a-4ab4-b0a5-e4dc2e380d7f/hermes/state.db",
+          "source_sha256": "2e1288ff5b31740fa94f940453b77255ebb4b090ea9f56fe11d4004afb760025",
+          "native_timestamp": 1793351105.7551713
+        }
+      ],
+      "sourceFiles": [
+        {
+          "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE06/trials/040e0df3-9a1a-4ab4-b0a5-e4dc2e380d7f/hermes/state.db",
+          "sha256": "2e1288ff5b31740fa94f940453b77255ebb4b090ea9f56fe11d4004afb760025"
+        }
+      ],
+      "rawBindings": {
+        "calls": [
+          {
+            "jsonPath": "$.capture.raw_records[92].row.tool_calls (JSON string)[0]",
+            "rowId": 92,
+            "rowSha256": "86ae45b952fe0f736385d131c3e79c56e5dd219e4a7831724334366747cf913a",
+            "active": 1
+          }
+        ],
+        "results": [
+          {
+            "jsonPath": "$.capture.raw_records[93].row",
+            "rowId": 93,
+            "rowSha256": "fabebfe3725789f774b1fb71a9926f44926467eb0da7630ae117957a3bddfe08",
+            "active": 1,
+            "toolName": "tool_call",
+            "contentSha256": "e260c38fa066c3670449988a18ebf9cdbfb7bae42a76a594b8406a4b91ee26e6"
+          }
+        ]
+      }
+    },
+    {
+      "case": "CE07",
+      "attemptId": "d4c60f75-3dca-4269-bb20-b955ebfff10b",
+      "originalAttemptPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-c3-hermes/hermes/CE07/d4c60f75-3dca-4269-bb20-b955ebfff10b/attempt.json",
+      "originalAttemptSha256": "51e3b05b18444bbe8b3a51415b4004b43e5a4e830eda22297f015f2c0ba5416e",
+      "eventJsonPath": "$.capture.events[140]",
+      "sessionId": "fa2fd7b1-9280-4cc9-910f-d17dad6b3875",
+      "nativeRawExportSha256": "06d6f6190925c718e31c4ae620a911611fdac46a25fd89e88d3d65e000d08aab",
+      "events": [
+        {
+          "kind": "tool_call",
+          "session_id": "fa2fd7b1-9280-4cc9-910f-d17dad6b3875",
+          "sequence": 140,
+          "payload": {
+            "call_id": "call_ecb98ea8d34c",
+            "name": "tool_call",
+            "arguments": "{\"calls\": [{\"arguments\": {\"repo_id\": \"code\"}, \"name\": \"mcp__agents_remember_task__read_ar_files\"}]}",
+            "server": null
+          },
+          "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE07/trials/d4c60f75-3dca-4269-bb20-b955ebfff10b/hermes/state.db",
+          "source_sha256": "8b132536d8a0ff3e178f1176b032050b91961d69cef2e5ad6145c01e14be18bd",
+          "native_timestamp": 1793350078.5655775
+        },
+        {
+          "kind": "tool_result",
+          "session_id": "fa2fd7b1-9280-4cc9-910f-d17dad6b3875",
+          "sequence": 144,
+          "payload": {
+            "call_id": "call_ecb98ea8d34c",
+            "name": "tool_call",
+            "output": "{\"error\": \"tool_call to 'mcp__agents_remember_task__read_ar_files' is missing required argument(s): files. The tool was NOT invoked. Parameters schema: {\\\"$defs\\\": {\\\"TaskDocumentRef\\\": {\\\"additionalProperties\\\": false, \\\"description\\\": \\\"Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root.\\\", \\\"properties\\\": {\\\"repository\\\": {\\\"title\\\": \\\"Repository\\\", \\\"type\\\": \\\"string\\\"}, \\\"path\\\": {\\\"title\\\": \\\"Path\\\", \\\"type\\\": \\\"string\\\"}}, \\\"required\\\": [\\\"repository\\\", \\\"path\\\"], \\\"title\\\": \\\"TaskDocumentRef\\\", \\\"type\\\": \\\"object\\\"}, \\\"TaskScopedReaderContext\\\": {\\\"additionalProperties\\\": false, \\\"description\\\": \\\"The exact task and canonical enclosure asserted by one reader call.\\\", \\\"properties\\\": {\\\"task_document_ref\\\": {\\\"$ref\\\": \\\"#/$defs/TaskDocumentRef\\\"}, \\\"contract_path\\\": {\\\"title\\\": \\\"Contract Path\\\", \\\"type\\\": \\\"string\\\"}}, \\\"required\\\": [\\\"task_document_ref\\\", \\\"contract_path\\\"], \\\"title\\\": \\\"TaskScopedReaderContext\\\", \\\"type\\\": \\\"object\\\"}}, \\\"properties\\\": {\\\"repo_id\\\": {\\\"title\\\": \\\"Repo Id\\\", \\\"type\\\": \\\"string\\\"}, \\\"files\\\": {\\\"items\\\": {}, \\\"title\\\": \\\"Files\\\", \\\"type\\\": \\\"array\\\"}, \\\"task_context\\\": {\\\"$ref\\\": \\\"#/$defs/TaskScopedReaderContext\\\", \\\"nullable\\\": true}}, \\\"required\\\": [\\\"repo_id\\\", \\\"files\\\"], \\\"title\\\": \\\"read_ar_filesArguments\\\", \\\"type\\\": \\\"object\\\"}. Retry tool_call with 'arguments' matching the parameters schema above.\"}"
+          },
+          "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE07/trials/d4c60f75-3dca-4269-bb20-b955ebfff10b/hermes/state.db",
+          "source_sha256": "8b132536d8a0ff3e178f1176b032050b91961d69cef2e5ad6145c01e14be18bd",
+          "native_timestamp": 1793350078.620988
+        }
+      ],
+      "sourceFiles": [
+        {
+          "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE07/trials/d4c60f75-3dca-4269-bb20-b955ebfff10b/hermes/state.db",
+          "sha256": "8b132536d8a0ff3e178f1176b032050b91961d69cef2e5ad6145c01e14be18bd"
+        }
+      ],
+      "rawBindings": {
+        "calls": [
+          {
+            "jsonPath": "$.capture.raw_records[65].row.tool_calls (JSON string)[1]",
+            "rowId": 65,
+            "rowSha256": "796e1d317d0df44a8f4575b11b307e5c514ed092933ea9c6f7e899ce9e72e4e2",
+            "active": 1
+          }
+        ],
+        "results": [
+          {
+            "jsonPath": "$.capture.raw_records[67].row",
+            "rowId": 67,
+            "rowSha256": "9c7c2b4559bd9b37f7aa31d77e0e9d2ddcf48887163ef5e3b1ad6cbe8d7849b9",
+            "active": 1,
+            "toolName": "tool_call",
+            "contentSha256": "44d7636d17079c0219017e3c4ab3719e4cebfd5ba2ef85af5566702d440bd678"
+          }
+        ]
+      }
+    },
+    {
+      "case": "CE08",
+      "attemptId": "f0c85e16-9fc0-4914-8ca9-a8e2d61de023",
+      "originalAttemptPath": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-c3-hermes/hermes/CE08/f0c85e16-9fc0-4914-8ca9-a8e2d61de023/attempt.json",
+      "originalAttemptSha256": "c0f525c6b008ff12342577388cb23ad17c7d433f9c2d87656924aa3c76c99c5a",
+      "eventJsonPath": "$.capture.events[223]",
+      "sessionId": "a1429f89-9cb9-42f9-ba67-4269e3a97fea",
+      "nativeRawExportSha256": "567c67e2c47e9f75e9713b098121910c80b386508a55cbf86ad40cf526003e43",
+      "events": [
+        {
+          "kind": "tool_call",
+          "session_id": "a1429f89-9cb9-42f9-ba67-4269e3a97fea",
+          "sequence": 223,
+          "payload": {
+            "call_id": "call_fee9d5e5f08b",
+            "name": "tool_call",
+            "arguments": "{\"calls\": \"[{\\\"arguments\\\": {\\\"memoryRoot\\\": \\\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE08/trials/f0c85e16-9fc0-4914-8ca9-a8e2d61de023/project/coordination/memory-repos/ar-code\\\", \\\"recordId\\\": \\\"INV-1RWT3JRR\\\", \\\"view\\\": \\\"invariant\\\"}, {\\\"arguments\\\": {\\\"memoryRoot\\\": \\\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE08/trials/f0c85e16-9fc0-4914-8ca9-a8e2d61de023/project/coordination/memory-repos/ar-code\\\", \\\"sourcePath\\\": \\\"dashboard/src/data/files.test.ts\\\", \\\"view\\\": \\\"source_context\\\"}]\", \"name\": \"mcp__agents_remember_task__knowledge_read\"}",
+            "server": null
+          },
+          "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE08/trials/f0c85e16-9fc0-4914-8ca9-a8e2d61de023/hermes/state.db",
+          "source_sha256": "64ce7c339cb45c08cb01d6217421b6ff2ace919965ac8bdd8773a88996f1887e",
+          "native_timestamp": 1793351504.0205276
+        },
+        {
+          "kind": "tool_result",
+          "session_id": "a1429f89-9cb9-42f9-ba67-4269e3a97fea",
+          "sequence": 227,
+          "payload": {
+            "call_id": "call_fee9d5e5f08b",
+            "name": "tool_call",
+            "output": "{\"error\": \"tool_call 'calls' is not valid JSON: Expecting property name enclosed in double quotes: line 1 column 251 (char 250)\"}"
+          },
+          "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE08/trials/f0c85e16-9fc0-4914-8ca9-a8e2d61de023/hermes/state.db",
+          "source_sha256": "64ce7c339cb45c08cb01d6217421b6ff2ace919965ac8bdd8773a88996f1887e",
+          "native_timestamp": 1793351504.0585399
+        }
+      ],
+      "sourceFiles": [
+        {
+          "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-c3-hermes/hermes-CE08/trials/f0c85e16-9fc0-4914-8ca9-a8e2d61de023/hermes/state.db",
+          "sha256": "64ce7c339cb45c08cb01d6217421b6ff2ace919965ac8bdd8773a88996f1887e"
+        }
+      ],
+      "rawBindings": {
+        "calls": [
+          {
+            "jsonPath": "$.capture.raw_records[110].row.tool_calls (JSON string)[1]",
+            "rowId": 110,
+            "rowSha256": "d385af8074ae7c0b62585b6e09727645df0e24a2db4876421aeda707ea14e21e",
+            "active": 1
+          }
+        ],
+        "results": [
+          {
+            "jsonPath": "$.capture.raw_records[112].row",
+            "rowId": 112,
+            "rowSha256": "4145d23179c558d80b07114a2098b69378bce01efa33f63a8df839d600f3f1a6",
+            "active": 1,
+            "toolName": "tool_call",
+            "contentSha256": "5259278f191ba9aa06b99b5dd008d1db1b40cae9ecfcf3b85814d839f5d07022"
+          }
+        ]
+      }
+    }
+  ]
+}

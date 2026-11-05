@@ -23,7 +23,7 @@ You must be given all of these; a brief missing one is refused and reported, nev
 - **The task-collaboration doctrine** `tasks/AGENTS.md`, **applied, not paraphrased**: meta-questioning,
   reframe-before-execution, evidence-first, visible planning, assumptions and truth gaps stated.
 - **Where code is in scope:** the resolved memory layer's `system/tools.md` and
-  `system/coding-guidelines.md`.
+  `system/coding-guidelines.md`; where UI is in scope, also `system/design-guidelines.md`.
 
 **Refuse a malformed dispatch** — an unresolved placeholder, colliding requirement IDs, a packet version that
 disagrees with the brief — and report it to the architect.
@@ -36,7 +36,9 @@ This section states only the obligations that are yours while running it.
    objective, and the highest-leverage framing. Use the reframing sections of `tasks/AGENTS.md`; a reframing
    that materially changes scope, intent, or sequencing is **played back and waits for confirmation**, while a
    pure clarification may continue.
-2. **Establish the evidence model** within the master's scope, visible before or alongside the plan. Retrieval:
+2. **Establish the evidence model** within the master's scope, visible before or alongside the plan.
+   Read [knowledge commands]({{detail:reference/knowledge-commands.md}}) when you reach a knowledge-system command or check, not before.
+   Retrieval:
    route indexes and onboarding for the map, bounded `read_ar_files` for intent confirmation; organise this evidence work with your
    harness as you see fit, and retain durable reports.
 3. **Blast radius WITHIN the master** — routes touched, invariants at risk, regressions. Cross-master and
@@ -107,9 +109,15 @@ the architect rules it and the orchestrator adopts the ruled plan into durable e
 
 ## Messages
 
-Messages wake; files carry. A message says what is asked or what is handed over, and names the files: evidence, verdicts, lists and logs are files, never pasted into a message. The full text goes in `body` and its files in `attach`; the tool files every message in the `messages` folder of the narrowest task the two agents share, and a leaf workspace links that folder as `messages`. The recipient reads the message and, where a file belongs to it, one last line naming the file and its SHA-256. A text holds at most the limit of the settings. A return goes to the parent's role with its task references, never to an id read from an earlier message.
+Read [message handovers and receipts]({{detail:reference/message-handover.md}}) when you reach a step another seat awaits, a handover, or a held/full-store receipt, not before.
+
+## Continue the assigned work
+
+Collect helpers and continue ordinary work. Follow **What every role acts on** in your first message for helper collection and continuation.
 
 ## Organise your own work
+
+Read [shared working rules]({{detail:reference/shared-working-rules.md}}) when you reach evidence or time recording, sandbox or harness setup, scratch removal, or a process/live-host operation, not before.
 
 Organise your own work inside the assignment, with whatever your harness offers, at any size. You decide the split; the roles order work at task boundaries. The seat answers for all of it: check their work, report which parts they did, and hand it over under your own name. Every boundary act is yours: a message to another seat, a task record or a product operation changing leaf state. A harness sub-agent is no AR role, holds no seat, does not start a role and has the same working folder, permissions and assignment. Nobody checks itself through a sub-agent: code and memory changes still require the independent Reviewer, never their author's helper. A harness without sub-agents can do all the same work.
 

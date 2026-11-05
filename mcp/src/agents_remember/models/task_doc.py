@@ -8,7 +8,7 @@ itself (``tasks.TaskDocument``) is the persisted contract and is deliberately
 
 from __future__ import annotations
 
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -114,6 +114,41 @@ class TaskDocDiscardEvidence(BaseModel):
     nextArgs: dict[str, Any] | None = Field(default=None, max_length=32)
 
 
+class TaskDocAvailableAlignmentLeaf(BaseModel):
+    """A declared sibling whose packet supplied its requirement identities."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    state: Literal["available"]
+    requirements: list[str]
+
+
+class TaskDocUnavailableAlignmentLeaf(BaseModel):
+    """A declared sibling whose packet does not exist yet."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    state: Literal["unavailable"]
+
+
+TaskDocAlignmentLeaf = Annotated[
+    TaskDocAvailableAlignmentLeaf | TaskDocUnavailableAlignmentLeaf, Field(discriminator="state")
+]
+
+
+class TaskDocAlignmentSweep(BaseModel):
+    """Packet-write advice, bounded to twelve sibling rows or the master's location."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message: str
+    openLeaves: list[TaskDocAlignmentLeaf] | None = Field(default=None, max_length=12)
+    openLeafCount: int | None = Field(default=None, gt=12)
+    masterTaskDocument: str | None = None
+
+
 class TaskDocResponse(ToolResponse):
     """``task_doc``: the document's identity, status, and progress after the op."""
 
@@ -145,6 +180,7 @@ class TaskDocResponse(ToolResponse):
     diff: str | None = None
     wouldLose: bool = False
     masterSync: TaskDocMasterSync | None = None
+    alignmentSweep: TaskDocAlignmentSweep | None = None
     # remove_subtask outcome (260703-L18 finding 1, closes friction F-N): the op removes the master
     # row and (unless keep_file) deletes the leaf doc, then echoes what it did. Without these fields
     # the extra=forbid envelope REJECTED the real payload, surfacing a tool error after a destructive

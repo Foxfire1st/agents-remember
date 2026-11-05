@@ -1,7 +1,7 @@
 {
   "schema": "ar-role-capsule-budgets/v1",
   "authority": "MIK-R101 rule 6",
-  "how": "budget = min(ceil(size_words * 11 / 10), ceiling); ceilings = 3700 capsule / 2500 step file; capsule size = whitespace-split words of render_instructions(), task data and seals excluded; step size = complete declared source",
+  "how": "budget = min(ceil(size_words * 11 / 10), applicable ceiling); capsule ceilings at every stage =4631 Architect and4513 Manager under D656 measured raises;4000 Curator/Reviewer/Bootstrap and3700 other roles; step files2500; shared digest1100 under D656 (former1000, originally900); capsule size=whitespace-split render_instructions(), task data and seals excluded; step size=complete declared source; digest size=complete core/every-role.md source delivered separately.",
   "handover": {
     "how": "budget_tokens = min(ceil(size_tokens * 11 / 10), 3300); size_tokens = the o200k_base tokens of the projection's compact JSON as it stands in the first message (not key sorted), measured on the largest projection the role can have: a parented start with every optional field present and a task document naming 12 requirement packets, with the test's temporary root replaced by /home/user/projects/ar-coordination before counting, and below that root the fixture's repository, task, leaf and packet names as long as this master's own (MIK-R193 rule 5); the count moves by under one per cent between runs because a request id's digits tokenize differently, and the eleven-tenths margin covers it",
     "architect/planning": {
@@ -39,174 +39,174 @@
   },
   "capsules": {
     "architect/orientation": {
-      "size_words": 3003,
-      "budget_words": 3304
+      "size_words": 3612,
+      "budget_words": 3974
     },
     "architect/planning": {
-      "size_words": 2354,
-      "budget_words": 2590
+      "size_words": 3632,
+      "budget_words": 3996
     },
     "architect/review": {
-      "size_words": 2613,
-      "budget_words": 2875
+      "size_words": 3812,
+      "budget_words": 4194
     },
     "architect/coordination": {
-      "size_words": 3607,
-      "budget_words": 3700
+      "size_words": 4210,
+      "budget_words": 4631
     },
     "architect/authorized-closeout": {
-      "size_words": 2232,
-      "budget_words": 2456
+      "size_words": 2951,
+      "budget_words": 3247
     },
     "architect/recovery": {
-      "size_words": 2319,
-      "budget_words": 2551
+      "size_words": 2895,
+      "budget_words": 3185
     },
     "orchestrator/orientation": {
-      "size_words": 2224,
-      "budget_words": 2447
+      "size_words": 2324,
+      "budget_words": 2557
     },
     "orchestrator/planning": {
-      "size_words": 1542,
-      "budget_words": 1697
+      "size_words": 1765,
+      "budget_words": 1942
     },
     "orchestrator/review": {
-      "size_words": 1834,
-      "budget_words": 2018
+      "size_words": 1984,
+      "budget_words": 2183
     },
     "orchestrator/coordination": {
-      "size_words": 2828,
-      "budget_words": 3111
+      "size_words": 2972,
+      "budget_words": 3270
     },
     "orchestrator/authorized-closeout": {
-      "size_words": 1453,
-      "budget_words": 1599
+      "size_words": 1713,
+      "budget_words": 1885
     },
     "orchestrator/recovery": {
-      "size_words": 1540,
-      "budget_words": 1694
+      "size_words": 1657,
+      "budget_words": 1823
     },
     "designer/orientation": {
-      "size_words": 2299,
-      "budget_words": 2529
+      "size_words": 2272,
+      "budget_words": 2500
     },
     "designer/planning": {
-      "size_words": 1617,
-      "budget_words": 1779
+      "size_words": 1713,
+      "budget_words": 1885
     },
     "strategist/orientation": {
-      "size_words": 2477,
-      "budget_words": 2725
+      "size_words": 2444,
+      "budget_words": 2689
     },
     "strategist/planning": {
-      "size_words": 1795,
-      "budget_words": 1975
+      "size_words": 1885,
+      "budget_words": 2074
     },
     "manager/orientation": {
-      "size_words": 3022,
-      "budget_words": 3325
+      "size_words": 3265,
+      "budget_words": 3592
     },
     "manager/review": {
-      "size_words": 2632,
-      "budget_words": 2896
+      "size_words": 2925,
+      "budget_words": 3218
     },
     "manager/curation": {
-      "size_words": 2978,
-      "budget_words": 3276
+      "size_words": 3240,
+      "budget_words": 3564
     },
     "manager/coordination": {
-      "size_words": 3678,
-      "budget_words": 3700
+      "size_words": 4102,
+      "budget_words": 4513
     },
     "manager/authorized-closeout": {
-      "size_words": 2251,
-      "budget_words": 2477
+      "size_words": 2654,
+      "budget_words": 2920
     },
     "manager/recovery": {
-      "size_words": 2338,
-      "budget_words": 2572
+      "size_words": 2598,
+      "budget_words": 2858
     },
     "worker/orientation": {
-      "size_words": 2643,
-      "budget_words": 2908
+      "size_words": 2883,
+      "budget_words": 3172
     },
     "worker/implementation": {
-      "size_words": 2378,
-      "budget_words": 2616
+      "size_words": 2837,
+      "budget_words": 3121
     },
     "worker/recovery": {
-      "size_words": 1959,
-      "budget_words": 2155
+      "size_words": 2216,
+      "budget_words": 2438
     },
     "curator/orientation": {
-      "size_words": 3121,
-      "budget_words": 3434
+      "size_words": 3175,
+      "budget_words": 3493
     },
     "curator/curation": {
-      "size_words": 3700,
-      "budget_words": 3700
+      "size_words": 3853,
+      "budget_words": 4000
     },
     "curator/recovery": {
-      "size_words": 2437,
-      "budget_words": 2681
+      "size_words": 2508,
+      "budget_words": 2759
     },
     "reviewer/orientation": {
-      "size_words": 3698,
-      "budget_words": 3700
+      "size_words": 3751,
+      "budget_words": 4000
     },
     "reviewer/review": {
-      "size_words": 3652,
-      "budget_words": 3700
+      "size_words": 3828,
+      "budget_words": 4000
     },
     "reviewer/recovery": {
-      "size_words": 3014,
-      "budget_words": 3316
+      "size_words": 3084,
+      "budget_words": 3393
     },
     "investigator/orientation": {
-      "size_words": 1794,
-      "budget_words": 1974
+      "size_words": 1847,
+      "budget_words": 2032
     },
     "investigator/recovery": {
-      "size_words": 1110,
-      "budget_words": 1221
+      "size_words": 1231,
+      "budget_words": 1355
     },
     "bootstrap/orientation": {
-      "size_words": 2628,
-      "budget_words": 2891
+      "size_words": 2132,
+      "budget_words": 2346
     },
     "bootstrap/recovery": {
-      "size_words": 1944,
-      "budget_words": 2139
+      "size_words": 1788,
+      "budget_words": 1967
     },
     "bootstrap/bootstrap": {
-      "size_words": 3688,
-      "budget_words": 3700
+      "size_words": 3630,
+      "budget_words": 3993
     },
     "launcher/orientation": {
-      "size_words": 1531,
-      "budget_words": 1685
+      "size_words": 1093,
+      "budget_words": 1203
     },
     "launcher/coordination": {
-      "size_words": 2135,
-      "budget_words": 2349
+      "size_words": 1928,
+      "budget_words": 2121
     }
   },
   "step_details": {
     "reference/curator-authoring-d301.md": {
-      "size_words": 1080,
-      "budget_words": 1188
+      "size_words": 1322,
+      "budget_words": 1455
     },
     "reference/curator-handoff-d301.md": {
       "size_words": 185,
       "budget_words": 204
     },
     "reference/reviewer-orient-d301.md": {
-      "size_words": 52,
-      "budget_words": 58
+      "size_words": 117,
+      "budget_words": 129
     },
     "reference/reviewer-baseline-d301.md": {
-      "size_words": 196,
-      "budget_words": 216
+      "size_words": 222,
+      "budget_words": 245
     },
     "reference/reviewer-adjudication-d301.md": {
       "size_words": 42,
@@ -224,6 +224,10 @@
       "size_words": 241,
       "budget_words": 266
     },
+    "reference/bootstrap-failure-states.md": {
+      "size_words": 724,
+      "budget_words": 797
+    },
     "reference/curator-intake-details.md": {
       "size_words": 42,
       "budget_words": 47
@@ -233,24 +237,72 @@
       "budget_words": 62
     },
     "reference/curator-card-details.md": {
-      "size_words": 220,
-      "budget_words": 242
+      "size_words": 374,
+      "budget_words": 412
     },
     "reference/curator-worklist-details.md": {
-      "size_words": 327,
-      "budget_words": 360
+      "size_words": 717,
+      "budget_words": 789
+    },
+    "reference/refused-write.md": {
+      "size_words": 453,
+      "budget_words": 499
     },
     "reference/curator-writer-details.md": {
-      "size_words": 450,
-      "budget_words": 495
+      "size_words": 699,
+      "budget_words": 769
     },
     "reference/shared-writing-profile.md": {
       "size_words": 1334,
       "budget_words": 1468
     },
-    "reference/bootstrap-failure-states.md": {
-      "size_words": 724,
-      "budget_words": 797
+    "reference/architect-working-rules.md": {
+      "size_words": 1834,
+      "budget_words": 2018
+    },
+    "reference/manager-working-rules.md": {
+      "size_words": 406,
+      "budget_words": 447
+    },
+    "reference/worker-working-rules.md": {
+      "size_words": 100,
+      "budget_words": 110
+    },
+    "reference/shared-working-rules.md": {
+      "size_words": 318,
+      "budget_words": 350
+    },
+    "reference/coordination-starts.md": {
+      "size_words": 47,
+      "budget_words": 52
+    },
+    "reference/message-handover.md": {
+      "size_words": 290,
+      "budget_words": 319
+    },
+    "reference/child-questions.md": {
+      "size_words": 273,
+      "budget_words": 301
+    },
+    "reference/investigator-instruction-review.md": {
+      "size_words": 42,
+      "budget_words": 47
+    },
+    "reference/knowledge-use.md": {
+      "size_words": 458,
+      "budget_words": 504
+    },
+    "reference/curator-repository-foundation.md": {
+      "size_words": 155,
+      "budget_words": 171
+    },
+    "templates/turn-report.md": {
+      "size_words": 1897,
+      "budget_words": 2087
+    },
+    "reference/knowledge-commands.md": {
+      "size_words": 2496,
+      "budget_words": 2500
     }
   },
   "decisions_L88": {
@@ -3436,5 +3488,124 @@
       }
     },
     "step_detail_changes": {}
+  },
+  "decisions_L62_A": {
+    "authority": "MIK-R62 v8, D641(A); manager 20261030T062640Z and 20261030T062819Z",
+    "method": "Actual native compiler matrix and complete step-file whitespace word counts; ceil(size*11/10), capsule ceiling 3700 and detail ceiling 2500 unchanged.",
+    "curator_compaction": "Removed only duplicated foundation procedure; unique admission, no-fabrication, commit-word and partial-scope duties retained. Scoped recovery consistency replaces absolute prohibitions. Final measured capsule 3680, headroom 20.",
+    "writer_detail_growth": {
+      "before_size": 450,
+      "before_budget": 495,
+      "size_words": 699,
+      "budget_words": 769,
+      "reason": "Serving-build identity is now executable before deciding or writing: preserve original launch interpreter, compare actual stamp, run worklist/ingest with exact binding, distinguish planned/refused/empty written from publication. Added duty/command segments W01-W02,W06-W09,W11-W19,W24,W26 and necessary binding/report facts W10,W20-W25 are enumerated in the Worker sentence map; navigation W03-W05 adds no workflow. Concrete route and truthful report semantics justify growth; no generic background or second writer is added."
+    },
+    "new_refused_write_detail": {
+      "size_words": 414,
+      "budget_words": 456,
+      "reason": "Single procedure owns the approved build/route, honest admitted route, scoped manual-write ladder and retained stops; role links it only at the refusal."
+    },
+    "unchanged_registry_entries": [
+      "reference/shared-writing-profile.md",
+      "reference/reviewer-adjudication-d301.md"
+    ]
+  },
+  "capsule_ceilings_words": {
+    "architect": 4631,
+    "manager": 4513,
+    "curator": 4000,
+    "reviewer": 4000,
+    "bootstrap": 4000,
+    "every_other_role": 3700
+  },
+  "budget_authority": "Only the developer sets a capsule ceiling. At every stage, Architect, Curator, Reviewer and Bootstrap have 4,000 words; every other role has 3,700. Remove repetition where clarity is not lost. D656/v11 amendment2 and the recorded measured raises below govern the named later ceilings.",
+  "digest": {
+    "size_words": 1000,
+    "budget_words": 1100
+  },
+  "decisions_D656": {
+    "authority": "D656, MIK-R62 v11 amendment2, v12; Manager20261104T104522Z digest ruling",
+    "formula": "min(ceil(actual_words*11/10),applicable literal ceiling)",
+    "capsuleRaises": [
+      {
+        "role": "architect",
+        "largestCapsule": "architect/coordination",
+        "beforeWords": 3697,
+        "currentWords": 4166,
+        "addedWords": 469,
+        "formerLiteral": 4000,
+        "newLiteral": 4200,
+        "slack": 34,
+        "authority": "D656; v11 amendment2; v7 rule51",
+        "duties": "Exact retained inventory steps, continuation, individual stage starts and declared start/question/handover procedures"
+      },
+      {
+        "role": "manager",
+        "largestCapsule": "manager/coordination",
+        "beforeWords": 3687,
+        "currentWords": 3910,
+        "addedWords": 223,
+        "formerLiteral": 3700,
+        "newLiteral": 4000,
+        "slack": 90,
+        "authority": "D656; v11 amendment2; v7 rule51",
+        "duties": "Exact retained inventory steps, continuation, individual stage starts and declared start/question/handover procedures"
+      }
+    ],
+    "digestRaise": {
+      "wordsAtCeilingAuthorization": 939,
+      "laterReferenceAuditRestoredWords": 61,
+      "currentWords": 1000,
+      "formerLiteral": 900,
+      "newLiteral": 1000,
+      "slack": 0,
+      "duties": "Inventory26:10/51:1/55:2/75:1; AU4.1; LO6.2/LO6.3; AC2.1; AC0.1. Invalid848/939/995 intermediate drafts are not candidates."
+    },
+    "preservedCeilings": {
+      "stepDetailsWords": 2500,
+      "handoverTokens": 3300
+    },
+    "note": "No duty cut or history record changed; all current matrix/detail entries re-recorded from actual compiler/source operands."
+  },
+  "decisions_D656_R8": {
+    "authority": "D656;v11 amendment2;Manager20261104T115843Z",
+    "raises": [
+      {
+        "subject": "architect",
+        "largestCapsule": "architect/coordination",
+        "measuredWords": 4210,
+        "formerLiteral": 4200,
+        "newLiteral": 4631,
+        "formula": "ceil(4210*11/10)=4631",
+        "authority": "D656;v11 amendment2;Manager20261104T115843Z",
+        "slack": 421
+      },
+      {
+        "subject": "manager",
+        "largestCapsule": "manager/coordination",
+        "measuredWords": 4102,
+        "formerLiteral": 4000,
+        "newLiteral": 4513,
+        "formula": "ceil(4102*11/10)=4513",
+        "authority": "D656;v11 amendment2;Manager20261104T115843Z",
+        "slack": 411
+      },
+      {
+        "subject": "shared digest",
+        "measuredWords": 1000,
+        "formerLiteral": 1000,
+        "newLiteral": 1100,
+        "formula": "ceil(1000*11/10)=1100",
+        "authority": "D656;v11 amendment2;Manager20261104T115843Z",
+        "slack": 100
+      }
+    ],
+    "preservedLiterals": {
+      "otherHighRoles": 4000,
+      "otherRoles": 3700,
+      "stepDetails": 2500,
+      "handoverTokens": 3300
+    },
+    "reason": "Inherited rule delivery, exact protected duties and their named working steps; no obligation cut to fit. Worker formula recomputed, no raise: isolated tail adds five words; this recut also carries other explicitly declared duties."
   }
 }

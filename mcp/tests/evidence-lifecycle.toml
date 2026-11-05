@@ -1,91 +1,6 @@
 schema_version = "ar-test-evidence-lifecycle/v3"
 large_fixture_bytes = 25000
 
-[[contract]]
-id = "ar-durable-store/1.0-process-race-evidence"
-owner = "mcp/src/agents_remember/controlplane/durable_store.py"
-evidence_node = "mcp/tests/test_provider_store_durability.py::ProviderStoreDurabilityTests::test_no_record_is_lost_when_an_append_races_a_compaction"
-
-[[contract]]
-id = "canvas-host-and-presenter-cases"
-owner = "mcp/tests/canvas_host_test_support.py"
-evidence_node = "mcp/tests/test_canvas_serving.py::test_a_stored_attempt_publishes_through_the_store"
-
-[[contract]]
-id = "knowledge-diff-cases"
-owner = "mcp/tests/diff_scope_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_diff_scope.py::test_a_realization_the_candidate_removed_keeps_its_baseline_source_in_the_union"
-
-[[contract]]
-id = "knowledge-generation-cases"
-owner = "mcp/tests/generation_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_read_boundaries.py::test_a_context_declaring_another_schema_generation_is_refused_before_a_page_is_built"
-
-[[contract]]
-id = "knowledge-identity-branching-fixture"
-owner = "mcp/tests/knowledge_fixture_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_store.py::test_three_separately_recorded_revisions_stay_independently_addressable"
-
-[[contract]]
-id = "knowledge-read-scope-cases"
-owner = "mcp/tests/read_scope_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_read_scope.py::test_a_path_seed_returns_the_sibling_realizations_and_advertises_the_unreached_family"
-
-[[contract]]
-id = "landing-report-scratch-pair-cases"
-owner = "mcp/tests/landing_report_test_support.py"
-evidence_node = "mcp/tests/test_landing_report_closeout.py::test_clean_check_reports_both_with_ok_true"
-
-[[contract]]
-id = "paseo-launch-given-to-agent-cases"
-owner = "mcp/tests/paseo_launch_test_support.py"
-evidence_node = "mcp/tests/test_paseo_launch_roles.py::RoleFolderAndIdentityTests::test_each_role_class_gets_one_agent_in_its_folder_with_title_and_labels"
-
-[[contract]]
-id = "paseo-role-tool-fixture-cases"
-owner = "mcp/tests/paseo_role_tools_test_support.py"
-evidence_node = "mcp/tests/test_paseo_role_tools.py::MayStartRuleTests::test_each_role_may_start_exactly_the_roles_the_rule_names"
-
-[[contract]]
-id = "paseo-runtime-command-cases"
-owner = "mcp/tests/paseo_runtime_test_support.py"
-evidence_node = "mcp/tests/test_paseo_runtime.py::PaseoRuntimeTests::test_fresh_provision_then_a_repeat_that_touches_nothing"
-
-[[contract]]
-id = "pnt-sandbox-process-cases"
-owner = "mcp/tests/pnt_sandbox_test_support.py"
-evidence_node = "mcp/tests/test_pnt_sandbox_processes.py::StartAndStopTests::test_stop_signals_only_the_process_start_recorded"
-
-[[contract]]
-id = "synthetic-test-evidence-candidate"
-owner = "mcp/test_support/agents_remember_test_support/testing/evidence_lifecycle.py"
-evidence_node = "mcp/tests/test_dependency_ownership_ast_helpers.py::test_repository_inputs_reach_their_supported_consumers"
-
-[[contract]]
-id = "tool-answer-l111-shaped-rows"
-owner = "mcp/tests/tool_answer_l111_test_support.py"
-evidence_node = "mcp/tests/test_tool_answer_rows_l111.py::ToolAnswerL111ShapedRowsTests::test_every_l111_tool_has_a_shaped_row"
-
-[[contract]]
-id = "tool-log-sandbox-witness"
-owner = "mcp/tests/tool_log_witness.py"
-evidence_node = "mcp/tests/tool_log_witness.py::main"
-
-[[contract]]
-id = "tool-refusal-census-cases"
-owner = "mcp/tests/tool_refusal_census_support.py"
-evidence_node = "mcp/tests/test_tool_refusal_conformance.py::FailurePathCensusTests::test_every_failure_path_answers_in_one_of_the_four_named_shapes"
-
-[[contract]]
-id = "transaction-only-delivery-git-fixture-cases"
-owner = "mcp/tests/transaction_only_worktree_delivery_test_support.py"
-evidence_node = "mcp/tests/test_transaction_only_worktree_delivery.py::test_public_closeout_commits_code_and_memory_without_acceptance_tools"
-
-[[contract]]
-id = "workflow-chain-walk-fixture-cases"
-owner = "mcp/tests/workflow_chain_guidance_test_support.py"
-evidence_node = "mcp/tests/test_workflow_chain_guidance.py::WorkflowChainTests::test_the_chain_runs_in_the_declared_order_through_the_registered_entry_points"
-
 [[artifact]]
 path = "mcp/tests/_evidence_catalog_fixture.py"
 kind = "shared-support"
@@ -164,6 +79,42 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_abandoned_series_closeout.py",
   "mcp/tests/test_activation_admission_registered.py",
+  "mcp/tests/test_agent_eval_accounting.py",
+  "mcp/tests/test_agent_eval_adapters.py",
+  "mcp/tests/test_agent_eval_auth_observation.py",
+  "mcp/tests/test_agent_eval_capture_bindings.py",
+  "mcp/tests/test_agent_eval_codex_access.py",
+  "mcp/tests/test_agent_eval_codex_custom.py",
+  "mcp/tests/test_agent_eval_d641_effects.py",
+  "mcp/tests/test_agent_eval_d641_judge.py",
+  "mcp/tests/test_agent_eval_evidence_selection.py",
+  "mcp/tests/test_agent_eval_git_admission.py",
+  "mcp/tests/test_agent_eval_git_semantics.py",
+  "mcp/tests/test_agent_eval_grade_sources.py",
+  "mcp/tests/test_agent_eval_hermes_nested.py",
+  "mcp/tests/test_agent_eval_hermes_opaque.py",
+  "mcp/tests/test_agent_eval_hermes_refusals.py",
+  "mcp/tests/test_agent_eval_hermes_skill_policy.py",
+  "mcp/tests/test_agent_eval_history_helpers.py",
+  "mcp/tests/test_agent_eval_isolation.py",
+  "mcp/tests/test_agent_eval_judge_codex_reads.py",
+  "mcp/tests/test_agent_eval_judge_evidence.py",
+  "mcp/tests/test_agent_eval_judge_guard.py",
+  "mcp/tests/test_agent_eval_judge_reads.py",
+  "mcp/tests/test_agent_eval_opaque_dispatch.py",
+  "mcp/tests/test_agent_eval_preflight.py",
+  "mcp/tests/test_agent_eval_regrade.py",
+  "mcp/tests/test_agent_eval_result_identity.py",
+  "mcp/tests/test_agent_eval_retained_verdicts.py",
+  "mcp/tests/test_agent_eval_runner.py",
+  "mcp/tests/test_agent_eval_runtime_evidence.py",
+  "mcp/tests/test_agent_eval_server_calls.py",
+  "mcp/tests/test_agent_eval_text_delivery.py",
+  "mcp/tests/test_agent_eval_trajectory.py",
+  "mcp/tests/test_agent_eval_trial_setup.py",
+  "mcp/tests/test_agent_eval_trials.py",
+  "mcp/tests/test_agent_eval_usage.py",
+  "mcp/tests/test_agent_eval_validation.py",
   "mcp/tests/test_agent_tool_surface_corrections.py",
   "mcp/tests/test_agentic_settings.py",
   "mcp/tests/test_agents_remember_quality.py",
@@ -343,6 +294,7 @@ consumers = [
   "mcp/tests/test_git_object_memo.py",
   "mcp/tests/test_global_state_isolation.py",
   "mcp/tests/test_governing_overview_resolution.py",
+  "mcp/tests/test_handoff_check.py",
   "mcp/tests/test_held_delivery_tick_cost.py",
   "mcp/tests/test_held_queue.py",
   "mcp/tests/test_held_store_authority.py",
@@ -704,6 +656,7 @@ consumers = [
   "mcp/tests/test_role_capsule_audiences.py",
   "mcp/tests/test_role_capsule_budgets.py",
   "mcp/tests/test_role_capsule_compiler.py",
+  "mcp/tests/test_role_capsule_contracts.py",
   "mcp/tests/test_role_capsule_manifest_edges.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_first_message.py",
@@ -762,6 +715,7 @@ consumers = [
   "mcp/tests/test_sync_runtime.py",
   "mcp/tests/test_sync_scripts.py",
   "mcp/tests/test_task_decision_product_records.py",
+  "mcp/tests/test_task_doc_alignment_sweep.py",
   "mcp/tests/test_task_doc_graph_publication.py",
   "mcp/tests/test_task_doc_ordinary_l111.py",
   "mcp/tests/test_task_doc_review_public.py",
@@ -1215,6 +1169,7 @@ consumers = [
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_knowledge_bootstrap_procedure.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
+  "mcp/tests/test_knowledge_correction_guidance.py",
   "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_landing_report.py",
@@ -1376,6 +1331,373 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/fixtures/claude-prose-verdict-retained.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "D643 retained Claude final native assistant row567 and normalized message883, exact7979 UTF8 bytes; source stdout dd874c705e879066aec614ee6bea3b570c35b1f828a576984eabbe32352ef9e2; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Bind observed prose plus fenced JSON decoding, unchanged schema validation, ambiguity and byte offsets without another inference."
+replacement_contract = "node:mcp/tests/test_agent_eval_retained_verdicts.py::test_retained_claude_prose_then_json_fence_is_decoded_without_schema_change"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_retained_verdicts.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/codex-custom-e3-ce01-ce11.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "D641 E3 exact retained CE01/2385763a and CE11/a8f7dc22 custom-call/result pairs; attempt/raw-export/source hashes and row ordinals embedded; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Preserve observed local-after-dispatch and first-refusal shapes without inventing unreachable calls."
+replacement_contract = "node:mcp/tests/test_agent_eval_codex_custom.py::test_e3_retained_custom_dispatch_preserves_exact_graded_actions"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_codex_custom.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/codex-custom-local-ce13.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Retained Codex CE13 7fe0465c local custom cells, exact response and paired error/result with source hashes; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Preserve real custom_tool_call local-only cells and failed pre-dispatch behavior without invented calls."
+replacement_contract = "node:mcp/tests/test_agent_eval_codex_custom.py::test_retained_ce13_local_custom_cells_preserve_error_and_create_no_tools"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_codex_custom.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/codex-dispatch-returns.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "scripts/agent_evals/adapters/codex_dispatch.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Native parsed Codex exec records from real CE01, CE07, CE08 and CE13 failures; original container and native source digests retained in fixture provenance; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Protect exact returned-value dispatch, failed patch attempts, source-bound stored arguments and local-only cells without inventing missing native actions."
+replacement_contract = "node:mcp/tests/test_agent_eval_adapters.py::test_actual_codex_returned_dispatches_and_local_only_cells"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_adapters.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/codex-hermes-unknown-verdicts.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Five retained gpt-6.1-sol judge responses from 20261029-old-text/hermes; source hashes embedded; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Preserve the distinction between valid rubric unknowns and decoder failure on the actual recorded responses."
+replacement_contract = "node:mcp/tests/test_agent_eval_retained_verdicts.py::test_real_raw_json_unknown_verdict_is_accepted_without_becoming_a_pass"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_retained_verdicts.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/d641-effects-real-records.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Four retained Hermes failing effect/code-grade rows from 20261030-old-text-hermes; original source paths and SHA256 embedded; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Preserve empty stderr additions and deterministic unknown causes from actual failing attempts."
+replacement_contract = "node:mcp/tests/test_agent_eval_d641_effects.py::test_real_empty_stderr_has_header_only_patch"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_d641_effects.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/d641-isolation-retained.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Hermes CE08 5370da32 skill mutation, CE02 80281145 shared checkout write, and CE08 0fa3c9ff empty-model/zero-API session versus recorded real-home session; exact selected fields with source paths and hashes; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Preserve the real shared-home and shared-checkout hazards that per-trial isolation must remove."
+replacement_contract = "node:mcp/tests/test_agent_eval_isolation.py::IsolationTests::test_retained_home_alias_is_replaced_by_trial_home"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_isolation.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/d641-judge-inputs.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Real Hermes CE01/CE02 firm fails, CE13 unknown, scratch clones and final carrier from 20261030-old-text-hermes; source paths and hashes embedded; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Preserve real mixed verdicts, full final carrier evidence, and admissible new scratch repositories."
+replacement_contract = "node:mcp/tests/test_agent_eval_d641_judge.py::test_real_firm_fail_wins_and_unknown_only_stays_unknown"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_d641_judge.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/detail-read-observer-d646.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "D646 retained Codex compound-command and Hermes execute_code detail-read action/result pairs; source paths and hashes preserved in fixture provenance; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Protect observed full-body reads and partial/empty-result counterexamples on native retained shapes without constraining actor tools."
+replacement_contract = "node:mcp/tests/test_agent_eval_text_delivery.py::test_d646_retained_compound_and_execute_code_full_body_reads"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_text_delivery.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/helper-wait-real-dispatches.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Eight exact retained Hermes CE05/CE06 native helper dispatch pairs and source-bound host field selections; no fabricated completion or roster; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Keep helper dispatch, liveness and deadline accounting separate on the actual ACP records."
+replacement_contract = "node:mcp/tests/test_agent_eval_adapters.py::test_helper_wait_real_hermes_dispatches_remain_unknown_not_running"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_accounting.py",
+  "mcp/tests/test_agent_eval_adapters.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/hermes-compression-active-rows.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "CE11 Hermes23763a1f native inactive/active duplicate pair rows1194995/96 and1195309/10 plus finalstop1195556; hashes embedded; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Keep compression provenance while testing active-row chronology, pairing and native terminal proof."
+replacement_contract = "node:mcp/tests/test_agent_eval_adapters.py::test_real_hermes_compression_uses_only_active_rows"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_adapters.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/hermes-edit-binding-retained.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Eight actual unanswered edit prompts from 20261029-old-text/hermes; exact native seat and call path hashes embedded; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Preserve the observed outside-project scratch writes that require explicit local runtime binding without relaxing approval."
+replacement_contract = "node:mcp/tests/test_agent_eval_trial_setup.py::TrialSetupTests::test_retained_edit_prompts_get_a_trial_local_scratch_binding"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_isolation.py",
+  "mcp/tests/test_agent_eval_trial_setup.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/hermes-nested-authoring.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Five retained Hermes actor captures from 20261029-old-text; nested authoring calls and paired results with original source hashes; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Preserve actual nested dispatches, including the CE14 refusal, without converting capture repair into a semantic verdict."
+replacement_contract = "node:mcp/tests/test_agent_eval_hermes_nested.py::test_actual_nested_calls_enter_the_existing_graded_action_list"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_d641_judge.py",
+  "mcp/tests/test_agent_eval_hermes_nested.py",
+  "mcp/tests/test_agent_eval_regrade.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/hermes-opaque-dispatch-real.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Exact retained c3 Hermes wrapper/result pairs from six attempts; original attempt, event and source hashes embedded; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Preserve real unrecognised batch shapes and refusals as complete opaque actions, without inventing children."
+replacement_contract = "node:mcp/tests/test_agent_eval_hermes_opaque.py::test_full_native_wrapper_and_outputs_are_one_opaque_action"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_hermes_opaque.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/hermes-refusal-real-records.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Retained native dispatcher refusal pairs previously inline in test_agent_eval_hermes_refusals.py; D229 test-data homes normalized to /home/test; original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Keep refused parent dispatches visible without inventing child actions or opening recorded payload paths."
+replacement_contract = "node:mcp/tests/test_agent_eval_hermes_refusals.py::test_native_dispatch_refusal_is_visible_without_a_guessed_child"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_hermes_refusals.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/judge-claude-grep-real.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "D642 retained native Claude read-check; exact raw records5/6,39/40,54/55,56/57 with source and row hashes embedded; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Distinguish native count-only search, content exposure, whole read and duplicated views without repeated inference."
+replacement_contract = "node:mcp/tests/test_agent_eval_judge_reads.py::test_real_claude_grep_fixture_retains_native_modes_and_source_identity"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_judge_reads.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/judge-claude-inline-read-real.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "D642 one authorized native Claude read-check; exact parsed source records43/44, native stdout and row hashes embedded; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "A real successful read of an inline-listed file must remain bound to its shipped manifest row."
+replacement_contract = "node:mcp/tests/test_agent_eval_judge_reads.py::test_live_claude_inline_artifact_read_remains_manifest_bound"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_judge_reads.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/judge-claude-usage-real.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "D642 retained native Claude read-check; lossless compressed metrics projection of all61 raw records with complete final result and tool-result strings; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Bind actual per-model and visible-message token scopes, turn counts and tool-result bytes without repeated inference."
+replacement_contract = "node:mcp/tests/test_agent_eval_usage.py::test_real_multiturn_session_uses_model_aggregate_and_keeps_final_call"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_judge_codex_reads.py",
+  "mcp/tests/test_agent_eval_usage.py",
+  "mcp/tests/test_previous_host_removed.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/judge-codex-read-real.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Retained c3 CE01 attempt273534e1 raw record53; original source hashes and ordinal embedded; path-rebound variants declared constructed in tests; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Keep the observed native command record shape separate from constructed confinement and read-channel controls."
+replacement_contract = "node:mcp/tests/test_agent_eval_judge_codex_reads.py::test_unchanged_retained_codex_wire_preserves_full_read_receipt"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_judge_codex_reads.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/judge-package-budget-real.json.gz"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Four retained c3 over-budget packages and exact Hermes CE01 ea34127e Codex judge request; source hashes and reconstruction qualifications embedded; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Bind package reduction and the paid character guard to actual rejected evidence without repeating model inference."
+replacement_contract = "node:mcp/tests/test_agent_eval_judge_guard.py::test_retained_codex_character_rejection_stops_before_any_execution"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_judge_evidence.py",
+  "mcp/tests/test_agent_eval_judge_guard.py",
+]
+
+[[artifact]]
 path = "mcp/tests/fixtures/knowledge_files/4.1-direct_landing.py.json"
 kind = "fixture"
 authority = "internal-canonical"
@@ -1390,6 +1712,8 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_agent_eval_preflight.py",
+  "mcp/tests/test_agent_eval_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
@@ -1424,6 +1748,8 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_agent_eval_preflight.py",
+  "mcp/tests/test_agent_eval_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
@@ -1458,6 +1784,8 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_agent_eval_preflight.py",
+  "mcp/tests/test_agent_eval_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
@@ -1492,6 +1820,8 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_agent_eval_preflight.py",
+  "mcp/tests/test_agent_eval_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
@@ -1526,6 +1856,8 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_agent_eval_preflight.py",
+  "mcp/tests/test_agent_eval_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
@@ -1560,6 +1892,8 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_agent_eval_preflight.py",
+  "mcp/tests/test_agent_eval_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
@@ -1594,6 +1928,8 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_agent_eval_preflight.py",
+  "mcp/tests/test_agent_eval_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
@@ -1628,6 +1964,8 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_agent_eval_preflight.py",
+  "mcp/tests/test_agent_eval_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
@@ -1662,6 +2000,8 @@ permanence_rationale = "The format and validator cases read the worked examples 
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_agent_eval_preflight.py",
+  "mcp/tests/test_agent_eval_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
@@ -1980,6 +2320,24 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/fixtures/opaque-dispatch-real.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Exact c3 CE01 string-result dispatches and CE11 assignment-expression dispatch; source, attempt and raw-export hashes and ordinals embedded; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Retain whole real unknown dispatches and all paired outputs while preserving loud shape provenance."
+replacement_contract = "node:mcp/tests/test_agent_eval_opaque_dispatch.py::test_real_codex_unsupported_shape_is_full_opaque_action"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_opaque_dispatch.py",
+]
+
+[[artifact]]
 path = "mcp/tests/fixtures/repository_profiles/node/package-lock.json"
 kind = "fixture"
 authority = "internal-hand-authored"
@@ -1996,6 +2354,42 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_abandoned_series_closeout.py",
   "mcp/tests/test_activation_admission_registered.py",
+  "mcp/tests/test_agent_eval_accounting.py",
+  "mcp/tests/test_agent_eval_adapters.py",
+  "mcp/tests/test_agent_eval_auth_observation.py",
+  "mcp/tests/test_agent_eval_capture_bindings.py",
+  "mcp/tests/test_agent_eval_codex_access.py",
+  "mcp/tests/test_agent_eval_codex_custom.py",
+  "mcp/tests/test_agent_eval_d641_effects.py",
+  "mcp/tests/test_agent_eval_d641_judge.py",
+  "mcp/tests/test_agent_eval_evidence_selection.py",
+  "mcp/tests/test_agent_eval_git_admission.py",
+  "mcp/tests/test_agent_eval_git_semantics.py",
+  "mcp/tests/test_agent_eval_grade_sources.py",
+  "mcp/tests/test_agent_eval_hermes_nested.py",
+  "mcp/tests/test_agent_eval_hermes_opaque.py",
+  "mcp/tests/test_agent_eval_hermes_refusals.py",
+  "mcp/tests/test_agent_eval_hermes_skill_policy.py",
+  "mcp/tests/test_agent_eval_history_helpers.py",
+  "mcp/tests/test_agent_eval_isolation.py",
+  "mcp/tests/test_agent_eval_judge_codex_reads.py",
+  "mcp/tests/test_agent_eval_judge_evidence.py",
+  "mcp/tests/test_agent_eval_judge_guard.py",
+  "mcp/tests/test_agent_eval_judge_reads.py",
+  "mcp/tests/test_agent_eval_opaque_dispatch.py",
+  "mcp/tests/test_agent_eval_preflight.py",
+  "mcp/tests/test_agent_eval_regrade.py",
+  "mcp/tests/test_agent_eval_result_identity.py",
+  "mcp/tests/test_agent_eval_retained_verdicts.py",
+  "mcp/tests/test_agent_eval_runner.py",
+  "mcp/tests/test_agent_eval_runtime_evidence.py",
+  "mcp/tests/test_agent_eval_server_calls.py",
+  "mcp/tests/test_agent_eval_text_delivery.py",
+  "mcp/tests/test_agent_eval_trajectory.py",
+  "mcp/tests/test_agent_eval_trial_setup.py",
+  "mcp/tests/test_agent_eval_trials.py",
+  "mcp/tests/test_agent_eval_usage.py",
+  "mcp/tests/test_agent_eval_validation.py",
   "mcp/tests/test_agent_tool_surface_corrections.py",
   "mcp/tests/test_agentic_settings.py",
   "mcp/tests/test_agents_remember_quality.py",
@@ -2175,6 +2569,7 @@ consumers = [
   "mcp/tests/test_git_object_memo.py",
   "mcp/tests/test_global_state_isolation.py",
   "mcp/tests/test_governing_overview_resolution.py",
+  "mcp/tests/test_handoff_check.py",
   "mcp/tests/test_held_delivery_tick_cost.py",
   "mcp/tests/test_held_queue.py",
   "mcp/tests/test_held_store_authority.py",
@@ -2536,6 +2931,7 @@ consumers = [
   "mcp/tests/test_role_capsule_audiences.py",
   "mcp/tests/test_role_capsule_budgets.py",
   "mcp/tests/test_role_capsule_compiler.py",
+  "mcp/tests/test_role_capsule_contracts.py",
   "mcp/tests/test_role_capsule_manifest_edges.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_first_message.py",
@@ -2594,6 +2990,7 @@ consumers = [
   "mcp/tests/test_sync_runtime.py",
   "mcp/tests/test_sync_scripts.py",
   "mcp/tests/test_task_decision_product_records.py",
+  "mcp/tests/test_task_doc_alignment_sweep.py",
   "mcp/tests/test_task_doc_graph_publication.py",
   "mcp/tests/test_task_doc_ordinary_l111.py",
   "mcp/tests/test_task_doc_review_public.py",
@@ -2739,6 +3136,64 @@ consumers = [
   "mcp/tests/test_transaction_only_worktree_delivery_cache.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/text-delivery-c7-native.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Exact retained native received-message fields from c7 Codex CE02 and Hermes CE02, with full source hashes embedded; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Preserve the observed distinction between a delivered system instruction and a case-only first message so a sent prompt cannot masquerade as received role text."
+replacement_contract = "node:mcp/tests/test_agent_eval_text_delivery.py::test_real_c7_native_received_fields_show_codex_text_and_hermes_missing_text"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_text_delivery.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/text-delivery-native-reads.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Exact retained Codex CommandExecution and Hermes read_file/terminal call-result pairs with original attempt, session, source path and SHA-256 bindings; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Keep delivery read observations bound to actual harness receipts rather than guessed tool shapes."
+replacement_contract = "node:mcp/tests/test_agent_eval_text_delivery.py::test_r2_exact_retained_codex_and_hermes_receipts_prove_reads"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_text_delivery.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/text-delivery-pointer-artifacts.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "curator-eval-tooling"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "Exact parsed old and new captured Curator entries with original source paths, file hashes and signatures; D229 test-data homes normalized to /home/test, original evidence unchanged"
+introduced_by = "260928-MIK-L62"
+lifetime = "permanent"
+permanence_rationale = "Bind production pointer delivery to the actual two captured arm shapes and prevent inline detail bodies from replacing the subject under measurement."
+replacement_contract = "node:mcp/tests/test_agent_eval_text_delivery.py::test_real_captured_load_text_excludes_inline_detail_bodies"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agent_eval_d641_judge.py",
+  "mcp/tests/test_agent_eval_preflight.py",
+  "mcp/tests/test_agent_eval_regrade.py",
+  "mcp/tests/test_agent_eval_text_delivery.py",
+  "mcp/tests/test_agent_eval_trials.py",
 ]
 
 [[artifact]]
@@ -3114,6 +3569,8 @@ permanence_rationale = "Every validator, index, writer and conversion case start
 replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_agent_eval_preflight.py",
+  "mcp/tests/test_agent_eval_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
@@ -3151,6 +3608,7 @@ consumers = [
   "mcp/tests/test_carryover_apply_transaction.py",
   "mcp/tests/test_family_history_judgments.py",
   "mcp/tests/test_generated_copy_worklist.py",
+  "mcp/tests/test_handoff_check.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_database_retired.py",
   "mcp/tests/test_knowledge_history_files.py",
@@ -3765,6 +4223,7 @@ replacement_contract = "node:mcp/tests/test_role_instruction_wording.py::Instruc
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_capsule_replay_integrity.py",
+  "mcp/tests/test_curator_instruction_wording.py",
   "mcp/tests/test_developer_question_wording.py",
   "mcp/tests/test_leaf_handover.py",
   "mcp/tests/test_previous_host_removed.py",
@@ -4050,6 +4509,7 @@ consumers = [
   "mcp/tests/test_tool_answer_table_enclosure.py",
   "mcp/tests/test_tool_answer_table_log.py",
   "mcp/tests/test_tool_entry_point_controls.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_entry_point_valid_progression.py",
   "mcp/tests/test_tool_refusal_conformance.py",
   "mcp/tests/test_user_settings_guard.py",
@@ -4305,3 +4765,88 @@ consumer_scope = "exact-source"
 consumers = [
   "mcp/tests/test_fresh_user_harness.py",
 ]
+
+[[contract]]
+id = "ar-durable-store/1.0-process-race-evidence"
+owner = "mcp/src/agents_remember/controlplane/durable_store.py"
+evidence_node = "mcp/tests/test_provider_store_durability.py::ProviderStoreDurabilityTests::test_no_record_is_lost_when_an_append_races_a_compaction"
+
+[[contract]]
+id = "canvas-host-and-presenter-cases"
+owner = "mcp/tests/canvas_host_test_support.py"
+evidence_node = "mcp/tests/test_canvas_serving.py::test_a_stored_attempt_publishes_through_the_store"
+
+[[contract]]
+id = "knowledge-diff-cases"
+owner = "mcp/tests/diff_scope_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_diff_scope.py::test_a_realization_the_candidate_removed_keeps_its_baseline_source_in_the_union"
+
+[[contract]]
+id = "knowledge-generation-cases"
+owner = "mcp/tests/generation_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_read_boundaries.py::test_a_context_declaring_another_schema_generation_is_refused_before_a_page_is_built"
+
+[[contract]]
+id = "knowledge-identity-branching-fixture"
+owner = "mcp/tests/knowledge_fixture_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_store.py::test_three_separately_recorded_revisions_stay_independently_addressable"
+
+[[contract]]
+id = "knowledge-read-scope-cases"
+owner = "mcp/tests/read_scope_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_read_scope.py::test_a_path_seed_returns_the_sibling_realizations_and_advertises_the_unreached_family"
+
+[[contract]]
+id = "landing-report-scratch-pair-cases"
+owner = "mcp/tests/landing_report_test_support.py"
+evidence_node = "mcp/tests/test_landing_report_closeout.py::test_clean_check_reports_both_with_ok_true"
+
+[[contract]]
+id = "paseo-launch-given-to-agent-cases"
+owner = "mcp/tests/paseo_launch_test_support.py"
+evidence_node = "mcp/tests/test_paseo_launch_roles.py::RoleFolderAndIdentityTests::test_each_role_class_gets_one_agent_in_its_folder_with_title_and_labels"
+
+[[contract]]
+id = "paseo-role-tool-fixture-cases"
+owner = "mcp/tests/paseo_role_tools_test_support.py"
+evidence_node = "mcp/tests/test_paseo_role_tools.py::MayStartRuleTests::test_each_role_may_start_exactly_the_roles_the_rule_names"
+
+[[contract]]
+id = "paseo-runtime-command-cases"
+owner = "mcp/tests/paseo_runtime_test_support.py"
+evidence_node = "mcp/tests/test_paseo_runtime.py::PaseoRuntimeTests::test_fresh_provision_then_a_repeat_that_touches_nothing"
+
+[[contract]]
+id = "pnt-sandbox-process-cases"
+owner = "mcp/tests/pnt_sandbox_test_support.py"
+evidence_node = "mcp/tests/test_pnt_sandbox_processes.py::StartAndStopTests::test_stop_signals_only_the_process_start_recorded"
+
+[[contract]]
+id = "synthetic-test-evidence-candidate"
+owner = "mcp/test_support/agents_remember_test_support/testing/evidence_lifecycle.py"
+evidence_node = "mcp/tests/test_dependency_ownership_ast_helpers.py::test_repository_inputs_reach_their_supported_consumers"
+
+[[contract]]
+id = "tool-answer-l111-shaped-rows"
+owner = "mcp/tests/tool_answer_l111_test_support.py"
+evidence_node = "mcp/tests/test_tool_answer_rows_l111.py::ToolAnswerL111ShapedRowsTests::test_every_l111_tool_has_a_shaped_row"
+
+[[contract]]
+id = "tool-log-sandbox-witness"
+owner = "mcp/tests/tool_log_witness.py"
+evidence_node = "mcp/tests/tool_log_witness.py::main"
+
+[[contract]]
+id = "tool-refusal-census-cases"
+owner = "mcp/tests/tool_refusal_census_support.py"
+evidence_node = "mcp/tests/test_tool_refusal_conformance.py::FailurePathCensusTests::test_every_failure_path_answers_in_one_of_the_four_named_shapes"
+
+[[contract]]
+id = "transaction-only-delivery-git-fixture-cases"
+owner = "mcp/tests/transaction_only_worktree_delivery_test_support.py"
+evidence_node = "mcp/tests/test_transaction_only_worktree_delivery.py::test_public_closeout_commits_code_and_memory_without_acceptance_tools"
+
+[[contract]]
+id = "workflow-chain-walk-fixture-cases"
+owner = "mcp/tests/workflow_chain_guidance_test_support.py"
+evidence_node = "mcp/tests/test_workflow_chain_guidance.py::WorkflowChainTests::test_the_chain_runs_in_the_declared_order_through_the_registered_entry_points"

@@ -187,6 +187,18 @@ than quietly rewriting either half.
 
 ### 4. Author through the curator's own writer, inside the task that owns the work
 
+For a correct write refused by that writer/record tool/task_doc input class: check build/route,
+take an honest admitted route; otherwise write openly by hand and run every check that still works.
+Use the primary tool first and follow the
+[correct-input write-refusal procedure](../l-01-agent-lifecycles/reference/refused-write.md).
+Tell the record owner before a manual change to its record. Report write/tool/every input
+tried/refusal/checks and defect issue; tell machine-state owner before writing. Tool repair gets
+its own task when developer slots it; next Curator re-records. Other tool/input classes keep their
+tools. No hidden edit, false tool authorship, old-build evasion, false claim or permission bypass.
+Read/check/validation/sync, starts, product guards and commit gates retain stops; failed gates are
+repaired. This is the same-tool correct-write exception, not authority to bypass the contract or
+the developer's commit word.
+
 The writer is the curator file writer, reached by the shipped command line, and the run happens on the
 task the Architect opened for this foundation. `--contract` is that task's leaf enclosure contract: the
 run reads the code worktree and writes the memory worktree the contract names, so no argument list can
@@ -271,8 +283,8 @@ The full migration of MIK-R19 reads every file of the code, and this procedure r
 of it. **Whatever the run reads, a weakness it meets in that file is recorded in the same step**, as
 a `WKN-` record of kind `context`, `compute`, `storage`, `time`, `fault` or `debt`, on the file and
 the symbol where it occurs, with one sentence and any measurement the reader took. The author is the
-curator and the route is the writer, exactly as for every other record: nothing here writes a
-weakness by hand, and nobody is sent to look for one.
+curator and the route is the writer, exactly as for every other record, subject only to step 4's
+same-tool correct-input refusal procedure. Nobody is sent to look for one.
 
 **A run's check neither counts them nor asks for any.** The census, the coverage plan and the
 independent check count records and obligations; a weakness is not one of those, it is not a finding,
@@ -287,7 +299,7 @@ and its absence from a file is not an omission. A run that meets none records no
 | No memory layer resolved, or the resolved line is not the declared one (`memory_layer_not_resolved`, `memory_line_moved`) | the same refusal payload | Repair the repository entry or the coordination settings, then re-observe. Never write onto a line the ordinary reader does not select. |
 | The enclosure contract cannot be loaded, or names no leaf | the refusal the command prints | Report it and stop: `--contract` is the write guard, so a contract that cannot be loaded writes nothing. No other destination and no invented enclosure is substituted. |
 | The memory worktree is in the legacy format (`legacy-format`) | the refusal the command prints | Report it. Conversion (`agents-remember knowledge-convert`) is its own step and the developer's decision. **Nothing was written.** |
-| The writer refused the list | the report: `state: refused`, with every problem named | Correct the list and run it again. **Nothing was written.** |
+| The writer refused the list | the report: `state: refused`, with every problem named | For faulty input, correct the list and run the same tool again. For a correct-input write refusal, follow step 4's same-tool procedure. The refused run wrote nothing; any subsequent manual write has separate provenance. |
 | A run was interrupted, or a later run is narrower than an earlier one | the leaf's history file and the records in the tree | Resume on the same task with the same list. A rerun of the same list writes the same files with the same IDs and does not duplicate records. A rerun removes the sidecar entries this run wrote earlier from an entry the list no longer names, and reports them `removed`. |
 | A moved input revision | the code revision the admission bound, against the checkout | A moved source is an explicit new observation, not a silent reuse: re-observe and decide. Anchors are resolved at the revision the run was admitted on. |
 | A missing optional source | the source inventory | Absent, not failed. It becomes no fact. |
@@ -303,7 +315,8 @@ and its absence from a file is not an omission. A run that meets none records no
    here rewrites a memory file to make a check pass.
 4. **No database, no second writer and no second destination.** The curator file writer and the
    memory worktree the task's enclosure contract names are the only ones used. Records and sidecar
-   entries are never written by hand.
+   entries use that writer first; only step 4's same-tool correct-input refusal procedure admits an
+   openly recorded manual write.
 5. **No invented semantic approval and no invented authority.** The commit word is the developer's,
    the authorization reference is the run's own, and admission is the task's real enclosure contract
    and the real revisions rather than a flag or a word in a document.

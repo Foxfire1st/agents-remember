@@ -22,3 +22,7 @@ The bound catalogs, all three lenses (completion against task docs · scoped
 ## Step 5 — baseline sealing
 
 An empty first-pass issue list is a valid terminating baseline.
+
+## Select focused tests from the whole diff
+
+Choose focused tests across every changed surface and relevant gate; run a full suite only if explicitly asked.

@@ -101,6 +101,7 @@ ROUND_NUMBER_PATTERNS = tuple(
 )
 
 SECTION_HEADING = "## Where your stage ends"
+RETIRED_WORKER_CHECKS = "the focused tests, the lint and the type check pass on its final bytes"
 
 #: Stops every stage section names (rule 8): the permission prompt, the
 #: product guard, the meaning question, the outside-workspace effect.
@@ -117,7 +118,7 @@ STOPS = (
 STAGE_PARTS = {
     "worker": (
         "Your stage ends when the candidate meets the requirement",
-        "the focused tests, the lint and the type check pass on its final bytes",
+        "the handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of its final bytes",
         "the report is with the Reviewer",
         "you repair, and you go on",
         "Your report names what you repaired",
@@ -136,12 +137,19 @@ STAGE_PARTS = {
         *STOPS,
     ),
     "curator": (
-        "the task's knowledge is written, checked and published",
-        "the quality check is clean",
-        "you repair, and you go on",
-        "Your report names what you repaired",
-        "sends what it waits for, and from whom, to its parent with `role_message`",
-        *STOPS,
+        "Your stage ends when task knowledge is written and checked and quality is clean. "
+        "Distinguish installed-writer publication from scoped manual provenance.",
+        "quality is clean.",
+        "Repair faults your work or instrument causes:",
+        "Report your repairs.",
+        "If unfinished, report what you await and from whom to your parent via `role_message` "
+        "on `agents-remember-task`.",
+        "Stop for open permission prompts",
+        "Stop for open permission prompts, other correct-input refusals, unowned state, "
+        "requirement-meaning questions or effects outside worktree/scratch/task; "
+        "covered correct writes follow recovery.",
+        "requirement-meaning questions",
+        "effects outside worktree/scratch/task",
     ),
     "manager": (
         "You hand a stage over whole",
@@ -166,21 +174,9 @@ REVIEWER_STAGE_EQUIVALENTS = {
 }
 
 
-CURATOR_STAGE_EQUIVALENTS = {
-    "you repair, and you go on": "Repair faults your work or instrument causes:",
-    "Your report names what you repaired": "Report your repairs.",
-    "sends what it waits for, and from whom, to its parent with `role_message`": "send what you await and from whom to your parent with `role_message`",
-    "a refusal by a product guard": "a product-guard or AR-tool refusal with correct input or unowned state",
-    "a question about what the requirement means": "a requirement-meaning question",
-    "an effect outside your own worktree": "effects outside your worktree, scratch folder and task",
-}
-
-
 def _facet_variants(parts: tuple[str, ...], facet: str) -> tuple[str, ...]:
     if parts == STAGE_PARTS["reviewer"] and facet in REVIEWER_STAGE_EQUIVALENTS:
         return facet, REVIEWER_STAGE_EQUIVALENTS[facet]
-    if parts == STAGE_PARTS["curator"] and facet in CURATOR_STAGE_EQUIVALENTS:
-        return facet, CURATOR_STAGE_EQUIVALENTS[facet]
     return (facet,)
 
 
@@ -311,11 +307,30 @@ def _section_missing(section: str | None, parts: tuple[str, ...]) -> list[str]:
     if section is None:
         return ["no stage-end section"]
     flat = _flatten(section)
-    return [
+    missing = [
         part
         for part in parts
         if not any(_flatten(variant) in flat for variant in _facet_variants(parts, part))
     ]
+    if parts == STAGE_PARTS["worker"] and RETIRED_WORKER_CHECKS in flat:
+        missing.append("retired focused/lint/type handover rule")
+    return missing
+
+
+def test_worker_stage_requires_named_clean_copy_checks_and_refuses_the_retired_rule() -> None:
+    source = (CANONICAL_SKILLS / LIFECYCLE / "roles/worker.md").read_text()
+    section = _section_of(source)
+    assert section is not None
+    parts = STAGE_PARTS["worker"]
+    assert _section_missing(section, parts) == []
+    live = parts[1]
+    replaced = section.replace(live, RETIRED_WORKER_CHECKS)
+    assert replaced != section
+    assert live in _section_missing(replaced, parts)
+    assert "retired focused/lint/type handover rule" in _section_missing(replaced, parts)
+    assert "retired focused/lint/type handover rule" in _section_missing(
+        section + "\n" + RETIRED_WORKER_CHECKS, parts
+    )
 
 
 def _check_source_sections(role: str, parts: tuple[str, ...], missing: list[str]) -> None:

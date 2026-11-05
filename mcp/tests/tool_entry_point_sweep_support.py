@@ -12,6 +12,7 @@ import json
 import re
 import subprocess
 import tempfile
+import traceback
 import warnings
 from pathlib import Path
 from typing import Any
@@ -463,7 +464,12 @@ class EntryPointWorld:
             except _ToolCallTimeout:
                 raise
             except BaseException as exc:
-                return f"RAISED {type(exc).__name__}", None
+                origin = traceback.extract_tb(exc.__traceback__)[-1]
+                return f"RAISED {type(exc).__name__}", {
+                    "detail": str(exc),
+                    "exceptionType": type(exc).__name__,
+                    "exceptionLocation": f"{origin.filename}:{origin.lineno}",
+                }
         if result.isError:
             text = "\n".join(
                 text for content in result.content if (text := getattr(content, "text", None))

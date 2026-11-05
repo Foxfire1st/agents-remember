@@ -20,13 +20,16 @@ import sys
 import tempfile
 from pathlib import Path
 
-HARNESS_DIR = Path(__file__).resolve().parent
+HARNESS_DIR = Path(__file__).resolve().parent.parent
 # Strings, not Path objects: a non-str ``sys.path`` entry is silently ignored by the importer.
 if HARNESS_DIR.as_posix() not in sys.path:
     sys.path.insert(0, HARNESS_DIR.as_posix())
 
-from fresh_user_scenario import environment_facts, run_fresh_user_acceptance  # noqa: E402
-from reporting import write_json  # noqa: E402
+from e2e_harness.fresh_user_scenario import (  # noqa: E402
+    environment_facts,
+    run_fresh_user_acceptance,
+)
+from e2e_harness.reporting import write_json  # noqa: E402
 
 REPORT_DIRECTORY = "fresh-user-acceptance"
 

@@ -30,3 +30,42 @@ is judged with its named canonical file.
 
 A rerun that changes a target's `rationale` or `role` rewrites the
   `realizes` entry this leaf wrote from that entry; the entry keeps its ID.
+
+## Worklist and gate response blocks
+
+Read the persisted worklist and the full memory-quality result in its log together. The bounded
+MCP answer names artifacts rather than inlining these blocks. On converted memory,
+`knowledgeWorklist` summarizes the computed worklist; it is not a verdict that its items
+are answered. A block is present only when that worklist or gate was computed; an absent block
+is not a passing judgment or an empty result. Its fields mean:
+
+| Field | Meaning |
+| --- | --- |
+| `state` | Whether the worklist computation is `complete` or `incomplete`. |
+| `path` | The supplied persisted-worklist path, or `null` when no path is supplied. |
+| `digest` | The computed worklist's content digest; read its document for the code/memory pairing. |
+| `itemCount` | Total items in this worklist, including items already satisfied; not the open-item count. |
+| `itemsByKind` | Counts of those items grouped by their `kind`. |
+| `incomplete` | Inputs the computation could not read, with their reported details; an incomplete run is not measured absence. |
+
+`knowledgeGate` is the compact gate judgment. It judges the exact paired candidate and the
+current satisfying history rows, not whether a command merely exited zero. Its fields mean:
+
+| Field | Meaning |
+| --- | --- |
+| `state` | `pass` when there are no blocking findings; otherwise `refused`. |
+| `owner` | The owner identifier supplied to this gate judgment, or `null`. |
+| `worklistState` | The state of the worklist the gate judged. |
+| `worklistDigest` | That worklist's digest. |
+| `worklistPath` | Its supplied persisted path, or `null`. |
+| `findingCount` | Total blocking gate findings. |
+| `openItemCount` | Findings for worklist items without a current satisfying row. |
+| `incompleteCount` | Findings for worklist inputs that could not be read. |
+| `violationCount` | Findings whose codes belong to the knowledge validator. |
+| `reportOnlyCount` | Nonblocking report-only observations, separate from `findingCount`. |
+
+Do not add these subtotals to infer a new verdict or count report-only observations as blocking
+findings. Use the returned judgment and read each actual finding. A closeout gate refusal is
+`knowledge-gate-refused`; its findings go to the Curator for repair, and it is not bypassed. A
+changed candidate needs its own exact-tree check. The public command and tool reference is
+[knowledge commands](knowledge-commands.md).

@@ -101,3 +101,7 @@ the sealed issue list into a finding.
   the curator handoff check (which catches history-only "refreshes" before the Git transaction,
   where prose requests did not)
   is the working example.
+
+## Reuse existing user-interface primitives
+
+Treat a new UI control duplicating an existing primitive as a finding and name what to reuse.

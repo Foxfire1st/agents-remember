@@ -1,0 +1,6096 @@
+{
+  "schema": "ar-shared-rule-digest/v1",
+  "baseline": {
+    "tree": "cd0e68f0",
+    "inventoryPath": "/var/tmp/mik-run3/architect/scratch/r62v4-d2/digest/units-cm.json",
+    "inventorySha256": "c0d42bd1a03ccc1d11ea2b3248d386fe981e74a9d86c1445e0abcb11d15fe680",
+    "unitCount": 145,
+    "unitIds": [
+      "AU0.1",
+      "AU1.1",
+      "AU1.2",
+      "AU2.1",
+      "AU2.2",
+      "AU2.3",
+      "AU2.4",
+      "AU2.5",
+      "AU2.6",
+      "AU2.7",
+      "AU2.8",
+      "AU3.1",
+      "AU3.2",
+      "AU3.3",
+      "AU3.4",
+      "AU3.5",
+      "AU4.1",
+      "AU5.1",
+      "AU5.2",
+      "AU5.3",
+      "AU5.4",
+      "AU5.5",
+      "AU6.1",
+      "AU6.2",
+      "AU7.1",
+      "AU7.2",
+      "AU7.3",
+      "AU7.4",
+      "AU8.1",
+      "AU8.2",
+      "AU9.1",
+      "AU9.2",
+      "AU9.3",
+      "AU9.4",
+      "AU10.1",
+      "AU10.2",
+      "AU11.1",
+      "AU11.2",
+      "AU11.3",
+      "IN0.1",
+      "IN1.1",
+      "IN2.1",
+      "IN2.2",
+      "IN2.3",
+      "IN2.4",
+      "IN3.1",
+      "IN3.2",
+      "IN3.3",
+      "IN4.1",
+      "IN4.2",
+      "IN5.1",
+      "IN5.2",
+      "IN5.3",
+      "IN5.4",
+      "IN5.5",
+      "IN6.1",
+      "IN6.2",
+      "IN6.3",
+      "IN7.1",
+      "IN7.2",
+      "IN7.3",
+      "IN7.4",
+      "IN7.5",
+      "IN8.1",
+      "IN8.2",
+      "IN8.3",
+      "IN8.4",
+      "LF0.1",
+      "LF0.2",
+      "LF0.3",
+      "LF0.4",
+      "LF0.5",
+      "LF0.6",
+      "LF0.7",
+      "LF1.1",
+      "LF1.2",
+      "LF1.3",
+      "LF1.4",
+      "LF1.5",
+      "LF2.1",
+      "LF2.2",
+      "LF2.3",
+      "LF2.4",
+      "LO0.1",
+      "LO0.2",
+      "LO0.3",
+      "LO0.4",
+      "LO1.1",
+      "LO1.2",
+      "LO2.1",
+      "LO2.2",
+      "LO2.3",
+      "LO2.4",
+      "LO2.5",
+      "LO3.1",
+      "LO3.2",
+      "LO3.3",
+      "LO3.4",
+      "LO3.5",
+      "LO3.6",
+      "LO3.7",
+      "LO4.1",
+      "LO5.1",
+      "LO6.1",
+      "LO6.2",
+      "LO6.3",
+      "AC0.1",
+      "AC0.2",
+      "AC0.3",
+      "AC0.4",
+      "AC0.5",
+      "AC0.6",
+      "AC1.1",
+      "AC1.2",
+      "AC1.3",
+      "AC1.4",
+      "AC1.5",
+      "AC1.6",
+      "AC1.7",
+      "AC1.8",
+      "AC1.9",
+      "AC2.1",
+      "AC2.2",
+      "AC2.3",
+      "AC2.4",
+      "AC2.5",
+      "AC2.6",
+      "AC2.7",
+      "AC2.8",
+      "AC2.9",
+      "AC2.10",
+      "AC3.1",
+      "AC3.2",
+      "AC3.3",
+      "AC3.4",
+      "AC3.5",
+      "AC3.6",
+      "AC3.7",
+      "AC3.8",
+      "AC4.1",
+      "AC5.1",
+      "AC5.2",
+      "AC5.3",
+      "AC5.4",
+      "AC5.5"
+    ],
+    "units": [
+      {
+        "id": "AU0.1",
+        "file": "core/authority.md",
+        "lines": [
+          3,
+          4
+        ],
+        "text": "The rules in this file apply to every seat in this skill. It is authored once and composed into a\ncapsule; a role file states its own seat's side of a rule and never restates the whole of it.",
+        "sha256": "2fdd89a48e79afe350f6862ca6d4eababfa290da647437cd9746e8a1b40d623f"
+      },
+      {
+        "id": "AU1.1",
+        "file": "core/authority.md",
+        "lines": [
+          8,
+          10
+        ],
+        "text": "Lifecycle and job are one entity. Every agent type runs its **own self-contained lifecycle**; this\nskill is the single roof over all of them. No role is defined by reference to another role's\nlifecycle, and no role reads another role's file to learn its own obligations.",
+        "sha256": "131f0eccf2dc975f63039ab5b3d8e1ecbb49c21a72e07d401317c6d244489146"
+      },
+      {
+        "id": "AU1.2",
+        "file": "core/authority.md",
+        "lines": [
+          12,
+          14
+        ],
+        "text": "Authority in this system is **structural, never textual**: a seat's task document plus its role\nname is its address, and AR — not a prompt or a chat claim — records which agent holds it when\n`role_start` starts it.",
+        "sha256": "228e7540eddddb6ae8910db0afd0fa8e91a6ba33a62eb8a2b258b2ffb814c5f5"
+      },
+      {
+        "id": "AU2.1",
+        "file": "core/authority.md",
+        "lines": [
+          20,
+          20
+        ],
+        "text": "| Projects | none — the start names no document; the sprint document holds the developer's request, and the developer names it to the architect in the dashboard | architect |",
+        "sha256": "4a09b723fe31d3ce09e38c48de8996c0458daba67bc3849a30273a4dca0bc2d7"
+      },
+      {
+        "id": "AU2.2",
+        "file": "core/authority.md",
+        "lines": [
+          21,
+          21
+        ],
+        "text": "| Sprint | the sprint (`kind:\"master\"`) document | orchestrator · strategist · designer · plan reviewer · super-exit reviewer |",
+        "sha256": "9ae26df124570590a4d20ada416eb37ac9cfb5825ae0a6e990ff1ba866436984"
+      },
+      {
+        "id": "AU2.3",
+        "file": "core/authority.md",
+        "lines": [
+          22,
+          22
+        ],
+        "text": "| Master | the master document | manager · master-exit reviewer |",
+        "sha256": "f8d4e52e4b3cf67c52f5523285609a171ef8e4c52327c2cebd10327acb5a5e18"
+      },
+      {
+        "id": "AU2.4",
+        "file": "core/authority.md",
+        "lines": [
+          23,
+          23
+        ],
+        "text": "| Leaf | the leaf document | worker · curator · leaf route reviewer |",
+        "sha256": "0dad0bc085b0a23fce39d66a027c75ca2ae26894e32be64b9add2b3e45ca3bec"
+      },
+      {
+        "id": "AU2.5",
+        "file": "core/authority.md",
+        "lines": [
+          24,
+          24
+        ],
+        "text": "| Portfolio artifact | none — a notes draft only | strategist's draft before adoption |",
+        "sha256": "da8eafe9927947929e481f4c861879838a0601cdccbd9af8f9e16a86678306f5"
+      },
+      {
+        "id": "AU2.6",
+        "file": "core/authority.md",
+        "lines": [
+          26,
+          29
+        ],
+        "text": "- A seat is bound when `role_start` starts its agent: **canonical task document\n  plus role**. The architect is the exception of the first row: its\n  start names no document, and a start that names one is refused. Different roles may coexist on\n  one document; only a second live occupant of the same `(task document, role)` seat collides.",
+        "sha256": "74639fbeee81f0314254e9cd30aa24c8fbdd792642745ead764e2405d6f21c24"
+      },
+      {
+        "id": "AU2.7",
+        "file": "core/authority.md",
+        "lines": [
+          30,
+          31
+        ],
+        "text": "- A started agent's parent is the agent that called `role_start` for it; a role started from the\n  dashboard or by a chat without a role has none.",
+        "sha256": "776910a48812006036629ec1630a4496dca3908392e6450f6877440db46fd837"
+      },
+      {
+        "id": "AU2.8",
+        "file": "core/authority.md",
+        "lines": [
+          32,
+          34
+        ],
+        "text": "- **A seat that WEARS a hat runs that hat's file as its own.** Hat-collapse is sanctioned only for\n  the owner/developer-facing architect seat in solo or flat runs (see `roles/architect.md`). A\n  spawned role seat never wears another role's hat and never becomes a different role in place.",
+        "sha256": "e533537182f55829908b2e42950279790d1cc866997f17063ea2b25e9e622f79"
+      },
+      {
+        "id": "AU3.1",
+        "file": "core/authority.md",
+        "lines": [
+          38,
+          38
+        ],
+        "text": "When the dashboard owns a session, its role is fixed for the session lifetime.",
+        "sha256": "12a8ea7b3e00ef71dea70ca9b52e2061effa1872697f25af7636c6f681a331ec"
+      },
+      {
+        "id": "AU3.2",
+        "file": "core/authority.md",
+        "lines": [
+          40,
+          41
+        ],
+        "text": "- A pasted brief for another role is **refused**, not absorbed: the seat sends the mismatch to\n  its parent with `role_message` instead of silently rerouting itself.",
+        "sha256": "ec8ca2d18cdf5f28a4ca731703dae07791026ac339829606d32cdfe71b58b9b9"
+      },
+      {
+        "id": "AU3.3",
+        "file": "core/authority.md",
+        "lines": [
+          42,
+          44
+        ],
+        "text": "- Roles expand **horizontally** by starting new, individually addressable role agents\n  (`role_start` with the role and its canonical task references). A role seat is never a\n  harness-native sub-agent of another role seat.",
+        "sha256": "7bc1f7dda7daa6de99344691cbbba8997b71c5a4ed04c09d21386d117a917e3e"
+      },
+      {
+        "id": "AU3.4",
+        "file": "core/authority.md",
+        "lines": [
+          45,
+          47
+        ],
+        "text": "- Harness sub-agents work inside the seat's assignment with its permissions and working folder.\n  The seat organises their work, verifies and credits it, and performs all boundary acts itself.\n  Helpers hold no AR seat, start no role and cannot supply independent review of their author.",
+        "sha256": "709dfc622f60395021812853ef7536ae9fc1eb1f307197a4f04c6717bece08b8"
+      },
+      {
+        "id": "AU3.5",
+        "file": "core/authority.md",
+        "lines": [
+          48,
+          48
+        ],
+        "text": "- Sessions not owned by the dashboard follow their host harness's ordinary rules.",
+        "sha256": "662e45649fa1b944182265c3241caf525b968f9972baf3593b3ce9e4581b1d74"
+      },
+      {
+        "id": "AU4.1",
+        "file": "core/authority.md",
+        "lines": [
+          52,
+          57
+        ],
+        "text": "A role that starts another calls `role_start` **once**, with the role, a request id it chooses and\nthe task references the role requires. The same request id with the same selection reconciles the\nsame agent and never creates a second. Agent kind, model and effort come from the role settings\nunless the call overrides them; a call cannot state a mode. A call that is not carried out answers\n`refused` with its reason, and a refusal never falls back to another tool. A leaf's Worker,\nReviewer and Curator are started as a set with `role_start_set`.",
+        "sha256": "c20a07a9f2cb20d9767e83b4b053b598842f57847464f63bf230ce70dae2f789"
+      },
+      {
+        "id": "AU5.1",
+        "file": "core/authority.md",
+        "lines": [
+          61,
+          65
+        ],
+        "text": "When the developer says *\"you are the orchestrator/manager/worker for task X\"* (or equivalent),\nthat is a **task-seat takeover**, not a loose role hint. Before analysis, profile checks, a start,\nor implementation, resolve the named task document and converge on that role's canonical seat at\nits canonical altitude (table above; a reviewer binds the leaf, master, or sprint document its\nexact review seam adjudicates).",
+        "sha256": "3ec3b73ffdad06162dc542d08ba53c4b34cd2079ff3377a7670a228161a7a985"
+      },
+      {
+        "id": "AU5.2",
+        "file": "core/authority.md",
+        "lines": [
+          67,
+          67
+        ],
+        "text": "1. Resolve the canonical JSON-primary task document and the role being claimed.",
+        "sha256": "a11523f836192e691020319d99e446ac1355bd6b7f3db642087d563789f974a4"
+      },
+      {
+        "id": "AU5.3",
+        "file": "core/authority.md",
+        "lines": [
+          68,
+          70
+        ],
+        "text": "2. Start the named role on that document with `role_start` once. An architect is started without\n   a document reference: the sprint document holds the request, and the developer names it in the\n   dashboard.",
+        "sha256": "4ecc4bbe1f289f283d818123f35ab6fe2678746a8e0fb06e11464f35bccb4323"
+      },
+      {
+        "id": "AU5.4",
+        "file": "core/authority.md",
+        "lines": [
+          71,
+          71
+        ],
+        "text": "3. Tell the developer that the agent is in the dashboard.",
+        "sha256": "5f3162fc856caeb10d32a42714155815800f30d82cc211908cc141f231c7a8d6"
+      },
+      {
+        "id": "AU5.5",
+        "file": "core/authority.md",
+        "lines": [
+          73,
+          75
+        ],
+        "text": "A chat without a role makes the same `role_start` call. Takeover never means replacing a live\nincumbent: a start without a binding takes no replacement. If `role_start` refuses the selection,\nsay which document or role is missing — never improvise another way to attach.",
+        "sha256": "4d018521f1fed3ddd7d27ac5d9bead1573a42bb7a52c05d8228964dc0cbf368e"
+      },
+      {
+        "id": "AU6.1",
+        "file": "core/authority.md",
+        "lines": [
+          79,
+          79
+        ],
+        "text": "**worker → manager → orchestrator → architect → developer.** An Investigator escalates to the parent that started it, or asks the developer without one. **No rung is skipped, ever.** Each role file states only its own rung.",
+        "sha256": "c303b39804a76d9e627862cf4b90c124a54b77b75ec80a5260e862a32b353bf3"
+      },
+      {
+        "id": "AU6.2",
+        "file": "core/authority.md",
+        "lines": [
+          81,
+          85
+        ],
+        "text": "A question is developer-worthy when it is a **high-blast-radius truth** — answered wrong it means\nbig rewrites later (architecture direction, security posture, doctrine contradictions, irreversible\ndata/branch operations, where agent settings live). Such a question escalates **immediately** to\nthe architect relay, regardless of any loop's round count. Presentation-grade choices (2px vs 3px)\nnever do: the owning seat rules and logs.",
+        "sha256": "6255aa49ab04e950aa9dddc3235ad967464a4dbba1143989366b0d19c9c56e77"
+      },
+      {
+        "id": "AU7.1",
+        "file": "core/authority.md",
+        "lines": [
+          89,
+          93
+        ],
+        "text": "When the developer clarifies a rule, boundary, or desired behavior during an active task, decide\nwhether it is **current implementation** or **future queue** before writing only a note. Read the\nactive queue first: the current leaf, parent/master, neighboring leaves, decision log, open\nquestions, and in-flight branch state. The question is not whether a note is useful; it is whether\nthe developer is effectively steering the work already in hand.",
+        "sha256": "58d226ea52a7b05543d3db888f04fcafee52a2428c8a7735cdd315356616a402"
+      },
+      {
+        "id": "AU7.2",
+        "file": "core/authority.md",
+        "lines": [
+          95,
+          99
+        ],
+        "text": "- **Current implementation** — it names the same task/leaf/master, resolves a defect exposed by the\n  current work, or improves the same doctrine or code path. A small change that plainly fits the\n  current diff is a strong signal for immediate implementation even when the developer phrases it as\n  \"maybe\". Extend the current task surface/decision log enough to make the added scope visible, and\n  implement it now.",
+        "sha256": "5f4e7e781b8c88ee2c2ccec7a266fda6387fcd6a433ad5cab96e8abb76d1e8a1"
+      },
+      {
+        "id": "AU7.3",
+        "file": "core/authority.md",
+        "lines": [
+          100,
+          102
+        ],
+        "text": "- **Future queue** — it names a later release, a separate subsystem, a large scope jump, work whose\n  correctness depends on another unfinished master, or a change that would reorder already-running\n  leaves. Record it in the right durable queue or ask the owning seat to plan it later.",
+        "sha256": "73c7a23a106f9b424f832363b396e7473943c6fa87dc41ffee225934ba462888"
+      },
+      {
+        "id": "AU7.4",
+        "file": "core/authority.md",
+        "lines": [
+          103,
+          105
+        ],
+        "text": "- If the intent is genuinely ambiguous after reading the queue, send the question to your parent with `role_message` on `agents-remember-task`; without a parent, ask in your own chat. Do not\n  silently downgrade a close/current/small change into future speak, and do not silently expand the\n  active leaf when the fit is unclear.",
+        "sha256": "a5bfc053c01c04d0d1a547a69cdd2d85993d2ba69fd2fd8152d780b90b916e82"
+      },
+      {
+        "id": "AU8.1",
+        "file": "core/authority.md",
+        "lines": [
+          109,
+          116
+        ],
+        "text": "Once the developer accepts an orchestrated series/portfolio plan, that acceptance is **standing\nauthority** for the owning seats to execute the subordinate edges in that series. Managers govern\ntheir workers, leaf readiness, and released leaf closeouts. The orchestrator governs managers, the\nportfolio queue, organizational leaf → super releases, atomic master → super handovers, and the\nsame closeout/finalize/cleanup mechanics when it wears a manager or worker hat in a flat/direct\nrun. These edges do **not** stop for a new developer approval merely because a commit, lifecycle\nfinalization, cleanup, or integration command is next: the owner runs the transaction preview,\nrecords the accepted-series authority in the intent note or decision log, and continues.",
+        "sha256": "aa0e37a19ead2ec316982473bc0096598baaa3bdf07d21c7db96f40f06e2f2bd"
+      },
+      {
+        "id": "AU8.2",
+        "file": "core/authority.md",
+        "lines": [
+          118,
+          123
+        ],
+        "text": "This does not weaken the ladder. Developer approval is still required for the final completed super\nintegration branch / PR-carryover gate, for any human-pinned gate that is actually raised\n(`integration-approval`, `push-approval`, `cleanup-approval`), for scope changes beyond the accepted\nplan, for unresolved transaction conflicts or scope blockers, and for quo-vadis decisions.\nOwner-never-self-approves means verdicts and delegated gates need the configured distinct decider;\nit does not force a developer hand-off for mechanical closeout of in-scope work.",
+        "sha256": "3009587058e6a975ea35ace14bfbe4fa4e0a4475b1929b1e7dbccae7537a423e"
+      },
+      {
+        "id": "AU9.1",
+        "file": "core/authority.md",
+        "lines": [
+          127,
+          128
+        ],
+        "text": "A question for the developer goes up the chain with `role_message`; `operations/orientation.md`\nstates how.",
+        "sha256": "e607f1fa449da44cb531bcb6496379470ac16934c0e0df0a0a61451790095c6d"
+      },
+      {
+        "id": "AU9.2",
+        "file": "core/authority.md",
+        "lines": [
+          130,
+          131
+        ],
+        "text": "- A seat sends the question to its parent, stating what is being decided, the options, the\n  consequences, and the durable evidence refs.",
+        "sha256": "4bc6ab473963a78944cbf9d21b40b6ea0de9b302b1b4a9e9846fa19032935a1b"
+      },
+      {
+        "id": "AU9.3",
+        "file": "core/authority.md",
+        "lines": [
+          132,
+          134
+        ],
+        "text": "- The architect presents one item at the developer's pace, records the ruling in the durable task\n  surface (`openQuestions` / decision logs, with notes for analysis), and returns the answer with\n  `role_message`.",
+        "sha256": "58b065b860a9520b9373cc7940b78462dc5b2aadb544c332ae09eb0f029f9e97"
+      },
+      {
+        "id": "AU9.4",
+        "file": "core/authority.md",
+        "lines": [
+          135,
+          136
+        ],
+        "text": "- If the item is underspecified, the architect sends a single clarification back instead of\n  guessing.",
+        "sha256": "41a5f115f3d78ba6061462f2b22ab65ba751a509e6c901f086876fb063c65b21"
+      },
+      {
+        "id": "AU10.1",
+        "file": "core/authority.md",
+        "lines": [
+          140,
+          143
+        ],
+        "text": "Ending a turn — simply stopping once your artifact is\nwritten and nothing is pending — is **never a liveness gap**. A turn that ends without a message\nto its parent wakes that parent with one line from the host, which names where the newest report\nlies; the parent reads the report and acts.",
+        "sha256": "81e470437ab93482f4934205a5953bd831883be355887689cc523800a6e91ce6"
+      },
+      {
+        "id": "AU10.2",
+        "file": "core/authority.md",
+        "lines": [
+          145,
+          148
+        ],
+        "text": "**Watcher ban (uniform-mechanism ruling 2026-07-07):** no role watches, polls, nudges, or\ntimer-loops on its own initiative — that is a banned seat-local watcher, and there is no per-seat\nvariance. Every role's own liveness duty inverts to *passive*: you are woken by a message; answer\nit before ending your turn again.",
+        "sha256": "6b6982097c2e098414d2a9cf21213137f921d6ca54333f46acc62f683e74ffa7"
+      },
+      {
+        "id": "AU11.1",
+        "file": "core/authority.md",
+        "lines": [
+          152,
+          153
+        ],
+        "text": "- **Doctrine and instruction text** is changed only through a task;\n  a seat never rewrites its own role file or another role's file to resolve a disagreement.",
+        "sha256": "8ec0ae47290da8499bab3873ab70fbdfecd19b47743a97b0ec9920259a81aa5a"
+      },
+      {
+        "id": "AU11.2",
+        "file": "core/authority.md",
+        "lines": [
+          154,
+          155
+        ],
+        "text": "- **Requirements** are owned by the architecture seat that compiled them; a claimed contradiction\n  or overconstraint is diagnosed and proposed, never self-approved, and never silently rewritten.",
+        "sha256": "3c6fdca1d24e3b7f55fa5fae4110e8d900899ba1e430a9603f3255f1ef2105e9"
+      },
+      {
+        "id": "AU11.3",
+        "file": "core/authority.md",
+        "lines": [
+          156,
+          164
+        ],
+        "text": "- **Git code/memory transactions** are closeout/integration work owned by the owning seat. They\n  publish only the explicitly authorized code and prepared memory commits/merges. Closeout and\n  integration do **not** launch automatic code-quality, full-suite, or independent-review\n  operations; full code quality, full tests, and independent review run only after an explicit\n  developer request. Curation is never deferred that way: the curator runs the complete\n  memory-quality operation as part of curation, and closeout and integration carry that result as a\n  prerequisite instead of rerunning it. Worker targeted checks and the curator's complete onboarding\n  result remain truthful handoff evidence — failed or not-run checks are reported and never\n  relabeled as full green.",
+        "sha256": "64e3a7a6ef8967139345474c9f192601c87284aad84a7d733e367d1525182f92"
+      },
+      {
+        "id": "IN0.1",
+        "file": "core/invariants.md",
+        "lines": [
+          3,
+          3
+        ],
+        "text": "Authored once. A role file names the invariant it depends on; it never restates the set.",
+        "sha256": "0593e714cf653eb0b474b598d75ac83a250aa2bbeb4b3c00ddedf442246a2312"
+      },
+      {
+        "id": "IN1.1",
+        "file": "core/invariants.md",
+        "lines": [
+          7,
+          11
+        ],
+        "text": "A seat's real state is the task tree — masters, leaves, statuses, decision logs, `openQuestions`,\ncontracts, worktree contracts — plus its own written artifacts. This is why\nshort-lived workers and reviewers are safe, why sessions can die, compact, and resume without\nlosing the run, and why **every seat writes its artifact of record**. A finding held only in a chat\nis a bug.",
+        "sha256": "02101d65549f31a6029ac0c66b8a9602e3400806d60dd7f5208f845bd9baeda3"
+      },
+      {
+        "id": "IN2.1",
+        "file": "core/invariants.md",
+        "lines": [
+          15,
+          16
+        ],
+        "text": "- Decision-needing questions land in the task doc's **`openQuestions`** — the rendered decision\n  surface the developer can see.",
+        "sha256": "73b34119fdd3f97273dab0f1cbac2562cf544d3c20d51aff1246483bc180f980"
+      },
+      {
+        "id": "IN2.2",
+        "file": "core/invariants.md",
+        "lines": [
+          17,
+          17
+        ],
+        "text": "- `notes/` carries the analysis behind them.",
+        "sha256": "631915308bd7216b0fb4e5a5a296b58aad0cf9a05e99033465c84e4a46463b4c"
+      },
+      {
+        "id": "IN2.3",
+        "file": "core/invariants.md",
+        "lines": [
+          18,
+          19
+        ],
+        "text": "- Rulings that change task/branch/orchestration state get a **decision-log entry**. Notes carry\n  analysis that must survive beyond the terse decision entry.",
+        "sha256": "a0ccf4e96c1726a22cb3eee872a07e4103c98bd1d86d7f1bd73570a6bf643ee9"
+      },
+      {
+        "id": "IN2.4",
+        "file": "core/invariants.md",
+        "lines": [
+          20,
+          21
+        ],
+        "text": "- Backend seats never hand a question straight to the developer; the architect relay owns\n  presentation pace.",
+        "sha256": "260b842131ea21ae168f49a579c6bd0b604059e69b4c7c2bc8c6f18f125e096b"
+      },
+      {
+        "id": "IN3.1",
+        "file": "core/invariants.md",
+        "lines": [
+          25,
+          25
+        ],
+        "text": "- Parallelize independent work by default, up to the applicable `orchestration.concurrency` cap.",
+        "sha256": "da4cd612677f08d7c4c084027fe6c10a4b59d8da2b1440baffa5e47fc6e85078"
+      },
+      {
+        "id": "IN3.2",
+        "file": "core/invariants.md",
+        "lines": [
+          26,
+          27
+        ],
+        "text": "- Sequential execution is the exception and **must name** a gate, a shared-file one-writer\n  dependency, or an explicit ruling.",
+        "sha256": "2960f52db5562f095bf837cd68d1b6736aef88ee46daa3b9d7063b74fde01cf9"
+      },
+      {
+        "id": "IN3.3",
+        "file": "core/invariants.md",
+        "lines": [
+          28,
+          28
+        ],
+        "text": "- Build concurrency never grants landing order.",
+        "sha256": "0d076f0c8817b512c25b88edcb7a0883f1386e06b044534e203b40cfe9823211"
+      },
+      {
+        "id": "IN4.1",
+        "file": "core/invariants.md",
+        "lines": [
+          32,
+          33
+        ],
+        "text": "- Coordination seats are `task_doc` leaves with attached chats, so the developer can walk into any\n  seat at any level.",
+        "sha256": "7ca6af118ab782944ec0f73f6dfd9a7d25fffd1dd9e7430f135ab3867ee85268"
+      },
+      {
+        "id": "IN4.2",
+        "file": "core/invariants.md",
+        "lines": [
+          34,
+          34
+        ],
+        "text": "- The developer talks to exactly one seat: the **architect**. Backend seats stay behind the relay.",
+        "sha256": "76bec0d869abe8b68f1466609a05d2e78605b3f6c2ae3766637ff679936166f1"
+      },
+      {
+        "id": "IN5.1",
+        "file": "core/invariants.md",
+        "lines": [
+          38,
+          40
+        ],
+        "text": "```\ntask doc (approved)  →  branch (intent)  →  worktree (only where something is built)\n```",
+        "sha256": "8d035ee66c274cc4f82d346ce9883876fc4312c7189d5b622ad2dfebabbf0648"
+      },
+      {
+        "id": "IN5.2",
+        "file": "core/invariants.md",
+        "lines": [
+          42,
+          42
+        ],
+        "text": "- **Design and portfolio work never touch git.** Nothing is being built there.",
+        "sha256": "a250e8dd5b2b81c3252f60ba9fa729c4c8b6ef267f549e8bb17876caf235cc16"
+      },
+      {
+        "id": "IN5.3",
+        "file": "core/invariants.md",
+        "lines": [
+          43,
+          46
+        ],
+        "text": "- **Intents create branches**: the super branch at portfolio-execution entry; an intermediate master\n  branch only for an `atomic` master; a leaf branch together with its leaf worktree (the one place\n  branch + worktree legitimately appear at once, because leaf work *is* worktree work). An\n  `organizational` master creates no branch.",
+        "sha256": "d12a5c6a3ef556e79984580bf9d067e31af1b74edcf3ec568446053ef03ef377"
+      },
+      {
+        "id": "IN5.4",
+        "file": "core/invariants.md",
+        "lines": [
+          47,
+          47
+        ],
+        "text": "- **Worktrees exist per build/integration edge** and are reclaimed after.",
+        "sha256": "539315a2f0674eb74b14838f2ec2483350172aed7d014636e58770e8bc42ecdc"
+      },
+      {
+        "id": "IN5.5",
+        "file": "core/invariants.md",
+        "lines": [
+          48,
+          50
+        ],
+        "text": "- **Chat is never a build route.** Every code change lives under an approved task doc; small code\n  work takes the minimal `w-02-light-task-workflow` artifact. Chat remains right for research and\n  for the design conversation itself.",
+        "sha256": "d251be28f540c9c168d42243b197f46d35a555f699a20398266c4384eeee2d0c"
+      },
+      {
+        "id": "IN6.1",
+        "file": "core/invariants.md",
+        "lines": [
+          54,
+          56
+        ],
+        "text": "The default agent behavior stands: **fulfill the task, fill small blanks**, with no creative-liberty\nprompting in either direction. A seat fills small, unambiguous blanks a competent implementer would\nfill, and no more.",
+        "sha256": "261ccb4efa1d373ba7b21079b75928e194014928920f570ec5acb871c5129300"
+      },
+      {
+        "id": "IN6.2",
+        "file": "core/invariants.md",
+        "lines": [
+          58,
+          59
+        ],
+        "text": "A **plan delta beyond blank-filling escalates one rung up** — never straight to the developer, and\nnever a reshape of the seat's own. A seat's changes can collide with what it cannot see.",
+        "sha256": "6b5fd5c4a783d7e09c18719b0a2cd5dcfdb7064d6cd430d02a2c22fe5bbd8b7e"
+      },
+      {
+        "id": "IN6.3",
+        "file": "core/invariants.md",
+        "lines": [
+          61,
+          63
+        ],
+        "text": "**The spirit test is orchestrator-only.** It is never ported down the ladder; managers and workers\nkeep the default behavior and escalate real deltas. The full spirit test lives in\n`roles/orchestrator.md`.",
+        "sha256": "886565d6347011c32c9e0b57e1d2b65af47f7900c0766f4065f1d7d3875bd8cf"
+      },
+      {
+        "id": "IN7.1",
+        "file": "core/invariants.md",
+        "lines": [
+          67,
+          68
+        ],
+        "text": "Role files are **model-interpreted markdown, never an executor**. Each carries a portable **knob\nblock** (harness / model / effort / tools) — the defaults the role settings supply at the start.",
+        "sha256": "e3d1f0c0b0fdc146eed13bd8edccc7b46d89aa07d01d3a6ce80d8eb9a27c1ab8"
+      },
+      {
+        "id": "IN7.2",
+        "file": "core/invariants.md",
+        "lines": [
+          70,
+          71
+        ],
+        "text": "- Resolution: **role-file defaults < global settings < repo-local settings**, in the global agentic\n  settings file with a repo-local override layer. Unknown `orchestration.*` keys fail loud.",
+        "sha256": "6b00af180a69971c5ff63a8d5353a97573e77ecb8eb1c654223af747bb898bbf"
+      },
+      {
+        "id": "IN7.3",
+        "file": "core/invariants.md",
+        "lines": [
+          72,
+          76
+        ],
+        "text": "- Only the launch-setting rows (`harness`, `model`, `effort`, `serviceTier`, `mode`,\n  `featureValues`) participate in `orchestration.roles.<role>` and\n  `orchestration.rolesPerLevel.<level>.<role>`; `launchArgs`, `sessionCommands` and\n  `promptKeywords` load and are no longer read. `dispatch` and `tools` are structural\n  authority/capability descriptions, never settings keys.",
+        "sha256": "9afc1624a533469250f8634a3bb86a9d70e7fc3a076ee6a8d7c46f48667e813e"
+      },
+      {
+        "id": "IN7.4",
+        "file": "core/invariants.md",
+        "lines": [
+          77,
+          80
+        ],
+        "text": "- There are deliberately **no per-harness role files** (developer decision 2026-07-05).\n  Harness-specific *abilities* — sub-agent fan-out and the like — are covered inside the portable\n  files as capability-conditional doctrine, and harness *preference* is deployment configuration,\n  not doctrine. Hard-coding a vendor would fork the doctrine per harness.",
+        "sha256": "d888e3f50c08089c8c5bb79e5b22f828f56b39ed2c6b9bb8fbf847e3c7e6bff0"
+      },
+      {
+        "id": "IN7.5",
+        "file": "core/invariants.md",
+        "lines": [
+          81,
+          82
+        ],
+        "text": "- `role_start` is itself the harness-independent fan-out: a harness with no sub-agent facility\n  still starts a role agent on a canonical document+role seat through the framework — one behavior, any engine.",
+        "sha256": "8f727b143c8b0c28dbb080c4e95b6af8fc3f4efe70da715a8a53556d2a02e439"
+      },
+      {
+        "id": "IN8.1",
+        "file": "core/invariants.md",
+        "lines": [
+          86,
+          87
+        ],
+        "text": "- `tasks/AGENTS.md` owns the task-collaboration doctrine (meta-questioning, reframe-before-execution,\n  evidence-first, visible planning). Seats that scope work apply it; they do not paraphrase it.",
+        "sha256": "06cf23e4eb448cd585ea919dd6632ed1f8d7dbae4a7143dbfe1f76b9b5449859"
+      },
+      {
+        "id": "IN8.2",
+        "file": "core/invariants.md",
+        "lines": [
+          88,
+          88
+        ],
+        "text": "- `w-02-light-task-workflow` owns the task format and the requirement-packet template.",
+        "sha256": "807d782c0a057c7efd43471289eb09b75f4885e05e496aeedf1aae3881cd9133"
+      },
+      {
+        "id": "IN8.3",
+        "file": "core/invariants.md",
+        "lines": [
+          89,
+          91
+        ],
+        "text": "- The memory layer (`c-…` skills and the resolved `system/*` files) owns repository-specific\n  commands, coding guidelines, and landing flow. A seat reads the resolved `system/tools.md`,\n  `system/coding-guidelines.md`, and `system/git-workflow.md` rather than inventing a runner.",
+        "sha256": "9292275342f47d9480ed7bfafe1dfcb61c0337b125d445271611914eb942302d"
+      },
+      {
+        "id": "IN8.4",
+        "file": "core/invariants.md",
+        "lines": [
+          92,
+          94
+        ],
+        "text": "- `roles/` owns role duties; `operations/` owns operation-scoped procedure; `reference/` owns\n  rationale, history, and superseded rulings. The normative path injects `core/` + the role + the\n  current operation, and references rationale rather than embedding it.",
+        "sha256": "3d3cc79eba62becb261c04505be5bbe0107afce6c9045964622d149b11c63f86"
+      },
+      {
+        "id": "LF0.1",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          3,
+          4
+        ],
+        "text": "The worktree tools record where a task is, so work is observable and resumable across chat\ndeaths. The landing chain keeps its own lifecycle in the worktree contract.",
+        "sha256": "1498414063b72699f7912e8d575015d5581a77ab2418c18ee429003541f58119"
+      },
+      {
+        "id": "LF0.2",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          8,
+          8
+        ],
+        "text": "| `worktree_start` | creates the task's worktree and records its location in the contract |",
+        "sha256": "cff0700973fcd3d916fdcc321b681b3f3bf056e3c146c2c25c720117d18c6ee8"
+      },
+      {
+        "id": "LF0.3",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          9,
+          9
+        ],
+        "text": "| Resuming an existing task | `worktree_attach` resolves the contract and reports its worktree |",
+        "sha256": "82c99664bf3fc54f004eb2c181e1e0bce205069066f3a1e8492ce632b5b9afcc"
+      },
+      {
+        "id": "LF0.4",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          10,
+          10
+        ],
+        "text": "| Close | the landing chain records completion or abandonment in the contract |",
+        "sha256": "644735e1e1956788bffbe268d4a5351e2a839cd5168c3941ec0b1bdf97873cfb"
+      },
+      {
+        "id": "LF0.5",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          12,
+          12
+        ],
+        "text": "Rules:",
+        "sha256": "09e09762d2d1e809d52aa2d5556e5ca727966b86b2b6fceabeafeca50ac54522"
+      },
+      {
+        "id": "LF0.6",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          14,
+          17
+        ],
+        "text": "- The seat binding is made when `role_start` starts the agent (canonical task document plus role).\n  The architect is started without a document; the other sprint roles bind\n  to the sprint document, managers to master documents, workers/curators to leaf documents, and\n  reviewers bind to the exact leaf, master, or sprint document whose review seam they adjudicate.",
+        "sha256": "795e80cf0cec4dc7cc0a5b5ef5ce93337b50bc9cde4c378b9fe34d6f80703d15"
+      },
+      {
+        "id": "LF0.7",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          18,
+          20
+        ],
+        "text": "- Owning seats own the machinery their own\n  role file names, and no other agent calls `task_doc`, `role_start`, or closeout on\n  their behalf.",
+        "sha256": "c1a535963eaca703ee3fc45fec3d55f300523ad8416e2816c9074d77907c6cb1"
+      },
+      {
+        "id": "LF1.1",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          24,
+          26
+        ],
+        "text": "The opening detail the **architect and orchestrator** run before relying on memory or providers\n(each role file binds whether its seat runs it; a started role never repeats it, because the AR\nhandover carries its task facts and workspace bindings):",
+        "sha256": "5fb956c9eea214961d0794d5f0d86e5b9f3b5ec08fd570ee7b66155a528951ba"
+      },
+      {
+        "id": "LF1.2",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          28,
+          29
+        ],
+        "text": "1. `context_packet(repo_id=\"<repo-id>\", include_drift=true,\n   include_freshness=true)`.",
+        "sha256": "2697c41d58719564d5e5e25fc1788a37e4b4819d73c8423a6c85735a21837f00"
+      },
+      {
+        "id": "LF1.3",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          30,
+          34
+        ],
+        "text": "2. Report the packet facts before relying on memory: repository/branch/dirty state;\n   memory + onboarding roots; drift status and actionable count; branch freshness\n   (`behind`/`diverged` → fast-forward the local official line first). Reconcile actual memory\n   content or ancestry conflicts; missing cache rows or attribution for unchanged memory do not\n   block an otherwise valid code/memory pair.",
+        "sha256": "c72caf3f4611395a32a1d0aece9bfb9feea12a9e15d70e808dc1969cbcf0e2e6"
+      },
+      {
+        "id": "LF1.4",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          35,
+          37
+        ],
+        "text": "3. Drifted/missing/orphaned onboarding on committed, non-dirty source: **send the question up the\n   chain with `role_message`** before refreshing via `c-05-create-or-update-onboarding-files` — drift handling is\n   approval-gated. Drift tied to dirty source is active work-in-progress, not maintenance.",
+        "sha256": "0f97c8820db73f0717fca8ee99ef3990317e211e087982a6b6c468fbae94ae45"
+      },
+      {
+        "id": "LF1.5",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          38,
+          39
+        ],
+        "text": "4. Providers stopped/degraded: run the matching provider/runtime operations, re-check, report;\n   `indexing` means healthy-but-busy (partial results).",
+        "sha256": "a78b7bf4532962ee947134ab957216a8ef6d3445ff6f2bc8a15a31b6ffc38b79"
+      },
+      {
+        "id": "LF2.1",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          43,
+          43
+        ],
+        "text": "A `degradation-alert` event pauses provider **starting**, not the seats.",
+        "sha256": "2e846ad5cfcd6bed1becb32f4b2d1cb290ca8959d02f1347cd249b8f0023ec44"
+      },
+      {
+        "id": "LF2.2",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          45,
+          48
+        ],
+        "text": "- Managers and other leaf-altitude seats: stop starting providers until an all-clear — no worktree\n  provider setup, no watcher start or restart.\n  Continue providerless/native-read work that remains valid and report provider-dependent blockers\n  upward. **No provider kill authority**: no docker-kill, no container stop, no provider teardown.",
+        "sha256": "27a1c11cccd2590b516ffb791a9286178c5e31699dba8203d7937be44807769c"
+      },
+      {
+        "id": "LF2.3",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          49,
+          50
+        ],
+        "text": "- The orchestrator owns investigation dispatch, the remediation order, and the provider stop\n  (through the investigator protocol).",
+        "sha256": "f9a820983432e64b7e8c115f22153a96df0c6d2479cb36f37ca2afe4292813bd"
+      },
+      {
+        "id": "LF2.4",
+        "file": "core/lifecycle-frame.md",
+        "lines": [
+          51,
+          53
+        ],
+        "text": "- This iteration is providers-only. Sentry or a future system monitor may feed the detector later;\n  that does not change the response protocol: detect → report → explicit orchestrator order →\n  fix or stop.",
+        "sha256": "e784a7d8e20710f285b4b5c4cd8c8e36fdbf4013cb26c327a01f4594f5f56836"
+      },
+      {
+        "id": "LO0.1",
+        "file": "core/loop.md",
+        "lines": [
+          3,
+          6
+        ],
+        "text": "**OWNER → BUILDER → REVIEWER → owner, at every level that owns work.** The owner never\nself-approves; the builder never lands; the reviewer never decides — **verdicts are evidence**. The\nowner checks the verdict and either redispatches a builder or escalates. Role files reference this\nfile; they do not restate it.",
+        "sha256": "0df7dee38af49734c1b1dd0a06897e976a6a8e6187cb132fbf5f915ff1545340"
+      },
+      {
+        "id": "LO0.2",
+        "file": "core/loop.md",
+        "lines": [
+          10,
+          10
+        ],
+        "text": "| Leaf | the leaf's owning seat (manager; architect in tight/flat mode) | spawned worker (no-commit contract) | spawned reviewer, criteria catalog + liberty |",
+        "sha256": "eed5fd74fc155b765044ac6ca2a9a4b07578cf78759fd5fddd8ab6c56a9c0057"
+      },
+      {
+        "id": "LO0.3",
+        "file": "core/loop.md",
+        "lines": [
+          11,
+          11
+        ],
+        "text": "| Master | the manager | the leaf workers | the master-exit seam reviewer (verdict rides `master-handover-approval`) |",
+        "sha256": "117999ffc2853a40f25745ff3530324e2076bfb91ff5553876ef9fc5dc026695"
+      },
+      {
+        "id": "LO0.4",
+        "file": "core/loop.md",
+        "lines": [
+          12,
+          12
+        ],
+        "text": "| Portfolio plan | the architect | strategist when approved; orchestrator on a sanctioned strategist skip | reviewer with the plan-review catalog |",
+        "sha256": "d7f57b47cff602409fa717e3b6b88a237a98b7fe3d0096e51157cd9302926620"
+      },
+      {
+        "id": "LO1.1",
+        "file": "core/loop.md",
+        "lines": [
+          16,
+          19
+        ],
+        "text": "Run independent route review **only** when the developer or the approved task/role brief requests\nit; closeout and integration never require or launch it. Every review is dispatched with an explicit\nmode — `reviewMode=baseline` or `reviewMode=fix-verification` — and the full mode contract lives in\n`operations/review.md`.",
+        "sha256": "fb0f7d11d7d19d9ea1583fb17b135bb9ccddfd67fa9056599645089f7ef96a44"
+      },
+      {
+        "id": "LO1.2",
+        "file": "core/loop.md",
+        "lines": [
+          21,
+          23
+        ],
+        "text": "Independence requires **another agent**, never builder self-review: the reviewer seat is never the\nauthor/implementer seat. Every requirement verdict must cite evidence of the requirement's class;\nevidence of the wrong class is verdict laundering, not a pass.",
+        "sha256": "c9d4d2681dd3bd54839e8818936018645f20dc70d643b45c819fc17a00e0aa1e"
+      },
+      {
+        "id": "LO2.1",
+        "file": "core/loop.md",
+        "lines": [
+          27,
+          29
+        ],
+        "text": "The owning seat scores three axes — blast radius (doctrine/enforcement/public surface vs\nleaf-local) · novelty (new subsystem vs pattern-following) · size (files × steps) — into three\ntiers:",
+        "sha256": "92e5e18cae07fe2ebaa8b69afcae79c4b47808a16f968bb7364f74110f4222da"
+      },
+      {
+        "id": "LO2.2",
+        "file": "core/loop.md",
+        "lines": [
+          31,
+          32
+        ],
+        "text": "- **direct** — ordinary build channel plus the requested independent route review; no additional\n  loop machinery.",
+        "sha256": "6238a2f3bea8bf95a2770c0735590ee440df22ae65d3efae6b63b04d58d274ac"
+      },
+      {
+        "id": "LO2.3",
+        "file": "core/loop.md",
+        "lines": [
+          33,
+          34
+        ],
+        "text": "- **builder-verified** — builder implements; owner additionally verifies report-vs-artifact; the\n  requested route review still runs.",
+        "sha256": "8d11ebb60007ac1af82f1a6cd7899e741e98dd29c9cc5b0b99a1df8cac0eb203"
+      },
+      {
+        "id": "LO2.4",
+        "file": "core/loop.md",
+        "lines": [
+          35,
+          36
+        ],
+        "text": "- **full loop** — builder + independent reviewer rounds, with the route partition as the review\n  scope floor where the leaf owns that seam.",
+        "sha256": "cde53f799eb4048c2c5b9956f329085364e1db18f95d5e179d1f0a6b8da5dae6"
+      },
+      {
+        "id": "LO2.5",
+        "file": "core/loop.md",
+        "lines": [
+          38,
+          44
+        ],
+        "text": "The strategist's blast-radius register is the scoring input when an orchestration task exists. A\nleaf's loop mark (tier + scope: manager | orchestrator — the owning level runs the loop with ITS\nagent set) is recorded on the leaf doc with a decision-log entry. A master whose leaves all score\n`direct` avoids iterative full-loop machinery. Atomic leaves still defer a requested route review to\nthe one master integration seam; organizational leaves retain their requested review\nscope. **The knobs tune review depth and round machinery; they do not create a review when none was\nrequested.**",
+        "sha256": "abeeef9b9b70553fce45dcf903ae7ed92f84394f0c5b63a1e0b7015ca552adf8"
+      },
+      {
+        "id": "LO3.1",
+        "file": "core/loop.md",
+        "lines": [
+          48,
+          53
+        ],
+        "text": "- A governed review runs one thorough baseline and fix-verification rounds within **the\n  settings limit**: the number of rounds without an approval that\n  `orchestration.loops.defaults.maxRounds` names. The limit in force is the one the settings\n  file names when the round is begun; a changed number holds for the next round without a\n  restart. The review state that `task_doc` answers carries the limit for the task, with its\n  approved extra rounds. A pending round may resume; a new review counts the next round.",
+        "sha256": "e5904c72785680b390937c0a9358704bf33bf996ce70fd3463e91af5e5f0d99a"
+      },
+      {
+        "id": "LO3.2",
+        "file": "core/loop.md",
+        "lines": [
+          54,
+          55
+        ],
+        "text": "- Residuals of a passing round are verified by the same reviewer where the lifecycle uses follow-up\n  verification; fix rounds resume the same builder.",
+        "sha256": "db8b1fb2bf53b4f35ae111293edf5e4cc23c3a44a96653d8cf02640d24f17629"
+      },
+      {
+        "id": "LO3.3",
+        "file": "core/loop.md",
+        "lines": [
+          56,
+          57
+        ],
+        "text": "- Fix-verification rounds verify **only** the original listed issues. Any outside-list matter goes to the\n  developer and is not a successor finding.",
+        "sha256": "fef65297bfd210ae2b14d2f9fda4a7a8e50ea25dc864f6b9e05d6bb125fc0350"
+      },
+      {
+        "id": "LO3.4",
+        "file": "core/loop.md",
+        "lines": [
+          58,
+          59
+        ],
+        "text": "- **The convergence rule.** Every fix-verification round must shrink or honestly retain the listed\n  open set with fixed/unfixed dispositions. At the settings limit, or when a further round is needed, request authorization as `../operations/review.md` states. Verifying repaired items is an ordinary fix-verification round: when a review's rounds are used up and the only items left were raised before and have since been repaired, the same reviewer verifies exactly those items in the next round, not as an exception.",
+        "sha256": "43fbb53164b4f6c59ba0fcee3c70a1c929796d8fc755048f2a54c0e2bb914c2e"
+      },
+      {
+        "id": "LO3.5",
+        "file": "core/loop.md",
+        "lines": [
+          61,
+          67
+        ],
+        "text": "The simple review rule: if no review state is present, the used-round count is zero and the next\nreview is a baseline; do not create a pristine marker or refuse because legacy review history is\nabsent. Before reviewer work the owner calls `task_doc(operation=\"begin_review\")`; after the result\nthe owner records it with `task_doc(operation=\"record_review\")` or the existing\n`task_doc(operation=\"record_route_review\")`. Review 1 is thorough — inspect the entire agreed scope,\napplicable criteria, required routes, and lenses, then record the fixed original issue list with\nprecise statements, evidence, and fix-acceptance criteria.",
+        "sha256": "46119c91ec6e71b1bb112ee5d3531d86fa54e1cb9ca5d240c0ef2d547cc0571e"
+      },
+      {
+        "id": "LO3.6",
+        "file": "core/loop.md",
+        "lines": [
+          69,
+          73
+        ],
+        "text": "A changed candidate, source, requirement version, model, seat, route, or report label does **not**\nreset the list. Unknown, duplicate, rewritten, reintroduced, newly discovered, or outside-list\nissues, new criteria, new routes/lenses, whole-review requests, and passing with unresolved items\nare refused. This rule applies equally to native, plan, integration, route, lens,\nreplacement, resumed, bootstrap, diagnostic, delta, and final review labels.",
+        "sha256": "bd112793aa698f0af97b48fd366d637f2ba0087ffe39ba0e90a07793252ad759"
+      },
+      {
+        "id": "LO3.7",
+        "file": "core/loop.md",
+        "lines": [
+          75,
+          76
+        ],
+        "text": "Mechanical tests and worker diagnosis are evidence and may not publish reviewer findings or reset\nreview authority.",
+        "sha256": "80dd495e1b3524b55b044a6d14f4e1fe3cf9aff4561a5f024c2363592ef99492"
+      },
+      {
+        "id": "LO4.1",
+        "file": "core/loop.md",
+        "lines": [
+          80,
+          85
+        ],
+        "text": "The baseline review runs its type's standing catalog from `../criteria/` (code-seam · doctrine ·\nonboarding-memory · report-verification · plan-review), the required routes, and the exploratory\nmandate, under the promotion ratchet. Fix-verification uses the sealed baseline and only the\nstanding criteria/evidence needed to verify its listed IDs; it has no exploratory mandate,\nwhole-catalog rediscovery, new-lens duty, or catalog-promotion authority. `roles/reviewer.md` binds\nthe review mode, the evidence packet, and which catalogs apply.",
+        "sha256": "0b900dc17f4e1aa9c56287242e17bbad2783da1c311cd454408cc30bc7b32354"
+      },
+      {
+        "id": "LO5.1",
+        "file": "core/loop.md",
+        "lines": [
+          89,
+          92
+        ],
+        "text": "Each level runs its loop with its own harness/model/effort set — the orchestrator-level set (the\nstrongest models) and the manager-level set (cheaper, possibly workflow-free) — configured per level\nin the `orchestration.loops` settings block. The architect proposes a strategist pre-run, and it\noccurs only after developer approval; settings cannot auto-run it.",
+        "sha256": "ae9612ca6c78ddaf1c1f7185f1247aed18d3ecfaffdad9239f364a5f511a3412"
+      },
+      {
+        "id": "LO6.1",
+        "file": "core/loop.md",
+        "lines": [
+          96,
+          98
+        ],
+        "text": "After intent and scope are established, the architect compiles every independently falsifiable\nobligation into a canonical requirement index with a stable ID and explicit version. Clauses that\ncan be violated, reviewed, owned, evidenced, or superseded independently are separate requirements.",
+        "sha256": "73bedcced71e8742500a38fdfc6499f4157203932f329fa6f5790bc6028a3224"
+      },
+      {
+        "id": "LO6.2",
+        "file": "core/loop.md",
+        "lines": [
+          100,
+          105
+        ],
+        "text": "Before any sprint/master/leaf task document is created, every ID + version has one self-contained,\nversion-addressed packet using `../../w-02-light-task-workflow/requirement-packet-template.md`,\nincluding the problem, required behavior, rationale, scope and exclusions, preservation boundaries,\nfailure/recovery behavior, examples, forbidden overreach, expected evidence, authority/provenance,\ndependencies, and open truth gaps. Material state, sequence, ownership, and interaction\nrelationships get diagrams.",
+        "sha256": "a13ba9f7ddadd2931b1e7441650a3f6da6762bdbe96713162d531eca468f080f"
+      },
+      {
+        "id": "LO6.3",
+        "file": "core/loop.md",
+        "lines": [
+          107,
+          115
+        ],
+        "text": "A fresh agent cold-reads each packet without the planning transcript and must be able to explain\nwhat changes, what stays unchanged, the important failure states, and proof of conformance. The\narchitect presents the complete corpus for developer approval and creates task topology only after\nthat approval; every approved packet records the durable ruling. Masters and leaves carry filtered\nID + version + canonical-packet links, never rewritten requirement contracts. Each leaf owns exactly\none primary requirement revision; several leaves may implement independently executable\nmanifestations of one revision, while adjacent requirements are dependency/preservation context\nonly. A requirement change increments its version, cites durable developer approval, invalidates\naffected acceptance state, and rebriefs affected leaves.",
+        "sha256": "b265518aaf28c9c7c685111860a4b4ad8d6ac7bccc84b992f225d7a6c796caec"
+      },
+      {
+        "id": "AC0.1",
+        "file": "core/acceptance.md",
+        "lines": [
+          3,
+          8
+        ],
+        "text": "**Terminal truth is mechanical; acceptance is the owner's.** A canonical terminal/finalizer outcome\nof `completed` means only that the provider turn ended normally. It does **not** attest that the\nrequired artifact exists, is current, or satisfies its requirement — a subordinate can violate its\nartifact obligation and still produce mechanical `completed` truth. A terminal `interrupted` outcome\nremains an interruption, not a completed handoff. Role files state their own seat's side of this\nboundary; they do not restate the whole of it.",
+        "sha256": "109e5be0f4660940387a3de7ed3150d12ccab217ed88b1f3fb1f950c5a6efc83"
+      },
+      {
+        "id": "AC0.2",
+        "file": "core/acceptance.md",
+        "lines": [
+          10,
+          14
+        ],
+        "text": "- **The relay derives and delivers the state signal.** The host reads that a turn ended,\n  derives that mechanical seat-state fact, and delivers it to the structurally current owner: one\n  line to the agent that waits, carrying the ended agent's last line. It\n  never opens, parses, or evaluates a report, verdict, coherence record, or\n  acceptance envelope, and it never nudges a seat on its own judgment about an artifact.",
+        "sha256": "fb0898704ea858cc711c22cd7b7c22e2c2c51443f294527113ef8d2962343348"
+      },
+      {
+        "id": "AC0.3",
+        "file": "core/acceptance.md",
+        "lines": [
+          15,
+          17
+        ],
+        "text": "- **The gate owner validates before advancing state.** On wake, the current owner opens the required artifact, candidate\n  identity, evidence, and acceptance envelope and validates them **before advancing lifecycle\n  state**. For a leaf gate that owner is the Manager. Peer hand-overs go directly between Worker, Reviewer and Curator; a recipient checks the exact object and requested stretch, while the Manager retains gate acceptance.",
+        "sha256": "2d27507a8fa71a0a328936db6c0bbaebc6d05ee577bddd4509de9df48357aceb"
+      },
+      {
+        "id": "AC0.4",
+        "file": "core/acceptance.md",
+        "lines": [
+          18,
+          20
+        ],
+        "text": "- **An artifact defect is owner-detected.** A missing, malformed, or stale artifact is a handoff\n  defect the owner finds after wake; it nudges, rejects, replaces, or escalates under existing\n  doctrine instead of waiting for an imaginary artifact check by the relay.",
+        "sha256": "950948c802024daf4f96d68dc86400c1f9dd8a6cc9fcf75a8af49d00975a58b3"
+      },
+      {
+        "id": "AC0.5",
+        "file": "core/acceptance.md",
+        "lines": [
+          21,
+          23
+        ],
+        "text": "- **The artifact obligation is unchanged; a file hands itself over to nobody.** Worker, reviewer\n  and curator write their durable handoff artifact before ending a successful handoff turn, then\n  send it with `role_message` to the agent that waits. A file on record wakes no one.",
+        "sha256": "4b18eb1078975f5c2e2cb4bab0b98db4110a82a551e6e410b2e99d0c032c9038"
+      },
+      {
+        "id": "AC0.6",
+        "file": "core/acceptance.md",
+        "lines": [
+          24,
+          25
+        ],
+        "text": "- **Nothing here moves authority.** This file states the boundary that already holds; it changes no\n  approval of requirements, plans, commits, or integration.",
+        "sha256": "f001ee7686504e89f2414244a6194f47ff669e7ff3dbbacc4060955a3f767f86"
+      },
+      {
+        "id": "AC1.1",
+        "file": "core/acceptance.md",
+        "lines": [
+          31,
+          31
+        ],
+        "text": "| worker | the turn report + the leaf Requirement Attempt Journal records | Reviewer for code; Manager for the gate |",
+        "sha256": "fef8668eba3d4f935d666a976208e09d00ef1e79fad12ae94a4b9bf9ec78efb2"
+      },
+      {
+        "id": "AC1.2",
+        "file": "core/acceptance.md",
+        "lines": [
+          32,
+          32
+        ],
+        "text": "| reviewer | the verdict artifact | the decider of the gate the verdict attaches to |",
+        "sha256": "d2e0b38bc5f1ee468314153915bb40e148e3d926b569bd133a03b66a7877aa36"
+      },
+      {
+        "id": "AC1.3",
+        "file": "core/acceptance.md",
+        "lines": [
+          33,
+          33
+        ],
+        "text": "| curator | the structured coherence record and its generated projection | Reviewer for memory; Manager for the gate |",
+        "sha256": "e58e0e991b7e1320c566c78a5859a2c4447e8e0194a97aaee2b00f406825acdc"
+      },
+      {
+        "id": "AC1.4",
+        "file": "core/acceptance.md",
+        "lines": [
+          34,
+          34
+        ],
+        "text": "| strategist | the orchestration-task draft | the architect (who rules it) |",
+        "sha256": "66751ce7844629292523f7f91336bc658adc361f39bbb1a3cd69357d66b84f04"
+      },
+      {
+        "id": "AC1.5",
+        "file": "core/acceptance.md",
+        "lines": [
+          35,
+          35
+        ],
+        "text": "| designer | the task_doc + the designer-limits note | the architect |",
+        "sha256": "3a9458157763e8c3ae5a1dd8331b97aebe88551e9c6faea403684e833d645ed2"
+      },
+      {
+        "id": "AC1.6",
+        "file": "core/acceptance.md",
+        "lines": [
+          36,
+          36
+        ],
+        "text": "| investigator | the investigation report | the parent that started it, or the developer |",
+        "sha256": "0352502318a8e17c9f52c2b01a7c3a19fb990d7fe5df7def04fe45bf8a2ac034"
+      },
+      {
+        "id": "AC1.7",
+        "file": "core/acceptance.md",
+        "lines": [
+          37,
+          37
+        ],
+        "text": "| manager | the master-handover packet | the orchestrator |",
+        "sha256": "dd8b9b62f918bdf8a9e3f05341ae0e9b081334cfd12937b49aed420e68087511"
+      },
+      {
+        "id": "AC1.8",
+        "file": "core/acceptance.md",
+        "lines": [
+          38,
+          38
+        ],
+        "text": "| orchestrator | the super-exit packet and demo notes | the architect |",
+        "sha256": "caa29f8f415754bbd66d8df45cfb40dab8c1a3b8dc9d7a86409239b80e6478b1"
+      },
+      {
+        "id": "AC1.9",
+        "file": "core/acceptance.md",
+        "lines": [
+          40,
+          42
+        ],
+        "text": "A seat writes its artifact **before** ending a successful handoff turn, then ends. It does not\nauthor a second, model-written completion row, and it does not carry the decider's or the owner's\nruntime identity.",
+        "sha256": "c9e7169afdc93ecdcf596d6f15716e3647e7afbb24e9eb8e01d06f9be27d5598"
+      },
+      {
+        "id": "AC2.1",
+        "file": "core/acceptance.md",
+        "lines": [
+          46,
+          49
+        ],
+        "text": "Before dispatch, the owner projects the leaf's one owned primary revision — with its stable ID +\nversion, approved packet, and durable corpus-ruling citation — plus separately labelled\ndependency/preservation context into the builder brief. Adjacent context is verified as a constraint\nand cannot be claimed closed by this leaf.",
+        "sha256": "805e048fd07cefcff4fc55d4bb8bcf2d8975f9f556d134dd0dc14623989bee11"
+      },
+      {
+        "id": "AC2.2",
+        "file": "core/acceptance.md",
+        "lines": [
+          51,
+          51
+        ],
+        "text": "The builder's handoff contains **one** acceptance block for the owned primary revision:",
+        "sha256": "a5eec5b07684727b96cd276ed89b89f0caf62172bb37ff5b59709bb7cd765d95"
+      },
+      {
+        "id": "AC2.3",
+        "file": "core/acceptance.md",
+        "lines": [
+          53,
+          53
+        ],
+        "text": "1. status: exactly `satisfied`, `blocked`, or `approved-change`;",
+        "sha256": "362eee575f966ca68c547570f5c73666dc51df9f5c2a47645588bed55dd7bdf6"
+      },
+      {
+        "id": "AC2.4",
+        "file": "core/acceptance.md",
+        "lines": [
+          54,
+          55
+        ],
+        "text": "2. delivery/implementation rationale explaining what was delivered and why it satisfies the\n   requirement;",
+        "sha256": "182f57b582f853fac036fbe66d67e0b32896fec6c7f984a361fb445d74e796f6"
+      },
+      {
+        "id": "AC2.5",
+        "file": "core/acceptance.md",
+        "lines": [
+          56,
+          57
+        ],
+        "text": "3. delivery/implementation citations — code uses file path + symbol; non-code work uses the\n   deliverable path + section/anchor appropriate to that artifact;",
+        "sha256": "ca49a89c6e2d924f54c02dad21b28a7988ec5cdf6c926910d7cc4084313f27fa"
+      },
+      {
+        "id": "AC2.6",
+        "file": "core/acceptance.md",
+        "lines": [
+          58,
+          59
+        ],
+        "text": "4. verification rationale explaining what behavior the evidence demonstrates and **which failure it\n   would catch**;",
+        "sha256": "55d4749cd248af5026239473c05c29b28b41857db5cfab28f34fbbed168360f8"
+      },
+      {
+        "id": "AC2.7",
+        "file": "core/acceptance.md",
+        "lines": [
+          60,
+          61
+        ],
+        "text": "5. test/verification citations using file path + test symbol, executable node, report section, or\n   other exact verification anchor appropriate to the evidence;",
+        "sha256": "67116088be355ad0589b7da90d033ef4edd1f7835ded4b45404c31f4abb05614"
+      },
+      {
+        "id": "AC2.8",
+        "file": "core/acceptance.md",
+        "lines": [
+          62,
+          62
+        ],
+        "text": "6. the exact command and result, or a durable evidence reference that contains them.",
+        "sha256": "fb5345640860d6e1394e0196c40f07e60cccc3365f3556c7ceef7e539869d926"
+      },
+      {
+        "id": "AC2.9",
+        "file": "core/acceptance.md",
+        "lines": [
+          64,
+          69
+        ],
+        "text": "A `blocked` or `approved-change` block also explains why the original requirement cannot be\ndelivered unchanged, describes the changed delivery when one exists, and cites the durable developer\napproval/ruling. A new blocker may be reported while approval is pending, but that block is\nexplicitly incomplete and cannot pass review. **`satisfied` is invalid when any required rationale,\ncitation, or exact evidence is absent.** General prose or an aggregate \"requirements addressed\"\nclaim is not an acceptance envelope.",
+        "sha256": "afc75d04cf25252e1c2e594111a09bcc7a8c6659eef9d1a632ba85912ec57064"
+      },
+      {
+        "id": "AC2.10",
+        "file": "core/acceptance.md",
+        "lines": [
+          71,
+          77
+        ],
+        "text": "The independent reviewer inspects the owned primary packet revision and the cited artifacts itself\nand adjudicates that exact manifestation as `accepted` or `rejected`, with its own rationale.\nMissing rationale, an unapproved packet revision, missing or wrong-class evidence, or invalid\ncitations forces rejection of that requirement; the overall verdict cannot pass while any\nrequirement is rejected. An accurately reported `blocked` row may be accepted as a truthful\nhandoff, but it still requires a BLOCK recommendation until the requirement is delivered or becomes\nan approved change.",
+        "sha256": "3f8e6ec4a9dcb4f50f087b60054235af97d2de5c41d7b5eafec06e03fe411080"
+      },
+      {
+        "id": "AC3.1",
+        "file": "core/acceptance.md",
+        "lines": [
+          81,
+          83
+        ],
+        "text": "The canonical `ID@version` states semantic intent and changes only through explicit developer\napproval. A leaf-local attempt ID states what one exact candidate was handed to independent review\nfor one leaf manifestation of that revision.",
+        "sha256": "f069c0718f1d1c393f5f6599a6b219a9d305f6120c2f1023128dc19677db01fe"
+      },
+      {
+        "id": "AC3.2",
+        "file": "core/acceptance.md",
+        "lines": [
+          85,
+          86
+        ],
+        "text": "- The builder advances that ID **only** when handing a candidate to review, or when a reviewer\n  rejection requires a successor handoff.",
+        "sha256": "9cfbed35c434f4b08309b3ec4ef962933a5484ad65a3236f6c5ad8c4e4e343b5"
+      },
+      {
+        "id": "AC3.3",
+        "file": "core/acceptance.md",
+        "lines": [
+          87,
+          89
+        ],
+        "text": "- Internal implementation, test, and evidence reruns do **not** mint attempts. Preserve them\n  separately as experimental protocol events with the candidate identity, command, result, failure\n  cause, repair, and expected proof for the next run.",
+        "sha256": "2a5c1eb4056c715a68821431ebf0119618cffc76ef8c11fad55ba13e5d677e4c"
+      },
+      {
+        "id": "AC3.4",
+        "file": "core/acceptance.md",
+        "lines": [
+          90,
+          96
+        ],
+        "text": "- Before review handoff, the builder appends an immutable worker attempt record to the leaf's\n  detailed journal. It binds the revision, manifestation, predecessor and carried findings when\n  present, exact candidate tree/commit or appropriate non-code digest/anchors, and its own\n  requirement-specific status, rationale, citations, findings, failure class, and a\n  content-addressed reference to immutable expanded evidence. The frozen expanded artifact carries\n  shared definitions and complete command results; do not duplicate the complete master acceptance\n  envelope or experimental-run body inside every attempt.",
+        "sha256": "532a0d1d26010b112fbf6d0b9d7c3d3f3884cf11837358522e1ea381ae8e6c1a"
+      },
+      {
+        "id": "AC3.5",
+        "file": "core/acceptance.md",
+        "lines": [
+          97,
+          102
+        ],
+        "text": "- Validate the complete record before append. Append plus exact-candidate review handoff is one\n  logical formal-attempt boundary. A malformed pre-handoff row is preserved, receives an\n  append-only `non-attempt-correction`/void reference, and consumes no attempt ID; the corrected row\n  uses that same next ID at handoff. A malformed handed-off row is already a formal attempt: the\n  independent reviewer rejects it, and the worker may append a successor only at the next review\n  handoff. The worker never self-rejects or silently replaces either row.",
+        "sha256": "dc9dd89cbcb7d12a21408fd2418a898022b6d39dee1b8186c404e3bb3a01cb5a"
+      },
+      {
+        "id": "AC3.6",
+        "file": "core/acceptance.md",
+        "lines": [
+          103,
+          108
+        ],
+        "text": "- The independent reviewer appends a separate reviewer record against that exact attempt and exact\n  candidate after inspecting the artifacts itself. It chooses `accepted` or `rejected`, supplies its\n  own rationale/citations, and classifies every rejection finding as exactly one of\n  `implementation defect`, `evidence gap`, `requirement contradiction/overconstraint`, `test/tool\n  defect`, or `external blocker`. It never modifies the worker record, and acceptance never floats\n  to a later candidate.",
+        "sha256": "4623bf1579158070de3203d4788e5edc8711effcbf75a54e10dc14ba00d89039"
+      },
+      {
+        "id": "AC3.7",
+        "file": "core/acceptance.md",
+        "lines": [
+          109,
+          113
+        ],
+        "text": "- Rejection closes that attempt; a repair appends a successor citing the predecessor and listed\n  findings. Accepted attempts stay closed. During successor verification, an outside-list\n  regression, changed route, or changed requirement goes directly to the developer; it does not add\n  a finding, reopen a resolved item, or reset the review. Same-reviewer verification and shrinking\n  findings stay in force; an architect takeover continues the same attempt lineage.",
+        "sha256": "26185e4617c6d1fd0afe7ec23289055c0df25af928447d39f5651ddb697d953a"
+      },
+      {
+        "id": "AC3.8",
+        "file": "core/acceptance.md",
+        "lines": [
+          114,
+          116
+        ],
+        "text": "- A requirement contradiction/overconstraint is rejected and routed through the architect for\n  developer-approved revision; builders and reviewers may propose a revision but never rewrite or\n  approve one.",
+        "sha256": "46b9c6292c92c60f6ce7261d844bd2d128304fb6948c085162ce34487aeb30ca"
+      },
+      {
+        "id": "AC4.1",
+        "file": "core/acceptance.md",
+        "lines": [
+          120,
+          124
+        ],
+        "text": "The detailed per-leaf worker and reviewer records are authority. A master maintains a rebuildable\nsummary linking those records and showing attempts, rejection history, current state, and dominant\nopen failure class per requirement manifestation. The summary is a disposable observation only: it\nis never a requirement contract, lifecycle/closeout gate, queue authority, or task-authoring lock.\nMissing or stale summary state is rebuilt from leaf journals and cannot block work.",
+        "sha256": "316e3f1b68a8af106873c5e543600135078599d0d7d78c04e54cfd412ca04ae2"
+      },
+      {
+        "id": "AC5.1",
+        "file": "core/acceptance.md",
+        "lines": [
+          128,
+          129
+        ],
+        "text": "For each newly created or retained fixture, recording, generator, shared support file, or migration\nproof, the handoff records either:",
+        "sha256": "54d05be228f9aedc0a29796574d96b8f7c11f62a33f257b57846e46742d1144b"
+      },
+      {
+        "id": "AC5.2",
+        "file": "core/acceptance.md",
+        "lines": [
+          131,
+          132
+        ],
+        "text": "1. the registered stable contract identity, real owner, executable evidence node, and exact\n   consumers; or",
+        "sha256": "8cba4d1d68a47676361974356ee42b614703cd1694d27085162608056cbca1c0"
+      },
+      {
+        "id": "AC5.3",
+        "file": "core/acceptance.md",
+        "lines": [
+          133,
+          133
+        ],
+        "text": "2. the expiry date, executable replacement/removal event, owner, and compatibility consequence.",
+        "sha256": "bf2f938652dec66aa23f5714fb29f5e83bb9fd83858ce14fe46df03863b89606"
+      },
+      {
+        "id": "AC5.4",
+        "file": "core/acceptance.md",
+        "lines": [
+          135,
+          138
+        ],
+        "text": "For example, a retained provider frame may graduate to\n`contract:codex-agent-wire-version-matrix`; a migration comparison expiring on `2026-09-30` must\nname an exact `node:...::test_replacement` and removal event. \"Useful later\" is neither option. A\nmissing or contradictory catalog row is implementation work, never a review note or tool blocker.",
+        "sha256": "9b44746d956a1800b4d8ba4bfeac0ac90adaf16482b2a62bc1fc1d832ff61a5e"
+      },
+      {
+        "id": "AC5.5",
+        "file": "core/acceptance.md",
+        "lines": [
+          140,
+          142
+        ],
+        "text": "This hold point is **independent of requirement acceptance**: a valid stable-contract-or-expiry\ndisposition cannot fill a missing requirement rationale or verification proof, and a satisfied\nrequirement cannot waive missing lifecycle metadata for durable evidence.",
+        "sha256": "c0c5be68c879e942b1532c72c6c4dfd5d772f97b9eb0fef91d4bdb348c2e887b"
+      }
+    ]
+  },
+  "unitDefinition": "Frozen cd0e68f0 IDs: each paragraph, list item, table data row or fenced block under each numbered heading; rewrites retain IDs, new blocks use the next free block ID, removed IDs are never reused. Unit text joins its inclusive source lines with LF and no trailing LF.",
+  "roles": [
+    "architect",
+    "orchestrator",
+    "designer",
+    "strategist",
+    "manager",
+    "worker",
+    "curator",
+    "reviewer",
+    "investigator",
+    "bootstrap"
+  ],
+  "units": [
+    {
+      "id": "AU0.1",
+      "file": "core/authority.md",
+      "lines": [
+        3,
+        3
+      ],
+      "sha256": "891e0f8f9d94136b755382f7da010c2eed8610d749c71976956ddcd9391557b4",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/authority.md",
+          "lines": [
+            3,
+            3
+          ],
+          "sha256": "891e0f8f9d94136b755382f7da010c2eed8610d749c71976956ddcd9391557b4",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "AU1.1",
+      "file": "core/authority.md",
+      "lines": [
+        7,
+        7
+      ],
+      "sha256": "596217169f7c8450bb9a83209f11049830866a2597c470c2b772fba46543491a",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        1
+      ]
+    },
+    {
+      "id": "AU1.2",
+      "file": "core/authority.md",
+      "lines": [
+        9,
+        11
+      ],
+      "sha256": "228e7540eddddb6ae8910db0afd0fa8e91a6ba33a62eb8a2b258b2ffb814c5f5",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/authority.md",
+          "lines": [
+            9,
+            11
+          ],
+          "sha256": "228e7540eddddb6ae8910db0afd0fa8e91a6ba33a62eb8a2b258b2ffb814c5f5",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "AU2.1",
+      "file": "core/authority.md",
+      "lines": [
+        17,
+        17
+      ],
+      "sha256": "4a09b723fe31d3ce09e38c48de8996c0458daba67bc3849a30273a4dca0bc2d7",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/authority.md",
+          "lines": [
+            17,
+            17
+          ],
+          "sha256": "4a09b723fe31d3ce09e38c48de8996c0458daba67bc3849a30273a4dca0bc2d7",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "AU2.2",
+      "file": "core/authority.md",
+      "lines": [
+        18,
+        18
+      ],
+      "sha256": "a058ef22c87954af5e828ff5643f613ffdb0706f16f1a9dfa0a4d21866ec4eaf",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/authority.md",
+          "lines": [
+            18,
+            18
+          ],
+          "sha256": "a058ef22c87954af5e828ff5643f613ffdb0706f16f1a9dfa0a4d21866ec4eaf",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "AU2.3",
+      "file": "core/authority.md",
+      "lines": [
+        19,
+        19
+      ],
+      "sha256": "10df4386037cd186129fb5c02cdafa66709873455393f420519eefa91948e866",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/authority.md",
+          "lines": [
+            19,
+            19
+          ],
+          "sha256": "10df4386037cd186129fb5c02cdafa66709873455393f420519eefa91948e866",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "AU2.4",
+      "file": "core/authority.md",
+      "lines": [
+        20,
+        20
+      ],
+      "sha256": "ea4f7d1d46b1ea5d38269880c78e9f106ecad24208d3256b920de579a8b6129f",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/authority.md",
+          "lines": [
+            20,
+            20
+          ],
+          "sha256": "ea4f7d1d46b1ea5d38269880c78e9f106ecad24208d3256b920de579a8b6129f",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "AU2.5",
+      "file": "core/authority.md",
+      "lines": [
+        21,
+        21
+      ],
+      "sha256": "da8eafe9927947929e481f4c861879838a0601cdccbd9af8f9e16a86678306f5",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/authority.md",
+          "lines": [
+            21,
+            21
+          ],
+          "sha256": "da8eafe9927947929e481f4c861879838a0601cdccbd9af8f9e16a86678306f5",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "AU2.6",
+      "file": "core/authority.md",
+      "lines": [
+        23,
+        23
+      ],
+      "sha256": "014cf291db24dca57fcd4247f17b05fa3b690ee6f10b9637a7fe893731c54583",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/authority.md",
+          "lines": [
+            23,
+            23
+          ],
+          "sha256": "014cf291db24dca57fcd4247f17b05fa3b690ee6f10b9637a7fe893731c54583",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "AU2.7",
+      "file": "core/authority.md",
+      "lines": [
+        24,
+        25
+      ],
+      "sha256": "776910a48812006036629ec1630a4496dca3908392e6450f6877440db46fd837",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/authority.md",
+          "lines": [
+            24,
+            25
+          ],
+          "sha256": "776910a48812006036629ec1630a4496dca3908392e6450f6877440db46fd837",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "AU2.8",
+      "file": "core/authority.md",
+      "lines": [
+        26,
+        26
+      ],
+      "sha256": "65c195e6914ff37d8d15171f9bdac2cefef0b9e4763215951c316775f651786e",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        1
+      ]
+    },
+    {
+      "id": "AU3.1",
+      "file": "core/authority.md",
+      "lines": [
+        30,
+        30
+      ],
+      "sha256": "12a8ea7b3e00ef71dea70ca9b52e2061effa1872697f25af7636c6f681a331ec",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        1
+      ]
+    },
+    {
+      "id": "AU3.2",
+      "file": "core/authority.md",
+      "lines": [
+        32,
+        33
+      ],
+      "sha256": "ec8ca2d18cdf5f28a4ca731703dae07791026ac339829606d32cdfe71b58b9b9",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        1
+      ]
+    },
+    {
+      "id": "AU3.3",
+      "file": "core/authority.md",
+      "lines": [
+        34,
+        36
+      ],
+      "sha256": "7bc1f7dda7daa6de99344691cbbba8997b71c5a4ed04c09d21386d117a917e3e",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "reference",
+      "reason": "stated already",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            112,
+            117
+          ],
+          "sha256": "481b1b4174d8392ed173bcfd263b1313329cc21e4124133669c44be859187e70",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/orchestrator.md",
+          "lines": [
+            58,
+            63
+          ],
+          "sha256": "481b1b4174d8392ed173bcfd263b1313329cc21e4124133669c44be859187e70",
+          "capsule": "orchestrator/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/designer.md",
+          "lines": [
+            118,
+            124
+          ],
+          "sha256": "fdb875076233bd0fad83a32a5b5f4a41b691f5c5e8fc320dc0191a2aa2f929d1",
+          "capsule": "designer/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/strategist.md",
+          "lines": [
+            127,
+            133
+          ],
+          "sha256": "fdb875076233bd0fad83a32a5b5f4a41b691f5c5e8fc320dc0191a2aa2f929d1",
+          "capsule": "strategist/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+          "lines": [
+            94,
+            99
+          ],
+          "sha256": "481b1b4174d8392ed173bcfd263b1313329cc21e4124133669c44be859187e70",
+          "capsule": "manager/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/worker.md",
+          "lines": [
+            51,
+            56
+          ],
+          "sha256": "481b1b4174d8392ed173bcfd263b1313329cc21e4124133669c44be859187e70",
+          "capsule": "worker/implementation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/curator.md",
+          "lines": [
+            102,
+            111
+          ],
+          "sha256": "a25db76f9a3fd0811b30ecd7ad1565d5c87e4595f2f20778901879cc98de6cc9",
+          "capsule": "curator/curation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            148,
+            155
+          ],
+          "sha256": "06b86337f24605080f2decb9fae6a253fa575dfaf16efc5cae01c77ce37eb106",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/investigator.md",
+          "lines": [
+            46,
+            51
+          ],
+          "sha256": "481b1b4174d8392ed173bcfd263b1313329cc21e4124133669c44be859187e70",
+          "capsule": "investigator/orientation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/bootstrap.md",
+          "lines": [
+            153,
+            159
+          ],
+          "sha256": "fdb875076233bd0fad83a32a5b5f4a41b691f5c5e8fc320dc0191a2aa2f929d1",
+          "capsule": "bootstrap/orientation"
+        }
+      ]
+    },
+    {
+      "id": "AU3.4",
+      "file": "core/authority.md",
+      "lines": [
+        37,
+        39
+      ],
+      "sha256": "709dfc622f60395021812853ef7536ae9fc1eb1f307197a4f04c6717bece08b8",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "reference",
+      "reason": "stated already",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            112,
+            117
+          ],
+          "sha256": "481b1b4174d8392ed173bcfd263b1313329cc21e4124133669c44be859187e70",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/orchestrator.md",
+          "lines": [
+            58,
+            63
+          ],
+          "sha256": "481b1b4174d8392ed173bcfd263b1313329cc21e4124133669c44be859187e70",
+          "capsule": "orchestrator/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/designer.md",
+          "lines": [
+            118,
+            124
+          ],
+          "sha256": "fdb875076233bd0fad83a32a5b5f4a41b691f5c5e8fc320dc0191a2aa2f929d1",
+          "capsule": "designer/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/strategist.md",
+          "lines": [
+            127,
+            133
+          ],
+          "sha256": "fdb875076233bd0fad83a32a5b5f4a41b691f5c5e8fc320dc0191a2aa2f929d1",
+          "capsule": "strategist/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+          "lines": [
+            94,
+            99
+          ],
+          "sha256": "481b1b4174d8392ed173bcfd263b1313329cc21e4124133669c44be859187e70",
+          "capsule": "manager/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/worker.md",
+          "lines": [
+            51,
+            56
+          ],
+          "sha256": "481b1b4174d8392ed173bcfd263b1313329cc21e4124133669c44be859187e70",
+          "capsule": "worker/implementation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/curator.md",
+          "lines": [
+            102,
+            111
+          ],
+          "sha256": "a25db76f9a3fd0811b30ecd7ad1565d5c87e4595f2f20778901879cc98de6cc9",
+          "capsule": "curator/curation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            148,
+            155
+          ],
+          "sha256": "06b86337f24605080f2decb9fae6a253fa575dfaf16efc5cae01c77ce37eb106",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/investigator.md",
+          "lines": [
+            46,
+            51
+          ],
+          "sha256": "481b1b4174d8392ed173bcfd263b1313329cc21e4124133669c44be859187e70",
+          "capsule": "investigator/orientation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/bootstrap.md",
+          "lines": [
+            153,
+            159
+          ],
+          "sha256": "fdb875076233bd0fad83a32a5b5f4a41b691f5c5e8fc320dc0191a2aa2f929d1",
+          "capsule": "bootstrap/orientation"
+        }
+      ]
+    },
+    {
+      "id": "AU3.5",
+      "file": "core/authority.md",
+      "lines": [
+        40,
+        40
+      ],
+      "sha256": "662e45649fa1b944182265c3241caf525b968f9972baf3593b3ce9e4581b1d74",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/authority.md",
+          "lines": [
+            40,
+            40
+          ],
+          "sha256": "662e45649fa1b944182265c3241caf525b968f9972baf3593b3ce9e4581b1d74",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "AU4.1",
+      "file": "core/authority.md",
+      "lines": [
+        44,
+        44
+      ],
+      "sha256": "8a87a3b611d768a94ba208841253d6a178a80e9f1036efa881f337679725bce5",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "manager"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        2,
+        3
+      ]
+    },
+    {
+      "id": "AU4.2",
+      "file": "core/authority.md",
+      "lines": [
+        46,
+        46
+      ],
+      "sha256": "3924db7eed6513cbedec2ebaddc98150a0f57bcf4690a24d9a756903c70448aa",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "designer",
+        "strategist",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "investigator",
+        "bootstrap"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        4
+      ]
+    },
+    {
+      "id": "AU5.1",
+      "file": "core/authority.md",
+      "lines": [
+        50,
+        54
+      ],
+      "sha256": "3ec3b73ffdad06162dc542d08ba53c4b34cd2079ff3377a7670a228161a7a985",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "manager"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        5
+      ]
+    },
+    {
+      "id": "AU5.2",
+      "file": "core/authority.md",
+      "lines": [
+        56,
+        56
+      ],
+      "sha256": "a11523f836192e691020319d99e446ac1355bd6b7f3db642087d563789f974a4",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "manager"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        5
+      ]
+    },
+    {
+      "id": "AU5.3",
+      "file": "core/authority.md",
+      "lines": [
+        57,
+        59
+      ],
+      "sha256": "4ecc4bbe1f289f283d818123f35ab6fe2678746a8e0fb06e11464f35bccb4323",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "manager"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        5
+      ]
+    },
+    {
+      "id": "AU5.4",
+      "file": "core/authority.md",
+      "lines": [
+        60,
+        60
+      ],
+      "sha256": "5f3162fc856caeb10d32a42714155815800f30d82cc211908cc141f231c7a8d6",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "manager"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        5
+      ]
+    },
+    {
+      "id": "AU5.5",
+      "file": "core/authority.md",
+      "lines": [
+        62,
+        64
+      ],
+      "sha256": "4d018521f1fed3ddd7d27ac5d9bead1573a42bb7a52c05d8228964dc0cbf368e",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "manager"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        2
+      ]
+    },
+    {
+      "id": "AU6.1",
+      "file": "core/authority.md",
+      "lines": [
+        68,
+        68
+      ],
+      "sha256": "c303b39804a76d9e627862cf4b90c124a54b77b75ec80a5260e862a32b353bf3",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "reference",
+      "reason": "stated already",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            90,
+            91
+          ],
+          "sha256": "5a219c38640b4709e7f81f0e82ff9a1ba5547048ae641b89cf5f293a052a9efd",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/orchestrator.md",
+          "lines": [
+            64,
+            67
+          ],
+          "sha256": "e41fafc8b37c5fbba5c971104e2036dcedb4e59cfeec8b6dc49db480c0a4190e",
+          "capsule": "orchestrator/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/designer.md",
+          "lines": [
+            98,
+            109
+          ],
+          "sha256": "5860b6589a63832492f710a65167ddebfd52eff755527bc1d27491f4995cbc69",
+          "capsule": "designer/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/strategist.md",
+          "lines": [
+            108,
+            118
+          ],
+          "sha256": "08c92f9cc05f9c8d2a3ea1be2b4548da08f82267ae053b52169f4f9586aadf0e",
+          "capsule": "strategist/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+          "lines": [
+            100,
+            103
+          ],
+          "sha256": "e41fafc8b37c5fbba5c971104e2036dcedb4e59cfeec8b6dc49db480c0a4190e",
+          "capsule": "manager/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/worker.md",
+          "lines": [
+            91,
+            97
+          ],
+          "sha256": "6db6067130e47f5de0350bdac5ea184f2ec27b9196f8805f824e6bbf6790e062",
+          "capsule": "worker/implementation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/curator.md",
+          "lines": [
+            173,
+            177
+          ],
+          "sha256": "f11adf0232a4fe61a0f95d4a3a79931c1e544102e5b0abc335e8a6dcdd1ef20d",
+          "capsule": "curator/curation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            216,
+            220
+          ],
+          "sha256": "5871b31a91f40fd7dfffed63e371ce4b966e7dd07f6fdb970d836776812bcce8",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/investigator.md",
+          "lines": [
+            52,
+            56
+          ],
+          "sha256": "2c7c0a99c97d45f43f6060be16cf054cf9b2e1f8e5470e9b7de198690599336f",
+          "capsule": "investigator/orientation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/bootstrap.md",
+          "lines": [
+            125,
+            148
+          ],
+          "sha256": "203c9417bda0f280476ad30333419d3d941db521affbcc8504704703976d77ac",
+          "capsule": "bootstrap/orientation"
+        }
+      ]
+    },
+    {
+      "id": "AU6.2",
+      "file": "core/authority.md",
+      "lines": [
+        70,
+        74
+      ],
+      "sha256": "6255aa49ab04e950aa9dddc3235ad967464a4dbba1143989366b0d19c9c56e77",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        6
+      ]
+    },
+    {
+      "id": "AU7.1",
+      "file": "core/authority.md",
+      "lines": [
+        78,
+        82
+      ],
+      "sha256": "58d226ea52a7b05543d3db888f04fcafee52a2428c8a7735cdd315356616a402",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        7
+      ]
+    },
+    {
+      "id": "AU7.2",
+      "file": "core/authority.md",
+      "lines": [
+        84,
+        84
+      ],
+      "sha256": "d5bb379c0728adb062997038ffe8c5834b36054925ff1235405161ad6c35f994",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "manager",
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        7
+      ]
+    },
+    {
+      "id": "AU7.3",
+      "file": "core/authority.md",
+      "lines": [
+        85,
+        87
+      ],
+      "sha256": "73c7a23a106f9b424f832363b396e7473943c6fa87dc41ffee225934ba462888",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        7
+      ]
+    },
+    {
+      "id": "AU7.4",
+      "file": "core/authority.md",
+      "lines": [
+        88,
+        90
+      ],
+      "sha256": "a5bfc053c01c04d0d1a547a69cdd2d85993d2ba69fd2fd8152d780b90b916e82",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        7
+      ]
+    },
+    {
+      "id": "AU8.1",
+      "file": "core/authority.md",
+      "lines": [
+        94,
+        94
+      ],
+      "sha256": "59a6d969d6120cfa02003c12e1fc5879845545a6acf314f2d14f7383adc1ecd3",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "manager"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        8
+      ]
+    },
+    {
+      "id": "AU8.2",
+      "file": "core/authority.md",
+      "lines": [
+        96,
+        101
+      ],
+      "sha256": "3009587058e6a975ea35ace14bfbe4fa4e0a4475b1929b1e7dbccae7537a423e",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "manager"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        8
+      ]
+    },
+    {
+      "id": "AU9.1",
+      "file": "core/authority.md",
+      "lines": [
+        105,
+        106
+      ],
+      "sha256": "e607f1fa449da44cb531bcb6496379470ac16934c0e0df0a0a61451790095c6d",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "reference",
+      "reason": "stated already",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            90,
+            91
+          ],
+          "sha256": "5a219c38640b4709e7f81f0e82ff9a1ba5547048ae641b89cf5f293a052a9efd",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/orchestrator.md",
+          "lines": [
+            64,
+            67
+          ],
+          "sha256": "e41fafc8b37c5fbba5c971104e2036dcedb4e59cfeec8b6dc49db480c0a4190e",
+          "capsule": "orchestrator/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/designer.md",
+          "lines": [
+            98,
+            109
+          ],
+          "sha256": "5860b6589a63832492f710a65167ddebfd52eff755527bc1d27491f4995cbc69",
+          "capsule": "designer/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/strategist.md",
+          "lines": [
+            108,
+            118
+          ],
+          "sha256": "08c92f9cc05f9c8d2a3ea1be2b4548da08f82267ae053b52169f4f9586aadf0e",
+          "capsule": "strategist/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+          "lines": [
+            100,
+            103
+          ],
+          "sha256": "e41fafc8b37c5fbba5c971104e2036dcedb4e59cfeec8b6dc49db480c0a4190e",
+          "capsule": "manager/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/worker.md",
+          "lines": [
+            91,
+            97
+          ],
+          "sha256": "6db6067130e47f5de0350bdac5ea184f2ec27b9196f8805f824e6bbf6790e062",
+          "capsule": "worker/implementation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/curator.md",
+          "lines": [
+            173,
+            177
+          ],
+          "sha256": "f11adf0232a4fe61a0f95d4a3a79931c1e544102e5b0abc335e8a6dcdd1ef20d",
+          "capsule": "curator/curation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            216,
+            220
+          ],
+          "sha256": "5871b31a91f40fd7dfffed63e371ce4b966e7dd07f6fdb970d836776812bcce8",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/investigator.md",
+          "lines": [
+            52,
+            56
+          ],
+          "sha256": "2c7c0a99c97d45f43f6060be16cf054cf9b2e1f8e5470e9b7de198690599336f",
+          "capsule": "investigator/orientation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/bootstrap.md",
+          "lines": [
+            125,
+            148
+          ],
+          "sha256": "203c9417bda0f280476ad30333419d3d941db521affbcc8504704703976d77ac",
+          "capsule": "bootstrap/orientation"
+        }
+      ]
+    },
+    {
+      "id": "AU9.2",
+      "file": "core/authority.md",
+      "lines": [
+        108,
+        108
+      ],
+      "sha256": "d548cab8a923597212fb95d7c2e2c9f0769aac439ce704953357dd68f5b1f5a2",
+      "audience": [
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        18
+      ]
+    },
+    {
+      "id": "AU9.3",
+      "file": "core/authority.md",
+      "lines": [
+        109,
+        111
+      ],
+      "sha256": "58b065b860a9520b9373cc7940b78462dc5b2aadb544c332ae09eb0f029f9e97",
+      "audience": [
+        "architect"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        9
+      ]
+    },
+    {
+      "id": "AU9.4",
+      "file": "core/authority.md",
+      "lines": [
+        112,
+        113
+      ],
+      "sha256": "41a5f115f3d78ba6061462f2b22ab65ba751a509e6c901f086876fb063c65b21",
+      "audience": [
+        "architect"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        9
+      ]
+    },
+    {
+      "id": "AU10.1",
+      "file": "core/authority.md",
+      "lines": [
+        117,
+        117
+      ],
+      "sha256": "8e14bb91235c796b87224f758af4036f25a1b6d702ea4ff26f977f6977190e02",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "reference",
+      "reason": "enforced by the product",
+      "evidence": [
+        {
+          "path": "mcp/src/agents_remember/package_data/paseo_plugin/server/turn_ended.ts",
+          "symbol": "handleTurnEnded / scheduleSeatWake / seatWakeDelivery"
+        }
+      ]
+    },
+    {
+      "id": "AU10.2",
+      "file": "core/authority.md",
+      "lines": [
+        119,
+        122
+      ],
+      "sha256": "6b6982097c2e098414d2a9cf21213137f921d6ca54333f46acc62f683e74ffa7",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        10
+      ]
+    },
+    {
+      "id": "AU10.3",
+      "file": "core/authority.md",
+      "lines": [
+        124,
+        124
+      ],
+      "sha256": "623b3d8ef4b63a710df5ace30d29c1da0811b100d412522b0b226311d02246f7",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "designer",
+        "strategist",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "investigator",
+        "bootstrap"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        11,
+        12
+      ]
+    },
+    {
+      "id": "AU11.1",
+      "file": "core/authority.md",
+      "lines": [
+        128,
+        129
+      ],
+      "sha256": "8ec0ae47290da8499bab3873ab70fbdfecd19b47743a97b0ec9920259a81aa5a",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        13
+      ]
+    },
+    {
+      "id": "AU11.2",
+      "file": "core/authority.md",
+      "lines": [
+        130,
+        131
+      ],
+      "sha256": "3c6fdca1d24e3b7f55fa5fae4110e8d900899ba1e430a9603f3255f1ef2105e9",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "reference",
+      "reason": "stated already",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            102,
+            107
+          ],
+          "sha256": "789ab8013f7dc2cfdc46a5134639d15bcb76e183976ce6db9e6a6416c5cd0e66",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/orchestrator.md",
+          "lines": [
+            16,
+            33
+          ],
+          "sha256": "e654c05c57d09bd10d1bc0148f037e6dd723e5b6b19122d79af6af09e2f09cc3",
+          "capsule": "orchestrator/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/designer.md",
+          "lines": [
+            87,
+            97
+          ],
+          "sha256": "0ce37cc1740ae41b1c074fadf0853b23823255b72e92334d265c04074e96823e",
+          "capsule": "designer/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/strategist.md",
+          "lines": [
+            95,
+            107
+          ],
+          "sha256": "758b38a8bfccbad3f95d4789d3e65b35aa6279f825ad0303f9f0c879ffcde612",
+          "capsule": "strategist/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+          "lines": [
+            72,
+            75
+          ],
+          "sha256": "91deeec7df698f2a95728977b105309b59ce3bf56abdab91552f6ae940a04087",
+          "capsule": "manager/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/worker.md",
+          "lines": [
+            57,
+            70
+          ],
+          "sha256": "3bd944e08d6db86aaafbf33289b08dacdf2e1adb17b744b902a6213e67cc4e3c",
+          "capsule": "worker/implementation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/curator.md",
+          "lines": [
+            112,
+            124
+          ],
+          "sha256": "1728f0e2e86a2becdc785d8ec6e00052898bb98418ec5a1b03c2afea0cb78261",
+          "capsule": "curator/curation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            156,
+            167
+          ],
+          "sha256": "e5c6e777aad3d9990bee390dd6f8da3c2f14d46c98a1d057da3d2a413c7ca028",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/investigator.md",
+          "lines": [
+            34,
+            37
+          ],
+          "sha256": "d3d0a6dfb1955f3868557213f2a550f930a8f2f876690e33c802c6a96e815e4e",
+          "capsule": "investigator/orientation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/bootstrap.md",
+          "lines": [
+            72,
+            83
+          ],
+          "sha256": "3c04c3ad97188a4653e3f9dc91048b350ba40ff0a566d7e2b5700cefbdeb0246",
+          "capsule": "bootstrap/orientation"
+        }
+      ]
+    },
+    {
+      "id": "AU11.3",
+      "file": "core/authority.md",
+      "lines": [
+        132,
+        132
+      ],
+      "sha256": "7de7ac24d685745eb0218818339807fbe706029b91f15d6b8bf1b9c010cf1b84",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        14
+      ]
+    },
+    {
+      "id": "AU11.4",
+      "file": "core/authority.md",
+      "lines": [
+        134,
+        134
+      ],
+      "sha256": "97c66e37837146de5e93861635da9ee798760f57ca93ef73a4644145fc78ed80",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "designer",
+        "strategist",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "investigator",
+        "bootstrap"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        15
+      ]
+    },
+    {
+      "id": "IN0.1",
+      "file": "core/invariants.md",
+      "lines": [
+        3,
+        3
+      ],
+      "sha256": "0593e714cf653eb0b474b598d75ac83a250aa2bbeb4b3c00ddedf442246a2312",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/invariants.md",
+          "lines": [
+            3,
+            3
+          ],
+          "sha256": "0593e714cf653eb0b474b598d75ac83a250aa2bbeb4b3c00ddedf442246a2312",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "IN1.1",
+      "file": "core/invariants.md",
+      "lines": [
+        7,
+        11
+      ],
+      "sha256": "02101d65549f31a6029ac0c66b8a9602e3400806d60dd7f5208f845bd9baeda3",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "reference",
+      "reason": "stated already",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            96,
+            101
+          ],
+          "sha256": "0d657adb6a862867baea2f254c859f7eb53943a388bec463b07a7f80d24c3480",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/orchestrator.md",
+          "lines": [
+            50,
+            53
+          ],
+          "sha256": "74c76afc86e080f2208bcee6226df7c8747a405357955a16709b5ac5386a09fb",
+          "capsule": "orchestrator/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/designer.md",
+          "lines": [
+            110,
+            113
+          ],
+          "sha256": "74c76afc86e080f2208bcee6226df7c8747a405357955a16709b5ac5386a09fb",
+          "capsule": "designer/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/strategist.md",
+          "lines": [
+            119,
+            122
+          ],
+          "sha256": "74c76afc86e080f2208bcee6226df7c8747a405357955a16709b5ac5386a09fb",
+          "capsule": "strategist/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+          "lines": [
+            86,
+            89
+          ],
+          "sha256": "74c76afc86e080f2208bcee6226df7c8747a405357955a16709b5ac5386a09fb",
+          "capsule": "manager/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/worker.md",
+          "lines": [
+            41,
+            44
+          ],
+          "sha256": "74c76afc86e080f2208bcee6226df7c8747a405357955a16709b5ac5386a09fb",
+          "capsule": "worker/implementation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/curator.md",
+          "lines": [
+            165,
+            172
+          ],
+          "sha256": "fabbd08fdaa4bf0553e78053fe4d610b7b210da0e2f5037c6827cab24a69d636",
+          "capsule": "curator/curation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            210,
+            215
+          ],
+          "sha256": "4224f3f34e00d30244e8dc88fbcbe3e551b7603372d8e1fab67382d633bbb0d0",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/investigator.md",
+          "lines": [
+            38,
+            41
+          ],
+          "sha256": "74c76afc86e080f2208bcee6226df7c8747a405357955a16709b5ac5386a09fb",
+          "capsule": "investigator/orientation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/bootstrap.md",
+          "lines": [
+            32,
+            83
+          ],
+          "sha256": "d4b15be8b4e3436189276c62824f58106f5b1843d59d47e37eaf0ec4932e4e18",
+          "capsule": "bootstrap/orientation"
+        }
+      ]
+    },
+    {
+      "id": "IN1.2",
+      "file": "core/invariants.md",
+      "lines": [
+        13,
+        13
+      ],
+      "sha256": "229cf3335ba0f8ac874f9213fd60601b3afd6ea8c5f43d9a78ae30a9f06259c5",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "designer",
+        "strategist",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "investigator",
+        "bootstrap"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        16,
+        17
+      ]
+    },
+    {
+      "id": "IN2.1",
+      "file": "core/invariants.md",
+      "lines": [
+        17,
+        17
+      ],
+      "sha256": "a9be569c3228d823fa8e69f1c2aafe4b2570348e698a748055bc920968fb4b8d",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        18
+      ]
+    },
+    {
+      "id": "IN2.2",
+      "file": "core/invariants.md",
+      "lines": [
+        18,
+        18
+      ],
+      "sha256": "631915308bd7216b0fb4e5a5a296b58aad0cf9a05e99033465c84e4a46463b4c",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "reference",
+      "reason": "stated already",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            96,
+            101
+          ],
+          "sha256": "0d657adb6a862867baea2f254c859f7eb53943a388bec463b07a7f80d24c3480",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/orchestrator.md",
+          "lines": [
+            50,
+            53
+          ],
+          "sha256": "74c76afc86e080f2208bcee6226df7c8747a405357955a16709b5ac5386a09fb",
+          "capsule": "orchestrator/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/designer.md",
+          "lines": [
+            110,
+            113
+          ],
+          "sha256": "74c76afc86e080f2208bcee6226df7c8747a405357955a16709b5ac5386a09fb",
+          "capsule": "designer/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/strategist.md",
+          "lines": [
+            119,
+            122
+          ],
+          "sha256": "74c76afc86e080f2208bcee6226df7c8747a405357955a16709b5ac5386a09fb",
+          "capsule": "strategist/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+          "lines": [
+            86,
+            89
+          ],
+          "sha256": "74c76afc86e080f2208bcee6226df7c8747a405357955a16709b5ac5386a09fb",
+          "capsule": "manager/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/worker.md",
+          "lines": [
+            41,
+            44
+          ],
+          "sha256": "74c76afc86e080f2208bcee6226df7c8747a405357955a16709b5ac5386a09fb",
+          "capsule": "worker/implementation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/curator.md",
+          "lines": [
+            165,
+            172
+          ],
+          "sha256": "fabbd08fdaa4bf0553e78053fe4d610b7b210da0e2f5037c6827cab24a69d636",
+          "capsule": "curator/curation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            210,
+            215
+          ],
+          "sha256": "4224f3f34e00d30244e8dc88fbcbe3e551b7603372d8e1fab67382d633bbb0d0",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/investigator.md",
+          "lines": [
+            38,
+            41
+          ],
+          "sha256": "74c76afc86e080f2208bcee6226df7c8747a405357955a16709b5ac5386a09fb",
+          "capsule": "investigator/orientation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/bootstrap.md",
+          "lines": [
+            32,
+            83
+          ],
+          "sha256": "d4b15be8b4e3436189276c62824f58106f5b1843d59d47e37eaf0ec4932e4e18",
+          "capsule": "bootstrap/orientation"
+        }
+      ]
+    },
+    {
+      "id": "IN2.3",
+      "file": "core/invariants.md",
+      "lines": [
+        19,
+        19
+      ],
+      "sha256": "6b9acf160828a564b9ab94c098192b7ff9474f5b61545097f00f82629888cfb9",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "manager"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        18
+      ]
+    },
+    {
+      "id": "IN2.4",
+      "file": "core/invariants.md",
+      "lines": [
+        20,
+        20
+      ],
+      "sha256": "555c3e43e42de767d95b7862d9f7985c87d07509a095403c5e9e7966543541f5",
+      "audience": [
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        18
+      ]
+    },
+    {
+      "id": "IN3.1",
+      "file": "core/invariants.md",
+      "lines": [
+        24,
+        24
+      ],
+      "sha256": "4b8e7252c69df56a041b0b613a50f0b878c347c87e36c89d77eac92220969826",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "manager"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        19
+      ]
+    },
+    {
+      "id": "IN3.2",
+      "file": "core/invariants.md",
+      "lines": [
+        25,
+        25
+      ],
+      "sha256": "d1690adfd336f3252c62536109dc7b06f25c9850cd8fe159228dde7c3775d340",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "manager"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        20
+      ]
+    },
+    {
+      "id": "IN3.3",
+      "file": "core/invariants.md",
+      "lines": [
+        26,
+        26
+      ],
+      "sha256": "0d076f0c8817b512c25b88edcb7a0883f1386e06b044534e203b40cfe9823211",
+      "audience": [
+        "manager",
+        "orchestrator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        19
+      ]
+    },
+    {
+      "id": "IN3.4",
+      "file": "core/invariants.md",
+      "lines": [
+        28,
+        28
+      ],
+      "sha256": "092809f3d900394894b34eb35b73bc98efbcabe7ad107c50f80790e3e8577289",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "designer",
+        "strategist",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "investigator",
+        "bootstrap"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        21,
+        22,
+        23
+      ]
+    },
+    {
+      "id": "IN4.1",
+      "file": "core/invariants.md",
+      "lines": [
+        32,
+        32
+      ],
+      "sha256": "3ab7a70c401bba0da089584e1dde458d73e601a553fc53652ec2121c3bb0f667",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/invariants.md",
+          "lines": [
+            32,
+            32
+          ],
+          "sha256": "3ab7a70c401bba0da089584e1dde458d73e601a553fc53652ec2121c3bb0f667",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "IN4.2",
+      "file": "core/invariants.md",
+      "lines": [
+        33,
+        33
+      ],
+      "sha256": "e7f3bce34d3dedcfc2ae6962740525b972c77172e395c687eca3cd7668d7b2db",
+      "audience": [
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        18
+      ]
+    },
+    {
+      "id": "IN5.1",
+      "file": "core/invariants.md",
+      "lines": [
+        37,
+        39
+      ],
+      "sha256": "8d035ee66c274cc4f82d346ce9883876fc4312c7189d5b622ad2dfebabbf0648",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/invariants.md",
+          "lines": [
+            37,
+            39
+          ],
+          "sha256": "8d035ee66c274cc4f82d346ce9883876fc4312c7189d5b622ad2dfebabbf0648",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "IN5.2",
+      "file": "core/invariants.md",
+      "lines": [
+        41,
+        41
+      ],
+      "sha256": "a250e8dd5b2b81c3252f60ba9fa729c4c8b6ef267f549e8bb17876caf235cc16",
+      "audience": [
+        "architect"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        24
+      ]
+    },
+    {
+      "id": "IN5.3",
+      "file": "core/invariants.md",
+      "lines": [
+        42,
+        45
+      ],
+      "sha256": "d12a5c6a3ef556e79984580bf9d067e31af1b74edcf3ec568446053ef03ef377",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/invariants.md",
+          "lines": [
+            42,
+            45
+          ],
+          "sha256": "d12a5c6a3ef556e79984580bf9d067e31af1b74edcf3ec568446053ef03ef377",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "IN5.4",
+      "file": "core/invariants.md",
+      "lines": [
+        46,
+        46
+      ],
+      "sha256": "539315a2f0674eb74b14838f2ec2483350172aed7d014636e58770e8bc42ecdc",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/invariants.md",
+          "lines": [
+            46,
+            46
+          ],
+          "sha256": "539315a2f0674eb74b14838f2ec2483350172aed7d014636e58770e8bc42ecdc",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "IN5.5",
+      "file": "core/invariants.md",
+      "lines": [
+        47,
+        49
+      ],
+      "sha256": "d251be28f540c9c168d42243b197f46d35a555f699a20398266c4384eeee2d0c",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "manager",
+        "investigator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        25
+      ]
+    },
+    {
+      "id": "IN6.1",
+      "file": "core/invariants.md",
+      "lines": [
+        53,
+        55
+      ],
+      "sha256": "261ccb4efa1d373ba7b21079b75928e194014928920f570ec5acb871c5129300",
+      "audience": [
+        "architect",
+        "investigator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        26
+      ]
+    },
+    {
+      "id": "IN6.2",
+      "file": "core/invariants.md",
+      "lines": [
+        57,
+        57
+      ],
+      "sha256": "8dda38bceb52e0701e0ddc1f42c73865a15c4adfb3689ee16edada2db945380e",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        26
+      ]
+    },
+    {
+      "id": "IN6.3",
+      "file": "core/invariants.md",
+      "lines": [
+        59,
+        59
+      ],
+      "sha256": "50e24054cd897a78ae60feb3fa9c1ab5216d347f78e3127a7ad3227915065697",
+      "audience": [
+        "orchestrator",
+        "manager",
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        27
+      ]
+    },
+    {
+      "id": "IN7.1",
+      "file": "core/invariants.md",
+      "lines": [
+        63,
+        63
+      ],
+      "sha256": "c651a0657fbf73e65affd135ea803773b9bf0228c53c44d423f0b3cb2d431c93",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/invariants.md",
+          "lines": [
+            63,
+            63
+          ],
+          "sha256": "c651a0657fbf73e65affd135ea803773b9bf0228c53c44d423f0b3cb2d431c93",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "IN7.2",
+      "file": "core/invariants.md",
+      "lines": [
+        65,
+        65
+      ],
+      "sha256": "d81799ee42d3df541820db29654725e3274e06573f7f27df24a294665b9359f3",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/invariants.md",
+          "lines": [
+            65,
+            65
+          ],
+          "sha256": "d81799ee42d3df541820db29654725e3274e06573f7f27df24a294665b9359f3",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "IN7.3",
+      "file": "core/invariants.md",
+      "lines": [
+        66,
+        70
+      ],
+      "sha256": "9afc1624a533469250f8634a3bb86a9d70e7fc3a076ee6a8d7c46f48667e813e",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/invariants.md",
+          "lines": [
+            66,
+            70
+          ],
+          "sha256": "9afc1624a533469250f8634a3bb86a9d70e7fc3a076ee6a8d7c46f48667e813e",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "IN7.4",
+      "file": "core/invariants.md",
+      "lines": [
+        71,
+        74
+      ],
+      "sha256": "d888e3f50c08089c8c5bb79e5b22f828f56b39ed2c6b9bb8fbf847e3c7e6bff0",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/invariants.md",
+          "lines": [
+            71,
+            74
+          ],
+          "sha256": "d888e3f50c08089c8c5bb79e5b22f828f56b39ed2c6b9bb8fbf847e3c7e6bff0",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "IN7.5",
+      "file": "core/invariants.md",
+      "lines": [
+        75,
+        76
+      ],
+      "sha256": "8f727b143c8b0c28dbb080c4e95b6af8fc3f4efe70da715a8a53556d2a02e439",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/invariants.md",
+          "lines": [
+            75,
+            76
+          ],
+          "sha256": "8f727b143c8b0c28dbb080c4e95b6af8fc3f4efe70da715a8a53556d2a02e439",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "IN8.1",
+      "file": "core/invariants.md",
+      "lines": [
+        80,
+        81
+      ],
+      "sha256": "06cf23e4eb448cd585ea919dd6632ed1f8d7dbae4a7143dbfe1f76b9b5449859",
+      "audience": [
+        "architect"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        28
+      ]
+    },
+    {
+      "id": "IN8.2",
+      "file": "core/invariants.md",
+      "lines": [
+        82,
+        82
+      ],
+      "sha256": "807d782c0a057c7efd43471289eb09b75f4885e05e496aeedf1aae3881cd9133",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/invariants.md",
+          "lines": [
+            82,
+            82
+          ],
+          "sha256": "807d782c0a057c7efd43471289eb09b75f4885e05e496aeedf1aae3881cd9133",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "IN8.3",
+      "file": "core/invariants.md",
+      "lines": [
+        83,
+        85
+      ],
+      "sha256": "1902bcc1d8eb2838afe5d3c7fe2765fe6bfe9466192cb763ecb8ef56b53fe02c",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        29
+      ]
+    },
+    {
+      "id": "IN8.6",
+      "file": "core/invariants.md",
+      "lines": [
+        87,
+        87
+      ],
+      "sha256": "6735e24fdb90fe72ce9e511b0412cbc28d002396e2e2635d2a2aca8dc7a3abc6",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "designer",
+        "strategist",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "investigator",
+        "bootstrap"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        31
+      ]
+    },
+    {
+      "id": "IN8.4",
+      "file": "core/invariants.md",
+      "lines": [
+        88,
+        88
+      ],
+      "sha256": "e360383c0d17884342042f2fa7198ce8f524e70b5882af68b9436658c5532fcf",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/invariants.md",
+          "lines": [
+            88,
+            88
+          ],
+          "sha256": "e360383c0d17884342042f2fa7198ce8f524e70b5882af68b9436658c5532fcf",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "IN8.5",
+      "file": "core/invariants.md",
+      "lines": [
+        90,
+        90
+      ],
+      "sha256": "629a54fba0b20241a886f10b89a4c0bd8ffe1af62c84c076bf4e485547b741fb",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "designer",
+        "strategist",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "investigator",
+        "bootstrap"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        30
+      ]
+    },
+    {
+      "id": "LF0.1",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        3,
+        4
+      ],
+      "sha256": "1498414063b72699f7912e8d575015d5581a77ab2418c18ee429003541f58119",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/lifecycle-frame.md",
+          "lines": [
+            3,
+            4
+          ],
+          "sha256": "1498414063b72699f7912e8d575015d5581a77ab2418c18ee429003541f58119",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "LF0.2",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        8,
+        8
+      ],
+      "sha256": "cff0700973fcd3d916fdcc321b681b3f3bf056e3c146c2c25c720117d18c6ee8",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/lifecycle-frame.md",
+          "lines": [
+            8,
+            8
+          ],
+          "sha256": "cff0700973fcd3d916fdcc321b681b3f3bf056e3c146c2c25c720117d18c6ee8",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "LF0.3",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        9,
+        9
+      ],
+      "sha256": "82c99664bf3fc54f004eb2c181e1e0bce205069066f3a1e8492ce632b5b9afcc",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/lifecycle-frame.md",
+          "lines": [
+            9,
+            9
+          ],
+          "sha256": "82c99664bf3fc54f004eb2c181e1e0bce205069066f3a1e8492ce632b5b9afcc",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "LF0.4",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        10,
+        10
+      ],
+      "sha256": "644735e1e1956788bffbe268d4a5351e2a839cd5168c3941ec0b1bdf97873cfb",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/lifecycle-frame.md",
+          "lines": [
+            10,
+            10
+          ],
+          "sha256": "644735e1e1956788bffbe268d4a5351e2a839cd5168c3941ec0b1bdf97873cfb",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "LF0.5",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        12,
+        12
+      ],
+      "sha256": "09e09762d2d1e809d52aa2d5556e5ca727966b86b2b6fceabeafeca50ac54522",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "lead-in",
+      "evidence": [
+        {
+          "unitIds": [
+            "LF0.6",
+            "LF0.7"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "LF0.6",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        14,
+        14
+      ],
+      "sha256": "78b3f87213e3f7d90740d1158b4ff96cb7c73d328a37f99f46a63cfd293b9766",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "enforced by the product",
+      "evidence": [
+        {
+          "path": "mcp/src/agents_remember/application/role_launch_context.py",
+          "symbol": "resolve_role_launch_context / parentless_selection_violation"
+        },
+        {
+          "path": "mcp/src/agents_remember/models/role_identity.py",
+          "symbol": "ROLE_LEVELS / LEAF_ROLES / TASKLESS_ROLES"
+        }
+      ]
+    },
+    {
+      "id": "LF0.7",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        15,
+        17
+      ],
+      "sha256": "c1a535963eaca703ee3fc45fec3d55f300523ad8416e2816c9074d77907c6cb1",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "reference",
+      "reason": "stated already",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            112,
+            117
+          ],
+          "sha256": "481b1b4174d8392ed173bcfd263b1313329cc21e4124133669c44be859187e70",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/orchestrator.md",
+          "lines": [
+            58,
+            63
+          ],
+          "sha256": "481b1b4174d8392ed173bcfd263b1313329cc21e4124133669c44be859187e70",
+          "capsule": "orchestrator/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/designer.md",
+          "lines": [
+            118,
+            124
+          ],
+          "sha256": "fdb875076233bd0fad83a32a5b5f4a41b691f5c5e8fc320dc0191a2aa2f929d1",
+          "capsule": "designer/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/strategist.md",
+          "lines": [
+            127,
+            133
+          ],
+          "sha256": "fdb875076233bd0fad83a32a5b5f4a41b691f5c5e8fc320dc0191a2aa2f929d1",
+          "capsule": "strategist/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+          "lines": [
+            94,
+            99
+          ],
+          "sha256": "481b1b4174d8392ed173bcfd263b1313329cc21e4124133669c44be859187e70",
+          "capsule": "manager/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/worker.md",
+          "lines": [
+            51,
+            56
+          ],
+          "sha256": "481b1b4174d8392ed173bcfd263b1313329cc21e4124133669c44be859187e70",
+          "capsule": "worker/implementation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/curator.md",
+          "lines": [
+            102,
+            111
+          ],
+          "sha256": "a25db76f9a3fd0811b30ecd7ad1565d5c87e4595f2f20778901879cc98de6cc9",
+          "capsule": "curator/curation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            148,
+            155
+          ],
+          "sha256": "06b86337f24605080f2decb9fae6a253fa575dfaf16efc5cae01c77ce37eb106",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/investigator.md",
+          "lines": [
+            46,
+            51
+          ],
+          "sha256": "481b1b4174d8392ed173bcfd263b1313329cc21e4124133669c44be859187e70",
+          "capsule": "investigator/orientation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/bootstrap.md",
+          "lines": [
+            153,
+            159
+          ],
+          "sha256": "fdb875076233bd0fad83a32a5b5f4a41b691f5c5e8fc320dc0191a2aa2f929d1",
+          "capsule": "bootstrap/orientation"
+        }
+      ]
+    },
+    {
+      "id": "LF1.1",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        21,
+        21
+      ],
+      "sha256": "4eeb14d61ea58938f1e968ea6882bf3cbd686691339872a6efc79df22296ca54",
+      "audience": [
+        "architect",
+        "orchestrator"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/orientation.md",
+          "lines": [
+            1,
+            44
+          ],
+          "sha256": "128a746bf67578e97e221e5adb6d0aaedea3e4048f45018a755d8160c3a4bc5e",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            1,
+            124
+          ],
+          "sha256": "d937f857d2c0f2057cbf35fdf8b2032ea778cb164061969c8c9fcff0edf516c5",
+          "capsule": "architect/planning"
+        }
+      ]
+    },
+    {
+      "id": "LF1.2",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        23,
+        23
+      ],
+      "sha256": "35375f80804648f4315e0ae495483ca97840aa65365b6dc0475fc38e3cedafe8",
+      "audience": [
+        "architect",
+        "orchestrator"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/orientation.md",
+          "lines": [
+            1,
+            44
+          ],
+          "sha256": "128a746bf67578e97e221e5adb6d0aaedea3e4048f45018a755d8160c3a4bc5e",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            1,
+            124
+          ],
+          "sha256": "d937f857d2c0f2057cbf35fdf8b2032ea778cb164061969c8c9fcff0edf516c5",
+          "capsule": "architect/planning"
+        }
+      ]
+    },
+    {
+      "id": "LF1.3",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        24,
+        24
+      ],
+      "sha256": "60de6dbcb7c335c3978df95dd3f97e02b0638d376685e7b8aba41299716c7559",
+      "audience": [
+        "architect",
+        "orchestrator"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/orientation.md",
+          "lines": [
+            1,
+            44
+          ],
+          "sha256": "128a746bf67578e97e221e5adb6d0aaedea3e4048f45018a755d8160c3a4bc5e",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            1,
+            124
+          ],
+          "sha256": "d937f857d2c0f2057cbf35fdf8b2032ea778cb164061969c8c9fcff0edf516c5",
+          "capsule": "architect/planning"
+        }
+      ]
+    },
+    {
+      "id": "LF1.4",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        25,
+        25
+      ],
+      "sha256": "7383416ca51ae2693d9a94679171d828219d6dae23183195c7199347c5dfc2da",
+      "audience": [
+        "architect",
+        "orchestrator"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/orientation.md",
+          "lines": [
+            1,
+            44
+          ],
+          "sha256": "128a746bf67578e97e221e5adb6d0aaedea3e4048f45018a755d8160c3a4bc5e",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            1,
+            124
+          ],
+          "sha256": "d937f857d2c0f2057cbf35fdf8b2032ea778cb164061969c8c9fcff0edf516c5",
+          "capsule": "architect/planning"
+        }
+      ]
+    },
+    {
+      "id": "LF1.5",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        26,
+        26
+      ],
+      "sha256": "6848db5cbf8106b00c38eda2bd103f048a280b61c3530a65e1ddab1ce624fdf5",
+      "audience": [
+        "architect",
+        "orchestrator"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/orientation.md",
+          "lines": [
+            1,
+            44
+          ],
+          "sha256": "128a746bf67578e97e221e5adb6d0aaedea3e4048f45018a755d8160c3a4bc5e",
+          "capsule": "investigator/orientation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/investigator.md",
+          "lines": [
+            1,
+            56
+          ],
+          "sha256": "fcacee5c84ee2bd352872710e2f727dc3e6d7f19490db31ea9a0214a10b48bd7",
+          "capsule": "investigator/orientation"
+        }
+      ]
+    },
+    {
+      "id": "LF2.1",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        30,
+        30
+      ],
+      "sha256": "2e846ad5cfcd6bed1becb32f4b2d1cb290ca8959d02f1347cd249b8f0023ec44",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/lifecycle-frame.md",
+          "lines": [
+            30,
+            30
+          ],
+          "sha256": "2e846ad5cfcd6bed1becb32f4b2d1cb290ca8959d02f1347cd249b8f0023ec44",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "LF2.2",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        32,
+        35
+      ],
+      "sha256": "27a1c11cccd2590b516ffb791a9286178c5e31699dba8203d7937be44807769c",
+      "audience": [
+        "manager",
+        "worker",
+        "reviewer",
+        "curator",
+        "investigator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        32
+      ]
+    },
+    {
+      "id": "LF2.3",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        36,
+        36
+      ],
+      "sha256": "83a8cf204b77fafdb302d3c61034663de44690c710514da79b1fa7f36c7e8894",
+      "audience": [
+        "orchestrator",
+        "investigator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        32
+      ]
+    },
+    {
+      "id": "LF2.4",
+      "file": "core/lifecycle-frame.md",
+      "lines": [
+        37,
+        37
+      ],
+      "sha256": "bd9e7f8cf2b74a527f192a572e82c319135e0daefbce94087f921981dc9670b9",
+      "audience": [
+        "orchestrator",
+        "investigator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        32
+      ]
+    },
+    {
+      "id": "LO0.1",
+      "file": "core/loop.md",
+      "lines": [
+        3,
+        3
+      ],
+      "sha256": "1c35714bfe89e8462505ad6af78d417b622d0db8478063b8b907d54237f68a81",
+      "audience": [
+        "architect",
+        "manager",
+        "orchestrator",
+        "worker",
+        "reviewer"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/coordination.md",
+          "lines": [
+            1,
+            44
+          ],
+          "sha256": "5fb76125ef5088a8543304987ab41855c67e86742af74ef6cdc13317008bff27",
+          "capsule": "manager/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+          "lines": [
+            1,
+            110
+          ],
+          "sha256": "649b82b5d7b2371879953489dea3aa82ce7fe2fde72ad5495c2ead4a637e1a12",
+          "capsule": "manager/coordination"
+        }
+      ]
+    },
+    {
+      "id": "LO0.2",
+      "file": "core/loop.md",
+      "lines": [
+        7,
+        7
+      ],
+      "sha256": "9a50b939ea7144b3b010056c389205520fec4879cfcb262a2356b9639619f406",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/loop.md",
+          "lines": [
+            7,
+            7
+          ],
+          "sha256": "9a50b939ea7144b3b010056c389205520fec4879cfcb262a2356b9639619f406",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "LO0.3",
+      "file": "core/loop.md",
+      "lines": [
+        8,
+        8
+      ],
+      "sha256": "117999ffc2853a40f25745ff3530324e2076bfb91ff5553876ef9fc5dc026695",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/loop.md",
+          "lines": [
+            8,
+            8
+          ],
+          "sha256": "117999ffc2853a40f25745ff3530324e2076bfb91ff5553876ef9fc5dc026695",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "LO0.4",
+      "file": "core/loop.md",
+      "lines": [
+        9,
+        9
+      ],
+      "sha256": "d7f57b47cff602409fa717e3b6b88a237a98b7fe3d0096e51157cd9302926620",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/loop.md",
+          "lines": [
+            9,
+            9
+          ],
+          "sha256": "d7f57b47cff602409fa717e3b6b88a237a98b7fe3d0096e51157cd9302926620",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "LO1.1",
+      "file": "core/loop.md",
+      "lines": [
+        13,
+        13
+      ],
+      "sha256": "fae8cb9e953a563e51723c23adeb022088a23359f4849ffad4522745cbbb0e7e",
+      "audience": [
+        "reviewer",
+        "manager",
+        "orchestrator",
+        "architect"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "LO1.2",
+      "file": "core/loop.md",
+      "lines": [
+        15,
+        17
+      ],
+      "sha256": "c9d4d2681dd3bd54839e8818936018645f20dc70d643b45c819fc17a00e0aa1e",
+      "audience": [
+        "architect",
+        "orchestrator",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "LO2.1",
+      "file": "core/loop.md",
+      "lines": [
+        21,
+        21
+      ],
+      "sha256": "c0f1c51dfd3d19bb09c70d04987bf40245b15f964a45e997c3ab995eccc506d5",
+      "audience": [
+        "manager",
+        "architect",
+        "orchestrator"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "LO2.2",
+      "file": "core/loop.md",
+      "lines": [
+        23,
+        23
+      ],
+      "sha256": "b357df5c7d41f38bfd9663b0fe6f26285bc0e24b0d359fe4d3fdd29e5d66173b",
+      "audience": [
+        "manager",
+        "architect"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "LO2.3",
+      "file": "core/loop.md",
+      "lines": [
+        24,
+        24
+      ],
+      "sha256": "8f01ea8197ec2b69d6d091202158cb25cd71eb7f35ef6669bab8d4d10631f708",
+      "audience": [
+        "manager",
+        "architect",
+        "worker"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "LO2.4",
+      "file": "core/loop.md",
+      "lines": [
+        25,
+        25
+      ],
+      "sha256": "23989a1c373b6c1f2f77e50d4488a8ff1a95cbe6ea0b99ae6316bf42d03ee11d",
+      "audience": [
+        "manager",
+        "reviewer",
+        "worker"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "LO2.5",
+      "file": "core/loop.md",
+      "lines": [
+        27,
+        27
+      ],
+      "sha256": "7b082b2dcde3aa23933c751c76357078c824a1162bc215724e4a1ae33c7b160b",
+      "audience": [
+        "manager",
+        "orchestrator",
+        "architect"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "LO3.1",
+      "file": "core/loop.md",
+      "lines": [
+        31,
+        36
+      ],
+      "sha256": "e5904c72785680b390937c0a9358704bf33bf996ce70fd3463e91af5e5f0d99a",
+      "audience": [
+        "reviewer",
+        "manager"
+      ],
+      "disposition": "reference",
+      "reason": "enforced by the product",
+      "evidence": [
+        {
+          "path": "mcp/src/agents_remember/worktrees/review_history.py",
+          "symbol": "begin_task_review"
+        },
+        {
+          "path": "mcp/src/agents_remember/application/task_docs/task_doc_route_review.py",
+          "symbol": "review_settings_limit"
+        }
+      ]
+    },
+    {
+      "id": "LO3.2",
+      "file": "core/loop.md",
+      "lines": [
+        37,
+        38
+      ],
+      "sha256": "db8b1fb2bf53b4f35ae111293edf5e4cc23c3a44a96653d8cf02640d24f17629",
+      "audience": [
+        "reviewer",
+        "worker",
+        "manager"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "LO3.3",
+      "file": "core/loop.md",
+      "lines": [
+        39,
+        40
+      ],
+      "sha256": "fef65297bfd210ae2b14d2f9fda4a7a8e50ea25dc864f6b9e05d6bb125fc0350",
+      "audience": [
+        "reviewer"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "LO3.4",
+      "file": "core/loop.md",
+      "lines": [
+        41,
+        42
+      ],
+      "sha256": "43fbb53164b4f6c59ba0fcee3c70a1c929796d8fc755048f2a54c0e2bb914c2e",
+      "audience": [
+        "reviewer",
+        "manager",
+        "architect"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "LO3.5",
+      "file": "core/loop.md",
+      "lines": [
+        44,
+        44
+      ],
+      "sha256": "64b8ddf42d66d5d572de30038f12970b5d377d150d279cd46fda6ba191f20a96",
+      "audience": [
+        "manager",
+        "architect",
+        "reviewer"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "LO3.6",
+      "file": "core/loop.md",
+      "lines": [
+        46,
+        50
+      ],
+      "sha256": "bd112793aa698f0af97b48fd366d637f2ba0087ffe39ba0e90a07793252ad759",
+      "audience": [
+        "reviewer",
+        "manager"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "LO3.7",
+      "file": "core/loop.md",
+      "lines": [
+        52,
+        53
+      ],
+      "sha256": "80dd495e1b3524b55b044a6d14f4e1fe3cf9aff4561a5f024c2363592ef99492",
+      "audience": [
+        "worker",
+        "reviewer"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "LO4.1",
+      "file": "core/loop.md",
+      "lines": [
+        57,
+        62
+      ],
+      "sha256": "0b900dc17f4e1aa9c56287242e17bbad2783da1c311cd454408cc30bc7b32354",
+      "audience": [
+        "reviewer"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "LO5.1",
+      "file": "core/loop.md",
+      "lines": [
+        66,
+        69
+      ],
+      "sha256": "ae9612ca6c78ddaf1c1f7185f1247aed18d3ecfaffdad9239f364a5f511a3412",
+      "audience": [
+        "architect"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        33
+      ]
+    },
+    {
+      "id": "LO6.1",
+      "file": "core/loop.md",
+      "lines": [
+        73,
+        75
+      ],
+      "sha256": "73bedcced71e8742500a38fdfc6499f4157203932f329fa6f5790bc6028a3224",
+      "audience": [
+        "architect"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/planning.md",
+          "lines": [
+            1,
+            51
+          ],
+          "sha256": "038e0497dccec7384799b627761c110fd01c6fdb23fcb08e48ee00f81a5a8f48",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            1,
+            124
+          ],
+          "sha256": "d937f857d2c0f2057cbf35fdf8b2032ea778cb164061969c8c9fcff0edf516c5",
+          "capsule": "architect/planning"
+        }
+      ]
+    },
+    {
+      "id": "LO6.2",
+      "file": "core/loop.md",
+      "lines": [
+        77,
+        82
+      ],
+      "sha256": "a13ba9f7ddadd2931b1e7441650a3f6da6762bdbe96713162d531eca468f080f",
+      "audience": [
+        "architect"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        34
+      ]
+    },
+    {
+      "id": "LO6.3",
+      "file": "core/loop.md",
+      "lines": [
+        84,
+        84
+      ],
+      "sha256": "edf9a51051627eeb2f5329b5ea8fa6cb1a7fd39a88700767637f1658f2ff672a",
+      "audience": [
+        "architect"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        34
+      ]
+    },
+    {
+      "id": "AC0.1",
+      "file": "core/acceptance.md",
+      "lines": [
+        3,
+        8
+      ],
+      "sha256": "109e5be0f4660940387a3de7ed3150d12ccab217ed88b1f3fb1f950c5a6efc83",
+      "audience": [
+        "architect",
+        "investigator",
+        "orchestrator",
+        "manager",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        38
+      ]
+    },
+    {
+      "id": "AC0.2",
+      "file": "core/acceptance.md",
+      "lines": [
+        10,
+        15
+      ],
+      "sha256": "8a105cb235c7bcfca9fddeb1a8fcbc644bc765ee59f2bfede82b58478c7b8a1f",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/acceptance.md",
+          "lines": [
+            10,
+            15
+          ],
+          "sha256": "8a105cb235c7bcfca9fddeb1a8fcbc644bc765ee59f2bfede82b58478c7b8a1f",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "AC0.3",
+      "file": "core/acceptance.md",
+      "lines": [
+        16,
+        18
+      ],
+      "sha256": "2d27507a8fa71a0a328936db6c0bbaebc6d05ee577bddd4509de9df48357aceb",
+      "audience": [
+        "manager",
+        "orchestrator",
+        "architect",
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        36,
+        37
+      ]
+    },
+    {
+      "id": "AC0.4",
+      "file": "core/acceptance.md",
+      "lines": [
+        19,
+        21
+      ],
+      "sha256": "950948c802024daf4f96d68dc86400c1f9dd8a6cc9fcf75a8af49d00975a58b3",
+      "audience": [
+        "manager",
+        "orchestrator",
+        "architect"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        36
+      ]
+    },
+    {
+      "id": "AC0.5",
+      "file": "core/acceptance.md",
+      "lines": [
+        22,
+        24
+      ],
+      "sha256": "4b18eb1078975f5c2e2cb4bab0b98db4110a82a551e6e410b2e99d0c032c9038",
+      "audience": [
+        "worker",
+        "reviewer",
+        "curator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        38
+      ]
+    },
+    {
+      "id": "AC0.6",
+      "file": "core/acceptance.md",
+      "lines": [
+        25,
+        26
+      ],
+      "sha256": "f001ee7686504e89f2414244a6194f47ff669e7ff3dbbacc4060955a3f767f86",
+      "audience": [],
+      "disposition": "reference",
+      "reason": "no action",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/core/acceptance.md",
+          "lines": [
+            25,
+            26
+          ],
+          "sha256": "f001ee7686504e89f2414244a6194f47ff669e7ff3dbbacc4060955a3f767f86",
+          "basis": "definition, product description or authoring metadata; no started-role action"
+        }
+      ]
+    },
+    {
+      "id": "AC1.1",
+      "file": "core/acceptance.md",
+      "lines": [
+        32,
+        32
+      ],
+      "sha256": "fef8668eba3d4f935d666a976208e09d00ef1e79fad12ae94a4b9bf9ec78efb2",
+      "audience": [
+        "worker",
+        "reviewer",
+        "manager"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/implementation.md",
+          "lines": [
+            1,
+            36
+          ],
+          "sha256": "d46afca327988e35f5b5148081fa814a769a87f2f0d6216a3a74669adacc7a22",
+          "capsule": "worker/implementation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/worker.md",
+          "lines": [
+            1,
+            97
+          ],
+          "sha256": "058ef57ec937b4c3cd6e371fb0d52cfc3834ddd2c53548d7de2052b8760f0f1b",
+          "capsule": "worker/implementation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/templates/turn-report.md",
+          "lines": [
+            1,
+            211
+          ],
+          "sha256": "85c940333b806eb10afec74b4d680d028012ae8333fcf68a5472bbfdac8b8cbf",
+          "capsule": "worker/implementation"
+        }
+      ]
+    },
+    {
+      "id": "AC1.2",
+      "file": "core/acceptance.md",
+      "lines": [
+        33,
+        33
+      ],
+      "sha256": "d2e0b38bc5f1ee468314153915bb40e148e3d926b569bd133a03b66a7877aa36",
+      "audience": [
+        "reviewer",
+        "manager",
+        "orchestrator",
+        "architect"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "AC1.3",
+      "file": "core/acceptance.md",
+      "lines": [
+        34,
+        34
+      ],
+      "sha256": "e58e0e991b7e1320c566c78a5859a2c4447e8e0194a97aaee2b00f406825acdc",
+      "audience": [
+        "curator",
+        "reviewer",
+        "manager"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "AC1.4",
+      "file": "core/acceptance.md",
+      "lines": [
+        35,
+        35
+      ],
+      "sha256": "66751ce7844629292523f7f91336bc658adc361f39bbb1a3cd69357d66b84f04",
+      "audience": [
+        "architect"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/planning.md",
+          "lines": [
+            1,
+            51
+          ],
+          "sha256": "038e0497dccec7384799b627761c110fd01c6fdb23fcb08e48ee00f81a5a8f48",
+          "capsule": "strategist/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/strategist.md",
+          "lines": [
+            1,
+            133
+          ],
+          "sha256": "43d7d68320e5f50df19f23b61d6a2fb92a868cb7d398a2895b97ae282332d9dc",
+          "capsule": "strategist/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/planning.md",
+          "lines": [
+            1,
+            51
+          ],
+          "sha256": "038e0497dccec7384799b627761c110fd01c6fdb23fcb08e48ee00f81a5a8f48",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            1,
+            124
+          ],
+          "sha256": "d937f857d2c0f2057cbf35fdf8b2032ea778cb164061969c8c9fcff0edf516c5",
+          "capsule": "architect/planning"
+        }
+      ]
+    },
+    {
+      "id": "AC1.5",
+      "file": "core/acceptance.md",
+      "lines": [
+        36,
+        36
+      ],
+      "sha256": "3a9458157763e8c3ae5a1dd8331b97aebe88551e9c6faea403684e833d645ed2",
+      "audience": [
+        "architect"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/planning.md",
+          "lines": [
+            1,
+            51
+          ],
+          "sha256": "038e0497dccec7384799b627761c110fd01c6fdb23fcb08e48ee00f81a5a8f48",
+          "capsule": "designer/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/designer.md",
+          "lines": [
+            1,
+            124
+          ],
+          "sha256": "48a53096c94fc71bed3883839af18086e2f4a6149a4f704478737feba687c2bc",
+          "capsule": "designer/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/planning.md",
+          "lines": [
+            1,
+            51
+          ],
+          "sha256": "038e0497dccec7384799b627761c110fd01c6fdb23fcb08e48ee00f81a5a8f48",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            1,
+            124
+          ],
+          "sha256": "d937f857d2c0f2057cbf35fdf8b2032ea778cb164061969c8c9fcff0edf516c5",
+          "capsule": "architect/planning"
+        }
+      ]
+    },
+    {
+      "id": "AC1.6",
+      "file": "core/acceptance.md",
+      "lines": [
+        37,
+        37
+      ],
+      "sha256": "0352502318a8e17c9f52c2b01a7c3a19fb990d7fe5df7def04fe45bf8a2ac034",
+      "audience": [
+        "investigator",
+        "architect",
+        "orchestrator",
+        "manager"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/orientation.md",
+          "lines": [
+            1,
+            44
+          ],
+          "sha256": "128a746bf67578e97e221e5adb6d0aaedea3e4048f45018a755d8160c3a4bc5e",
+          "capsule": "investigator/orientation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/investigator.md",
+          "lines": [
+            1,
+            56
+          ],
+          "sha256": "fcacee5c84ee2bd352872710e2f727dc3e6d7f19490db31ea9a0214a10b48bd7",
+          "capsule": "investigator/orientation"
+        }
+      ]
+    },
+    {
+      "id": "AC1.7",
+      "file": "core/acceptance.md",
+      "lines": [
+        38,
+        38
+      ],
+      "sha256": "8963365f45bf041c0a42be7c236fbe307fbdea1577f6ceb304fbc3069f7d9c60",
+      "audience": [
+        "manager",
+        "orchestrator"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/coordination.md",
+          "lines": [
+            1,
+            44
+          ],
+          "sha256": "5fb76125ef5088a8543304987ab41855c67e86742af74ef6cdc13317008bff27",
+          "capsule": "manager/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+          "lines": [
+            1,
+            110
+          ],
+          "sha256": "649b82b5d7b2371879953489dea3aa82ce7fe2fde72ad5495c2ead4a637e1a12",
+          "capsule": "manager/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/templates/master-handover-packet.md",
+          "lines": [
+            1,
+            87
+          ],
+          "sha256": "e9866b5cf00f80b7d0b1b7121dfcc3547e0ad9d3a6e6790312a7ed1b16270735",
+          "capsule": "manager/coordination"
+        }
+      ]
+    },
+    {
+      "id": "AC1.8",
+      "file": "core/acceptance.md",
+      "lines": [
+        39,
+        39
+      ],
+      "sha256": "78d46f1b50aa05f4688c36cb63d11865fa9c6406e31bd756b2d2f2bd9b647ab2",
+      "audience": [
+        "orchestrator",
+        "architect"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/coordination.md",
+          "lines": [
+            1,
+            44
+          ],
+          "sha256": "5fb76125ef5088a8543304987ab41855c67e86742af74ef6cdc13317008bff27",
+          "capsule": "orchestrator/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/orchestrator.md",
+          "lines": [
+            1,
+            74
+          ],
+          "sha256": "4952e0267c2b9ab3b3be8c8c59ca943c7a34e53aeb1ad4f06c012cba34cd47ef",
+          "capsule": "orchestrator/coordination"
+        }
+      ]
+    },
+    {
+      "id": "AC1.9",
+      "file": "core/acceptance.md",
+      "lines": [
+        41,
+        43
+      ],
+      "sha256": "c9e7169afdc93ecdcf596d6f15716e3647e7afbb24e9eb8e01d06f9be27d5598",
+      "audience": [
+        "worker",
+        "reviewer",
+        "curator",
+        "investigator",
+        "manager",
+        "orchestrator"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        38
+      ]
+    },
+    {
+      "id": "AC2.1",
+      "file": "core/acceptance.md",
+      "lines": [
+        47,
+        50
+      ],
+      "sha256": "805e048fd07cefcff4fc55d4bb8bcf2d8975f9f556d134dd0dc14623989bee11",
+      "audience": [
+        "architect",
+        "manager",
+        "orchestrator",
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        35
+      ]
+    },
+    {
+      "id": "AC2.2",
+      "file": "core/acceptance.md",
+      "lines": [
+        52,
+        52
+      ],
+      "sha256": "a5eec5b07684727b96cd276ed89b89f0caf62172bb37ff5b59709bb7cd765d95",
+      "audience": [
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        39
+      ]
+    },
+    {
+      "id": "AC2.3",
+      "file": "core/acceptance.md",
+      "lines": [
+        54,
+        54
+      ],
+      "sha256": "362eee575f966ca68c547570f5c73666dc51df9f5c2a47645588bed55dd7bdf6",
+      "audience": [
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        39
+      ]
+    },
+    {
+      "id": "AC2.4",
+      "file": "core/acceptance.md",
+      "lines": [
+        55,
+        56
+      ],
+      "sha256": "182f57b582f853fac036fbe66d67e0b32896fec6c7f984a361fb445d74e796f6",
+      "audience": [
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        39
+      ]
+    },
+    {
+      "id": "AC2.5",
+      "file": "core/acceptance.md",
+      "lines": [
+        57,
+        58
+      ],
+      "sha256": "ca49a89c6e2d924f54c02dad21b28a7988ec5cdf6c926910d7cc4084313f27fa",
+      "audience": [
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        39
+      ]
+    },
+    {
+      "id": "AC2.6",
+      "file": "core/acceptance.md",
+      "lines": [
+        59,
+        60
+      ],
+      "sha256": "55d4749cd248af5026239473c05c29b28b41857db5cfab28f34fbbed168360f8",
+      "audience": [
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        39
+      ]
+    },
+    {
+      "id": "AC2.7",
+      "file": "core/acceptance.md",
+      "lines": [
+        61,
+        62
+      ],
+      "sha256": "67116088be355ad0589b7da90d033ef4edd1f7835ded4b45404c31f4abb05614",
+      "audience": [
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        39
+      ]
+    },
+    {
+      "id": "AC2.8",
+      "file": "core/acceptance.md",
+      "lines": [
+        63,
+        63
+      ],
+      "sha256": "fb5345640860d6e1394e0196c40f07e60cccc3365f3556c7ceef7e539869d926",
+      "audience": [
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        39
+      ]
+    },
+    {
+      "id": "AC2.9",
+      "file": "core/acceptance.md",
+      "lines": [
+        65,
+        70
+      ],
+      "sha256": "afc75d04cf25252e1c2e594111a09bcc7a8c6659eef9d1a632ba85912ec57064",
+      "audience": [
+        "worker",
+        "reviewer"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        39
+      ]
+    },
+    {
+      "id": "AC2.10",
+      "file": "core/acceptance.md",
+      "lines": [
+        72,
+        78
+      ],
+      "sha256": "3f8e6ec4a9dcb4f50f087b60054235af97d2de5c41d7b5eafec06e03fe411080",
+      "audience": [
+        "reviewer"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        40
+      ]
+    },
+    {
+      "id": "AC3.1",
+      "file": "core/acceptance.md",
+      "lines": [
+        82,
+        84
+      ],
+      "sha256": "f069c0718f1d1c393f5f6599a6b219a9d305f6120c2f1023128dc19677db01fe",
+      "audience": [
+        "architect",
+        "manager",
+        "orchestrator",
+        "worker",
+        "reviewer"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/planning.md",
+          "lines": [
+            1,
+            51
+          ],
+          "sha256": "038e0497dccec7384799b627761c110fd01c6fdb23fcb08e48ee00f81a5a8f48",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            1,
+            124
+          ],
+          "sha256": "d937f857d2c0f2057cbf35fdf8b2032ea778cb164061969c8c9fcff0edf516c5",
+          "capsule": "architect/planning"
+        }
+      ]
+    },
+    {
+      "id": "AC3.2",
+      "file": "core/acceptance.md",
+      "lines": [
+        86,
+        87
+      ],
+      "sha256": "9cfbed35c434f4b08309b3ec4ef962933a5484ad65a3236f6c5ad8c4e4e343b5",
+      "audience": [
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        41
+      ]
+    },
+    {
+      "id": "AC3.3",
+      "file": "core/acceptance.md",
+      "lines": [
+        88,
+        90
+      ],
+      "sha256": "2a5c1eb4056c715a68821431ebf0119618cffc76ef8c11fad55ba13e5d677e4c",
+      "audience": [
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        41
+      ]
+    },
+    {
+      "id": "AC3.4",
+      "file": "core/acceptance.md",
+      "lines": [
+        91,
+        97
+      ],
+      "sha256": "532a0d1d26010b112fbf6d0b9d7c3d3f3884cf11837358522e1ea381ae8e6c1a",
+      "audience": [
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        42
+      ]
+    },
+    {
+      "id": "AC3.5",
+      "file": "core/acceptance.md",
+      "lines": [
+        98,
+        103
+      ],
+      "sha256": "dc9dd89cbcb7d12a21408fd2418a898022b6d39dee1b8186c404e3bb3a01cb5a",
+      "audience": [
+        "worker",
+        "reviewer"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        42
+      ]
+    },
+    {
+      "id": "AC3.6",
+      "file": "core/acceptance.md",
+      "lines": [
+        104,
+        109
+      ],
+      "sha256": "4623bf1579158070de3203d4788e5edc8711effcbf75a54e10dc14ba00d89039",
+      "audience": [
+        "reviewer"
+      ],
+      "disposition": "reference",
+      "reason": "stage procedure reached through its operation file",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/operations/review.md",
+          "lines": [
+            1,
+            65
+          ],
+          "sha256": "2a0ea3d72ecd340c3ec923db71c9426de0295c5b20310ddcb8f2512d6025c86a",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            1,
+            220
+          ],
+          "sha256": "295c280b0885684f9b2368c4f16edaac9cb1af77e0938f605a95e4c0e86147e0",
+          "capsule": "reviewer/review"
+        }
+      ]
+    },
+    {
+      "id": "AC3.7",
+      "file": "core/acceptance.md",
+      "lines": [
+        110,
+        110
+      ],
+      "sha256": "f7da27446be0435e9a75b39fdf68d0314067db054c3c3b46274caccc30cf2652",
+      "audience": [
+        "worker",
+        "reviewer",
+        "architect"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        43
+      ]
+    },
+    {
+      "id": "AC3.8",
+      "file": "core/acceptance.md",
+      "lines": [
+        111,
+        113
+      ],
+      "sha256": "46b9c6292c92c60f6ce7261d844bd2d128304fb6948c085162ce34487aeb30ca",
+      "audience": [
+        "reviewer",
+        "worker",
+        "architect",
+        "manager",
+        "orchestrator"
+      ],
+      "disposition": "reference",
+      "reason": "stated already",
+      "evidence": [
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+          "lines": [
+            102,
+            107
+          ],
+          "sha256": "789ab8013f7dc2cfdc46a5134639d15bcb76e183976ce6db9e6a6416c5cd0e66",
+          "capsule": "architect/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/orchestrator.md",
+          "lines": [
+            16,
+            33
+          ],
+          "sha256": "e654c05c57d09bd10d1bc0148f037e6dd723e5b6b19122d79af6af09e2f09cc3",
+          "capsule": "orchestrator/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/designer.md",
+          "lines": [
+            87,
+            97
+          ],
+          "sha256": "0ce37cc1740ae41b1c074fadf0853b23823255b72e92334d265c04074e96823e",
+          "capsule": "designer/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/strategist.md",
+          "lines": [
+            95,
+            107
+          ],
+          "sha256": "758b38a8bfccbad3f95d4789d3e65b35aa6279f825ad0303f9f0c879ffcde612",
+          "capsule": "strategist/planning"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+          "lines": [
+            72,
+            75
+          ],
+          "sha256": "91deeec7df698f2a95728977b105309b59ce3bf56abdab91552f6ae940a04087",
+          "capsule": "manager/coordination"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/worker.md",
+          "lines": [
+            57,
+            70
+          ],
+          "sha256": "3bd944e08d6db86aaafbf33289b08dacdf2e1adb17b744b902a6213e67cc4e3c",
+          "capsule": "worker/implementation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/curator.md",
+          "lines": [
+            112,
+            124
+          ],
+          "sha256": "1728f0e2e86a2becdc785d8ec6e00052898bb98418ec5a1b03c2afea0cb78261",
+          "capsule": "curator/curation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
+          "lines": [
+            156,
+            167
+          ],
+          "sha256": "e5c6e777aad3d9990bee390dd6f8da3c2f14d46c98a1d057da3d2a413c7ca028",
+          "capsule": "reviewer/review"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/investigator.md",
+          "lines": [
+            34,
+            37
+          ],
+          "sha256": "d3d0a6dfb1955f3868557213f2a550f930a8f2f876690e33c802c6a96e815e4e",
+          "capsule": "investigator/orientation"
+        },
+        {
+          "path": "skills/l-01-agent-lifecycles/roles/bootstrap.md",
+          "lines": [
+            72,
+            83
+          ],
+          "sha256": "3c04c3ad97188a4653e3f9dc91048b350ba40ff0a566d7e2b5700cefbdeb0246",
+          "capsule": "bootstrap/orientation"
+        }
+      ]
+    },
+    {
+      "id": "AC4.1",
+      "file": "core/acceptance.md",
+      "lines": [
+        117,
+        121
+      ],
+      "sha256": "316e3f1b68a8af106873c5e543600135078599d0d7d78c04e54cfd412ca04ae2",
+      "audience": [
+        "manager"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        44
+      ]
+    },
+    {
+      "id": "AC5.1",
+      "file": "core/acceptance.md",
+      "lines": [
+        125,
+        126
+      ],
+      "sha256": "54d05be228f9aedc0a29796574d96b8f7c11f62a33f257b57846e46742d1144b",
+      "audience": [
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        45
+      ]
+    },
+    {
+      "id": "AC5.2",
+      "file": "core/acceptance.md",
+      "lines": [
+        128,
+        129
+      ],
+      "sha256": "8cba4d1d68a47676361974356ee42b614703cd1694d27085162608056cbca1c0",
+      "audience": [
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        45
+      ]
+    },
+    {
+      "id": "AC5.3",
+      "file": "core/acceptance.md",
+      "lines": [
+        130,
+        130
+      ],
+      "sha256": "bf2f938652dec66aa23f5714fb29f5e83bb9fd83858ce14fe46df03863b89606",
+      "audience": [
+        "worker"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        45
+      ]
+    },
+    {
+      "id": "AC5.4",
+      "file": "core/acceptance.md",
+      "lines": [
+        132,
+        135
+      ],
+      "sha256": "9b44746d956a1800b4d8ba4bfeac0ac90adaf16482b2a62bc1fc1d832ff61a5e",
+      "audience": [
+        "worker",
+        "reviewer"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        45
+      ]
+    },
+    {
+      "id": "AC5.5",
+      "file": "core/acceptance.md",
+      "lines": [
+        137,
+        139
+      ],
+      "sha256": "c0c5be68c879e942b1532c72c6c4dfd5d772f97b9eb0fef91d4bdb348c2e887b",
+      "audience": [
+        "worker",
+        "reviewer"
+      ],
+      "disposition": "digest",
+      "digestLines": [
+        45
+      ]
+    }
+  ],
+  "removed": [],
+  "digest": {
+    "path": "core/every-role.md",
+    "sha256": "fad9d9a793efd91e379357a9a89023c9875730a0c3050443b0dff4c69f84c4ba",
+    "sizeWords": 1000,
+    "maximumWords": 1000,
+    "ceilingAuthority": "D656; Manager 20261104T104522Z raises the former 900-word inherited digest ceiling to literal 1000 for complete retained duties"
+  }
+}

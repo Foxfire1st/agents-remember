@@ -656,6 +656,8 @@ def _project_task_doc_dry(whole: dict[str, Any]) -> dict[str, Any]:
     for location_key in ("inputFile", "inputFileSha256"):
         if isinstance(whole.get(location_key), str):
             answer[location_key] = whole[location_key]
+    if whole.get("alignmentSweep") is not None:
+        answer["alignmentSweep"] = whole["alignmentSweep"]
     return answer
 
 
@@ -684,6 +686,8 @@ def project_task_doc_answer(
             )
         if operation == "record_route_review" and isinstance(whole.get("taskDocumentPath"), str):
             answer["taskDocumentPath"] = whole["taskDocumentPath"]
+        if whole.get("alignmentSweep") is not None:
+            answer["alignmentSweep"] = whole["alignmentSweep"]
     master_sync = answer.get("masterSync")
     if (
         isinstance(master_sync, dict)

@@ -13,7 +13,13 @@ src/foo/bar.ts
 ar-coordination/memory-repos/ar-my-app/onboarding/src/foo/bar.ts.md
 ```
 
-The onboarding unit should explain what the code does not make obvious: invariants, intent, boundaries, conventions, cross-repo edges, and risky assumptions. It should not duplicate code, type signatures, or obvious implementation details.
+The onboarding unit explains what the code does not make obvious: invariants, intent,
+boundaries, conventions, cross-repo edges and risky assumptions. In converted memory,
+its Markdown is paired with `onboarding/src/foo/bar.ts.json`: a structured sidecar
+holding references, realization claims and, for tests, proofs. The prose describes
+current truth; shared invariants, families and decisions live in records under
+`knowledge/`, rather than being copied into each card. See the [knowledge-system
+reference](reference/knowledge-system.md).
 
 ## Memory Root
 
@@ -80,7 +86,10 @@ promotion remain the truth controls.
 
 ## Drift Detection
 
-Each file-level sidecar onboarding unit records verification metadata, including the source commit it was checked against. Before planning against onboarding, `c-05-create-or-update-onboarding-files` compares the source file with that verification point.
+In converted memory, references, realization claims and proofs carry code anchors
+in JSON sidecars. Currentness compares those recorded anchors with the selected
+code tree. Read the card beside its sidecar and source; a card’s prose alone does
+not establish that an anchor still names the current code.
 
 Common outcomes:
 
@@ -108,8 +117,23 @@ The root onboarding overview gives repo-level orientation. Larger repositories c
 
 File-level onboarding remains one-to-one with source files. Route-local overviews add structure; they do not replace file-specific onboarding when file-specific facts matter.
 
-## Memory Ledger
+## Knowledge Judgments and Publication
 
-External memory repos use `memory.md` as a ledger that maps code commits to memory commits. This lets a branch carry the memory version that matches its code state.
+`knowledge/layout.json` marks a converted memory tree. A record's Git history
+records changes to its meaning; Curator-authored rows in
+`knowledge/history/<owner>.json` record judgments about the changes a leaf, wave or
+crossing made. Closed history files remain frozen; a reopened leaf uses an
+attempt-qualified successor file.
 
-The ledger matters for worktree-backed tasks and external-memory closeout because code and memory may move together but still live in separate repositories.
+A worklist compares base and candidate code and memory trees. Its items identify
+knowledge the changes reach; a current satisfying history row answers each item.
+The mandatory knowledge gate recomputes the worklist and validates the exact
+candidate trees. Open items, unreadable inputs and refusing validator violations
+block publication. These checks do not invent the Curator's judgment.
+
+## Memory Attribution Cache
+
+Memory-content commits carry `Code-Commit` attribution. `memory.md` is an ignored,
+computed cache of that history, outside staging, commits and transaction authority.
+The code and memory commits remain the durable pair; a missing cache does not
+block closeout or landing.
