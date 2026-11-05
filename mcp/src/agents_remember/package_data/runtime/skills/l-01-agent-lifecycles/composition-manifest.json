@@ -160,6 +160,10 @@
     "launcher": {
       "source": "core/launcher.md",
       "purpose": "The ambient launcher's own obligations, authored here so the role registry holds only roles."
+    },
+    "every-role": {
+      "source": "core/every-role.md",
+      "purpose": "Shared standing duties delivered once beside the capsule in the first message, not composed into it."
     }
   },
   "roles": {
@@ -190,7 +194,8 @@
         "invariants",
         "lifecycle-frame",
         "loop",
-        "acceptance"
+        "acceptance",
+        "every-role"
       ],
       "operations": [
         "orientation",
@@ -236,7 +241,8 @@
         "invariants",
         "lifecycle-frame",
         "loop",
-        "acceptance"
+        "acceptance",
+        "every-role"
       ],
       "operations": [
         "orientation",
@@ -272,7 +278,8 @@
         "authority",
         "invariants",
         "loop",
-        "acceptance"
+        "acceptance",
+        "every-role"
       ],
       "operations": [
         "orientation",
@@ -298,7 +305,8 @@
         "authority",
         "invariants",
         "loop",
-        "acceptance"
+        "acceptance",
+        "every-role"
       ],
       "operations": [
         "orientation",
@@ -341,7 +349,8 @@
         "invariants",
         "lifecycle-frame",
         "loop",
-        "acceptance"
+        "acceptance",
+        "every-role"
       ],
       "operations": [
         "orientation",
@@ -386,7 +395,8 @@
         "authority",
         "invariants",
         "lifecycle-frame",
-        "acceptance"
+        "acceptance",
+        "every-role"
       ],
       "operations": [
         "orientation",
@@ -429,7 +439,8 @@
       "core": [
         "authority",
         "invariants",
-        "acceptance"
+        "acceptance",
+        "every-role"
       ],
       "operations": [
         "orientation",
@@ -466,7 +477,8 @@
         "authority",
         "invariants",
         "loop",
-        "acceptance"
+        "acceptance",
+        "every-role"
       ],
       "operations": [
         "orientation",
@@ -506,7 +518,8 @@
       "core": [
         "authority",
         "invariants",
-        "acceptance"
+        "acceptance",
+        "every-role"
       ],
       "operations": [
         "orientation",
@@ -533,7 +546,8 @@
       "core": [
         "authority",
         "invariants",
-        "acceptance"
+        "acceptance",
+        "every-role"
       ],
       "operations": [
         "orientation",
@@ -574,7 +588,9 @@
       "injected": false,
       "step_detail": true,
       "step": "when you reach Curation workflow 1: Reconcile, not before",
-      "roles": ["curator"]
+      "roles": [
+        "curator"
+      ]
     },
     "curator-handoff-d301": {
       "source": "reference/curator-handoff-d301.md",
@@ -582,7 +598,9 @@
       "injected": false,
       "step_detail": true,
       "step": "when you reach Curation workflow 7: Undergo the independent fact-check, not before; reuse at Curation workflow 8: Repair, then republish",
-      "roles": ["curator"]
+      "roles": [
+        "curator"
+      ]
     },
     "reviewer-orient-d301": {
       "source": "reference/reviewer-orient-d301.md",
@@ -590,7 +608,9 @@
       "injected": false,
       "step_detail": true,
       "step": "when you reach step 1 (orient and scope), not before",
-      "roles": ["reviewer"]
+      "roles": [
+        "reviewer"
+      ]
     },
     "reviewer-baseline-d301": {
       "source": "reference/reviewer-baseline-d301.md",
@@ -598,7 +618,9 @@
       "injected": false,
       "step_detail": true,
       "step": "when you reach step 3 (baseline steps 3–5), not before",
-      "roles": ["reviewer"]
+      "roles": [
+        "reviewer"
+      ]
     },
     "reviewer-adjudication-d301": {
       "source": "reference/reviewer-adjudication-d301.md",
@@ -606,7 +628,9 @@
       "injected": false,
       "step_detail": true,
       "step": "when you reach step 7 (requirement adjudication), not before",
-      "roles": ["reviewer"]
+      "roles": [
+        "reviewer"
+      ]
     },
     "reviewer-memory-d301": {
       "source": "reference/reviewer-memory-d301.md",
@@ -614,7 +638,9 @@
       "injected": false,
       "step_detail": true,
       "step": "when you reach step 8 (memory review), not before",
-      "roles": ["reviewer"]
+      "roles": [
+        "reviewer"
+      ]
     },
     "reviewer-master-exit-d301": {
       "source": "reference/reviewer-master-exit-d301.md",
@@ -622,7 +648,9 @@
       "injected": false,
       "step_detail": true,
       "step": "when you reach master-exit review, not before",
-      "roles": ["reviewer"]
+      "roles": [
+        "reviewer"
+      ]
     },
     "bootstrap-foundation-d301": {
       "source": "reference/bootstrap-foundation-d301.md",
@@ -630,7 +658,9 @@
       "injected": false,
       "step_detail": true,
       "step": "when you reach step 8, not before",
-      "roles": ["bootstrap"]
+      "roles": [
+        "bootstrap"
+      ]
     },
     "bootstrap-failure-states": {
       "source": "reference/bootstrap-failure-states.md",
@@ -638,7 +668,9 @@
       "injected": false,
       "step_detail": true,
       "step": "when you reach a step that answers with a state you cannot name, not before",
-      "roles": ["bootstrap"]
+      "roles": [
+        "bootstrap"
+      ]
     },
     "curator-intake-details": {
       "source": "reference/curator-intake-details.md",
@@ -646,7 +678,9 @@
       "injected": false,
       "step_detail": true,
       "step": "when you reach Curation workflow 1: Reconcile, not before",
-      "roles": ["curator"]
+      "roles": [
+        "curator"
+      ]
     },
     "curator-message-details": {
       "source": "reference/curator-message-details.md",
@@ -654,15 +688,19 @@
       "injected": false,
       "step_detail": true,
       "step": "when you reach Curation workflow 1: Reconcile, not before",
-      "roles": ["curator"]
+      "roles": [
+        "curator"
+      ]
     },
     "curator-card-details": {
       "source": "reference/curator-card-details.md",
       "description": "Overview/card and trace-row formats and the batch citation command.",
       "injected": false,
       "step_detail": true,
-      "step": "when you reach Curation workflow 4: L3 is last resort, not before",
-      "roles": ["curator"]
+      "step": "when you reach Curation workflow 2: Before ingest, not before",
+      "roles": [
+        "curator"
+      ]
     },
     "curator-worklist-details": {
       "source": "reference/curator-worklist-details.md",
@@ -670,15 +708,37 @@
       "injected": false,
       "step_detail": true,
       "step": "when you reach Curation workflow 2: Before ingest, not before",
-      "roles": ["curator"]
+      "roles": [
+        "curator"
+      ]
+    },
+    "refused-write": {
+      "source": "reference/refused-write.md",
+      "description": "Scoped same-tool/input-class recovery after a refused correct record write.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when a covered writer or record tool refuses a correct write, not before",
+      "roles": [
+        "architect",
+        "orchestrator",
+        "designer",
+        "strategist",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer"
+      ]
     },
     "curator-writer-details": {
       "source": "reference/curator-writer-details.md",
       "description": "Command/options and check messages at step 2; record formats and read-back call at step 3.",
       "injected": false,
       "step_detail": true,
-      "step": "when you reach Curation workflow 2: Before ingest, not before",
-      "roles": ["curator", "manager"]
+      "step": "before a CLI deciding run or write; use record formats at Curation workflow 2: Before ingest",
+      "roles": [
+        "curator",
+        "manager"
+      ]
     },
     "shared-writing-profile": {
       "source": "reference/shared-writing-profile.md",
@@ -686,13 +746,21 @@
       "injected": false,
       "step_detail": true,
       "step": "when you reach Curation workflow 2: Before ingest, not before",
-      "roles": ["curator", "worker", "reviewer"]
+      "roles": [
+        "curator",
+        "worker",
+        "reviewer"
+      ]
     },
     "visual-explainer-authoring": {
       "source": "reference/visual-explainer-authoring.md",
       "description": "Apply the shared writing profile to optional visual walkthroughs without replacing required evidence.",
       "injected": false,
-      "roles": ["worker", "curator", "reviewer"]
+      "roles": [
+        "worker",
+        "curator",
+        "reviewer"
+      ]
     },
     "rationale": {
       "source": "reference/rationale.md",
@@ -718,6 +786,160 @@
       "source": "templates/",
       "description": "Field schemas for start handovers and handoff artifacts, and the plan/report template library for the seats that compile them.",
       "injected": false
+    },
+    "architect-working-rules": {
+      "source": "reference/architect-working-rules.md",
+      "description": "Named-step architect working rules duties.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach Establish the work, Delegate and decide, Developer decisions and permissions, a Curator text/model/role-set change, or measurement/unknown/failure/cost discussion, not before",
+      "roles": [
+        "architect"
+      ]
+    },
+    "manager-working-rules": {
+      "source": "reference/manager-working-rules.md",
+      "description": "Named-step manager working rules duties.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach progress judgment, provider replacement or the named coordination step, not before",
+      "roles": [
+        "manager",
+        "architect",
+        "orchestrator"
+      ]
+    },
+    "worker-working-rules": {
+      "source": "reference/worker-working-rules.md",
+      "description": "Named-step worker working rules duties.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach the named working-folder, sandbox or helper step, not before",
+      "roles": [
+        "worker"
+      ]
+    },
+    "shared-working-rules": {
+      "source": "reference/shared-working-rules.md",
+      "description": "Named-step shared working rules duties.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach its named clock, evidence, sandbox, configuration or host step, not before",
+      "roles": [
+        "architect",
+        "orchestrator",
+        "designer",
+        "strategist",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "investigator",
+        "bootstrap"
+      ]
+    },
+    "coordination-starts": {
+      "source": "reference/coordination-starts.md",
+      "description": "Named-step coordination starts duties.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach a role start or override verification, not before",
+      "roles": [
+        "manager",
+        "architect",
+        "orchestrator"
+      ]
+    },
+    "message-handover": {
+      "source": "reference/message-handover.md",
+      "description": "Named-step message handover duties.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach a waiting-seat handover or held/full-store receipt, not before",
+      "roles": [
+        "architect",
+        "orchestrator",
+        "designer",
+        "strategist",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "investigator"
+      ]
+    },
+    "child-questions": {
+      "source": "reference/child-questions.md",
+      "description": "Named-step child questions duties.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach a child's question or the developer's answer to it, not before",
+      "roles": [
+        "manager",
+        "orchestrator",
+        "architect"
+      ]
+    },
+    "investigator-instruction-review": {
+      "source": "reference/investigator-instruction-review.md",
+      "description": "Named-step investigator instruction review duties.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach a concern that asks for an instruction-shortfall review, not before",
+      "roles": [
+        "investigator"
+      ]
+    },
+    "knowledge-use": {
+      "source": "reference/knowledge-use.md",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "architect",
+        "investigator",
+        "worker",
+        "reviewer"
+      ],
+      "description": "Knowledge and code reads for diagnosis, investigation, editing and review.",
+      "step": "when you reach Architect diagnosis, Investigator repository-code investigation, Worker editing or a failing test, or Reviewer inspection of changes, not before"
+    },
+    "curator-repository-foundation": {
+      "source": "reference/curator-repository-foundation.md",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "curator"
+      ],
+      "step": "when you reach a repository's first or resumed knowledge foundation, not before"
+    },
+    "worker-turn-report": {
+      "source": "templates/turn-report.md",
+      "description": "Requirement Attempt Journal shape at the Worker freeze report.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach the freeze report, not before",
+      "roles": [
+        "worker"
+      ]
+    },
+    "knowledge-commands": {
+      "source": "reference/knowledge-commands.md",
+      "description": "Registry-bound CLI and knowledge MCP command reference at use.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach a knowledge command or its result, not before",
+      "roles": [
+        "architect",
+        "orchestrator",
+        "designer",
+        "strategist",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "investigator",
+        "bootstrap"
+      ]
     }
   },
   "composition_order": [
@@ -726,7 +948,7 @@
   ],
   "notes": [
     "Routing metadata only: the role route composes exactly one role source and one applicable operation source.",
-    "The frozen core map remains metadata for compiler compatibility; shared core blocks are not injected into role capsules.",
+    "The frozen core map remains metadata for compiler compatibility; shared core blocks are not injected into role capsules; the digest travels beside the capsule in the first message.",
     "Canonical task references and workspace bindings travel in the handover as data, separate from instruction blocks.",
     "The compiler vocabulary retains ten role ids and nine operation ids; the role launcher exposes only the seven current UI roles.",
     "Paseo is the host. Role agents start and message each other with the AR tools role_start and role_message on the agents-remember-task tool server."

@@ -1,22 +1,16 @@
 # Core — The Three-Party Loop (one home — this file owns the loop doctrine)
 
-**OWNER → BUILDER → REVIEWER → owner, at every level that owns work.** The owner never
-self-approves; the builder never lands; the reviewer never decides — **verdicts are evidence**. The
-owner checks the verdict and either redispatches a builder or escalates. Role files reference this
-file; they do not restate it.
+The owner validates the deliverable and decides the gate; the builder builds, and a distinct Reviewer supplies evidence rather than gate acceptance. Role boundaries remain fixed, including developer-chosen Architect direct coordination.
 
 | Level | Owner (holds the deliverable, rules, lands) | Builder | Reviewer |
 | --- | --- | --- | --- |
-| Leaf | the leaf's owning seat (manager; architect in tight/flat mode) | spawned worker (no-commit contract) | spawned reviewer, criteria catalog + liberty |
+| Leaf | Manager, or Architect under developer-chosen direct coordination | Worker | distinct Reviewer on that leaf |
 | Master | the manager | the leaf workers | the master-exit seam reviewer (verdict rides `master-handover-approval`) |
 | Portfolio plan | the architect | strategist when approved; orchestrator on a sanctioned strategist skip | reviewer with the plan-review catalog |
 
 ## Review is opt-in and explicit
 
-Run independent route review **only** when the developer or the approved task/role brief requests
-it; closeout and integration never require or launch it. Every review is dispatched with an explicit
-mode — `reviewMode=baseline` or `reviewMode=fix-verification` — and the full mode contract lives in
-`operations/review.md`.
+Independent review runs when the task or owner requests it, under an explicit baseline or fix-verification mode and the exact seam. Closeout creates no new review duty; existing required review and curation evidence still precede the gate.
 
 Independence requires **another agent**, never builder self-review: the reviewer seat is never the
 author/implementer seat. Every requirement verdict must cite evidence of the requirement's class;
@@ -24,24 +18,13 @@ evidence of the wrong class is verdict laundering, not a pass.
 
 ## Complexity-scored tiers (per leaf, at dispatch, when review is requested)
 
-The owning seat scores three axes — blast radius (doctrine/enforcement/public surface vs
-leaf-local) · novelty (new subsystem vs pattern-following) · size (files × steps) — into three
-tiers:
+The owning seat dispatches the review scope, mode, exact candidate and requirement revision; review scope follows the agreed seam rather than an invented score.
 
-- **direct** — ordinary build channel plus the requested independent route review; no additional
-  loop machinery.
-- **builder-verified** — builder implements; owner additionally verifies report-vs-artifact; the
-  requested route review still runs.
-- **full loop** — builder + independent reviewer rounds, with the route partition as the review
-  scope floor where the leaf owns that seam.
+- A baseline covers the complete agreed candidate diff, including unattributed changes.
+- Owner report-versus-artifact validation is not independent review or permission to accept its own authorship.
+- Fix-verification covers only the sealed outstanding findings and their required evidence.
 
-The strategist's blast-radius register is the scoring input when an orchestration task exists. A
-leaf's loop mark (tier + scope: manager | orchestrator — the owning level runs the loop with ITS
-agent set) is recorded on the leaf doc with a decision-log entry. A master whose leaves all score
-`direct` avoids iterative full-loop machinery. Atomic leaves still defer a requested route review to
-the one master integration seam; organizational leaves retain their requested review
-scope. **The knobs tune review depth and round machinery; they do not create a review when none was
-requested.**
+Record the agreed seam and review authority on the task. Organizational leaf review and atomic integration review keep their distinct scopes; changing a label or the coordinating level creates no new baseline and no new mandatory review.
 
 ## Rounds and convergence
 
@@ -58,13 +41,7 @@ requested.**
 - **The convergence rule.** Every fix-verification round must shrink or honestly retain the listed
   open set with fixed/unfixed dispositions. At the settings limit, or when a further round is needed, request authorization as `../operations/review.md` states. Verifying repaired items is an ordinary fix-verification round: when a review's rounds are used up and the only items left were raised before and have since been repaired, the same reviewer verifies exactly those items in the next round, not as an exception.
 
-The simple review rule: if no review state is present, the used-round count is zero and the next
-review is a baseline; do not create a pristine marker or refuse because legacy review history is
-absent. Before reviewer work the owner calls `task_doc(operation="begin_review")`; after the result
-the owner records it with `task_doc(operation="record_review")` or the existing
-`task_doc(operation="record_route_review")`. Review 1 is thorough — inspect the entire agreed scope,
-applicable criteria, required routes, and lenses, then record the fixed original issue list with
-precise statements, evidence, and fix-acceptance criteria.
+With no review state, the used count is zero and the next review is baseline; invent no pristine marker. The leaf Reviewer opens its round with `task_doc(operation="begin_review")` and records its result with `record_review` or `record_route_review`; other seams retain their owner recording. The first review covers the complete agreed scope and fixes its original issue list, statements, evidence and acceptance criteria.
 
 A changed candidate, source, requirement version, model, seat, route, or report label does **not**
 reset the list. Unknown, duplicate, rewritten, reintroduced, newly discovered, or outside-list
@@ -104,12 +81,4 @@ failure/recovery behavior, examples, forbidden overreach, expected evidence, aut
 dependencies, and open truth gaps. Material state, sequence, ownership, and interaction
 relationships get diagrams.
 
-A fresh agent cold-reads each packet without the planning transcript and must be able to explain
-what changes, what stays unchanged, the important failure states, and proof of conformance. The
-architect presents the complete corpus for developer approval and creates task topology only after
-that approval; every approved packet records the durable ruling. Masters and leaves carry filtered
-ID + version + canonical-packet links, never rewritten requirement contracts. Each leaf owns exactly
-one primary requirement revision; several leaves may implement independently executable
-manifestations of one revision, while adjacent requirements are dependency/preservation context
-only. A requirement change increments its version, cites durable developer approval, invalidates
-affected acceptance state, and rebriefs affected leaves.
+Present the complete requirement corpus for developer approval before task topology; record that ruling and project canonical ID/version/packet links into tasks rather than rewriting their contracts. A leaf owns one primary revision, with adjacent context preserved separately. A requirement change needs a new version, durable developer approval, invalidation of affected acceptance and a rebrief of affected leaves. Reviews and cold reads are advice, not authority to add a requirement.

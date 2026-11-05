@@ -1,25 +1,18 @@
-"""Focused checks for source admission, the manifest parser and the frozen vocabulary.
+"""Source admission, strict manifest/vocabulary and content-addressed compilation.
 
-Three boundaries are pinned here, each of which a later leaf consumes:
-
-* the frozen vocabulary is exactly ten roles and nine operations, and the ambient
-  launcher is a routing condition rather than a role;
-* the canonical composition manifest parses, agrees with that vocabulary, and
-  declares no key that no longer exists;
-* admitting sources proves containment before it reads a byte, and preserves
-  content-addressed revisions, so "the same bytes compile to the same capsule" is a
-  property of what was read rather than of what was requested; and
-* the shipped corpus compiles end to end from disk, twice, to the same digest.
-
-The last case is the only one that touches the real tree; everything else builds its
-own fixture so a failure names one boundary instead of a whole corpus.
+The frozen ten roles, nine operations and launcher routing condition agree with
+shipped declarations. Admission proves containment before reading; revisions
+address exact bytes. Repeated shipped compilation is deterministic and strips
+only typed metadata while preserving complete instruction prose.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, get_args
 
@@ -46,6 +39,7 @@ from agents_remember.models.role_capsules.statuses import CAPSULE_STATUSES
 from agents_remember.models.role_capsules.types import (
     CapsuleAdmittedFacts,
     CapsuleBinding,
+    CapsuleInstructionBlock,
     CapsuleLauncherSeat,
     CapsuleRoleSeat,
     CapsuleSourceAdmission,
@@ -752,30 +746,55 @@ def test_no_core_unit_can_enter_any_shipped_role_capsule(role: str) -> None:
 
 
 def test_an_admitted_core_source_is_inert_for_a_role_capsule() -> None:
-    """Core bytes may still be *admitted*; they must not be *composed*.
+    """Shared sources never compose; the required digest source still binds the seal.
 
-    The admission request still carries the manifest's declared core sources — that is a fact
-    about the corpus, and refusing to admit them would be a different change. What the ruling
-    fixes is the composition: the delivered capsule must be byte-identical to one compiled
-    without any core source at all, so a reader can see that the shared material contributes
-    nothing to the instruction stream.
+    Inherited rule 24 requires every-role admission even though its instruction text
+    travels outside the capsule. Other admitted core sources remain inert for both
+    rendered capsule text and semantic identity.
     """
 
     request = _shipped_request("worker", "implementation")
-    assert request.core, "the corpus still declares core sources; this case needs them admitted"
+    digest_source = _shipped_parsed().core["every-role"].source
+    assert len(request.core) > 1, "this case needs non-digest core sources too"
 
     with_core = compile_admitted_capsule(_shipped_binding("worker", "implementation"), request)
-    without_core = compile_admitted_capsule(
+    digest_only = compile_admitted_capsule(
+        _shipped_binding("worker", "implementation"),
+        _shipped_request("worker", "implementation", core=(digest_source,)),
+    )
+
+    assert with_core.ok and digest_only.ok
+    assert with_core.result is not None and digest_only.result is not None
+    assert with_core.result.render_instructions() == digest_only.result.render_instructions(), (
+        "an admitted core source changed the delivered capsule instructions"
+    )
+    assert with_core.semantic_digest == digest_only.semantic_digest
+    omitted = compile_admitted_capsule(
         _shipped_binding("worker", "implementation"),
         _shipped_request("worker", "implementation", core=()),
     )
+    assert not omitted.ok
+    assert omitted.error is not None
+    assert omitted.error.status == "missing-required-instruction"
+    assert digest_source in omitted.error.detail
 
-    assert with_core.ok and without_core.ok
-    assert with_core.result is not None and without_core.result is not None
-    assert with_core.result.render_instructions() == without_core.result.render_instructions(), (
-        "an admitted core source changed the delivered instructions"
+
+def _assert_delivered_source_prose(block: CapsuleInstructionBlock, source: bytes) -> None:
+    """Only closed, typed composition metadata leaves the independently read source."""
+    key = r"[a-z0-9]+(?:-[a-z0-9]+)*"
+    metadata = re.compile(
+        rf"<!-- ar:(?:roles [a-z,\-]+|(?:needs|gives) {key} (?:from|to) {key}: "
+        rf"{key}(?:, {key})*) -->"
     )
-    assert with_core.semantic_digest == without_core.semantic_digest
+    prose = "".join(
+        line
+        for line in strip_frontmatter(source.decode()).splitlines(keepends=True)
+        if metadata.fullmatch(line.rstrip("\r\n")) is None
+    )
+    assert block.content == prose
+    assert block.revision == compute_content_digest(source), (
+        "the revision must still address the whole file"
+    )
 
 
 def test_a_role_capsule_carries_no_frontmatter_from_any_composed_source() -> None:
@@ -801,19 +820,21 @@ def test_a_role_capsule_carries_no_frontmatter_from_any_composed_source() -> Non
         assert block.content.lstrip().startswith("#"), (
             f"{block.identity} does not open on its own heading after the frontmatter strip"
         )
-        without_frontmatter = strip_frontmatter(
-            (LIFECYCLE_ROOT / block.source_path).read_text(encoding="utf-8")
+        # Both planning audiences are delivered to the Architect. Audience and
+        # typed handoff metadata leave; the complete remaining prose must stay.
+        source = (LIFECYCLE_ROOT / block.source_path).read_bytes()
+        _assert_delivered_source_prose(block, source)
+        lines = block.content.splitlines(keepends=True)
+        assert len(lines) > 1
+        deleted = replace(block, content="".join(lines[1:]))
+        relocated = replace(block, content="".join((*lines[1:], lines[0])))
+        leaked = replace(
+            block, content=block.content + "<!-- ar:gives proof to worker: report -->\n"
         )
-        # Both planning audiences are delivered to the Architect; only metadata markers leave.
-        without_frontmatter = "".join(
-            line
-            for line in without_frontmatter.splitlines(keepends=True)
-            if not line.startswith("<!-- ar:roles ")
-        )
-        assert block.content == without_frontmatter
-        assert block.revision == compute_content_digest(
-            (LIFECYCLE_ROOT / block.source_path).read_bytes()
-        ), "the revision must still address the whole file"
+        wrong_revision = replace(block, revision=compute_content_digest(source + b"\n"))
+        for mutant in (deleted, relocated, leaked, wrong_revision):
+            with pytest.raises(AssertionError):
+                _assert_delivered_source_prose(mutant, source)
 
 
 def test_the_frontmatter_strip_only_removes_a_closed_leading_block() -> None:

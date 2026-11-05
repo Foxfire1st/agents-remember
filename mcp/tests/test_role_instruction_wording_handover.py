@@ -570,6 +570,17 @@ class RoleToolDescriptionWordingTests(unittest.TestCase):
                 self.assertEqual(forbidden_in(text), [])
                 if name == "role_message":
                     self.assertIn("Reference: docs/reference/mcp-tools.md.", text)
+                    # Rule47: the compact surface keeps its own promise/held semantics.
+                    self.assertLessEqual(len(text), 600)
+                    self.assertIn(
+                        "A mid-turn message reaches the running turn, which the host may cancel.",
+                        text,
+                    )
+                    self.assertIn(
+                        "Held means queued for delivery when the recipient can take it, "
+                        "not refusal; never resend held.",
+                        text,
+                    )
                     self.assertIn("Only a role agent that AR launched can call it", reference)
                 else:
                     self.assertIn("Only a role agent that AR launched can call this", text)
@@ -610,13 +621,12 @@ class RoleToolDescriptionWordingTests(unittest.TestCase):
             ),
             (
                 "role_message",
-                "Only the host request is promised: without wait the call answers once the host "
-                "accepted the message",
+                "Only the host request is promised: without wait, host acceptance; "
+                "with wait, the consuming turn ends, not AR acceptance.",
             ),
             (
                 "role_message",
-                "with wait it answers when the consuming turn ends "
-                "(finished, failed, cancelled, permission, timeout)",
+                "With `wait` it returns when the turn that consumed the message ends.",
             ),
             (
                 "role_start_set",

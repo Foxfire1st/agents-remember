@@ -18,6 +18,7 @@ from unittest import mock
 import pytest
 from agents_remember.application import knowledge_write_route as write_body
 from agents_remember.application.knowledge_writer import Owner, WriteRequest
+from agents_remember.application.knowledge_writer.handoff import read_handoff, read_handoff_shapes
 from agents_remember.cli import knowledge_bootstrap, knowledge_write_route
 from agents_remember.cli.__main__ import main
 from agents_remember.cli.knowledge_write_route import run_wave_write
@@ -62,6 +63,39 @@ from writer_worklist_test_support import write_knowledge
 
 OWNER = Owner(task=TASK_ID, kind="leaf", id=LEAF_ID)
 TEST_ID = f"{TEST_FILE}::LandingTests::test_pair_lands_together"
+
+
+def test_producer_shape_check_does_not_admit_a_partial_curator_input(tmp_path: Path) -> None:
+    world = build_world(tmp_path)
+    producer = [entry("P-1", target=[target("land_pair")])]
+    _, shape_problems = read_handoff_shapes(producer)
+    assert shape_problems == []
+    _, intake_problems = read_handoff(producer)
+    assert any("scope" in problem.message for problem in intake_problems)
+    assert any("admission" in problem.message for problem in intake_problems)
+    before = tree_bytes(world.memory)
+    report = _write(world, producer)
+    assert report.refused, report.render()
+    assert tree_bytes(world.memory) == before
+
+
+@pytest.mark.parametrize("defect", ["rationale", "locator", "evidence", "proof"])
+def test_producer_and_writer_keep_identical_field_refusals(defect: str) -> None:
+    authored = entry("P-1", target=[target("land_pair")], scope=SCOPE, admission=ADMISSION)
+    if defect == "rationale":
+        authored["target"][0]["rationale"] = ""
+    elif defect == "locator":
+        authored["target"][0]["locator"] = {"kind": "unrecognized"}
+    elif defect == "evidence":
+        authored["evidence"] = 42
+    else:
+        authored["proofs"] = [{"test": TEST_FILE, "facet": "A bare file is not a case."}]
+    _, shape_problems = read_handoff_shapes([authored])
+    _, intake_problems = read_handoff([authored])
+    assert shape_problems
+    assert [problem.render() for problem in shape_problems] == [
+        problem.render() for problem in intake_problems
+    ]
 
 
 def _write(world: World, document: Any, *, commit: bool = True, worklist: Any = None):

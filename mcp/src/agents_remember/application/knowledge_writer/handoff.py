@@ -318,6 +318,20 @@ class HandoffDocument:
 def read_handoff(raw: Any) -> tuple[HandoffDocument, list[Problem]]:
     """Read the document's three sections, collecting every shape problem instead of stopping."""
 
+    return _read_document(raw, producer_shapes=False)
+
+
+def read_handoff_shapes(raw: Any) -> tuple[HandoffDocument, list[Problem]]:
+    """Read producer and row shapes without making the Curator's admission decisions.
+
+    The same field decoders serve the writer and the read-only handoff check. Scope,
+    admission and attachment to authored records remain full-writer intake requirements.
+    """
+
+    return _read_document(raw, producer_shapes=True)
+
+
+def _read_document(raw: Any, *, producer_shapes: bool) -> tuple[HandoffDocument, list[Problem]]:
     problems: list[Problem] = []
     if isinstance(raw, list):
         raw = {"entries": raw}
@@ -327,10 +341,11 @@ def read_handoff(raw: Any) -> tuple[HandoffDocument, list[Problem]]:
     if unknown:
         problems.append(Problem("document", f"unknown section(s) {unknown}; known: {SECTIONS}"))
     sections = {name: _section(raw, name, problems) for name in SECTIONS}
+    entry_reader = read_producer_entry if producer_shapes else _entry
     entries = [
         entry
         for position, one in enumerate(sections["entries"], start=1)
-        if (entry := _entry(position, one, problems)) is not None
+        if (entry := entry_reader(position, one, problems)) is not None
     ]
     records = [
         record
@@ -343,7 +358,8 @@ def read_handoff(raw: Any) -> tuple[HandoffDocument, list[Problem]]:
         if (row := _row(position, one, problems)) is not None
     ]
     _require_distinct_handles(entries, records, problems)
-    _require_attached_rulings(entries, records, problems)
+    if not producer_shapes:
+        _require_attached_rulings(entries, records, problems)
     return (
         HandoffDocument(
             entries=tuple(entry for entry in entries if not entry.ruling),
@@ -623,7 +639,9 @@ def _identifiers(value: Any) -> tuple[str, ...]:
     return ()
 
 
-def _entry(position: int, raw: Any, problems: list[Problem]) -> EntryRequest | None:
+def read_producer_entry(position: int, raw: Any, problems: list[Problem]) -> EntryRequest | None:
+    """Decode one entry's shared fields without inventing its Curator-owned keys."""
+
     where = f"entries[{position}]"
     if not isinstance(raw, Mapping):
         problems.append(Problem(where, "an entry is a JSON object"))
@@ -653,8 +671,16 @@ def _entry(position: int, raw: Any, problems: list[Problem]) -> EntryRequest | N
         supersedes=_identifiers(raw.get("supersedes")),
         replace_evidence=replacement is True,
     )
-    if entry.ruling:
+    return entry
+
+
+def _entry(position: int, raw: Any, problems: list[Problem]) -> EntryRequest | None:
+    entry = read_producer_entry(position, raw, problems)
+    if entry is None or entry.ruling:
         return entry
+    where = f"entries[{position}] ({entry.entry_id})"
+    invariant_id = entry.invariant_id
+    admission = entry.admission
     scope = raw.get("scope")
     if scope is not None or invariant_id is None:
         read = read_curator_scope(scope)

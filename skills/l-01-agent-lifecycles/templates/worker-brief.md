@@ -1,7 +1,7 @@
 # Template — Worker Brief
 
 What a starting seat (manager / orchestrator) makes sure the leaf's documents hold before it
-starts a worker with `role_start_set` or `role_start`. The call carries no brief: the worker's
+starts a worker with `role_start`. The call carries no brief: the worker's
 first message is compiled from the documents.
 
 **This template feeds inputs; it does not author rules.** Where the packet states a rule, the rule's
@@ -40,7 +40,7 @@ You are a WORKER for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Yo
   goes to the Reviewer and no round is begun. Where a path was changed on both sides, or a focused
   test fails, repair exactly that and send the same Reviewer one look at the repair. Send memory
   conflicts directly to the Curator; ask the Manager only for a
-  step the sync contract reserves to it. For a native memory-file conflict, the Curator repairs content; the Manager captures, verifies and stages it, then the Worker continues `worktree_sync` on `agents-remember-task` with the exact contract and `resolution_action="continue"`. No other `worktree_*`, `lifecycle_finalize_task`, `task_doc`,
+  step the sync contract reserves to it. For a native memory-file conflict, the Curator repairs content; the Manager captures, verifies and stages it, then the Worker continues `worktree_sync` on `agents-remember-task` with the exact contract and `resolution_action="continue"`. For canonical task-document edits and your own completed step marking, use `task_doc` first; a correct-input refusal follows `../reference/refused-write.md`. No other `worktree_*`, `lifecycle_finalize_task`,
   `memory_*`, or `route_index_refresh` —
   generated route indexes are regenerated with a local `build_route_indexes(...)` from the memory
   worktree.
@@ -98,7 +98,13 @@ comments except bounded `L<leaf>-R<n>`/`L<leaf>-S<n>` durable-requirement identi
 Name any guideline finding or plan conflict in your turn report; a contradiction you hide is a
 verdict finding, not a style note.
 
+## Design guidelines (read before your first UI edit)
+
+`<memory-worktree-path>/system/design-guidelines.md` — UI work follows it, where the file exists.
+
 ## Targeted checks (before you report)
+
+Before each freeze, pass the handover checks named in `system/coding-guidelines.md` on a clean copy of the candidate's final bytes. The freeze report names every check, the copy's tree and its result. Repair a failing check before freezing. These fast deterministic checks are distinct from full code-quality and full-test operations, which require an explicit developer request.
 Run targeted checks and record the durable-evidence promotion hold point as `../templates/turn-report.md` states, using the repository-specific commands, environment and evidence requirements from `system/task-publication.md`, `system/coding-guidelines.md` and `system/tools.md`. Full code-quality and full-test operations require an explicit developer request. A failed or not-run targeted check is reported and never relabeled as full green.
 - `git diff --check` in both worktrees.
 
@@ -120,6 +126,9 @@ freeze as `../operations/implementation.md` §Outputs states, in the shape `skil
   stamps the <leaf-id> commit."
 
 ## Turn report and direct handover
+Freeze the candidate and first tell the Manager to start the Reviewer; once that Reviewer exists,
+send it the freeze directly. After code PASS and the Manager has started the Curator, send the
+Curator the exact passed freeze’s hand-off list directly.
 Write `<notes-reports-path>/<leaf-id>-worker-report.md` following
 `skills/l-01-agent-lifecycles/templates/turn-report.md` and `../operations/implementation.md` §Outputs — including exact links to every newly
 appended journal attempt, a separate Checks section with exact commands + outcomes,

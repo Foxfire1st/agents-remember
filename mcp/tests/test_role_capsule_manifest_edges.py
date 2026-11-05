@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import copy
 import json
+import re
+import shutil
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -11,6 +15,10 @@ from agents_remember.application.role_capsules.launch import compile_launch_caps
 from agents_remember.application.role_capsules.sources import (
     CapsuleAdmissionRequest,
     admit_capsule_sources,
+)
+from agents_remember.application.skill_resources.capsule import (
+    CapsuleSeatAddress,
+    routed_admission_for,
 )
 from agents_remember.errors import CapsuleCompilationError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -44,6 +52,93 @@ from test_role_capsule_admission import (
 )
 
 __all__ = ["launch_corpus_fixture", "world_fixture"]
+
+
+def test_investigator_review_pointer_requires_its_declared_source(tmp_path: Path) -> None:
+    """A named facet reaches the seat; a present but undeclared file cannot stand in."""
+    root = tmp_path / "corpus"
+    shutil.copytree(LIFECYCLE_ROOT, root)
+    manifest = root / MANIFEST_RELATIVE
+    document = json.loads(manifest.read_text())
+    source = "reference/investigator-instruction-review.md"
+
+    def compile_current():
+        request = routed_admission_for(
+            root,
+            MANIFEST_RELATIVE,
+            manifest.read_bytes(),
+            CapsuleSeatAddress("investigator", "orientation"),
+        )
+        return compile_admitted_capsule(_shipped_binding("investigator", "orientation"), request)
+
+    accepted = compile_current()
+    assert accepted.ok, accepted.render_explanation()
+    assert accepted.result is not None
+    references = {entry.source_path: entry for entry in accepted.result.capsule.detail_references}
+    assert references[source].content == (root / source).read_bytes()
+    assert "two-week window" in references[source].content.decode()
+    assert "when you reach a concern" in accepted.result.render_instructions()
+    del document["references"]["investigator-instruction-review"]
+    manifest.write_text(json.dumps(document))
+    refused = compile_current()
+    assert refused.error is not None
+    assert refused.error.status == "detail-reference-missing"
+    assert source in refused.error.detail
+    assert (root / source).is_file()
+
+
+def test_progress_judgment_detail_reaches_all_declared_coordination_seats() -> None:
+    """Rule41 requires a direct selective pointer; a declaration alone delivers nothing."""
+    parsed = _shipped_parsed()
+    source = "reference/manager-working-rules.md"
+    for role in ("architect", "manager", "orchestrator"):
+        for operation in parsed.roles[role].operations:
+            outcome = compile_admitted_capsule(
+                _shipped_binding(role, operation), _shipped_request(role, operation)
+            )
+            assert outcome.ok, outcome.render_explanation()
+            assert outcome.result is not None
+            details = {
+                entry.source_path: entry for entry in outcome.result.capsule.detail_references
+            }
+            assert source in details, (role, operation)
+            assert details[source].content == (LIFECYCLE_ROOT / source).read_bytes()
+            assert "{{detail:" + source + "}}" in outcome.result.render_instructions()
+
+
+def test_architect_measurement_detail_keeps_change_trigger_and_unknown_boundary() -> None:
+    """Rule50's retained trigger and outcome meanings reach the actual Architect detail."""
+    for operation in _shipped_parsed().roles["architect"].operations:
+        outcome = compile_admitted_capsule(
+            _shipped_binding("architect", operation), _shipped_request("architect", operation)
+        )
+        assert outcome.ok, outcome.render_explanation()
+        assert outcome.result is not None
+        detail = next(
+            entry
+            for entry in outcome.result.capsule.detail_references
+            if entry.source_path == "reference/architect-working-rules.md"
+        ).content.decode()
+        for clause in (
+            "when the Curator's text, model or role set changes, and on the developer's request",
+            "Every measurement belongs to the Architect; the Worker implements tooling and agreed edits.",
+            "An infrastructure failure, a missing capture or an unanswered prompt makes a trial unknown",
+            "Record tokens per attempt and per run, judge usage separately and unknown usage distinctly.",
+            "About 2.5 million tokens is the comparison guide, not a per-trial cap",
+            "A case below 2 of 3 on a model is a failure for the loop.",
+            "A run gets its own coordination report with raw evidence and a one-page summary per case theme.",
+        ):
+            assert clause in detail, (operation, clause)
+        assert "No role text gains a per-leaf grader step." in detail
+        assert "only a worse theme reopens the loop" in detail
+        assert "Nothing waits for the developer before spending." in detail
+        assert "No ruling record is kept per loop change." in detail
+        for superseded in (
+            "bring a projection well beyond it to the developer before spending",
+            "take its cause, proposed retry/recovery/drop and changed population to the developer",
+            "Each agreed change records a ruling",
+        ):
+            assert superseded not in detail
 
 
 def test_launch_refuses_malformed_audience_markers_after_common_or_excluded_passages(
@@ -301,3 +396,169 @@ def test_composing_roots_answers_what_each_seat_kind_can_actually_contribute() -
     launcher_composed = {block.composition_root for block in launcher.result.capsule.instructions}
     assert "role" not in launcher_composed
     assert launcher_composed <= set(launcher_roots)
+
+
+def _assert_core_source_map(root: Path, document: dict) -> None:
+    """Every current non-heading source line belongs to exactly one frozen/new unit."""
+    files: dict[str, list] = {}
+    for row in document["units"]:
+        source = (root / row["file"]).read_text().splitlines()
+        start, end = row["lines"]
+        assert 1 <= start <= end <= len(source), row["id"]
+        assert sha256("\n".join(source[start - 1 : end]).encode()).hexdigest() == row["sha256"], (
+            row["id"]
+        )
+        files.setdefault(row["file"], []).append(row)
+    for path, rows in files.items():
+        extents = [row["lines"] for row in rows]
+        assert extents == sorted(extents), path
+        covered = [number for start, end in extents for number in range(start, end + 1)]
+        assert len(covered) == len(set(covered)), path
+        lines = (root / path).read_text().splitlines()
+        for number, line in enumerate(lines, 1):
+            following = lines[number] if number < len(lines) else ""
+            table_header = line.startswith("|") and re.fullmatch(r"\|[\s:|\-]+\|", following)
+            structural = (
+                not line.strip()
+                or line.startswith("#")
+                or table_header
+                or re.fullmatch(r"\|[\s:|\-]+\|", line)
+            )
+            assert structural or number in covered, (path, number, "unmapped source line")
+
+
+def _assert_core_dispositions(root: Path, document: dict, text: str) -> None:
+    rows = {row["id"]: row for row in document["units"]}
+    assert len(rows) == len(document["units"]), "duplicate ID"
+    lines = text.splitlines()
+    reasons = {
+        "rationale or history",
+        "stated already",
+        "enforced by the product",
+        "stage procedure reached through its operation file",
+        "no action",
+        "binds no started role",
+        "lead-in",
+    }
+    for row in rows.values():
+        if row["disposition"] == "digest":
+            assert row["digestLines"], row["id"]
+            for number in row["digestLines"]:
+                match = re.search(r"\(([^()]*)\)$", lines[number - 1])
+                assert match and row["id"] in match[1].split(", "), row["id"]
+        else:
+            assert row["disposition"] == "reference" and row["reason"] in reasons, row["id"]
+            assert row["evidence"], row["id"]
+            for evidence in row["evidence"]:
+                if "sha256" in evidence:
+                    source = (root.parents[1] / evidence["path"]).read_text().splitlines()
+                    start, end = evidence["lines"]
+                    assert (
+                        sha256("\n".join(source[start - 1 : end]).encode()).hexdigest()
+                        == evidence["sha256"]
+                    ), row["id"]
+    for number, line in enumerate(lines, 1):
+        match = re.search(r"\(([^()]*)\)$", line)
+        assert match and not line.startswith("#"), number
+        for identity in match[1].split(", "):
+            assert rows[identity]["disposition"] == "digest"
+            assert number in rows[identity]["digestLines"]
+
+
+def test_frozen_core_inventory_and_digest_map_remain_complete(tmp_path: Path) -> None:
+    document = json.loads((LIFECYCLE_ROOT / "core/digest-map.json").read_text())
+    text = (LIFECYCLE_ROOT / "core/every-role.md").read_text()
+    baseline = document["baseline"]
+    assert baseline["tree"] == "cd0e68f0" and baseline["unitCount"] == 145
+    assert len(baseline["units"]) == len(set(baseline["unitIds"])) == 145
+    assert {row["id"] for row in baseline["units"]} == set(baseline["unitIds"])
+    for row in baseline["units"]:
+        assert sha256(row["text"].encode()).hexdigest() == row["sha256"]
+    current = {row["id"] for row in document["units"]}
+    removed = {row["id"] for row in document["removed"]}
+    assert set(baseline["unitIds"]) <= current | removed
+    assert not current & removed
+    assert document["digest"]["sha256"] == sha256(text.encode()).hexdigest()
+    assert document["digest"]["sizeWords"] == len(text.split())
+    _assert_core_source_map(LIFECYCLE_ROOT, document)
+    _assert_core_dispositions(LIFECYCLE_ROOT, document, text)
+    for key, value in (("sha256", "0" * 64), ("lines", [0, 0])):
+        mutant = copy.deepcopy(document)
+        mutant["units"][0][key] = value
+        with pytest.raises(AssertionError):
+            _assert_core_source_map(LIFECYCLE_ROOT, mutant)
+    mutant = copy.deepcopy(document)
+    next(row for row in mutant["units"] if row["disposition"] == "reference")["reason"] = (
+        "not needed"
+    )
+    with pytest.raises(AssertionError):
+        _assert_core_dispositions(LIFECYCLE_ROOT, mutant, text)
+    copied = tmp_path / "corpus"
+    shutil.copytree(LIFECYCLE_ROOT / "core", copied / "core")
+    source = copied / "core/authority.md"
+    source.write_text(source.read_text() + "\nA new unmapped duty.\n")
+    with pytest.raises(AssertionError, match="unmapped source line"):
+        _assert_core_source_map(copied, document)
+
+
+def test_inherited_step_details_reach_only_the_seats_that_use_them(tmp_path: Path) -> None:
+    """A registry row is insufficient: actual capsules need their selective working pointer."""
+    manifest_bytes = (LIFECYCLE_ROOT / MANIFEST_RELATIVE).read_bytes()
+    knowledge = "reference/knowledge-use.md"
+    foundation = "reference/curator-repository-foundation.md"
+    consumers = {
+        "architect": ("planning", "when diagnosing, not before"),
+        "worker": ("implementation", "when you reach editing or a failing test, not before"),
+        "reviewer": ("review", "when inspecting changes, not before"),
+        "investigator": ("orientation", "when investigating repository code, not before"),
+    }
+    for role, entry in _shipped_parsed().roles.items():
+        operation = consumers[role][0] if role in consumers else entry.operations[0]
+        request = routed_admission_for(
+            LIFECYCLE_ROOT, MANIFEST_RELATIVE, manifest_bytes, CapsuleSeatAddress(role, operation)
+        )
+        outcome = compile_admitted_capsule(_shipped_binding(role, operation), request)
+        assert outcome.ok, outcome.render_explanation()
+        assert outcome.result is not None
+        rendered = " ".join(outcome.result.render_instructions().split())
+        details = {item.source_path: item for item in outcome.result.capsule.detail_references}
+        assert (knowledge in details) == (role in consumers), role
+        assert (foundation in details) == (role == "curator"), role
+        if role in consumers:
+            assert "{{detail:" + knowledge + "}}" in rendered
+            assert consumers[role][1] in rendered
+            detail = details[knowledge].content.decode()
+            for clause in (
+                "memoryRoot",
+                "repositoryRoot",
+                "codeTreeId",
+                'view="source_context"',
+                "Read every page through `continuation` until enumeration is complete",
+                "A proof records what a test demonstrates, not that it passed",
+                "A refusal, partial index or unverified currentness is a stated gap",
+                "whether or not the handover names an invariant or family",
+                "On a failing test, inspect its recorded `proves` links",
+                "where no link is recorded, read the test and code and state that gap",
+                "Change no sibling outside the assigned scope",
+                "distinguish recorded claims, observed evidence and your hypothesis",
+                "Inspect the complete diff, including unattributed files",
+            ):
+                assert clause in detail, (role, clause)
+    root = tmp_path / "corpus"
+    shutil.copytree(LIFECYCLE_ROOT, root)
+    manifest = root / MANIFEST_RELATIVE
+    document = json.loads(manifest_bytes)
+    for key, role, operation in (
+        ("knowledge-use", "worker", "implementation"),
+        ("curator-repository-foundation", "curator", "curation"),
+    ):
+        mutant = copy.deepcopy(document)
+        del mutant["references"][key]
+        manifest.write_text(json.dumps(mutant))
+        request = routed_admission_for(
+            root, MANIFEST_RELATIVE, manifest.read_bytes(), CapsuleSeatAddress(role, operation)
+        )
+        outcome = compile_admitted_capsule(_shipped_binding(role, operation), request)
+        assert outcome.error is not None, key
+        assert outcome.error.status == "detail-reference-missing", outcome.render_explanation()
+        assert key in outcome.error.detail

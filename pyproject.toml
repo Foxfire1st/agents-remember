@@ -85,6 +85,7 @@ product_package_roots = ["mcp/src/agents_remember"]
 verification_package_roots = [
   ".dagger/src/agents_remember_quality",
   "mcp/test_support/agents_remember_test_support",
+  "scripts/agent_evals",
 ]
 
 [tool.radon]

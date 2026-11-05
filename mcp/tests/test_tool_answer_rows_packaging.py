@@ -89,7 +89,7 @@ _ROW_CASE_ROOT_PREFIX = "rowcase-ambient-width-fixed-for-row-bounds-"
 @contextlib.contextmanager
 def _fixed_width_case_root() -> Iterator[Path]:
     """A hermetic fixture root of authored, constant width under /tmp."""
-    root = Path(tempfile.mkdtemp(prefix=_ROW_CASE_ROOT_PREFIX, dir=tempfile.gettempdir()))
+    root = Path(tempfile.mkdtemp(prefix=_ROW_CASE_ROOT_PREFIX, dir="/tmp"))
     try:
         yield root
     finally:

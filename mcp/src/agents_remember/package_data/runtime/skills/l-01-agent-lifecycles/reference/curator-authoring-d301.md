@@ -4,13 +4,13 @@ Read the relevant section before the named step. Existing detail-source names be
 
 ## Before routing cards, writing trace rows and lifting decisions
 
-Read the card detail file (`reference/curator-card-details.md`, at its capsule-linked workspace path) when you reach **Curation workflow 4: L3 is last resort**, not before.
-Never hand-write sidecar JSON; read the card detail file (`reference/curator-card-details.md`, at its capsule-linked workspace path) when you reach **Curation workflow 4: L3 is last resort**, not before.
+Read the card detail file (`reference/curator-card-details.md`, at its capsule-linked workspace path) when you reach **Curation workflow 2: Before ingest**, not before.
+Use the writer for sidecar JSON, with only its scoped correct-write recovery; read the card detail file (`reference/curator-card-details.md`, at its capsule-linked workspace path) when you reach **Curation workflow 2: Before ingest**, not before.
    - a changed file whose card was brought up to date is answered by an `onboarding_trace` row
-     (row format (`reference/curator-card-details.md`, at its capsule-linked workspace path), read when you reach **Curation workflow 4: L3 is last resort**, not before) written through `knowledge-ingest`; the hand-off names the
+     (row format (`reference/curator-card-details.md`, at its capsule-linked workspace path), read when you reach **Curation workflow 2: Before ingest**, not before) written through `knowledge-ingest`; the hand-off names the
      subject, the disposition and the reason, and the writer binds the row to the source files'
      content.
-Read the card detail file (`reference/curator-card-details.md`, at its capsule-linked workspace path) when you reach **Curation workflow 4: L3 is last resort**, not before.
+Read the card detail file (`reference/curator-card-details.md`, at its capsule-linked workspace path) when you reach **Curation workflow 2: Before ingest**, not before.
    **Lift the decisions that keep governing code.** On converted memory, turn each developer ruling
    and requirement-packet choice that still constrains code into a decision record with the
    alternatives it weighed; decisions that matter only within the task stay in the task. The hand-off
@@ -25,6 +25,20 @@ Read the card detail file (`reference/curator-card-details.md`, at its capsule-l
    - the **ruled change intent** — the task, developer decisions, approved design notes, builder
      report, reviewer verdict;
    - the **implemented reality** — the complete fed change set and its verification evidence.
+
+   **Cards say what is true now.** Decide each sentence of every card and its paired notes, including reference captions
+   one by one, whatever its tense or location, dated sections included. Edit individual
+   sentences; never replace a section or regenerate a card wholesale. When a sentence is
+   true now, keep its wording, including true statements about retired things. Before
+   keeping a sentence, verify it in the supplied source. Before narrowing or dropping
+   one, search the supplied source and memory for what supports it. A sentence about
+   what happens is true only if that code runs today; code that exists but never runs
+   does not make it true.
+   Repair or withdraw every false claim in every current carrier found by a
+   bounded search: the card body, paired notes and sibling cards. Repair the class, not just
+   one example. Remove past accounts, including dated change notes, “former … was removed”
+   and “The fix: …”, from the card and name them in that card's history row, written after
+   the card's last edit.
 
 ## Before curation step 2
 
@@ -53,19 +67,27 @@ Read the card detail file (`reference/curator-card-details.md`, at its capsule-l
    back — the writer's report, and the records named by the read-back call (file `reference/curator-writer-details.md`, at its capsule-linked workspace path; read that file when you reach **Curation workflow 2: Before ingest**, not before) — and
    carry the coverage into the handoff: the families authored or updated, and those examined and left unchanged.
 
+## Attribute prepared code locations to their families
+
+Attribute each code location the task's Prepared context names as unattributed to its family, or state in the report why it does not belong.
+
 ## Before curation step 4
 
 4. **Route every change-set item and every notes item to the right home** through the
    `c-05-create-or-update-onboarding-files` skill workflow:
-   - changed source files → their file-level sidecars with compact current contracts and a newest
-     semantic-history entry; a mechanical consumer change with no contract impact gets a precise
-     reviewed no-impact entry, not invented architecture prose;
+   - changed source files → their file-level cards and sidecars with compact current contracts;
+     on converted memory, record the judgment in the history row. A mechanical consumer change
+     with no contract impact gets a precise reviewed no-impact row, not invented architecture prose;
    - route overviews → body updates when route meaning changed, otherwise an explicit reviewed
      no-impact history entry only when that overview was reviewed;
    - entity catalog → only for real load-bearing entity changes;
    - a notes item with no file, route, or entity home → the L3 Operational-Notes target, **last
      resort only**, never the default drop point for an inconvenient finding;
    - generated route indexes → regenerate with `route_index_refresh` on `agents-remember-task` scoped to this leaf.
+
+## Retire deleted or renamed source cards and repair references
+
+When the leaf deletes or renames source files, retire their cards and re-point or remove every reference to them, also where the validator only reports.
 
 ## Before curation step 5
 

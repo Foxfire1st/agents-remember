@@ -91,14 +91,23 @@ def _index_tables(fragment: str, *, dynamic: bool) -> list[str]:
     """
 
     tables = []
-    if not _STATEMENT.search(fragment):
-        return tables
-    for match in _TABLE.finditer(fragment):
+    for statement in _STATEMENT.finditer(fragment):
+        match = _TABLE.match(fragment, statement.start())
+        if match is None:
+            if dynamic:
+                tables.append("dynamic-table")
+            continue
+        tail = fragment[match.end() :]
+        if tail.startswith(('"', "'", "]")):
+            tail = tail[1:]
+        # A literal prefix of an interpolated name is not a fixed table target.
+        complete = not tail or tail[0].isspace() or tail.startswith("(")
+        if dynamic and not complete:
+            tables.append("dynamic-table")
+            continue
         name = match.group(1).lower()
         if name in LOGICAL_TABLES or name.startswith("ix_"):
             tables.append(name)
-    if not tables and dynamic:
-        tables.append("dynamic-table")
     return tables
 
 
@@ -395,3 +404,16 @@ def test_the_census_exception_is_exactly_the_stated_one() -> None:
                 f"{name} is excepted but no longer stages rows into an index table; "
                 "remove it from EXCEPTED_FILES instead of carrying a dead exception"
             )
+
+
+def test_table_classifier_keeps_dynamic_targets_separate_from_dynamic_values() -> None:
+    prefix = "INSERT " + "INTO "
+    for table in ("sessions", "messages"):
+        assert _index_tables(prefix + table + " VALUES (\0)", dynamic=True) == []
+    for table in ("repository", "ix_claim"):
+        assert _index_tables(prefix + table + " VALUES (\0)", dynamic=True) == [table]
+    for target in ("\0", "sessions\0", "main.\0"):
+        assert _index_tables(prefix + target + " VALUES (?)", dynamic=True) == ["dynamic-table"]
+    assert _index_tables(
+        prefix + "sessions VALUES (\0); " + prefix + "\0 VALUES (?)", dynamic=True
+    ) == ["dynamic-table"]

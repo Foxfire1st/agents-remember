@@ -53,9 +53,15 @@ master's leaf loop to the master-exit seam, then hand over.
 - Successor worker scope: `<fixes/evidence for listed IDs only>`.
 
 ## Start defaults
-- Leaf starts: one `role_start_set` call on each canonical leaf starts its Worker, Reviewer and
-  Curator; knob overrides per seat (agent, model, effort):
-  <settings/orchestration notes or none>.
+- Check a packet's dependencies before starting and before integrating its leaf, because the product
+  does not. The closeout preview and every landing route can refuse with knowledge-gate findings;
+  send those findings to the Curator. Nothing bypasses the gate.
+- Leaf starts: individual `role_start` calls under this canonical master: Worker alone at build,
+  Reviewer at the Worker’s freeze notice, Curator at the Reviewer’s code-PASS notice. The Worker
+  first notifies the Manager, then sends the freeze directly once the Reviewer exists; the Reviewer
+  first notifies the Manager of code PASS, then sends peer content directly once the Curator exists.
+  Both notices are admitted Manager notices. Separately assigned packet cold reads remain possible.
+  Knob overrides per seat (agent, model, effort): <settings/orchestration notes or none>.
 - Before every worker dispatch, compile the leaf's one owned primary revision: stable ID, version,
   matching approved canonical packet, durable corpus-approval citation, deliverable evidence
   class, and verification evidence class. List applicable inherited master revisions separately as
@@ -129,11 +135,12 @@ master's leaf loop to the master-exit seam, then hand over.
   operation, and closeout and integration carry that result as a prerequisite instead of rerunning
   it. Worker targeted checks and the curator's complete onboarding result are reported truthfully,
   including failures and not-run checks.
-- Curator: started held by the leaf's `role_start_set` call and opened by its first message.
-  The Worker and Reviewer feed the frozen change set,
-  hand-off list and code verdict directly.
-- Concurrency: <max parallel leaf build work or "sequential">. Build concurrency does not grant
-  landing order. An atomic block exposes no intermediate leaf to super. After a closeout claim,
+- Curator: start after code PASS; the Worker and Reviewer feed the frozen change set, hand-off list
+  and code verdict directly. Also start it when an approved packet’s prerequisite sync reaches
+  memory reconciliation it owns. Ordinary delivery curation and the knowledge check follow code PASS.
+- Concurrency: parallelize independent leaf work; name dependencies or other genuine sequencing
+  reasons. Only the developer authorizes a concurrency limit. Land ready leaves serially. Build
+  concurrency does not grant landing order. An atomic block exposes no intermediate leaf to super. After a closeout claim,
   lifecycle/worker/commit/recovery evidence belongs only to the enclosure-root operation journal;
   observe it with `worktree_status` and execute only advertised
   `worktree_operation_control` actions. Queue absence or invalidation never strands that journal.

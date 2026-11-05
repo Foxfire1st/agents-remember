@@ -72,6 +72,32 @@ message delivered during a turn can be the running turn's text; detail says so t
 over the exception bound rides as its beginning with the whole in the detail file. Never wait on
 an agent that may be waiting on you.
 
+### Message files and receipts
+
+Messages are filed at the narrowest shared task. Same-leaf messages use that task's
+`notes/messages/<leaf-slug>/`; messages whose narrowest shared task is the master or sprint use
+its `notes/messages/`. With no shared task, the sender's role execution record owns the message
+folder under `<coordinationRoot>/notes/reports/paseo-native-executions/<sender-role>/messages/`.
+An enclosure's `messages` link is a view of its message folder, not a separate filing authority.
+The response's `messageFile` and `messageFileSha256` identify the actual filed bytes, including a
+refused delivery's `.undelivered.md` file or a wait reply cut at the message limit. A filed message
+and a tool receipt show what was attempted and returned; they do not show semantic acceptance.
+
+The role-message response keeps its own queue fields: `status: held`, `heldReason`, `detail`,
+`permission` (the host's name or null), `heldMessageId`, `waitingMine` and `waitingTotal`.
+`limitedUntil` is present for a provider-limit hold when known. `withdraw_held_message_id`
+withdraws the exact waiting message; `withdrawnHeldMessageId` reports the withdrawal. These are
+the role-message fields, not field aliases for another message surface. The full sender procedure
+for held and full-store responses is
+[Message handover](../../skills/l-01-agent-lifecycles/reference/message-handover.md).
+
+Before claiming no send, search the complete message folder for the narrowest shared task and the
+applicable tool-call receipts and detail files. An active enclosure's receipts are under its
+`logs/`; otherwise use the configured `transcriptRoot`, whose default is
+`<coordinationRoot>/logs/mcp`. Terminal lifecycle calls use that configured transcript root.
+See [MCP fields](settings-json.md#mcp-fields) for receipt scope and retention. A missing file in one
+assumed default folder is not evidence that no message was sent.
+
 ## Install & scaffolding
 
 | Tool | Purpose | Key args |
@@ -83,10 +109,11 @@ an agent that may be waiting on you.
 | Tool | Purpose | Key args |
 | --- | --- | --- |
 | `memory_init` | Initialize (or repair) a repository's memory root. | `repo_id`, `dry_run=false`, `initialize_git=true` |
-| `memory_quality_check` | Closeout memory-quality gate (drift integrity + style checks). A full contract-scoped call also atomically replaces the curator worklist at `<worktree enclosure>/reports/curator-memory-quality.md`, combining quality findings, current-addition onboarding coverage, route-index preview, drift candidates, and report-only evidence. | `request={"mode":"sync", "repo_id":..., "checks":..., "detail_limit":50, "contract_path":...}`; use `mode:"start"` for async admission and poll only with `mode:"poll"`, `repo_id`, `run_id` |
+| `memory_quality_check` | Closeout memory-quality checks; the full logged result includes `knowledgeWorklist` and exact-tree `knowledgeGate` blocks for converted leaves. A full contract-scoped call atomically replaces `<worktree enclosure>/reports/curator-memory-quality.md`, combining quality findings, current-addition coverage, route-index preview, drift candidates and report-only evidence. The persisted change-to-knowledge worklist is a separate artifact. | `request={"mode":"sync", "repo_id":..., "checks":..., "detail_limit":50, "contract_path":...}`; use `mode:"start"` for async admission and poll only with `mode:"poll"`, `repo_id`, `run_id` |
 | `citation_fix` | Regenerate anchored citation ranges in an admitted memory scope; preview synchronously or in the shared background run registry. Ambiguous anchors, renames and deletions remain curator work. | `repo_id`, `contract_path=None`, `document=None` or `documents=None`, `dry_run=false`, `mode="sync"`; preview with `mode="start", dry_run=true`, then `mode="poll", run_id=...` with the same repository/contract and no selectors |
+| `citation_note_revision` | Revise one converted sidecar reference's note in a leaf memory worktree, preserving targets, anchors and other references. Refuse a stale sidecar digest, missing key or empty note. | `repo_id`, `contract_path`, `card`, reference number `reference`, `note`, `base_digest`, `dry_run=false` |
 | `route_index_refresh` | Regenerate `overview.index.json` route indexes to match the onboarding tree. **Writes** into the memory root it resolves. | `repo_id`, `dry_run=false`, `contract_path=None` |
-| `knowledge_read` | Name the records of one memory-tree view (`source_context`, `invariant`, `family`): each row holds the text ID, kind, state and memory-checkout location. No record text: open the named files with your own tools. | `memoryRoot`, `view`, `limit=32`, `continuation`, view seeds |
+| `knowledge_read` | Name the records of one memory-tree view (`source_context`, `invariant`, `family`, `record`, `weakness`, `dependent`): each row holds the text ID, kind, state and memory-checkout location. No record text: open the named files with your own tools. | `memoryRoot`, `view`, `limit=32`, `continuation`, view seeds |
 | `knowledge_diff` | Name the changed records of two memory trees beside a caller-readable report holding the whole comparison: the two trees, counts by kind, changed records, report location. | `memoryRoot`, `beforeRevision="HEAD"`, `afterRevision`, `recordId`, `path` |
 
 `memory_quality_check.request` is exactly one shape. `sync` and `start` accept repository,
@@ -95,15 +122,17 @@ start fields while polling, even when their values equal defaults: the discrimin
 rejects contradictory presence before it reads the run registry. A unique start at capacity returns
 `capacity-reached` without a `runId`; poll or wait for active work, then submit a new start request.
 
-The three rows above support the same optional `contract_path` as the `worktree_*` verbs: a leaf
-enclosure contract path. `memory_quality_check` carries it inside its discriminated `request`;
-the other two tools take it directly. Omitted, they resolve the configured **official** memory repo
-(unchanged). Supplied, they act on that leaf's **memory worktree** and measure it against the leaf's code
-worktree — how a curator checks its own change-set before handing it back, and the only correct way
-to run `route_index_refresh` from inside a leaf, since without it that tool writes indexes into the
-official repo and leaves it dirty. A contract naming another repo, or one whose memory worktree is
-gone, is refused; nothing falls back to the official repo. The response carries `onboardingRoot`, so
-which tree was acted on is always visible.
+`memory_quality_check` carries an optional leaf enclosure `contract_path` inside
+its discriminated sync/start `request`; `citation_fix` and `route_index_refresh`
+take it directly. With it, they act on the leaf memory worktree against that
+leaf's code. A wrong repository or absent worktree refuses rather than selecting
+the official root. The response identifies the measured `onboardingRoot`.
+
+An unscoped quality check or route-index preview reads the configured official
+memory scope. Unscoped citation repair and route-index writes have only the narrow
+pre-baseline admission described below: a configured converted root, no adopted
+baseline and no linked memory worktree. `citation_note_revision` requires a leaf
+contract. Use the leaf contract for candidate work.
 
 Only a full leaf-scoped sync/start `memory_quality_check` request writes the curator checklist. It reports
 `curatorActionableCount`, the **raw** `qualityChecklistStatus`, and the combined `checklistStatus`; the
@@ -142,14 +171,19 @@ artifact for both fresh success and recovery; `resultArtifact` carries its repos
 identity. The immutable machine result never replaces or renames the human summary, and there is no
 universal result filename fallback.
 
-Citation ranges are not repaired by hand. MCP `citation_fix(repo_id=<id>,
+Use the primary `citation_fix` route for moved citation anchors. A correct-input
+refusal follows the delivered Curator recovery procedure only for that refusing
+tool and input class; permission decisions and product guards remain stops. MCP
+`citation_fix(repo_id=<id>,
 contract_path=<enclosure contract>, dry_run=true|false)` regenerates every range that can be
 regenerated from its anchor — the whole tree in one call after a package move — and prints a work
 order for the rest: the anchor, the range, the file, and every location in the code tree that does
 hold that anchor. It repairs pure MOVES only, where a symbol kept its name and changed file; a
 rename, a deletion and an ambiguous match are refused rather than guessed at. `contract_path` is
-**required**: there is no argument list that names the official memory repo, and a contract that
-points at it is refused. The checkout-only CLI remains a development adapter to the same guarded
+the ordinary leaf write route; a contract naming the official memory repo is refused.
+The only unscoped admission is the configured converted memory root before baseline
+adoption, with no linked memory worktree; the repository and resolved root must
+match its settings. Other unscoped calls refuse and name the leaf route. The checkout-only CLI remains a development adapter to the same guarded
 application operation, not an agent-facing route around MCP.
 | `read_ar_files` | Name which knowledge governs up to 20 paths: existence, governing card as a memory-worktree location, record counts by state, and action-asking records by ID, kind, state and card heading; overviews once per call, nearest first. No source, card or overview text: read the named files with your own tools. `refresh` and object-form entries are refused as `argument-removed`. | `repo_id`, `files:[strings]`, `task_context` for a leaf |
 
@@ -174,8 +208,8 @@ application operation, not an agent-facing route around MCP.
 | `worktree_checkpoint_landing` | Partially publish an unfinished series master by landing its finished leaves; not a pause. | `contract_path`, `strategy`, `dry_run=false` |
 | `worktree_record_landing` | Record a commit the landing target already holds. | `contract_path`, `code_commit`, `memory_commit`, dry-run options |
 | `worktree_status` | Report strict task-addressed lifecycle status without queue input. A live locator resolves to the root manifest/journal and its executable controls; a terminal locator resolves to the exact external archive/receipt plus surviving contract truth, distinguishes archive-ready from cleanup-completed, and returns the archived `cleanupArguments` with exact retry `nextArgs`. | `repo_id`, `task_name` / `contract_path` |
-| `worktree_closeout_preview` | Non-mutating preview of a worktree-backed closeout. | `contract_path`, code/memory commit messages |
-| `worktree_closeout_apply` | Validate every enabled explicit nonblank input, claim the exact first-ready door generation through a short CAS, then start or observe its durable task-bound closeout and return promptly. Poll `worktree_status`; no operation ID is exposed. Agents Remember source commits run the leaf change-set-scoped quality contract (`--targeted`) before Git commit — the full wrapper runs once per master at the master integration gate. | `contract_path`, `intent_note`, explicit message for each enabled commit leg |
+| `worktree_closeout_preview` | Non-mutating preview of a worktree-backed closeout. On converted memory, the invariant gate judges the exact candidate trees; `knowledge-gate-refused` carries its findings. | `contract_path`, code/memory commit messages |
+| `worktree_closeout_apply` | On converted memory, judge the exact candidate trees with the invariant gate; `knowledge-gate-refused` carries its findings. Validate every enabled explicit nonblank input, claim the exact first-ready door generation through a short CAS, then start or observe its durable task-bound closeout and return promptly. Poll `worktree_status`; no operation ID is exposed. Agents Remember source commits run the leaf change-set-scoped quality contract (`--targeted`) before Git commit — the full wrapper runs once per master at the master integration gate. | `contract_path`, `intent_note`, explicit message for each enabled commit leg |
 | `worktree_integrate` | Start or observe durable task-bound landing (`ff-only` or `replay`) and return promptly. Poll `worktree_status`; retries with conflicting input refuse. | `contract_path`, `strategy`, `dry_run=false` |
 | `worktree_sync` | Pull the moved official line into a live worktree: fetch, merge code, fast-forward memory, advance the recorded base pair. Conflicts are retained for agent resolution (`continue` / `cancel` / `reconcile`). | `contract_path`, `memory_sync_choice`, `resolution_action`, `knowledge_resolution`, `dry_run=false` |
 | `worktree_pause` | Pause an atomic master and hand control back to the developer; publishes nothing. | `contract_path` |
@@ -238,6 +272,19 @@ strand accepted operation evidence.
 | --- | --- | --- |
 | `explainer_control` | Update or retire one leaf's explainer, or claim a master as its architect. `retire` archives the explainer's chat in Paseo and removes its workspace completely -- Git worktrees removed and pruned, the leaf's folder deleted -- for a seat in any state (live, closed, archived, missing); the task's published revisions, grades and receipts stay. `claim` is open to any hosted architect seat, writes the master-to-architect record and nothing else. `update` and `retire` are accepted only from the seat that record names; any other caller is refused `not-this-masters-architect` and claims first. A refused action is a typed answer, never a server error. | `action` (`update`, `retire`, `claim`), `repo_id`, `task_name`, `leaf_id` for the two leaf actions, `receipt_id` for a `retire` |
 
+The explainer launch also adds four bound tools to that seat's normal
+`agents-remember-task` server instance. They are available to the bound explainer,
+not advertised as general tools to every role. The launch supplies the workspace,
+task root and seat; grade calls carry that seat's current binding and block
+fingerprints. There is no separate explainer server or caller-selected workspace.
+
+| Bound explainer tool | Purpose | Key args |
+| --- | --- | --- |
+| `render` | Check the draft in Chromium and publish the next task revision. Write admitted claims to `drafts/assets/claim-map.json` first. Answers publication state, revision and run-file locations; open images from those files. | none; uses the launch-bound workspace |
+| `define_category` | Define a review-block category with 2–5 grades, highest first; a conflicting existing scale/meaning refuses. | `name`, `scale`, `binding`, optional `meaning` |
+| `remove_category` | Remove a category and its grades in the bound environment. | `name`, `binding` |
+| `grade` | Grade named review blocks with a reason; stale binding refuses and long refusal lists move to a named file. | `references`, `category`, `grade`, `reason`, `binding` |
+
 The developer's own presses do not pass through this tool: the page's Update and Retire call the
 dashboard's routes, and master retirement and sprint archive retire every environment through their
 hook. A leaf's environment is built at the developer's first request, never by opening the page, and
@@ -264,6 +311,30 @@ file. `linkage_report`
 answers the fact counts with the report location. Long `fields`/`section_body` may ride
 as files (`fields_file`, `section_body_file`). A master-sync failure answers `ok:false`
 with `master-sync-failed` and leaves the leaf unchanged.
+
+A successful leaf `create`, or a `set_field`/`replace` that sets or replaces the
+leaf's `requirements`, adds `alignmentSweep` when its master has other open
+leaves. Dry runs include it too. The field is advice, not a gate: it refuses
+nothing and changes no document bytes. Refusals and masters with no other open
+leaf omit it. Siblings come from the master's rows, excluding resolved or retired
+rows and the edited leaf.
+
+At most 12 declared siblings are listed as `openLeaves`, each with `id` and
+`state`. A present sibling has `state: "available"` and `requirements` identities
+such as `MIK-R62@v12`; `requirements: []` means present with no requirement
+identities. A declared sibling whose file does not yet exist retains its `id`
+with `state: "unavailable"`; that row must not contain `requirements`. An
+undeclared sibling is neither read nor listed. These states are advisory and do
+not block the write. Only a missing file is unavailable: malformed JSON remains
+an error, not an unavailable row.
+
+Structured packet references supply requirement identities; prose requirement
+entries contribute their explicit `<id>@v<n>` mentions. With more than 12
+siblings, the bounded answer instead supplies `openLeafCount` and
+`masterTaskDocument`, the master's rendered Markdown path; this count form does
+not replace unavailable rows at or below 12. Both forms include `message`:
+"Sweep these against the new or revised packet before release
+(operations/planning.md)."
 
 - `create`: new doc from `fields` (`id`, `slug`, `title`, `kind` `subTask`|`master` — the old
 `light` kind is refused — `repo`, `type`, `createdAt`, `objective`, `requirements`, `steps`,
@@ -321,16 +392,25 @@ See [w-02-light-task-workflow Worktrees And Closeout](worktrees-c09.md) for the 
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `knowledge_read` | Name the records of one memory-tree view (`source_context`, `invariant`, `family`) at one snapshot, paged; each row holds the text ID, kind, state and memory-checkout location. No record text: open the named files with your own tools. | `memoryRoot`, `view`, `limit=32`, `continuation`, view seeds |
+| `knowledge_read` | Name the records of one memory-tree view (`source_context`, `invariant`, `family`, `record`, `weakness`, `dependent`) at one snapshot, paged; each row holds the text ID, kind, state and memory-checkout location. No record text: open the named files with your own tools. | `memoryRoot`, `view`, `limit=32`, `continuation`, view seeds |
 | `knowledge_diff` | Name the changed records of two memory trees beside a caller-readable report holding the whole comparison. | `memoryRoot`, `beforeRevision="HEAD"`, `afterRevision`, `recordId`, `path` |
-| `knowledge_integrity_check` | Structural-rule violations, matched review conditions, scope and limits; no verdict, no causal explanation. | `memoryRoot`, `codeRoot` |
+| `knowledge_integrity_check` | Validate converted memory: `validation.ok`, refusal/report counts, rule counts and bounded violations. With `contractPath`, use the leaf code/memory worktrees and return its latest persisted worklist; no semantic judgment is inferred. | `memoryRoot`, `codeRoot`, `baseCommits`, or leaf `contractPath` |
+| `knowledge_write` | Plan or write a Curator hand-off through the admitted writer. Without `commit` it plans and validates; with it, writes knowledge files and makes no Git commit. The answer names the whole report and all refusals. | `contractPath`, `handoff` + `handoffName` or `handoffPath`, `authorizationRef`, `commit=false`; foundation `repoId` + `wave`, or master `crossing` |
 | `curator_coherence` | Author, publish, inspect or validate one leaf's curator-coherence authority (`prepare` → `publish` → `validate`). | one action's request shape at a time |
+
+See [Knowledge system](knowledge-system.md) for record/sidecar/history ownership,
+worklist and gate fields, validator, derived index, conversion/crossing and the
+reader/review surfaces. The [knowledge command
+reference](../../skills/l-01-agent-lifecycles/reference/knowledge-commands.md)
+lists command callers, timing and examples.
 
 ## Role agents
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
 | `role_start` | Start one role agent for one canonical selection, caller as parent; repeating `request_id` reconciles the same agent. | `role`, `request_id`, the role's task references, `agent` / `model` / `effort` |
+| `role_start_set` | Existing Manager-only leaf set API: start Worker and hold Reviewer/Curator, unless `reviewer_message` opens Reviewer. Repeating `request_id` reconciles the same set and opens no held seat. Its availability does not prescribe the lifecycle's stage-start order. | `request_id`, canonical task references, optional `reviewer_message`, per-seat `worker` / `reviewer` / `curator` launch choices, `replaces` |
+| `user_settings_init` | Preview/create role-settings with one harness or per-role harness choices; read existing choices without overwriting. `host-authority` is refused because host preparation owns it. | `target="role-settings"`, `harness` or `roles`, `dry_run=true` first |
 | `role_message` | Send one text message to one role agent; with `wait`, return its reply. | `text`, `agent_id` or role + task references, `wait=false`, `timeout_seconds` |
 
 The capsule operation and skill catalog left the surface with the skills surface tools

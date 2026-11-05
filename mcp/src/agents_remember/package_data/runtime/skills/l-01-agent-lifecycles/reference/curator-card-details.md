@@ -1,8 +1,23 @@
 # Curator — card format and citation-check step detail
 
-Read this file when routing cards and checking their citations. Source passages are retained
-verbatim from `roles/curator.md`; the no-handwritten-sidecar boundary and the authored trace
-obligation remain in the capsule.
+Read this file when routing cards and checking their citations. The no-handwritten-sidecar
+boundary and the authored trace obligation remain in the capsule.
+
+## Curation 2: before ingest; reuse during Curation 4
+
+Read the subject’s earlier rows before ingest. For invariants:
+
+- `changed` changes the record’s meaning and increments revision;
+- `moved` re-anchors without changing meaning;
+- `deleted` removes entries or retires the invariant;
+- `extended` adds an entry without changing meaning;
+- `no_impact` preserves meaning and the entry set, including admission/origin/slug-only changes.
+
+Family and onboarding rows keep their own schemas.
+
+Check each changed claim, count and prose line reference against code; a prose line reference lies inside its citation anchor. Green structural checks and authentic anchors do not prove prose true.
+
+Retain one independent statement-by-statement fact-check. citation_fix makes deterministic fixes only; semantic or ambiguous items are Curator decisions with the full decision-item report in the workspace. State that principle without claiming an unbuilt L68 feature already exists.
 
 ## Overview format
 
@@ -10,6 +25,11 @@ An overview reads from its purpose (MIK-R80): title, the governing overview, wha
    under one of the fixed headings `## What This Repo Is`, `## What This Area Is` or `## Purpose`,
    how it is built, its invariants and boundaries, and last all citation lines together. A change
    goes into the section its change belongs to.
+
+## Current card content
+
+When routing or refreshing cards, apply the current-truth and all-carrier repair rule from
+**Before curation step 1** in the already-delivered reconciliation detail.
 
 ## Converted-card format and citation command
 

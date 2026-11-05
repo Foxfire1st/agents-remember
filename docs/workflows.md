@@ -18,7 +18,7 @@ Every build keeps these rules:
 1. Resolve the active context with `c-08-ar-coordination-context-resolver`.
 2. Run drift detection before planning against onboarding.
 3. Wait for developer approval before implementation (the sprint architect's plan gate).
-4. Update onboarding only after approved changes, live per completed plan-section.
+4. Curate current cards, sidecars and knowledge records against approved code changes in the leaf memory worktree, before publication.
 5. Run the checks listed in the resolved memory layer's `system/tools.md` when available.
 
 ## Build Modes
@@ -66,6 +66,26 @@ Closeout and commit approval are separate from implementation approval. The agen
 preview before any `w-02-light-task-workflow` closeout creates commits. The git-landing flow (direct vs PR-gated) is
 deferred to the repo's `system/task-publication.md` when present, together with the
 `landing.workflow` setting that decides which of the two the repository runs.
+
+## Knowledge in a Leaf
+
+The Worker reports changed behavior and hands off the exact candidate; the Curator
+reconciles current cards, references, records and history rows in the admitted
+memory worktree. A full contract-scoped `memory_quality_check` computes the
+change-to-knowledge worklist and gate findings. `knowledge_integrity_check` runs
+the validator and returns that leaf's latest persisted worklist; it does not
+replace a fresh quality run.
+
+The worklist binds base code B and memory K_B to candidate code C and memory K_C.
+The closeout preview and publication routes judge the exact candidate trees,
+recomputing the gate rather than trusting a saved worklist. A
+`knowledge-gate-refused` result names repair findings; the Curator repairs memory
+and reruns checks. There is no gate waiver. The validated curator-coherence
+record remains a separate readiness requirement.
+
+For file formats, commands, conversion/crossing and the read-only producer-list
+check, see [Knowledge system](reference/knowledge-system.md). Implementation
+approval does not authorize a Git commit or landing.
 
 ## Choosing A Build Mode
 

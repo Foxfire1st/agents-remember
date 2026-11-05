@@ -518,6 +518,48 @@ def test_a_shared_core_change_does_not_reach_a_role_capsule() -> None:
     assert not [b for b in mutated.capsule.instructions if b.composition_root == "core"]
 
 
+def test_every_role_digest_is_sealed_without_composing_its_content() -> None:
+    document = fixture_manifest_document()
+    path = "core/shared-obligations.md"
+    document["core"]["every-role"] = {"source": path, "purpose": "shared role digest"}  # type: ignore[index]
+    document["roles"]["worker"]["core"].append("every-role")  # type: ignore[index]
+    sources = all_sources(document)
+    original = next(source for source in sources if source.identity == "core:every-role")
+    edited = replaced(
+        sources, "core:every-role", content=original.content[:-1].decode("utf-8") + " "
+    )
+    revised = next(source for source in edited if source.identity == "core:every-role")
+    assert len(original.content) == len(revised.content)
+    assert (
+        sum(
+            before != after for before, after in zip(original.content, revised.content, strict=True)
+        )
+        == 1
+    )
+    baseline = compile_worker(document=document, sources=sources)
+    mutated = compile_worker(document=document, sources=edited)
+
+    assert mutated.semantic_digest != baseline.semantic_digest
+    assert mutated.render_instructions() == baseline.render_instructions()
+    assert not [block for block in mutated.capsule.instructions if block.composition_root == "core"]
+    for result, expected in ((baseline, original), (mutated, revised)):
+        records = [row for row in result.manifest.sources if row.identity == "core:every-role"]
+        assert len(records) == 1
+        assert records[0].composition_root == "core"
+        assert records[0].path == path
+        assert records[0].revision == expected.revision
+        assert records[0].selected is False
+
+    launcher = compile_role_capsule(
+        launcher_binding(), manifest_bytes(document), sources, selection_for(document)
+    )
+    changed_launcher = compile_role_capsule(
+        launcher_binding(), manifest_bytes(document), edited, selection_for(document)
+    )
+    assert changed_launcher.semantic_digest == launcher.semantic_digest
+    assert not [row for row in launcher.manifest.sources if row.identity == "core:every-role"]
+
+
 # --------------------------------------------------------------------------------------
 # Selection refusals.
 # --------------------------------------------------------------------------------------
@@ -609,6 +651,20 @@ def test_missing_mandatory_material_is_refused_rather_than_omitted() -> None:
     )
     assert operation_error.status == "missing-required-instruction"
     assert "operation:implementation" in operation_error.detail
+
+    document = fixture_manifest_document()
+    path = "core/shared-obligations.md"
+    document["core"]["every-role"] = {"source": path, "purpose": "shared role digest"}  # type: ignore[index]
+    document["roles"]["worker"]["core"].append("every-role")  # type: ignore[index]
+    digest_error = failure(
+        document=document,
+        sources=tuple(
+            source for source in all_sources(document) if source.identity != "core:every-role"
+        ),
+    )
+    assert digest_error.status == "missing-required-instruction"
+    assert "core:every-role" in digest_error.detail
+    assert path in digest_error.detail
 
 
 def test_a_source_the_manifest_does_not_declare_is_refused() -> None:

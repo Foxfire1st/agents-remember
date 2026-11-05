@@ -16,10 +16,17 @@ from agents_remember.models.role_capsules.types import (
     CapsuleToolPolicy,
     compute_content_digest,
 )
+from agents_remember.models.role_capsules.vocabulary import (
+    CapsuleOperation,
+    CapsuleRole,
+    capsule_role_or_none,
+)
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 
 from agents_remember_test_support.testing.leaf_instruction_wording import (
     LEAF_CLAUSES,
+    MESSAGE_HANDOVER_SOURCE,
+    MESSAGE_HANDOVER_STEP,
     autonomy_clauses,
     delivered_step,
     normalized,
@@ -90,7 +97,32 @@ def surface_clauses(source: str, clauses: dict[str, tuple[str, ...]]) -> dict[st
 
 
 def clause_surface(root: Path, source: str, name: str, report_path: Path) -> str:
-    """Only the code-lane-isolation facet moved to the named handoff step file."""
+    """Resolve moved facets through their actual admitted role and declared step."""
+    # Rule44/BA3: busy retry moved to a declared detail, not an inline substitute.
+    if name == "busy retry":
+        role_operations: dict[CapsuleRole, CapsuleOperation] = {
+            "worker": "implementation",
+            "reviewer": "review",
+            "curator": "curation",
+        }
+        kind, owner = Path(source).parts
+        owner = Path(owner).stem
+        role_name = (
+            owner
+            if kind == "roles"
+            else next(role for role, operation in role_operations.items() if operation == owner)
+        )
+        role = capsule_role_or_none(role_name)
+        assert role is not None, role_name
+        assert "{{detail:" + MESSAGE_HANDOVER_SOURCE + "}}" in (root / source).read_text()
+        _, text = delivered_step(
+            root,
+            (role, role_operations[role]),
+            MESSAGE_HANDOVER_SOURCE,
+            MESSAGE_HANDOVER_STEP,
+            report_path,
+        )
+        return text
     if (
         source in {"roles/curator.md", "operations/curation.md"}
         and name == "memory leaves code untouched"

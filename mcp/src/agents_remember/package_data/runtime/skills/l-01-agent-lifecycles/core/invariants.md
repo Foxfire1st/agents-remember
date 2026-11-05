@@ -10,28 +10,27 @@ short-lived workers and reviewers are safe, why sessions can die, compact, and r
 losing the run, and why **every seat writes its artifact of record**. A finding held only in a chat
 is a bug.
 
+A claim about all members checks the complete claimed population; absence searches the relevant tree completely. Record covered scope and truncation. A reported check names what ran and what was left out; a failure is pre-existing only with the same cause on the base, by message and subtest, not merely its name.
+
 ## The decision surface
 
-- Decision-needing questions land in the task doc's **`openQuestions`** — the rendered decision
-  surface the developer can see.
+- Put a decision needing the developer on the visible task decision surface or, for a taskless seat, in its own chat as its role states.
 - `notes/` carries the analysis behind them.
-- Rulings that change task/branch/orchestration state get a **decision-log entry**. Notes carry
-  analysis that must survive beyond the terse decision entry.
-- Backend seats never hand a question straight to the developer; the architect relay owns
-  presentation pace.
+- Record rulings that change task, branch or orchestration state in the owning task decision log; keep durable analysis in notes.
+- A seat with a parent sends developer questions through that parent; a parentless seat asks in its own chat.
 
 ## Sequencing is decided by the dependency graph, not by habit
 
-- Parallelize independent work by default, up to the applicable `orchestration.concurrency` cap.
-- Sequential execution is the exception and **must name** a gate, a shared-file one-writer
-  dependency, or an explicit ruling.
+- Parallelize independent work by default with named reasons for sequencing, without an invented concurrency cap; serial landing order remains.
+- Sequential execution names a gate, a shared-file one-writer dependency, an explicit ruling, or a harness without sub-agents; only the developer can authorize a concurrency limit.
 - Build concurrency never grants landing order.
+
+Guards need observed recurring cause and developer acceptance. Before a requirement goes to a Worker, the Architect—and Investigator proposals—plainly disclose every added refusal, limit or narrowing beyond the developer's words and obtain the developer's yes. Full inputs and pages have no invented count cap.
 
 ## Observability
 
-- Coordination seats are `task_doc` leaves with attached chats, so the developer can walk into any
-  seat at any level.
-- The developer talks to exactly one seat: the **architect**. Backend seats stay behind the relay.
+- Coordination seats keep their selected task documents and attached chats; taskless Architect and Bootstrap seats need no invented document.
+- The Architect owns the developer conversation in delegated work; a parentless seat uses its own chat, and backend seats preserve their named parent relay.
 
 ## The spine: task doc → branch → worktree
 
@@ -55,20 +54,15 @@ The default agent behavior stands: **fulfill the task, fill small blanks**, with
 prompting in either direction. A seat fills small, unambiguous blanks a competent implementer would
 fill, and no more.
 
-A **plan delta beyond blank-filling escalates one rung up** — never straight to the developer, and
-never a reshape of the seat's own. A seat's changes can collide with what it cannot see.
+A plan delta beyond filling small, unambiguous blanks goes to the parent rather than reshaping the task; without a parent, ask in your own chat.
 
-**The spirit test is orchestrator-only.** It is never ported down the ladder; managers and workers
-keep the default behavior and escalate real deltas. The full spirit test lives in
-`roles/orchestrator.md`.
+The spirit test belongs only to the Orchestrator, as its own role states; Managers and Workers keep their assigned promise and escalate real deltas.
 
 ## Knob resolution and capability doctrine
 
-Role files are **model-interpreted markdown, never an executor**. Each carries a portable **knob
-block** (harness / model / effort / tools) — the defaults the role settings supply at the start.
+Role files are model-interpreted Markdown, not executors or deployment-setting blocks. Harness, model, effort and capabilities come from the admitted launch settings and the host.
 
-- Resolution: **role-file defaults < global settings < repo-local settings**, in the global agentic
-  settings file with a repo-local override layer. Unknown `orchestration.*` keys fail loud.
+- Launch settings resolve the global and repository layers and applicable role/level overrides; an explicit admitted call overrides those values, while the default harness comes from `orchestration.spawn.harness`. Unknown orchestration keys fail loudly.
 - Only the launch-setting rows (`harness`, `model`, `effort`, `serviceTier`, `mode`,
   `featureValues`) participate in `orchestration.roles.<role>` and
   `orchestration.rolesPerLevel.<level>.<role>`; `launchArgs`, `sessionCommands` and
@@ -89,6 +83,8 @@ block** (harness / model / effort / tools) — the defaults the role settings su
 - The memory layer (`c-…` skills and the resolved `system/*` files) owns repository-specific
   commands, coding guidelines, and landing flow. A seat reads the resolved `system/tools.md`,
   `system/coding-guidelines.md`, and `system/task-publication.md` rather than inventing a runner.
-- `roles/` owns role duties; `operations/` owns operation-scoped procedure; `reference/` owns
-  rationale, history, and superseded rulings. The normative path injects `core/` + the role + the
-  current operation, and references rationale rather than embedding it.
+
+Design rules belong to the repository's `system/design-guidelines.md`; no role text or code default states one, shipped design files are examples only, and AR's look is never imposed on a user's pages.
+- Roles own duties, operations own step procedure, and reference files own delivered details, rationale and history. A started role's first message carries its role text, its operation text and the digest `core/every-role.md`; it loads no other `core/` file, which is reference for those who write and review this text.
+
+Instructions and requirements point to the repository's own guideline files and never restate their content; that keeps AR least opinionated.

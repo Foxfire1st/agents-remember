@@ -56,8 +56,8 @@ class CapsuleCompilationOutcome:
     manifest: CapsuleManifest
     error: CapsuleCompilationError | None
     # The text of the "What every role acts on" block a launch writes into its first message,
-    # apart from ``render_instructions()``. No source fills it yet: it stays None, and the
-    # message then writes no block and no heading (MIK-R193 rule 1).
+    # apart from ``render_instructions()``. The admitted core/every-role.md supplies it;
+    # without that source the message writes no block and no heading (MIK-R193 rule 1).
     shared_block: str | None = None
 
     def __post_init__(self) -> None:
@@ -112,6 +112,14 @@ def compile_admitted_capsule(
     manifest_bytes = _manifest_bytes(sources, request)
     parsed = _parsed_or_none(manifest_bytes)
     try:
+        shared_block = next(
+            (
+                source.text()
+                for source in sources
+                if source.composition_root == "core" and source.path == "core/every-role.md"
+            ),
+            None,
+        )
         result = compile_role_capsule(
             binding, manifest_bytes, sources, request.as_selection(), projection
         )
@@ -121,7 +129,9 @@ def compile_admitted_capsule(
             manifest=_failure_manifest(parsed, binding, error),
             error=error,
         )
-    return CapsuleCompilationOutcome(result=result, manifest=result.manifest, error=None)
+    return CapsuleCompilationOutcome(
+        result=result, manifest=result.manifest, error=None, shared_block=shared_block
+    )
 
 
 def _failure_manifest(

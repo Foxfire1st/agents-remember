@@ -11,32 +11,19 @@ deaths. The landing chain keeps its own lifecycle in the worktree contract.
 
 Rules:
 
-- The seat binding is made when `role_start` starts the agent (canonical task document plus role).
-  The architect is started without a document; the other sprint roles bind
-  to the sprint document, managers to master documents, workers/curators to leaf documents, and
-  reviewers bind to the exact leaf, master, or sprint document whose review seam they adjudicate.
+- A task-bound seat is bound by its canonical document plus role. Architect and Bootstrap start without documents; an Investigator uses its supplied taskless, sprint or master scope. Managers bind masters, Orchestrators sprints, and every Reviewer binds a leaf, including a Reviewer of an integration seam.
 - Owning seats own the machinery their own
   role file names, and no other agent calls `task_doc`, `role_start`, or closeout on
   their behalf.
 
 ## The trust checkpoint
 
-The opening detail the **architect and orchestrator** run before relying on memory or providers
-(each role file binds whether its seat runs it; a started role never repeats it, because the AR
-handover carries its task facts and workspace bindings):
+Orientation uses the role, exact canonical assignment and workspace bindings the handover supplies, not an invented trust packet.
 
-1. `context_packet(repo_id="<repo-id>", include_drift=true,
-   include_freshness=true)`.
-2. Report the packet facts before relying on memory: repository/branch/dirty state;
-   memory + onboarding roots; drift status and actionable count; branch freshness
-   (`behind`/`diverged` → fast-forward the local official line first). Reconcile actual memory
-   content or ancestry conflicts; missing cache rows or attribution for unchanged memory do not
-   block an otherwise valid code/memory pair.
-3. Drifted/missing/orphaned onboarding on committed, non-dirty source: **send the question up the
-   chain with `role_message`** before refreshing via `c-05-create-or-update-onboarding-files` — drift handling is
-   approval-gated. Drift tied to dirty source is active work-in-progress, not maintenance.
-4. Providers stopped/degraded: run the matching provider/runtime operations, re-check, report;
-   `indexing` means healthy-but-busy (partial results).
+1. Read the supplied rendered task and requirement files with native file tools; change canonical task documents only through `task_doc`.
+2. Confirm role, task, requirement version, roots, contract and report path agree; name the owning source and field of any missing binding.
+3. Before repository planning, the Architect reads the relevant knowledge and resolves the memory layer; onboarding changes belong to the Curator, not a started role's invented refresh.
+4. Provider problems are investigated read-only; no role acquires a provider state-changing operation from this checkpoint.
 
 ## Provider degradation, as every seat meets it
 
@@ -46,8 +33,5 @@ A `degradation-alert` event pauses provider **starting**, not the seats.
   provider setup, no watcher start or restart.
   Continue providerless/native-read work that remains valid and report provider-dependent blockers
   upward. **No provider kill authority**: no docker-kill, no container stop, no provider teardown.
-- The orchestrator owns investigation dispatch, the remediation order, and the provider stop
-  (through the investigator protocol).
-- This iteration is providers-only. Sentry or a future system monitor may feed the detector later;
-  that does not change the response protocol: detect → report → explicit orchestrator order →
-  fix or stop.
+- An Investigator investigates and reports within its supplied concern. Provider state changes go to the owning Worker; remediation requires the explicit authorized order of the developer or the named parent, and a no-start alert remains binding.
+- The provider protocol is detect, report, obtain the owning authority's explicit order, then perform only the authorized remediation; a possible future monitor grants no present authority.

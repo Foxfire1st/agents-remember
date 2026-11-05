@@ -79,6 +79,12 @@ def delivered_step(
     return instructions, path.read_text(encoding="utf-8")
 
 
+# MIK-R62 rules44/BA3: pin the expected step independently of the manifest.
+MESSAGE_HANDOVER_SOURCE = "reference/message-handover.md"
+MESSAGE_HANDOVER_STEP = (
+    "when you reach a waiting-seat handover or held/full-store receipt, not before"
+)
+
 ROLES = (
     "architect",
     "bootstrap",
@@ -199,22 +205,22 @@ def autonomy_clauses(role: str) -> dict[str, tuple[str, ...]]:
 LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
     "roles/worker.md": {
         "freeze to reviewer": (
-            "Freeze the candidate and send it directly to the leaf's Reviewer as `../operations/implementation.md` §Outputs states.",
+            "Freeze the candidate as `../operations/implementation.md` §Outputs states. Worker first tells Manager to start Reviewer, then hands freeze directly to that Reviewer.",
         ),
-        "set start": (
-            "the Manager starts the leaf's Worker, Reviewer and Curator as a set in one `role_start_set` call",
+        "Reviewer start notice": (
+            "Worker first tells Manager to start Reviewer, then hands freeze directly to that Reviewer.",
         ),
         "identity and whole stretch": (
-            "Freeze the candidate and send it directly to the leaf's Reviewer as `../operations/implementation.md` §Outputs states.",
+            "Freeze the candidate as `../operations/implementation.md` §Outputs states. Worker first tells Manager to start Reviewer, then hands freeze directly to that Reviewer.",
         ),
         "repair return": (
-            "Freeze the candidate and send it directly to the leaf's Reviewer as `../operations/implementation.md` §Outputs states.",
+            "Freeze the candidate as `../operations/implementation.md` §Outputs states. Worker first tells Manager to start Reviewer, then hands freeze directly to that Reviewer.",
         ),
         "producer to curator": (
             "After code PASS, send the Curator your structured hand-off list for that exact freeze with producer data preserved verbatim",
         ),
         "factual independence": (
-            "Freeze the candidate and send it directly to the leaf's Reviewer as `../operations/implementation.md` §Outputs states.",
+            "Freeze the candidate as `../operations/implementation.md` §Outputs states. Worker first tells Manager to start Reviewer, then hands freeze directly to that Reviewer.",
         ),
         "seat address": ("Use the sibling role and exact leaf task references from the handover.",),
         "whole product identity": (
@@ -231,7 +237,7 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
             "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/implementation.md` §Boundaries states.",
         ),
         "busy retry": (
-            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/implementation.md` §Boundaries states.",
+            "Full-store recipient-busy is a refusal: pending record, independent work, one resend before turn end, then remain pending.",
         ),
         "sender owes contents": (
             "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/implementation.md` §Boundaries states.",
@@ -244,7 +250,9 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
         ),
     },
     "operations/implementation.md": {
-        "freeze to reviewer": ("Freeze the candidate and hand it directly to the leaf's Reviewer",),
+        "freeze to reviewer": (
+            "Freeze the candidate and first tell the Manager to start the Reviewer. Once the Reviewer exists, hand the freeze directly to that Reviewer",
+        ),
         "identity and whole stretch": (
             "naming the leaf, head and change hash in your report, report path, and whole next stretch",
         ),
@@ -252,11 +260,11 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
             "Repair sealed findings and return a new freeze directly to the same Reviewer.",
         ),
         "producer to curator": (
-            "After code PASS, send your hand-off list for that freeze directly to the Curator.",
+            "After code PASS and the Manager has started the Curator, send your hand-off list for that freeze directly to the Curator.",
         ),
         "factual independence": ("This is a factual hand-over, not a review brief.",),
         "busy retry": (
-            "For busy, record pending, retry before ending your turn and report a second refusal once.",
+            "Full-store recipient-busy is a refusal: pending record, independent work, one resend before turn end, then remain pending.",
         ),
         "upward notice recovery": (
             "Record and retry an unreachable-Manager notice rather than put that transport failure to the developer.",
@@ -264,8 +272,7 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
     },
     "roles/reviewer.md": {
         "verdict to worker": (
-            "hand it directly to the leaf's Worker as `../operations/review.md` §Outputs states",
-            "Write/record the verdict and hand it directly to the leaf\u2019s Worker per `../operations/review.md` §Outputs.",
+            "Write and record the verdict, then hand it directly to the leaf's Worker.",
         ),
         "sealed whole repair": (
             "A block names the report with sealed findings and requests the whole repair stretch",
@@ -273,7 +280,7 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
         ),
         "pass to curator": (
             "code PASS also goes directly to the Curator with your hand-off list for that freeze",
-            "send code PASS and your freeze hand-off list directly to the Curator",
+            "Reviewer first tells Manager code PASS; Manager starts Curator, then peer content stays direct. Send your freeze hand-off list directly to the Curator.",
         ),
         "memory verdict to curator": (
             "hand it directly to the leaf's Worker as `../operations/review.md` §Outputs states",
@@ -328,8 +335,7 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
             "Answer Curator findings of code failing requirements or contradicting the Worker\u2019s report per `../operations/review.md` §Boundaries, even after code PASS.",
         ),
         "busy retry": (
-            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/review.md` §Boundaries states.",
-            "Apply `../operations/review.md` §Boundaries to taken hand-overs and provider, seat and busy refusals.",
+            "Full-store recipient-busy is a refusal: pending record, independent work, one resend before turn end, then remain pending.",
         ),
         "upward notice recovery": (
             "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/review.md` §Boundaries states.",
@@ -337,11 +343,13 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
         ),
     },
     "operations/review.md": {
-        "verdict to worker": ("For a leaf, hand the verdict directly to the Worker",),
+        "verdict to worker": ("Hand the verdict directly to the Worker",),
         "sealed whole repair": (
             "a block names the sealed findings report and asks for the whole repair stretch",
         ),
-        "pass to curator": ("Code PASS also goes directly to the Curator for the passed freeze.",),
+        "pass to curator": (
+            "Once the Curator exists, send it the passed freeze and code-PASS verdict directly.",
+        ),
         "memory verdict to curator": (
             "Review its memory change and return findings or PASS directly to it.",
         ),
@@ -367,7 +375,7 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
             "They open no code review-state round, reset no passed code review and add no IDs to its baseline.",
         ),
         "memory extra approval": (
-            "Any extra memory pass follows `../operations/curation.md` §Handoff / exit states.",
+            "Any extra memory pass follows `../operations/curation.md` §Handoff / exit.",
         ),
         "post-pass concern": (
             "Answer Curator code findings directly to Curator and Worker, even after code PASS",
@@ -376,18 +384,18 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
             "take a valid finding into your findings and reopen the verdict for that point, or state why it does not hold",
         ),
         "busy retry": (
-            "Count a hand-over as taken and handle provider, seat, busy and unreachable-Manager refusals as `../operations/implementation.md` §Boundaries states.",
+            "Full-store recipient-busy is a refusal: pending record, independent work, one resend before turn end, then remain pending.",
         ),
         "upward notice recovery": (
-            "Count a hand-over as taken and handle provider, seat, busy and unreachable-Manager refusals as `../operations/implementation.md` §Boundaries states.",
+            "Handle non-work replies, empty or doubled seats and unreachable-Manager notices as `../operations/implementation.md` §Boundaries states.",
         ),
     },
     "roles/curator.md": {
         "memory to reviewer": (
-            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit states",
+            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit",
         ),
         "identity and whole stretch": (
-            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit states",
+            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit",
         ),
         "post-pass code finding": (
             "Send code questions and evidenced code concerns as `../operations/curation.md` §Failure handling states, even after the Reviewer has passed the code",
@@ -397,16 +405,16 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
         ),
         "finding and answer report": ("Your report names the finding and the Reviewer's answer.",),
         "memory lane and count": (
-            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit states",
+            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit",
         ),
         "memory leaves code untouched": (
-            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit states",
+            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit",
         ),
         "memory ordinary limit": (
-            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit states",
+            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit",
         ),
         "busy retry": (
-            "Address handovers and count them as taken as `../operations/curation.md` §Handoff / exit states.",
+            "Full-store recipient-busy is a refusal: pending record, independent work, one resend before turn end, then remain pending.",
         ),
         "upward notice recovery": (
             "If a required Manager notice cannot be delivered, record it as pending and retry it as `../operations/curation.md` §Handoff / exit states; do not turn this transport failure into a developer question in your own chat.",
@@ -439,11 +447,11 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
             "Its ordinary limit is the same number of passes as the code review.",
         ),
         "busy retry": (
-            "Count a hand-over as taken and handle provider, seat, busy and unreachable-Manager refusals as `../operations/implementation.md` §Boundaries states.",
+            "Full-store recipient-busy is a refusal: pending record, independent work, one resend before turn end, then remain pending.",
         ),
         "upward notice recovery": (
             "If a required Manager notice cannot be delivered, record it as pending",
-            "Count a hand-over as taken and handle provider, seat, busy and unreachable-Manager refusals as `../operations/implementation.md` §Boundaries states.",
+            "Handle non-work replies, empty or doubled seats and unreachable-Manager notices as `../operations/implementation.md` §Boundaries states.",
         ),
     },
 }

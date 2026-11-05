@@ -35,6 +35,10 @@ MANIFEST = "names paseo in a manifest"
 RUNTIME_COMMANDS = "PNT-R01: "
 ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
     PACKAGE: {
+        "scripts/agent_evals/adapters/recorder_plugin/index.server.ts": (
+            2,
+            "the eval recorder imports Paseo's supported plugin interface, as the shipped AR plugin does; no daemon client or command runner",
+        ),
         "scripts/check-host-contract.py": (
             1,
             "checks the shipped plugin SDK pin against the build host",
@@ -52,6 +56,16 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
     },
     PROGRAM: {},
     LITERAL: {
+        "scripts/agent_evals/adapters/recorder_plugin/index.server.ts": (
+            3,
+            "the typed context.paseo door of Paseo's plugin interface for native event subscription",
+        ),
+        "scripts/agent_evals/fixtures.py": (2, "a directory name, not a call"),
+        "scripts/agent_evals/regrade.py": (1, "a directory name, not a call"),
+        "scripts/agent_evals/trial_setup.py": (
+            1,
+            "AR's own runtime CLI subcommand; host provision/stop use the single product runner",
+        ),
         CLI + "__main__.py": (1, "the `paseo` sub-command of AR's own command line (PNT-R01)"),
         "mcp/src/agents_remember/kernel/primitives/fresh_host.py": (
             1,
@@ -92,6 +106,10 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
         ),
     },
     RUNNER: {
+        "scripts/agent_evals/trial_setup.py": (
+            5,
+            "PaseoCli is the existing product runner, bound through require_bridge_runtime; only supported recorder plugin lifecycle calls",
+        ),
         RUNTIME + "paseo_install.py": (3, "install and preview use the single runtime runner"),
         RUNTIME + "paseo_node.py": (1, "Node/npm validation uses the same process runner"),
         RUNTIME + "paseo_run.py": (3, "run context and read-only install admission"),
@@ -128,6 +146,10 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
         ),
     },
     ADDRESS: {
+        "scripts/agent_evals/trial_setup.py": (
+            2,
+            "writes and verifies the private fixture installPrefix passed to AR's runtime CLI; recorder uses require_bridge_runtime and the product runner",
+        ),
         RUNTIME + "paseo_install.py": (4, "install result and read-only preview of selected host"),
         RUNTIME + "paseo_run.py": (1, "checks the selected prefix before replacement"),
         RUNTIME + "paseo_start.py": (3, "reports/comparisons for the configured listen address"),

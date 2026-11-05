@@ -64,10 +64,31 @@ selected code repository:
 ```text
 ar-coordination/memory-repos/ar-my-app/
   memory.md
-  onboarding/
+  onboarding/                 # current Markdown cards and JSON sidecars
+  knowledge/
+    layout.json               # converted-layout marker
+    invariants/               # one JSON record per shared truth
+    families/
+    decisions/
+    history/                  # owner/attempt judgment files
   docs/
   system/
 ```
+
+The other record directories hold incidents, assumptions, limitations, failure
+modes, scenarios, diagnostics, terms, weaknesses and dependents. File sidecars own
+realizations/proofs; family records own their members and routes. The derived
+knowledge index is a disposable SQLite cache under
+`<coordination-root>/runtime/knowledge-index/`, outside Git working trees. Reads
+rebuild it from the selected text tree when needed; it is not a second source of
+truth.
+
+The worklist compares four code/memory sides, the validator checks the candidate's
+structure and references, and the mandatory gate combines current satisfying
+judgments with validator results on the exact publication trees. The review page
+presents the change set and stored judgments; the knowledge reader presents a
+selected memory tree. Neither display authors a judgment. See [Knowledge
+system](reference/knowledge-system.md) for the layout, commands and boundaries.
 
 ## Resolution Order
 
@@ -90,7 +111,7 @@ Once memory is resolved, agents reach into memory and code through three substra
 
 The meaning and relationship substrates were served by two providers — GrepAI for semantic memory search, CodeGraphContext for the code graph. Both are retired (MIK-R112): no product path installs, enables, starts, indexes, or queries them, and the `providers/` tree shown above holds only what an older installation left behind.
 
-These providers were accelerators for *finding* knowledge; they were never the source of truth. Durable memory stays Markdown + Git, drift-checked and approval-gated, whatever surfaced a candidate. `runtime_install` stops a leftover provider watcher and reports old provider keys once as unused; deleting leftover folders takes the explicit `providers-remove` command — see the [Providers guide](guides/providers.md), now a retirement and old-install cleanup account, and [MCP tool reference](reference/mcp-tools.md).
+These providers were accelerators for *finding* knowledge; they were never the source of truth. Durable memory stays Markdown/JSON + Git, drift-checked and approval-gated, whatever surfaced a candidate. `runtime_install` stops a leftover provider watcher and reports old provider keys once as unused; deleting leftover folders takes the explicit `providers-remove` command — see the [Providers guide](guides/providers.md), now a retirement and old-install cleanup account, and [MCP tool reference](reference/mcp-tools.md).
 
 ## Ownership Boundaries
 

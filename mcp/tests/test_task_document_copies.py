@@ -41,6 +41,18 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 
+TASK_DOCUMENT_RECOVERY_CLAUSES = (
+    "task_doc first, then logged canonical amendment on correct-input refusal",
+    "owner's next publication refreshes renders/projections",
+    "rendered copies never parsed back",
+    "Follow skills/l-01-agent-lifecycles/reference/refused-write.md for that same-tool recovery",
+    "read/check/validation/sync, starts, product guards and commit gates retain stops",
+)
+
+
+def missing_task_document_recovery(text: str) -> list[str]:
+    return [clause for clause in TASK_DOCUMENT_RECOVERY_CLAUSES if clause not in text]
+
 
 class TaskDocumentCopyTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -322,7 +334,12 @@ class TaskDocumentCopyTests(unittest.TestCase):
                 self.config, context, {"path": str(self.groups[0])}, rows
             )
             self.assertIn("harness's own file tools", first)
-            self.assertIn("task_doc only", first)
+            self.assertEqual(missing_task_document_recovery(first), [])
+            for clause in TASK_DOCUMENT_RECOVERY_CLAUSES:
+                with self.subTest(role=role, recovery_clause=clause):
+                    mutant = first.replace(clause, "")
+                    self.assertNotEqual(mutant, first)
+                    self.assertIn(clause, missing_task_document_recovery(mutant))
             self.assertEqual(
                 metadata["state"],
                 "inside-working-folder"

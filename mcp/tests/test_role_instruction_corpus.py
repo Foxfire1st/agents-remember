@@ -20,6 +20,7 @@ the properties a consumer depends on:
 
 from __future__ import annotations
 
+import argparse
 import copy
 import json
 import re
@@ -33,6 +34,8 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
+from agents_remember.cli.__main__ import build_parser
+from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.tasks import write_task_doc
 from curation_statement_surface import fragment_one_surfaces
 from test_task_document import _config, _doc
@@ -982,3 +985,177 @@ def test_native_new_master_then_indexed_leaf_dependencies(tmp_path: Path) -> Non
     assert call("set_field", "01_a", waitsFor=["B"])["ok"]
     assert json.loads((root / "01_a.json").read_bytes())["waitsFor"] == ["B"]
     assert "## Order" in (root / "task.md").read_text(encoding="utf-8")
+
+
+def _require_clauses(text: str, clauses: tuple[str, ...]) -> None:
+    for clause in clauses:
+        assert clause in text, clause
+
+
+def _architect_passages(text: str) -> str:
+    return " ".join(
+        " ".join(
+            re.findall(r"(?s)<!-- ar:roles architect -->\s*(.*?)(?=<!-- ar:roles |\Z)", text)
+        ).split()
+    )
+
+
+def test_packet_alignment_and_advisory_review_keep_independent_preparation() -> None:
+    """Inherited12/13/19/22/23: omissions or a move to common prose lose the duty."""
+    required = {
+        "operations/planning.md": (
+            "## Cross-packet alignment sweep",
+            "**When.**",
+            "**What.**",
+            "in both directions",
+            "reader other than the drafter",
+            'before the intent-review question "go, or review first?"',
+            "again before the go for a packet revised during the review",
+            "goes to the developer before either leaf proceeds",
+            "drafted and registered",
+            "**No finding** is recorded",
+            "**The default stays.**",
+            "that leaf's charter covers it anyway",
+            "each knowledge answer read to its last page",
+            "the code they leave unattributed",
+            "Prepared context before any seat starts",
+            "a row kind, a disposition, a writer field or a gate",
+            "how the leaf's own curation completes on the installed build",
+            "fixtures and scratch copies only",
+            "what it ran and what it left out",
+            "same cause on the base, compared by message and subtest, not by test name",
+            "tell the developer that day: hours, item",
+            "Plan-review and super-exit have no startable Reviewer seat",
+        ),
+        "operations/review.md": (
+            "## Advisory independent reviews",
+            "exception to routing",
+            "Architect carries the advisory findings to the Reviewer itself",
+            "They hold no leaf seat",
+            "same material as the Reviewer",
+            "own output folder",
+            "own clean copy",
+            "own ports",
+            "No advisory reviewer reads the Reviewer's or Curator's files",
+            "another advisory reviewer's folders",
+            "reports only to the Architect",
+            "brief names nothing the Architect or developer has already noticed",
+            "an advisory report changes no verdict by itself",
+            "one questions file",
+            "tells the Manager once",
+            "rule on each",
+            "extra round",
+            "pre-landing check confirms that every advisory finding has a ruling",
+            "sufficient seat permissions",
+            "default/auto-review or a refused approval",
+            "leaves the decision to the user",
+            "without bypass",
+        ),
+    }
+    for source, clauses in required.items():
+        text = (LIFECYCLE_ROOT / source).read_text()
+        selected = _architect_passages(text)
+        _require_clauses(selected, clauses)
+        for clause in clauses:
+            mutant = selected.replace(clause, "")
+            with pytest.raises(AssertionError, match=re.escape(clause)):
+                _require_clauses(mutant, clauses)
+        # The same prose in the all-roles passage cannot satisfy Architect-only ownership.
+        moved = text.replace("<!-- ar:roles architect -->", "<!-- ar:roles all -->")
+        assert not _architect_passages(moved)
+    architect = (LIFECYCLE_ROOT / "roles/architect.md").read_text()
+    for heading, target in (
+        ("Establish the work", "operations/planning.md"),
+        ("Delegate and decide", "operations/review.md"),
+    ):
+        section = architect.split("## " + heading + "\n", 1)[1].split("\n## ", 1)[0]
+        pointer = next(line for line in section.splitlines() if target in line)
+        assert len(pointer.split()) <= 25, (heading, pointer)
+    coordination = (LIFECYCLE_ROOT / "operations/coordination.md").read_text()
+    manager = " ".join(
+        " ".join(
+            re.findall(r"(?s)<!-- ar:roles manager -->\s*(.*?)(?=<!-- ar:roles |\Z)", coordination)
+        ).split()
+    )
+    _require_clauses(
+        manager,
+        (
+            "For integration or master-exit",
+            "acceptance and delivery-proof leaf",
+            "if none is named, ask the architect",
+            "adding candidate identity and attempt records",
+            "as your first `role_message` to the returned agent ID",
+            "For a pending hand-over, the Manager gives the sender the occasion to retry and relays no contents",
+        ),
+    )
+    # Advice does not recreate the superseded cold-read sweep requirement.
+    alignment = _architect_passages((LIFECYCLE_ROOT / "operations/planning.md").read_text())
+    assert "drafted, cold-read and registered" not in alignment
+
+
+def _assert_public_command_reference(reference: str) -> None:
+    pending = [("", build_parser())]
+    while pending:
+        prefix, parser = pending.pop()
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for name, child in action.choices.items():
+                    command = (prefix + " " + name).strip()
+                    assert f"| `{command}` |" in reference, command
+                    pending.append((command, child))
+
+
+def test_knowledge_gate_and_worklist_explanations_cover_actual_landing_steps() -> None:
+    """Inherited2/4/5 retain exact-tree/refusal meaning and field owners after c-02 retirement."""
+    closeout = " ".join((LIFECYCLE_ROOT / "operations/closeout.md").read_text().split())
+    for clause in (
+        "exact candidate code/memory trees",
+        "Leaf integration judges its closeout pair again",
+        "master's memory commit against the parent line's memory tip",
+        "master's net code diff",
+        "every non-abandoned leaf landed",
+        "checkpoint proves the chain of leaves already landed",
+        "Direct landing likewise judges its exact candidate pair",
+        "`knowledge-gate-refused`",
+        "`direct-landing-knowledge-gate-refused`",
+        "Send the findings to the Curator",
+        "Nothing bypasses the gate",
+    ):
+        assert clause in closeout, clause
+        assert clause not in closeout.replace(clause, "", 1)
+    brief = " ".join((LIFECYCLE_ROOT / "templates/manager-brief.md").read_text().split())
+    for clause in (
+        "dependencies before starting",
+        "before integrating",
+        "findings to the Curator",
+        "Nothing bypasses the gate",
+    ):
+        assert clause in brief, clause
+    detail = (LIFECYCLE_ROOT / "reference/curator-worklist-details.md").read_text()
+    worklist, gate = detail.split("`knowledgeGate`", 1)
+    for field in ("state", "path", "digest", "itemCount", "itemsByKind", "incomplete"):
+        assert f"| `{field}` |" in worklist, field
+    for field in (
+        "state",
+        "owner",
+        "worklistState",
+        "worklistDigest",
+        "worklistPath",
+        "findingCount",
+        "openItemCount",
+        "incompleteCount",
+        "violationCount",
+        "reportOnlyCount",
+    ):
+        assert f"| `{field}` |" in gate, field
+    assert "an absent block\nis not a passing judgment or an empty result" in detail
+    reference = (LIFECYCLE_ROOT / "reference/knowledge-commands.md").read_text()
+    for column in ("What it does", "Who and when", "Example"):
+        assert column in reference
+    for tool in (name for name in PUBLIC_TOOLS if name.startswith("knowledge_")):
+        assert f"| `{tool}` |" in reference
+    _assert_public_command_reference(reference)
+    for role in ROLE_ORDER:
+        text = (LIFECYCLE_ROOT / f"roles/{role}.md").read_text()
+        assert "{{detail:reference/knowledge-commands.md}}" in text, role
+    assert not (SKILLS_ROOT / "c-02-memory-quality-control").exists()

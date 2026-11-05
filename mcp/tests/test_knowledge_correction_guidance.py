@@ -6,21 +6,60 @@ from pathlib import Path
 from agents_remember.application.knowledge_gate.gate import __doc__ as GATE_GUIDE
 from agents_remember.application.knowledge_writer import __doc__ as WRITER_GUIDE
 from agents_remember_test_support.testing.capsule_wording import instruction_surface
-from agents_remember_test_support.testing.leaf_instruction_wording import normalized
+from agents_remember_test_support.testing.leaf_instruction_wording import delivered_step, normalized
+from test_knowledge_bootstrap_procedure import (
+    FOUNDATION_AUTHORITY_CLAUSES,
+    delivered_foundation,
+    foundation_delivery_controls,
+    free_agent_capsule,
+)
 
 ROOT = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
 
 
-def test_curator_deduplication_keeps_distinct_authority_and_outcome_clauses() -> None:
+def test_curator_deduplication_keeps_distinct_authority_and_outcome_clauses(tmp_path: Path) -> None:
     surface = normalized(instruction_surface(ROOT, "roles/curator.md"))
     for clause in (
-        "Report a missing task; never fabricate a task, worktree or enclosure.",
-        "never hand-write records, sidecar entries or history, open or edit the derived index",
+        "Use mounted `knowledge_write` or the admitted serving-build CLI with this task's contract, hand-off list and `--commit` (`commit: true`).",
+        "Only that tool and input class admits open manual recovery; other writes keep their tools.",
+        "A missing writer is not a refused correct write: report required records not written.",
+        "Never edit the derived index.",
+        "`--commit` (`commit: true`) authorizes file writes, not Git or acceptance.",
         "`planned` and `refused` wrote nothing",
-        "report refusals exactly as returned.",
+        "writer-report state, written record/entry IDs/paths, history rows and each refusal's own reason.",
         "Send code questions and evidenced concerns under `../operations/curation.md` §Failure handling, including after code PASS.",
     ):
         assert normalized(clause) in surface, clause
+    capsule = free_agent_capsule("curator")
+    delivered_foundation(capsule, ROOT, tmp_path / "foundation.md", FOUNDATION_AUTHORITY_CLAUSES)
+    foundation_delivery_controls(
+        capsule,
+        ROOT,
+        tmp_path / "foundation-controls",
+        FOUNDATION_AUTHORITY_CLAUSES,
+        "Report a missing task; never fabricate a task, worktree or enclosure.",
+    )
+    _, detail = delivered_step(
+        ROOT,
+        ("curator", "curation"),
+        "reference/refused-write.md",
+        "when a covered writer or record tool refuses a correct write, not before",
+        tmp_path / "report.md",
+    )
+    detail = normalized(detail)
+    for clause in (
+        "Retain the tool's actual refusal.",
+        "Record each input and refusal",
+        "a route that requires hidden edits, an older build lacking a check, false tool authorship or a weakened false claim is no route.",
+        "Tell the record's or machine state's owner before writing.",
+        "This exception covers only the same tool and input class that refused; every other write still uses its tool.",
+        "Record the manual write and its provenance, run every check that still works, and record the defect in an issue row.",
+        "Put the tool, every input tried, every refusal, the actual write, all check results and that issue row in the full report.",
+        "Claim no tool receipt for the manual work.",
+        "Read, check, validation and sync refusals, starts, product guards and commit gates retain their boundaries.",
+        "A denied or unanswered permission request is not worked around",
+    ):
+        assert normalized(clause) in detail, clause
 
 
 def test_curator_guidance_names_one_run_rows_proofs_and_link_recovery() -> None:

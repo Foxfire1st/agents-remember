@@ -377,9 +377,16 @@ RETIRED_CLAIMS = (
         claim_id="relay-evaluates-artifact",
         description="the relay evaluates, inspects, checks, or verifies a required artifact",
         pattern=re.compile(
-            rf"(?=.*\b{_RELAY}\b)"
-            rf"(?=.*\b(?:evaluat|inspect|verif|assess|judg|check|pars|open)\w*\b)"
-            rf"(?=.*\b{_ARTIFACT}\w*\b)"
+            # Attribute the action to the relay. Imperative "sweep ... open leaf
+            # packets" names neither a relay subject nor an act of opening.
+            rf"\b{_RELAY}\b(?:\s+(?:notifier|sweep|relay))?\s+"
+            r"(?:(?:must|shall|will|can|may|should|to)\s+(?:first\s+)?"
+            r"(?:evaluate|inspect|verify|assess|judge|check|parse|open)"
+            r"|evaluates|inspects|verifies|assesses|judges|checks|parses|opens)\b"
+            rf"[^.;:]{{0,120}}\b{_ARTIFACT}\w*\b"
+            rf"|\b{_ARTIFACT}\w*\b[^.;:]{{0,80}}\b"
+            r"(?:evaluated|inspected|verified|assessed|judged|checked|parsed|opened)"
+            rf"\s+by\s+(?:the\s+|a\s+)?{_RELAY}\b"
         ),
         sample=(
             "The HFX2-L2 agent-notifier sweep evaluates each expected artifact at every hand-off."
@@ -676,19 +683,64 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
                 self._assert_owed(relative)
 
     def test_a_worker_hands_its_frozen_report_directly_to_the_reviewer(self) -> None:
-        worker = normalize(read_surface("skills/l-01-agent-lifecycles/roles/worker.md"))
-        operation = normalize(
-            read_surface("skills/l-01-agent-lifecycles/operations/implementation.md")
+        worker_source = read_surface("skills/l-01-agent-lifecycles/roles/worker.md")
+        operation_source = read_surface("skills/l-01-agent-lifecycles/operations/implementation.md")
+        # Rule 43 stages seat creation through the Manager, while the Worker
+        # still sends the complete frozen object directly to its Reviewer.
+        routes = (
+            (
+                worker_source,
+                "Outputs",
+                (
+                    "Freeze the candidate as `../operations/implementation.md` §Outputs states.",
+                    "Worker first tells Manager to start Reviewer, then hands freeze directly to that Reviewer.",
+                ),
+            ),
+            (
+                worker_source,
+                "Boundaries",
+                (
+                    "A Worker starts no role.",
+                    "Freeze the candidate and hand it to the Reviewer directly, rather than asking the Manager to relay it",
+                ),
+            ),
+            (
+                operation_source,
+                "Outputs",
+                (
+                    "Freeze the candidate and first tell the Manager to start the Reviewer.",
+                    "Once the Reviewer exists, hand the freeze directly to that Reviewer with `role_message` on `agents-remember-task`",
+                    "naming the leaf, head and change hash in your report, report path, and whole next stretch.",
+                ),
+            ),
+            (
+                operation_source,
+                "Boundaries",
+                (
+                    "Count a hand-over as taken only when the recipient's reply or report names the exact object and shows the requested work or its start.",
+                ),
+            ),
         )
-        self.assertIn("freeze the candidate and send it directly to the leaf's reviewer", worker)
-        # One-home repair: the handover mechanics live in the operation; the role
-        # carries the referral.
-        self.assertIn(
-            "freeze the candidate and send it directly to the leaf's reviewer as",
-            worker,
-        )
+
+        def require_route(source: str, heading: str, clauses: tuple[str, ...]) -> None:
+            match = re.search(r"(?ms)^## " + re.escape(heading) + r"\n(.*?)(?=^## |\Z)", source)
+            self.assertIsNotNone(match, heading)
+            assert match is not None
+            reading = normalize(match[1])
+            for clause in clauses:
+                self.assertIn(normalize(clause), reading)
+
+        for source, heading, clauses in routes:
+            require_route(source, heading, clauses)
+            for clause in clauses:
+                with self.subTest(heading=heading, route_clause=clause):
+                    mutant = source.replace(clause, "")
+                    self.assertNotEqual(mutant, source)
+                    with self.assertRaises(AssertionError):
+                        require_route(mutant, heading, clauses)
+        worker = normalize(worker_source)
+        operation = normalize(operation_source)
         self.assertIn("not routine report notices", operation)
-        self.assertIn("a reply or report names its exact object", operation)
         self.assertIn("count a hand-over as taken", worker)
         self.assertIn("a worker started from the dashboard has none", worker)
         self.assertIn("a finished turn is not ar acceptance", worker)
@@ -1003,6 +1055,24 @@ class SilenceIsNotContradictionTests(unittest.TestCase):
 
 class DetectorTeethTests(unittest.TestCase):
     """Each detector still catches the shipped text it was written for, and clears the new one."""
+
+    def test_packet_alignment_sweep_is_not_a_relay_artifact_check(self) -> None:
+        legal = (
+            "Before a new or revised packet is released, sweep it against every open "
+            "leaf's packet of its master, both ways, for contradictions and stale facts."
+        )
+        self.assertEqual(contradictions(legal), ())
+        for illegal in (
+            "The notifier opens the report.",
+            "The sweep checks each required packet.",
+            "The relay must first verify the acceptance envelope.",
+            "The report is parsed by the notifier.",
+            RETIRED_CLAIMS[0].sample,
+        ):
+            with self.subTest(text=illegal):
+                self.assertIn(
+                    "relay-evaluates-artifact", {item.claim_id for item in contradictions(illegal)}
+                )
 
     def test_owner_bound_approval_doctrine_is_not_a_contradiction(self) -> None:
         """The detector asks WHO accepts. R13 preserves the developer's and the owner's approvals.

@@ -12,12 +12,19 @@ from __future__ import annotations
 
 import json
 import re
+import tempfile
 from pathlib import Path
 from typing import get_args
 
+from agents_remember.models.role_capsules.vocabulary import capsule_role_or_none
 from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.role_launcher import LauncherRole
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
+from agents_remember_test_support.testing.leaf_instruction_wording import (
+    MESSAGE_HANDOVER_SOURCE,
+    MESSAGE_HANDOVER_STEP,
+    delivered_step,
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 LIFECYCLE = Path("l-01-agent-lifecycles")
@@ -96,3 +103,35 @@ def read(relative: Path) -> str:
 
 def role_text(role: str) -> str:
     return " ".join(read(LIFECYCLE / "roles" / f"{role}.md").split())
+
+
+def assert_message_handover_delivery(roles: tuple[str, ...]) -> None:
+    """Rules44/47 and BA3: exercise each sender's real launch-delivered step."""
+    for role_name in roles:
+        role = capsule_role_or_none(role_name)
+        assert role is not None, role_name
+        pointer = "{{detail:" + MESSAGE_HANDOVER_SOURCE + "}}"
+        if role == "bootstrap":
+            assert pointer not in role_text(role), role
+            continue
+        assert pointer in role_text(role), role
+        with tempfile.TemporaryDirectory() as directory:
+            _, held = delivered_step(
+                CANONICAL / LIFECYCLE,
+                (role, "orientation"),
+                MESSAGE_HANDOVER_SOURCE,
+                MESSAGE_HANDOVER_STEP,
+                Path(directory) / "report.md",
+            )
+        for clause in (
+            "Held means queued eventual delivery, possibly many turns later: never resend it",
+            "consumption needs the recipient artifact and superseded held messages are withdrawn",
+            "Full-store recipient-busy is a refusal: pending record, independent work, one resend before turn end, then remain pending.",
+            "Withdraw a superseded held message by `withdraw_held_message_id`.",
+            "A receiver does not poll.",
+            "A receipt or turn-end does not establish semantic acceptance.",
+            "same-leaf messages under `notes/messages/<leaf-slug>/`",
+            "The active enclosure holds its own receipts; otherwise receipts use the configured `transcriptRoot`.",
+            "Search the complete applicable message folder and receipt scope before claiming that no message was sent.",
+        ):
+            assert clause in held, (role, clause)

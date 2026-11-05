@@ -72,8 +72,10 @@ this module keeps are the ones the evidence lifecycle catalog names by node.
 
 from __future__ import annotations
 
+import sys
 import unittest
 from typing import Any
+from unittest.mock import patch
 
 import anyio
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
@@ -89,10 +91,42 @@ from tool_entry_point_sweep_support import (
     _git,
     refusal_marks,
 )
+from tool_entry_point_world import EntryPointWorld as OrdinaryEntryPointWorld
 
 # test_tool_refusal_conformance.py imports this pin from this module's path; the
 # value now lives in tool_entry_point_sweep_support.py, so it is re-exported here.
 __all__ = ["T34_REPAIRED_TOOLS"]
+
+
+class EntryPointExceptionEvidenceTests(unittest.TestCase):
+    def test_both_worlds_retain_exception_evidence(self) -> None:
+        for world_type in (OrdinaryEntryPointWorld, EntryPointWorld):
+            for message in ("synthetic runtime warning", ""):
+                with self.subTest(world=world_type.__module__, message=message):
+                    raise_lines: list[int] = []
+
+                    def inner(
+                        expected_message: str = message, lines: list[int] = raise_lines
+                    ) -> None:
+                        lines.append(sys._getframe().f_lineno + 1)
+                        raise RuntimeWarning(expected_message)
+
+                    def run_wrapper(*_args: Any, **_kwargs: Any) -> None:
+                        inner()
+
+                    world = world_type.__new__(world_type)
+                    with patch.object(anyio, "run", side_effect=run_wrapper):
+                        kind, answer = world.call("synthetic_exception", {})
+
+                    self.assertEqual(kind, "RAISED RuntimeWarning")
+                    self.assertEqual(
+                        answer,
+                        {
+                            "detail": message,
+                            "exceptionType": "RuntimeWarning",
+                            "exceptionLocation": f"{__file__}:{raise_lines[0]}",
+                        },
+                    )
 
 
 class EntryPointCoverageTests(unittest.TestCase):

@@ -40,6 +40,7 @@ from agents_remember.models.role_capsules.vocabulary import (
 )
 
 if TYPE_CHECKING:
+    from agents_remember.models.role_capsules.contracts import CapsuleContractMarker
     from agents_remember.models.role_capsules.diagnostics import CapsuleManifest
 
 # --------------------------------------------------------------------------------------
@@ -468,6 +469,7 @@ class CapsuleCapsule:
     semantic_digest: CapsuleDigest
     binding: CapsuleBinding
     detail_references: tuple[CapsuleDetailReference, ...] = ()
+    contract_markers: tuple[CapsuleContractMarker, ...] = ()
 
     @property
     def instructions(self) -> tuple[CapsuleInstructionBlock, ...]:

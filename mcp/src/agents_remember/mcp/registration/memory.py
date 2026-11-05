@@ -37,13 +37,13 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         request: MemoryQualityCheckRequest,
     ) -> dict[str, Any]:
         """
-        Check memory before closeout: findings, counts and the checklist location, not semantic
-        certification. Pass a sync, start or poll request; candidate runs use the leaf contract.
-        Ready memory also requires validated curator_coherence. Four operations have no tool, by
-        design: the conversion (it runs inside the crossing sync, or once per repository), the
-        index build (every read builds it on demand), the formatter (the writer renders canonical
-        files), and the worklist (this tool computes it and `knowledge_integrity_check` returns
-        it). Longer explanation: docs/tool-details.md.
+        Check memory before closeout: findings, counts and checklist location, not semantic
+        certification. Pass sync/start/poll; candidate runs use the leaf contract. Full leaf logs
+        add knowledgeWorklist (state, path, digest, counts, unreadable inputs) and
+        knowledgeGate (exact-tree verdict and finding counts). Ready memory also needs validated
+        curator_coherence. Conversion, index build, formatter and worklist have no separate MCP
+        tool: conversion runs at crossing or once per repository; reads build the index; the
+        writer formats; this check computes the worklist. Docs: docs/tool-details.md.
         """
         if isinstance(request, MemoryQualityPollRequest):
             return tools.memory_quality_check_poll_payload(config, request)

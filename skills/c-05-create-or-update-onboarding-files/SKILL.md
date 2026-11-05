@@ -54,7 +54,13 @@ route overviews follow `workflows/converted-card-workflow.md`:
   (a new card, or a reference re-authored by its number);
 - a change with no onboarding impact is an `onboarding_trace` row written through `knowledge-ingest`.
 
-Never write sidecar JSON by hand. Old-format memory is refused; convert it by the procedure of MIK-R46 rule 6.
+Use `citation_fix` first. For a correct write refused by that writer/record tool/task_doc input class:
+check build/route, take an honest admitted route; otherwise write openly by hand and run every check
+that still works. Follow the [correct-input write-refusal procedure](../l-01-agent-lifecycles/reference/refused-write.md)
+for the full same-tool recovery, including owner notification, every attempted input and refusal,
+manual provenance, checks and the defect issue. Other tool/input classes keep their tools.
+Read/check/validation/sync, starts, product guards and commit gates retain stops; failed gates are
+repaired. Old-format memory is refused; convert it by the procedure of MIK-R46 rule 6.
 
 ## The drift check on converted cards
 

@@ -1,0 +1,26 @@
+{
+  "kind": "EVIDENCE COPY",
+  "epoch": "g1-20261030",
+  "purpose": "Exact retained grading reference for the declared G1 instrument; not a current instruction source.",
+  "sourcePath": "skills/l-01-agent-lifecycles/reference/refused-write.md",
+  "sourceSha256": "bbcdb9673a875499f0738ff7c23318c70da16f75455bce3535a18df48392dea7",
+  "sourceSizeBytes": 2760,
+  "sourceLines": [
+    24,
+    27
+  ],
+  "scopeSha256": "78aeb75c56081f2b0bb4f89781bc7526446c917b42605aafc42055c65f3d3748",
+  "sourceTree": "f51f35e1b13eb8b9576071fe51fb6cb7adfef37f",
+  "sourceBlob": "532e160181fdebc7bcd730a4bc7fccc9c56aa58d",
+  "runtimeReadFrom": "scripts/agent_evals/reference_epochs/g1-20261030/refused-write.md",
+  "authority": [
+    {
+      "path": "agents-remember/260928_maintained-invariant-knowledge/notes/messages/20261030T094851Z_manager-d8eb30d5_to_worker-315a1118.md",
+      "sha256": "712db3bb7aac420ee6e5bfe68fd4a4245d01c9b8c3fe2a5e6586629b8028d134"
+    },
+    {
+      "path": "agents-remember/260928_maintained-invariant-knowledge/notes/messages/20261030T095202Z_manager-d8eb30d5_to_worker-315a1118.md",
+      "sha256": "b0f36fff662adbf284640ad6a5e6f2e53635704d2f3f056599c551da1ad0f224"
+    }
+  ]
+}

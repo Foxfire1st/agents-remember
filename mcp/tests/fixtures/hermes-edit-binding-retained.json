@@ -1,0 +1,230 @@
+{
+  "schema": "ar-hermes-edit-binding-fixture/v1",
+  "source": "Exact retained host seats and selected Hermes message fields, no configuration or unrelated sessions copied",
+  "rows": [
+    {
+      "case": "CE01",
+      "attempt": "ab21f265-4a0e-4da1-b614-214c29eb77b9",
+      "hostAgentId": "a743738a-c941-4832-802e-7031cbcca81b",
+      "providerSessionId": "acf6dec3-836e-451b-8f3f-ed852e572bfa",
+      "projectRoot": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE01/trials/ab21f265-4a0e-4da1-b614-214c29eb77b9/project",
+      "record": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE01/ab21f265-4a0e-4da1-b614-214c29eb77b9/attempt.json",
+        "sha256": "da97c19de81d81be00e12fc5e434abb0c5aff06eb8c19c43533b8382439aa842"
+      },
+      "nativeSeat": {
+        "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE01/agents/var-tmp-mik-run3-architect-eval-sandbox-20261029-old-text-hermes-CE01-trials-ab21f265-4a0e-4da1-b614-214c29eb77b9-project/a743738a-c941-4832-802e-7031cbcca81b.json",
+        "sha256": "3740ad2bd430ef05cf28afa138f2b73e00ad20184d1bcb7811ac0bd76200fe14"
+      },
+      "oldBinding": "Native fixture binding: project /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE01/trials/ab21f265-4a0e-4da1-b614-214c29eb77b9/project; code /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE01/trials/ab21f265-4a0e-4da1-b614-214c29eb77b9/project/projects/code; memory /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE01/trials/ab21f265-4a0e-4da1-b614-214c29eb77b9/project/coordination/memory-repos/ar-code. The configured repository id is 'code'. The local knowledge_write wave is CE01-ab21f265-4a0e-4da1-b614-214c29eb77b9. This fixture uses that real repository-scoped wave route (repo_id and wave), not a production leaf contract or a role identity. Read/check tools must name these fixture roots explicitly. Native tools are attached as agents-remember-task.",
+      "userMessageId": 1180909,
+      "userMessageSha256": "3b30dcc0ebe325557f61bb68147bf5395d2e6576cf8a19b74237d9e2c6f0e3cb",
+      "rejectedWrite": {
+        "messageId": 1181218,
+        "tool": "write_file",
+        "path": "/home/test/.hermes/cache/scratch/check_anchors.py",
+        "argumentsSha256": "69db68c719067eeb8fc3a2c09c7845499e14a1201e9cde6b63c5ce4465b8428f"
+      },
+      "lastWait": {
+        "state": "permission",
+        "permission": "edit"
+      }
+    },
+    {
+      "case": "CE04",
+      "attempt": "dbb665f8-1a84-4a74-a9c9-d2ae6ad30fad",
+      "hostAgentId": "3aeb3fd7-4430-4147-9f05-4586b4ddd744",
+      "providerSessionId": "3641dd89-1eb9-4d0a-9e6f-5ac5499b087f",
+      "projectRoot": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE04/trials/dbb665f8-1a84-4a74-a9c9-d2ae6ad30fad/project",
+      "record": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE04/dbb665f8-1a84-4a74-a9c9-d2ae6ad30fad/attempt.json",
+        "sha256": "033afa653b73618974b122e610a9e5227dea129d7e822069cdd2ad9e757c8dba"
+      },
+      "nativeSeat": {
+        "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE04/agents/var-tmp-mik-run3-architect-eval-sandbox-20261029-old-text-hermes-CE04-trials-dbb665f8-1a84-4a74-a9c9-d2ae6ad30fad-project/3aeb3fd7-4430-4147-9f05-4586b4ddd744.json",
+        "sha256": "c6f41a51e623fb9e39afbe193b8f2fe7a0f622fbe8a93b30e0d325709689ca62"
+      },
+      "oldBinding": "Native fixture binding: project /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE04/trials/dbb665f8-1a84-4a74-a9c9-d2ae6ad30fad/project; code /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE04/trials/dbb665f8-1a84-4a74-a9c9-d2ae6ad30fad/project/projects/code; memory /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE04/trials/dbb665f8-1a84-4a74-a9c9-d2ae6ad30fad/project/coordination/memory-repos/ar-code. The configured repository id is 'code'. The local knowledge_write wave is CE04-dbb665f8-1a84-4a74-a9c9-d2ae6ad30fad. This fixture uses that real repository-scoped wave route (repo_id and wave), not a production leaf contract or a role identity. Read/check tools must name these fixture roots explicitly. Native tools are attached as agents-remember-task.",
+      "userMessageId": 1180355,
+      "userMessageSha256": "b7b8e37a7370a0242fa3bd59404cec2221b057aa12778211261c901311c713b5",
+      "rejectedWrite": {
+        "messageId": 1181065,
+        "tool": "write_file",
+        "path": "/home/test/.hermes/cache/scratch/ce04_history.py",
+        "argumentsSha256": "956415bf20c4cd1de21df0ab05e64bbee1c3afa0ffa6aa02307f269583553a25"
+      },
+      "lastWait": {
+        "state": "permission",
+        "permission": "edit"
+      }
+    },
+    {
+      "case": "CE04",
+      "attempt": "500a9c3a-7e46-465d-8e34-17f730c23035",
+      "hostAgentId": "a2735f07-0d8e-4c96-873e-bec7f273aca6",
+      "providerSessionId": "57986dd0-7006-4fc6-8adb-f40912c9cfcd",
+      "projectRoot": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE04/trials/500a9c3a-7e46-465d-8e34-17f730c23035/project",
+      "record": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE04/500a9c3a-7e46-465d-8e34-17f730c23035/attempt.json",
+        "sha256": "8a683dd99103d1158841e84965f1e6d0e562b32224bb08b1303586f851f76fb5"
+      },
+      "nativeSeat": {
+        "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE04/agents/var-tmp-mik-run3-architect-eval-sandbox-20261029-old-text-hermes-CE04-trials-500a9c3a-7e46-465d-8e34-17f730c23035-project/a2735f07-0d8e-4c96-873e-bec7f273aca6.json",
+        "sha256": "c9a287e6ed187453f546623e40a03060bd4e2c3eca645b6b0fd4c09e66283308"
+      },
+      "oldBinding": "Native fixture binding: project /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE04/trials/500a9c3a-7e46-465d-8e34-17f730c23035/project; code /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE04/trials/500a9c3a-7e46-465d-8e34-17f730c23035/project/projects/code; memory /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE04/trials/500a9c3a-7e46-465d-8e34-17f730c23035/project/coordination/memory-repos/ar-code. The configured repository id is 'code'. The local knowledge_write wave is CE04-500a9c3a-7e46-465d-8e34-17f730c23035. This fixture uses that real repository-scoped wave route (repo_id and wave), not a production leaf contract or a role identity. Read/check tools must name these fixture roots explicitly. Native tools are attached as agents-remember-task.",
+      "userMessageId": 1182413,
+      "userMessageSha256": "28255650a35920b63c18457b1d5c78111be2f6b4d8c39becc30e5905a8223665",
+      "rejectedWrite": {
+        "messageId": 1182727,
+        "tool": "write_file",
+        "path": "/home/test/.hermes/cache/scratch/ce04-handoff-changed.json",
+        "argumentsSha256": "3fc16c1b709ca606af43e0f4ce1334530b9bb4d32701806eb189fede78e7c704"
+      },
+      "lastWait": {
+        "state": "permission",
+        "permission": "edit"
+      }
+    },
+    {
+      "case": "CE05",
+      "attempt": "92343657-32cd-4ed6-81b8-398f89052e0c",
+      "hostAgentId": "0fd5db7b-fcca-48e6-9de9-ecd720618894",
+      "providerSessionId": "04155b44-346d-456a-9794-bcc29503a315",
+      "projectRoot": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE05/trials/92343657-32cd-4ed6-81b8-398f89052e0c/project",
+      "record": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE05/92343657-32cd-4ed6-81b8-398f89052e0c/attempt.json",
+        "sha256": "c2166b25f9a890f164f0194e128a14a3dd6aaa91a502229c7e6fb1c13cf35b8e"
+      },
+      "nativeSeat": {
+        "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE05/agents/var-tmp-mik-run3-architect-eval-sandbox-20261029-old-text-hermes-CE05-trials-92343657-32cd-4ed6-81b8-398f89052e0c-project/0fd5db7b-fcca-48e6-9de9-ecd720618894.json",
+        "sha256": "0ac2048384faba5074814e544715d5ee5590e99add4b3a5d2fb9c95459f3e198"
+      },
+      "oldBinding": "Native fixture binding: project /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE05/trials/92343657-32cd-4ed6-81b8-398f89052e0c/project; code /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE05/trials/92343657-32cd-4ed6-81b8-398f89052e0c/project/projects/code; memory /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE05/trials/92343657-32cd-4ed6-81b8-398f89052e0c/project/coordination/memory-repos/ar-code. The configured repository id is 'code'. The local knowledge_write wave is CE05-92343657-32cd-4ed6-81b8-398f89052e0c. This fixture uses that real repository-scoped wave route (repo_id and wave), not a production leaf contract or a role identity. Read/check tools must name these fixture roots explicitly. Native tools are attached as agents-remember-task.",
+      "userMessageId": 1181425,
+      "userMessageSha256": "a161c13e03ba5d6b7fc7b919aa8772c03d3225a4182207acfe0dac797bf72d68",
+      "rejectedWrite": {
+        "messageId": 1181937,
+        "tool": "write_file",
+        "path": "/home/test/.hermes/cache/scratch/ce05-wave-handoff.json",
+        "argumentsSha256": "186c7a2a9900569ac627be674a050d26ace7f5d821a5874329b18c6ab0201595"
+      },
+      "lastWait": {
+        "state": "permission",
+        "permission": "edit"
+      }
+    },
+    {
+      "case": "CE07",
+      "attempt": "c35190d1-900a-4d7a-94f4-a16ab3480b8b",
+      "hostAgentId": "a45432b7-3ca9-4bf5-b7ab-af622da8e435",
+      "providerSessionId": "b0d58118-8a61-46ab-b7cd-70055c19304c",
+      "projectRoot": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE07/trials/c35190d1-900a-4d7a-94f4-a16ab3480b8b/project",
+      "record": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE07/c35190d1-900a-4d7a-94f4-a16ab3480b8b/attempt.json",
+        "sha256": "714580baf35b9f428994bdfb722fb319fe0e0cae76e395fd034ad7ba93e05980"
+      },
+      "nativeSeat": {
+        "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE07/agents/var-tmp-mik-run3-architect-eval-sandbox-20261029-old-text-hermes-CE07-trials-c35190d1-900a-4d7a-94f4-a16ab3480b8b-project/a45432b7-3ca9-4bf5-b7ab-af622da8e435.json",
+        "sha256": "faac08a90764e3a088982a145b73cf2dde6839280b52212dfe9dfced636bb3a0"
+      },
+      "oldBinding": "Native fixture binding: project /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE07/trials/c35190d1-900a-4d7a-94f4-a16ab3480b8b/project; code /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE07/trials/c35190d1-900a-4d7a-94f4-a16ab3480b8b/project/projects/code; memory /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE07/trials/c35190d1-900a-4d7a-94f4-a16ab3480b8b/project/coordination/memory-repos/ar-code. The configured repository id is 'code'. The local knowledge_write wave is CE07-c35190d1-900a-4d7a-94f4-a16ab3480b8b. This fixture uses that real repository-scoped wave route (repo_id and wave), not a production leaf contract or a role identity. Read/check tools must name these fixture roots explicitly. Native tools are attached as agents-remember-task.",
+      "userMessageId": 1182502,
+      "userMessageSha256": "5b3ff44d3d51a93721281ab7323d1406e4515b6351d255b51cb83ca3a0b894ff",
+      "rejectedWrite": {
+        "messageId": 1183004,
+        "tool": "execute_code/write_file",
+        "path": "/home/test/.hermes/cache/scratch/ce07-inv-admission-handoff.json",
+        "argumentsSha256": "12c4b83af6ce2c7a16e048ddef994ce0fd8d18259981a01de0221d36f85151e2"
+      },
+      "lastWait": {
+        "state": "permission",
+        "permission": "edit"
+      }
+    },
+    {
+      "case": "CE12",
+      "attempt": "60bb46a5-bccd-4acd-b39b-63665d971002",
+      "hostAgentId": "f7273681-ff15-42c4-be98-425fce0e01ee",
+      "providerSessionId": "3e9261f4-aaed-436e-b4a3-2090bd4062c4",
+      "projectRoot": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE12/trials/60bb46a5-bccd-4acd-b39b-63665d971002/project",
+      "record": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE12/60bb46a5-bccd-4acd-b39b-63665d971002/attempt.json",
+        "sha256": "dbe93ea99aaf2591151126bb442b665dd8e4745f7da6e3e061c1e1c814e00d0f"
+      },
+      "nativeSeat": {
+        "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE12/agents/var-tmp-mik-run3-architect-eval-sandbox-20261029-old-text-hermes-CE12-trials-60bb46a5-bccd-4acd-b39b-63665d971002-project/f7273681-ff15-42c4-be98-425fce0e01ee.json",
+        "sha256": "f33aa837bd33f40188235c2e93d812fe22d2809eae7bcc09605c911ac2450175"
+      },
+      "oldBinding": "Native fixture binding: project /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE12/trials/60bb46a5-bccd-4acd-b39b-63665d971002/project; code /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE12/trials/60bb46a5-bccd-4acd-b39b-63665d971002/project/projects/code; memory /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE12/trials/60bb46a5-bccd-4acd-b39b-63665d971002/project/coordination/memory-repos/ar-code. The configured repository id is 'code'. The local knowledge_write wave is CE12-60bb46a5-bccd-4acd-b39b-63665d971002. This fixture uses that real repository-scoped wave route (repo_id and wave), not a production leaf contract or a role identity. Read/check tools must name these fixture roots explicitly. Native tools are attached as agents-remember-task.",
+      "userMessageId": 1183789,
+      "userMessageSha256": "63b754adf6da65ef6de3402242f02b00b1c39a231fc745b4ed503269357da46b",
+      "rejectedWrite": {
+        "messageId": 1184044,
+        "tool": "write_file",
+        "path": "/home/test/.hermes/cache/scratch/verify_anchors.py",
+        "argumentsSha256": "caef024cbab86ce3225599f7db0a1c0df844933ba2416cf77ff6c2020495d8a4"
+      },
+      "lastWait": {
+        "state": "permission",
+        "permission": "edit"
+      }
+    },
+    {
+      "case": "CE12",
+      "attempt": "11cf8e1d-50d9-4615-a072-9dd9ca44414e",
+      "hostAgentId": "3fbdf65f-1520-4f78-b039-79c82a14985f",
+      "providerSessionId": "29f4b117-a94d-4b36-b5c9-e87e6b73b3be",
+      "projectRoot": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE12/trials/11cf8e1d-50d9-4615-a072-9dd9ca44414e/project",
+      "record": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE12/11cf8e1d-50d9-4615-a072-9dd9ca44414e/attempt.json",
+        "sha256": "7b19f26599f3521c9466523c964441b4ecafe51513e793d2f958157f7f01cef1"
+      },
+      "nativeSeat": {
+        "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE12/agents/var-tmp-mik-run3-architect-eval-sandbox-20261029-old-text-hermes-CE12-trials-11cf8e1d-50d9-4615-a072-9dd9ca44414e-project/3fbdf65f-1520-4f78-b039-79c82a14985f.json",
+        "sha256": "64efa41d258b851286ffc98f221b6c808c600ca4d8b2d28a8688aba0ca0683bb"
+      },
+      "oldBinding": "Native fixture binding: project /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE12/trials/11cf8e1d-50d9-4615-a072-9dd9ca44414e/project; code /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE12/trials/11cf8e1d-50d9-4615-a072-9dd9ca44414e/project/projects/code; memory /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE12/trials/11cf8e1d-50d9-4615-a072-9dd9ca44414e/project/coordination/memory-repos/ar-code. The configured repository id is 'code'. The local knowledge_write wave is CE12-11cf8e1d-50d9-4615-a072-9dd9ca44414e. This fixture uses that real repository-scoped wave route (repo_id and wave), not a production leaf contract or a role identity. Read/check tools must name these fixture roots explicitly. Native tools are attached as agents-remember-task.",
+      "userMessageId": 1184143,
+      "userMessageSha256": "d610f28709494993f133c07b434527dd2ee01dc108f57d6af02aba5c9dc93763",
+      "rejectedWrite": {
+        "messageId": 1184505,
+        "tool": "write_file",
+        "path": "/home/test/.hermes/cache/scratch/verify_anchors.py",
+        "argumentsSha256": "cf5d641cfc2c2230f18a0fa3de4e08d5a965536ee529c8ac693798e918e69d57"
+      },
+      "lastWait": {
+        "state": "permission",
+        "permission": "edit"
+      }
+    },
+    {
+      "case": "CE12",
+      "attempt": "9b06d3c2-e766-4d74-b06d-9d7864a2c2a5",
+      "hostAgentId": "73388da7-dc4c-4ac2-b9f3-66605009895a",
+      "providerSessionId": "005ea5f0-0b55-46c0-83ed-cf5489f640ed",
+      "projectRoot": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE12/trials/9b06d3c2-e766-4d74-b06d-9d7864a2c2a5/project",
+      "record": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE12/9b06d3c2-e766-4d74-b06d-9d7864a2c2a5/attempt.json",
+        "sha256": "e02dbbe167d3164fce7430f14ee6b822e349df6a1c3e774fb1400a2a7f769aea"
+      },
+      "nativeSeat": {
+        "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE12/agents/var-tmp-mik-run3-architect-eval-sandbox-20261029-old-text-hermes-CE12-trials-9b06d3c2-e766-4d74-b06d-9d7864a2c2a5-project/73388da7-dc4c-4ac2-b9f3-66605009895a.json",
+        "sha256": "031810ec4be9ac5449fc35a1a38a8756a41971215a1c78758b41110584316409"
+      },
+      "oldBinding": "Native fixture binding: project /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE12/trials/9b06d3c2-e766-4d74-b06d-9d7864a2c2a5/project; code /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE12/trials/9b06d3c2-e766-4d74-b06d-9d7864a2c2a5/project/projects/code; memory /var/tmp/mik-run3/architect/eval-sandbox/20261029-old-text/hermes-CE12/trials/9b06d3c2-e766-4d74-b06d-9d7864a2c2a5/project/coordination/memory-repos/ar-code. The configured repository id is 'code'. The local knowledge_write wave is CE12-9b06d3c2-e766-4d74-b06d-9d7864a2c2a5. This fixture uses that real repository-scoped wave route (repo_id and wave), not a production leaf contract or a role identity. Read/check tools must name these fixture roots explicitly. Native tools are attached as agents-remember-task.",
+      "userMessageId": 1184590,
+      "userMessageSha256": "011c3d2b67cfaae74b9d4ad83468645785246ca84cfdeb2468e0ff8909667b99",
+      "rejectedWrite": {
+        "messageId": 1185249,
+        "tool": "write_file",
+        "path": "/home/test/.hermes/cache/scratch/build_reports.py",
+        "argumentsSha256": "7cde5be990688401650c8873b7d27d0a525b1701a2cd5361c71b66c00747061c"
+      },
+      "lastWait": {
+        "state": "permission",
+        "permission": "edit"
+      }
+    }
+  ]
+}

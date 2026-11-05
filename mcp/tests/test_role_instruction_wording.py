@@ -58,6 +58,7 @@ from role_instruction_wording_support import (
     REPOSITORY_ROOT,
     STARTERS,
     TOOL_SERVER,
+    assert_message_handover_delivery,
     forbidden_in,
     instruction_files,
     read,
@@ -65,7 +66,240 @@ from role_instruction_wording_support import (
 )
 
 
+def _required_step(text: str, heading: str, clauses: tuple[str, ...]) -> None:
+    """Read the named working step, never accept a matching clause elsewhere."""
+    match = re.search(r"(?ms)^## " + re.escape(heading) + r"\n(.*?)(?=^## |\Z)", text)
+    assert match is not None, heading
+    step = " ".join(match[1].split())
+    for clause in clauses:
+        assert clause in step, (heading, clause)
+
+
+def _step_controls(source: str, heading: str, clauses: tuple[str, ...]) -> None:
+    text = read(LIFECYCLE / source)
+    _required_step(text, heading, clauses)
+    for clause in clauses:
+        # Delete an actual duty, rather than pass a fabricated empty input to the checker.
+        normalized = " ".join(text.split())
+        assert clause in normalized, (source, clause)
+        mutant = re.sub(re.escape(clause).replace(r"\ ", r"\s+"), "", text)
+        assert mutant != text, (source, clause)
+        with unittest.TestCase().assertRaises(AssertionError):
+            _required_step(mutant, heading, clauses)
+    # A duty at another step is still missing where it is acted on.
+    moved = text.replace("## " + heading + "\n", "## Wrong working step\n")
+    with unittest.TestCase().assertRaises(AssertionError):
+        _required_step(moved, heading, clauses)
+
+
 class InstructionFileWordingTests(unittest.TestCase):
+    def test_inherited_construction_cost_and_continuation_keep_their_bounds(self) -> None:
+        checks = (
+            (
+                "roles/manager.md",
+                "Start the leaf's agents and own its decisions",
+                (
+                    "dependencies before starting and before integrating",
+                    "every landing route can refuse with gate findings",
+                    "send the findings to the Curator and bypass no gate",
+                    "one rerun on the same operands after a harness, loader or capture fault",
+                    "instruments that change no product source",
+                    "a second failure of one cause goes up with what was tried",
+                    "a small item that has cost about an hour, or a second repair round or freeze",
+                ),
+            ),
+            (
+                "roles/orchestrator.md",
+                "Coordinate role agents",
+                (
+                    "a small item that has cost about an hour, or a second repair round or freeze",
+                    "with its hours and a proposal",
+                ),
+            ),
+            (
+                "roles/worker.md",
+                "Where your stage ends",
+                (
+                    "after three repairs of your own, stop repairing",
+                    "tell the Manager at once with the hours",
+                    "bound its complete repair",
+                    "Dropping applies only to nondefect polish",
+                    "Work step to step, wave to wave, in one turn",
+                    "collecting your helpers' results",
+                    "a wait you name",
+                    "a nearly full context",
+                    "handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot`",
+                    "pass on a clean copy of its final bytes",
+                ),
+            ),
+            (
+                "roles/reviewer.md",
+                "Where your stage ends",
+                (
+                    "Work step to step, wave to wave, in one turn",
+                    "collecting helpers' results",
+                    "your verdict, a named wait or a nearly full context",
+                ),
+            ),
+            (
+                "roles/curator.md",
+                "Where your stage ends",
+                (
+                    "Work step to step, wave to wave, in one turn",
+                    "collecting helpers' results",
+                    "your hand-over, a named wait or a nearly full context",
+                ),
+            ),
+            (
+                "roles/investigator.md",
+                "Investigate and report",
+                (
+                    "Work step to step, wave to wave, in one turn",
+                    "collecting your helpers' results",
+                    "your report, a question to your parent",
+                ),
+            ),
+        )
+        for source, heading, clauses in checks:
+            with self.subTest(source=source, heading=heading):
+                _step_controls(source, heading, clauses)
+        for role in ("worker", "reviewer", "curator", "investigator"):
+            self.assertNotIn("Hermes: their files", role_text(role))
+
+        for role in ("architect", "manager", "orchestrator"):
+            _step_controls(
+                f"roles/{role}.md",
+                "Questions received from children",
+                (
+                    "{{detail:reference/child-questions.md}}",
+                    "when you reach a child's question or the developer's answer to it, not before",
+                ),
+            )
+        _step_controls(
+            "reference/child-questions.md",
+            "Relay the question and return its answer",
+            (
+                "answer it yourself if it lies within your authority",
+                "say that the answer is your own",
+                "pass the question unchanged to your parent",
+                "originating role, task and agent ID",
+                "add your own recommendation separately",
+                "Without a parent, put it to the developer in your own chat",
+                "task number and what the task does",
+                "agent that sent the question",
+                "state that the developer gave it",
+                "your agent ID as the agent that received it",
+                "developer's words in quotation marks",
+                "passes these three unchanged",
+                "An answer of your own is never the developer's answer or approval",
+            ),
+        )
+        _step_controls(
+            "roles/orchestrator.md",
+            "Verify and hand over",
+            (
+                "Plan-review and super-exit have no startable Reviewer seat",
+                "architect, who takes it to the developer",
+            ),
+        )
+
+    def test_freeze_report_and_receiver_keep_candidate_and_check_identity(self) -> None:
+        checks = (
+            (
+                "operations/implementation.md",
+                "Outputs",
+                (
+                    "the relevant checks not run and why",
+                    "same cause, not only under the same test name",
+                    "files it exercises are byte-identical",
+                    "each re-run with the changed file behind it",
+                    "Before each freeze",
+                    "handover checks on a clean copy of the final candidate",
+                    "the copy\u2019s tree and its result",
+                    "repair failures before freezing",
+                    "distinct from full code-quality operations",
+                ),
+            ),
+            (
+                "roles/worker.md",
+                "Outputs",
+                (
+                    "Requirement Attempt Journal records with their attempt IDs",
+                    "when you reach the freeze report, not before",
+                    "run `handoff-check` with the serving build's interpreter (`server_info` on `agents-remember-task`)",
+                    "against that freeze; the message names its result",
+                ),
+            ),
+            (
+                "roles/reviewer.md",
+                "Inputs",
+                (
+                    "Require tree-bound passing coding-guidelines handover results",
+                    "never the hosting leaf's enclosure candidate",
+                    "| atomic-master integration review | the canonical master | master's acceptance leaf |",
+                    "| master-exit | the master | master's acceptance leaf |",
+                    "| portfolio plan review | the sprint | none |",
+                    "| super-exit | the sprint | none |",
+                ),
+            ),
+            (
+                "templates/worker-brief.md",
+                "Targeted checks (before you report)",
+                (
+                    "Before each freeze",
+                    "clean copy of the candidate's final bytes",
+                    "The freeze report names every check, the copy's tree and its result",
+                    "Repair a failing check before freezing",
+                ),
+            ),
+        )
+        for source, heading, clauses in checks:
+            with self.subTest(source=source):
+                _step_controls(source, heading, clauses)
+
+    def test_design_guidelines_are_obligations_at_each_ui_input_step(self) -> None:
+        checks = (
+            (
+                "roles/worker.md",
+                "Inputs",
+                (
+                    "`system/design-guidelines.md` under `workspace.memoryRoot`",
+                    "where it exists",
+                    "before your first UI edit, and work as it directs",
+                ),
+            ),
+            (
+                "roles/reviewer.md",
+                "Inputs",
+                (
+                    "`system/design-guidelines.md`",
+                    "under `workspace.memoryRoot`",
+                    "where it exists: review the UI as it directs",
+                ),
+            ),
+            (
+                "roles/designer.md",
+                "Inputs",
+                ("where UI is in scope, also `system/design-guidelines.md`",),
+            ),
+            (
+                "templates/worker-brief.md",
+                "Design guidelines (read before your first UI edit)",
+                (
+                    "`<memory-worktree-path>/system/design-guidelines.md`",
+                    "UI work follows it, where the file exists",
+                ),
+            ),
+        )
+        for source, heading, clauses in checks:
+            with self.subTest(source=source):
+                _step_controls(source, heading, clauses)
+        brief = read(LIFECYCLE / "templates/worker-brief.md")
+        self.assertLess(brief.index("## Design guidelines"), brief.index("## Targeted checks"))
+        for role in ("worker", "reviewer", "designer"):
+            for copied_method in ("DESIGN.md", "TREATMENT.md", "TECHNIQUES.md"):
+                self.assertNotIn(copied_method, role_text(role))
+
     def test_investigator_scope_report_and_authority_are_explicit(self) -> None:
         investigator = role_text("investigator")
         for clause in (
@@ -160,16 +394,18 @@ class InstructionFileWordingTests(unittest.TestCase):
                 "Keep each work item tied to its canonical AR task and primary requirement. Start, reconcile, message and follow through as the selected Coordination operation states; a start is not completion. Handle the order of the day, operational problems, checks before and after a landing, and paired closeout within delegated authority. An Orchestrator started from the dashboard has no parent, needs none, and must not invent one: put developer decisions in your own chat.",
                 "Decide ordinary requirement interpretation within the intended promise and operational rulings yourself, and keep the work going. Keep those rulings in one durable rulings record, a list of requirement sentences that should change, and one status file under the selected task's notes; name their paths in your report. When the Architect started you, it reads these files on its own and aligns the requirement texts with the rulings. These records do not authorize new or dropped scope or a changed promise.",
                 "If you cannot start a needed role within your permissions, report that blocker to the agent that started you with `role_message` on `agents-remember-task`; without a parent, report it in your own chat and invent no Architect ID. Never start that role yourself. Assign a check or investigation that belongs to no leaf to an Investigator on your own sprint or on your sprint and one of its masters. Send the scoped concern as your first `role_message` on `agents-remember-task` to its returned agent ID; never select a leaf for this role.",
-                "When the Architect started you, message it only for a developer decision: new or dropped scope or a change to a requirement's promise; something only the developer can do or approve; an override of a role default; or a blocker that none of your own decisions can remove. Send these with `role_message` on `agents-remember-task` to the parent agent ID in your handover. Forward only questions requiring the developer and permission notices as stated below; send no other role messages or landing notices. Ordinary requirement readings and operational rulings stay with you; do not ask the Architect to perform them. Send one further message with the path of your report when the whole assignment is finished or cannot be finished. Send no other messages to the Architect.",
+                "When the Architect started you, message it only for a developer decision: new or dropped scope or a change to a requirement's promise; something only the developer can do or approve; an override of a role default; a small item that has cost about an hour, or a second repair round or freeze, with its hours and a proposal; or a blocker that none of your own decisions can remove. Send these with `role_message` on `agents-remember-task` to the parent agent ID in your handover. Forward only questions requiring the developer and permission notices as stated below; send no other role messages or landing notices. Ordinary requirement readings and operational rulings stay with you; do not ask the Architect to perform them. Send one further message with the path of your report when the whole assignment is finished or cannot be finished. Send no other messages to the Architect.",
                 "If that message cannot be delivered, write the matter in your status file, continue every part of the work that does not depend on the developer's decision, and send the message again later. Do not decide the developer's question yourself.",
-                "A turn ending proves only that it ended. Verify each Manager's delivery and aggregate evidence; the Manager owns the leaf-diff, repair and evidence loop. You may inspect supplied actual diffs for acceptance without taking over that loop. Request an independent Reviewer when the brief or risk requires it; a Reviewer never adjudicates its own work. Request a Curator for affected memory/onboarding when needed. Keep reports, findings, review, curation, and Git publication separately addressed. Use the existing AR task and paired Git owners for their semantic records; do not claim acceptance or landing from the status of an agent in Paseo.",
+                "A turn ending proves only that it ended. Verify each Manager's delivery and aggregate evidence; the Manager owns the leaf-diff, repair and evidence loop. You may inspect supplied actual diffs for acceptance without taking over that loop. Request an independent Reviewer when the brief or risk requires it; a Reviewer never adjudicates its own work. Request a Curator for affected memory/onboarding when needed. Keep reports, findings, review, curation, and Git publication separately addressed. Use the existing AR task and paired Git owners for their semantic records; do not claim acceptance or landing from the status of an agent in Paseo.\n\nPlan-review and super-exit have no startable Reviewer seat. Bring either review to the architect, who takes it to the developer with the sprint-level Reviewer idea.",
             ],
             "roles/manager.md": [
-                "You coordinate one selected master at Projects altitude. You do not own the portfolio. For one master, the Architect delegates coordination to one Manager. An Orchestrator sits above the Managers when two or more masters are worked on at the same time, or when the developer asks for one above a single master. Direct coordination by the Architect is only the developer-chosen exception. When another agent started you, report to that agent's role with its task references, unless the Architect instructs the reporting-recipient change below.",
-                "Read each leaf's reports and task records yourself. Direct leaf handover flow and relay limits follow `../operations/coordination.md`. Inspect the complete changed-file diff and both verdicts before deciding the gate. Keep closeout, integration, acceptance writes and the order of landings. Start, finalize and abandon publish task stage and mirror it into the master's row; do not follow them with a separate status write. Use `task_doc set_status` for an explicit correction and for organizational-master completion, whose completion act remains yours. Reviews are evidence, not gate decisions. Preserve stable requirement/finding IDs and distinguish implementation, review, curation and publication status. A Manager started from the dashboard has no parent and needs none: put a needed developer decision in your own chat and do not invent an Architect ID. Direct leaf repair-loop handovers run as `../operations/coordination.md` states.",
-                "Decide the order of your leaves, agent starts and replacements, operational problems, ordinary requirement interpretation within the intended promise, checks before and after a landing, and paired closeout and integration within delegated authority. Review rounds, memory passes and relay limits follow `../operations/coordination.md`. Accepting a verdict for the gate stays yours. Assign a check or investigation that belongs to no leaf to an Investigator on your own sprint and master. Send the scoped concern as your first `role_message` on `agents-remember-task` to its returned agent ID; never select a leaf for this role.",
+                "Normal start is individual role_start: Worker alone at build; Reviewer at Worker freeze; Curator after code PASS.",
+                "Hear from a leaf only when the Worker asks you to start the Reviewer at freeze; the Reviewer reports code PASS so you can start the Curator;",
+                "You coordinate one selected master at Projects altitude. You do not own the portfolio. When another agent started you, report to that agent's role with its task references, unless the Architect instructs the reporting-recipient change below.",
+                "Read each leaf's reports and task records yourself. Direct leaf hand-overs, repair loops, review rounds, memory passes and relay limits follow `../operations/coordination.md`. Inspect the complete changed-file diff and both verdicts before deciding the gate. Keep closeout, integration, acceptance writes and the order of landings. Start, finalize and abandon publish task stage and mirror it into the master's row; do not follow them with a separate status write. Use `task_doc set_status` for an explicit correction and for organizational-master completion, whose completion act remains yours. Reviews are evidence, not gate decisions. Preserve stable requirement/finding IDs and distinguish implementation, review, curation and publication status. A Manager started from the dashboard has no parent and needs none: put a needed developer decision in your own chat and do not invent an Architect ID.",
+                "Decide the order of your leaves, agent starts and replacements, operational problems, ordinary requirement interpretation within the intended promise, checks before and after a landing, and paired closeout and integration within delegated authority. Accepting a verdict for the gate stays yours. The task's construction is yours: step order, evidence form, which existing test or command shows a thing, one rerun on the same operands after a harness, loader or capture fault, and sandbox- or scratch-only instruments that change no product source; a second failure of one cause goes up with what was tried. Assign a check or investigation that belongs to no leaf to an Investigator on your own sprint and master. Send the scoped concern as your first `role_message` on `agents-remember-task` to its returned agent ID; never select a leaf for this role.",
                 "Keep your rulings in one durable rulings record, a list of requirement sentences that should change, and one status file under the selected master's notes; name their paths in your report. The Architect reads these files on its own and aligns the requirement texts with the rulings. These records do not authorize new or dropped scope or a changed promise.",
-                "When another agent started you, message your parent or the instructed reporting recipient only for a developer decision: new or dropped scope or a change to a requirement's promise; something only the developer can do or approve; an override of a role default; or a blocker that none of your own decisions can remove. Send these with `role_message` on `agents-remember-task` to the parent agent ID in your handover, or to the instructed reporting-recipient ID recorded in your report. When the Orchestrator owns coordination, do not bypass it to the Architect. Forward only questions requiring the developer and permission notices as stated below; send no other role messages or landing notices. Ordinary requirement readings and operational rulings stay with you; keep the work going. Send one further message with the path of your report, addressed to the parent's role with its task references, when the whole assignment is finished or cannot be finished. Send no other messages to that recipient.",
+                "When another agent started you, message your parent or the instructed reporting recipient only for a developer decision: new or dropped scope or a change to a requirement's promise; something only the developer can do or approve; an override of a role default; a small item that has cost about an hour, or a second repair round or freeze, with its hours and a proposal; or a blocker that none of your own decisions can remove. Send these with `role_message` on `agents-remember-task` to the parent agent ID in your handover, or to the instructed reporting-recipient ID recorded in your report. When the Orchestrator owns coordination, do not bypass it to the Architect. Forward only questions requiring the developer and permission notices as stated below; send no other role messages or landing notices. Ordinary requirement readings and operational rulings stay with you; keep the work going. Send one further message with the path of your report, addressed to the parent's role with its task references, when the whole assignment is finished or cannot be finished. Send no other messages to that recipient.",
                 "If the Architect who started you names an Orchestrator's agent ID in a message when a second master starts, record that instruction and reporting-recipient ID in your durable report and send developer-needed matters to that Orchestrator from then on. This changes your reporting recipient, not your fixed launch parent; no other message changes whom you report to.",
                 "If you cannot start a needed role within your permissions, report that blocker to your parent or instructed reporting recipient with `role_message` on `agents-remember-task`; without a parent, report it in your own chat and invent no Architect ID. Never start that role yourself.",
                 "If an upward message cannot be delivered, write the matter in your status file, continue every part of the work that does not depend on the developer's decision, and send the message again later. Do not decide the developer's question yourself.",
@@ -178,9 +414,32 @@ class InstructionFileWordingTests(unittest.TestCase):
                 "The Architect's first delegation for one master is one Manager on that canonical master. For two or more masters worked on at the same time, it is one Orchestrator on the canonical sprint, which starts one Manager per master. This delegation rule applies only to the Architect; Designers and Strategists do not start a coordinating role. Direct coordination by the Architect is only the developer-chosen exception; in that case, the Architect directly coordinates distinct Workers, Reviewers, and Curators. The developer may also ask for an Orchestrator above a single master. Keep one explicit owner per task and preserve the agent IDs of started roles. Do not fabricate a sprint/master for a taskless project role or an agent identity to satisfy an old hierarchy."
             ],
             "operations/coordination.md": [
-                "The Manager starts a leaf's Worker, Reviewer and Curator as a set in one `role_start_set` call on `agents-remember-task`: the Worker opens at once, and the Reviewer and the Curator are held until their first message opens them, unless the call carries the Reviewer's first work. The Reviewer first cold-reads the requirement before code exists. The Worker, Reviewer and Curator run the leaf repair loop directly with `role_message` on `agents-remember-task`: Worker freeze to Reviewer, verdict and sealed findings back to Worker, passed freeze and producer lists to Curator, memory change and verdict between Curator and Reviewer. A Curator's code concern goes to both Reviewer and Worker even after code PASS; the Reviewer answers it and the Curator records the answer. The Manager reads their reports, decides the gate and keeps closeout, integration, status, acceptance and landing order; it relays no freeze, finding, verdict or memory change. Keep paired code/memory/report paths and exact task references in each hand-over.",
+                "The Manager calls role_start once per stage: Worker first, Reviewer at the freeze, Curator when curation begins.",
+                "The Worker\u2019s freeze notice and Reviewer\u2019s code-PASS notice go to the Manager first.",
+                "At build, start the Worker alone.",
+                "For ordinary delivery, curation begins after code PASS.",
+                "The Worker hands its freeze directly to the Reviewer once that seat exists.",
+                "A separately assigned packet cold read remains possible without an early normal leaf Reviewer.",
+                "Ordinary delivery curation and the knowledge check still follow code PASS.",
+                "The Worker, Reviewer and Curator run the leaf repair loop directly with `role_message` on `agents-remember-task`: Worker freeze to Reviewer, verdict and sealed findings back to Worker, passed freeze and producer lists to Curator, memory change and verdict between Curator and Reviewer. A Curator's code concern goes to both Reviewer and Worker even after code PASS; the Reviewer answers it and the Curator records the answer. The Manager reads their reports, decides the gate and keeps closeout, integration, status, acceptance and landing order; it relays no freeze, finding, verdict or memory change. Keep paired code/memory/report paths and exact task references in each hand-over.",
                 "The Architect delegates coordination first to one Manager for one master, or to one Orchestrator on the sprint when two or more masters are worked on at the same time. The Orchestrator starts one Manager per master; each Manager coordinates its distinct Workers, Reviewers, and Curators. Only the developer may choose direct coordination by the Architect. The developer may also ask for an Orchestrator above a single master. If the Architect's coordinating-agent start is refused, the Architect tells the developer the refusal and its reason; it does not fall back to direct coordination.",
-                "Send one message to one agent with `role_message` on `agents-remember-task`, addressed by agent ID or by role plus task references. A leaf hand-over uses the role and exact task reference in `leafSeats.roleMessageArguments`; use a product-supplied agent ID only whole and unchanged. The current leaf resolver reaches a seat's single live agent; a seat with two live occupants is refused naming both, and the tool never picks one; an empty-seat refusal is reported once to the Manager with its text and no candidate is chosen. A role address never means you yourself. A recipient that is mid-turn takes the message up without its turn being cancelled; when the host cannot hand a message to the running turn, the message is held, and while anything is held for a recipient a further message is held behind it. A message to a recipient that waits for a permission decision, or whose start has not finished, is held the same way: the answer says `held` and why, and the product delivers what it holds in the order it took it once the recipient can take it. The host is never sent a message for a recipient that waits at a permission prompt, because it would answer the permission with a denial; only the developer answers the prompt, in that agent's chat. A closed session is resumed first; an archived or missing agent is refused and stays as it is. With `wait` the call returns when the turn that took your message has ended: with the recipient's final text, or saying that the turn failed or was cancelled; or it returns a pending permission, also for a wait on a held message, or a timeout with the message still delivered. It can also return `accepted` without a text, when the host cannot say which turn took the message; read the reply later then. The text of a message delivered during a turn can be that running turn's own; `detail` says so. Do not wait on an agent that may be waiting on you: two agents that wait on each other both stand still until one wait runs out. If your own tool calls are cut off earlier than the wait, pass a shorter `timeout_seconds`. An Orchestrator, Manager or developer-direct-coordinating Architect follows assignments until the work is complete, blocked, or a true developer decision is needed; it does not start a role and stop. The Architect releases execution coordination after the handover and continues the developer conversation and status reading; it holds no wait on an Orchestrator or Manager for execution completion. On a refusal or an uncertain result, act on the named reason; do not guess a parent or start duplicate work. A role started from the dashboard works directly with the developer and needs no parent.",
+                "Send one message to one agent with `role_message` on `agents-remember-task`, addressed by agent ID or by role plus task references.",
+                "A leaf hand-over uses the role and exact task reference in `leafSeats.roleMessageArguments`; use a product-supplied agent ID only whole and unchanged.",
+                "The current leaf resolver reaches a seat's single live agent; a seat with two live occupants is refused naming both, and the tool never picks one; an empty-seat refusal is reported once through the role\u2019s recovery route with its text and no candidate is chosen; a Manager uses its parent route, never itself.",
+                "A role address never means you yourself.",
+                "A recipient that is mid-turn takes the message up without its turn being cancelled.",
+                "The answer names `held` and its reason when the host has not delivered the message.",
+                "The host is never sent a message for a recipient that waits at a permission prompt, because it would answer the permission with a denial; permission decisions follow `operations/orientation.md`.",
+                "A closed session is resumed first; an archived or missing agent is refused and stays as it is.",
+                "With `wait` the call returns when the turn that took your message has ended: with the recipient's final text, or saying that the turn failed or was cancelled; or it returns a pending permission, also for a wait on a held message, or a timeout with the message still delivered.",
+                "It can also return `accepted` without a text, when the host cannot say which turn took the message; read the reply later then.",
+                "The text of a message delivered during a turn can be that running turn's own; `detail` says so.",
+                "Do not wait on an agent that may be waiting on you: two agents that wait on each other both stand still until one wait runs out.",
+                "If your own tool calls are cut off earlier than the wait, pass a shorter `timeout_seconds`.",
+                "An Orchestrator, Manager or developer-direct-coordinating Architect follows assignments until the work is complete, blocked, or a true developer decision is needed; it does not start a role and stop.",
+                "The Architect releases execution coordination after the handover and continues the developer conversation and status reading; it holds no wait on an Orchestrator or Manager for execution completion.",
+                "On a refusal or an uncertain result, act on the named reason; do not guess a parent or start duplicate work.",
+                "A role started from the dashboard works directly with the developer and needs no parent.",
             ],
             "SKILL.md": [
                 "Use the agent IDs these tools return and the sender line of each message you receive; never invent a sender, recipient, parent, or delivery result.",
@@ -189,17 +448,17 @@ class InstructionFileWordingTests(unittest.TestCase):
             ],
             "roles/curator.md": [
                 "Intake/writer admission: `../operations/curation.md` §Required inputs and §Bound Paseo intake and capabilities.",
-                "**Repository foundation is regular task work.** After setup reports memory/baseline state, the user starts the Architect, which opens the real foundation task, standalone or under a master/sprint.",
-                "Never fabricate a leaf, worktree or enclosure;",
-                "or the mounted `knowledge_write`, which runs the same writer with the same arguments.",
-                "No other route writes knowledge from this seat.",
+                "**Start this seat only on a leaf task document for the leaf pass, never taskless.** Read [repository foundation]({{detail:reference/curator-repository-foundation.md}}) when you reach a repository's first or resumed knowledge foundation, not before.",
+                "Never fabricate a leaf, worktree or enclosure",
+                "Use mounted `knowledge_write`",
+                "Only that tool and input class admits open manual recovery; other writes keep their tools.",
                 "Report one full-intake worklist of distinct outstanding memory actions:",
                 "A Curator started from the dashboard has no parent and needs none.",
                 "A Curator starts no role:",
                 "A harness without sub-agents can do all the same work.",
             ],
             "operations/curation.md": [
-                "Count a hand-over as taken and handle provider, seat, busy and unreachable-Manager refusals as `../operations/implementation.md` §Boundaries states.",
+                "Handle non-work replies, empty or doubled seats and unreachable-Manager notices as `../operations/implementation.md` §Boundaries states.",
                 "Reviewer compares Git bases/candidates; Curator records no separate comparison.",
             ],
         }
@@ -269,11 +528,18 @@ class InstructionFileWordingTests(unittest.TestCase):
             reading = role_text(role).replace("starts no role", "does not start a role")
             with self.subTest(role=role):
                 self.assertEqual(missing_clauses(reading, autonomy_clauses(role)), [])
-        worker = role_text("worker").replace(
-            "Use an agent ID only whole and unchanged as the product supplied it",
-            "Use only the whole, unchanged agent ID supplied by the product",
-        )
-        self.assertEqual(missing_clauses(worker, LEAF_CLAUSES["roles/worker.md"]), [])
+        # BA3: equivalence changes wording, not the actual source/step of an obligation.
+        source = "roles/worker.md"
+        with tempfile.TemporaryDirectory() as directory:
+            for name, alternatives in surface_clauses(source, LEAF_CLAUSES[source]).items():
+                worker = clause_surface(
+                    CANONICAL / LIFECYCLE, source, name, Path(directory) / "report.md"
+                ).replace(
+                    "Use an agent ID only whole and unchanged as the product supplied it",
+                    "Use only the whole, unchanged agent ID supplied by the product",
+                )
+                with self.subTest(obligation=name):
+                    self.assertEqual(missing_clauses(worker, {name: alternatives}), [])
 
     def test_the_surfaces_are_the_router_seven_roles_and_their_eight_operations(
         self,
@@ -431,14 +697,9 @@ class InstructionFileWordingTests(unittest.TestCase):
             "A role started from the dashboard works directly with the developer and needs no parent.",
             # What the message tool answers, as its own description says it.
             "A role address never means you yourself.",
-            "when the host cannot hand a message to the running turn, the message is held, and "
-            "while anything is held for a recipient a further message is held behind it.",
-            "A message to a recipient that waits for a permission decision, or whose start has "
-            "not finished, is held the same way: the answer says `held` and why, and the product "
-            "delivers what it holds in the order it took it once the recipient can take it.",
-            "The host is never sent a message for a recipient that waits at a permission prompt, "
-            "because it would answer the permission with a denial; only the developer answers "
-            "the prompt, in that agent's chat.",
+            "The answer names `held` and its reason when the host has not delivered the message.",
+            "A closed session is resumed first; an archived or missing agent is refused and stays as it is.",
+            "The host is never sent a message for a recipient that waits at a permission prompt, because it would answer the permission with a denial; permission decisions follow `operations/orientation.md`.",
             "or it returns a pending permission, also for a wait on a held message, or a timeout "
             "with the message still delivered.",
             "saying that the turn failed or was cancelled",
@@ -451,10 +712,10 @@ class InstructionFileWordingTests(unittest.TestCase):
         ):
             with self.subTest(sentence=sentence):
                 self.assertIn(sentence, coordination)
+        assert_message_handover_delivery(ROLES)
         architect = " ".join(role_text("architect").split())
         for sentence in (
-            "A message to a recipient that waits for a permission decision, or whose start has "
-            "not finished, is held by the product and delivered when the recipient can take it",
+            "Read [message handovers and receipts]({{detail:reference/message-handover.md}}) when you reach a step another seat awaits, a handover, or a held/full-store receipt, not before.",
             "its final text, or that the turn failed or was cancelled, a pending permission, or "
             "a timeout; `accepted` without a text means that the reply is to be read later.",
             "Do not wait on an agent that may be waiting on you.",
@@ -584,7 +845,7 @@ class InstructionFileWordingTests(unittest.TestCase):
             (
                 "curator",
                 "curation",
-            ): "send what you await and from whom to your parent with `role_message`",
+            ): "report what you await and from whom to your parent via `role_message`",
         }
         banned = (
             "in your own chat, is what the sender receives",
@@ -596,15 +857,13 @@ class InstructionFileWordingTests(unittest.TestCase):
             "needs no second model-authored completion post",
         )
         # MIK-R172 rule 1 in the doctrine home: the artifact does not hand itself over,
-        # and the relay's line carries the agent's last line.
+        # and the sender hands it to the waiting agent (R62 rule44).
         acceptance = " ".join(
             (CANONICAL / LIFECYCLE / "core" / "acceptance.md").read_text(encoding="utf-8").split()
         )
         self.assertIn("A file on record wakes no one", acceptance)
         self.assertIn("a file hands itself over to nobody", acceptance)
-        self.assertIn(
-            "one line to the agent that waits, carrying the ended agent's last line", acceptance
-        )
+        self.assertIn("send it with `role_message` to the agent that waits", acceptance)
         self.assertNotIn("needs no second model-authored completion post", acceptance)
         for (role, operation), clause in stage_sentence.items():
             text = capsule(role, operation)
@@ -637,9 +896,7 @@ class InstructionFileWordingTests(unittest.TestCase):
         # Where the report of the previous host named the execution, it names the agent.
         implementation = " ".join(read(LIFECYCLE / "operations" / "implementation.md").split())
         self.assertIn(
-            "exact checks and results, your agent ID as the `senderLine` of `role_message` on "
-            '`agents-remember-task` names it (write "agent ID not known" when you sent no '
-            "message), and open limitations.",
+            'exact checks and results, the relevant checks not run and why, your agent ID as the `senderLine` of `role_message` on `agents-remember-task` names it (write "agent ID not known" when you sent no message), and open limitations.',
             implementation,
         )
 

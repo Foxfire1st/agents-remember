@@ -154,7 +154,7 @@ def test_launch_composition_names_frozen_details_by_their_request_paths(tmp_path
 
 
 def test_curator_receives_ruled_step_details_separately_and_keeps_writer_boundaries() -> None:
-    """The actual launch corpus exports syntax, not serving-build or readback authority."""
+    """Command/report details stay separate; serving authority remains inline."""
     root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
     manifest = (root / "composition-manifest.json").read_bytes()
     binding = worker_binding(operation="curation", granted=frozenset(PUBLIC_TOOLS))
@@ -192,16 +192,22 @@ def test_curator_receives_ruled_step_details_separately_and_keeps_writer_boundar
         assert syntax not in text
     assert "replace_evidence: true" in worklist.content.decode()
     assert "replace_evidence: true" not in text
-    assert "--authorization-ref <ref> --commit --json" in writer.content.decode()
-    assert "--authorization-ref <ref> --commit --json" not in text
+    assert (
+        "--authorization-ref '<the admitted authorization>' --commit --json"
+        in writer.content.decode()
+    )
+    assert "--authorization-ref '<the admitted authorization>' --commit --json" not in text
+    for semantics in (
+        "exit zero covers both a plan and a write",
+        "`written` report with no written paths establishes no publication.",
+        "written paths, record/entry IDs and refusals",
+    ):
+        assert semantics in writer.content.decode(), semantics
+        assert semantics not in text, semantics
     for boundary in (
         "Require a readable persisted leaf worklist before ingest.",
         "There is no dataset to\n  publish.",
-        "On development installs, only the serving build produces:",
-        "Use the clean main checkout; its serving commit is the ruler.",
-        "substitute no producer after refusal.",
-        "Zero exit does not prove a write.",
-        "Use report state, listed records/entries and refusals as evidence; report refusals exactly as returned.",
+        CURATOR_SERVING_STAGE_BOUNDARY,
         "Implementation alone never changes invariant or family meaning.",
         "Include **family coverage**: authored/updated families with members/routes, and examined unchanged families with reasons.",
     ):
@@ -308,20 +314,40 @@ def test_step_details_are_named_for_reaching_their_step_not_intake(tmp_path: Pat
     manifest = (root / "composition-manifest.json").read_bytes()
     seen: set[str] = set()
 
-    def check(text: str, records: list[dict]) -> None:
+    def check(text: str, records: list[dict], role: str) -> None:
         for entry in records:
-            assert "when you reach" in entry["step"] and "not before" in entry["step"]
             sentences = re.split(r"(?<=\.)\s+|\n", text)
             naming = [sentence for sentence in sentences if entry["path"] in sentence]
             assert naming, entry["sourcePath"]
+            if entry["sourcePath"] == "reference/knowledge-use.md":
+                assert entry["step"] == (
+                    "when you reach Architect diagnosis, Investigator repository-code investigation, "
+                    "Worker editing or a failing test, or Reviewer inspection of changes, not before"
+                )
+                trigger = {
+                    "architect": "when diagnosing, not before",
+                    "investigator": "when investigating repository code, not before",
+                    "worker": "when you reach editing or a failing test, not before",
+                    "reviewer": "when inspecting changes, not before",
+                }[role]
+                assert all(trigger in sentence for sentence in naming)
+                continue
+            conditional = CURATOR_CONDITIONAL_DETAIL_TRIGGERS.get(entry["sourcePath"])
+            if conditional:
+                step, trigger = conditional
+                assert entry["step"] == step
+                assert all(trigger in sentence for sentence in naming)
+                continue
+            assert "when you reach" in entry["step"] and "not before" in entry["step"]
             for sentence in naming:
                 assert "when you reach" in sentence and "not before" in sentence, sentence
-                assert "intake" not in sentence.lower(), sentence
+                assert "read during intake" not in sentence.lower(), sentence
 
+    # Every declared role is relevant now: standing-rule details include scopes
+    # absent from the three original D301 roles (D656).
+    parsed = parse_composition_manifest(manifest)
     for role, operation in (
-        ("curator", "curation"),
-        ("reviewer", "orientation"),
-        ("bootstrap", "bootstrap"),
+        (name, step) for name in parsed.role_order for step in parsed.roles[name].operations
     ):
         metadata = parse_composition_manifest(manifest).roles[role]
         result = _compile_corpus_pair(
@@ -337,11 +363,11 @@ def test_step_details_are_named_for_reaching_their_step_not_intake(tmp_path: Pat
             delivery, str(tmp_path / role / "request.md"), {}
         )
         entries = record["detailReferences"]
-        check(text, entries)
+        check(text, entries, role)
         seen.update(entry["sourcePath"] for entry in entries)
         mutant = text.replace("not before", "read during intake", 1)
         with pytest.raises(AssertionError):
-            check(mutant, entries)
+            check(mutant, entries, role)
     assert seen == {
         entry.source for entry in parse_composition_manifest(manifest).detail_references
     }
@@ -445,8 +471,7 @@ def test_curator_detail_names_use_only_curation_workflow_numbers_and_titles(tmp_
         "curator-message-details.md": (1, "Reconcile"),
         "curator-worklist-details.md": (2, "Before ingest"),
         "shared-writing-profile.md": (2, "Before ingest"),
-        "curator-writer-details.md": (2, "Before ingest"),
-        "curator-card-details.md": (4, "L3 is last resort"),
+        "curator-card-details.md": (2, "Before ingest"),
         "curator-handoff-d301.md": (7, "Undergo the independent fact-check"),
     }
     workflow = text.split("## Normal workflow\n", 1)[1].split("## Authority gates", 1)[0]
@@ -459,8 +484,30 @@ def test_curator_detail_names_use_only_curation_workflow_numbers_and_titles(tmp_
         )
     assert set(actual) == set(range(1, 9))
     entries = record["detailReferences"]
-    assert {Path(entry["sourcePath"]).name for entry in entries} == set(expected)
+    standing_names = {
+        "message-handover.md",
+        "shared-working-rules.md",
+        "knowledge-commands.md",
+        "curator-repository-foundation.md",
+    }
+    conditional_names = {Path(path).name for path in CURATOR_CONDITIONAL_DETAIL_TRIGGERS}
+    assert {Path(entry["sourcePath"]).name for entry in entries} == (
+        set(expected) | conditional_names | standing_names
+    )
     for entry in entries:
+        if Path(entry["sourcePath"]).name in standing_names:
+            naming = [line for line in text.splitlines() if entry["path"] in line]
+            assert naming and all(
+                "when you reach" in line and "not before" in line for line in naming
+            )
+            continue
+        conditional = CURATOR_CONDITIONAL_DETAIL_TRIGGERS.get(entry["sourcePath"])
+        if conditional:
+            step, trigger = conditional
+            assert entry["step"] == step
+            naming = [line for line in text.splitlines() if entry["path"] in line]
+            assert naming and all(trigger in line for line in naming)
+            continue
         number, title = expected[Path(entry["sourcePath"]).name]
         assert actual[number] == title
         label = f"Curation workflow {number}: {title}"
@@ -482,7 +529,7 @@ def test_nested_curator_file_names_use_the_same_operation_titles(tmp_path: Path)
     authoring = Path(authoring_entry["path"]).read_text()
     for line in authoring.splitlines():
         if "reference/curator-card-details.md" in line:
-            assert "when you reach **Curation workflow 4: L3 is last resort**, not before" in line
+            assert "when you reach **Curation workflow 2: Before ingest**, not before" in line
         if "reference/curator-writer-details.md" in line:
             assert "when you reach **Curation workflow 2: Before ingest**, not before" in line
     writer_entry = next(
@@ -491,8 +538,9 @@ def test_nested_curator_file_names_use_the_same_operation_titles(tmp_path: Path)
         if item["sourcePath"] == "reference/curator-writer-details.md"
     )
     writer = Path(writer_entry["path"]).read_text()
+    assert "Read the serving-build command section before a CLI deciding run or write." in writer
     assert (
-        "Read this file when you reach **Curation workflow 2: Before ingest**, not before."
+        "authoring detail when you reach **Curation workflow 2: Before ingest**, not before."
         in writer
     )
 
@@ -534,111 +582,66 @@ def test_every_curator_stage_keeps_the_serving_build_producer_boundary() -> None
         assert outcome.result is not None
         text = outcome.result.render_instructions()
         for boundary in (
-            "On development installs, only the serving build produces:",
-            "the starting tool server or that same build's CLI.",
-            "Use the clean main checkout; its serving commit is the ruler.",
-            "Every run states its ruler.",
-            "Leaf source never produces leaf memory, admitted or not.",
-            "substitute no producer after refusal.",
+            CURATOR_SERVING_STAGE_BOUNDARY,
+            "Use that build for deciding and writing.",
+            "A PATH `agents-remember` may be stale; report its use and observed identity honestly.",
         ):
             assert boundary in text, (operation, boundary)
 
 
-# R125's independent recipient oracle. These five complete base paragraphs are
-# the only non-common text in the seven operations; ownership is not read from
-# their current markers. The remaining base bytes, including every closeout and
-# integration boundary, must reach every existing carrier unchanged.
-R125_ADDRESSED_PARAGRAPHS = (
-    (
-        "planning",
-        "architect",
-        "When the leaf's packet names an effect on a recorded invariant or family, the Architect "
-        "declares it in `expectedKnowledgeEffects` through `task_doc` on `agents-remember-task` "
-        "before implementation. A leaf whose packet names none declares nothing. After a new "
-        "leaf's task document exists, before any start, ask the developer once: \"go, or review "
-        'first?" (one-line suggestion optional), disclosing up-front review uses planned '
-        "comparison (no task workspace) and makes the explainer workspace on first Explain; "
-        "record `review-first` or `go` (`agreedRevision`) in `intentReview` via `task_doc` "
-        "(`intent-review-open` until `go`).",
-    ),
-    (
-        "coordination",
-        "manager",
-        "The Manager receives only what `../roles/manager.md` lists for the Manager. It supplies "
-        "the occasion for the sender to retry a pending hand-over, without relaying contents or "
-        "asking for developer confirmation of that occasion. Read reports and task records for "
-        "routine state and record which seat holds each next step and since when. Starts refused "
-        "`intent-review-open` wait for architect's `go`; never retry.",
-    ),
-    (
-        "review",
-        "reviewer",
-        "For a leaf, hand the verdict directly to the Worker with `role_message` on "
-        "`agents-remember-task`; the verdict travels as a file and the message names its path, "
-        "never its pasted text; a block names the sealed findings report and asks for the whole "
-        "repair stretch. Code PASS also goes directly to the Curator for the passed freeze. "
-        "Review its memory change and return findings or PASS directly to it. Name the leaf, "
-        "exact object (candidate head and change hash from the Worker's report, or memory change "
-        "identity), report/verdict path, and the whole next stretch. Use the sibling role and "
-        "exact leaf task references from the handover; product-supplied IDs stay whole and "
-        "unchanged. A Worker's factual hand-over gives no review instructions, and the Reviewer "
-        "does not read the Worker's chat. A cleanly synced leaf sends no new freeze to you and "
-        "opens no round: where no path was changed on both sides, the Worker runs its focused "
-        "tests once more and the Manager's closeout preview decides. Where a path was changed "
-        "on both sides, or a focused test fails, the Worker sends exactly that repair for one "
-        "look. When a freeze arrives, check every finding against its entry in the Worker's "
-        "freeze report and return a freeze that lacks the entries, with no round counted.",
-    ),
-    (
-        "review",
-        "reviewer",
-        "Where every finding on the candidate is closed and what remains is a finding on the "
-        "Worker's record alone (its report, its evidence table, a hash or an anchor in it), the "
-        "same Reviewer checks the repaired record on the round it last recorded: `begin_review` "
-        "is not called and the count stays, and only while the candidate is byte for byte the "
-        "candidate that round was recorded on. With a changed candidate the tool refuses and "
-        "names `begin_review` as the next step.",
-    ),
-    (
-        "review",
-        "reviewer",
-        "Answer Curator code findings directly to Curator and Worker, even after code PASS: "
-        "take a valid finding into your findings and reopen the verdict for that point, or state "
-        "why it does not hold. Preserve the sealed fixed-list baseline; an unresolved "
-        "disagreement or authority issue goes to the Manager.",
-    ),
-)
-
-# Six operation fingerprints retain their complete base bytes. Bootstrap alone
-# pins the D301 candidate wording and named-step move, not unchanged-base prose;
-# its sentence ledger still needs independent meaning review. These pins bind
-# the expected delivery corpus without reading markers as an ownership oracle.
-# The orientation pin was renewed for MIK-R172 rule 1: the sentence that made the
-# agent's own chat reply the answer now sends the answer with `role_message`.
-# The implementation and coordination pins were renewed for MIK-R193 rule 8: the
-# implementation document lost the "Messages" passage its role text already carries, and
-# the coordination document stopped naming a nested field three of its readers never have.
-R125_OPERATION_SHA256 = {
-    "orientation": "cb21c41525efc28773e5497b396701ef0f9b246833958c3d7b3448c57a5b11f1",
-    # MIK-R189 rule 1 (L183): the architect block gains "go, or review first?" and the manager
-    # block's "intent-review-open waits for go", so the planning seal follows the new text.
-    "planning": "464ef1952bdbb23012cba852cac0812a0563af5b42bb420cdfcbd96e46aad801",
-    "review": "c7ddda94f04ea23c555296fbf8108037598098a17d22cad26613be65de64c317",
-    # MIK-R196: the coordination text now names leafSeats.roleMessageArguments, so its pinned
-    # digest follows the sentence the wording suite requires. MIK-R189 rule 1 (L183) adds the
-    # manager block's intent-review sentence, so the seal moved with that text too.
-    "coordination": "21b57a18e50629b3223234df6a0fdb877ae739787d18a773ddc772bd54631785",
-    "recovery": "ae7583596bc9f30d49b5d675e48b5076da2aabca5cf3d992ab97ce438e7607b1",
-    "implementation": "53561f31eed705d04851973f654d9670b48a061075a132c704f83b2817798ce9",
-    # MIK-R196 rule 4: the bootstrap operation's step 8 hands the foundation to the Architect and
-    # the failure states moved to their own detail file; re-pinned on the new text.
-    # MIK-R196 rules 4-5 (L188) rewrote this operation: the onboarding-scaffold and citation-fixer
-    # steps left it and the foundation is handed to the Architect, so the seal moved with the text.
-    "bootstrap": "1bfd3c57a6bb7d6f4759cc41a9076debfaf25429e8a9525fb78ab3a3de391c4e",
+# D656 renews the complete operation and per-recipient byte pins after its approved
+# stage-start, handover, permission and continuation wording changes. The expected
+# projections were derived independently from the reviewed source audiences once;
+# tests never read current audience markers to decide their expected recipients.
+D656_OPERATION_SHA256 = {
+    "orientation": "127ead9498fbd9811abe4acfab1edbb53a446122a58924e1d1f045443759a651",
+    "planning": "ec4e036bb3190f1e55609b940535c59cceaf5563d3116f54041cb7cbdc28de5c",
+    "implementation": "f79d875a5459baea525fba1d9b6e0b924517fc636c5b0041b5a428c810945a38",
+    "review": "9ce18b86a587453034f52c538aab64b29200a8c53586813a078d41352ee64539",
+    "curation": "d4419241535f8cc0f0b8e8685fc6b740dea5a79428fec70d372001fd95d6a711",
+    "coordination": "e3cb95ab87a89b81e4c2015f8ca9d616d5819187405fb9964e165710434e9afb",
+    "authorized-closeout": "2861b5d5b09c9e4f84c6c217cfe418849592e197f0d5e9c5cc9a5c42110fc0cc",
+    "recovery": "77bf9d941b300f292480f66fd7528066ce9d744c69da740a16648849b559f8f8",
+    "bootstrap": "8ee46540770891de1b0c855b3e246282462b4f07da29cfbc78f7c3a00cf5ccf1",
 }
-# MIK-R196 rule 8 (L188) repointed this operation's closeout authority to the kept workflow,
-# so the seal moved with the text it pins.
-R125_CLOSEOUT_SHA256 = "5792285c5b5606253dcd9bb8cfa5e5dd7c139b180d8395810390c022cf2e9146"
+D656_STAGE_SHA256 = {
+    "orientation/architect": "b68c955e51b41ab7a646a84f2bf84517583a04d77d44f79635ec4b64827bb95c",
+    "orientation/orchestrator": "0683b3f0becff41384f6a2c79a8870c5edc0e47b9bb821a825c917baf9be3281",
+    "orientation/designer": "0683b3f0becff41384f6a2c79a8870c5edc0e47b9bb821a825c917baf9be3281",
+    "orientation/strategist": "0683b3f0becff41384f6a2c79a8870c5edc0e47b9bb821a825c917baf9be3281",
+    "orientation/manager": "0683b3f0becff41384f6a2c79a8870c5edc0e47b9bb821a825c917baf9be3281",
+    "orientation/worker": "0683b3f0becff41384f6a2c79a8870c5edc0e47b9bb821a825c917baf9be3281",
+    "orientation/curator": "0a49eb8ea424315579e377419d9343313bf161a466306f1fe1eb22739ca105ed",
+    "orientation/reviewer": "0683b3f0becff41384f6a2c79a8870c5edc0e47b9bb821a825c917baf9be3281",
+    "orientation/investigator": "89a2a41b7621a9c7a03dd149f40793bcaaf126c53533f262435e02530bc2f907",
+    "orientation/bootstrap": "fb292901ed2d3a528cbd80e7d7030ed884973c9976407a6f40c864eccded8162",
+    "planning/architect": "d39b63bb7b6eaec8e8ffef109e001b73e47430a711ec050758abff604558775c",
+    "planning/designer": "c7e44a4163f1a49d45aea0159d9b0dd76f96f727a59b8564887a129c856be68a",
+    "planning/strategist": "c7e44a4163f1a49d45aea0159d9b0dd76f96f727a59b8564887a129c856be68a",
+    "planning/orchestrator": "c7e44a4163f1a49d45aea0159d9b0dd76f96f727a59b8564887a129c856be68a",
+    "implementation/worker": "2620a4f02c35dc90edcc1a5b828ad95ca952a2b53e19f5542044c028c86fa269",
+    "review/reviewer": "71ebbc4a38f7572a0a2705dae1fb722c13d63b21ce3309c782292a0101b99a19",
+    "review/manager": "f9313b61362f48b604a45006900706dfda248c81c32f40fbf1a267ec46745107",
+    "review/orchestrator": "f9313b61362f48b604a45006900706dfda248c81c32f40fbf1a267ec46745107",
+    "review/architect": "6f8653dc517266a90a65f306d30bc66ef302cf0872ff655787db7ea7e959fd1d",
+    "curation/curator": "87d423772acfaa4e3da98b1c7086de8822cda50558dafc18391ddd9cf5e99d80",
+    "curation/manager": "252e3db2c7f4ed0deb8a4c37d39d965919935d4ca6e29d652513c1d0cd8d24ac",
+    "coordination/architect": "f117578686e46db35a47a7fcb63d5a4b38c9575e3c7122c3441e8562c0eb9171",
+    "coordination/orchestrator": "f117578686e46db35a47a7fcb63d5a4b38c9575e3c7122c3441e8562c0eb9171",
+    "coordination/manager": "2c5241ab758ccfc7fde7315240b13457663cb23a95233820e27133de12378cff",
+    "authorized-closeout/manager": "2861b5d5b09c9e4f84c6c217cfe418849592e197f0d5e9c5cc9a5c42110fc0cc",
+    "authorized-closeout/orchestrator": "2861b5d5b09c9e4f84c6c217cfe418849592e197f0d5e9c5cc9a5c42110fc0cc",
+    "authorized-closeout/architect": "2861b5d5b09c9e4f84c6c217cfe418849592e197f0d5e9c5cc9a5c42110fc0cc",
+    "recovery/architect": "5482387b04386d2d73c1662c9572550c0ce8ffa505964f54f659fac10a1a131d",
+    "recovery/orchestrator": "5482387b04386d2d73c1662c9572550c0ce8ffa505964f54f659fac10a1a131d",
+    "recovery/manager": "5482387b04386d2d73c1662c9572550c0ce8ffa505964f54f659fac10a1a131d",
+    "recovery/worker": "5482387b04386d2d73c1662c9572550c0ce8ffa505964f54f659fac10a1a131d",
+    "recovery/curator": "bb6cb529c621d9e637dd2eae5cf4b91fd514897891088aceb7b814608d2177d8",
+    "recovery/investigator": "5482387b04386d2d73c1662c9572550c0ce8ffa505964f54f659fac10a1a131d",
+    "recovery/bootstrap": "41558f9722778d9cada28a4a011d773e5c893352fb88a2c8254adab6de00ab94",
+    "recovery/reviewer": "5482387b04386d2d73c1662c9572550c0ce8ffa505964f54f659fac10a1a131d",
+    "bootstrap/bootstrap": "1bfd3c57a6bb7d6f4759cc41a9076debfaf25429e8a9525fb78ab3a3de391c4e",
+}
 R125_OPERATION_ROLES: dict[str, tuple[str, ...]] = {
     "orientation": (
         "architect",
@@ -689,63 +692,18 @@ def test_memory_review_instructions_select_the_independent_recorded_lane() -> No
     assert "Under-way reviews finish as begun; new lanes apply after landing." in curation
 
 
-MEMORY_REVIEW_PREDECESSOR = (
-    "Curator memory checks keep separately sealed reports, IDs and a count with the same settings "
-    "limit as code; they open no review-state round, reset no passed code review and add no IDs "
-    "to its baseline."
-)
-MEMORY_REVIEW_RECORDED_LANE = (
-    "Curator memory checks use their own sealed reports, IDs and recorded lane: "
-    "`begin_review`/`record_review` with `reviewKind=memory`, same settings limit and extra-round "
-    "approval as code. They open no code review-state round, reset no passed code review and "
-    "add no IDs to its baseline. Under-way memory reviews finish as begun; recorded lanes apply "
-    "after landing."
-)
+CURATOR_SERVING_STAGE_BOUNDARY = "Decide and write through the starting server or its serving-build CLI. Development uses clean main and its stated serving commit as ruler; name it. Leaf source never produces leaf memory: test leaf writer/check changes on fixtures or scratch. Install nothing; disable no guard."
 
-
-CURATOR_SERVING_STAGE_BOUNDARY = (
-    "On development installs, only the serving build produces: the starting tool server or "
-    "that same build's CLI. Use the clean main checkout; its serving commit is the ruler. "
-    "Every run states its ruler. Leaf source never produces leaf memory, admitted or not. "
-    "Prove leaf writer/check changes on fixtures and scratch copies; that evidences the build, "
-    "not an ordered fixture procedure. Install nothing for a run, disable no guard, "
-    "substitute no producer after refusal."
-)
-
-
-def _unmarked_pinned_operation(root: Path, operation: str) -> str:
-    content = (root / f"operations/{operation}.md").read_bytes()
-    unmarked = b"".join(
-        line
-        for line in content.splitlines(keepends=True)
-        if not re.fullmatch(rb"<!-- ar:roles [a-z,\-]+ -->\n", line)
-    )
-    pinned = unmarked
-    if operation in {"orientation", "recovery"}:
-        addition = ("\n" + CURATOR_SERVING_STAGE_BOUNDARY + "\n").encode()
-        assert unmarked.endswith(addition), operation
-        pinned = unmarked[: -len(addition)]
-    elif operation == "review":
-        assert unmarked.count(MEMORY_REVIEW_RECORDED_LANE.encode()) == 1
-        pinned = unmarked.replace(
-            MEMORY_REVIEW_RECORDED_LANE.encode(), MEMORY_REVIEW_PREDECESSOR.encode()
-        )
-    assert sha256(pinned).hexdigest() == R125_OPERATION_SHA256[operation], operation
-    return unmarked.decode()
-
-
-def _expected_operation_stage(operation: str, role: str, base: str) -> str:
-    for addressed_operation, owner, paragraph in R125_ADDRESSED_PARAGRAPHS:
-        if operation != addressed_operation:
-            continue
-        assert base.count(paragraph + "\n") == 1, (operation, paragraph)
-        if role != owner:
-            base = base.replace(paragraph + "\n", "")
-    if operation in {"orientation", "recovery"}:
-        assert base.count(CURATOR_SERVING_STAGE_BOUNDARY + "\n") == 1
-        if role != "curator":
-            base = base.replace(CURATOR_SERVING_STAGE_BOUNDARY + "\n", "")
-    return base
+CURATOR_CONDITIONAL_DETAIL_TRIGGERS = {
+    "reference/curator-writer-details.md": (
+        "before a CLI deciding run or write; use record formats at Curation workflow 2: Before ingest",
+        "before a CLI deciding run or write; use its record formats at **Curation workflow 2: Before ingest**",
+    ),
+    "reference/refused-write.md": (
+        "when a covered writer or record tool refuses a correct write, not before",
+        "when a covered writer or record tool refuses a correct write, not before",
+    ),
+}
 
 
 def _compile_corpus_pair(
@@ -771,11 +729,6 @@ def test_real_operation_audiences_preserve_pinned_common_and_only_addressed_para
     for operation, roles in R125_OPERATION_ROLES.items():
         metadata = document.operations[operation]
         assert set(metadata.applies_to_roles) == set(roles), operation
-        base = (
-            _unmarked_pinned_operation(root, operation)
-            if operation in R125_OPERATION_SHA256
-            else None
-        )
         for role in roles:
             entry = document.roles[role]
             result = _compile_corpus_pair(
@@ -787,16 +740,10 @@ def test_real_operation_audiences_preserve_pinned_common_and_only_addressed_para
                 for block in result.capsule.instructions
                 if block.source_path == metadata.source
             )
-            if base is not None:
-                assert stage.content == _expected_operation_stage(operation, role, base), (
-                    role,
-                    operation,
-                )
-            elif operation == "authorized-closeout":
-                assert sha256(stage.content.encode()).hexdigest() == R125_CLOSEOUT_SHA256, (
-                    role,
-                    operation,
-                )
+            assert (
+                sha256(stage.content.encode()).hexdigest()
+                == D656_STAGE_SHA256[f"{operation}/{role}"]
+            ), (role, operation)
             checked.add((role, operation))
     assert checked == {
         (role.role, operation) for role in document.roles.values() for operation in role.operations
@@ -806,18 +753,16 @@ def test_real_operation_audiences_preserve_pinned_common_and_only_addressed_para
 def test_operation_audience_markings_preserve_pinned_bytes_and_immutable_closeout() -> None:
     root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
     document = parse_composition_manifest((root / "composition-manifest.json").read_bytes())
-    for operation in R125_OPERATION_SHA256:
-        assert document.operations[operation].audience == "sections", operation
-        assert document.operations[operation].source == f"operations/{operation}.md"
-        content = (root / f"operations/{operation}.md").read_bytes()
-        assert content.startswith(b"<!-- ar:roles all -->\n")
-        _unmarked_pinned_operation(root, operation)
-    closeout = document.operations["authorized-closeout"]
-    assert closeout.audience == "all"
-    assert closeout.source == "operations/closeout.md"
-    assert sha256((root / closeout.source).read_bytes()).hexdigest() == R125_CLOSEOUT_SHA256, (
-        "authorized-closeout"
-    )
+    for operation, expected in D656_OPERATION_SHA256.items():
+        metadata = document.operations[operation]
+        content = (root / metadata.source).read_bytes()
+        assert sha256(content).hexdigest() == expected, operation
+        if operation == "authorized-closeout":
+            assert metadata.audience == "all"
+            assert metadata.source == "operations/closeout.md"
+        else:
+            assert metadata.audience == "sections", operation
+            assert content.startswith(b"<!-- ar:roles all -->\n"), operation
 
 
 def test_repairing_roles_stop_after_three_repairs_of_the_same_check_or_finding() -> None:

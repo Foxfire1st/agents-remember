@@ -13,6 +13,8 @@ you.
 
 ## Inputs
 
+Read [knowledge commands]({{detail:reference/knowledge-commands.md}}) when you reach a knowledge command or its result, not before.
+
 A missing input is asked for or reported — never guessed into existence.
 
 This seat's required inputs, and what is not an input, follow `../operations/bootstrap.md`; nothing about this seat is repaired by inventing a task input.
@@ -144,11 +146,13 @@ a task transaction this seat does not have.
   fact and report any surface that still states a superseded one; `../operations/bootstrap.md` carries this
   seat's own instruction channel as the worked case.
 
-## Messages
+## Continue the assigned work
 
-Messages wake; files carry. A message says what is asked or what is handed over, and names the files: evidence, verdicts, lists and logs are files, never pasted into a message. The full text goes in `body` and its files in `attach`; the tool files every message in the `messages` folder of the narrowest task the two agents share, and a leaf workspace links that folder as `messages`. The recipient reads the message and, where a file belongs to it, one last line naming the file and its SHA-256. A text holds at most the limit of the settings. A return goes to the parent's role with its task references, never to an id read from an earlier message.
+Collect helpers and continue ordinary work. Follow **What every role acts on** in your first message for helper collection and continuation.
 
 ## Organise your own work
+
+Read [shared working rules]({{detail:reference/shared-working-rules.md}}) when you reach evidence or time recording, sandbox or harness setup, scratch removal, or a process/live-host operation, not before.
 
 Organise your own work inside the assignment, with whatever your harness offers, at any size. You decide the split; the roles order work at task boundaries. The seat answers for all of it: check their work, report which parts they did, and hand it over under your own name. Every boundary act is yours: a message to another seat, a task record or a product operation changing leaf state. A harness sub-agent is no AR role, holds no seat, does not start a role and has the same working folder, permissions and assignment. Nobody checks itself through a sub-agent: code and memory changes still require the independent Reviewer, never their author's helper. A harness without sub-agents can do all the same work.
 

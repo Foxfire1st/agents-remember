@@ -39,6 +39,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
 from unittest import mock
@@ -70,6 +71,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control
 from agents_remember.worktrees.modules.finalize import FinalizeArgs, _finalized_result
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 from mcp.server.fastmcp import FastMCP
+from pydantic import ValidationError
 
 REPO = "agents-remember"
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
@@ -735,7 +737,7 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
 
         description = advertised_description("task_doc")
         self.assertNotIn("'light'|'subTask'|'master'", description)
-        self.assertIn("kind ['subTask'|'master']", description)
+        self.assertIn("Kind: subTask or master.", description)
 
         coord = self.world("tsip-l4-kind-")
         target = TaskDocTarget(repo_id=REPO, task_name="l4-kind", slug="l4_kind")
@@ -760,6 +762,49 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
         message = str(caught.exception)
         self.assertIn("light task documents are no longer supported", message)
         self.assertIn("['subTask', 'master']", message)
+
+    def test_task_doc_alignment_states_validate_through_the_registered_response(self) -> None:
+        """Manager B: explicit unavailable is not empty; unknown states cannot widen the schema."""
+        self.assertIs(TOOL_RESPONSE_MODELS["task_doc"], TaskDocResponse)
+
+        def payload(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+            return {
+                "operation": "task_doc.create",
+                "taskId": "L1",
+                "slug": "leaf",
+                "kind": "subTask",
+                "status": "pending",
+                "docPath": "/fixture/leaf.json",
+                "renderedPath": "/fixture/leaf.md",
+                "ok": True,
+                "alignmentSweep": {"message": "Advisory sibling alignment", "openLeaves": rows},
+            }
+
+        for row in (
+            {"id": "L1", "state": "available", "requirements": []},
+            {"id": "L2", "state": "available", "requirements": ["R2"]},
+            {"id": "L3", "state": "unavailable"},
+        ):
+            parsed = TOOL_RESPONSE_MODELS["task_doc"].model_validate(payload([row]))
+            self.assertEqual(
+                parsed.model_dump(exclude_none=True)["alignmentSweep"]["openLeaves"], [row]
+            )
+        self.assertEqual(
+            TOOL_RESPONSE_MODELS["task_doc"]
+            .model_validate(payload([]))
+            .model_dump()["alignmentSweep"]["openLeaves"],
+            [],
+        )
+        for row in (
+            {"id": "L1", "state": "unknown", "requirements": []},
+            {"id": "L1", "state": "available"},
+            {"id": "L1", "state": "unavailable", "requirements": []},
+            {"id": "L1", "requirements": []},
+            {"id": "L1", "state": "available", "requirements": [], "extra": True},
+            {"id": "L1", "state": "unavailable", "extra": True},
+        ):
+            with self.subTest(row=row), self.assertRaises(ValidationError):
+                TOOL_RESPONSE_MODELS["task_doc"].model_validate(payload([row]))
 
     # -- T8: worktree_operation_control / nextTool -------------------------------------
 

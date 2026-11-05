@@ -12,6 +12,7 @@ boundary; they do not restate the whole of it.
   line to the agent that waits, carrying the ended agent's last line. It
   never opens, parses, or evaluates a report, verdict, coherence record, or
   acceptance envelope, and it never nudges a seat on its own judgment about an artifact.
+  A silent leaf seat is first sent back under the host's turn-end rules; a parent line is no report inspection. The relay neither validates artifact content nor invents a gate decision.
 - **The gate owner validates before advancing state.** On wake, the current owner opens the required artifact, candidate
   identity, evidence, and acceptance envelope and validates them **before advancing lifecycle
   state**. For a leaf gate that owner is the Manager. Peer hand-overs go directly between Worker, Reviewer and Curator; a recipient checks the exact object and requested stretch, while the Manager retains gate acceptance.
@@ -34,8 +35,8 @@ boundary; they do not restate the whole of it.
 | strategist | the orchestration-task draft | the architect (who rules it) |
 | designer | the task_doc + the designer-limits note | the architect |
 | investigator | the investigation report | the parent that started it, or the developer |
-| manager | the master-handover packet | the orchestrator |
-| orchestrator | the super-exit packet and demo notes | the architect |
+| manager | the master-handover packet and owned records | its named coordination recipient; without a parent, the developer |
+| orchestrator | the super-exit packet and demo notes | the Architect that owns the developer conversation |
 
 A seat writes its artifact **before** ending a successful handoff turn, then ends. It does not
 author a second, model-written completion row, and it does not carry the decider's or the owner's
@@ -106,11 +107,7 @@ for one leaf manifestation of that revision.
   `implementation defect`, `evidence gap`, `requirement contradiction/overconstraint`, `test/tool
   defect`, or `external blocker`. It never modifies the worker record, and acceptance never floats
   to a later candidate.
-- Rejection closes that attempt; a repair appends a successor citing the predecessor and listed
-  findings. Accepted attempts stay closed. During successor verification, an outside-list
-  regression, changed route, or changed requirement goes directly to the developer; it does not add
-  a finding, reopen a resolved item, or reset the review. Same-reviewer verification and shrinking
-  findings stay in force; an architect takeover continues the same attempt lineage.
+- Rejection closes that attempt; a repair appends a successor citing the predecessor and sealed findings. Accepted attempts stay closed. Outside-list observations or changed promises go through the parent to the developer without adding or reopening findings or resetting review; the same-reviewer and shrinking-list rules remain.
 - A requirement contradiction/overconstraint is rejected and routed through the architect for
   developer-approved revision; builders and reviewers may propose a revision but never rewrite or
   approve one.

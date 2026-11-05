@@ -44,7 +44,7 @@ Agents Remember fixes that: the matching note is reachable at the moment of the 
 
 ## Core Features
 
-**Agents Remember gives coding agents project memory they can verify and act on.** It turns local invariants, naming rules, migration scars, cross-repo contracts, and "this looks safe but is not" facts into versioned Markdown beside the code, checks that memory against Git before use, and updates it only after approved work lands.
+**Agents Remember gives coding agents project memory they can verify and act on.** It turns local invariants, naming rules, migration scars, cross-repo contracts, and "this looks safe but is not" facts into versioned Markdown and JSON in an external memory repository, checks that memory against Git before use, and curates it alongside approved code changes.
 
 ```text
 src/orchestrator/core_editor.py
@@ -53,8 +53,8 @@ memory-repos/ar-agents-remember/onboarding/src/orchestrator/core_editor.py.md
 
 - **Path-addressed memory:** A source file's note lives at a deterministic mirror path, so an agent holding a file can reach the right context without search, ranking, or guesswork.
 - **Git-proven freshness:** File notes, route overviews, and entity catalogs are drift-checked against source commits, route scopes, or deterministic fingerprints before they are trusted.
-- **Search that finds, not decides:** Optional semantic memory and code-graph providers help locate relevant files, callers, dependencies, and concepts, but verified Markdown and source code remain the truth.
-- **Memory that lands with code:** External memory repos use a `memory.md` ledger, isolated dual worktrees, preview/apply closeout, and all-or-nothing integration so code and memory stay synchronized.
+- **Retrieval that names its evidence:** By-path reads name cards and recorded knowledge; agents read those files beside source. The former semantic and code-graph providers are retired.
+- **Memory that lands with code:** External memory repos pair code and memory worktrees. Converted memory holds current cards, structured records and Curator judgment rows; closeout and landing judge the exact candidate trees. `memory.md` is an ignored cache derived from memory commits’ `Code-Commit` attribution.
 - **Repo-owned agent behavior:** Each memory repo carries `system/` files for path rules, tools, coding guidelines, documentation sources, branch policy, and reporting shape, so the same project rules load across harnesses.
 - **Harness-ready first run:** Starter packages for Claude Code, Codex, Cursor, Antigravity, VS Code Copilot, Hermes, Pi.dev, and OpenClaw carry the native MCP, skills, hooks, rules, and instruction files each harness needs.
 
@@ -76,7 +76,7 @@ context_packet(repo_id="my-app")
 memory_quality_check(request={"mode":"sync", "repo_id":"my-app"})
 ```
 
-It then reads the source file and its onboarding note together before proposing a change. After the change is approved and lands, the onboarding is refreshed and re-verified against the new commit — so the note stays true to the code.
+It then reads the source file and its onboarding note together before proposing a change. In a leaf worktree, the Curator reconciles cards, JSON sidecars and shared knowledge records against the changed code. A recomputed worklist, validator and exact-tree gate check the candidate before publication. See the [knowledge-system reference](docs/reference/knowledge-system.md) for file formats, commands and the reader/review surfaces.
 
 ## Live Demo
 
@@ -196,6 +196,7 @@ not an installation example for the current Python 3.14 build.
 - [Features](docs/features.md) - the concentrated tour of what Agents Remember gives users.
 - [Getting Started](docs/getting-started.md) - a fuller first-run setup.
 - [Concepts](docs/concepts.md) - onboarding units, memory roots, drift, and approval gates.
+- [Knowledge system](docs/reference/knowledge-system.md) - records, sidecars, judgment history, worklists and exact-tree gates.
 - [Architecture](docs/architecture.md) - runtime, coordination, and memory repos.
 - [Workflows](docs/workflows.md) - the `l-01-agent-lifecycles` skill and its build modes (research-only exit / `w-02-light-task-workflow` skill task / master + light sub-task series), and when to use each.
 - [Benchmark Methodology](docs/benchmarks-methodology.md) - how paired `codex exec --json` runs are captured and compared.

@@ -98,7 +98,8 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         """Preview a worktree closeout without mutating: the count of changed code paths and
         proposed commits with subjects up to the list bound, and what blocks (states:
         would-closeout, blocked, closeout-gate-blocked). A preview is a read; the whole result
-        is in the log file.
+        is in the log file. On converted memory, the invariant gate judges the exact candidate
+        trees; knowledge-gate-refused carries its findings.
         Reference: docs/reference/mcp-tools.md."""
         return tools.worktree_closeout_preview_payload(
             config,
@@ -122,8 +123,9 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         """Apply an approved worktree closeout and return promptly. States: closed, blocked,
         closeout-gate-blocked. Answers the state reached and the next call; the whole result
         is in the log file. Delivered-against-reviewed names
-        same, different, or no review recorded. Poll worktree_status for progress.
-        Reference: docs/reference/mcp-tools.md."""
+        same, different, or no review recorded. Poll worktree_status for progress. On converted
+        memory, the invariant gate judges the exact candidate trees; knowledge-gate-refused
+        carries its findings. Reference: docs/reference/mcp-tools.md."""
         return tools.worktree_closeout_apply_payload(
             config,
             contract_path,
