@@ -371,8 +371,8 @@ ORDINARY_DETAIL_LINK_COUNTS = {
 D656_OPERATION_SHA256 = {
     "orientation": "107f06ea46e2733be46cf43b46a47297a89e9112e6c07035278c27ccd9722d66",
     "planning": "3c23ea1f2b8b0415182630e6eccb28a7e5c3e6244c3b5964b19395bc35cb4d82",
-    "implementation": "4cea26fed05b6dc4375cfee691459aa5f5e28ff4201b4d779e3c1abf86f7f3a9",
-    "review": "7e92054b732aefaad656f7b795e8bca67c23fe96fd4138399672c2bce437f314",
+    "implementation": "bf4fc5b611fabe7612934c58db459b0f291a9e3913b94adf1118509910eb2bd8",
+    "review": "88fba52076f3f7d9e7b4148fc218b64ff9f241bc60a367d695dec096ca500eac",
     "curation": "21f27c8c6dc62274cb6f72363fee217b1594a21c63302b128fd37320f37d919d",
     "coordination": "0087aa0dbd1e322454046dae01d4a8d230205831f22abeebabc7da644424b9d4",
     "authorized-closeout": "3e6725c0730cc1456dd5ba1bbcfe7edc1a53203e05f65dd58dac0ed842eb0035",
@@ -391,8 +391,8 @@ D656_STAGE_SHA256 = {
     "orientation/bootstrap": "85495ca8b48fa4b642527224613f29321209acacd8249de265f789422aadee85",
     "planning/architect": "42ca7b32b119f66ad21ed43b5d985b997bccea1787c4190b7e54a44f4622bd8d",
     "planning/orchestrator": "1d43e30ca193e814e73f1881ffc756075bd6a1116b19b0240587084cae756ffc",
-    "implementation/worker": "d6395b57c397dcc36798a97374284cfb7dfb26971d31965aad87c83522ead649",
-    "review/reviewer": "edb984eb61424be4e7589ba4e231ef7e3df2d48cc9e1029531a7614b6bb20d10",
+    "implementation/worker": "4d94f63806f06d1d9669b882bfdccd3360016efaa6671c85e8e651abbbe47414",
+    "review/reviewer": "e57cd885f31f3a1118a6ce3675a03067b4797433c8af78726fb1015bdd39f430",
     "review/manager": "ae9f97119e5bd164559b002067bff3b8ccac333aee977429a5429ecce8ecaffe",
     "review/orchestrator": "ae9f97119e5bd164559b002067bff3b8ccac333aee977429a5429ecce8ecaffe",
     "review/architect": "066fcb1673508bfdfdbdd632047938b3b0377545004c7e179e2d8e71efe6c729",
@@ -1064,7 +1064,8 @@ GROUPED_DETAIL_CLAUSES = (
             "changed whose dependent record is not confirmed. A weakness record never substitutes for "
             "such a finding.",
             "An empty first-pass issue list is a valid terminating baseline.",
-            "Choose focused tests across every changed surface and relevant gate.",
+            "Select focused tests by",
+            "which also names the fix-verification case.",
         ),
     ),
     (

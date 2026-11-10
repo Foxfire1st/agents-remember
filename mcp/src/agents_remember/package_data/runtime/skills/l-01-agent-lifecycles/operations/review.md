@@ -54,6 +54,10 @@ A baseline covers the complete candidate diff, including all changed and unattri
 Fix-verification checks only the sealed outstanding findings against the same requirement and candidate lineage. Report a new contradiction or scope issue separately.
 
 <!-- ar:roles reviewer -->
+## Select focused tests
+
+In a baseline review, rerun the Worker's recorded focused-test list and repeat its search on the frozen candidate; a test file the search finds that the Worker did not run is a finding. In fix-verification, apply the search to the repair's own touched names; an unrun matching test keeps the repaired finding open and is not a new finding.
+
 <!-- ar:gives producer-list to curator: list-file, freeze-identity, handoff-check-result -->
 ## Receive the intake and hand over the leaf verdict
 

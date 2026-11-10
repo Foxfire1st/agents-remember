@@ -4469,8 +4469,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/operations/review.md",
      "lines": [
-      58,
-      98
+      62,
+      102
      ],
      "sha256": "d3d5aabefe1e813530a2935f3d0be45809cabf8ab65d97032c701fae48c9edc2",
      "capsule": "reviewer/review"
@@ -4739,8 +4739,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/operations/review.md",
      "lines": [
-      82,
-      84
+      86,
+      88
      ],
      "sha256": "439d957d2ef6a15fe78972f60c4ec509836fb9c745c05aa3161ccc5b286a6b59",
      "capsule": "reviewer/review"
@@ -4800,8 +4800,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/operations/review.md",
      "lines": [
-      94,
-      98
+      98,
+      102
      ],
      "sha256": "76a78c03fa53c935cb27a8b9b96dca31b4c32c00de71ae19a9e8015d81228369",
      "capsule": "reviewer/review"
@@ -4834,8 +4834,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/operations/review.md",
      "lines": [
-      110,
-      137
+      114,
+      141
      ],
      "sha256": "28c53796108cbdfd7614652bb51db9671a62f1cea3ece4b92c4649d5dc2f6015",
      "capsule": "reviewer/review"
@@ -4870,8 +4870,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/operations/review.md",
      "lines": [
-      94,
-      98
+      98,
+      102
      ],
      "sha256": "76a78c03fa53c935cb27a8b9b96dca31b4c32c00de71ae19a9e8015d81228369",
      "capsule": "reviewer/review"
@@ -4906,8 +4906,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/operations/review.md",
      "lines": [
-      82,
-      84
+      86,
+      88
      ],
      "sha256": "439d957d2ef6a15fe78972f60c4ec509836fb9c745c05aa3161ccc5b286a6b59",
      "capsule": "reviewer/review"
@@ -4976,8 +4976,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/operations/review.md",
      "lines": [
-      110,
-      137
+      114,
+      141
      ],
      "sha256": "28c53796108cbdfd7614652bb51db9671a62f1cea3ece4b92c4649d5dc2f6015",
      "capsule": "reviewer/review"
@@ -5256,8 +5256,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/operations/implementation.md",
      "lines": [
-      26,
-      41
+      28,
+      43
      ],
      "sha256": "3158c9a27dd6a7c6da059f7908e104ff2c7a1e06219aac92ff6af575c602cd86",
      "capsule": "worker/implementation"
@@ -5338,8 +5338,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/operations/review.md",
      "lines": [
-      64,
-      67
+      68,
+      71
      ],
      "sha256": "b0f67aec2334f71c3d15bf4b19f4536d134e8db6fa936e0aee018bcee524eca6",
      "capsule": "reviewer/review"
@@ -5746,8 +5746,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/operations/review.md",
      "lines": [
-      82,
-      84
+      86,
+      88
      ],
      "sha256": "439d957d2ef6a15fe78972f60c4ec509836fb9c745c05aa3161ccc5b286a6b59",
      "capsule": "reviewer/review"
