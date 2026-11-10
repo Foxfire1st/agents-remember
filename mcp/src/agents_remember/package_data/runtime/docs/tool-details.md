@@ -304,8 +304,11 @@ validator violation: a code or test reference anchor that does not hold at the e
 tree is refused with `R198.1-reference-anchor` whether the option is passed or not, so a tree
 whose anchors are stale answers `blocked-invalid` and the repair is the anchor, not the option
 (MIK-R198 rules 5 and 7). The first baseline of a converted tree is validated before it is
-committed. Preview with
-dry_run=true. Usually driven by the c-10-adopt-memory-baseline skill.
+committed. Read `memory_baseline_status` first. Preview with `dry_run=true`: it answers
+`would-adopt` only when the staged-tree validation would pass, and a refusal or a dry run leaves
+the index, the refs and every file as they were. A missing, stale or malformed `memory.md` is a
+cache state and does not decide adoption; only reachable `Code-Commit:` attribution does. The
+adoption procedure is documented in the adopt-existing-memory guide (`docs/guides/adopt-existing-memory.md`).
 
 
 ## `memory_carryover_plan`

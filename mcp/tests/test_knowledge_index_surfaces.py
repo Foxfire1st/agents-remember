@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -157,33 +156,6 @@ def test_knowledge_read_resolves_a_converted_memory_tree_through_its_index(
     assert refused["state"] == "refused"
     assert refused["refusalCode"] == "snapshot_unavailable"
     assert "no coordination root" in refused["refusalDetail"]
-
-
-def test_the_bootstrap_skill_names_only_views_that_list_an_existing_foundation(
-    tmp_path: Path,
-) -> None:
-    """The skill tells a curator how to read a foundation that exists; each view it names lists rows.
-
-    Catches an example that sends the reader to a view which answers nothing on a tree that holds
-    records, from which the reader would conclude that no foundation exists.
-    """
-
-    skill = Path(__file__).resolve().parents[2] / "skills/c-14-knowledge-bootstrap/SKILL.md"
-    (row,) = (
-        line
-        for line in skill.read_text("utf-8").splitlines()
-        if line.startswith("| **Converted, records present**")
-    )
-    named = re.findall(r'view="([a-z_]+)"', row)
-    assert named == ["family", "invariant", "source_context"]
-    root = _converted(tmp_path)
-    for view in named:
-        listed = _read(root, tmp_path / "coordination", view=view)
-        assert listed["state"] == "view" and listed["payload"]["rows"], view
-    # The removed matrix view answers the unknown-view refusal on the same tree, not rows.
-    removed = _read(root, tmp_path / "coordination", view="curation_queue")
-    assert removed["state"] == "refused", removed
-    assert removed["refusalCode"] == "unknown_view", removed
 
 
 def _diff(root: Path, before: str, after: str = "HEAD", **fields: Any) -> dict[str, Any]:

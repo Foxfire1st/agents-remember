@@ -173,7 +173,7 @@ def admit_bootstrap_context(
                 f"repo_id {repo_id!r} declares no external memory root, so there is no memory line "
                 "for a knowledge bootstrap to publish on"
             ),
-            "declare the repository's memory root and run the c-00-initialize-memory-repo route",
+            "declare the repository's memory root and follow the memory initialization guide (docs/guides/onboard-existing-repo.md)",
         )
     root_refusal = _coordination_root_refusal(config, repo_id)
     if root_refusal is not None:
@@ -203,7 +203,7 @@ def _coordination_root_refusal(config: McpRuntimeConfig, repo_id: str) -> Bootst
             f"the coordination root {config.coordination_root.as_posix()} does not exist or is not a "
             f"directory, so repo_id {repo_id!r} has no workspace to bootstrap knowledge in"
         ),
-        "run runtime_install to create the coordinator scaffold first (c-13-install-and-onboard)",
+        "run runtime_install to create the coordinator scaffold first (docs/getting-started.md)",
     )
 
 

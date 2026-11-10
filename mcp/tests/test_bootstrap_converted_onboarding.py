@@ -4,18 +4,15 @@ A repository that is set up for the first time gets onboarding in the text forma
 the tools that exist; no new tool is added. Each case drives the real public operation on
 a real Git repository, and every refusal is read from the refusal's own text.
 
-    RULE 1  the skill writes converted cards: the c-03 templates and skill text hold no
-            stamp, no metadata table and no Update History; the package copies equal the
-            sources (pinned by ``test_sync_scripts``; asserted here by content).
+    RULE 1  onboarding written in the first hour uses the converted text format and holds no
+            legacy card appendix.
     RULE 2  the fixer runs before the first baseline: the five admission conditions one
             by one, the ``pre-baseline`` result, the refusal after the baseline, and
             ``route_index_refresh``.
     RULE 3  the first baseline holds no old-format card: the adoption state for each of
             the four old-format signs, and its independence from ``accept_drift``.
-    RULE 4  the order of the first hour is true: ``memory_init``, onboarding with the
-            fixer, ``memory_baseline_adopt``, then the knowledge foundation (text).
-    RULE 5  the hand-off is truthful: the c-03 handoff names cards, the fixer dry run,
-            the baseline state and the knowledge state (text, plus the journey below).
+    RULE 4  the order of the first hour is true: ``memory_init``, onboarding, the first
+            baseline, then the knowledge foundation.
     RULE 6  installed copies: regenerated with ``scripts/sync-skills.py``.
 
 ``test_bootstrap_journey_from_init_to_second_fixer_refusal`` is the composed packet test:
@@ -36,16 +33,6 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
-from agents_remember.application.skill_resources.provider import shipped_composition_corpus
-from agents_remember_test_support.testing.curator_contracts import (
-    SectionLink,
-    linked_section,
-    require_clauses,
-)
-from agents_remember_test_support.testing.curator_contracts import (
-    normalized as normalized_contract,
-)
-from agents_remember_test_support.testing.leaf_instruction_wording import delivered_step
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
@@ -417,182 +404,6 @@ def test_legacy_cards_cannot_refuse_an_adopted_repository(
         "already-adopted",
         "ready",
     }
-
-
-# --- rules 1/4/5: the skill texts --------------------------------------------
-
-CANONICAL_SKILL_FILES = (
-    "skills/c-03-repo-bootstrap/SKILL.md",
-    "skills/c-03-repo-bootstrap/templates/repo-overview-template.md",
-    "skills/c-03-repo-bootstrap/templates/route-local-overview-template.md",
-    "skills/c-03-repo-bootstrap/templates/file-card-template.md",
-    "skills/c-03-repo-bootstrap/templates/curator-review-template.md",
-    "skills/c-03-repo-bootstrap/templates/bootstrap-handoff-template.md",
-    "skills/c-13-install-and-onboard/SKILL.md",
-    "skills/l-01-agent-lifecycles/operations/bootstrap.md",
-)
-
-
-def test_bootstrap_skill_texts_carry_no_legacy_card_format() -> None:
-    """Rule 1: no stamp, no metadata table and no Update History in the skill texts."""
-
-    for relative in CANONICAL_SKILL_FILES:
-        text = (REPO_ROOT / relative).read_text(encoding="utf-8")
-        assert "lastVerifiedCommitHash" not in text, relative
-        assert "lastVerifiedCommitDate" not in text, relative
-        assert "| doc_type |" not in text, relative
-        assert "## Update History" not in text, relative
-
-
-def test_bootstrap_skill_texts_state_the_fixer_and_the_order(tmp_path: Path) -> None:
-    """Rules 1/4/5: the fixer replaces the tables; the first hour runs in order."""
-
-    bootstrap = (REPO_ROOT / "skills/c-03-repo-bootstrap/SKILL.md").read_text(encoding="utf-8")
-    assert "runs the fixer on the card" in bootstrap
-    assert "replaces each table with `- <finding> [n]` lines" in bootstrap
-    assert "Never write sidecar JSON by hand" in bootstrap
-
-    install = (REPO_ROOT / "skills/c-13-install-and-onboard/SKILL.md").read_text(encoding="utf-8")
-    # MIK-R196 rules 4-5: setup initialises the memory root and authors no onboarding, so the order
-    # claim follows the step that survives -- the root before its baseline, the baseline before the
-    # foundation is handed to the Architect.
-    assert "Setup authors no onboarding" in install
-    assert "citation fixer here" in install, "setup must not run the fixer"
-    assert install.index("Initialise the memory repo, and author no onboarding") < install.index(
-        "Adopt the first attributed baseline"
-    )
-    assert install.index("Adopt the first attributed baseline") < install.index(
-        "Reach the repository's knowledge foundation"
-    )
-
-    operation = (REPO_ROOT / "skills/l-01-agent-lifecycles/operations/bootstrap.md").read_text(
-        encoding="utf-8"
-    )
-    # MIK-R196 rule 5 removed the onboarding-scaffold/fixer step from this operation, so the order
-    # it protected now runs from the memory root's own init: the root is initialized (or repaired)
-    # before its baseline is adopted, and the baseline before the foundation is reported.
-    assert operation.index("Initialize or repair the memory root") < operation.index(
-        "Adopt the first attributed baseline"
-    )
-    # The foundation left this operation for the Architect (MIK-R196 rule 4), so the order claim
-    # follows the step that survives: the baseline still comes before the foundation is reported
-    # and handed over. Retiring the assertion instead would drop the order it protects.
-    assert operation.index("Adopt the first attributed baseline") < operation.index(
-        "Report the knowledge foundation's state"
-    )
-    instructions, foundation = delivered_step(
-        REPO_ROOT / "skills/l-01-agent-lifecycles",
-        ("bootstrap", "bootstrap"),
-        "reference/bootstrap/foundation-state.md",
-        # MIK-R196 rule 4 inserted the user-settings step and moved the foundation to the
-        # Architect's work: the eighth step still stands after the baseline, and it now reads
-        # "Report the knowledge foundation's state and hand its making to the Architect".
-        # P5-18 (round 5): the role file's state pointer is the one pointer for this action.
-        "Before reading and reporting the knowledge foundation's state, read",
-        tmp_path / "bootstrap.md",
-    )
-    # The compiled step heading and its delivered detail jointly retain ordering and ownership.
-    foundation_step = "### 8. Report the knowledge foundation's state"
-    assert foundation_step in instructions
-    assert instructions.index("Adopt the first attributed baseline") < instructions.index(
-        foundation_step
-    )
-    assert (
-        "Read and report the knowledge foundation's state, then name the next step at the "
-        "handover below." in instructions
-    )
-    assert (
-        "Before reading and reporting the knowledge foundation's state, read "
-        "[knowledge-foundation states](" in instructions
-    )
-    # The emitted state procedure owns the report and next step; its actual boundary link
-    # owns Bootstrap's standing no-author rule, also carried by the compiled role itself.
-    lifecycle = REPO_ROOT / "skills/l-01-agent-lifecycles"
-    foundation_clauses = (
-        "Read `memory_init`'s `knowledge` block and report its state:",
-        "Name one next step in both the conversation and report: start the Architect.",
-    )
-    require_clauses(foundation, foundation_clauses, "actual emitted foundation")
-    for clause in foundation_clauses:
-        reading = normalized_contract(foundation)
-        mutant = reading.replace(normalized_contract(clause), "", 1)
-        assert mutant != reading
-        with pytest.raises(AssertionError):
-            require_clauses(mutant, foundation_clauses, "deleted state or next-step duty")
-    no_author = (
-        "This role sets up and reports. It does not maintain, refactor, curate or repair the workspace it set up.",
-        "Author or refresh no onboarding content. Do not edit a memory file to make a check pass. "
-        "Author no knowledge records, run no knowledge writer, invent no invariants and populate "
-        "no database to claim readiness. Do not organise their production.",
-    )
-    with shipped_composition_corpus() as (origin, _):
-        target = origin / "roles/bootstrap.md"
-        assert target.read_bytes() == (lifecycle / "roles/bootstrap.md").read_bytes()
-
-        def require_bootstrap_boundary(text: str) -> str:
-            boundary = linked_section(
-                text,
-                lifecycle / "reference/bootstrap/foundation-state.md",
-                SectionLink(
-                    target,
-                    "Bootstrap's boundaries",
-                    "Before acting on the reported state, apply",
-                    "## Boundaries",
-                ),
-            )
-            require_clauses(boundary, no_author, "actual reached Bootstrap boundary")
-            return boundary
-
-        boundary = require_bootstrap_boundary(foundation)
-        for surface, where in (
-            (boundary, "actual reached role boundary"),
-            (instructions, "actual compiled and emitted Bootstrap instructions"),
-        ):
-            require_clauses(surface, no_author, where)
-            for clause in no_author:
-                reading = normalized_contract(surface)
-                mutant = reading.replace(normalized_contract(clause), "", 1)
-                assert mutant != reading
-                with pytest.raises(AssertionError):
-                    require_clauses(mutant, no_author, (where, "deleted no-author duty"))
-        for mutant in (
-            foundation.replace("[Bootstrap's boundaries]", "[missing boundaries]", 1),
-            foundation.replace("#boundaries", "#wrong-boundaries", 1),
-            foundation.replace(
-                "[Bootstrap's boundaries](", "[Bootstrap's boundaries](wrong-owner/", 1
-            ),
-        ):
-            assert mutant != foundation
-            with pytest.raises(AssertionError):
-                require_bootstrap_boundary(mutant)
-    # Curator ownership lives in the foundation procedure; Bootstrap only reports its state.
-    knowledge_bootstrap = (REPO_ROOT / "skills/c-14-knowledge-bootstrap/SKILL.md").read_text(
-        encoding="utf-8"
-    )
-    assert (
-        "The curator authors the foundation, the Architect organises the task it is authored under, "
-        "and the bootstrap seat reports the state it read"
-    ) in " ".join(knowledge_bootstrap.split())
-    # MIK-R196 rule 4 moved the foundation's ordering rules out of the bootstrap detail and
-    # they survive on the install-and-onboard surface; read from the owner that states them.
-    flat_install = " ".join(install.split())
-    assert "runs after the baseline" in flat_install
-    assert "before the first baseline no leaf can exist" in flat_install
-    assert "already has a commit" in flat_install
-
-
-def test_bootstrap_skill_texts_state_taskless_route_and_audit_trail() -> None:
-    """Journey findings 1-2: the no-contract pre-baseline route; bootstrap retention."""
-
-    bootstrap = (REPO_ROOT / "skills/c-03-repo-bootstrap/SKILL.md").read_text(encoding="utf-8")
-    assert "run the fixer with no contract" in bootstrap
-    assert "admits `pre-baseline`" in bootstrap
-    assert "never part of a memory commit" not in bootstrap
-    assert "audit trail" in bootstrap
-
-    install = (REPO_ROOT / "skills/c-13-install-and-onboard/SKILL.md").read_text(encoding="utf-8")
-    assert "never part of a memory commit" not in install
-    assert "audit trail" in install
 
 
 def test_first_baseline_retains_onboarding_bootstrap_audit_trail(

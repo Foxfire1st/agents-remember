@@ -78,4 +78,4 @@ lands"). `knowledge-convert --help` states the same.
 ## See also
 
 - `adopt-existing-memory.md`: convert first, then adopt.
-- The `c-13-install-and-onboard` skill, which describes this same procedure.
+- `docs/getting-started.md`: setup reaches the same conversion decision.

@@ -296,8 +296,10 @@ def build_coordination_context(
         code_repository_root=repo.root,
         coordination_root=coordination_root,
         memory_root=effective_memory_root,
-        onboarding_root=_effective_child_root(
-            effective_memory_root, roots.onboarding_root, "onboarding"
+        onboarding_root=(
+            contract.memory_worktree / "onboarding"
+            if contract is not None and contract.memory_worktree is not None
+            else _effective_child_root(effective_memory_root, roots.onboarding_root, "onboarding")
         ),
         settings_path=roots.settings_path,
         path_settings_path=_existing_path_settings(roots.settings_path, coordination_root),

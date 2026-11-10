@@ -136,7 +136,7 @@ def _assert_names_the_removal(error: MemoryModeUnsupportedError, *, removed: str
     assert "removed" in error.detail
     for mode in EXPECTED_MODES:
         assert f"`{mode}`" in error.detail
-    assert "c-00-initialize-memory-repo" in error.detail
+    assert "docs/guides/onboard-existing-repo.md" in error.detail
     assert error.remedies
 
 
@@ -932,47 +932,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 CORRECTED_SURFACES: tuple[tuple[str, tuple[str, ...], str], ...] = (
     (
-        "skills/c-00-initialize-memory-repo/SKILL.md",
-        (
-            "Defaults to repo-local internal memory",
-            "`topology`: `internal` by default",
-            "Default internal memory:",
-            "Fresh Internal Memory",
-            "Set `memory_root` to `<code_repository_root>/ar-memory`",
-        ),
-        "It is the only supported topology",
-    ),
-    (
-        "mcp/src/agents_remember/package_data/runtime/skills/c-00-initialize-memory-repo/SKILL.md",
-        (
-            "Defaults to repo-local internal memory",
-            "`topology`: `internal` by default",
-            "Default internal memory:",
-            "Fresh Internal Memory",
-        ),
-        "It is the only supported topology",
-    ),
-    (
-        "skills/c-13-install-and-onboard/SKILL.md",
-        ("(internal by default", "silently choose internal memory"),
-        "Removed-layout note",
-    ),
-    (
-        "skills/c-03-repo-bootstrap/templates/bootstrap-state-template.md",
-        ("internal / external / mixed",),
-        "| topology | external |",
-    ),
-    (
-        "skills/c-03-repo-bootstrap/templates/cross-repo-boundary-pack-template.md",
-        ("internal / external / mixed",),
-        "| topology | external |",
-    ),
-    (
-        "skills/c-03-repo-bootstrap/templates/bootstrap-input-ledger-template.md",
-        ("internal / external / mixed",),
-        "| topology | external |",
-    ),
-    (
         "docs/architecture.md",
         (
             "Internal memory is the default",
@@ -1024,16 +983,6 @@ def test_the_instruction_and_documentation_plane_never_teaches_the_removed_defau
     for phrase in forbidden:
         assert phrase not in text, f"{relative_path} re-teaches the removed default: {phrase!r}"
     assert required in text, f"{relative_path} lost the corrected statement: {required!r}"
-
-
-def test_the_generated_skill_copy_carries_the_canonical_correction() -> None:
-    """The copy `runtime_install` serves is checked against the tree it is generated from."""
-    canonical = (_REPO_ROOT / "skills/c-00-initialize-memory-repo/SKILL.md").read_bytes()
-    generated = (
-        _REPO_ROOT
-        / "mcp/src/agents_remember/package_data/runtime/skills/c-00-initialize-memory-repo/SKILL.md"
-    ).read_bytes()
-    assert generated == canonical
 
 
 # --------------------------------------------------------------------------------------

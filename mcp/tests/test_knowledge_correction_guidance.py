@@ -194,7 +194,6 @@ def test_authored_handoff_conversion_and_walkthrough_reach_one_profile() -> None
     sources = (
         ROOT / "templates/curator-handoff-list.md",
         ROOT.parents[1] / "docs/guides/first-conversion.md",
-        ROOT.parent / "c-13-install-and-onboard/SKILL.md",
         ROOT / "reference/writing/visual-explainers.md",
     )
     for source in sources:

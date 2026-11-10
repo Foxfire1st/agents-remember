@@ -166,7 +166,7 @@ keys are reported once as unused, and the block may be omitted or emptied.)
 `coordinationRoot` is where the runtime and memory repos live (populated by
 the `runtime_install` MCP tool); **default it to `<workspace>/ar-coordination/`** — inside the
 workspace, never the user's home directory. `workspaceRoot` is the workspace itself (it holds your
-code repos). The `c-13-install-and-onboard` skill treats the workspace as the first assumption for
+code repos). The install guide (`docs/getting-started.md`) treats the workspace as the first assumption for
 every install location and shows each resolved default for you to accept or override, so placement
 is never silent or guessed. List each repo you
 want Agents Remember to manage under `repositories`. The `providers` block is
@@ -225,7 +225,7 @@ reads memory and role settings without overwriting existing targets; it starts n
 other role and authors no onboarding or knowledge. At exit, the user starts an
 Architect for that optional regular work.
 
-The package-served `c-13-install-and-onboard` procedure describes this setup and
+The install guide (`docs/getting-started.md`) describes this setup and
 its maintenance owners. For an explicitly requested runtime refresh, the existing
 maintenance tools remain:
 

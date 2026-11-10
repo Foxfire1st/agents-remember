@@ -237,7 +237,9 @@ filename fallback.
 
 ## Onboarding checklist
 
-Before declaring a repository ready for requested code certification:
+Before declaring a repository ready for requested code certification, report each requested
+repository's exact profile path and digest, the validation result, and whether an
+authority-settings restart remains. Routine closeout and integration need no profile.
 
 1. Inspect its documented build, static checks, suite, suite-dependent checks, and clean-room
    scenarios. Resolve a real semantic ambiguity with the repository owner; do not infer commands

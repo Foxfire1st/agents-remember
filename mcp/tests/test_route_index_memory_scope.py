@@ -36,7 +36,7 @@ def _cache_counts(built, stale, errors):
     return dict(builtCount=built, staleCount=stale, buildErrorCount=errors)
 
 
-def test_public_full_names_missing_onboarding_without_creating_a_cache(tmp_path: Path):
+def test_public_full_measures_zero_routes_without_creating_onboarding(tmp_path: Path):
     contract, configured, _scoped = _scoped_pair(tmp_path)
     onboarding = contract.memory_repo_path / "onboarding"
     assert not onboarding.exists()
@@ -48,10 +48,8 @@ def test_public_full_names_missing_onboarding_without_creating_a_cache(tmp_path:
     built = whole["routeIndexCacheBuild"]
     assert built["builtIndexes"] == []
     assert built["builtCount"] == 0
-    assert built["buildErrors"][0]["path"] == str(onboarding)
-    assert "onboarding root does not exist" in built["buildErrors"][0]["error"]
-    assert answer["routeIndexCacheBuild"]["buildErrorCount"] == 1
-    assert not whole["acceptanceEligible"]
+    assert built["buildErrors"] == []
+    assert answer["routeIndexCacheBuild"]["buildErrorCount"] == 0
     assert not onboarding.exists()
 
 

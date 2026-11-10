@@ -166,6 +166,8 @@ consumers = [
   "mcp/tests/test_capsule_serving.py",
   "mcp/tests/test_capsule_serving_surface.py",
   "mcp/tests/test_capture_baseline.py",
+  "mcp/tests/test_cardless_knowledge_writer.py",
+  "mcp/tests/test_cardless_sidecar_validation.py",
   "mcp/tests/test_carryover_apply_transaction.py",
   "mcp/tests/test_carryover_document_units.py",
   "mcp/tests/test_catalog_selection.py",
@@ -250,6 +252,8 @@ consumers = [
   "mcp/tests/test_drift_dismissal_occurrences.py",
   "mcp/tests/test_durable_store_contract.py",
   "mcp/tests/test_emptied_sprint.py",
+  "mcp/tests/test_empty_leaf_memory_scope.py",
+  "mcp/tests/test_empty_onboarding_readers.py",
   "mcp/tests/test_enclosure_adoption.py",
   "mcp/tests/test_enclosure_adoption_in_place.py",
   "mcp/tests/test_enclosure_doctrine_parity.py",
@@ -290,6 +294,7 @@ consumers = [
   "mcp/tests/test_final_codex_certificate.py",
   "mcp/tests/test_final_codex_models.py",
   "mcp/tests/test_fixture_recorded_paths.py",
+  "mcp/tests/test_fresh_repository_knowledge_path.py",
   "mcp/tests/test_fresh_user_harness.py",
   "mcp/tests/test_gate_certificate_authority.py",
   "mcp/tests/test_gate_certification_evidence.py",
@@ -1084,6 +1089,7 @@ consumers = [
   "mcp/tests/test_converted_onboarding_baseline.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_converted_onboarding_drift_leaf_route.py",
+  "mcp/tests/test_empty_onboarding_readers.py",
 ]
 
 [[artifact]]
@@ -1130,6 +1136,7 @@ consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_bootstrap_converted_onboarding.py",
   "mcp/tests/test_capsule_launch_wiring.py",
+  "mcp/tests/test_cardless_knowledge_writer.py",
   "mcp/tests/test_carryover_apply_transaction.py",
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
   "mcp/tests/test_cleanup_completed_contract_remains.py",
@@ -1162,9 +1169,12 @@ consumers = [
   "mcp/tests/test_direct_leaf_integration_refusal.py",
   "mcp/tests/test_direct_leaf_role_start.py",
   "mcp/tests/test_emptied_sprint.py",
+  "mcp/tests/test_empty_leaf_memory_scope.py",
+  "mcp/tests/test_empty_onboarding_readers.py",
   "mcp/tests/test_enclosure_without_remains.py",
   "mcp/tests/test_evidence_dependency_bounds.py",
   "mcp/tests/test_explainer_control.py",
+  "mcp/tests/test_fresh_repository_knowledge_path.py",
   "mcp/tests/test_idle_stat_witnesses.py",
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_knowledge_bootstrap_procedure.py",
@@ -1718,6 +1728,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_preflight.py",
   "mcp/tests/test_agent_eval_validation.py",
+  "mcp/tests/test_cardless_sidecar_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_curator_card_layouts.py",
   "mcp/tests/test_knowledge_census_files.py",
@@ -1755,6 +1766,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_preflight.py",
   "mcp/tests/test_agent_eval_validation.py",
+  "mcp/tests/test_cardless_sidecar_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_curator_card_layouts.py",
   "mcp/tests/test_knowledge_census_files.py",
@@ -1792,6 +1804,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_preflight.py",
   "mcp/tests/test_agent_eval_validation.py",
+  "mcp/tests/test_cardless_sidecar_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_curator_card_layouts.py",
   "mcp/tests/test_knowledge_census_files.py",
@@ -1829,6 +1842,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_preflight.py",
   "mcp/tests/test_agent_eval_validation.py",
+  "mcp/tests/test_cardless_sidecar_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_curator_card_layouts.py",
   "mcp/tests/test_knowledge_census_files.py",
@@ -1866,6 +1880,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_preflight.py",
   "mcp/tests/test_agent_eval_validation.py",
+  "mcp/tests/test_cardless_sidecar_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_curator_card_layouts.py",
   "mcp/tests/test_knowledge_census_files.py",
@@ -1903,6 +1918,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_preflight.py",
   "mcp/tests/test_agent_eval_validation.py",
+  "mcp/tests/test_cardless_sidecar_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_curator_card_layouts.py",
   "mcp/tests/test_knowledge_census_files.py",
@@ -1940,6 +1956,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_preflight.py",
   "mcp/tests/test_agent_eval_validation.py",
+  "mcp/tests/test_cardless_sidecar_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_curator_card_layouts.py",
   "mcp/tests/test_knowledge_census_files.py",
@@ -1977,6 +1994,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_preflight.py",
   "mcp/tests/test_agent_eval_validation.py",
+  "mcp/tests/test_cardless_sidecar_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_curator_card_layouts.py",
   "mcp/tests/test_knowledge_census_files.py",
@@ -2014,6 +2032,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_preflight.py",
   "mcp/tests/test_agent_eval_validation.py",
+  "mcp/tests/test_cardless_sidecar_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_curator_card_layouts.py",
   "mcp/tests/test_knowledge_census_files.py",
@@ -2454,6 +2473,8 @@ consumers = [
   "mcp/tests/test_capsule_serving.py",
   "mcp/tests/test_capsule_serving_surface.py",
   "mcp/tests/test_capture_baseline.py",
+  "mcp/tests/test_cardless_knowledge_writer.py",
+  "mcp/tests/test_cardless_sidecar_validation.py",
   "mcp/tests/test_carryover_apply_transaction.py",
   "mcp/tests/test_carryover_document_units.py",
   "mcp/tests/test_catalog_selection.py",
@@ -2538,6 +2559,8 @@ consumers = [
   "mcp/tests/test_drift_dismissal_occurrences.py",
   "mcp/tests/test_durable_store_contract.py",
   "mcp/tests/test_emptied_sprint.py",
+  "mcp/tests/test_empty_leaf_memory_scope.py",
+  "mcp/tests/test_empty_onboarding_readers.py",
   "mcp/tests/test_enclosure_adoption.py",
   "mcp/tests/test_enclosure_adoption_in_place.py",
   "mcp/tests/test_enclosure_doctrine_parity.py",
@@ -2578,6 +2601,7 @@ consumers = [
   "mcp/tests/test_final_codex_certificate.py",
   "mcp/tests/test_final_codex_models.py",
   "mcp/tests/test_fixture_recorded_paths.py",
+  "mcp/tests/test_fresh_repository_knowledge_path.py",
   "mcp/tests/test_fresh_user_harness.py",
   "mcp/tests/test_gate_certificate_authority.py",
   "mcp/tests/test_gate_certification_evidence.py",
@@ -3227,6 +3251,25 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/fresh_repository_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "fresh-repository-knowledge-path"
+category = "unit-regression"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "Fresh memory initialization and baseline adoption through production application tools"
+introduced_by = "260928-MIK-L204"
+lifetime = "permanent"
+permanence_rationale = "The fresh repository path must exercise the baseline Git omission of empty onboarding directories without hand-created card fixtures."
+replacement_contract = "node:mcp/tests/test_fresh_repository_knowledge_path.py::test_first_knowledge_from_a_fresh_baseline_reaches_closeout_preview"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_cardless_knowledge_writer.py",
+  "mcp/tests/test_fresh_repository_knowledge_path.py",
+]
+
+[[artifact]]
 path = "mcp/tests/gate_certification_test_support.py"
 kind = "shared-support"
 authority = "internal-canonical"
@@ -3606,6 +3649,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_preflight.py",
   "mcp/tests/test_agent_eval_validation.py",
+  "mcp/tests/test_cardless_sidecar_validation.py",
   "mcp/tests/test_citation_census_inputs.py",
   "mcp/tests/test_curator_card_layouts.py",
   "mcp/tests/test_knowledge_census_files.py",
@@ -3641,8 +3685,10 @@ replacement_contract = "node:mcp/tests/test_knowledge_writer.py::test_a_decision
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_tool_surface_corrections.py",
+  "mcp/tests/test_cardless_knowledge_writer.py",
   "mcp/tests/test_carryover_apply_transaction.py",
   "mcp/tests/test_family_history_judgments.py",
+  "mcp/tests/test_fresh_repository_knowledge_path.py",
   "mcp/tests/test_generated_copy_worklist.py",
   "mcp/tests/test_handoff_check.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",

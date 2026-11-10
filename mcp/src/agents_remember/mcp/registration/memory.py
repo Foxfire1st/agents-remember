@@ -130,8 +130,8 @@ def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -
         entry point check against. Omitted, it defaults to the configured code repository's
         currently checked-out branch, and the call refuses rather than inventing a name when
         neither is available. Creates missing paths only and never overwrites existing onboarding
-        content. Preview with dry_run=true. Usually driven by the c-00-initialize-memory-repo
-        skill."""
+        content. Preview with dry_run=true. Documented in docs/guides/onboard-existing-repo.md.
+        """
         return tools.memory_init_payload(
             config,
             repo_id,

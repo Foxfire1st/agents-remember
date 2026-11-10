@@ -43,7 +43,6 @@ __all__ = [
     "CUTOVER_LOCK_CODE",
     "FIRST_CONVERSION_COMMAND",
     "FIRST_CONVERSION_GUIDE",
-    "FIRST_CONVERSION_SKILL",
     "LEGACY_FORMAT_CODE",
     "CutoverProbeError",
     "LegacyFormatCase",
@@ -63,8 +62,6 @@ _WORKTREE_PREFIX: Final = "worktree "
 FIRST_CONVERSION_COMMAND: Final = (
     "agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY"
 )
-#: The skill that describes the first-conversion procedure.
-FIRST_CONVERSION_SKILL: Final = "c-13-install-and-onboard"
 #: The guide page that describes the first-conversion procedure.
 FIRST_CONVERSION_GUIDE: Final = "docs/guides/first-conversion.md"
 
@@ -75,12 +72,12 @@ def first_conversion_procedure() -> str:
     Memory with no attributed baseline converts in place with the conversion command, then
     adopts the baseline; memory with an official line converts inside one new leaf's memory
     worktree as that leaf's first memory change, then closes out and lands like any leaf.
-    The skill and the guide carry the full procedure.
+    The guide carries the full procedure.
     """
 
     return (
         f"make its first conversion with `{FIRST_CONVERSION_COMMAND}`, as the "
-        f"{FIRST_CONVERSION_SKILL} skill and {FIRST_CONVERSION_GUIDE} describe (MIK-R46 rule 6)"
+        f"{FIRST_CONVERSION_GUIDE} describes (MIK-R46 rule 6)"
     )
 
 
@@ -270,8 +267,8 @@ def legacy_format_refusal(
     open. The refusal names the operation, the memory root or line, that the memory has no
     ``knowledge/layout.json``, and how it converts: ``worktree_sync`` with ``merge-memory``
     when the line it syncs from is converted; otherwise the first conversion of MIK-R46 rule 6
-    (``agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY``, as the
-    ``c-13-install-and-onboard`` skill describes). When Git can say, it names the line of
+    (``agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY``, as
+    ``docs/guides/first-conversion.md`` describes). When Git can say, it names the line of
     ``repository`` that already holds converted memory. It decides nothing; the caller
     established the legacy input. It carries the code ``legacy-format``.
 

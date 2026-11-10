@@ -59,15 +59,10 @@ def run_drift_summary(
     output: DriftSummaryOutput | None = None,
     base: KnowledgeBasePort | None = None,
 ) -> DriftSummaryPacket:
-    if not context.onboarding_root.exists():
-        return {
-            "status": "error",
-            "error": f"onboarding root does not exist: {context.onboarding_root}",
-        }
     memory_root = Path(getattr(context, "memory_root", None) or context.onboarding_root.parent)
     if is_converted_memory(memory_root):
         onboarding = Path(context.onboarding_root)
-        if not onboarding.is_dir():
+        if onboarding.exists() and not onboarding.is_dir():
             return {
                 "status": "error",
                 "error": f"onboarding root is not a readable directory: {context.onboarding_root}",

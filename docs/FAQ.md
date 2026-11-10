@@ -57,7 +57,7 @@ Drifted onboarding can still be useful historical context, but the agent must tr
 
 ### What happens when a file moves?
 
-The onboarding should move with the source path. If it does not, drift detection can classify the old onboarding as orphaned. The Curator follows the [card procedure](../skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md) for file-level onboarding relocation, while structural route changes can route through the `c-03-repo-bootstrap` skill.
+The onboarding should move with the source path. If it does not, drift detection can classify the old onboarding as orphaned. The Curator follows the [card procedure](../skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md) for file-level onboarding relocation, while structural route changes follow the repository-preparation guides.
 
 ### How does this handle cross-file or cross-repo coupling?
 

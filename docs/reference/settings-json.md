@@ -11,7 +11,10 @@ Agents Remember has five settings families with stated authorities:
 | Retired provider block (`providers`; parses, keys reported unused) | server-generated from the authority config (`--from-settings`) | per command |
 
 `system/settings.md` remains the human and agent prose guidance file beside a
-memory root's `settings.json`.
+memory root's `settings.json`. When both exist, the sibling `settings.json` is the
+machine-readable source for storage, `pathRules` and `crossRepo`; a fenced settings
+block in `settings.md` is accepted only when that JSON file is absent. Never leave two
+different machine settings in one memory root.
 
 The user's `~/.config/agents-remember/settings.json` (under `XDG_CONFIG_HOME` when
 set) is the GLOBAL agentic settings file — it is NOT an MCP authority file (the server refuses it as `--config`)
@@ -374,7 +377,12 @@ empty unless the memory layer explicitly allows a cross-repo relationship.
 
 ## MCP Fields
 
-`coordinationRoot` is the coordinator runtime target. It must be absolute.
+`coordinationRoot` is the coordinator runtime target. It must be absolute. When it is
+not supplied explicitly, resolution uses the installed runtime root when the command runs
+from an installed coordinator, and otherwise the source-development default
+`../ar-coordination`. An explicit `onboarding_root` override is accepted only when it points
+under `<coordinationRoot>/memory-repos/ar-<code-repository-name>/onboarding`; a path under a
+repo-local `ar-memory/` root is refused by name, with the exact path reported.
 
 `workspaceRoot` is the workspace root used to derive repository paths from repo
 ids. It must be absolute.
@@ -526,8 +534,9 @@ The agentic settings family — everything under the top-level `orchestration`
 key — lives in TWO JSON files merged on every read (260703-L13):
 
 - **Global:** `~/.config/agents-remember/settings.json` (or
-  `$XDG_CONFIG_HOME/agents-remember/settings.json`). The c-13 interview adds the
-  developer's agentic preferences after approval. Absent knobs retain built-in
+  `$XDG_CONFIG_HOME/agents-remember/settings.json`). The [setup
+  interview](#the-setup-interview) records the developer's agentic preferences through
+  `user_settings_init` after approval. Absent knobs retain built-in
   defaults without a seeded copy. User-owned: runtime_install never writes this file.
   Host provisioning uses `paseoRuntime` in the active MCP authority file selected
   by `--config`.
@@ -576,6 +585,32 @@ a harness/MCP restart.
 delegation, the loop defaults below, no role overrides, no concurrency caps,
 no spawn harness preference, and a host-managed full
 quality gate with normal RAM and swap behavior (see `orchestration.qualityGate`).
+
+### The setup interview
+
+Setup creates the user settings file once, then walks the developer through four families in
+plain language: gate delegation, the review-loop limits, each role's harness/model/effort and
+permission mode, and the spawn preference. Write the answers through the one initial
+`user_settings_init`. Leave a family at its built-in default when the developer has no
+preference. When the file already holds choices, read and report them, give the developer the file
+path and the documented keys and values to change, and edit nothing.
+
+Offer only choices the real host catalog names. Validate each harness, model and effort against
+that catalog, and say which choices the host does not offer rather than promising them. Modes and
+`notes`, and permission-bearing features such as `plan_mode`, `auto_accept` and unknown features,
+are user/profile authority only; never write them into a repository's settings. `service_tier` and
+`fast_mode` are speed features and may come from either layer. A role's host profile wins field by
+field; user instruction text is plain text, and a first non-blank line holding only `<overwrite>`
+replaces the baseline. No skill or file-path loading is performed.
+
+The one boot-snapshot key is `orchestration.gateDelegation`: a change to it needs a harness or MCP
+restart. Every other family is read per use.
+
+A developer-requested local override belongs in `<code-repo>/system/settings.json` and is reported
+as the developer's choice; setup never writes it on the developer's behalf. Verify that the
+workspace's `.agents-remember/role-executions/` directory exists and is ignored by Git: taskless and
+controller roles receive a scratch folder there, while leaf roles receive one under their group's
+real `scratch`.
 
 ### orchestration.gateDelegation
 

@@ -13,7 +13,7 @@ V13_PRE_SHORT_OPERATION_SHA256 = {
     "coordination": "0087aa0dbd1e322454046dae01d4a8d230205831f22abeebabc7da644424b9d4",
     "authorized-closeout": "3e6725c0730cc1456dd5ba1bbcfe7edc1a53203e05f65dd58dac0ed842eb0035",
     "recovery": "e5707af48d38d94eafcc9458cf6a7dc87c094c9563eb3b899efc527171abe69f",
-    "bootstrap": "adf23a3d714aa283da02c408c94a90944eb022ac87242746d3965acf4b63b5f6",
+    "bootstrap": "1a9a92eef605905e95d0727f1efc72821ab490886da1d750190546ffc515b0da",
 }
 
 V13_PRE_SHORT_STAGE_SHA256 = {
@@ -48,7 +48,7 @@ V13_PRE_SHORT_STAGE_SHA256 = {
     "recovery/investigator": "33e3cd99034cfb3426c59996174eafd7b14964cb66ab7f96a0502b7d5f940b67",
     "recovery/bootstrap": "c770ba6d2024ae702664e3340a30f1aaa7f153ae8b3f9e6fdcced923fcaea285",
     "recovery/reviewer": "33e3cd99034cfb3426c59996174eafd7b14964cb66ab7f96a0502b7d5f940b67",
-    "bootstrap/bootstrap": "5e9c0f5d8bc911b063197b522a5b01b8e26c1278539569eda7b31c3f6cbabc07",
+    "bootstrap/bootstrap": "9472403bc5f34c79b904a4baf63569789990684a42e0d66b9e208135ca9d1c83",
 }
 
 V13_OPERATION_SHA256 = {
@@ -60,7 +60,7 @@ V13_OPERATION_SHA256 = {
     "coordination": "b6ce2f36eff1ebf1c013d6b26ab0675d74c6ab88c90a547612ac875242064418",
     "authorized-closeout": "c2f5de0efb06134f6edc9ba655863667b983906e7024a9231cdf99fba3c464e5",
     "recovery": "920faa49cc2de8111c07d8844827f9592a57e63d977d9c7830c17f80dfe29f24",
-    "bootstrap": "adf23a3d714aa283da02c408c94a90944eb022ac87242746d3965acf4b63b5f6",
+    "bootstrap": "1a9a92eef605905e95d0727f1efc72821ab490886da1d750190546ffc515b0da",
 }
 
 V13_STAGE_SHA256 = {
@@ -95,7 +95,7 @@ V13_STAGE_SHA256 = {
     "recovery/investigator": "48adf4af29a2dc921d985de149e258d86b7ae1d3b9c09d5cf92a189e5f7cbb48",
     "recovery/bootstrap": "c770ba6d2024ae702664e3340a30f1aaa7f153ae8b3f9e6fdcced923fcaea285",
     "recovery/reviewer": "48adf4af29a2dc921d985de149e258d86b7ae1d3b9c09d5cf92a189e5f7cbb48",
-    "bootstrap/bootstrap": "5e9c0f5d8bc911b063197b522a5b01b8e26c1278539569eda7b31c3f6cbabc07",
+    "bootstrap/bootstrap": "9472403bc5f34c79b904a4baf63569789990684a42e0d66b9e208135ca9d1c83",
 }
 
 V13_PATH_INVERSE = {

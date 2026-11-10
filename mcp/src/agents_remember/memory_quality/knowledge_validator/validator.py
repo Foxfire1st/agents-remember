@@ -92,12 +92,13 @@ def _reports_at_route(rule: ValidationRule, context: ValidationContext, finding:
     return False
 
 
-def validate_tree(
+def validate_tree(  # noqa: PLR0913 -- conversion_debt names the converted check's no-base route
     candidate: KnowledgeTree,
     *,
     bases: Sequence[KnowledgeTree] = (),
     code: CodeTree | None = None,
     conversion: bool = False,
+    conversion_debt: bool = False,
     leaf_publication: bool | LeafCommit = False,
 ) -> ValidationReport:
     """Validate ``candidate`` with every registered rule.
@@ -136,6 +137,7 @@ def validate_tree(
         bases=tuple(bases),
         code=code,
         conversion=conversion,
+        conversion_debt=conversion_debt,
         leaf_publication=bool(leaf_publication),
         frozen=leaf_publication.frozen if isinstance(leaf_publication, LeafCommit) else (),
     )

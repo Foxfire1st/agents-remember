@@ -459,7 +459,6 @@ def test_writer_examples_in_complete_curator_delivery_and_followed_skills(
             ):
                 pending.append((linked, linked.read_text()))
     assert LIFECYCLE / "reference/knowledge/commands.md" in followed
-    assert ROOT / "skills/c-14-knowledge-bootstrap/SKILL.md" in followed
 
 
 def test_authored_effect_rule_names_retiring_deleted_rows(

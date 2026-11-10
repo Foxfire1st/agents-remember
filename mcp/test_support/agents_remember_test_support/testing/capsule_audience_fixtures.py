@@ -377,7 +377,7 @@ D656_OPERATION_SHA256 = {
     "coordination": "0087aa0dbd1e322454046dae01d4a8d230205831f22abeebabc7da644424b9d4",
     "authorized-closeout": "3e6725c0730cc1456dd5ba1bbcfe7edc1a53203e05f65dd58dac0ed842eb0035",
     "recovery": "e5707af48d38d94eafcc9458cf6a7dc87c094c9563eb3b899efc527171abe69f",
-    "bootstrap": "e6fb52316f9543213e5848d79c18111dde158140423d302a9d3492a1aa01ef17",
+    "bootstrap": "673691f0b744343bfb0be5e08506a8ebec19bd4d7e7a81438f48306c930efe9e",
 }
 
 D656_STAGE_SHA256 = {
@@ -412,7 +412,7 @@ D656_STAGE_SHA256 = {
     "recovery/investigator": "33e3cd99034cfb3426c59996174eafd7b14964cb66ab7f96a0502b7d5f940b67",
     "recovery/bootstrap": "c770ba6d2024ae702664e3340a30f1aaa7f153ae8b3f9e6fdcced923fcaea285",
     "recovery/reviewer": "33e3cd99034cfb3426c59996174eafd7b14964cb66ab7f96a0502b7d5f940b67",
-    "bootstrap/bootstrap": "654604b5996607bfc7d4c62cc20bf15a3daa5719d30e6613b322f73653d58ec2",
+    "bootstrap/bootstrap": "0a2e9bf4e8ea94c818fa302c5ab5604475c5cb999614cc397fe45752ab51a8d4",
 }
 
 R125_OPERATION_ROLES = {

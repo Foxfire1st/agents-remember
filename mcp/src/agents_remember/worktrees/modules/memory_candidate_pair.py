@@ -66,7 +66,6 @@ def resolve_memory_candidate_pair(
     onboarding_root = (memory_root / "onboarding").resolve()
     _require_path(code_root, "codeRoot", kind="directory", contract_path=contract_path)
     _require_path(memory_root, "memoryRoot", kind="directory", contract_path=contract_path)
-    _require_path(onboarding_root, "onboardingRoot", kind="directory", contract_path=contract_path)
     _require_repository_pair(current, code_root, memory_root, contract_path)
     _require_branch_plan(
         _BranchPlan(

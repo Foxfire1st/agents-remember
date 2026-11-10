@@ -226,8 +226,7 @@ def assert_foundation_boundaries(
         "real foundation task under a master",
         "The Curator uses its actual enclosure contract.",
         "No incidental code delta is required",
-        "follow [the knowledge-bootstrap workflow]"
-        "(skill://agents-remember/skills/c-14-knowledge-bootstrap/SKILL.md).",
+        "follow [the curation operation](../../operations/curation.md)",
         "Onboarding is optional input",
         "This foundation procedure authors no onboarding",
         "For setup\N{RIGHT SINGLE QUOTATION MARK}s state report and next step, follow [Name the next step]",

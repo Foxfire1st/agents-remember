@@ -2,7 +2,8 @@
 
 Repository bootstrap can be token-heavy because the agent has to inspect broad
 source areas before it can write useful onboarding. This guide is for operators
-choosing the harness, model, and run shape before starting `c-03-repo-bootstrap`.
+choosing the harness, model, and run shape before starting a repository research run
+(see `skills/l-01-agent-lifecycles/reference/repository-research.md`).
 
 The runtime does not try to optimize spend on its own. Treat model choice as an
 operator decision, then give the agent a clear bootstrap scope.

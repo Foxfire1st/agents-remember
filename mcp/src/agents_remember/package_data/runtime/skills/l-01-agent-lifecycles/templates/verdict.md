@@ -303,7 +303,7 @@ reviewer does not.
 - affected onboarding checks + full `memory_quality_check` curation result: pass | failed | blocked | not-run — <finding/returned codes>
 - drift reporting when the workflow requests it: pass | failed | blocked | not-run — <request/result if any>
 - route overviews describe the accumulated behavior: yes | <finding>
-- carryover and ledger mapping coherent under [the branch carry-over workflow](../../c-10-adopt-memory-baseline/workflows/carryover-from-branch.md) for the recorded landing line: yes | <finding>
+- carryover and ledger mapping coherent under the branch carry-over guide (`docs/guides/carryover-from-branch.md`) for the recorded landing line: yes | <finding>
 - backing evidence file: <onboarding-coherency report path>
 
 ## Criteria Catalog Results (baseline: every bound criterion; fix-verification: sealed-ID evidence only — see roles/reviewer.md)

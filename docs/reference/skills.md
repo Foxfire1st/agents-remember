@@ -30,19 +30,18 @@ build serves, which is what makes a recorded origin/URI/digest name the same con
 | --- | --- |
 | `l-01-agent-lifecycles` | The agent lifecycles, one per agent type under one roof. A role agent on the Paseo host gets one role file and one operation; the skill houses the self-contained per-role lifecycles (architect · backend orchestrator · manager · worker · curator · investigator · adversarial reviewer · bootstrap) plus the report-template library and the reviewer criteria catalogs. For work on a managed repository, free chat creates or resolves the sprint document, writes the request of the developer into it, and starts an Architect with `role_start` (the call for an Architect names no document; the developer names the sprint document to it in the dashboard); another role is started this way only when the developer names the role and the task. |
 
-## Core Skills
+## Setup And Repository Preparation
 
-| Skill | Purpose |
-| --- | --- |
-| `c-00-initialize-memory-repo` | Create or repair a target repository memory root. |
-| `c-03-repo-bootstrap` | Bootstrap repo overviews, route-local overviews, and onboarding coverage. |
-| `c-10-adopt-memory-baseline` | Adopt existing external-memory onboarding as an accepted Git memory baseline and refresh its computed ledger cache, and carry richer memory forward after matching code lands. |
-| `c-13-install-and-onboard` | Lead package-based first-run setup after the MCP server is registered: the one-call Bootstrap start, the runtime scaffold, the memory repo, the baseline, user settings, and provider indexing. |
-| `c-14-knowledge-bootstrap` | Build or resume a repository's knowledge foundation through the existing curator as ordinary Architect-organized task work: read the current knowledge state, inventory bounded sources, author invariants and families through the curator's own writer, read the result back, and report coverage and unresolved work. |
+Setup and repository preparation live in the public docs, not in separate skills:
+[Getting Started](../getting-started.md) starts setup, [Onboard An Existing Repo](../guides/onboard-existing-repo.md)
+initializes memory, and [Adopt Existing Memory](../guides/adopt-existing-memory.md) adopts the
+first baseline. The `l-01-agent-lifecycles` skill carries the role and operation instructions; its
+repository-foundation detail opens a repository's knowledge foundation, and its repository-research
+reference holds the source inventory, bounded research and evidence rules.
 
 Closing out a leaf creates the code and memory commits in one transaction, and the worktree
-lifecycle keeps integration behind its approval gates; both live in the skills above rather than
-in separate skills of their own.
+lifecycle keeps integration behind its approval gates; both live in the `l-01-agent-lifecycles`
+skill rather than in separate skills of their own.
 
 ## Reading Served Skills
 

@@ -47,6 +47,5 @@ Retry skips equal files. Other uncommitted bytes are `target-edited`, never over
 
 The curator answers the worklist with **its own rows**. Closeout commits the gate-judged tree once, attributed to the leaf code commit (official tip), then integrates. `carryover-pending` still blocks cleanup/finalization until that memory reaches its line.
 
-See `c-10-adopt-memory-baseline`; [Adopt Existing Memory](adopt-existing-memory.md)
-for baseline; the [knowledge command and tool reference](../../skills/l-01-agent-lifecycles/reference/knowledge/commands.md)
+See [Adopt Existing Memory](adopt-existing-memory.md) for the baseline; the [knowledge command and tool reference](../../skills/l-01-agent-lifecycles/reference/knowledge/commands.md)
 for `memory_quality_check`, `curator_coherence` and their tool-returned result/report paths.

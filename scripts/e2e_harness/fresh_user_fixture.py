@@ -208,14 +208,13 @@ def write_exclusion_register(
 
 
 def write_thin_bootstrap(fixture: FreshUserFixture) -> Path:
-    """The durable outcome a thin ``c-03`` bootstrap produces, written by the scenario.
+    """The minimum onboarding artifact a repository-preparation run produces, for the scenario.
 
-    ``c-03-repo-bootstrap`` is an LLM-driven procedure with **no runtime entry point** — no MCP
-    tool, no CLI, no operation in the frozen capsule vocabulary. A script therefore cannot *run*
-    it; it can only produce the same durable artifact, which the skill states is the minimum
-    successful bootstrap: one root ``overview.md`` under the resolved ``onboarding_root``. This
-    function is that artifact, and the scenario records the distinction rather than presenting
-    the file as an executed procedure.
+    Repository preparation has **no runtime entry point** — no MCP tool, no CLI, no operation in
+    the frozen capsule vocabulary. A script therefore cannot *run* it; it can only produce the
+    durable artifact the public guides describe as the minimum first onboarding: one root
+    ``overview.md`` under the resolved ``onboarding_root``. This function is that artifact, and
+    the scenario records the distinction rather than presenting the file as an executed procedure.
     """
     onboarding = fixture.memory_root / "onboarding"
     onboarding.mkdir(parents=True, exist_ok=True)

@@ -31,7 +31,7 @@ The [Bootstrap role](../roles/bootstrap.md#report) owns the report duty and comp
 - <step>: <reason or real output>
 
 ## Next Step Named To The Developer
-- Start the Architect; its foundation work follows skill://agents-remember/skills/c-14-knowledge-bootstrap/SKILL.md, section "Who Runs It".
+- Start the Architect; its foundation work follows [the repository foundation detail](../reference/curator/repository-foundation.md).
 
 ## Limitations Stated To The Developer
 - <capability that does not exist, named as absent>

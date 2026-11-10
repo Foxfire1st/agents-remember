@@ -530,7 +530,7 @@ def test_every_relative_path_the_corpus_cites_resolves() -> None:
     * **corpus-relative** — ``core/authority.md``, ``operations/review.md``: resolved against the
       lifecycle root.
     * **file-relative** — ``../core/loop.md``: resolved against the citing file's own directory, and
-      against the skills root for a cross-skill reference such as ``../c-00-initialize-memory-repo/SKILL.md``.
+      against the skills root for a reference such as ``../core/every-role.md``.
     * **repository-relative** — ``mcp/src/agents_remember/controlplane/gate_policy.py``: resolved
       against the repository root.
 

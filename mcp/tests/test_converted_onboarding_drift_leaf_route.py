@@ -188,39 +188,6 @@ def test_descriptions_say_what_the_check_is() -> None:
             in judgments
         )
 
-    acceptance_copies = _skill_copies("c-10-adopt-memory-baseline")
-    assert len(acceptance_copies) == 2, [str(path) for path in acceptance_copies]
-    for copy in acceptance_copies:
-        text = _normalized_text(copy)
-        assert (
-            "[knowledge command and tool reference](../l-01-agent-lifecycles/reference/knowledge/commands.md)"
-        ) in text, copy
-        commands = _normalized_text(
-            copy.parent.parent / "l-01-agent-lifecycles/reference/knowledge/commands.md"
-        )
-        for phrase in (
-            "`include_drift:true` measures anchor drift",
-            *_CURRENTNESS,
-            "`citation_fix`",
-            "Curator executing the bounded citation repair step.",
-        ):
-            assert phrase in commands, (copy, phrase)
-        assert (
-            "If drift has actionable findings, stop unless `accept_drift=true` is part of the "
-            "approved `memory_baseline_adopt` request. On converted memory, `blocked-invalid` "
-            "(the knowledge validator refuses the tree) stops adoption with or without `accept_drift`: "
-            "accepting drift lifts the stale-anchor gate only and never waives a validator violation"
-        ) in text, copy
-        assert "R198.1-reference-anchor" in text, copy
-        assert (
-            "On converted memory it lifts the stale-anchor gate only: it never lets a tree "
-            "with a validator violation through"
-        ) in text, copy
-        assert (
-            "`blocked-invalid`: on converted memory, the knowledge validator refuses the tree; "
-            "`accept_drift` cannot clear it."
-        ) in text, copy
-
 
 _REAL_LEAF_CONTRACT = Path(
     "/home/firefox/projects/ar-coordination/tasks/agents-remember"
