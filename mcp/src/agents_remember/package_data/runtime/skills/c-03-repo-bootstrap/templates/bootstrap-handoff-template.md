@@ -1,5 +1,7 @@
 # Bootstrap Handoff — <repo>
 
+<!-- The bootstrap orchestrator uses this template to report completed work, remaining coverage, and the next step at handoff or pause. -->
+
 | Field | Value |
 |---|---|
 | generated | <YYYY-MM-DDThh:mm> |
@@ -105,9 +107,7 @@ Automated bootstrap stops at this handoff. Ask whether separate closeout should 
 ## How Future Agents Should Use This Bootstrap
 
 1. Read `bootstrap/STATE.md`.
-2. Read `overview.md`.
-3. If touching a source file, read ancestor `overview.md` files along the mirrored onboarding route.
-4. Read the file-level onboarding if it exists.
-5. If no file-level onboarding exists, check whether the nearest governing overview is sufficient or whether the file should be promoted.
-6. If touching cross-repo boundaries, read relevant boundary packs.
-7. If touching domain behavior, read relevant docs packs.
+2. Before ordinary source-file work, follow the [knowledge-use guidance](skill://agents-remember/skills/l-01-agent-lifecycles/reference/knowledge/use.md): start with a text search or `knowledge_read`, expand the candidates with `knowledge_read`, and read code and knowledge together.
+3. If no file-level onboarding exists, check whether the nearest governing overview is sufficient or whether the file should be promoted.
+4. If touching cross-repo boundaries, read relevant boundary packs.
+5. If touching domain behavior, read relevant docs packs.

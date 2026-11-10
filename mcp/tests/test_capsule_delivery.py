@@ -11,17 +11,28 @@ and how the compiler's own result (role seat and launcher seat) maps onto the va
 
 from __future__ import annotations
 
+import re
+from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 import pytest
 from agents_remember.application.role_capsules.compilation import compile_admitted_capsule
 from agents_remember.application.role_capsules.sources import CapsuleAdmissionRequest
+from agents_remember.cli import role_instruction_details
+from agents_remember.cli.role_instruction_details import compose_launch_instructions
+from agents_remember.cli.role_instruction_links import bind_markdown_links
+from agents_remember.kernel.onboarding_doc import unfenced_lines
 from agents_remember.models.role_capsules.manifest import parse_composition_manifest
 from agents_remember.models.role_capsules.types import (
     CapsuleAdmittedFacts,
     CapsuleBinding,
     CapsuleCapsule,
     CapsuleCompilationResult,
+    CapsuleDetailReference,
+    CapsuleInstructionBlock,
+    CapsuleInstructionUnit,
     CapsuleLauncherSeat,
     CapsuleRoleSeat,
     CapsuleToolPolicy,
@@ -31,6 +42,7 @@ from agents_remember.serving.capsule_delivery import (
     LAUNCHER_ROLE_SENTINEL,
     CapsuleBindingIdentity,
     CapsuleDelivery,
+    CapsuleInstructionOrigin,
     capsule_delivery_from,
 )
 
@@ -69,6 +81,7 @@ def test_task_and_skill_content_cannot_enter_the_instruction_slot() -> None:
         "trusted_instructions",
         "semantic_digest",
         "detail_references",
+        "instruction_origins",
     }
     assert delivery().detail_references == ()
 
@@ -170,6 +183,13 @@ def test_delivery_consumes_a_genuine_compilation_result() -> None:
     assert result.trusted_instructions == compilation.render_instructions()
     assert result.trusted_instructions.strip(), "the real capsule must render actual instructions"
     assert result.semantic_digest == compilation.semantic_digest
+    assert tuple(origin.source_path for origin in result.instruction_origins) == tuple(
+        unit.block.source_path for unit in compilation.capsule.instruction_units
+    )
+    for origin, unit in zip(
+        result.instruction_origins, compilation.capsule.instruction_units, strict=True
+    ):
+        assert result.trusted_instructions[origin.start : origin.end] == unit.block.content
     # The binding a launch publishes is exactly these four admitted facts, under these keys.
     assert result.binding.as_report() == {
         "repositoryId": admitted.repository_id,
@@ -249,7 +269,28 @@ def test_a_real_launcher_compilation_reports_the_sentinel_role() -> None:
     )
 
     class _Result:
-        capsule = type("C", (), {"binding": binding, "semantic_digest": "sha256:" + "0a" * 32})()
+        capsule = type(
+            "C",
+            (),
+            {
+                "binding": binding,
+                "semantic_digest": "sha256:" + "0a" * 32,
+                "instruction_units": (
+                    CapsuleInstructionUnit(
+                        0,
+                        CapsuleInstructionBlock(
+                            "launcher:ambient-launcher",
+                            "core",
+                            (),
+                            "core/launcher.md",
+                            compute_content_digest(b"# Launcher\n"),
+                            compute_content_digest(b"# Launcher\n"),
+                            "# Launcher\n",
+                        ),
+                    ),
+                ),
+            },
+        )()
 
         def render_instructions(self) -> str:
             return "# Launcher\n"
@@ -257,3 +298,187 @@ def test_a_real_launcher_compilation_reports_the_sentinel_role() -> None:
     result = capsule_delivery_from(_Result())
     assert result.binding.role == LAUNCHER_ROLE_SENTINEL
     assert result.binding.operation == "orientation"
+
+
+def test_launch_binds_each_inline_link_to_its_admitted_source_without_changing_compilation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = "[same](local.md) [sibling](../../other/workflow.md#step)\n"
+    second = "[same](local.md) [self](#section)\n"
+    trusted = first + second
+    carrier = replace(
+        delivery(instructions=trusted),
+        instruction_origins=(
+            CapsuleInstructionOrigin("operations/one.md", 0, len(first)),
+            CapsuleInstructionOrigin("roles/two.md", len(first), len(trusted)),
+        ),
+    )
+    root = tmp_path / "skills/lifecycle"
+
+    @contextmanager
+    def corpus():
+        yield root, "composition-manifest.json"
+
+    monkeypatch.setattr(role_instruction_details, "shipped_composition_corpus", corpus)
+    text, record = role_instruction_details.compose_launch_instructions(
+        carrier, str(tmp_path / "elsewhere/request.md"), {}
+    )
+    assert f"[same]({root / 'operations/local.md'})" in text
+    assert f"[same]({root / 'roles/local.md'})" in text
+    assert f"[sibling]({tmp_path / 'skills/other/workflow.md'}#step)" in text
+    assert f"[self]({root / 'roles/two.md'}#section)" in text
+    assert carrier.trusted_instructions == trusted
+    assert record["semanticDigest"] == carrier.semantic_digest
+
+
+def test_launch_markdown_binding_preserves_non_destinations_and_code(tmp_path: Path) -> None:
+    source = tmp_path / "roles/worker.md"
+    text = (
+        '[nested](../a(b).md "Title") [space](<../a b.md#part>)\n'
+        "![image](../picture.png?size=2#part) [reference][target]\n"
+        '[target]: ../target.md "Reference title"\n'
+        "[external](https://example.com/doc) [absolute](/a/doc.md)\n"
+        "[detail]({{detail:reference/frozen.md}})\n"
+        "`[inline](../unchanged.md)`\n"
+        "```md\n[fence](../unchanged.md)\n```\n"
+        "    [indent](../unchanged.md)\n"
+        "\\[literal](../unchanged.md)\n"
+    )
+    bound = bind_markdown_links(text, source)
+    assert f'[nested]({tmp_path}/a%28b%29.md "Title")' in bound
+    assert f"[space](<{tmp_path}/a%20b.md#part>)" in bound
+    assert f"![image]({tmp_path}/picture.png?size=2#part)" in bound
+    assert f'[target]: {tmp_path}/target.md "Reference title"' in bound
+    for line in text.splitlines()[3:]:
+        assert line in bound
+    assert "[reference][target]" in bound
+
+
+def test_launch_refuses_unbound_or_incomplete_origins(tmp_path: Path) -> None:
+    linked = delivery(instructions="[link](relative.md)\n")
+    with pytest.raises(Exception, match="require complete source origins"):
+        compose_launch_instructions(linked, str(tmp_path / "request.md"), {})
+    for origins in (
+        (CapsuleInstructionOrigin("roles/worker.md", 1, len(linked.trusted_instructions)),),
+        (CapsuleInstructionOrigin("roles/worker.md", 0, 4),),
+    ):
+        with pytest.raises(Exception, match="origins do not cover"):
+            compose_launch_instructions(
+                replace(linked, instruction_origins=origins), str(tmp_path / "request.md"), {}
+            )
+
+
+def _missing_emitted_link_targets(path: Path, body: str) -> list[str]:
+    """Inspect local destinations outside quoted Markdown fence examples."""
+    prose = "\n".join(line for _, line in unfenced_lines(body.splitlines()))
+    missing = []
+    for destination in re.findall(r"\]\(([^)\s]+)\)", prose):
+        parts = urlsplit(destination)
+        if parts.scheme or not parts.path:
+            continue
+        target = path.parent / unquote(parts.path)
+        if not target.is_file():
+            missing.append(destination)
+    return missing
+
+
+@pytest.mark.parametrize("marker", ("```", "~~~", "````"))
+def test_emitted_link_scan_excludes_only_fenced_examples(tmp_path: Path, marker: str) -> None:
+    """A real missing link fails before and after an unchanged quoted example."""
+    report = tmp_path / "launch.md"
+    literal = "[missing](absent.md)"
+    assert _missing_emitted_link_targets(report, literal) == ["absent.md"]
+    example = f"{marker}markdown\n{literal}\n{marker}\n"
+    assert _missing_emitted_link_targets(report, example) == []
+    assert _missing_emitted_link_targets(report, example + literal) == ["absent.md"]
+    assert _missing_emitted_link_targets(report, literal + "\n" + example + literal) == [
+        "absent.md",
+        "absent.md",
+    ]
+    if marker == "````":
+        # A shorter inner fence cannot resume checking the outer example.
+        nested = "````markdown\n```\n" + literal + "\n````\n" + literal
+        assert _missing_emitted_link_targets(report, nested) == ["absent.md"]
+    present = tmp_path / "present file.md"
+    present.write_text("present")
+    assert (
+        _missing_emitted_link_targets(
+            report, "[present](present%20file.md) [external](https://example.com) [self](#step)"
+        )
+        == []
+    )
+    assert _missing_emitted_link_targets(report, "[missing](absent%20file.md)") == [
+        "absent%20file.md"
+    ]
+
+
+def test_every_emitted_role_operation_link_resolves(tmp_path: Path) -> None:
+    """Inspect actual output files for the complete declared role/operation population."""
+    parsed = _shipped_manifest()
+    pairs = {(role, op) for role, entry in parsed.roles.items() for op in entry.operations}
+    assert pairs == {
+        (role, op) for op, entry in parsed.operations.items() for role in entry.applies_to_roles
+    }
+    failures = []
+    for role, operation in sorted(pairs):
+        compiled = real_compilation(role, operation)
+        carrier = capsule_delivery_from(compiled)
+        report = tmp_path / role / operation / "launch.md"
+        text, record = compose_launch_instructions(carrier, str(report), {})
+        emitted = [(report, text)] + [
+            (Path(item["path"]), Path(item["path"]).read_text())
+            for item in record["detailReferences"]
+        ]
+        for path, body in emitted:
+            # Independent inspection of the corpus's Markdown links, including absolute output.
+            for destination in _missing_emitted_link_targets(path, body):
+                failures.append((role, operation, path.name, destination))
+        assert carrier == capsule_delivery_from(compiled)
+        assert record["semanticDigest"] == compiled.capsule.semantic_digest
+    assert not failures, failures
+
+
+def test_detail_links_bind_frozen_siblings_and_keep_replay_hashes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "corpus"
+    first = b"[second](second.md#step) [other](../other.md) [self](#here)\n"
+    second = b"# Step\nOriginal second.\n"
+    references = tuple(
+        CapsuleDetailReference(f"reference/{name}.md", compute_content_digest(body), body, "step")
+        for name, body in (("first", first), ("second", second))
+    )
+
+    @contextmanager
+    def corpus():
+        yield root, "composition-manifest.json"
+
+    monkeypatch.setattr(role_instruction_details, "shipped_composition_corpus", corpus)
+    original = replace(
+        delivery(instructions="Read {{detail:reference/first.md}}."), detail_references=references
+    )
+    report = tmp_path / "request.md"
+    text, record = compose_launch_instructions(original, str(report), {})
+    first_path, second_path = [Path(item["path"]) for item in record["detailReferences"]]
+    body = first_path.read_text()
+    assert f"[second]({second_path}#step)" in body
+    assert f"[self]({first_path}#here)" in body
+    assert f"[other]({root / 'other.md'})" in body
+    assert original.detail_references == references
+    for item in record["detailReferences"]:
+        assert item["revision"] == compute_content_digest(Path(item["path"]).read_bytes())
+    # Replay needs no current corpus, and rejects a modified emitted detail.
+    receipt = {
+        "instructionComposition": record,
+        "report": {"path": str(report), "canonicalPath": str(report)},
+        "handoverArtifact": {
+            "path": str(report.with_suffix(".handover.txt")),
+            "canonicalPath": str(report.with_suffix(".handover.txt")),
+        },
+    }
+    role_instruction_details.validate_instruction_detail_artifacts(receipt)
+    assert compose_launch_instructions(original, str(report), {}) == (text, record)
+    second_path.chmod(0o644)
+    second_path.write_bytes(b"Changed.\n")
+    with pytest.raises(ValueError, match="bytes no longer match"):
+        role_instruction_details.validate_instruction_detail_artifacts(receipt)

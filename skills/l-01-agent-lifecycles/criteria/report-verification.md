@@ -1,141 +1,61 @@
-# Criteria Catalog — Report Verification
+# Criteria catalog: report verification
 
-The standing criteria an **adversarial reviewer** (`../roles/reviewer.md`) — and the loop OWNER
-verifying a builder round — MUST run over every report, claim, and summary in the change set:
-builder reports, owner claims, handover packets. **Standing from day one** in every review type:
-report-vs-artifact caught real defects in three separate engagements before this catalog existed.
-Criteria are never made up on the spot. A baseline review runs the standing list below as its
-regression floor and may use the exploratory mandate and promotion ratchet. A
-fix-verification uses only the sealed baseline evidence needed for its outstanding IDs; it
-does not recensus this catalog or add a criterion.
+The Reviewer and the loop owner checking a builder round use this catalog for every report, claim and summary in the change set. This includes builder reports, owner claims and handover packets. It is standing in every review type.
 
-## Standing Criteria (MUST RUN — the regression floor)
+Before starting a baseline or fix-verification, read the [shared catalog review rules](code-seam.md#shared-catalog-review-rules). They define standing checks, baseline exploration, fixed-list verification and criterion promotion, demotion and automation. Preserve the developer-ruling exception below.
 
-### RV-1 — Report-vs-artifact on EVERY claim
+## Standing criteria
 
-**Open the artifact behind every claim.** A report sentence asserting "X was done / is green /
-was refreshed" is verified against the artifact itself, not trusted — claim by claim, no sampling
-of the load-bearing ones.
+### RV-1 — Report-vs-artifact on every claim
 
-  A claim that "the tree contains only intended changes" is refuted against BOTH content and mode
-  rows: `git status --short` plus `git diff HEAD --numstat` for content, and `git diff HEAD
-  --summary` for mode-only changes — exec-bit drops on hooks/scripts are behaviorally meaningful
-  (git skips non-executable hooks) and silent to content diffs. Run the check in the same
-  filesystem view as the claimed change set (a 9P/Windows client can show mode rows the WSL-side
-  tree does not carry).
+Open the artifact behind every claim that something was done, passed or refreshed. Verify each claim against the artifact itself; do not sample the load-bearing claims.
 
-  The same claim must also cover **every nonignored untracked path**, not only the `??` name shown
-  by status. Enumerate those paths with a NUL-delimited Git inventory (for example,
-  `git ls-files --others --exclude-standard -z`) or an equivalently path-safe API; never pass the
-  result through shell word splitting or newline parsing. For every exact path, in that same
-  filesystem view:
+For a claim that the tree contains only intended changes, inspect both content and mode changes. Use `git status --short` and `git diff HEAD --numstat` for content, and `git diff HEAD --summary` for mode-only changes. An executable-bit drop on a hook or script affects behavior—Git skips non-executable hooks—and content diffs do not show it.
 
-  - use `lstat`-equivalent semantics and record the filesystem type plus numeric mode and any
-    executable significance;
-  - for a regular file, record its size and inspect bounded content: escaped/bounded text bytes,
-    or an explicit binary/sensitive classification with a content hash instead of an unlimited
-    raw dump;
-  - for a symlink, record the link itself and its link-target text without following the target;
-  - for a directory or special object, record its type and explicitly accept, reject, or route it
-    for further inspection rather than opening it as an ordinary file; and
-  - record whether the object is intended or unintended in the candidate.
+Run these checks in the same filesystem view as the claimed change set. A 9P/Windows client can show mode changes absent from the Windows Subsystem for Linux view.
 
-  If an object disappears, changes identity, or cannot be inspected between inventory and
-  evidence capture, report that race or limitation explicitly and re-establish a consistent view;
-  do not silently skip it or make a complete-tree claim. This is a semantic review obligation,
-  not a second verifier or permission to dump arbitrary untracked bytes into a report.
+The claim must also cover every nonignored untracked path, not just the `??` name in status. Enumerate exact paths with a NUL-delimited Git inventory, such as `git ls-files --others --exclude-standard -z`, or an equivalently path-safe application programming interface. Do not use shell word splitting or newline parsing.
 
-- Catching evidence, three separate engagements (260703-L8): review 3 caught a **hand-aligned
-  test** behind a wiring claim; cycle 6's scoped handoff caught **"refreshed" overviews that were
-  history-only**; review 4 caught the **OWNER's own canvas overclaim** (L8 decision log, cycle-7
-  entry) — builder reports and owner claims fail the same way. Fourth engagement
-  (260815-DAG-L12): 10 files carried mode-only changes (100755→100644, incl.
-  `.githooks/pre-commit`) absent from the worker's file list, contradicting "the tree contains
-  only intended changes".
+For every exact path, in that same filesystem view:
 
-### RV-2 — CLASS-completeness *(promoted to standing at 260703-L18 — 2 catches)*
+- Use `lstat`-equivalent semantics. Record filesystem type, numeric mode and executable significance.
+- For a regular file, record its size and inspect bounded content. Use escaped, bounded text bytes, or an explicit binary/sensitive classification with a content hash; do not dump unlimited raw content.
+- For a symbolic link, record the link and its target text without following the target.
+- For a directory or special object, record the type and explicitly accept, reject or route it for further inspection. Do not open it as an ordinary file.
+- Record whether the object is intended in the candidate.
 
-**Hunt the siblings of every found instance.** A finding or a fix names an instance of a CLASS
-(a directive surface, a census count, a vocabulary token). Enumerate the class — every sibling
-surface, not just the instances the report names — and check each one.
+If an object disappears, changes identity or becomes unreadable between inventory and evidence capture, report the race or limitation and establish a consistent view again. Do not silently omit it or claim complete-tree coverage. This is a semantic review obligation, not another verifier or authority to dump arbitrary untracked bytes into a report.
 
-- Catching evidence: (1) 260703-L10 round 1 — the reviewer's completeness sweep found **six of
-  ten first-action surfaces** still shipping the retired directive when the report claimed the
-  flip done (L10 decision log). (2) 260703-L18 review (L18R-3) — the fix for
-  advertised-but-unimplemented recovery choices named the `cli.py` `custom` residual but missed
-  the SIBLING `_load_memory_ledger` block still advertising an inert `reconciliation`; the
-  sibling hunt found it.
+Builder and owner claims need the same scrutiny.
 
-### RV-4 — Decision-log completeness for scope-expanding disclosures *(promoted to standing at 260703-L18 — 2 catches)*
+### RV-2 — Class-completeness
 
-**A scope-expanding owner supplement or load-bearing builder disclosure must be verifiable in
-the task-doc decision log, not only the builder report.** Continuity lives in the task_doc +
-durable artifacts, never in transcripts; a ruling or environment finding that exists only in a
-report is one lost file away from unrecoverable. Cross-check every supplement and disclosure the
-builder report carries against the decision log.
+This criterion is standing. For every found instance, identify its class—for example a directive surface, census count or vocabulary token. Enumerate and check every sibling surface, not just those named in the report.
 
-- Catching evidence: (1) 260703-L17 review (L17R-1) — supplement 2 (the wait-loop-era remnant
-  sweep with per-hit verdicts and two named follow-ups) was recorded only in the builder report.
-  (2) 260703-L18 review (L18R-4) — the load-bearing editable-install/PYTHONPATH environment
-  finding + named follow-ups lived only in the builder report; the leaf's `decisions[]` was
-  empty. Both folded by the owner at closeout.
+### RV-4 — Decision-log completeness for scope-expanding disclosures
 
-### RV-5 — Canonical invocation target provenance *(promoted to standing at 260731-EFA-L6 — 2 catches)*
+This criterion is standing. A scope-expanding owner supplement or consequential builder disclosure must be verifiable in the task-document decision log, not only the builder report. Cross-check every supplement and disclosure against that log.
 
-**Every test, mutation pin, benchmark, and evidence command must prove that its resolved source
-checkout and task/contract are the artifacts under review.** A nominally canonical command can
-resolve an editable install from another checkout, name the wrong worktree contract, or refuse
-before producing the output later attributed to it. Verify the source/import path and the
-task/contract scope consumed by the exact invocation; mutation-test pins under that same invocation.
-A green result or measurement without matching target provenance is not evidence for the change set.
+Continuity depends on task documents and durable artifacts, not transcripts. A ruling or environment finding held only in one report is lost if that report is lost.
 
-- Catching evidence: (1) 260703-L18 review (L18R-1) — the inbox delivered/unconfirmed pin failed
-  its mutation check only under `PYTHONPATH=src`; under the canonical `pytest mcp/tests`, the
-  main-repo editable install shadowed the worktree and the mutated code still passed. Remedy: the
-  `sys.path` pin idiom the sibling suites carry. (2) 260731-EFA-L6 S31 round-1 review (RV-5) — the
-  reported canonical cold-index command named the parent series contract, which has no L6 memory
-  worktree and was refused before cache creation; it therefore could not have produced the reported
-  L6 snapshot. The command needed the L6 enclosure contract to exercise the artifact under review.
+### RV-5 — Canonical invocation target provenance
 
-### RV-6 — Check scope, carried runs and pre-existing failures *(standing by requirement; the ratchet does not demote it, only a developer ruling does)*
+This criterion is standing. Every test, mutation check, benchmark and evidence command must establish that its resolved source checkout and task/contract are the artifacts under review.
 
-A report that calls a check complete, or the gate, names what it ran and what it left out; compare that with the gate's own definition. A failure called pre-existing fails on the base with the same cause (message and subtest), not only under the same test name. A run carried over from an earlier freeze stands only where the files it exercises are byte-identical to those of its last run; a carried run whose files changed is an evidence gap.
+Even a nominally canonical command can use an editable install from another checkout, name the wrong worktree contract or refuse before producing the output later attributed to it. Verify the resolved source/import path and the task/contract used by that exact invocation. Perform mutation-test checks under the same invocation. A passing result or measurement without matching target provenance is not evidence for the change set.
 
-- Catching evidence: 260928-MIK-L54, where a comparison of failing test names let a capsule land over its budget; and checks called "the full gate" that left out the dashboard's unit tests.
+### RV-6 — Check scope, carried runs and pre-existing failures
 
-## Candidate Criteria (seeded exploratory — one catching engagement each; promote at ≥2)
+This criterion is directly required and standing. The promotion/demotion process cannot demote it; only a developer ruling can.
 
-Run under the exploratory mandate during a baseline review only; a candidate is proposed for
-promotion into the standing list when it catches in a second engagement (the ratchet below).
+A report calling a check complete, or calling it the gate, must name what ran and what was left out. Compare that coverage with the gate's own definition.
 
-### RV-3 — Partial-fix-creates-falsehoods *(candidate — 1 catch)*
+A failure called pre-existing must fail on the base for the same cause, identified by message and subtest, rather than merely sharing a test name. A run carried from an earlier freeze remains valid only when the files it exercises are byte-identical to those of its last run. Changed exercised files make the carried run an evidence gap.
 
-**Verify claims ABOUT the changed artifacts, not only the artifacts.** A partial fix can turn
-previously-true sentences elsewhere false (docs describing the artifact, install guides quoting
-it, counts referencing it). Sweep for statements about what changed and re-verify their truth
-after the change.
+## Candidate criteria
 
-- Catching evidence (single engagement): 260703-L10 round 1 — the partial hook flip made **two
-  install-doc claims false** ("injects the same startup directive" no longer held); round 2
-  restored byte-identity so the claims became true again (L10 decision log + builder report).
+Run candidates under baseline exploration. For promotion, follow the [Promotion Ratchet](code-seam.md#promotion-ratchet).
 
-## Exploratory Mandate
+### RV-3 — Partial-fix-creates-falsehoods
 
-During a baseline review, beyond the standing list, the reviewer owes **novel lenses** (the brief sets
-N; default 2): ways THIS report could mislead that the catalog does not name yet. Every novel
-finding-class that survives refutation is proposed as a catalog amendment in the verdict. A
-Fix-verification has no novel-lens or new-catalog duty and cannot turn an observation outside
-the sealed issue list into a finding.
-
-## Promotion Ratchet
-
-- A **candidate** criterion that catches a real defect in **≥2 separate first-review engagements** is promoted
-  into the standing list above, with its catching evidence cited — escaped bugs become permanent
-  tests (RV-1 is itself the precedent: promoted on three catches). Promotion is proposed in the
-  verdict and lands on the loop owner's acceptance.
-- A **standing** criterion that fires nothing for **N consecutive engagements** (default 5)
-  demotes to spot-check.
-- A criterion that can be **mechanized graduates out of the catalog into a scoped diagnostic** —
-  the curator handoff check (which catches history-only "refreshes" before the Git transaction, where
-  prose requests did not)
-  is the working example.
+This candidate has one catch. Verify claims about changed artifacts as well as the artifacts themselves. A partial fix can make previously true documentation, quoted installation instructions or counts false. Find statements about what changed and check whether they remain true.

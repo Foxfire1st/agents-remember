@@ -17,7 +17,7 @@ from agents_remember.models.task_intent import TaskIntentState
 # Step/substep status carries the dashboard's granularity; the markdown render
 # only has a binary checkbox, so the richer state lives in the JSON.
 StepStatus = Literal["pending", "inProgress", "blocked", "done"]
-# Document status stays in the ``w-02-light-task-workflow`` template vocabulary so
+# Document status stays in the ``l-01-agent-lifecycles`` task-template vocabulary so
 # the rendered ``**Status:**`` line is always a valid template value.
 # ``abandoned`` is a second *terminal* value, and it records a decision rather than a failure.
 # On a master document it means nothing of that master integrated, so its work was deliberately

@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "mcp" / "test_support"))
 sys.path.insert(0, str(REPO_ROOT / "mcp" / "src"))
@@ -19,7 +21,10 @@ sys.path.insert(0, str(REPO_ROOT / "mcp" / "src"))
 from agents_remember_test_support.code_quality.projection_types import (
     SCHEMA_OUTPUT,
     TYPESCRIPT_OUTPUT,
+    ProjectionTypeGenerationError,
     generated_files,
+    render_typescript,
+    served_projection_schema,
     stale_generated_files,
     workspace_projection_schema,
 )
@@ -63,3 +68,21 @@ def test_the_generated_typescript_names_the_producers_limit_and_keeps_the_refine
 def test_the_committed_contract_files_are_the_generated_ones() -> None:
     """The canonical drift check passes on the bytes in the tree."""
     assert stale_generated_files(REPO_ROOT) == ()
+
+
+def test_currentness_is_explicitly_generated_and_unknown_served_models_still_refuse() -> None:
+    text = generated_files()[TYPESCRIPT_OUTPUT]
+    assert "export interface BuildCurrentness {" in text
+    assert '  mode: "installed" | "checkout";' in text
+    assert '  state: "current" | "stale" | "unknown";' in text
+    for field in ("loadedDigest", "installedDigest", "firstSeenAt", "reason", "remedy"):
+        assert f"  {field}?: string;" in text
+    assert "  buildCurrentness?: BuildCurrentness;" in text
+    assert "  servingProcessId?: number;" in text
+    served = served_projection_schema()
+    definitions = cast(dict[str, object], served["$defs"])
+    definitions["UndeclaredServedPayload"] = {"type": "object", "properties": {}}
+    with pytest.raises(
+        ProjectionTypeGenerationError, match="served projection schema tail changed"
+    ):
+        render_typescript(workspace_projection_schema(), served)

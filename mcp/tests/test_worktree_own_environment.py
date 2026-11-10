@@ -1,22 +1,12 @@
-"""A task worktree has its own environment: the product names no interpreter.
+"""Candidate environments follow tool notes; each run names its interpreter.
 
-MIK-R136 rule 3: the worker brief template and every role or criteria text of
-the product that names an interpreter or a ``PYTHONPATH`` for a candidate say
-instead to build the worktree's environment as the repository's tool notes say
-and to run every command on the candidate in it. A record of a run names the
-interpreter it used.
+MIK-R136 rule3 duties have one home at the Worker's candidate-environment
+ action after D699 retired the old brief. Check the canonical source and every
+ declared package copy. Roles, operations and templates name no concrete
+ candidate interpreter or PYTHONPATH. The retired-line negative remains.
 
-The census this protects is the canonical ``skills/l-01-agent-lifecycles/``
-tree plus the nine generated skill copies ``scripts/sync-skills.py`` owns: the
-only surface that ever named a candidate interpreter is the worker brief
-template, so every surface of that template carries the rule and the
-instruction surfaces (roles, operations, templates) name none.
-
-MIK-R136 rule 6: the product's own worktree-change enumeration — the working
-tier of the closeout worklist (`closeout_changed_paths`) — never carries the
-ignored environment directories, so they stay out of closeout/landing
-candidate accounting; sync merges and landing commits are tracked-content
-operations over the same inventory.
+MIK-R136 rule6 keeps ignored environments out of closeout candidate accounting;
+ the existing temporary-repository control is unchanged.
 """
 
 from __future__ import annotations
@@ -30,7 +20,7 @@ from test_worktree_support import init_repo
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 LIFECYCLE = Path("l-01-agent-lifecycles")
-TEMPLATE = LIFECYCLE / "templates" / "worker-brief.md"
+ENVIRONMENT_SOURCE = LIFECYCLE / "roles" / "worker.md"
 
 #: Instruction surfaces: a sentence here tells a seat how to run its candidate.
 INSTRUCTION_DIRS = ("roles", "operations", "templates")
@@ -44,11 +34,11 @@ FORBIDDEN_TOKENS = (
 )
 
 
-def template_surfaces() -> list[Path]:
-    """Every shipped surface of the worker brief template, canonical first."""
+def environment_surfaces() -> list[Path]:
+    """Every shipped surface of the Worker candidate-environment action, canonical first."""
 
-    return [REPOSITORY_ROOT / "skills" / TEMPLATE] + [
-        REPOSITORY_ROOT / copy_root / TEMPLATE for copy_root in GENERATED_SKILL_COPIES
+    return [REPOSITORY_ROOT / "skills" / ENVIRONMENT_SOURCE] + [
+        REPOSITORY_ROOT / copy_root / ENVIRONMENT_SOURCE for copy_root in GENERATED_SKILL_COPIES
     ]
 
 
@@ -58,11 +48,11 @@ def names_candidate_interpreter(text: str) -> bool:
     return any(token in text for token in FORBIDDEN_TOKENS)
 
 
-def test_worker_brief_template_names_no_candidate_interpreter() -> None:
-    """Every shipped worker brief template points at the tool notes, not an interpreter."""
+def test_worker_candidate_environment_names_no_candidate_interpreter() -> None:
+    """Every shipped Worker candidate-environment action points at the tool notes, not an interpreter."""
 
-    for surface in template_surfaces():
-        assert surface.is_file(), f"worker brief template surface missing: {surface}"
+    for surface in environment_surfaces():
+        assert surface.is_file(), f"Worker candidate-environment action surface missing: {surface}"
         text = surface.read_text(encoding="utf-8")
         assert not names_candidate_interpreter(text), (
             f"{surface} still names a candidate interpreter"
@@ -70,7 +60,14 @@ def test_worker_brief_template_names_no_candidate_interpreter() -> None:
         assert "system/tools.md" in text, (
             f"{surface} no longer points at the repository's tool notes"
         )
-        assert "names the interpreter it used" in text, (
+        for clause in (
+            "Build each worktree's environment as `system/tools.md` says.",
+            "Run every candidate command in that environment.",
+            "Report a command the tool notes lack,",
+            "record the interpreter each run used.",
+        ):
+            assert text.count(clause) == 1, (surface, clause)
+        assert "record the interpreter each run used" in text, (
             f"{surface} no longer requires a run record to name its interpreter"
         )
 
@@ -95,7 +92,7 @@ def test_the_guard_reports_the_retired_interpreter_line() -> None:
 
     retired = "- Interpreter: `<venv-python-path>` with `PYTHONPATH=<code-worktree>/mcp/src`"
     assert names_candidate_interpreter(retired)
-    shipped = (REPOSITORY_ROOT / "skills" / TEMPLATE).read_text(encoding="utf-8")
+    shipped = (REPOSITORY_ROOT / "skills" / ENVIRONMENT_SOURCE).read_text(encoding="utf-8")
     assert not names_candidate_interpreter(shipped)
 
 

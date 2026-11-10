@@ -5,18 +5,17 @@ description: "Initialize or repair the Agents Remember memory root for a target 
 
 # c-00-initialize-memory-repo Initialize Memory Repo
 
-Create the minimal memory root required before onboarding or task workflows can use Agents Remember for a target repository.
+The setup agent uses this skill to create the minimal memory root before onboarding or task workflows use Agents Remember for a target repository.
 
-This skill initializes durable repo memory through MCP `memory_init`. It does
+This skill initializes durable repository memory through the Model Context Protocol (MCP) `memory_init` tool. It does
 not install the coordinator runtime, create task
 worktrees, or generate onboarding content. Request MCP `runtime_install` only
 when the coordinator runtime scaffold is missing or stale. Skills are not installed
 as files at all: the tool server serves the canonical skill tree from its packaged
 copy as MCP resources, so no harness, project or coordination-root skill folder is
-part of setup or of this skill. Use `c-03-repo-bootstrap` after the memory scaffold
-exists when the developer wants onboarding content generated.
+part of setup or of this skill. After the memory scaffold exists, follow [repository bootstrap](../c-03-repo-bootstrap/SKILL.md) when the developer wants onboarding content generated.
 
-Use `c-08-ar-coordination-context-resolver` to inspect an existing repository's active context. This skill creates or repairs missing memory scaffolding; it does not replace the `c-08-ar-coordination-context-resolver` skill as the normal resolver.
+To inspect an existing repository's active context, follow the [context_packet guidance](../l-01-agent-lifecycles/reference/knowledge/commands.md). This skill creates or repairs missing memory scaffolding; the resolver remains the normal context entry point.
 
 ## Inputs
 
@@ -60,7 +59,7 @@ authoring source; it is never a runtime dependency of a project.
 4. If the resolved memory root or coordination root points outside the intended workspace, state the resolved absolute path before writing.
 5. Never create a memory root inside the code repository. A repo-local `ar-memory/` root was removed from the product and is refused by name; scaffolding must not recreate it.
 6. Memory setup must not install coordinator runtime files; if the coordinator runtime is missing, tell the developer to request MCP `runtime_install` first.
-7. Do not create onboarding content. An empty `onboarding/` directory is enough for the `c-08-ar-coordination-context-resolver` skill to resolve the memory root; the `c-03-repo-bootstrap` skill owns onboarding generation.
+7. Do not create onboarding content. An empty `onboarding/` directory is enough for the context resolver to resolve the memory root; the `c-03-repo-bootstrap` skill owns onboarding generation.
 
 ## Procedure
 
@@ -115,12 +114,11 @@ job.
 3. Verify the coordinator runtime exists by checking for:
 
 ```text
-<coordination-root>/AGENTS.md
 <coordination-root>/tasks/
 <coordination-root>/memory-repos/
 ```
 
-   The scaffold carries no skills copy, so an absent `skills/` directory is the expected state and
+   The scaffold carries no `AGENTS.md` file or skills copy, so their absence is expected and
    not a missing-runtime defect; the skills a session reads come from the tool server.
 
 4. If the runtime is missing, stop and ask the developer to request (preview
@@ -157,11 +155,11 @@ on its worktree contracts, or re-initialize the memory root with this skill. Not
 automatically, and no existing memory root is rewritten or deleted.
 
 **Unconverted memory is refused, not initialized around.** When the memory root holds legacy
-content (`onboarding/*.md` cards or `knowledge.sqlite`) but no `knowledge/layout.json`,
+content (old-format onboarding cards or a legacy knowledge database) but no `knowledge/layout.json`,
 `memory_init` still writes no marker — writing one beside legacy cards would read the old
 format as the new one — and its result names the first-conversion procedure. Every ordinary
 memory operation refuses such memory with the code `legacy-format`. Convert first with the
-`c-13-install-and-onboard` skill's first-conversion procedure (`docs/guides/first-conversion.md`),
+[first-conversion procedure](../c-13-install-and-onboard/SKILL.md#first-conversion-of-unconverted-memory) used by the `c-13-install-and-onboard` skill,
 then continue here.
 
 Report which are present and which are missing. If everything exists, stop with a clean summary.
@@ -262,7 +260,7 @@ Do not duplicate active `pathRules` here as the authoritative machine source whe
 
 No domain documentation configured yet.
 
-Add project-specific docs, local mirrors, API references, and canonical source links here before creating durable onboarding that depends on external behavior.
+Add project-specific docs, local mirrors, application programming interface references, and canonical source links here before creating durable onboarding that depends on external behavior.
 
 ## External References
 

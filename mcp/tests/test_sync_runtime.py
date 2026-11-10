@@ -50,7 +50,7 @@ class SyncRuntimeTests(unittest.TestCase):
         sync_runtime = load_sync_runtime()
 
         labels = {target.label for target in sync_runtime.TARGETS}
-        self.assertEqual(labels, {"agents-md-files", "benchmarks", "providers", "system"})
+        self.assertEqual(labels, {"benchmarks", "providers", "system"})
 
         for target in sync_runtime.TARGETS:
             target_path = target.path.as_posix()

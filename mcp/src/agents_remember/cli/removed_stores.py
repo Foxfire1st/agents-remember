@@ -42,8 +42,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--config",
         default=None,
-        help="Path to trusted MCP settings JSON. Omit to discover it from the working "
-        "directory, as the other subcommands do.",
+        help="Path to trusted MCP settings JSON. Omit to use the user settings file "
+        "~/.config/agents-remember/agents-remember-settings.json "
+        "(under XDG_CONFIG_HOME when set), whatever the current directory.",
     )
     parser.add_argument(
         "--dry-run",
@@ -67,9 +68,7 @@ def _contained_target(path: Path, root_real: Path) -> Path:
 
 def run(args: argparse.Namespace) -> int:
     try:
-        config: McpRuntimeConfig = load_config(
-            args.config if args.config else discover_config(Path.cwd())
-        )
+        config: McpRuntimeConfig = load_config(args.config if args.config else discover_config())
     except (ConfigError, ConfigDiscoveryError, OSError) as error:
         print(f"removed-stores: cannot resolve configuration: {error}", file=sys.stderr)
         return 1

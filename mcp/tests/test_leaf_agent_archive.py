@@ -588,7 +588,9 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
         port.archive.assert_not_called()
 
 
-def test_the_recovery_loop_is_a_background_task_of_the_serving_lifespan_and_keeps_its_interval():
+def test_the_recovery_loop_is_a_background_task_of_the_serving_lifespan_and_keeps_its_interval(
+    tmp_path,
+):
     """The loop is started by the lifespan itself and asks once a second, as it did before."""
 
     assert recovery.RECOVERY_TICK_SECONDS == 1.0
@@ -605,7 +607,12 @@ def test_the_recovery_loop_is_a_background_task_of_the_serving_lifespan_and_keep
                 launcher_catalog_prepare=None,
                 stream_shutdown=StreamShutdown(),
                 master_preparation=None,
-                config=SimpleNamespace(),
+                config=McpRuntimeConfig(
+                    config_path=tmp_path / "settings.json",
+                    coordination_root=tmp_path,
+                    workspace_root=tmp_path / "projects",
+                    transcript_root=tmp_path / "logs",
+                ),
                 background_ledger=BackgroundLedger(),
                 observer_root=None,
                 clock=lambda: None,

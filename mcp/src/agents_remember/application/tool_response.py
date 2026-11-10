@@ -38,6 +38,7 @@ from agents_remember.application.tool_answer_log import (
     resolve_log_roots,
     write_diff_report,
 )
+from agents_remember.application.tool_build_currentness import current_tool_build_currentness
 from agents_remember.models.base import NextStep, ResponseEnvelope
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import (
@@ -127,6 +128,9 @@ def bound_next_step(response: ResponseEnvelope, step: NextStep | None) -> NextSt
 
 
 def _attach_contract_guidance(response: ResponseEnvelope, tool_name: str) -> None:
+    reading = current_tool_build_currentness()
+    if reading is not None:
+        response.buildCurrentness = reading
     # An explicit refusal/recovery hint remains authoritative.
     path = next(
         (
@@ -373,6 +377,8 @@ def _select_shaped_answer(
     tool keeps the stripped whole result. A projection that drops everything
     still leaves the stripped whole result, never an empty answer.
     """
+    if finalized.get("code") == "server-build-stale":
+        return strip_envelope(finalized)
     if tool_name == "task_doc":
         task_operation = arguments.get("operation")
         projected = project_task_doc_answer(
@@ -432,6 +438,8 @@ def complete_tool_response(
         shaped: dict[str, Any] = dict(answer)
     else:
         shaped = _select_shaped_answer(tool_name, finalized, arguments)
+    if "buildCurrentness" in finalized:
+        shaped["buildCurrentness"] = finalized["buildCurrentness"]
     answer = shaped
     raw_next_step = answer.pop("nextStep", None)
     next_value = next_from_next_step(raw_next_step if isinstance(raw_next_step, dict) else None)

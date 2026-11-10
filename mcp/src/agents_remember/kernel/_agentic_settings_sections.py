@@ -30,6 +30,7 @@ from agents_remember.kernel._agentic_settings_core import (
     RESERVED_EXTRA_ARG_NAMES,
     UNUSED_HARNESS_ENTRY_FIELDS,
     UNUSED_ROLE_KNOB_FIELDS,
+    UNUSED_ROLES,
     AgenticSettingsError,
     ConcurrencySettings,
     ExtraArgument,
@@ -142,9 +143,11 @@ def _parse_loop_levels(raw: object, *, owner: str, source: str) -> dict[str, str
     for level, value in levels.items():
         entry = _require_object(value, f"{owner}.{level}", source)
         _refuse_unknown(entry, KNOWN_LOOP_LEVEL_FIELDS, f"{owner}.{level}", source)
-        # Loop postures are model-interpreted doctrine names (scored,
-        # seam-required, none, strategist, ...), deliberately not a closed set.
-        parsed[level] = _require_string(entry.get("loop"), f"{owner}.{level}.loop", source)
+        # Other loop postures remain nonempty, model-interpreted doctrine names.
+        posture = _require_string(entry.get("loop"), f"{owner}.{level}.loop", source)
+        if level == "portfolio" and posture == "strategist":
+            continue
+        parsed[level] = posture
     return parsed
 
 
@@ -159,6 +162,8 @@ def _parse_roles(
     roles = _resolve_role_keys(raw, owner=owner, source=source)
     parsed: dict[str, RoleKnobs] = {}
     for role, value in roles.items():
+        if role in UNUSED_ROLES:
+            continue
         knobs = _require_object(value, f"{owner}.{role}", source)
         _refuse_unknown(
             knobs,
@@ -295,7 +300,9 @@ def _parse_step_up(raw: object, role: str, owner: str, source: str) -> RoleStepU
 def _resolve_role_keys(raw: object, *, owner: str, source: str) -> dict[str, Any]:
     """Admit the earlier role key without rewriting the settings file."""
     roles = _require_object(raw, owner, source)
-    _refuse_unknown(roles, KNOWN_ROLES | CAPABILITY_IDS | {"system-specialist"}, owner, source)
+    _refuse_unknown(
+        roles, KNOWN_ROLES | CAPABILITY_IDS | UNUSED_ROLES | {"system-specialist"}, owner, source
+    )
     if "system-specialist" not in roles:
         return roles
     if "investigator" in roles and roles["investigator"] != roles["system-specialist"]:

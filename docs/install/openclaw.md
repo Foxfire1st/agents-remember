@@ -13,40 +13,10 @@ Official references:
 
 ## Register The MCP Server
 
-Write an MCP authority settings file (copy `examples/mcp/settings.example.json` and replace its
-paths), then merge this into `~/.openclaw/openclaw.json`:
-
-```json
-{
-  "mcp": {
-    "servers": {
-      "agents-remember": {
-        "command": "uvx",
-        "args": [
-          "--refresh-package",
-          "agents-remember-mcp@latest",
-          "--config",
-          "<PATH/TO/YOUR/PROJECTS_FOLDER>/.openclaw/mcp/agents-remember-settings.json"
-        ]
-      }
-    }
-  }
-}
-```
-
-`.openclaw/openclaw.merge.json` in this repository is that merge template, with
-`<PATH/TO/YOUR/PROJECTS_FOLDER>` markers to replace by hand; no script renders it. It also points
-`agents.defaults.workspace` at the agent workspace. Restart the gateway after merging.
-
-After merging, inspect the saved registry:
-
-```bash
-openclaw mcp status --verbose
-openclaw mcp doctor
-```
-
-`openclaw mcp probe agents-remember` opens a live connection and is useful when you want proof that
-the MCP server starts correctly.
+Use the [common registration example](../../examples/mcp/server.example.json) and the
+[shared settings setup](README.md). Adapt its command and arguments to the `mcp.servers.agents-remember` entry in `~/.openclaw/openclaw.json`.
+The settings path is the absolute user-config path, not a workspace file.
+Restart or reload the harness after changing its registration.
 
 ## Start With One Call
 
@@ -70,30 +40,6 @@ OpenClaw loads skills from the places it scans; Agents Remember writes none ther
 publishes each skill as an MCP resource (the SEP-2640 skills extension) and OpenClaw reads them from
 the running server, so there is no workspace skill copy to keep current and no skill-sync step to
 follow.
-
-## Optional: Workspace Instructions
-
-Put the Agents Remember instruction in the OpenClaw workspace `AGENTS.md`, pointing at the
-coordination runtime path OpenClaw can read. Copy `.openclaw/workspace/AGENTS.md` and replace
-`<PATH/TO/YOUR/PROJECTS_FOLDER>` with your absolute path:
-
-```markdown
-# Workspace Agent Instructions
-
-Read and follow `<PATH/TO/YOUR/PROJECTS_FOLDER>/ar-coordination/AGENTS.md` before working in any target project.
-Treat these rules as workspace instructions!
-
-@<PATH/TO/YOUR/PROJECTS_FOLDER>/ar-coordination/AGENTS.md
-```
-
-OpenClaw workspaces may contain other standing instruction files. Keep Agents Remember focused on
-repository memory and task workflow rules; do not put secrets in workspace docs. Do not overwrite a
-target repository's root `AGENTS.md` just to wire Agents Remember.
-
-OpenClaw has internal hooks and typed plugin hooks, but the documented file-based hook surface is
-for Gateway automation and lifecycle events, not a project-local MCP starter, so the workspace
-`AGENTS.md` is the instruction surface to rely on. If the workspace path or bootstrap files change
-while the gateway is running, restart the gateway.
 
 ## Long-running Turns
 

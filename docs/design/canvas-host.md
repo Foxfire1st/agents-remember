@@ -87,8 +87,9 @@ the explanation is.
 
 ## The host protocol (`canvas/protocol.py`)
 
-One registered version (`1`), four operations from the page -- `ready`, `status`, `open-evidence`,
-`request-explanation` -- and a closed payload per operation. Every envelope is strict about its
+One registered version (`1`), five operations from the page -- `ready`, `status`, `open-evidence`,
+`request-explanation`, `offer-selections` -- and a closed payload per operation. `stale-parts` is
+host-initiated, not a page operation. Every envelope is strict about its
 types, carries its type, version, request identity, session, revision and comparison, and the host
 compares all three of the last to the session it created. A JSON depth bound and the byte ceiling
 are checked before validation; every request is charged to the session's bucket before it is parsed.
@@ -103,7 +104,8 @@ identity is refused as ambiguous; a basis that was not `present` answers `unavai
 limitation; nothing is ever re-pointed at today's record.
 
 `request-explanation` records the question for the trusted conversation and answers
-`startsModel: false`. It cannot start authoring; only the Generate control does.
+`startsModel: false`. It cannot start authoring. Explain opens the first-request form;
+its explicit Send requests a build.
 
 ## Sessions and limits
 
@@ -154,23 +156,27 @@ A capability, not a fourth seat. One durable attempt record per explicit activat
 
 ## The panel
 
-`dashboard/src/panels/review/canvas/` sits above the review surface (never replacing it). Every read
+`dashboard/src/panels/review/explainer/ExplanationView.tsx` draws the Explanation view in the
+review's reading column. The top line, tree and side conversation remain outside it. Every read
 and channel is keyed by the exact scope it serves -- repository, task, leaf, frame and the shown
-comparison identity -- so a late answer for another scope is discarded, never shown. It reads the
-saved state on mount, opens the saved revision under a fresh channel, and offers Generate /
-Regenerate, Cancel, progress, the side conversation, the frame and the exact destination the page
-asks to open. While an attempt is live it observes status every three seconds; saved-only opening
+comparison identity -- so a late answer for another scope is discarded, never shown. It reads
+the saved state on mount and opens a saved revision under a fresh channel. Explain opens the
+first-request form, with Send, Cancel and build progress; the saved-revision selector offers
+retained revisions and Compare. The isolated frame forwards evidence destinations to the
+mounted review's navigation owner.
+While a build is active it reads build status every second; saved-only opening
 never polls, and no passive read starts/resumes a session. It revokes what it owns on unmount and a
 channel whose revision or scope moved before opening its successor, and on a second load of the
 frame (the page navigated itself) revokes that channel and re-opens the saved page.
-`onOpenEvidence` navigates only where the mounted review owns a matching selector; otherwise the
+`onEvidence` navigates only where the mounted review owns a matching selector; otherwise the
 exact destination is named and the panel says it cannot show it there.
 
 ## Supported boundaries and remaining limits
 
 The pinned offline kit is described in `canvas-kit.md`; selecting an entry carries its required
-notices into the immutable revision. A separate model-free witness executes all four entries under
-an actual selected session/CSP. It is not a native authoring witness.
+notices into the immutable revision. The render path prospectively loads the page's exact selected
+assets in Chromium before publication. The former separate four-entry model-free witness was
+removed with the isolation proof (D568, L201); no standalone witness proves every kit entry's features.
 
 Native conversation, status, cancel, explicit resume and replacement name actual host identities.
 An uncertain create repeats its immutable idempotent request. Passive native history reads refuse
@@ -182,9 +188,10 @@ pages mark bases with `data-evidence` and use the narrow `open-evidence` protoco
 revokes instead of sending another binding. Exact destination rendering remains with the mounted
 review's supported selectors (MIK-R106); unresolved destinations are named honestly.
 
-A system-change request requires an admitted existing AR owner route. This capability has no AR
-role messaging tool and never invents an owner or writes the fix itself. The author must name a
-missing route/scope when none was admitted.
+A system-change request requires an admitted existing AR owner route. The explainer uses the
+general AR `role_message` tool to this master's Architect, attaching the delivered developer-message
+file and marking its perspective as inference. It never invents an owner or writes the fix itself.
+The author must name a missing route/scope when none was admitted.
 
 The browser's opaque sandbox does not enforce per-frame CPU, heap, timer or GPU ceilings. D331
 accepts frame self-navigation; the mounted panel revokes the old channel and reopens saved output.

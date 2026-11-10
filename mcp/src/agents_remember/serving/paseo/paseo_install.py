@@ -14,13 +14,15 @@ from agents_remember.kernel.primitives.runtime_config import (
     load_paseo_runtime_settings,
 )
 from agents_remember.serving.paseo.paseo_command import CommandRunner, PaseoCli, run_command
-from agents_remember.serving.paseo.paseo_node import node_executable_valid
+from agents_remember.serving.paseo.paseo_install_plan import (
+    InstallObservation,
+    installed_manifest_version,
+    planned_changes,
+)
+from agents_remember.serving.paseo.paseo_node import node_valid
 from agents_remember.serving.paseo.paseo_packages import installed_lock_matches
 from agents_remember.serving.paseo.paseo_plugin_files import (
-    installed_plugin_path,
     plugin_source_root,
-    read_embed,
-    tree_digest,
 )
 from agents_remember.serving.paseo.paseo_process_record import (
     ProcessReader,
@@ -36,7 +38,6 @@ from agents_remember.serving.paseo.paseo_run import (
     _check_install_restart,
     _Run,
 )
-from agents_remember.serving.paseo.paseo_settings import pending_settings
 
 
 def install_host(config: McpRuntimeConfig, dry_run: bool) -> dict[str, Any]:
@@ -88,31 +89,31 @@ def preview_host(
 ) -> dict[str, Any]:
     """Observe without a lockfile, download, npm install, setting write or daemon start."""
     node = product_node()
-    cli = PaseoCli(settings, runner)
+    cli = PaseoCli(settings, runner, reader=reader)
     run = _Run(settings, cli, plugin_source_root(), bind_error, reader, ProvisionIntent.INSTALL)
     _check_install_restart(run)
     record = inspect_record(settings.home, "install", reader)
-    node_present = node_executable_valid(node, runner) and node.npm.is_file()
-    if node.root.exists() and not node_present:
+    held = bool(run.restart_reasons)
+    node_present = (
+        node_valid(node, runner) if not held else node.node.is_file() and node.npm.is_file()
+    )
+    if not held and node.root.exists() and not node_present:
         raise PaseoRuntimeFailure(
             "node_target_invalid",
             "node",
             f"Node {node.version} ({node.platform}) at {node.root}, from {node.url}, "
             "is invalid; it would not be overwritten.",
         )
-    installed = cli.installed_version()
-    install = installed != settings.version or not installed_lock_matches(settings.install_prefix)
-    pending = pending_settings(cli) if installed is not None and node_present else []
-    home_files = read_embed(settings.home) != settings.embed_payload() or tree_digest(
-        installed_plugin_path(settings.home)
-    ) != tree_digest(plugin_source_root())
-    held = bool(run.restart_reasons)
-    changed = not held and (
-        not node_present or install or bool(pending) or home_files or record.kind != "own"
+    installed = (
+        cli.installed_version()
+        if node_present and not held
+        else installed_manifest_version(settings.install_prefix)
     )
+    install = installed != settings.version or not installed_lock_matches(settings.install_prefix)
+    changes = planned_changes(run, InstallObservation(node_present, installed, install))
     return {
         "ok": True,
-        "changed": changed,
+        "changed": bool(changes),
         "home": settings.home.as_posix(),
         "installPrefix": settings.install_prefix.as_posix(),
         "version": settings.version,
@@ -121,7 +122,30 @@ def preview_host(
         "wouldInstallHost": not held and install,
         "wouldStart": not held and record.kind != "own",
         "restartRequired": run.restart_reasons,
-        "daemon": {"action": "untouched", "reasons": run.restart_reasons},
-        "changes": [],
+        "daemon": {
+            "action": "started"
+            if any(item["step"] == "daemon" and item["action"] == "started" for item in changes)
+            else "reloaded"
+            if record.kind == "own"
+            and any(
+                item["step"] in {"embed", "plugin"}
+                or (item["step"] == "config" and item["action"] in {"set", "reloaded"})
+                for item in changes
+            )
+            else "untouched",
+            "reasons": run.restart_reasons,
+        },
+        "deferred": [
+            {
+                "step": "daemon",
+                "action": "restart",
+                "reasons": run.restart_reasons,
+                "reason": "runtime_install preserves the running host and its agent sessions; "
+                "use explicit terminal provision outside the host for this transition",
+            }
+        ]
+        if held
+        else [],
+        "changes": changes,
         "error": None,
     }

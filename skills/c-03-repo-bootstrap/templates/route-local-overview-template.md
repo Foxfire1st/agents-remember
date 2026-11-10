@@ -1,10 +1,15 @@
 # <Area Or Route Name> Overview
 
-<!-- Converted card: kind and source are its place in the tree; currentness comes from the
+<!-- The overview worker uses this template to explain a source area to future agents and developers.
+Converted card: kind and source are its place in the tree; currentness comes from the
 card's reference anchors. Write the reference sections below as citation tables (the fixer's
 input) and run `citation_fix` on the card, which replaces each table with `- <finding> [n]`
 lines where the table stood and writes the sidecar. Never write sidecar JSON by hand and never
 choose a reference number. -->
+
+## Governing Overview
+
+[Parent overview](<relative-path-to-parent-overview.md>)
 
 ## What This Area Is
 
@@ -12,7 +17,7 @@ choose a reference number. -->
 
 ## Hot Path Summary
 
-<One or two short sentences for fast route discovery. Name the route's most useful files, identifiers, config keys, APIs, commands, tests, or error strings so agents can narrow source reads before opening the full overview.>
+<One or two short sentences for fast route discovery. Name the route's most useful files, identifiers, config keys, application programming interfaces, commands, tests, or error strings so agents can narrow source reads before opening the full overview.>
 
 ## What Belongs Here
 
@@ -92,10 +97,8 @@ choose a reference number. -->
 
 When changing files under this route:
 
-1. Read this overview.
-2. Read any child overview closer to the file.
-3. Read the file-level onboarding if it exists.
-4. If no file-level onboarding exists, check whether this overview is sufficient or whether the file should be promoted.
+1. Before changing files under this route, follow the [knowledge-use guidance](skill://agents-remember/skills/l-01-agent-lifecycles/reference/knowledge/use.md).
+2. If no file-level onboarding exists, check whether this overview is sufficient or whether the file should be promoted.
 
 ## Needs Verification
 

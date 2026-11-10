@@ -5,9 +5,9 @@ description: "Bootstrap onboarding for undocumented repos or existing memory sli
 
 # Repo Bootstrap
 
-Bootstrap durable onboarding for a repository that has little or no memory coverage, or for an already-adopted memory repo whose source slices need targeted creation, refresh, move handling, or cleanup.
+The bootstrap orchestrator uses this skill to create durable onboarding for a repository with little or no memory coverage. It also guides targeted creation, refresh, moves, and cleanup in an already-adopted memory repository.
 
-The minimum successful bootstrap is one root repo overview under the `c-08-ar-coordination-context-resolver` skill resolved `onboarding_root`:
+The minimum successful bootstrap is one root repo overview under the `onboarding_root` resolved by the coordination context resolver:
 
 ```text
 overview.md
@@ -28,7 +28,7 @@ root overview.md
   -> handoff
 ```
 
-**Core constraint:** LLM context is a rolling window. A full repository cannot be understood safely in one unbounded pass. This skill breaks bootstrap into bounded phases where agents write durable artifacts to disk and the orchestrator reads only distilled artifacts, not raw repo dumps.
+**Core constraint:** A language model has a limited context window. A full repository cannot be understood safely in one unbounded pass. This skill breaks bootstrap into bounded phases where agents write durable artifacts to disk and the orchestrator reads only distilled artifacts, not raw repo dumps.
 
 ---
 
@@ -53,7 +53,7 @@ overview.index.json
 Detached `bootstrap/areas/*` artifacts are allowed as temporary research and promotion artifacts. Durable agent-facing overviews exist to be discoverable through source-path traversal.
 
 `overview.index.json` files are generated route indexes. They do not replace
-overview prose or file-level onboarding. They let future `c-04-retrieval-strategy-router` skill reads infer child
+overview prose or file-level onboarding. They let future reads following [knowledge-use guidance](../l-01-agent-lifecycles/reference/knowledge/use.md) infer child
 routes, covered file sidecars, sparse coverage, and governing-overview fallback
 without repeatedly probing for missing sidecars. They also carry a compact
 `hotPath` block derived from each overview's `## Hot Path Summary` plus
@@ -74,37 +74,7 @@ Later file-level onboarding workers use the nearest governing `overview.md` as a
 
 ### Progressive discovery read order
 
-When working on a source file, read onboarding from broadest to narrowest:
-
-```text
-overview.md
-overview.index.json
-<ancestor-folder>/overview.md
-<ancestor-folder>/overview.index.json
-<nearest-folder>/overview.md
-<nearest-folder>/overview.index.json
-<source-file>.md
-```
-
-For example:
-
-```text
-source:
-  src/helpdesk/mappers/PlatformMapper.php
-
-onboarding read path:
-  overview.md
-  overview.index.json
-  src/overview.md
-  src/overview.index.json
-  src/helpdesk/overview.md
-  src/helpdesk/overview.index.json
-  src/helpdesk/mappers/overview.md
-  src/helpdesk/mappers/overview.index.json
-  src/helpdesk/mappers/PlatformMapper.php.md
-```
-
-This lets an agent reconstruct context whether it starts at the repo root or gets dropped directly onto a source file.
+Before ordinary source-file work, follow the [knowledge-use guidance](../l-01-agent-lifecycles/reference/knowledge/use.md): start with a text search or `knowledge_read`, expand the candidates with `knowledge_read`, and read code and knowledge together.
 
 ### File-level self-sufficiency
 
@@ -119,7 +89,7 @@ A file onboarding document must carry the file-specific facts that protect that 
 - repo-internal relationships
 - docs references that affect this file
 - cross-repo behavior that affects this file
-- update history
+- current evidence references and paired sidecar
 
 It must also backlink to the nearest governing overview so future agents discover the local area model.
 
@@ -145,18 +115,18 @@ Exploration artifacts help agents understand. Promotion artifacts help agents an
 
 ---
 
-## Behavior To Preserve
+## Responsibilities
 
-This skill intentionally keeps the strongest current bootstrap behavior.
+The orchestrator and its workers preserve these responsibilities throughout bootstrap. Use the template linked at each writing step instead of inferring the artifact shape from prior examples.
 
 1. **Thin orchestrator** — the orchestrator coordinates, reads distilled artifacts, updates state, and enforces gates. It does not ingest raw code, directory trees, grep dumps, or full repo search output.
 2. **Bounded specialization** — scout, structure, interface, pattern, concern, docs, boundary, overview, file, and curator workers operate on narrow scopes.
 3. **Confidence tags** — all factual findings in research and promotion artifacts use `[HIGH]`, `[MEDIUM]`, or `[LOW]`.
 4. **Durable checkpoints** — every phase produces artifacts that allow the bootstrap to stop and resume.
-5. **Topology awareness** — bootstrap resolves the active memory root, path rules, storage rules, source registry, and cross-repo rules through `c-08-ar-coordination-context-resolver` before writing artifacts.
+5. **Topology awareness** — bootstrap resolves the active memory root, path rules, storage rules, source registry, and cross-repo rules before writing artifacts; use the [context and knowledge tool reference](../l-01-agent-lifecycles/reference/knowledge/commands.md).
 6. **Cross-repo read-only semantics** — adjacent repos may be read only when allowed; only the target repo's memory is updated.
 7. **Developer consultation where it matters** — gated mode pauses at review gates; automated mode still parks uncertain claims and writes review artifacts.
-8. **`c-05-create-or-update-onboarding-files` skill ownership of file-level onboarding** — the `c-03-repo-bootstrap` skill prepares file cards and waves, but the `c-05-create-or-update-onboarding-files` skill owns the canonical file-level content model.
+8. **Curator ownership of file-level onboarding** — the `c-03-repo-bootstrap` skill prepares file cards and waves; the [Curator card procedure](../l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md) defines the canonical file-level content model.
 
 ---
 
@@ -165,9 +135,8 @@ This skill intentionally keeps the strongest current bootstrap behavior.
 | Input            | Required | Description                                                                                                                                                             |
 | ---------------- | -------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `repo`           |      yes | Target repository name.                                                                                                                                                 |
-| `topology`       |       no | Optional override passed through the `c-08-ar-coordination-context-resolver` skill. Normal bootstrap passes only `repo` and lets the `c-08-ar-coordination-context-resolver` skill resolve topology.                                                              |
 | `coordination-root` |    no | Optional coordination-root hint for explicit external-memory operations or repair.                                                                                       |
-| `control-mode`   |       no | `gated` or `automated`. If omitted, ask during Phase 0A.                                                                                                                |
+| `control-mode`   |       no | `gated` or `automated`. If omitted, ask when [recording the control mode](#02-ask-or-record-control-mode).                                                                                                                |
 | `bootstrap-mode` |       no | `quick-orientation`, `safe-starter-memory`, `cross-repo-focused`, `domain-doc-focused`, `existing-memory-slice-maintenance`, or `full-bootstrap`. Defaults to `safe-starter-memory` when the user is unsure. |
 | `seed-context`   |       no | Optional paths to known onboarding or documentation that should seed the run.                                                                                           |
 | `priority-areas` |       no | Optional area names or source routes to prioritize. If omitted, scout identifies them.                                                                                  |
@@ -245,7 +214,7 @@ Before asking the user for additional sources, the bootstrap orchestrator must p
 
 The inventory must show:
 
-1. sources discovered from the `c-08-ar-coordination-context-resolver` skill resolved `system/sources.md`
+1. sources from the resolved `system/sources.md`, using the [context and knowledge tool reference](../l-01-agent-lifecycles/reference/knowledge/commands.md)
 2. source categories
 3. source locations
 4. whether each source is readable or unavailable
@@ -267,13 +236,13 @@ Write the reviewed result to:
 bootstrap/input-ledger.md
 ```
 
-Use `templates/bootstrap-input-ledger-template.md`.
+Before writing the reviewed source inventory to the input ledger, read the [template](templates/bootstrap-input-ledger-template.md) for its required fields and sections.
 
 ---
 
 ## Topology And Eligibility
 
-Invoke `c-08-ar-coordination-context-resolver` before selecting bootstrap candidates or writing artifacts.
+Before selecting bootstrap candidates or writing artifacts, follow the [context and knowledge tool reference](../l-01-agent-lifecycles/reference/knowledge/commands.md) to resolve the target repository.
 
 Use the resolved context to determine:
 
@@ -291,7 +260,7 @@ Apply resolved `onboarding.pathRules` before selecting source paths. In shared s
 
 In mixed workspaces, resolving one repo must not move neighboring repos onto a different memory root.
 
-Bootstrap candidate selection is governed by the resolved `onboarding.pathRules` from `system/settings.json`. Starter settings should include a standard exclusion baseline so broad repo rules do not select generated, vendored, build-output, cache, IDE, local-machine, or downloaded metadata files unless the developer explicitly includes them for the run.
+Bootstrap candidate selection is governed by the resolved `onboarding.pathRules` from `system/settings.json`. Starter settings should include a standard exclusion baseline so broad repo rules do not select generated, vendored, build-output, cache, integrated development environment, local-machine, or downloaded metadata files unless the developer explicitly includes them for the run.
 
 Recommended `settings.json` path-rule excludes:
 
@@ -320,7 +289,7 @@ Use the same settings baseline for fresh bootstrap and `existing-memory-slice-ma
 
 ## Artifact Paths
 
-All paths below are relative to the `c-08-ar-coordination-context-resolver` skill resolved `onboarding_root`.
+All paths below are relative to the `onboarding_root` returned by the coordination context resolver.
 
 ```text
 overview.md
@@ -361,28 +330,6 @@ bootstrap/
 
 ---
 
-## Templates
-
-Use explicit templates instead of inferring artifact shape from prior examples:
-
-| Artifact                  | Template                                          |
-| ------------------------- | ------------------------------------------------- |
-| Root repo overview        | `templates/repo-overview-template.md`             |
-| Bootstrap input ledger    | `templates/bootstrap-input-ledger-template.md`    |
-| Bootstrap state           | `templates/bootstrap-state-template.md`           |
-| Coverage plan             | `templates/coverage-plan-template.md`             |
-| Governing route map       | `templates/governing-route-map-template.md`       |
-| Route-local overview card | `templates/route-local-overview-card-template.md` |
-| Route-local overview      | `templates/route-local-overview-template.md`      |
-| Docs evidence pack        | `templates/docs-evidence-pack-template.md`        |
-| Cross-repo boundary pack  | `templates/cross-repo-boundary-pack-template.md`  |
-| File card                 | `templates/file-card-template.md`                 |
-| Onboarding wave           | `templates/onboarding-wave-template.md`           |
-| Curator review            | `templates/curator-review-template.md`            |
-| Bootstrap handoff         | `templates/bootstrap-handoff-template.md`         |
-
----
-
 ## Citation And Reference Rules
 
 `Docs References`, `Repo-Internal References`, and `Cross-Repo References` are explanation-first sections backed by citation tables when they carry behavioral or boundary context.
@@ -404,7 +351,7 @@ Rules:
 6. Never emit absolute filesystem paths in onboarding output.
 7. Treat `system/sources.md`, search registries, embedding hits, and source lists as routing inputs only. Never cite them as proof.
 8. If no relevant source exists, keep the section and record what was checked plus that no relevant evidence was found.
-9. These tables are the fixer's input: run `citation_fix` on the card, which replaces each table with `- <finding> [n]` lines where the table stood and writes the sidecar. Never write sidecar JSON by hand and never choose a reference number. Before the first baseline there is no leaf enclosure to name: run the fixer with no contract and verify the answer admits `pre-baseline`. The leaf-contract-scoped fixer/index commands in `c-05-create-or-update-onboarding-files` apply once an enclosure exists; after adoption a contractless run is refused and names the leaf route.
+9. These tables are the fixer's input: run `citation_fix` on the card, which replaces each table with `- <finding> [n]` lines where the table stood and writes the sidecar. Never write sidecar JSON by hand and never choose a reference number. Before the first baseline there is no leaf enclosure to name: run the fixer with no contract and verify the answer admits `pre-baseline`. The leaf-contract-scoped fixer/index commands in the [knowledge command and tool reference](../l-01-agent-lifecycles/reference/knowledge/commands.md) apply once an enclosure exists; after adoption a contractless run is refused and names the leaf route.
 
 ---
 
@@ -436,7 +383,7 @@ bootstrap/STATE.md
 
 The state file is the first file read at the start of every bootstrap session and the last file updated at the end.
 
-Use `templates/bootstrap-state-template.md`.
+Before creating or updating bootstrap state, read the [template](templates/bootstrap-state-template.md) for its required fields and sections.
 
 The state file tracks:
 
@@ -461,7 +408,7 @@ The state file tracks:
 
 ### 0.1 Resolve topology
 
-Invoke `c-08-ar-coordination-context-resolver` with the target repo and optional topology/coordination-root hints.
+Resolve the target repository under [Topology And Eligibility](#topology-and-eligibility), passing any supplied topology and coordination-root hints.
 
 Done when:
 
@@ -529,7 +476,7 @@ Cleanup outputs may include:
 7. curator review
 8. handoff
 
-The `c-05-create-or-update-onboarding-files` skill remains the user-facing entry point for create/update onboarding requests. When the `c-05-create-or-update-onboarding-files` skill detects that the change is route-level create, refresh, move, or delete work, it should route to this `c-03-repo-bootstrap` skill mode instead of flattening the work into independent file-level onboarding edits.
+The [Curator card procedure](../l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md) is the entry point for file-level create/update onboarding. Route-level create, refresh, move, or delete work routes to this `c-03-repo-bootstrap` skill mode instead of flattening the work into independent file-level onboarding edits.
 
 ### 0.3 Present source inventory before asking for additions
 
@@ -647,7 +594,7 @@ For each high-priority area, use up to four focused agents:
 | Agent           | Focus                                     | Output                                 |
 | --------------- | ----------------------------------------- | -------------------------------------- |
 | Structure agent | architecture, modules, data flow, state   | `bootstrap/areas/<area>/structure.md`  |
-| Interface agent | APIs, events, protocols, cross-repo hints | `bootstrap/areas/<area>/interfaces.md` |
+| Interface agent | application programming interfaces, events, protocols, cross-repo hints | `bootstrap/areas/<area>/interfaces.md` |
 | Pattern agent   | conventions, errors, tests, domain terms  | `bootstrap/areas/<area>/patterns.md`   |
 | Concerns agent  | invariants, traps, fragility, security    | `bootstrap/areas/<area>/concerns.md`   |
 
@@ -694,7 +641,7 @@ Output:
 overview.md
 ```
 
-Use `templates/repo-overview-template.md`.
+Before writing the root repository overview, read the [template](templates/repo-overview-template.md) for its required fields and sections.
 
 Root overview verification comes from the card's reference anchors, not from a recorded commit: the author writes the reference sections as citation tables and runs the fixer on the card.
 
@@ -763,7 +710,7 @@ Write:
 bootstrap/coverage-plan.md
 ```
 
-Use `templates/coverage-plan-template.md`.
+Before writing the coverage plan, read the [template](templates/coverage-plan-template.md) for its required fields and sections.
 
 Inputs:
 
@@ -810,7 +757,7 @@ Write:
 bootstrap/governing-route-map.md
 ```
 
-Use `templates/governing-route-map-template.md`.
+Before writing the governing route map, read the [template](templates/governing-route-map-template.md) for its required fields and sections.
 
 This artifact decides where durable route-local `overview.md` files should live in the mirrored onboarding hierarchy.
 
@@ -838,7 +785,7 @@ For each selected governing route, write:
 bootstrap/overview-cards/<mirrored-source-route>.overview-card.md
 ```
 
-Use `templates/route-local-overview-card-template.md`.
+Before writing an overview card, read the [template](templates/route-local-overview-card-template.md) for its required fields and sections.
 
 Overview cards are work orders for route-local overview workers. They specify:
 
@@ -857,6 +804,8 @@ Done when:
 - cards constrain workers enough to avoid broad repo re-discovery
 
 ### 4D — Route-Local Overview Waves
+
+Before writing an overview-wave manifest, read the [wave template](templates/onboarding-wave-template.md) for its required fields and sections.
 
 Create wave manifests under:
 
@@ -881,7 +830,7 @@ Overview workers write durable route-local overviews:
 <mirrored-source-folder>/overview.md
 ```
 
-Use `templates/route-local-overview-template.md`.
+Before writing a route-local overview, read the [template](templates/route-local-overview-template.md) for its required fields and sections.
 
 Route-local overview verification comes from the card's reference anchors, not from a recorded commit: the author writes the reference sections as citation tables and runs the fixer on the card.
 
@@ -918,7 +867,7 @@ For each priority area or route where domain behavior, external protocol behavio
 bootstrap/evidence/docs/<area-or-route>.docs-pack.md
 ```
 
-Use `templates/docs-evidence-pack-template.md`.
+Before writing a documentation evidence pack, read the [template](templates/docs-evidence-pack-template.md) for its required fields and sections.
 
 Rules:
 
@@ -941,7 +890,7 @@ For each priority route with inbound or outbound cross-repo signals, write:
 bootstrap/evidence/cross-repo/<area-or-route>.boundary-pack.md
 ```
 
-Use `templates/cross-repo-boundary-pack-template.md`.
+Before writing a cross-repository boundary pack, read the [template](templates/cross-repo-boundary-pack-template.md) for its required fields and sections.
 
 Rules:
 
@@ -965,7 +914,7 @@ For each priority source file, write:
 bootstrap/file-cards/<mirrored-source-path>.card.md
 ```
 
-Use `templates/file-card-template.md`.
+Before writing a file card, read the [template](templates/file-card-template.md) for its required fields and sections.
 
 A file card must include:
 
@@ -990,9 +939,9 @@ Create wave manifests under:
 bootstrap/waves/onboarding-wave-001.md
 ```
 
-Use `templates/onboarding-wave-template.md`.
+Before writing an onboarding wave manifest, read the [template](templates/onboarding-wave-template.md) for its required fields and sections.
 
-Each file worker receives one file card and follows `c-05-create-or-update-onboarding-files`.
+Each file worker receives one file card and follows [Curator card procedure](../l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md).
 
 Default wave sizing:
 
@@ -1002,7 +951,7 @@ Default wave sizing:
 | cross-repo boundary file  |            1–2 files |
 | core logic cluster        |            2–3 files |
 | mapper cluster            |            3–5 files |
-| DTO/config/simple utility | defer unless touched |
+| Data transfer object / configuration / simple utility | defer unless touched |
 
 File onboarding workers must:
 
@@ -1015,7 +964,7 @@ File onboarding workers must:
 7. preserve strict 1-to-1 source mapping
 
 After a file onboarding wave creates, updates, moves, or deletes sidecars,
-refresh generated route indexes so the `c-04-retrieval-strategy-router` skill can use `coveredFiles` and route scope
+refresh generated route indexes so readers following [knowledge-use guidance](../l-01-agent-lifecycles/reference/knowledge/use.md) can use `coveredFiles` and route scope
 instead of probing for sidecar presence.
 
 ### 4I — Curator Review
@@ -1026,7 +975,7 @@ After each overview or onboarding wave, write:
 bootstrap/reviews/<wave-name>.curator.md
 ```
 
-Use `templates/curator-review-template.md`.
+Before reviewing a wave and writing its review, read the [template](templates/curator-review-template.md) for its required fields and sections.
 
 The curator checks:
 
@@ -1071,7 +1020,7 @@ When pausing or completing bootstrap, write:
 bootstrap/handoff.md
 ```
 
-Use `templates/bootstrap-handoff-template.md`.
+Before writing the bootstrap handoff, read the [template](templates/bootstrap-handoff-template.md) for its required fields and sections.
 
 The handoff lists:
 
@@ -1231,7 +1180,7 @@ Boundary mapper
   -> writes cross-repo boundary packs from allowed adjacent context
 
 File card/file worker agents
-  -> write file cards and invoke/follow the `c-05-create-or-update-onboarding-files` skill for file onboarding
+  -> write file cards and follow the [Curator card procedure](../l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md) for file onboarding
 
 Curator
   -> validates each wave and writes curator review
@@ -1253,7 +1202,7 @@ The orchestrator remains thin throughout.
 | Package/module/source route disappears or moves                  | yes, `existing-memory-slice-maintenance` cleanup or move handling |
 | Cross-repo boundary is poorly understood                         | yes, cross-repo-focused mode               |
 | Domain docs influence code behavior                              | yes, domain-doc-focused mode               |
-| Repo is already well bootstrapped and one file changed           | no, use the `c-05-create-or-update-onboarding-files` skill directly                      |
+| Repo is already well bootstrapped and one file changed           | no, use [Curator card procedure](../l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md) directly                      |
 | Small script repo with a few files                               | probably not; write root overview directly |
 
 ---
@@ -1262,12 +1211,11 @@ The orchestrator remains thin throughout.
 
 | Skill                                             | Relationship                                                                                                  |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `c-08-ar-coordination-context-resolver`           | Required first step. Resolves memory root, settings, sources, path rules, storage, and cross-repo policy.     |
-| `c-05-create-or-update-onboarding-files`          | Owns final file-level onboarding semantics and routes structural slice maintenance back to the `c-03-repo-bootstrap` skill. The `c-03-repo-bootstrap` skill creates cards/waves and delegates file output rules to the `c-05-create-or-update-onboarding-files` skill. |
-| `c-04-retrieval-strategy-router`                  | Consumes bootstrapped overviews and file maps as the Intent substrate and can route to semantic/relationship providers first. |
+| [context and knowledge tool reference](../l-01-agent-lifecycles/reference/knowledge/commands.md)           | Required first step. Resolves memory root, settings, sources, path rules, storage, and cross-repo policy.     |
+| [Curator card procedure](../l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md)          | Owns final file-level onboarding semantics and routes structural slice maintenance back to this skill. Bootstrap creates cards and waves, then delegates file output rules to that owner. After bootstrap, touched files can be promoted from deferred to covered. |
+| [knowledge-use guidance](../l-01-agent-lifecycles/reference/knowledge/use.md)                  | Consumes bootstrapped overviews and file maps for Intent, and uses native search for concept and relationship questions. |
 | `c-10-adopt-memory-baseline`                      | The next step on a newly scaffolded memory repo: commits this skill's output as the first attributed memory baseline and computes the ledger cache. It owns the drift check and the adoption procedure. |
 | `c-14-knowledge-bootstrap`                        | Owns the repository's **knowledge foundation** - the authored records under `knowledge/` in the memory repository - as a step separate from onboarding. This skill's handoff names it; onboarding is optional input to it, and this skill neither produces it nor substitutes for it. |
-| `c-05-create-or-update-onboarding-files`                     | Becomes relevant after bootstrap; touched files can be promoted from deferred to covered.                     |
 | `l-01-agent-lifecycles`                           | May trigger targeted bootstrap when an active job enters an uncovered area.                                   |
 | `confluence-search` / documentation search skills | Feed the docs evidence pass through approved sources from the input ledger.                                   |
 
@@ -1285,7 +1233,7 @@ This skill implementation is successful when:
 6. route-local overviews are created in the mirrored onboarding hierarchy
 7. file-level onboarding remains self-sufficient and backlinks to governing overview
 8. docs evidence and cross-repo boundary evidence are separate passes
-9. file cards constrain file workers before the `c-05-create-or-update-onboarding-files` skill is invoked
+9. file cards constrain file workers before the [Curator card procedure](../l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md) is followed
 10. curator review validates both overview waves and file onboarding waves
 11. current thin-orchestrator, confidence-tag, checkpoint, topology, and cross-repo read-only behavior is preserved
 12. guards prevent the likely bad behaviors without adding compatibility scaffolding for alpha-era labels

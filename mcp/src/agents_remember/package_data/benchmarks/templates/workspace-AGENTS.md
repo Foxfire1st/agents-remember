@@ -6,7 +6,7 @@ from parent directories outside this workspace.
 Do not apply unrelated user-level or global documentation lookup rules unless
 the benchmark prompt explicitly asks for external SDK/API documentation.
 
-Read and follow `{coordination_root}/AGENTS.md` before working in the benchmark repository.
+Before working in the benchmark repository, resolve its benchmark-local context through the available MCP tools using the code and coordination roots below. Read the resolved memory layer's `system/settings.md` and `system/tools.md` for its instructions and commands.
 Treat these rules as workspace instructions for this isolated benchmark only.
 
 Benchmark case: `{case_id}`
@@ -22,5 +22,3 @@ This is a non-interactive benchmark run. Do not ask the user questions, request
 approval, or pause for follow-up. Make reasonable assumptions from the prompt,
 source evidence, and memory evidence, then complete the requested task in one
 final answer.
-
-@{coordination_root}/AGENTS.md

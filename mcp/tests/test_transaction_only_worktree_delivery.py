@@ -657,22 +657,6 @@ def test_l56_publication_code_pins_both_live_commit_hook_mechanisms():
         assert obsolete not in text
 
 
-def test_l56_closeout_skill_names_the_live_hook_guarantee_without_prepared_policy():
-    """Remove retired policy claims without weakening live hook guarantees (the skill text).
-
-    The skill states the two guarantees a landing reader acts on -- the pre-commit check that
-    refuses a failing landing and the reference-transaction hook on a branch move -- and names no
-    retired prepared policy. It carries no copy of the module's plumbing names.
-    """
-    root = Path(__file__).resolve().parents[2]
-    text = (root / "skills/w-02-light-task-workflow/workflows/closeout.md").read_text(
-        encoding="utf-8"
-    )
-    assert "pre-commit" in text and "reference-transaction" in text
-    for obsolete in RETIRED_PUBLICATION_CLAIMS:
-        assert obsolete not in text
-
-
 def test_l56_renderer_prose_names_only_surviving_content_routes_and_exact_backfill():
     root = Path(__file__).resolve().parents[2] / "mcp/src/agents_remember"
     tree = ast.parse((root / "kernel/memory_attribution.py").read_text(encoding="utf-8"))

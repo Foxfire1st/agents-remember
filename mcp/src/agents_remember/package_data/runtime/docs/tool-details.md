@@ -105,6 +105,75 @@ paths. `providers-remove` (not this tool) refuses when its watcher stop
 fails, when a live process holds a folder open (naming pid and command), or
 when the provider root or a deletion target escapes the owned tree.
 
+## `knowledge-census` (CLI)
+
+Inventory and report a migration census. A child subcommand is required:
+
+```text
+agents-remember knowledge-census inventory MEMORY_ROOT --census ID --code CODE_REPO [--code-commit REV] [--memory-commit REV] [--scope DIR]
+agents-remember knowledge-census report MEMORY_ROOT [--revision REV] [--census ID] [--json]
+```
+
+`inventory` writes `baseline.json` and `inventory.json` under
+`knowledge/census/ID/` in a converted memory working tree. It pins the selected
+code and memory commits (both default to `HEAD`); repeat `--scope` to select more
+code directories, or omit it for the whole code tree. This is a write, not a
+preview. An unreadable baseline or an invalid census write is refused; an
+existing completed census is not overwritten. Claims, assessments and route
+statuses remain separate authoring work through the census writer.
+
+`report` only reads the working memory tree, or the selected `--revision`, and
+prints measurements and route status; `--census` selects one census. Exit status
+is `0` on success, `1` for invalid reported census files or a refused write, and
+`2` for unreadable inputs or an unreadable baseline.
+
+## `knowledge-copies` (CLI)
+
+Review and remove eligible copies of the retired knowledge database and unmanaged
+citation source indexes:
+
+```text
+agents-remember knowledge-copies --coordination-root ROOT --report REPORT [--json]
+agents-remember knowledge-copies --coordination-root ROOT --apply --reviewed REPORT [--report RESULT] [--json]
+```
+
+Without `--apply`, the command inventories copies and their cleanup rules and
+deletes nothing. `--report` saves the JSON review document; `--json` prints it.
+Apply requires that dry-run report from the same coordination root. A changed
+review digest or an unreadable controlling document refuses deletion. Tracked
+files, managed citation indexes and copies belonging to active tasks remain
+protected by the cleanup rules; eligible retained snapshots are released through
+their generation's deletion owner. The result names deleted, kept and failed
+paths. Exit status is `0` for a completed run, `1` for deletion failures (including
+a file changing during apply), and `2` for an invalid root or refused apply,
+including a changed scan since review.
+
+## `memory-backfill` (CLI)
+
+Plan or apply code-attribution trailers to memory commit history. The required
+contract selects the external-memory and code repositories:
+
+```text
+agents-remember memory-backfill --contract CONTRACT [--ref REF] [--rescue-ref RESCUE_REF]
+agents-remember memory-backfill --contract CONTRACT --apply --expected-digest DIGEST [--ref REF] [--rescue-ref RESCUE_REF]
+```
+
+Planning is the default and writes nothing. Review its census and digest before
+requesting a history rewrite; passing that digest as `--expected-digest` refuses
+an apply whose plan has changed. `--ref` is repeatable and otherwise selects the
+contract's memory work branch, or its source branch when no work branch is named.
+The rescue ref defaults to `refs/backup/memory-pre-migration`; a nonempty rewrite
+requires a free rescue name under `refs/` that is not a ref being moved. The
+command pins and reads back the original commits before rewriting, checks every
+rewritten tree through the repository's commit-check runner, and moves the named
+refs in one transaction. A failed tree check moves no named ref; rescue refs
+already written remain available.
+
+An already attributed history is a no-op. Exit status is `0` when nothing remains
+to rewrite or apply succeeds, `1` when a plan has work left, and `2` on refusal.
+After apply, reconcile worktrees and contract bases with the rewritten refs, then
+rebuild the disposable ledger cache from trailers; do not commit that cache.
+
 ## Drift check: where a stale anchor reports and where it refuses (MIK-R53 rule 11, MIK-R198 rules 5 and 7)
 
 `context_packet` with `include_drift` measures the reference anchors of

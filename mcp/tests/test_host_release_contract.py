@@ -152,7 +152,12 @@ def test_retired_selector_notice_once_on_each_public_command_and_dashboard_line(
         {name: ("command", operation) for name, operation in operations.items()},
     )
     for command in operations:
-        assert paseo_runtime.run(Namespace(config=str(path), paseo_command=command)) == 0
+        assert (
+            paseo_runtime.run(
+                Namespace(config=str(path), paseo_command=command, accept_harness_home_change=False)
+            )
+            == 0
+        )
         output = capsys.readouterr().out
         assert output.count("paseoRuntime.version") == 1
         notice = json.loads(output)["notice"]
@@ -186,10 +191,8 @@ def test_host_and_all_standalone_starters_refuse_old_location_before_any_write(
         require_user_settings_path(coordination)
     for path in (old, new):
         assert str(path) in str(caught.value)
-    # The eight starter packages carried this renderer until MIK-R196 rule 9 retired it: a
-    # starter package now carries configuration, hooks and instruction files only, so there is
-    # no starter left to ask. The claim that survives is the location refusal itself, above,
-    # and that neither the removed file nor an existing user file was read.
+    # The location refusal is the contract checked here. Neither the removed file
+    # nor an existing user file may be read.
     assert old.read_bytes() == before[0]
     if both:
         assert new.read_bytes() == before[1]

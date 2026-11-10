@@ -15,7 +15,7 @@ from typing import Any
 from ..artifacts import json_digest
 from .models import NativeCapture, NativeEvent
 
-_TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
+TERMINAL_HELPER_STATUSES = {"completed", "failed", "cancelled", "interrupted"}
 _HELPER_TOOLS = {"delegate_task", "spawn_agent", "wait_agent", "send_input", "close_agent"}
 
 
@@ -173,12 +173,12 @@ class _Facts:
             return
         status = helper["status"]
         self.observe(event, helper["id"], status)
-        if status not in _TERMINAL | {"running"}:
+        if status not in TERMINAL_HELPER_STATUSES | {"running"}:
             self.unknown(event, f"unclassified host helper status: {status!r}")
 
     def observe(self, event: NativeEvent, identity: str, status: str) -> None:
         helper = self.helper(identity)
-        if status != "removed" or helper["observed_status"] not in _TERMINAL:
+        if status != "removed" or helper["observed_status"] not in TERMINAL_HELPER_STATUSES:
             helper["observed_status"] = status
         helper["observations"].append(
             {"status": status, "carrier": "host-provider-update", **_reference(event)}
@@ -211,10 +211,14 @@ class _Facts:
         return {
             "schema": "ar-helper-wait-snapshot/v1",
             "helpers": helpers,
-            "pending_ids": [h["id"] for h in helpers if h["observed_status"] not in _TERMINAL],
+            "pending_ids": [
+                h["id"] for h in helpers if h["observed_status"] not in TERMINAL_HELPER_STATUSES
+            ],
             "running_ids": [],
             "observed_running_ids": [h["id"] for h in helpers if h["observed_status"] == "running"],
-            "terminal_ids": [h["id"] for h in helpers if h["observed_status"] in _TERMINAL],
+            "terminal_ids": [
+                h["id"] for h in helpers if h["observed_status"] in TERMINAL_HELPER_STATUSES
+            ],
             "liveness": "unobservable",
             "liveness_basis": "no admitted process-local live-roster carrier in NativeCapture",
             "reentries": [],

@@ -111,8 +111,6 @@ def test_shipped_contracts_have_one_matching_sender_and_receiver() -> None:
         "reviewer": "review",
         "curator": "curation",
         "investigator": "orientation",
-        "designer": "planning",
-        "strategist": "planning",
         "bootstrap": "bootstrap",
     }
     sides: dict[tuple[str, str, str], dict[str, list]] = {}

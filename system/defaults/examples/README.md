@@ -12,7 +12,7 @@ apply across multiple code repositories: global approval expectations, shared
 command conventions, common source registries, task/worktree roots, selected
 memory repo locations, and local operator conventions.
 
-Coordinator files should route agents through the `c-08-ar-coordination-context-resolver` skill before repository-specific
+Coordinator files should route agents through product context resolution (`context_packet`; see the [tool reference](skill://agents-remember/skills/l-01-agent-lifecycles/reference/knowledge/commands.md)) before repository-specific
 work begins. They may define global defaults, but they should not encode rules
 that are true for only one code repository.
 

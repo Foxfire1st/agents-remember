@@ -12,16 +12,22 @@ import hashlib
 import os
 import re
 import stat
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from itertools import islice
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 from typing import Any
 
 from agents_remember.cli.role_instruction_details import compose_launch_instructions
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.sidecar_pairing import confine_non_symlink_rel
 from agents_remember.models.role_capsules.types import CapsuleDetailReference
-from agents_remember.serving.capsule_delivery import CapsuleBindingIdentity, CapsuleDelivery
+from agents_remember.serving.capsule_delivery import (
+    CapsuleBindingIdentity,
+    CapsuleDelivery,
+    CapsuleInstructionOrigin,
+)
 
 from ..fixtures import CaseBundle
 from ..trial_isolation import CREDENTIAL_NAMES
@@ -50,6 +56,7 @@ class PointerDelivery:
     details: tuple[DetailFile, ...]
     composition: dict[str, Any]
     source_instruction_sha256: str
+    frozen_contents: Mapping[str, str]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -62,7 +69,31 @@ class PointerDelivery:
         }
 
 
-def _frozen_entry(artifact: dict[str, Any]) -> tuple[str, str, tuple[CapsuleDetailReference, ...]]:
+def _frozen_origins(entry: dict[str, Any]) -> tuple[CapsuleInstructionOrigin, ...]:
+    """Read captured provenance without inferring origins or refreshing frozen sources."""
+    rows = entry.get("instructionOrigins", [])
+    if not isinstance(rows, list):
+        raise AuthorityError("text-delivery-detail-fault: invalid captured instruction origins")
+    origins = []
+    for row in rows:
+        if (
+            not isinstance(row, dict)
+            or not isinstance(row.get("sourcePath"), str)
+            or not row["sourcePath"]
+            or PurePosixPath(row["sourcePath"]).is_absolute()
+            or ".." in PurePosixPath(row["sourcePath"]).parts
+            or row["sourcePath"] != PurePosixPath(row["sourcePath"]).as_posix()
+            or type(row.get("start")) is not int
+            or type(row.get("end")) is not int
+        ):
+            raise AuthorityError("text-delivery-detail-fault: invalid captured instruction origin")
+        origins.append(CapsuleInstructionOrigin(row["sourcePath"], row["start"], row["end"]))
+    return tuple(origins)
+
+
+def _frozen_entry(
+    artifact: dict[str, Any],
+) -> tuple[str, str, tuple[CapsuleDetailReference, ...], tuple[CapsuleInstructionOrigin, ...]]:
     try:
         entry = artifact["entries"]["curation"]
         instructions, digest, rows = (
@@ -104,7 +135,7 @@ def _frozen_entry(artifact: dict[str, Any]) -> tuple[str, str, tuple[CapsuleDeta
         raise AuthorityError(
             "text-delivery-detail-fault: captured pointers and detail inventory differ"
         )
-    return instructions, digest, tuple(references)
+    return instructions, digest, tuple(references), _frozen_origins(entry)
 
 
 def bind_text_details(artifact: dict[str, Any], report_path: Path) -> PointerDelivery:
@@ -117,7 +148,7 @@ def bind_text_details(artifact: dict[str, Any], report_path: Path) -> PointerDel
         raise AuthorityError(
             "text-delivery-detail-fault: report path must be absolute and nonlinked"
         )
-    instructions, digest, references = _frozen_entry(artifact)
+    instructions, digest, references, origins = _frozen_entry(artifact)
     # The capture compiler excludes this fixed evaluation binding from rendered text.
     delivery = CapsuleDelivery(
         CapsuleBindingIdentity(
@@ -126,6 +157,7 @@ def bind_text_details(artifact: dict[str, Any], report_path: Path) -> PointerDel
         instructions,
         digest,
         references,
+        origins,
     )
     try:
         bound, composition = compose_launch_instructions(delivery, str(report_path), {})
@@ -133,72 +165,82 @@ def bind_text_details(artifact: dict[str, Any], report_path: Path) -> PointerDel
         raise AuthorityError(
             f"text-delivery-detail-fault: production detail binding refused: {error}"
         ) from error
-    paths = {
-        row["sourcePath"]: Path(row["path"]) for row in composition.get("detailReferences", [])
+    emitted = {
+        row["sourcePath"]: row for row in (composition["detailReferences"] if references else ())
     }
     files = tuple(
         DetailFile(
             reference.source_path,
-            paths[reference.source_path],
-            reference.revision,
+            Path(emitted[reference.source_path]["path"]),
+            emitted[reference.source_path]["revision"],
             reference.step,
-            reference.revision.removeprefix("sha256:"),
-            len(reference.content),
+            emitted[reference.source_path]["revision"].removeprefix("sha256:"),
+            emitted[reference.source_path]["sizeBytes"],
         )
         for reference in references
     )
-    result = PointerDelivery(
-        bound, files, composition, hashlib.sha256(instructions.encode()).hexdigest()
+    readings = [_read_detail_file(detail) for detail in files]
+    unknowns = _detail_unknowns([state for state, _ in readings])
+    if unknowns:
+        raise AuthorityError("; ".join(unknowns))
+    contents = MappingProxyType(
+        {
+            detail.source_path: body.decode("utf-8")
+            for detail, (_, body) in zip(files, readings, strict=True)
+        }
     )
-    validation = validate_detail_links(result)
-    if validation["unknowns"]:
-        raise AuthorityError("; ".join(validation["unknowns"]))
-    return result
+    return PointerDelivery(
+        bound, files, composition, hashlib.sha256(instructions.encode()).hexdigest(), contents
+    )
 
 
 def _file_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
     return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns
 
 
-def _detail_file_state(detail: DetailFile) -> dict[str, Any]:
+def _read_detail_file(detail: DetailFile) -> tuple[dict[str, Any], bytes]:
     row = detail.to_dict()
     try:
         if any(path.is_symlink() for path in (detail.path, *detail.path.parents)):
-            return {**row, "state": "linked"}
+            return {**row, "state": "linked"}, b""
         descriptor = os.open(detail.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(descriptor, "rb") as stream:
             before = os.fstat(stream.fileno())
             if not stat.S_ISREG(before.st_mode):
-                return {**row, "state": "not-regular"}
+                return {**row, "state": "not-regular"}, b""
             if before.st_size != detail.size_bytes:
-                return {**row, "state": "size-mismatch", "observedSizeBytes": before.st_size}
+                return {**row, "state": "size-mismatch", "observedSizeBytes": before.st_size}, b""
             body = stream.read(detail.size_bytes + 1)
             after = os.fstat(stream.fileno())
             named = detail.path.stat(follow_symlinks=False)
         if _file_identity(before) != _file_identity(after) or _file_identity(
             after
         ) != _file_identity(named):
-            return {**row, "state": "changed-during-read"}
+            return {**row, "state": "changed-during-read"}, b""
         digest = hashlib.sha256(body).hexdigest()
         return {
             **row,
             "state": "ready" if digest == detail.sha256 else "digest-mismatch",
             "observedSha256": digest,
-        }
+        }, body
     except OSError as error:
-        return {**row, "state": "unavailable", "errorType": type(error).__name__}
+        return {**row, "state": "unavailable", "errorType": type(error).__name__}, b""
+
+
+def _detail_unknowns(files: list[dict[str, Any]]) -> list[str]:
+    return [
+        f"text-delivery-detail-fault: {row['source_path']} at {row['path']}: {row['state']}"
+        for row in files
+        if row["state"] != "ready"
+    ]
 
 
 def validate_detail_links(delivery: PointerDelivery) -> dict[str, Any]:
     """Check the exact emitted files; a dead/changed pointer is a delivery fault."""
-    files = [_detail_file_state(detail) for detail in delivery.details]
+    files = [_read_detail_file(detail)[0] for detail in delivery.details]
     return {
         "files": files,
-        "unknowns": [
-            f"text-delivery-detail-fault: {row['source_path']} at {row['path']}: {row['state']}"
-            for row in files
-            if row["state"] != "ready"
-        ],
+        "unknowns": _detail_unknowns(files),
     }
 
 

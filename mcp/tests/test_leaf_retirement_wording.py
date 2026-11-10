@@ -17,6 +17,15 @@ from agents_remember_test_support.testing.retired_leaf_handover_wording import (
 
 ROOT = Path(__file__).resolve().parents[2]
 
+# Removed source paths remain operands for the retired-sentence negative controls.
+REMOVED_INSTRUCTION_SOURCES = frozenset(
+    {
+        "skills/l-01-agent-lifecycles/roles/designer.md",
+        "skills/l-01-agent-lifecycles/roles/strategist.md",
+        "skills/l-01-agent-lifecycles/templates/worker-brief.md",
+    }
+)
+
 
 def test_bootstrap_restored_fixed_helper_restriction_fails_with_freedom_present() -> None:
     current = (ROOT / "skills/l-01-agent-lifecycles/roles/bootstrap.md").read_text()
@@ -61,8 +70,11 @@ def test_standalone_manager_handoff_sentence_is_retired_without_preserved_contex
 def test_each_obsolete_sentence_has_independent_source_confined_detection() -> None:
     for source, statement in RETIRED_LEAF_HANDOVER_WORDING:
         relative = source.removeprefix("skills/")
-        current = normalize_statement((ROOT / source).read_text())
-        assert retired_statement_findings(current, relative) == []
+        if source in REMOVED_INSTRUCTION_SOURCES:
+            assert not (ROOT / source).exists(), source
+        else:
+            current = normalize_statement((ROOT / source).read_text())
+            assert retired_statement_findings(current, relative) == []
         assert retired_statement_findings(normalize_statement(statement), relative)
         assert (
             retired_statement_findings(normalize_statement(statement), "unrelated/source.md") == []

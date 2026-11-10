@@ -4,7 +4,7 @@ Agents Remember has five settings families with stated authorities:
 
 | Family | Home | Read cadence |
 | --- | --- | --- |
-| Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard) | MCP authority settings file (outside the coordinator root) | boot |
+| Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard) | user configuration `agents-remember/agents-remember-settings.json` | boot |
 | Host runtime (`paseoRuntime`) | active MCP authority settings file selected by `--config` | per use; install reads at each call |
 | Memory topology (`onboarding.storage`, `pathRules`, `crossRepo`) | memory-root `system/settings.json` (beside `settings.md`) | per resolution |
 | **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness ids, qualityGate resource policy, roleMessageLimit) | **user configuration `agents-remember/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
@@ -17,16 +17,19 @@ The user's `~/.config/agents-remember/settings.json` (under `XDG_CONFIG_HOME` wh
 set) is the GLOBAL agentic settings file — it is NOT an MCP authority file (the server refuses it as `--config`)
 and NOT a provider settings source (the old implicit fallback to it is
 removed; an explicit `--from-settings` path is still read wherever it points). MCP authority settings
-live outside the coordinator root; see `examples/mcp/settings.example.json`.
+live at `~/.config/agents-remember/agents-remember-settings.json`, beside the separate
+user `settings.json` (under `XDG_CONFIG_HOME` when set). The explicit `--config` argument
+can select another file; see `examples/mcp/settings.example.json`.
 
 ### The user's file is closed to writing
 
 The installation keeps the user's file read-only (mode 444) and its folder
 closed to new and removed entries (mode 555), so nothing a role agent runs —
 a test, a helper, a script, the candidate's code — can write, replace or
-remove it. The product itself writes that file in one place only, the
-explicit `agents-remember upgrade-user-settings` move, and never opens the
-permissions by itself.
+remove it. `user_settings_init` exclusively creates an absent file with mode
+600; an existing destination is preserved. The explicit
+`agents-remember upgrade-user-settings` command moves the older settings file.
+Neither operation opens an existing file's or folder's permissions by itself.
 
 Before an edit, open the folder and the file for yourself. The folder is
 opened with the file because an editor that saves by replacing the file makes
@@ -208,6 +211,24 @@ unexpected shape is never echoed into a report. The settings file itself is the
 place that holds a private value, so protect it accordingly. The other five
 facts carry no secret.
 
+Harness storage belongs in each provider's `env`, so provisioning from another shell keeps
+the same sessions. These entries reach the host unchanged. For example:
+
+```json
+{"codex": {"env": {"CODEX_HOME": "/work/codex", "CODEX_SQLITE_HOME": "/work/codex-state"}}}
+```
+
+Put that object under `paseoRuntime.providers`. Status and provision report the names of
+storage variables inherited by the running host but absent from provider settings as
+`inheritedHarnessHomes`, with a remedy to move them into `env`. The package's
+`host-harness-homes.json` lists the variables and their documentation sources. Before any
+restart, provision compares the running host's observed values with the values this run's
+environment and provider settings would supply. A difference refuses with
+`harness-home-would-change` before stopping the host, naming the old and new values only in
+that same-user refusal. Run with the old values, put them in provider `env`, or explicitly
+repeat `paseo provision --config /work/settings.json --accept-harness-home-change` to accept
+the change. Ordinary reports and command logs contain variable names only.
+
 A provider entry states no `extraArgs` for Claude, and none for an entry that
 `extends` it: `options.extraArgs` and `params.extraArgs` are refused when the
 settings load, naming this file, the key and
@@ -243,8 +264,8 @@ agents-remember paseo stop      --config <MCP settings file>
 ```
 
 `--config` is required for the MCP installation context. The host block is read from
-the same user configuration file as the agentic settings; `coordinationRoot` no longer
-selects a host settings file.
+the active MCP authority file named by `--config`, separately from the user's
+agentic settings; `coordinationRoot` does not select a host settings file.
 `runtime_install` already provisions the host during product install; no host
 command is an extra install step. A repeat with no changes is read-only. A dry
 run reports Node/version/start/restart disposition and performs no mutation.
@@ -530,6 +551,9 @@ object leaf overrides the global one, sibling keys survive; arrays REPLACE
 
 **Fail-loud rule.** Unknown keys anywhere inside the `orchestration.*` family
 are rejected naming the offending file — a typo can never be silently ignored.
+The old `designer` and `strategist` role keys in `orchestration.roles` and
+`orchestration.rolesPerLevel.<level>` are accepted and reported as ignored
+in `unused_keys`; `server_info` exposes user-layer paths under `unusedSettingsKeys`.
 Unknown TOP-LEVEL families in the same file are tolerated-not-parsed (see
 Reserved Families below).
 
@@ -581,6 +605,11 @@ an earlier build stored: such a gate still refuses the operation it guards, and
 `agents-remember removed-stores` names the gate logs and removes them on the user's word.
 
 ### orchestration.roles, orchestration.rolesPerLevel
+
+Within the merged settings, per-level role fields override flat role fields: repo-local
+level override > global level override > repo-local role default > global role default.
+An omitted per-level field inherits its flat-role value. The terms `dispatch` and `tools`
+describe structural authority and capability; they are not role settings keys.
 
 Paseo role launches ask the host for these choices at each launcher view and start. If a catalog
 part is unavailable, its last successful answer is read from the shared on-disk store and shown
@@ -714,9 +743,15 @@ nor records it. `role_capsule_compile` alone compiles the baseline, not a live p
 These are complete shape examples; use only IDs/features the installation's current catalog offers.
 
 `orchestration.roles.<role>` overrides a role file's knob block per role
-(`architect`, `orchestrator`, `designer`, `strategist`, `manager`, `worker`, `curator`,
-`investigator`, `reviewer`).
+(`architect`, `orchestrator`, `manager`, `worker`, `curator`, `investigator`, `reviewer`,
+`bootstrap`).
 The earlier key `orchestration.roles.system-specialist` applies to the Investigator with one notice per load naming the key, file and new ID. Equal entries under both IDs load; conflicting entries are refused with both keys named. Stored settings are not rewritten.
+Stored `orchestration.roles.designer` and `orchestration.roles.strategist` entries remain
+accepted but are ignored. The same applies to those role keys under
+`orchestration.rolesPerLevel.leaf`, `.master` and `.portfolio`. The loader names their
+full dotted paths in `unused_keys`; `server_info` exposes user-layer paths under
+`unusedSettingsKeys`. Loading does not rewrite the settings file.
+
 Precedence: role-file defaults < global settings < repo-local settings.
 
 `orchestration.rolesPerLevel.<level>.<role>` (ruling 2026-07-07T08:15) adds
@@ -1000,7 +1035,6 @@ the effective harness ids (builtin + `orchestration.harnesses`).
   "roles": {
     "architect":    { "harness": "claude", "model": "claude-opus-4-8", "effort": "high" },
     "orchestrator": { "harness": "claude", "model": "claude-opus-4-8", "effort": "high" },
-    "strategist":   { "harness": "claude", "model": "claude-fable-5", "effort": "max" },
     "reviewer":     { "harness": "claude", "model": "claude-sonnet-5", "effort": "high" },
     "investigator": { "harness": "claude", "model": "claude-fable-5", "effort": "high" },
     "curator":      { "harness": "codex", "model": "gpt-5.6-luna", "effort": "medium" },
@@ -1032,8 +1066,7 @@ file with repo-local precedence like every agentic key.
     },
     "perLevel": {
       "leaf":      { "loop": "scored" },        // tier scored per leaf at dispatch (direct | builder-verified | full loop)
-      "master":    { "loop": "seam-required" }, // loop posture only; "none" = workflow-free manager (the master-exit SEAM stays unconditional)
-      "portfolio": { "loop": "strategist" }     // owner = orchestrator · builder = strategist · reviewer with the plan-review catalog
+      "master":    { "loop": "seam-required" }  // loop posture only; "none" = workflow-free manager (the master-exit SEAM stays unconditional)
     }
     // local override example (tight mode):
     // "perMaster": { "260703_agent-orchestration": { "leaf": { "loop": "builder-verified" } } }
@@ -1075,10 +1108,10 @@ Semantics, as the loop doctrine defines them
   are model-interpreted doctrine (validated as non-empty strings, not a closed
   set). Each level runs its loop with its own agent set
   (`orchestration.roles` knobs per role).
-- `perLevel.portfolio.loop: "strategist"` names the portfolio loop's parties.
-  **The strategist's mandatory pre-run is doctrine, not a knob** — no
-  configuration can waive it: an orchestrated run requires the adopted
-  orchestration task, unconditionally (`roles/strategist.md`).
+- The stored value `"strategist"` at `orchestration.loops.perLevel.portfolio.loop` or
+  `orchestration.loops.perMaster.<master>.portfolio.loop` remains accepted but is ignored.
+  The loader reports each such full dotted path in `unused_keys`; `server_info` exposes
+  user-layer paths under `unusedSettingsKeys`. Loading leaves the settings file unchanged.
 
 ### Reserved Families (the global file's future)
 
@@ -1119,12 +1152,15 @@ Task documents are read as rendered Markdown with the harness's own file tools. 
 Worker, Reviewer and Curator starts, the product publishes a real copy of its own leaf document under `task-documents/` in the enclosure group before the first turn, preserving its canonical relative path. `INDEX.json` holds one row per copied file with its kind, reference, repository, source and copy SHA-256 digests, path, publication time, and a missing flag for named-but-absent files. Writes rendering that leaf refresh its
 copy in every existing enclosure for that leaf atomically per file;
 cleanup removes the copies with the enclosure. Copies stay outside code and memory Git worktrees.
-task_doc first, then logged canonical amendment on correct-input refusal; owner's next publication
-refreshes renders/projections, rendered copies never parsed back. Follow the
+Use `task_doc` first. For a correct-input refusal of a covered write—`task_doc` edits
+(including an admitted task retirement or folder movement), `knowledge_write`, `citation_fix`,
+`citation_note_revision` and `curator_coherence` publication—follow the
 [correct-input write-refusal procedure](../../skills/l-01-agent-lifecycles/reference/refused-write.md)
-for the same tool/input class, recording the inputs, refusal and manual provenance and telling
-the record owner before amending its canonical document. Read/check/validation/sync, starts,
-product guards and commit gates retain stops; failed gates are repaired. Controllers read their
+for the same tool and input class before applying a stop. If no admitted route works, record the refusal, tell the owner, then make that write openly by hand and log it; never keep a blanket ban on writing it by hand. Record the inputs, refusal and manual
+provenance, and tell the record owner before amending its canonical document. The owner's next
+publication refreshes renders and projections; rendered copies are never parsed back.
+Read/check/validation/sync refusals, starts, product guards and commit gates retain their stops;
+failed gates are repaired. Controllers read their
 own canonical rendered file without a copy; the
 start whole result (log file) names the paths and whether they sit outside the working folder. Taskless roles have no task
 file. The handover names the paths. `read_ar_files` keeps its existing behavior; task documents are read as rendered files, not through `task_doc`.

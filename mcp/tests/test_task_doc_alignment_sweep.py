@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -332,27 +333,48 @@ def test_tool_description_names_field_within_existing_six_hundred_character_boun
     assert len(_TASK_DOC_TOOL_DESCRIPTION) <= 600
 
 
-def test_sweep_is_answer_only_and_does_not_change_the_written_document(tmp_path):
+class _FixedLogClock(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        moment = cls(2026, 1, 2, 3, 4, 5, 678900, tzinfo=UTC)
+        return moment if tz is not None else moment.replace(tzinfo=None)
+
+
+@pytest.mark.parametrize("operation", ["create", "set_field", "replace"])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_sweep_is_answer_only_and_does_not_change_the_written_document(
+    tmp_path, operation, dry_run
+):
     config, root = _world(tmp_path)
+    fields = _prepare_edit(config, operation)
     before = {path.name: path.read_bytes() for path in root.iterdir() if path.is_file()}
-    whole, answer = _deliver(config)
+    # Hold environmental log identities constant, rather than omitting any answer field.
+    with (
+        patch("agents_remember.application.tool_answer_log.datetime", _FixedLogClock),
+        patch("agents_remember.application.tool_answer_log._short_id", return_value="11223344"),
+    ):
+        whole, answer = _deliver(config, operation, dry_run=dry_run, fields=fields)
     assert "alignmentSweep" in whole
     with_sweep = {path.name: path.read_bytes() for path in root.iterdir() if path.is_file()}
-    assert b"alignmentSweep" not in with_sweep["leaf-99.json"]
+    assert all(b"alignmentSweep" not in data for data in with_sweep.values())
     for path in root.iterdir():
         if path.is_file() and path.name not in before:
             path.unlink()
     for name, data in before.items():
         (root / name).write_bytes(data)
-    with patch(
-        "agents_remember.application.task_docs.task_doc_tools.alignment_sweep", return_value=None
+    with (
+        patch("agents_remember.application.tool_answer_log.datetime", _FixedLogClock),
+        patch("agents_remember.application.tool_answer_log._short_id", return_value="11223344"),
+        patch(
+            "agents_remember.application.task_docs.task_doc_tools.alignment_sweep",
+            return_value=None,
+        ),
     ):
-        without_whole, without_answer = _deliver(config)
+        without_whole, without_answer = _deliver(config, operation, dry_run=dry_run, fields=fields)
     assert {path.name: path.read_bytes() for path in root.iterdir() if path.is_file()} == with_sweep
     assert {key: value for key, value in whole.items() if key != "alignmentSweep"} == without_whole
-    # Log locations and token counts are derived from the submitted response,
-    # rather than authored fields of the original task-document operation.
-    response_observations = {"alignmentSweep", "log", "tokens"}
-    assert {key: value for key, value in answer.items() if key not in response_observations} == {
-        key: value for key, value in without_answer.items() if key not in response_observations
-    }
+    # This local regression isolates the field. The inherited historical-base proof must
+    # additionally execute the actual base source; patching this candidate cannot prove that.
+    assert {
+        key: value for key, value in answer.items() if key != "alignmentSweep"
+    } == without_answer

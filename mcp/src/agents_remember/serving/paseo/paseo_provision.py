@@ -16,7 +16,6 @@ file they replace is kept until Paseo has accepted the new one.
 from __future__ import annotations
 
 import errno
-import hashlib
 import json
 import shutil
 import socket
@@ -45,6 +44,18 @@ from agents_remember.serving.paseo.paseo_daemon_config import (
     remove_stale_temporaries,
     restore_previous_config,
     write_provider_entries,
+)
+from agents_remember.serving.paseo.paseo_harness_homes import (
+    harness_home_status,
+    require_preserved_harness_homes,
+)
+from agents_remember.serving.paseo.paseo_install_plan import (
+    PREVIOUS_DIRECTORY,
+    STAGING_DIRECTORY,
+    embed_digest,
+    home_changes,
+    plugin_changes,
+    setting_change,
 )
 from agents_remember.serving.paseo.paseo_lock import runtime_lock
 from agents_remember.serving.paseo.paseo_node import ensure_node
@@ -82,8 +93,6 @@ INSTALL_TIMEOUT_SECONDS = 900.0
 START_TIMEOUT_SECONDS = 120
 # How Paseo 0.11 names a configuration file its schema refuses.
 _INVALID_CONFIGURATION = "Invalid config"
-STAGING_DIRECTORY = ".ar-staging"
-PREVIOUS_DIRECTORY = ".ar-previous"
 INSTALL_ENTRIES = ("node_modules", "package.json", "package-lock.json")
 _WILDCARD_HOSTS = frozenset({"0.0.0.0", "::"})
 
@@ -114,10 +123,31 @@ def provision_runtime(
     return _provision(
         _Run(
             settings,
-            PaseoCli(settings, runner),
+            PaseoCli(settings, runner, reader=reader),
             plugin_source or plugin_source_root(),
             probe,
             reader,
+        )
+    )
+
+
+def provision_with_home_change(
+    settings: PaseoRuntimeSettings,
+    *,
+    runner: CommandRunner = run_command,
+    plugin_source: Path | None = None,
+    probe: BindProbe = bind_error,
+    reader: ProcessReader = read_process,
+) -> dict[str, Any]:
+    """Explicit terminal provision after the operator accepts inherited home changes."""
+    return _provision(
+        _Run(
+            settings,
+            PaseoCli(settings, runner, reader=reader),
+            plugin_source or plugin_source_root(),
+            probe,
+            reader,
+            accept_harness_home_change=True,
         )
     )
 
@@ -134,7 +164,7 @@ def provision_for_install(
     return _provision(
         _Run(
             settings,
-            PaseoCli(settings, runner),
+            PaseoCli(settings, runner, reader=reader),
             plugin_source or plugin_source_root(),
             probe,
             reader,
@@ -147,8 +177,15 @@ def _provision(run: _Run) -> dict[str, Any]:
     settings, intent = run.settings, run.intent
     failure: PaseoRuntimeFailure | None = None
     node = None
+    homes: dict[str, Any] = {"inheritedHarnessHomes": "unknown", "harnessHomeRemedy": None}
     try:
-        inspect_record(settings.home, "install", run.reader)
+        record = inspect_record(settings.home, "install", run.reader)
+        facts = run.reader(record.pid) if record.kind == "own" and record.pid is not None else None
+        homes = (
+            harness_home_status(settings, facts)
+            if record.kind == "own"
+            else {"inheritedHarnessHomes": [], "harnessHomeRemedy": None}
+        )
         node = {**product_node().payload(), "changed": False}
         if intent is ProvisionIntent.INSTALL:
             _check_install_restart(run)
@@ -183,6 +220,7 @@ def _provision(run: _Run) -> dict[str, Any]:
         "daemon": {"action": _daemon_action(run), "reasons": run.restart_reasons},
         **({"restartRequired": run.restart_reasons} if intent is ProvisionIntent.INSTALL else {}),
         "changes": run.changes,
+        **homes,
         "error": None if failure is None else failure.as_payload(),
     }
 
@@ -220,7 +258,16 @@ def _stop_daemon(run: _Run, cli: PaseoCli, step: str) -> None:
     """Stop this home's daemon through Paseo, and only a process proven to be it."""
     if _own_daemon_recorded(run):
         preserve_live_install(run, "stop")
+        _preserve_homes_before_stop(run)
         cli.json(step, "daemon", "stop", "--json")
+
+
+def _preserve_homes_before_stop(run: _Run) -> None:
+    record = inspect_record(run.settings.home, run.step, run.reader)
+    facts = run.reader(record.pid) if record.kind == "own" and record.pid is not None else None
+    require_preserved_harness_homes(
+        run.settings, facts, accept_change=run.accept_harness_home_change
+    )
 
 
 def _daemon_action(run: _Run) -> str:
@@ -439,9 +486,7 @@ def _apply_settings(run: _Run, pending: list[DaemonSetting], running: bool) -> l
             response = run.cli.json(
                 "config", "daemon", "config", "set", setting.path, json.dumps(setting.value)
             )
-            run.change(
-                "config", "set", path=setting.path, value=setting.value, applies=setting.applies
-            )
+            run.changes.append(setting_change(setting))
         required = response.get("restartRequiredPaths")
         if running and any(
             path == setting.path or path.startswith(setting.path + ".")
@@ -468,13 +513,9 @@ def _apply_provider_entries(run: _Run, setting: DaemonSetting, running: bool) ->
         raise _provider_entries_not_accepted(args, result, restore_previous_config(home))
     accept_provider_entries(home)
     run.reload_owed = run.reload_owed and not running
-    run.change(
-        "config",
-        "set",
-        path=setting.path,
-        providerIds=sorted(setting.value),
-        applies=setting.applies,
-    )
+    run.changes.append(setting_change(setting))
+    if running:
+        run.change("config", "reloaded", path=PROVIDER_ENTRIES)
     return parse_json_output("config", args, result) if running else {}
 
 
@@ -497,12 +538,13 @@ def _provider_entries_not_accepted(
 
 def _sync_home_files(run: _Run) -> None:
     run.step = "plugin"
-    home = run.settings.home
-    if write_embed(home, run.settings.embed_payload()):
-        run.change("embed", "written", entries=len(run.settings.embed))
-    target = installed_plugin_path(home)
-    if sync_plugin_copy(run.plugin_source, target):
-        run.change("plugin", "copied", path=target.as_posix(), digest=tree_digest(target))
+    for change in home_changes(run.settings, run.plugin_source):
+        if change["step"] == "embed":
+            changed = write_embed(run.settings.home, run.settings.embed_payload())
+        else:
+            changed = sync_plugin_copy(run.plugin_source, installed_plugin_path(run.settings.home))
+        if changed:
+            run.changes.append(change)
 
 
 def _start_daemon(run: _Run) -> None:
@@ -521,6 +563,7 @@ def _start_daemon(run: _Run) -> None:
         # observed after the start-site admission, including an ambiguous failed reply.
         if _own_daemon_recorded(run):
             preserve_live_install(run, "stop after a failed start of")
+            _preserve_homes_before_stop(run)
             run.cli.call("daemon", "stop", "--json")
         still_alive = _own_daemon_recorded(run)
         if "EADDRINUSE" in result.stderr and not still_alive:
@@ -542,20 +585,22 @@ def _ensure_plugin(run: _Run, kept_running: bool) -> None:
     run.step = "plugin"
     home = run.settings.home
     target = installed_plugin_path(home)
-    loaded = {"plugin": tree_digest(target), "embed": _embed_digest(run.settings)}
+    loaded = {"plugin": tree_digest(target), "embed": embed_digest(run.settings)}
     stale = kept_running and read_loaded_stamp(home) != loaded
     entry = plugin_entry(run.cli, "plugin")
     command_error: str | None = None
-    if entry is not None and entry.get("path") != target.as_posix():
-        run.cli.json("plugin", "plugin", "remove", PLUGIN_ID, "--json")
-        run.change("plugin", "removed", path=entry.get("path"))
-        entry = None
-    if entry is None:
-        command_error = _plugin_command(run, "installed", "install", target.as_posix())
-    elif entry.get("enabled") is False:
-        command_error = _plugin_command(run, "enabled", "enable", PLUGIN_ID)
-    elif stale or entry.get("status") != "running":
-        command_error = _plugin_command(run, "reloaded", "reload", PLUGIN_ID)
+    operations = {
+        "installed": ("install", target.as_posix()),
+        "enabled": ("enable", PLUGIN_ID),
+        "reloaded": ("reload", PLUGIN_ID),
+    }
+    for change in plugin_changes(entry, target, stale):
+        action = change["action"]
+        if action == "removed":
+            run.cli.json("plugin", "plugin", "remove", PLUGIN_ID, "--json")
+            run.changes.append(change)
+        else:
+            command_error = _plugin_command(run, action, *operations[action])
     final = plugin_entry(run.cli, "plugin")
     if final is None or final.get("status") != "running":
         raise PaseoRuntimeFailure(
@@ -578,8 +623,3 @@ def _plugin_command(run: _Run, action: str, *args: str) -> str | None:
         return paseo_error_text(result)
     run.change("plugin", action)
     return None
-
-
-def _embed_digest(settings: PaseoRuntimeSettings) -> str:
-    payload = json.dumps(settings.embed_payload(), sort_keys=True)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

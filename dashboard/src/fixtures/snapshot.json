@@ -1,4 +1,14 @@
 {
+  "buildCurrentness": {
+    "mode": "installed",
+    "state": "stale",
+    "loadedDigest": "81c934bd195c8eb4ce33235c6be5ea0ed51e2ad297c8718b53127aa3bb59f4a2",
+    "installedDigest": "294b1e88f7de6c48d276eaa6bc69473f36d14054477a9f95257a0873e5fe1b60",
+    "firstSeenAt": "2026-06-14T08:59:00+00:00",
+    "reason": "Installed Python files changed after this server started.",
+    "remedy": "Restart the dashboard."
+  },
+  "servingProcessId": 123,
   "activeWorktreeGroups": ["sim-group"],
   "analytics": {
     "attentionQueue": [
@@ -2444,11 +2454,6 @@
             "label": "Sprint Orchestrator",
             "identity": "agent-sim-orchestrator",
             "state": "active"
-          },
-          {
-            "role": "strategist",
-            "label": "",
-            "state": "planned"
           }
         ],
         "executionGraph": {

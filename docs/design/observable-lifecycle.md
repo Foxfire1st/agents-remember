@@ -304,11 +304,6 @@ arranging the harness's own re-invocation.
   state are checked on a bounded cadence behind the unified gate channel. Callers
   consume returned inbox entries after reading them; they do not wrap the normal path
   in their own re-call loop.
-- **L3 — push-equivalent.** **`agents-remember gate-wait`**, a CLI file-watcher whose
-  *exit* is the notification. The blocked model backgrounds it and ends its turn;
-  harnesses that re-invoke the model on background-task completion get real push the moment
-  the dashboard click lands. Where a harness cannot wake on background completion, the turn
-  ends honestly and L1/L2 resume on the next poke.
 
 Taught behavior at a gate: report the gate packet in prose, then end the turn honestly
 until the developer response is handled. Unblock is an explicit resume after gate

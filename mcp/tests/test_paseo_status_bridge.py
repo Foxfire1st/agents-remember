@@ -195,7 +195,7 @@ class AgentStateScriptTests(unittest.TestCase):
         assert executable is not None
         fixture_node.symlink_to(executable)
         node_patch = patch(
-            "agents_remember.cli.paseo_bridge.product_node",
+            "agents_remember.serving.paseo.paseo_running_node.product_node",
             return_value=type("FixtureNode", (), {"node": fixture_node})(),
         )
         node_patch.start()

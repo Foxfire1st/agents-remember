@@ -7,11 +7,11 @@ import sys
 from pathlib import Path
 
 from agents_remember.benchmarks.runner_modules.constants import (
-    AGENTS_MD_TARGETS,
     BENCHMARK_ROOT_MARKER,
     PROVIDER_ASSET_DIRS,
 )
 from agents_remember.install.assets import long_path, packaged_source_root
+from agents_remember.install.experiment import RETIRED_STARTUP_TARGETS
 
 
 def is_ignored_package_path(relative: Path) -> bool:
@@ -108,7 +108,7 @@ def remove_path(path: Path) -> None:
 
 
 def sync_runtime_assets(coordination_root: Path, dry_run: bool) -> None:
-    """The workspace's instruction files and provider assets — no skill copy (MIK-R196 rule 7).
+    """Sync provider assets and retire coordinator instruction files; copy no skills.
 
     Skills reach the workspace's harness from the tool server's own package copy, through the
     benchmark-local MCP registration this workspace also writes; a coordination-root skill
@@ -120,8 +120,12 @@ def sync_runtime_assets(coordination_root: Path, dry_run: bool) -> None:
             print(f"Would ensure directory {coordination_root}")
         else:
             coordination_root.mkdir(parents=True, exist_ok=True)
-        for source_rel, target_rel in AGENTS_MD_TARGETS.items():
-            copy_file(source_root / source_rel, coordination_root / target_rel, dry_run)
+        for target_rel in RETIRED_STARTUP_TARGETS:
+            target = coordination_root / target_rel
+            if dry_run:
+                print(f"Would remove retired startup file {target}")
+            else:
+                remove_path(target)
         sync_provider_assets(source_root, coordination_root, dry_run)
 
     for folder in (

@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import agents_remember.serving.background_accounting as accounting_module
-from agents_remember.cli import dashboard as dashboard_module
+from agents_remember.cli import dashboard_daemon as dashboard_module
 from agents_remember.serving.background_accounting import (
     OWNER_METRICS,
     OWNER_PROJECTION,

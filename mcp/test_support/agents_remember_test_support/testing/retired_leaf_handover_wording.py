@@ -2,14 +2,6 @@
 
 RETIRED_LEAF_HANDOVER_WORDING: tuple[tuple[str, str], ...] = (
     (
-        "skills/c-05-create-or-update-onboarding-files/SKILL.md",
-        "**Seat routing:** in the manager -> builder -> reviewer -> curator chain (`l-01-agent-lifecycles`\n`roles/curator.md`), onboarding create/update duty during leaf work belongs to the curator seat, not\nthe builder — the builder produces code and a turn report only.",
-    ),
-    (
-        "skills/c-05-create-or-update-onboarding-files/SKILL.md",
-        "The curator runs this skill's\nworkflows from a change set (landed diff), the leaf task doc, and notes/ fed to it by the manager,\nand routes each item to the right onboarding home (a concrete sidecar or the governing overview\nwhose subject it is; the L3 Operational-Notes target is last-resort only, never a default).",
-    ),
-    (
         "skills/l-01-agent-lifecycles/core/acceptance.md",
         "For a leaf handoff that owner is the manager.",
     ),

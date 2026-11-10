@@ -1,107 +1,74 @@
-# Criteria Catalog — Code-Seam Review
+# Code-seam criteria and shared catalog review rules
 
-The standing criteria an **adversarial reviewer** (`../roles/reviewer.md`) MUST run when the change
-set under review wires code seams: consumers, enforcement points, gates, addresses, tool contracts.
-Binds at the master-exit and super-exit seams and in any loop review whose change set touches code
-(see the binding table in `../roles/reviewer.md`). Criteria are never made up on the spot. A
-baseline review runs the standing list below as its regression floor and may use the exploratory
-mandate and promotion ratchet. A fix-verification uses only the sealed baseline evidence
-needed for its outstanding IDs; it does not recensus this catalog or add a criterion.
+The Reviewer uses this file for the shared procedure governing all five criteria catalogs and for code-seam criteria when a change connects consumers, enforcement points, gates, addresses or tool contracts. The [Reviewer binding table](../roles/reviewer.md#bind-the-seam-and-catalogs) selects the catalogs at master-exit, super-exit and code-touching loop reviews; the shared rules select no additional catalog.
 
-## Standing Criteria (MUST RUN — the regression floor)
+## Shared catalog review rules
+
+These rules govern the review procedure for all five criteria catalogs. They do not select additional catalogs.
+
+The baseline review runs every standing criterion in each bound catalog. Do not invent criteria during intake. In fix-verification, use only the sealed baseline evidence needed for the outstanding identifiers; do not repeat the catalog census or add a criterion.
+
+Only two routes may add a finding after sealing: a valid code finding from the Curator, or a valid finding from an advisory review the Architect commissioned and forwarded in its questions file. Before adding a sealed finding or reopening the verdict through either route, follow [the review operation](../operations/review.md#boundaries).
+
+### Explore during the baseline
+
+For each bound catalog, the Reviewer must examine new ways the change could fail that the catalog does not yet name. The brief sets the number of new review lenses for that catalog; the default is two. Apply the lenses to the code, doctrine, memory, plan or report that catalog reviews.
+
+Propose every new finding class that survives refutation as a catalog amendment in the verdict. Fix-verification has no new-lens or new-catalog duty. Other observations outside the sealed issue list cannot become findings in that round. Send every other new observation through your role's developer-question route.
+
+### Promotion Ratchet
+
+The promotion ratchet is the procedure below for promoting, demoting and automating criteria.
+
+A candidate criterion that catches a real defect in at least two separate first-review engagements is promoted to standing, with its catching evidence cited. This keeps escaped failures as lasting checks.
+
+A standing criterion that catches nothing for N consecutive engagements is demoted to spot-check; N defaults to five. A criterion explicitly protected from this process retains its stated developer-ruling requirement.
+
+A criterion that can be automated moves out of the catalog into a scoped diagnostic.
+
+The Reviewer proposes promotion, demotion or automation in the verdict; it takes effect on the loop owner's acceptance.
+
+## Standing criteria
 
 ### CS-1 — Production-wiring walk
 
-**Trace the real call path, never a hand-aligned harness.** A claim that a consumer or an
-enforcement point exists must be walked through the PRODUCTION call path — the application
-entry point, the tool registration, the store fold — not through a test that hand-assembles
-the pieces into alignment. A test can pass while the production consumer is inert.
-
-- Catching evidence: 260703-L8 review 3 (AR3-1) — the integrate consumer was proven **inert**: the
-  policy was omitted at the application entry point and the gate was looked up on the wrong
-  lifecycle, while a hand-aligned test passed (L8 decision log, cycle-6 entry).
+Trace the production call path behind every claim that a consumer or enforcement point exists: the application entry point, tool registration or store fold. A test that manually aligns the pieces is insufficient; it can pass while the production consumer does nothing.
 
 ### CS-2 — Fail-open hunt
 
-**What happens when the address/config is absent or mistyped?** For every identity, address, key,
-or config the seam matches on: feed it nothing, feed it a near-miss, and confirm the seam fails
-CLOSED (refuses) rather than open (silently proceeds unmatched).
-
-- Catching evidence: 260703-L8 review 4 (AR4-1) — the seam's `enclosure` address had to be pinned
-  as an exact-string contract and the enclosure-less raise made a refusal (L8 decision log,
-  cycle-7 entry).
+For every identity, address, key or configuration value the seam matches, supply both an absent value and a near miss. Confirm that the seam refuses rather than silently proceeding unmatched.
 
 ### CS-3 — Validate-then-mutate
 
-**Every raise/write validates before it mutates.** A call that records state (a gate raise, a
-store append, a contract write) must perform its refusal checks before any durable effect; a
-mutation that precedes validation leaves half-states behind on refusal.
+Every operation that records state must run its refusal checks before any durable effect. This includes raising a gate, appending to a store and writing a contract. Mutation before validation can leave partial state after refusal.
 
-- Catching evidence: 260703-L8 cycle 6 — the `wait=false` raise was reworked to be
-  validate-then-mutate and seam-kind-restricted (L8 decision log, cycle-6 entry).
+### CS-6 — Scaling and reclamation
 
-## Candidate Criteria (seeded exploratory — one catching engagement each; promote at ≥2)
+This criterion is standing. For every loop, store, log or queue the change touches, examine all four properties:
 
-Run under the exploratory mandate during a baseline review only; a candidate is proposed for
-promotion into the standing list when it catches in a second engagement (the ratchet below).
+1. **Stability.** At 10 or 100 times the fleet size, could worst-case resource use threaten the underlying system? Find the budget, backpressure or load-shedding path that drops the signal before exhausting the system.
+2. **Bounded resources.** Establish worst-case time, disk space and memory. Find the per-cycle cap and the store's cap and eviction. Check for an O(n) reread per item that becomes quadratic across layers.
+3. **Reclamation.** Identify who reclaims the data, whether reclamation lands with this change, and the scaling evidence from at least two input sizes. A single-size smoke test is insufficient.
+4. **Quiescence.** With every external input at zero—no acknowledgements, live seats or operator—check that every feedback actor reaches a fixed point. If an actor's output belongs to its own input class, require a multi-cycle, zero-input convergence simulation. Examples include an escalation about an escalation, a retry row that is itself retryable, or an event emitted while folding events. A per-cycle budget limits rate but does not prove convergence. Separate zone verdicts cannot detect a loop crossing zone boundaries.
 
-### CS-4 — Reused-primitive affordance parity *(candidate — 1 catch)*
+No event, message or row outranks system health. A recurring notification condition updates its one existing row's date, tries and attempt; it never appends a sibling. Every store is purgeable: pending rows age out, and hard caps evict oldest first. The artifact on disk is the durable record, not the queue row. Report “keep it all” semantics on a queue-like store as a defect.
 
-**When a screen reuses a shared content primitive, verify every branch of the ORIGINAL's
-affordances (banners, status chips, truncation notices, error states) still fires on the reuse
-path.** A dropped affordance is a silent regression the reuse's own tests won't catch — they
-assert the new screen's happy paths, not the primitive's full surface.
+A green complexity-and-coverage diagnostic (CRAP) result is not delivery acceptance. Stability, bounded resources and reclamation become a gate once a reusable repository-wide scaling-test helper exists. The reusable quiescence check is the multi-cycle simulation with zero external input.
 
-- Catching evidence (single engagement): 260703-L17 review (L17R-2) — the notes reader's
-  `DualPane` reuse drops the "first 2 MiB" truncation banner on the markdown path (the banner
-  lives in `CodeSide`, which markdown never reaches); text and binary keep it.
+## Candidate criteria
 
-### CS-5 — Cross-repo side-effect safety *(candidate — seeded from a clean exemplar, 0 catches)*
+Run these under the baseline's exploratory work. Apply the promotion rules above and retain each candidate's stated catch count.
 
-**Any step that writes to a repository OTHER than the one it operates in gets the full
-validate-then-mutate treatment plus partial-failure and dirty-target analysis.** Check the order
-of validation vs the foreign write, the state left behind when the write lands but the caller
-fails afterward, behavior against a dirty target repo, and an exact format round-trip with the
-foreign artifact's consumer.
+### CS-4 — Reused-primitive affordance parity
 
-- Seeding evidence: 260703-L18 finding 7 (`_reconcile_missing_mapping` writing the official
-  memory repo's ledger mid-`worktree_start`) PASSED all four lenses under this analysis — the
-  clean exemplar that defined the class. A catch in a later engagement promotes.
+This candidate has one catch. When a screen reuses a shared content primitive, verify every branch of the original's behavior still works: banners, status chips, truncation notices and error states. Tests of the new screen's successful paths can miss lost behavior.
 
-### CS-6 — Scaling & reclamation *(promoted — 2 catches)*
+### CS-5 — Cross-repository side-effect safety
 
-**For every loop, store, log, or queue the change set touches, interrogate all four.**
+This candidate has zero catches. For a step writing to another repository, check validation before mutation, partial failure and a dirty target. Inspect the order of validation and the external write, the state left if the write succeeds but its caller then fails, behavior against a dirty repository, and an exact format round trip through the external artifact's consumer.
 
-1. (D1 — stability) At 10x/100x fleet, does this mechanism's worst-case resource draw threaten the substrate? Where is the budget / backpressure / load-shed that makes it shed the signal, not the system?
-2. (D2 — bounded) What is the worst-case time and on-disk / in-memory size? Where is the per-cycle cap and the store's cap+eviction? Is any re-read O(n) per item (accidentally quadratic across layers)?
-3. (D3 — reclamation) Who reclaims this data, is that reclamation landed in THIS change, and is it tested by scaling (>=2 sizes), not a single-N smoke?
-4. (D4 — quiescence) With ALL external inputs at zero (no acks, no live seats, no operator), does every feedback actor reach a fixed point? Any actor whose OUTPUT is a member of its own INPUT class (an escalation about an escalation, a retry row that is itself retryable, an event emitted while folding events) must prove convergence with a multi-cycle zero-input simulation — a per-cycle budget is a rate limiter, NOT a convergence proof, and per-zone verdicts cannot see a loop that lives on the edge BETWEEN zones.
-
-- Ruled invariant (developer, 2026-07-09, supersedes any per-row durability doctrine): **no event, message, or row outranks system health.** Notification rows coalesce — a re-firing condition updates its ONE existing row (date, tries, attempt), never appends a sibling. Every store is purgeable: pending rows age out, hard caps evict oldest-first, and the durable record is the artifact on disk, never the queue row. A reviewer who finds "keep it all" semantics on a queue-like store files it as a defect regardless of what older doctrine says.
-- Catching evidence: 260707-HFX2-L7 — the agent-notifier sweep re-folded a 61 MB append-only inbox once per finding (O(n^2)) over 4,298 never-reclaimed dead-seat rows, freezing the heartbeat and pegging a core while every correctness test passed. Style/CRAP/cyclomatic gates were all green.
-- Catching evidence (D4's seed, the promotion catch): 2026-07-09 escalation-storm meltdown — every ladder rung transition minted a NEW pending, ladder-eligible inbox row addressed to an absent developer; rows were compaction-exempt by doctrine ("pending is immortal"). Each zone passed D1-D3 (budget landed, snapshot fold landed, compactor wired — the L12 audit REFUTED the operator-inbox zone), yet the composed system diverged: 67,925 lines / 227 MB / 20,553 pending rows in one evening, host down. The quiescence regression (`test_unacked_backlog_reaches_a_fixed_point_with_absent_developer`) is D4's executable counterpart.
-- Mechanization seam: 260707-HFX2-L8 owns the doctrine; 260707-HFX2-L7 owns the first executable counterparts (`assert_subquadratic` scaling test R5 and the O(1)-inbox-read invariant R2). D1-D3 graduate into a gate once a reusable repo-wide scaling-test helper exists; D4's reusable shape is the zero-input multi-cycle fixed-point simulation.
-
-## Exploratory Mandate
-
-During a baseline review, beyond the standing list, the reviewer owes **novel lenses** (the brief sets
-N; default 2): attack surfaces of THIS change set the catalog does not name yet. Every novel
-finding-class that survives refutation is proposed as a catalog amendment in the verdict. A
-Fix-verification has no novel-lens or new-catalog duty and cannot turn an observation outside
-the sealed issue list into a finding.
-
-## Promotion Ratchet
-
-- A **candidate** criterion that catches a real defect in **≥2 separate first-review engagements** is promoted
-  into the standing list above, with its catching evidence cited — escaped bugs become permanent
-  tests. Promotion is proposed in the verdict and lands on the loop owner's acceptance.
-- A **standing** criterion that fires nothing for **N consecutive engagements** (default 5)
-  demotes to spot-check.
-- A criterion that can be **mechanized graduates out of the catalog into a scoped diagnostic** —
-  the curator handoff check (which catches history-only "refreshes" before the Git transaction,
-  where prose requests did not)
-  is the working example.
+For promotion, follow the [Promotion Ratchet](#promotion-ratchet).
 
 ## Reuse existing user-interface primitives
 
-Treat a new UI control duplicating an existing primitive as a finding and name what to reuse.
+Treat a new user-interface control that duplicates an existing primitive as a finding. Name the primitive to reuse.

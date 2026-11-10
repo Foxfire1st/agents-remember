@@ -67,8 +67,6 @@ SKILL_IDENTITY = f"{SKILL_ORIGIN}#{SKILL_NAME}"
 FIXTURE_ROLES = (
     "architect",
     "orchestrator",
-    "designer",
-    "strategist",
     "manager",
     "worker",
     "curator",
@@ -93,7 +91,7 @@ FIXTURE_CORE = ("authority", "invariants", "lifecycle-frame", "loop", "acceptanc
 
 FIXTURE_APPLICABILITY = {
     "orientation": FIXTURE_ROLES,
-    "planning": ("architect", "designer", "strategist", "orchestrator"),
+    "planning": ("architect", "orchestrator"),
     "implementation": ("worker",),
     "review": ("architect", "orchestrator", "manager", "reviewer"),
     "curation": ("manager", "curator"),
@@ -113,8 +111,6 @@ FIXTURE_APPLICABILITY = {
 FIXTURE_ROLE_CORE = {
     "architect": ("authority", "invariants", "lifecycle-frame", "loop", "acceptance"),
     "orchestrator": ("authority", "invariants", "lifecycle-frame", "loop", "acceptance"),
-    "designer": ("authority", "invariants", "loop", "acceptance"),
-    "strategist": ("authority", "invariants", "loop", "acceptance"),
     "manager": ("authority", "invariants", "lifecycle-frame", "loop", "acceptance"),
     "worker": ("authority", "invariants", "lifecycle-frame", "acceptance"),
     "curator": ("authority", "invariants", "acceptance"),
@@ -473,14 +469,21 @@ def test_a_real_binding_change_does_move_the_semantic_digest() -> None:
 
 
 def test_changing_an_unrelated_role_leaves_the_worker_capsule_untouched() -> None:
-    baseline = compile_worker()
-    mutated = compile_worker(
-        sources=replaced(all_sources(), "role:designer", content="# designer, rewritten\n")
+    sources = all_sources()
+    unselected = next(source for source in sources if source.identity == "role:curator")
+    rewritten = "# curator, rewritten\n"
+    assert unselected.content != rewritten.encode()
+    changed_sources = replaced(sources, "role:curator", content=rewritten)
+    assert (
+        next(source for source in changed_sources if source.identity == "role:curator").content
+        == rewritten.encode()
     )
+    baseline = compile_worker(sources=sources)
+    mutated = compile_worker(sources=changed_sources)
 
     assert mutated.semantic_digest == baseline.semantic_digest
     assert mutated.render_instructions() == baseline.render_instructions()
-    assert all(block.identity != "role:designer" for block in mutated.capsule.instructions)
+    assert all(block.identity != "role:curator" for block in mutated.capsule.instructions)
 
 
 def test_changing_an_applicable_operation_block_changes_that_capsule() -> None:

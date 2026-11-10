@@ -11,7 +11,9 @@ every harness.
 
 from __future__ import annotations
 
+import re
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -35,12 +37,15 @@ from agents_remember.application.skill_resources.capsule import (
     CapsuleSeatAddress,
     routed_admission_for,
 )
+from agents_remember.cli.role_instruction_details import compose_launch_instructions
 from agents_remember.memory_quality import landing_report
 from agents_remember.memory_quality.converted_check import converted_knowledge_check
 from agents_remember.memory_quality.curator_checklist import (
     write_curator_checklist,
 )
+from agents_remember.models.role_capsules.contracts import strip_contract_markers
 from agents_remember.models.role_capsules.manifest import parse_composition_manifest
+from agents_remember.models.role_capsules.sources import strip_frontmatter
 from agents_remember.models.role_capsules.types import (
     CapsuleAdmittedFacts,
     CapsuleBinding,
@@ -51,9 +56,10 @@ from agents_remember.models.role_capsules.types import (
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.models.tools.tool_answer import TOOL_ANSWER_STATUS_ENTRY_MAX
+from agents_remember.serving.capsule_delivery import capsule_delivery_from
 from agents_remember.worktrees.worktree_contract import load_contract
-from agents_remember_test_support.testing.leaf_instruction_wording import delivered_step
 from landing_report_test_support import (
+    CURATOR_HANDOVER_HEADING,
     CURATOR_SENTENCE_EQUIVALENTS,
     CURATOR_SENTENCES,
     REVIEWER_SENTENCES,
@@ -352,6 +358,33 @@ def test_answer_carries_two_counts_first_rows_within_bound() -> None:
     assert count_response_tokens(answer) <= 1500
 
 
+def _assert_curator_landing_text(text: str) -> None:
+    assert _curator_landing_missing(text) == []
+    for sentence in CURATOR_SENTENCES:
+        mutant = text
+        for variant in (sentence, CURATOR_SENTENCE_EQUIVALENTS.get(sentence, sentence)):
+            pattern = re.escape(" ".join(variant.split())).replace(r"\ ", r"\s+")
+            mutant = re.sub(pattern, "", mutant)
+        assert mutant != text
+        assert sentence in _curator_landing_missing(mutant)
+
+    sentence = CURATOR_SENTENCES[0]
+    no_handover = text.replace(CURATOR_HANDOVER_HEADING, "## Unrelated working step", 1)
+    outside_handover = text
+    for variant in (sentence, CURATOR_SENTENCE_EQUIVALENTS.get(sentence, sentence)):
+        pattern = re.escape(" ".join(variant.split())).replace(r"\ ", r"\s+")
+        outside_handover = re.sub(pattern, "", outside_handover)
+    assert outside_handover != text
+    outside_handover += "\n## Outside the handover\n" + sentence + "\n"
+    for mutant in (no_handover, outside_handover):
+        assert mutant != text
+        assert any(
+            " ".join(variant.split()) in " ".join(mutant.split())
+            for variant in (sentence, CURATOR_SENTENCE_EQUIVALENTS.get(sentence, sentence))
+        )
+        assert sentence in _curator_landing_missing(mutant)
+
+
 def test_role_texts_hold_landing_sentences_everywhere() -> None:
     roots = {REPO_ROOT / "skills"}
     roots.update(
@@ -365,14 +398,7 @@ def test_role_texts_hold_landing_sentences_everywhere() -> None:
     assert len(roots) == 2
     for root in sorted(roots):
         curator = (root / "l-01-agent-lifecycles" / "roles" / "curator.md").read_text()
-        assert _curator_landing_missing(curator) == [], root
-        reading = " ".join(curator.replace("**", "").split())
-        for sentence in CURATOR_SENTENCES:
-            mutant = reading
-            for variant in (sentence, CURATOR_SENTENCE_EQUIVALENTS.get(sentence, sentence)):
-                mutant = mutant.replace(" ".join(variant.split()), "")
-            assert mutant != reading
-            assert sentence in _curator_landing_missing(mutant)
+        _assert_curator_landing_text(curator)
 
     lifecycle = REPO_ROOT / "skills" / "l-01-agent-lifecycles"
     manifest_bytes = (lifecycle / "composition-manifest.json").read_bytes()
@@ -401,7 +427,7 @@ def test_role_texts_hold_landing_sentences_everywhere() -> None:
         assert outcome.result is not None
         text = outcome.result.render_instructions()
         assert sentences == CURATOR_SENTENCES
-        assert _curator_landing_missing(text) == [], f"compiled {role}/{operation}"
+        _assert_curator_landing_text(text)
 
 
 @pytest.mark.parametrize(
@@ -410,22 +436,61 @@ def test_role_texts_hold_landing_sentences_everywhere() -> None:
 def test_reviewer_landing_sentences_are_delivered_before_memory_review(
     root: Path, tmp_path: Path
 ) -> None:
-    """Both original findings live in the exact declared/delivered step-8 file."""
-    instructions, text = delivered_step(
-        root / "l-01-agent-lifecycles",
-        ("reviewer", "review"),
-        "reference/reviewer-memory-d301.md",
-        "when you reach step 8 (memory review), not before",
-        tmp_path / "review.md",
+    """Both findings remain inline in the actual delivered Reviewer role."""
+    lifecycle = root / "l-01-agent-lifecycles"
+    manifest = (lifecycle / "composition-manifest.json").read_bytes()
+    parsed = parse_composition_manifest(manifest)
+    binding = CapsuleBinding(
+        operation="review",
+        admitted=CapsuleAdmittedFacts(
+            task_reference="fixture/leaf.json",
+            task_document_digest=compute_content_digest(b'{"id":"leaf"}'),
+            seat=CapsuleRoleSeat("reviewer", parsed.roles["reviewer"].altitude),
+            repository_id="fixture",
+            work_branch="fixture",
+            tool_policy=CapsuleToolPolicy(granted=frozenset(PUBLIC_TOOLS)),
+        ),
     )
-    assert "Read [memory checks]" in instructions
+    admission = routed_admission_for(
+        lifecycle, "composition-manifest.json", manifest, CapsuleSeatAddress("reviewer", "review")
+    )
+    outcome = compile_admitted_capsule(binding, admission)
+    assert outcome.ok, outcome.render_explanation()
+    assert outcome.result is not None
+    result = outcome.result
+    role_block = next(
+        unit.block
+        for unit in result.capsule.instruction_units
+        if unit.block.source_path == "roles/reviewer.md"
+    )
+    role_source = lifecycle / "roles/reviewer.md"
+    assert role_block.revision == compute_content_digest(role_source.read_bytes())
+    role_text = role_block.content
+    assert (
+        role_text
+        == strip_contract_markers(
+            replace(role_block, content=strip_frontmatter(role_source.read_text()))
+        ).content
+    )
+    delivery = capsule_delivery_from(result)
+    assert "reference/review-memory-changes.md" not in {
+        entry.source_path for entry in delivery.detail_references
+    }
+    instructions, _ = compose_launch_instructions(delivery, str(tmp_path / "review.md"), {})
+    heading = "## Inspect and verify the candidate\n"
+    assert role_text.count(heading) == 1
+    section = role_text.split(heading, 1)[1].split("\n## ", 1)[0]
+    reading = " ".join(section.split())
+    emitted = " ".join(instructions.split())
+    assert "cutCards" in reading and "addedFiles" in reading
     for sentence in REVIEWER_SENTENCES:
         flat_sentence = " ".join(sentence.split())
-        reading = " ".join(text.split())
-        assert flat_sentence in reading, f"{sentence!r} missing in delivered {root}"
-        mutant = reading.replace(flat_sentence, "")
+        assert flat_sentence in reading, f"{sentence!r} missing in Reviewer role {root}"
+        assert flat_sentence in emitted, f"{sentence!r} missing in delivered {root}"
+        mutant = reading.replace(flat_sentence, "", 1)
         assert mutant != reading
-        assert flat_sentence not in mutant
+        with pytest.raises(AssertionError):
+            assert flat_sentence in mutant
 
 
 def test_leaf_base_reports_committed_and_keeps_older_base_out(tmp_path: Path) -> None:

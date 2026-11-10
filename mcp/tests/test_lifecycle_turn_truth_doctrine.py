@@ -33,8 +33,8 @@ Read this before trusting a test below, because the mechanisms are not interchan
 SILENCE IS NOT CONTRADICTION
 ----------------------------
 `classify_reading` returns three states, and `SilenceIsNotContradictionTests` pins all three on
-synthetic samples. `ABSENT` means the surface does not speak to the clause at all -- architect,
-designer, and orchestrator files are declared silent, and staying silent is not a failure. Only a
+synthetic samples. `ABSENT` means the surface does not speak to the clause at all; an Architect
+method need not describe a separate seat ending its turn. Staying silent is not a failure. Only a
 surface that owes the clause must `STATE` it; every canonical surface, owed or not, must avoid
 `CONTRADICTED`.
 
@@ -104,37 +104,34 @@ TREE_LITERAL = REPOSITORY_ROOT / DOCTRINE_TREE
 COMPLETION_TRUTH_ROSTER = (
     "skills/l-01-agent-lifecycles/core/acceptance.md",
     "skills/l-01-agent-lifecycles/operations/curation.md",
-    "skills/l-01-agent-lifecycles/reference/rulings.md",
-    "skills/l-01-agent-lifecycles/roles/designer.md",
+    "skills/l-01-agent-lifecycles/roles/orchestrator.md",
     "skills/l-01-agent-lifecycles/roles/reviewer.md",
-    "skills/l-01-agent-lifecycles/roles/strategist.md",
-    "skills/l-01-agent-lifecycles/templates/master-handover-packet.md",
 )
 # The completion-truth vocabulary itself: a surface uses it when it composes completion from
 # terminal/finalizer truth. `agent-notifier` is excluded on purpose -- naming the relay is not the
 # same act as composing completion, and three criteria/history files name it for other reasons.
-COMPLETION_TRUTH_VOCABULARY = re.compile(r"terminal/finalizer|terminal truth", re.IGNORECASE)
+COMPLETION_TRUTH_VOCABULARY = re.compile(
+    r"terminal/finalizer|terminal truth|terminal or finalizer|turn ending proves only",
+    re.IGNORECASE,
+)
 
 # Retained legacy template that states an AR relay's mechanical side. Capsule roles no longer
 # describe that relay; what a Worker tells the agent that started it is checked separately below.
-RELAY_MECHANICS_SURFACES = ("skills/l-01-agent-lifecycles/templates/turn-report.md",)
+RELAY_REFERENCE_SURFACES = ("skills/l-01-agent-lifecycles/templates/turn-report.md",)
 
 # The one reading every completion-truth surface must carry: the terminal outcome ends a turn and
 # nothing more. Written as one alternation so a legitimate rephrasing inside the pattern passes.
 MECHANICAL_READING = re.compile(
-    r"only that (?:the provider|this|the manager's) turn ended|only turn end\b",
+    r"only that (?:the provider|this|the manager's|the) turn ended|only turn end\b"
+    r"|a turn ending proves only that it ended",
 )
 
 
 def normalize(text: str) -> str:
-    """Strip markdown emphasis, collapse whitespace and fold case, so a clause reads by its words.
+    """Read clause words independently of Markdown emphasis, wrapping and capitalization.
 
-    Case folding was added at 260915-CAPS-L22, and the reason is worth stating: the same sentence is
-    capitalized where a surface begins it and lower-cased where it sits mid-sentence, so a
-    case-sensitive reader of an excerpt made the *wording* of the roster depend on where in a
-    paragraph each role file happens to state it. That is a property of typography, not of the
-    boundary the roster defends, and it silently broke four surfaces when their handoff paragraphs
-    were rewritten. Folding case makes the roster read clauses rather than capital letters.
+    The same sentence is capitalized at a paragraph's start and lower-cased mid-sentence.
+    Case folding prevents that typography from changing the roster's boundary reading.
     """
 
     return " ".join(re.sub(r"[*`]", "", text).split()).casefold()
@@ -147,11 +144,11 @@ def _flatten(text: str) -> str:
     return normalize(_MARKDOWN_LINK.sub(r"\1", text))
 
 
-_CLAUSE_SPLIT = re.compile(r"[,;:]|\band\b|\bbut\b")
+# A table label and its adjacent content cell do not share grammatical attribution.
+_CLAUSE_SPLIT = re.compile(r"[,;:|]|\band\b|\bbut\b")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 _NEGATION = re.compile(r"\b(?:never|not|no|nor|cannot|can't|without|instead of)\b", re.IGNORECASE)
-# Past this many surviving clauses the splitter is looking at a markdown list or table, not at a
-# sentence, so no rejoinder is produced for it.
+# Beyond this clause count, treat the input as a list/table and do not rejoin it as a sentence.
 MAX_JOINED_CLAUSES = 8
 
 
@@ -211,14 +208,11 @@ def promise_views(text: str) -> tuple[View, ...]:
 
 @dataclass(frozen=True)
 class RetiredClaim:
-    """One claim the reconciled boundary retires, with the text it was written to catch.
+    """A retired claim pattern and the text it must detect.
 
-    ``sanitize`` removes the spans of a reading that *state* the boundary rather than violate it,
-    before ``pattern`` is applied. It exists because a clause can carry both: the shipped
-    master-handover-packet wording says the terminal outcome ``attests only that the turn ended``
-    and that ``rule 4's validation is what accepts it`` -- correct doctrine, but it contains every
-    word an acceptance-side detector looks for. Removing those spans keeps the detector's teeth on
-    the parts of the clause that do make a claim.
+    ``sanitize`` removes valid boundary spans before matching: a clause may state both
+    turn-end-only evidence and owner validation, as the master-handover packet does.
+    Keep the remaining spans so actual acceptance claims remain detectable.
     """
 
     claim_id: str
@@ -312,11 +306,11 @@ _TERMINAL_OUTCOME = (
 _OUTCOME_ANAPHOR = (
     r"(?:that|this)\s+(?:(?:terminal|completed|finalizer|turn[- ]ended|same)\s+)?outcome"
 )
-# "attests only that this turn ended", "means only that the provider turn ended normally": an
-# attribution restricted to turn-end states the boundary and must not be read as a violation.
+# A direct turn-end-only attestation states the boundary; it does not accept the handoff.
 _TURN_END_RESTRICTION = re.compile(
-    r"\b(?:attests?|attesting|proves?|means|mean|is|are|counts? as|serves as|amounts to)\s+"
-    r"(?:only|merely|nothing more than)\s+(?:that[^.;:]{0,60}?\bturn end\w*|turn end\b)",
+    r"\b(?:attest(?:s|ed|ing)?|proves?|means|mean|is|are|counts? as|serves as|amounts to)\s+"
+    r"(?:only|merely|nothing more than)\s+"
+    r"(?:that\s+(?:(?:the provider|this|the manager's|the)\s+)?turn end(?:ed|s)?\b|turn end\b)",
     re.IGNORECASE,
 )
 # "... rule 4's validation is what accepts it": here the *owner's* validation accepts the handoff,
@@ -461,39 +455,33 @@ RETIRED_CLAIMS = (
 # surface on this roster is not, and the markers are the shipped wording for its own side of the
 # boundary. Matching is on normalized words, so emphasis and re-wrapping are free.
 #
-# Re-pointed at the consolidated corpus's shipped wording. The whole-boundary set moved with the
-# boundary itself, from the retired `SKILL.md` section to `core/acceptance.md`, which carries all
-# eight clauses verbatim; the per-role markers that no longer matched were re-quoted from the file
-# that ships them today, and one of them (`roles/strategist.md`) named the wrong validating seat --
-# the consolidated handoff-artifact table in `core/acceptance.md` gives the strategist's
-# orchestration-task draft to the architect, so the marker follows the corpus and not the reverse.
-# A marker is still the same clause it always was: `_assert_owed` requires its words to be present
-# AND the surface to contradict nothing, so deletion or an in-place denial still fails.
+# Required statements name each current owner's obligations. Architect methods retain
+# their artifact-before-ruling boundary without pretending to be separate role turns.
 OWED_STATEMENTS: dict[str, tuple[str, ...]] = {
     "skills/l-01-agent-lifecycles/core/acceptance.md": (
-        "Terminal truth is mechanical; acceptance is the owner's.",
+        "The relay neither validates artifact content nor invents a gate decision.",
         "means only that the provider turn ended normally",
-        "does not attest that the required artifact exists, is current, or satisfies its requirement",
-        "derives that mechanical seat-state fact, and delivers it to the structurally current owner",
-        "never opens, parses, or evaluates a report, verdict, coherence record, "
-        "or acceptance envelope",
-        "before advancing lifecycle state",
-        "nudges, rejects, replaces, or escalates",
-        "a file hands itself over to nobody",
-        "send it with `role_message` to the agent that waits",
-        "A file on record wakes no one",
-    ),
-    "skills/l-01-agent-lifecycles/roles/strategist.md": (
-        "Terminal/finalizer truth then attests only that this turn ended",
-        "wakes the architect, who validates the artifact",
+        "does not establish that the required artifact exists, is current or satisfies its requirement",
+        "The host reads that a turn ended and derives the mechanical seat-state signal.",
+        "It delivers one line to the structurally current owner waiting for that agent, "
+        "carrying the ended agent's last line.",
+        "The relay never opens, parses or evaluates reports, verdicts, coherence records "
+        "or acceptance envelopes.",
+        "On wake, the current gate owner opens and validates the required artifact, candidate "
+        "identity, evidence and acceptance envelope before advancing lifecycle state.",
+        "it nudges, rejects, replaces or escalates instead of waiting for the relay to check the artifact",
+        "Worker, Reviewer and Curator write their durable handoff artifact before ending a "
+        "successful handoff turn.",
+        "They then send it with `role_message` to the waiting agent.",
+        "A filed artifact wakes nobody by itself.",
     ),
     "skills/l-01-agent-lifecycles/templates/master-handover-packet.md": (
-        "which attests only that the manager's turn ended",
-        "who validates the packet",
+        "Before deciding the received handover, read [Keep relay and gate-owner duties separate](../core/acceptance.md#keep-relay-and-gate-owner-duties-separate) for exact-artifact and candidate validation.",
+        "The completion and handover boundary this template follows is owned by [acceptance](../core/acceptance.md).",
     ),
     "skills/l-01-agent-lifecycles/templates/turn-report.md": (
-        "The relay never inspects it",
-        "the manager — never a seat-local watcher — detects a missing report",
+        "The [acceptance reference](../core/acceptance.md) owns acceptance",
+        "[final-candidate verification](../operations/implementation.md#verify-the-final-candidate) owns targeted handover checks.",
     ),
 }
 
@@ -608,16 +596,7 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
         )
 
     def test_the_boundarys_one_home_states_the_whole_boundary(self) -> None:
-        """The whole boundary is owed by the surface that owns it, not by the file it used to sit in.
-
-        This case asserted the shared root (`SKILL.md`) while the boundary lived in a section there.
-        R01 moved that section -- verbatim -- into `core/acceptance.md`, whose own title declares it
-        the boundary's one home, and the consolidated `SKILL.md` cites it instead of restating it.
-        The case follows the boundary instead of the path it used to be reachable at: the same
-        assertion, against the surface that now holds the whole of it. `SKILL.md` is not unchecked by
-        that move -- it is swept by `test_no_canonical_surface_contradicts_the_boundary` like every
-        other canonical surface.
-        """
+        """The owner carries the whole boundary; the sweep also checks every referring surface."""
 
         self._assert_owed("skills/l-01-agent-lifecycles/core/acceptance.md")
 
@@ -635,7 +614,12 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
         """
 
         raw = read_surface(relative)
-        text = _flatten(raw)
+        if relative.startswith("skills/l-01-agent-lifecycles/templates/"):
+            target = (REPOSITORY_ROOT / relative).parent / "../core/acceptance.md"
+            self.assertEqual(target.resolve(), (TREE_LITERAL / "core/acceptance.md").resolve())
+            self.assertTrue(target.is_file())
+            self._assert_owed("skills/l-01-agent-lifecycles/core/acceptance.md")
+        text = normalize(raw)
         missing = [
             statement
             for statement in OWED_STATEMENTS[relative]
@@ -677,47 +661,57 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
                     "terminal outcome only ends the turn",
                 )
 
-    def test_the_relay_mechanics_surfaces_state_the_relay_side(self) -> None:
-        for relative in sorted(RELAY_MECHANICS_SURFACES):
+    def test_the_relay_reference_surfaces_point_to_the_owner(self) -> None:
+        for relative in sorted(RELAY_REFERENCE_SURFACES):
             with self.subTest(surface=relative):
                 self._assert_owed(relative)
 
     def test_a_worker_hands_its_frozen_report_directly_to_the_reviewer(self) -> None:
         worker_source = read_surface("skills/l-01-agent-lifecycles/roles/worker.md")
         operation_source = read_surface("skills/l-01-agent-lifecycles/operations/implementation.md")
+        every_role_source = read_surface("skills/l-01-agent-lifecycles/core/every-role.md")
         # Rule 43 stages seat creation through the Manager, while the Worker
         # still sends the complete frozen object directly to its Reviewer.
         routes = (
             (
                 worker_source,
-                "Outputs",
+                "Report and freeze the candidate",
                 (
-                    "Freeze the candidate as `../operations/implementation.md` §Outputs states.",
-                    "Worker first tells Manager to start Reviewer, then hands freeze directly to that Reviewer.",
+                    "Before writing the report, follow [Implementation outputs]"
+                    "(../operations/implementation.md#outputs) "
+                    "for report contents, checks and the freeze procedure.",
+                    "Before handing over a frozen candidate, follow [Hand over the frozen candidate]"
+                    "(../operations/implementation.md#hand-over-the-frozen-candidate) for the Manager "
+                    "stage-start notice, direct Reviewer handover and code-`PASS` Curator handover.",
                 ),
             ),
             (
                 worker_source,
-                "Boundaries",
+                "Preserve role and task boundaries",
                 (
                     "A Worker starts no role.",
-                    "Freeze the candidate and hand it to the Reviewer directly, rather than asking the Manager to relay it",
+                    "Keep the direct Reviewer and Curator handovers described above; "
+                    "the Manager does not relay their contents.",
                 ),
             ),
             (
                 operation_source,
                 "Outputs",
                 (
-                    "Freeze the candidate and first tell the Manager to start the Reviewer.",
-                    "Once the Reviewer exists, hand the freeze directly to that Reviewer with `role_message` on `agents-remember-task`",
-                    "naming the leaf, head and change hash in your report, report path, and whole next stretch.",
+                    "Freeze the candidate and tell the Manager to start the Reviewer.",
+                    "Once the Reviewer exists, send it the freeze directly with `role_message` "
+                    "on `agents-remember-task`.",
+                    "Name the leaf, the report path and the whole next stretch of work. "
+                    "The report names the head and change hash.",
                 ),
             ),
             (
-                operation_source,
-                "Boundaries",
+                every_role_source,
+                "Parallel work and waiting",
                 (
-                    "Count a hand-over as taken only when the recipient's reply or report names the exact object and shows the requested work or its start.",
+                    "Count a handover as taken only when the recipient's reply, report or intake "
+                    "names the exact object and shows the requested work or its start.",
+                    "Open every supplied recipient artifact before you call one absent.",
                 ),
             ),
         )
@@ -740,8 +734,10 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
                         require_route(mutant, heading, clauses)
         worker = normalize(worker_source)
         operation = normalize(operation_source)
-        self.assertIn("not routine report notices", operation)
-        self.assertIn("count a hand-over as taken", worker)
+        self.assertIn(
+            "do not send it routine report notices or ask it to relay handover contents", operation
+        )
+        self.assertIn("before deciding whether a handover was taken", worker)
         self.assertIn("a worker started from the dashboard has none", worker)
         self.assertIn("a finished turn is not ar acceptance", worker)
 
@@ -774,7 +770,9 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
                 (
                     "verify each manager's delivery and aggregate evidence",
                     "inspect supplied actual diffs for acceptance",
-                    "do not claim acceptance or landing from the status of an agent in paseo",
+                    "an agent's state in paseo does not record agents remember (ar) acceptance",
+                    "keep reports, findings, review, curation, and git publication separately addressed",
+                    "use the existing ar task and paired git owners for their semantic records",
                 ),
             ),
         )
@@ -794,6 +792,12 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
                     [],
                     f"{role}+{operation} no longer checks its candidate/evidence boundary",
                 )
+
+                for marker in markers:
+                    with self.subTest(removed_marker=marker):
+                        mutant = delivered.replace(normalize(marker), " ")
+                        self.assertNotEqual(mutant, delivered)
+                        self.assertNotIn(normalize(marker), mutant)
 
                 if role == "manager":
                     weakened = role_text.replace(
@@ -815,23 +819,17 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
 
 
 class ConvergenceTeethTests(unittest.TestCase):
-    """The re-pointed data kept the detectors' teeth: one mutant pair per reconciled site.
+    """Current source must read clean while each paired contradiction remains detectable.
 
-    The consolidation repair moved this module's roster and required-statement *data* to the
-    consolidated corpus and moved four corpus sentences so the EXISTING detectors read them
-    correctly. That is exactly the kind of change that can buy a green run by hollowing a guard out,
-    so the proof is stated instead of implied: for each reconciled site, the surface as it ships must
-    read clean, and the contradicting variant that site carried (or would carry) must still fail the
-    same detector. The shipped side is READ FROM THE CORPUS -- not pasted here -- so the pair cannot
-    agree with itself; only the mutant is synthetic. Change the corpus into a contradiction, or
-    hollow a detector out, and one half of a pair fails.
+    The shipped side is read from the corpus; only the mutant is synthetic. Updating
+    required wording or Markdown segmentation must not hollow out the detector.
     """
 
     #: site -> (corpus surface, synthetic contradicting variant, claim the variant must trip)
     RECONCILED_SITE_MUTANTS: tuple[tuple[str, str, str, str], ...] = (
         (
-            "reference/rulings.md migration map (historical record)",
-            "skills/l-01-agent-lifecycles/reference/rulings.md",
+            "core/acceptance.md table attribution",
+            "skills/l-01-agent-lifecycles/core/acceptance.md",
             "| LOCR-1 | x | The completed outcome accepts the handoff and validates the artifact |",
             "terminal-outcome-semantic-acceptance",
         ),
@@ -887,21 +885,19 @@ class ConvergenceTeethTests(unittest.TestCase):
         self.assertEqual(classify_reading(mutated), Reading.CONTRADICTED)
 
     def test_removing_an_owed_clause_from_the_shipped_text_still_fails_its_surface(self) -> None:
-        relative = "skills/l-01-agent-lifecycles/core/acceptance.md"
-        # The mutation is applied to the normalized reading, because that is what `_assert_owed`
-        # tests: a clause the shipped file carries across a line break or through markdown emphasis
-        # is removed here by its words, exactly as the check reads it.
-        shipped = _flatten(read_surface(relative))
-        for clause in OWED_STATEMENTS[relative]:
-            with self.subTest(clause=clause):
-                marker = normalize(clause)
-                self.assertIn(marker, shipped, f"{relative} no longer states its owed clause")
-                mutated = shipped.replace(marker, " ")
-                self.assertIn(
-                    clause,
-                    [owed for owed in OWED_STATEMENTS[relative] if normalize(owed) not in mutated],
-                    "a surface that lost its owed clause must be reported as missing it",
-                )
+        # Delete each owed statement on its authoritative source or explicit referral.
+        for relative, clauses in OWED_STATEMENTS.items():
+            shipped = normalize(read_surface(relative))
+            for clause in clauses:
+                with self.subTest(surface=relative, clause=clause):
+                    marker = normalize(clause)
+                    self.assertIn(marker, shipped, f"{relative} no longer states its owed clause")
+                    mutated = shipped.replace(marker, " ")
+                    self.assertIn(
+                        clause,
+                        [owed for owed in clauses if normalize(owed) not in mutated],
+                        "a surface that lost its owed clause must be reported as missing it",
+                    )
 
 
 class SilenceIsNotContradictionTests(unittest.TestCase):
@@ -911,6 +907,10 @@ class SilenceIsNotContradictionTests(unittest.TestCase):
         for text in (
             "Terminal truth attests only that this turn ended; the owner validates.",
             "Terminal/finalizer evidence proves only turn end.",
+            "A terminal or finalizer result attests only that the turn ended.",
+            "A turn ending proves only that it ended.",
+            "Terminal or finalizer evidence attested only that the turn ended.",
+            "A completed outcome attested only that the provider turn ended normally.",
         ):
             with self.subTest(text=text):
                 self.assertEqual(classify_reading(text), Reading.STATED)
@@ -937,6 +937,7 @@ class SilenceIsNotContradictionTests(unittest.TestCase):
         for boundary in (
             "Terminal/finalizer truth attests only that this turn ended and wakes the owner. ",
             "Terminal/finalizer evidence proves only turn end. ",
+            "Terminal or finalizer evidence attested only that the turn ended. ",
         ):
             with self.subTest(boundary=boundary):
                 self.assertEqual(
@@ -1104,9 +1105,24 @@ class DetectorTeethTests(unittest.TestCase):
             "A completed leaf is required before the manager advances lifecycle state.",
             # The possessive form of the same mistake: the seats close, not the outcome.
             "A completed leaf's worker seats close after the report lands.",
+            "| Handoff acceptance | A canonical completed outcome meant only that the provider turn ended. |",
         ):
             with self.subTest(text=text):
                 self.assertEqual(contradictions(text), (), text)
+
+        for text in (
+            "| Handoff acceptance | The completed outcome accepts the handoff. |",
+            "| Handoff acceptance | The handoff is accepted by the completed turn. |",
+            "Terminal or finalizer evidence attested that the handoff was accepted.",
+            "Terminal or finalizer evidence attested only that the handoff was accepted "
+            "when the turn ended.",
+            "The handoff was attested by the completed turn.",
+        ):
+            with self.subTest(table=text):
+                self.assertIn(
+                    "terminal-outcome-semantic-acceptance",
+                    [finding.claim_id for finding in contradictions(text)],
+                )
 
     def test_every_retired_claim_is_caught_in_its_own_sample(self) -> None:
         for claim in RETIRED_CLAIMS:
@@ -1134,7 +1150,7 @@ class DetectorTeethTests(unittest.TestCase):
             surfaces - set(COMPLETION_TRUTH_ROSTER),
             "the scan must range over undeclared surfaces too, not only the roster",
         )
-        for relative in (*COMPLETION_TRUTH_ROSTER, *RELAY_MECHANICS_SURFACES):
+        for relative in (*COMPLETION_TRUTH_ROSTER, *RELAY_REFERENCE_SURFACES):
             with self.subTest(surface=relative):
                 self.assertTrue(read_surface(relative).strip(), f"{relative} is empty")
 

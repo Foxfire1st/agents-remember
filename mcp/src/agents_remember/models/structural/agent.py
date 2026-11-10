@@ -14,8 +14,6 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 StructuralRole = Literal[
     "architect",
     "orchestrator",
-    "strategist",
-    "designer",
     "investigator",
     "system-specialist",
     "manager",

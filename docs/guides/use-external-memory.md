@@ -9,7 +9,7 @@ External memory is useful when:
 - code and memory should be reviewed or permissioned separately
 - several code repositories share one coordination root
 - long-running branches need matching code and memory versions
-- `w-02-light-task-workflow` worktree closeout should record code-memory ledger mappings
+- the [authorized worktree closeout](../../skills/l-01-agent-lifecycles/operations/closeout.md) should record code-memory ledger mappings
 
 ## Layout
 
@@ -42,7 +42,9 @@ Install the runtime first through the MCP server:
 runtime_install()
 ```
 
-Then ask the agent to run `c-00-initialize-memory-repo` for the target repository. It creates the external memory repo; there is no other mode to choose.
+Before ordinary task execution, initialize missing external memory for the selected repository through `memory_init` on `agents-remember-task`. This belongs to setup, including the Bootstrap role's permitted setup procedure; it is not a task-worktree repair.
+
+Preview with `dry_run: true`, naming the configured repository with `repo_id`. Use `initial_branch` for the chosen foundation branch, or let the initializer inherit the code checkout's current branch. If neither supplies a branch, resolve that decision rather than guessing one. Run the agreed setup without dry run, then read its returned memory root, Git result and knowledge-foundation state. Initialization scaffolds memory; it does not author onboarding cards or knowledge records. Existing files remain intact. Follow an actual refusal or returned next action rather than treating an existing unconverted root as initialized.
 
 ## Configure
 
@@ -76,7 +78,7 @@ In a one-repo memory repo, unscoped path rules are fine. In shared coordinator s
 
 ## Resolve
 
-The `c-08-ar-coordination-context-resolver` skill resolves the repository to its memory repo:
+Product context resolution maps the selected repository to its memory repo; use `context_packet` under the [mounted tool contract](../../skills/l-01-agent-lifecycles/reference/knowledge/commands.md):
 
 ```text
 <ar-coordination>/memory-repos/ar-<repo>/
@@ -87,7 +89,7 @@ that exact path and the route to re-point it. Resolution is per target repositor
 
 ## Closeout
 
-External-memory changes need code and memory to stay mapped. `w-02-light-task-workflow` handles that sequence for both direct edits in the current checkout and worktree-backed tasks:
+External-memory changes need code and memory to stay mapped. The [authorized closeout owner](../../skills/l-01-agent-lifecycles/operations/closeout.md) coordinates that sequence through the existing tools for both direct edits in the current checkout and worktree-backed tasks:
 
 1. for Agents Remember source changes, run the leaf change-set-scoped quality contract (`--targeted`); the full wrapper runs once per master at the master integration gate
 2. commit code

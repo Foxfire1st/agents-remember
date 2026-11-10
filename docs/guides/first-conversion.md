@@ -59,7 +59,7 @@ The memory repository has an official line (a branch leaves start from).
 
 The converter preserves source identities and exported wording; it is not a style-rewriting pass.
 For subsequent authored invariant revisions, family guarantees and history reasons, use the
-[shared STE-inspired writing profile](../../skills/l-01-agent-lifecycles/reference/shared-writing-profile.md).
+[shared STE-inspired writing profile](../../skills/l-01-agent-lifecycles/reference/writing/technical-english-profile.md).
 The migration procedure must link that profile before assessment waves start. Compare each proposed
 rewrite's promise and semantic scope with its exact baseline and obtain independent meaning review
 before publication through the normal writer. Keep producer statements, source/evidence identities,

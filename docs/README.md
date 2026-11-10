@@ -16,7 +16,7 @@ memory-repos/ar-agents-remember/onboarding/src/orchestrator/core_editor.py.md
 - **Search that finds, not decides:** Semantic memory and code-graph providers were optional accelerators for locating relevant files, callers, dependencies, and concepts; both are retired now, and verified Markdown and source code remain the truth.
 - **Memory that lands with code:** External memory repos use a `memory.md` ledger, isolated dual worktrees, preview/apply closeout, and all-or-nothing integration so code and memory stay synchronized.
 - **Repo-owned agent behavior:** Each memory repo carries `system/` files for path rules, tools, coding guidelines, documentation sources, branch policy, and reporting shape, so the same project rules load across harnesses.
-- **One-call first run:** Register the MCP server with your harness, then start Bootstrap from your own chat. The server serves the skills as package resources; optional native instruction files carry only the first-action directive.
+- **One-call first run:** Register the MCP server with your harness, then start Bootstrap from your own chat. The server serves the skills as package resources.
 
 The setup stores durable memory in a memory repository of its own, under `ar-coordination/memory-repos/ar-<repo>/`. Repo-local internal memory under `<repo>/ar-memory/` was removed from the product and is refused. For the full tour, see [Features](features.md).
 
@@ -60,7 +60,7 @@ The setup stores durable memory in a memory repository of its own, under `ar-coo
 - [Harnesses & Spawn Knobs](reference/harnesses.md)
 - [Path Rules](reference/path-rules.md)
 - [Skills](reference/skills.md)
-- [c-08-ar-coordination-context-resolver Resolver](reference/resolver-c08.md)
-- [c-05-create-or-update-onboarding-files Memory Quality Control](reference/drift-c02.md)
-- [w-02-light-task-workflow Worktrees And Closeout](reference/worktrees-c09.md)
+- [Product Context Resolution](reference/resolver-c08.md)
+- [Memory Quality Control](reference/drift-c02.md)
+- [Worktrees And Closeout](reference/worktrees-c09.md)
 - [Release Checklist](release-checklist.md) - pre-release quality, version-sync, and smoke gate.

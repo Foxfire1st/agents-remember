@@ -1,5 +1,7 @@
 # Bootstrap State — <repo>
 
+<!-- The bootstrap orchestrator uses this template to record progress, decisions, and blockers so another session can resume the work. -->
+
 | Field | Value |
 |---|---|
 | started | <YYYY-MM-DDThh:mm> |
@@ -10,7 +12,7 @@
 | memoryRoot | `<path>` |
 | onboardingRoot | `<path>` |
 | targetRepoBranch | `<branch>` |
-| topology | external / mixed |
+| topology | external |
 | sourceInventoryStatus | pending / presented / accepted / corrected / blocked |
 
 ## Phase Status
@@ -75,7 +77,7 @@
 
 | File | Reason | Revisit Trigger |
 |---|---|---|
-| `<path>` | routine DTO | when modified or promoted by coverage plan |
+| `<path>` | routine data transfer object | when modified or promoted by coverage plan |
 
 ## Closeout Boundary
 

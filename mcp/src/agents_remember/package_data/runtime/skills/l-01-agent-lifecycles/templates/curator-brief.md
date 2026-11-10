@@ -1,123 +1,105 @@
-# Template — Curator Brief
+# Curator brief
 
-What the **manager** makes sure the leaf's documents hold for a leaf's **curator**, which the
-leaf's `role_start_set` call starts held and its first message opens. The Curator receives the
-passed freeze and hand-off list directly from the
-Reviewer and Worker before writing its curation. This
-is the change-set and intent feeding contract: the curator never infers either from transcript
-memory. The Worker feeds the frozen change set and hand-off list, and the Reviewer feeds its code
-verdict. Existing intent anchors, the leaf task doc, approved
-developer/design rulings, the manager's immediately preceding current source-lineage projection,
-and notes/ complete the inputs.
+The Manager uses this template to supply a leaf's Curator with the frozen change set, intent and current source lineage. The Curator reads those inputs instead of inferring them from conversation history.
 
-**This template feeds inputs; it does not author rules.** The curator's duties live in
-`../roles/curator.md`, the coherence procedure in `../operations/curation.md`, and the truth
-boundary in `../core/acceptance.md`. The rows below carry the *values* for this leaf; if a value
-here disagrees with those files, they win.
+The Worker sends its frozen change set and handoff list directly. The Reviewer sends the passed freeze and code verdict directly. The leaf task document, existing intent anchors, approved developer and design rulings, the Manager's immediately preceding source-lineage projection, and task notes complete the inputs.
 
----
+This template supplies values, not new rules. The [Curator role](../roles/curator.md) owns duties, the [curation operation](../operations/curation.md) owns the coherence procedure, and [acceptance](../core/acceptance.md) owns the truth boundary. Those files govern a disagreement with a value in this intake record.
+
+## Intake values to fill
 
 ```md
-ROLE BRIEF — curator
+CURATOR INTAKE RECORD
 
-# CURATOR COHERENCE BRIEF — <leaf-id> · <leaf title>
+# CURATOR COHERENCE INTAKE — <leaf-id> · <leaf title>
 
-You are the CURATOR for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Your lifecycle is
-`skills/l-01-agent-lifecycles/roles/curator.md`; this brief is your session start. Perform the
-leaf's conservative three-way intent reconciliation and write its coherence pass from the inputs
-below, then hand the memory change and report directly to the Reviewer.
+You are the Curator for leaf `<leaf-id>` of master `<master>` in repository `<repo-id>`.
+Your compiled first message follows the [Curator role](../roles/curator.md); this record supplies intake values, not a session-start brief.
+Reconcile the three intent sources below conservatively and write the leaf's coherence pass.
+Then hand the memory change and report directly to the Reviewer.
 
 ## Worktrees
-- Code:   `<code-worktree-path>` (branch `<work-branch>`, base `<base-commit>`) — read-only for you.
-- Memory: `<memory-worktree-path>` (branch `<memory-work-branch>`) — your only write surface.
-- Enclosure contract: `<enclosure-contract-path>` — pass this as `contract_path` to every memory
-  tool below; it is what scopes them to this leaf instead of the official memory repo.
-- Pre-curator lineage: `<worktree_status sourceLineage projection>` — captured by the manager
-  immediately before dispatch and `state=current` across every applicable super → master → leaf
-  code and external-memory edge. This is evidence, never a caller-supplied commit-id authority.
 
-## The frozen change set (fed by the Worker, not inferred)
-- Code diff: `<base-commit>..<worker-head-commit-or-HEAD>` in the code worktree — <changed-path
-  list, or the dashboard change-set view ref (`/api/changeset/task` scope, or the leaf's
-  `committed`/`working` change-set) the Worker records for the exact freeze>.
-- Memory diff (if any pre-existing memory-worktree changes carry forward): `<memory-base>..<HEAD>`.
-- Counters: `<files changed / insertions / deletions>` from the change-set the Worker handed over —
-  do not re-derive this from your own guess at "what probably changed."
+- Code: `<code-worktree-path>`, branch `<work-branch>`, base `<base-commit>`. Read-only for you.
+- Memory: `<memory-worktree-path>`, branch `<memory-work-branch>`. Your only write surface.
+- Enclosure contract: `<enclosure-contract-path>`. Pass it as `contract_path` to every memory tool below so the tool acts on this leaf, not the official memory repository.
+- Pre-curator lineage: `<worktree_status sourceLineage projection>`. The Manager captured it immediately before the start. It has `state=current` across every applicable super → master → leaf code and external-memory edge. This is evidence, not caller-supplied commit-identifier authority.
+
+## Frozen change set supplied by the Worker
+
+- Code diff: `<base-commit>..<worker-head-commit-or-HEAD>` in the code worktree. Supply `<changed-path list, or the dashboard change-set view ref (/api/changeset/task scope, or the leaf's committed/working change-set) recorded by the Worker for this exact freeze>`.
+- Memory diff, if existing memory-worktree changes carry forward: `<memory-base>..<HEAD>`.
+- Counters: `<files changed / insertions / deletions>` from the change set the Worker handed over. Do not infer these from a guess about what changed.
 
 ## Task inputs
-- Leaf task doc: `<leaf-doc-path>` (read it first — objective, requirements, decision log).
-- Approved requirement corpus ruling: `<durable developer approval citation>`.
-- Primary requirement revision: `<stable-id>@<version>` — canonical packet `<packet-path>`.
-- Worker delivery attempt: `<attempt-id>` — a candidate handoff identity separate from the
-  semantic requirement revision and from every evidence digest.
-- Adjacent preservation/dependency revisions: `<stable-id>@<version> — <packet-path> | none`.
-- Requirement adjudication: `<reviewer-verdict-path | none when review was not requested>` —
-  attach the reviewer's independent `accepted | rejected` row only when this leaf has an approved
-  review. For an atomic child, any requested route-review adjudication is deferred to the
-  accumulated canonical master integration review; retain worker evidence and report rejected or
-  worker-blocked revisions as blockers, never current intent to write into onboarding.
+
+Before checking the approved revision, read [the approval-record definition](../core/every-role.md#requirements-and-limits) for the approved manifest entry, its content hash and the corpus hash.
+
+- Leaf task document: `<leaf-doc-path>`. Read its objective, requirements and decision log first.
+- Requirement approval record: `<durable approval-record citation>`.
+- Primary requirement revision: `<stable-id>@<version>`, canonical packet `<packet-path>`.
+- Worker delivery attempt: `<attempt-id>`. This candidate-handoff identity differs from the semantic requirement revision and every evidence digest.
+- Adjacent preservation and dependency revisions: `<stable-id>@<version> — <packet-path> | none`.
+- Requirement adjudication: `<reviewer-verdict-path | none when review was not requested>`. Attach the Reviewer's independent `accepted | rejected` row only when this leaf has an approved review.
 - Review mode: `<baseline | fix-verification | none>`.
-- Sealed review baseline / predecessor: `<sealed baseline ref> / <immediately preceding result or
-  N/A>` when review was requested.
-- Outstanding issue IDs: `<exact IDs and dispositions supplied by the reviewer | none>` — when
-  review exists, preserve these judgments.
-- notes/: `<series-notes-path>` — the builder turn report
-  (`notes/reports/<leaf-id>-worker-report.md`), the optional route-review verdict, and
-  any other task-local notes naming a factual current-state clarification.
-- Producers' curator hand-off list: `<path or fenced-block location of the builder's list, plus the
-  reviewer's own list when review was requested>` — the requirement-shaped items in the shape of
-  `../templates/curator-handoff-list.md`, handed over unparaphrased as data. Producer fields
-  (`id`, `statement`, `kind`, `target`, `found_at`, `disposition`, `disposition_source`, `evidence`,
-  `authority`) arrive filled; the curator fields (`resolution`, `validated_at`, `record_action`,
-  `supersedes`) are `null` and are yours to fill. If the list and a report prose summary disagree, the
-  list governs — attach the list itself, never a re-telling of it.
+- Sealed review baseline and predecessor: `<sealed baseline ref> / <immediately preceding result or N/A>` when review was requested.
+- Outstanding issues: `<exact IDs and dispositions supplied by the reviewer | none>`. Preserve these judgments when review exists.
+- Task notes: `<series-notes-path>`. Include the builder turn report (`notes/reports/<leaf-id>-worker-report.md`), optional route-review verdict and task-local notes that state a factual current-state clarification.
+- Producers' Curator handoff lists: `<path or fenced-block location of the builder's list, plus the reviewer's own list when review was requested>`. Attach the lists themselves as data, in the supplied handoff-list format, without paraphrasing.
+
+For an atomic child, requested route-review adjudication waits for the accumulated canonical master integration review. Retain Worker evidence. Treat rejected or Worker-blocked revisions as blockers, never current intent to put into onboarding.
+
+Before checking the supplied producer lists, read [the Curator handoff-list contract](curator-handoff-list.md#the-entry) for producer fields and Curator-owned fields.
 
 ## Three-way intent inputs
 
 ### Existing system intent
-- Governing onboarding/entity paths: `<paths>`.
-- Load-bearing tests, incidents, and negative knowledge: `<paths or none>`.
+
+- Governing onboarding and entity paths: `<paths>`.
+- Load-bearing tests, incidents and negative knowledge: `<paths or none>`.
 - Contracts expected to remain unchanged: `<contracts>`.
 
 ### Ruled change intent
+
 - Developer decisions and approved design notes: `<paths + concise rulings>`.
-- Task requirements that authorize a contract change: `<exact stable-id>@<version> — <canonical
-  packet path>; repeat for each applicable revision`.
+- Requirements authorizing a contract change: `<exact stable-id>@<version> — <canonical packet path>; repeat for each applicable revision`.
 - Explicit non-goals: `<non-goals>`.
 
 ### Implemented reality
-- Fed code range/diff source: `<exact base-to-head or reviewed working-tree evidence>`.
+
+- Supplied code range or diff: `<exact base-to-head or reviewed working-tree evidence>`.
 - Builder report: `<path>`.
-- Reviewer verdict: `<path or flat/solo review evidence | none when not requested>`.
+- Reviewer verdict: `<path or review evidence under developer-chosen direct coordination | none when not requested>`.
 - Verification evidence: `<commands/artifacts>`.
 
-## Routing rule
-Route each change-set and notes/ item to its onboarding home as `../roles/curator.md` and the `c-05-create-or-update-onboarding-files` workflow state; the brief hands the inputs, not the procedure.
+## Routing and handoff
 
-## Curator handoff values
-The handover names the leaf, exact freeze head/change hash, memory change identity and report path, and follows the lane, ID and handoff rules of `../roles/curator.md`.
+Before routing each change-set or task-notes item, read [change routing](../reference/curator/change-routing.md) for changed-file and notes-item routing to records, cards and indexes.
+
+Before handing memory over, read [Curator memory handover](../reference/curator/memory-handover.md) for the exact reviewed trees, lanes and whole requested work.
 
 ## Messages
-Messages wake; files carry. A message says what is asked or what is handed over, and names the files: evidence, verdicts, lists and logs are files, never pasted into a message. The full text goes in `body` and its files in `attach`; the tool files every message in the `messages` folder of the narrowest task the two agents share, and a leaf workspace links that folder as `messages`. The recipient reads the message and, where a file belongs to it, one last line naming the file and its SHA-256. A text holds at most the limit of the settings. A return goes to the parent's role with its task references, never to an id read from an earlier message.
+
+Before composing a message, read [Send a message that names the files](../reference/message-handover.md#send-a-message-that-names-the-files) for the sender and payload rules.
+
+Before handling a full-store refusal, read [full-store receipt handling](../reference/message-handover.md#handle-a-full-store-refusal) for the pending record, one resend and second-refusal report.
+
 ```
 
----
+## Manager's compilation checks
 
-**Compiler notes for the manager.**
+Fill every placeholder before supplying the intake values. Do not send an unresolved placeholder.
 
-- Fill every `<placeholder>`; a brief with an unresolved placeholder is not dispatchable.
-- Immediately before compiling this brief, call `worktree_status` for the canonical leaf and require
-  `sourceLineage.state=current`. If it is stale or unavailable, synchronize and reconcile before
-  the Curator is opened.
-- `<enclosure-contract-path>` is the leaf's `series-contract.md` under the master's
-  `enclosures/<leaf-id>/`. Use it to scope every memory-quality and coherence call; an unscoped
-  `route_index_refresh` writes into the official memory repo.
-- The Curator is started held with the set and opened by its first message. Supply task, intent and current-lineage
-  anchors; the Worker sends its exact frozen change-set counters/paths and hand-off list directly,
-  and the Reviewer sends the passed freeze and verdict directly. Relay neither handover.
-- Name the Worker report and candidate-bound Reviewer verdict paths as notes/ inputs supplied
-  directly by their producers; the Curator does not re-request evidence that already exists in
-  `notes/reports/`.
-- The Reviewer records the ordinary CODE round and its own result; the Manager keeps gate acceptance
-  and records the architect's or the developer's approval beyond the settings limit. The Curator's MEMORY review is sealed and counted
-  separately and writes no code-review state.
+Immediately before starting the Curator, call `worktree_status` for the canonical leaf. Require `sourceLineage.state=current`. If it is stale or unavailable, synchronize and reconcile before opening the Curator.
+
+Use the leaf's `series-contract.md` under the master's `enclosures/<leaf-id>/` for `<enclosure-contract-path>`. Before supplying memory-tool scope, read [Authority gates](../operations/curation.md#authority-gates) for the enclosure-contract requirement and unscoped `route_index_refresh` consequence.
+
+Before starting the Curator stage, read [Start leaf stages and deliver the first intake](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake) for stage timing and direct producer handovers.
+
+Supply the task, intent and current-lineage anchors.
+
+Name the Worker report and candidate-bound Reviewer verdict paths as task-note inputs supplied directly by those producers. The Curator does not request evidence again when it already exists in `notes/reports/`.
+
+Before recording ordinary code review, read [Record code review rounds](../operations/review.md#record-code-review-rounds) for ordinary leaf begin and result records.
+
+Before checking code and memory lane results, read [the leaf verdict handover procedure](../operations/review.md#receive-the-intake-and-hand-over-the-leaf-verdict) for separate code and memory results, direct handovers and stage-start notices.

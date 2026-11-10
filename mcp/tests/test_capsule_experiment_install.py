@@ -21,6 +21,7 @@ import hashlib
 import json
 import shutil
 import sys
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -34,6 +35,7 @@ if str(MCP_SRC) not in sys.path:
 from _user_settings_guard import user_settings_path_for_write
 from agents_remember.application.role_capsules.launch import compile_launch_capsule
 from agents_remember.application.tool_answer_log import tool_call_context
+from agents_remember.benchmarks.runner_modules import filesystem
 from agents_remember.install import experiment as install_experiment
 from agents_remember.install import runtime as install_runtime
 from agents_remember.kernel.agentic_settings import (
@@ -46,11 +48,10 @@ from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
 from agents_remember.serving.projections.snapshots import read_tool_reports
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-CANONICAL_AGENTS_MD = REPOSITORY_ROOT / "agents-md-files"
 CANONICAL_SKILLS = REPOSITORY_ROOT / "skills"
 CANONICAL_PROVIDER_REQUIREMENTS = REPOSITORY_ROOT / "providers" / "requirements"
 
-CORPUS_FINGERPRINT = "**You set one repository up and report what actually happened.**"
+CORPUS_FINGERPRINT = "Bootstrap sets up one repository during a new user's first hour and reports what actually happened."
 """A canonical block identity: the opening statement of ``roles/bootstrap.md``.
 
 The seat's own first obligation-bearing sentence, and the selector has to be **unique in the
@@ -69,7 +70,7 @@ no longer exists.
 
 CORPUS_FINGERPRINT_SOURCE = CANONICAL_SKILLS / "l-01-agent-lifecycles" / "roles" / "bootstrap.md"
 
-RETIRED_CORE_FINGERPRINT = "# Core — Completion Truth And Handoff Acceptance"
+RETIRED_CORE_FINGERPRINT = "# Core — Completion and handoff acceptance"
 """A shared core block's first heading, which the capsule must **not** carry.
 
 The negative half of the same ruling: the shared blocks stay on disk in the corpus, and no capsule
@@ -82,14 +83,22 @@ RETIRED_CORE_FINGERPRINT_SOURCE = (
 )
 
 LEGACY_FINGERPRINT = "## Start Here — Route By Role"
-"""The legacy AR startup chain's own routing heading, from the coordinator ``AGENTS.md``.
+"""Historical startup text planted to prove retirement of an earlier installation."""
 
-Presence of this heading in an installed coordination root is exactly "the old full AR
-startup chain is installed". The capsule never carries it, so the two counts are
-independent readings rather than one number compared with itself.
-"""
+RETIRED_STARTUP_FILES = ("AGENTS.md", "tasks/AGENTS.md", "system/AGENTS.md")
 
-LEGACY_FINGERPRINT_SOURCE = CANONICAL_AGENTS_MD / "coordinator" / "AGENTS.md"
+
+def plant_retired_startup_files(coordination_root: Path) -> None:
+    for target in RETIRED_STARTUP_FILES:
+        path = coordination_root / target
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{LEGACY_FINGERPRINT}\nEarlier installed {target}\n", encoding="utf-8")
+
+
+def assert_no_retired_startup_files(coordination_root: Path) -> None:
+    for target in RETIRED_STARTUP_FILES:
+        path = coordination_root / target
+        assert not path.exists() and not path.is_symlink(), target
 
 
 def _copy(source: Path, destination: Path) -> None:
@@ -100,14 +109,12 @@ def _copy(source: Path, destination: Path) -> None:
 def create_install_source(root: Path) -> Path:
     """One install source tree built from this repository's canonical assets.
 
-    The package-data layout, the four startup targets, the canonical corpus the
-    compiler reads, and the provider requirement files ``require_runtime_tree``
-    insists on.
+    The package-data layout, canonical corpus the compiler reads, and provider
+    requirement files ``require_runtime_tree`` insists on.
     """
 
     source = root / "package_data"
     runtime_root = source / "runtime"
-    shutil.copytree(CANONICAL_AGENTS_MD, runtime_root / "agents-md-files")
     shutil.copytree(
         CANONICAL_SKILLS / "l-01-agent-lifecycles",
         runtime_root / "skills" / "l-01-agent-lifecycles",
@@ -258,23 +265,57 @@ def test_the_two_fingerprints_resolve_in_their_canonical_sources() -> None:
     """The selectors are real corpus text, so a zero count means absence, not drift."""
 
     assert CORPUS_FINGERPRINT in CORPUS_FINGERPRINT_SOURCE.read_text(encoding="utf-8")
-    assert LEGACY_FINGERPRINT in LEGACY_FINGERPRINT_SOURCE.read_text(encoding="utf-8")
-    assert CORPUS_FINGERPRINT not in LEGACY_FINGERPRINT_SOURCE.read_text(encoding="utf-8")
     # The retired core anchor is still real corpus text: it is on disk in the corpus and it is
     # simply not delivered, so absence from a capsule is a composition fact rather than drift.
     assert RETIRED_CORE_FINGERPRINT in RETIRED_CORE_FINGERPRINT_SOURCE.read_text(encoding="utf-8")
 
 
-def test_an_unselected_run_installs_the_legacy_startup_chain(tmp_path: Path) -> None:
+@pytest.mark.parametrize("earlier_install", [False, True])
+def test_an_unselected_run_leaves_no_retired_startup_files(
+    tmp_path: Path, earlier_install: bool
+) -> None:
     source = create_install_source(tmp_path)
     coordination_root = tmp_path / "ar-coordination"
+    if earlier_install:
+        plant_retired_startup_files(coordination_root)
+        assert fingerprint_count(coordination_root, LEGACY_FINGERPRINT) == 3
 
     summary = run_install(source, coordination_root, experiment=None)
 
     assert summary.experiment is None
-    for target in install_experiment.WITHHELD_STARTUP_TARGETS:
-        assert (coordination_root / target).is_file(), target
-    assert fingerprint_count(coordination_root, LEGACY_FINGERPRINT) == 1
+    assert_no_retired_startup_files(coordination_root)
+    assert summary.removed_paths == (3 if earlier_install else 0)
+    assert fingerprint_count(coordination_root, LEGACY_FINGERPRINT) == 0
+    assert (coordination_root / "providers/requirements/grepai.txt").is_file()
+
+
+def test_the_module_states_that_an_unselected_install_still_retires_startup_files() -> None:
+    """L84-CUR-05: the docstring states what an unselected (``legacy``) install actually does.
+
+    The cutover above removes the retired AGENTS.md copies in every accepted install, so the
+    module may not describe ``legacy`` as the existing installation left unchanged.
+    """
+
+    doc = " ".join((install_experiment.__doc__ or "").split())
+    assert "the existing installation, unchanged" not in doc
+    assert (
+        "Not selected is ``legacy``: the run keeps the old startup chain's unmodified install "
+        "path, but the cutover described below still retires the ``AGENTS.md`` copies." in doc
+    )
+
+
+def test_an_unselected_preview_reports_retirement_without_removing_files(tmp_path: Path) -> None:
+    source = create_install_source(tmp_path)
+    coordination_root = tmp_path / "ar-coordination"
+    plant_retired_startup_files(coordination_root)
+    before = snapshot_regular_files(coordination_root)
+
+    summary = run_install(source, coordination_root, experiment=None, dry_run=True)
+
+    assert snapshot_regular_files(coordination_root) == before
+    assert summary.removed_paths == 3
+    run_install(source, coordination_root, experiment=None)
+    assert_no_retired_startup_files(coordination_root)
 
 
 def test_a_selected_run_cuts_over_to_the_capsule_path(tmp_path: Path) -> None:
@@ -298,18 +339,20 @@ def test_a_selected_run_removes_an_earlier_legacy_installation(tmp_path: Path) -
 
     source = create_install_source(tmp_path)
     coordination_root = tmp_path / "ar-coordination"
-    run_install(source, coordination_root, experiment=None)
-    assert (coordination_root / "AGENTS.md").is_file()
+    plant_retired_startup_files(coordination_root)
+    assert fingerprint_count(coordination_root, LEGACY_FINGERPRINT) == 3
 
     summary = run_install(source, coordination_root, experiment="role-capsules")
 
     assert summary.experiment is not None
     assert summary.removed_paths >= len(install_experiment.WITHHELD_STARTUP_TARGETS)
     assert not (coordination_root / "AGENTS.md").exists()
+    assert not (coordination_root / "tasks" / "AGENTS.md").exists()
+    assert_no_retired_startup_files(coordination_root)
     assert fingerprint_count(coordination_root, LEGACY_FINGERPRINT) == 0
 
 
-def test_running_the_installer_again_without_the_selection_restores_the_legacy_chain(
+def test_running_the_installer_again_without_selection_keeps_retired_files_absent(
     tmp_path: Path,
 ) -> None:
     """No global switch is left on: the next run's own input decides its mode."""
@@ -322,8 +365,8 @@ def test_running_the_installer_again_without_the_selection_restores_the_legacy_c
     summary = run_install(source, coordination_root, experiment=None)
 
     assert summary.experiment is None
-    assert (coordination_root / "AGENTS.md").is_file()
-    assert fingerprint_count(coordination_root, LEGACY_FINGERPRINT) == 1
+    assert_no_retired_startup_files(coordination_root)
+    assert fingerprint_count(coordination_root, LEGACY_FINGERPRINT) == 0
 
 
 def test_an_unknown_experiment_is_refused_by_name(tmp_path: Path) -> None:
@@ -383,35 +426,51 @@ def test_a_dry_run_reports_the_cutover_and_writes_nothing(tmp_path: Path) -> Non
     source = create_install_source(tmp_path)
     coordination_root = tmp_path / "ar-coordination"
     run_install(source, coordination_root, experiment=None)
+    plant_retired_startup_files(coordination_root)
+    before = snapshot_regular_files(coordination_root)
+
+    ordinary = run_install(source, coordination_root, experiment=None, dry_run=True)
+
+    assert ordinary.experiment is None
+    assert ordinary.removed_paths >= 1
+    assert snapshot_regular_files(coordination_root) == before
 
     summary = run_install(source, coordination_root, experiment="role-capsules", dry_run=True)
 
     assert summary.experiment is not None
     assert summary.experiment.delivery.mode == "capsule"
     assert (coordination_root / "AGENTS.md").is_file()
+    assert snapshot_regular_files(coordination_root) == before
 
 
-def test_the_legacy_fingerprint_is_present_when_disabled_and_absent_when_opted_in(
+def test_both_install_modes_remove_the_legacy_fingerprint(
     tmp_path: Path,
 ) -> None:
-    """Two runs, one independent input (the selection), and the count moves one way."""
+    """Both real entry points remove planted legacy files through the same cutover."""
 
     disabled_root = tmp_path / "disabled"
     opted_in_root = tmp_path / "opted-in"
     disabled_source = create_install_source(tmp_path / "a")
     opted_in_source = create_install_source(tmp_path / "b")
 
+    plant_retired_startup_files(disabled_root)
+    plant_retired_startup_files(opted_in_root)
+    assert fingerprint_count(disabled_root, LEGACY_FINGERPRINT) == 3
+    assert fingerprint_count(opted_in_root, LEGACY_FINGERPRINT) == 3
     run_install(disabled_source, disabled_root, experiment=None)
     run_install(opted_in_source, opted_in_root, experiment="role-capsules")
 
     disabled_count = fingerprint_count(disabled_root, LEGACY_FINGERPRINT)
     opted_in_count = fingerprint_count(opted_in_root, LEGACY_FINGERPRINT)
-    assert disabled_count == 1
+    assert disabled_count == 0
     assert opted_in_count == 0
-    assert disabled_count != opted_in_count
+    assert_no_retired_startup_files(disabled_root)
+    assert_no_retired_startup_files(opted_in_root)
 
 
-def test_the_canonical_corpus_reaches_an_opted_in_run_once_through_the_capsule() -> None:
+def test_the_canonical_corpus_reaches_an_opted_in_run_once_through_the_capsule(
+    tmp_path: Path,
+) -> None:
     """Counted over the real effective material, from two different producers.
 
     Both halves of the 260915-CAPS-L22 ruling are measured on the ONE delivery path an opted-in run
@@ -427,7 +486,11 @@ def test_the_canonical_corpus_reaches_an_opted_in_run_once_through_the_capsule()
     # Side B is the authored source the compiler read; the capsule carries its block, and the
     # legacy startup chain (side A) carries none of it.
     assert CORPUS_FINGERPRINT in CORPUS_FINGERPRINT_SOURCE.read_text(encoding="utf-8")
-    assert LEGACY_FINGERPRINT_SOURCE.read_text(encoding="utf-8").count(CORPUS_FINGERPRINT) == 0
+    source = create_install_source(tmp_path)
+    coordination_root = tmp_path / "ar-coordination"
+    run_install(source, coordination_root, experiment="role-capsules")
+    assert fingerprint_count(coordination_root, CORPUS_FINGERPRINT) == 0
+    assert_no_retired_startup_files(coordination_root)
 
 
 def test_the_run_record_carries_the_packet_shape_and_the_independent_version(
@@ -488,6 +551,7 @@ def test_the_selection_is_recorded_per_run_and_never_persisted(tmp_path: Path) -
     config_path.write_text(default_agentic_settings_seed_text(), encoding="utf-8")
     before_settings = config_path.read_bytes()
     run_install(source, coordination_root, experiment=None)
+    plant_retired_startup_files(coordination_root)
     before_files = snapshot_regular_files(coordination_root)
     assert config_path.read_bytes() == before_settings
 
@@ -640,20 +704,14 @@ def test_a_selected_install_writes_nothing_into_the_install_source_tree(
     assert after == digests
 
 
-def test_the_rollback_plan_names_the_restore_command(tmp_path: Path) -> None:
+def test_an_actual_install_reports_no_startup_rollback(tmp_path: Path) -> None:
     source = create_install_source(tmp_path)
     coordination_root = tmp_path / "ar-coordination"
 
-    rows = install_experiment.experiment_rollback_plan(coordination_root=coordination_root)
-
-    assert [row.path for row in rows] == [(coordination_root / "AGENTS.md").as_posix()]
-    assert "no experiment selected" in rows[0].undo_command
-
     summary = run_install(source, coordination_root, experiment="role-capsules")
     assert summary.experiment is not None
-    payload_rows = summary.experiment.payload()["rollback"]
-    assert isinstance(payload_rows, list)
-    assert [row["path"] for row in payload_rows] == [row.path for row in rows]
+    assert summary.experiment.payload()["rollback"] == []
+    assert_no_retired_startup_files(coordination_root)
 
 
 EARLIER_EXPERIMENT_PART = r"""
@@ -752,3 +810,17 @@ def test_an_install_over_an_earlier_experimental_installation_fails_on_none_of_i
 
     listed = read_tool_reports(coordination_root, now=datetime.now(UTC))
     assert [(node.tool, node.path) for node in listed] == [("runtime_install", report.as_posix())]
+
+
+def test_benchmark_asset_sync_retires_the_same_startup_files(tmp_path: Path, monkeypatch) -> None:
+    source = create_install_source(tmp_path)
+    coordination_root = tmp_path / "benchmark-coordination"
+    plant_retired_startup_files(coordination_root)
+    before = snapshot_regular_files(coordination_root)
+    monkeypatch.setattr(filesystem, "packaged_source_root", lambda: nullcontext(source))
+
+    filesystem.sync_runtime_assets(coordination_root, dry_run=True)
+    assert snapshot_regular_files(coordination_root) == before
+    filesystem.sync_runtime_assets(coordination_root, dry_run=False)
+    assert_no_retired_startup_files(coordination_root)
+    assert (coordination_root / "providers/requirements/grepai.txt").is_file()

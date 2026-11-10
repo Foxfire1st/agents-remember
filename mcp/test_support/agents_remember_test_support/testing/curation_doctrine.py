@@ -38,9 +38,7 @@ from agents_remember.kernel.generated_copies import DECLARATION_PATH, parse_gene
 from .retired_leaf_handover_wording import RETIRED_LEAF_HANDOVER_WORDING
 
 #: The normal MIK curation pass remains complete on both canonical surfaces.
-COMPLETE_CURATION_RULE = (
-    "Curation is always complete: a named scoped check never stands in for the full operation"
-)
+COMPLETE_CURATION_RULE = "A named scoped check never substitutes for the full operation."
 
 #: The declared generated skill copies ``scripts/sync-skills.py`` owns, relative to the
 #: repository root. A stale package copy serves the old sentence.
@@ -246,12 +244,6 @@ RETIRED_CURATION_STATEMENTS: tuple[RetiredCurationStatement, ...] = (
         sources=("skills/l-01-agent-lifecycles/templates/onboarding-coherency.md",),
         probe="separate developer-requested operations",
         reason="the curator's own report template declared the complete operation separate and not a gate",
-    ),
-    RetiredCurationStatement(
-        statement="Full memory quality is an explicit developer-requested operation through `c-05-create-or-update-onboarding-files`, not a closeout precondition.",
-        sources=("skills/w-02-light-task-workflow/SKILL.md",),
-        probe="is not a closeout precondition",
-        reason="closeout was told curation's completed result is not its precondition",
     ),
     RetiredCurationStatement(
         statement="curator_coherence runs only when the developer explicitly requests that separate diagnostic.",
@@ -605,7 +597,7 @@ LOOP_GATE_CORRECTED_FIELDS = ("qualityChecklistStatus", "closeoutReady")
 #: field names each must carry. Membership is the census -- the retired pairing must never return to
 #: one of these -- and the positive half is asserted with the same reader the skill carriers use, so
 #: a document that drops a field name is caught rather than silently leaving the census.
-#: ``drift-c02.md`` documents the ``c-05-create-or-update-onboarding-files`` operation, and ``mcp-tools.md``
+#: ``drift-c02.md`` documents the l-01 curation operation, and ``mcp-tools.md``
 #: documents the tool surface itself; both are read by seats that may never open a skill file.
 LOOP_GATE_DOCUMENTS: dict[str, tuple[str, ...]] = {
     "docs/reference/drift-c02.md": LOOP_GATE_CORRECTED_FIELDS,
@@ -623,10 +615,21 @@ LOOP_GATE_REASON = (
 CURATION_POLICY_STATEMENTS: dict[str, tuple[str, ...]] = {
     "skills/l-01-agent-lifecycles/operations/curation.md": (
         COMPLETE_CURATION_RULE,
-        "prepare → publish → validate",
+        "Run `prepare`, then `publish`, then `validate`.",
+        "Run the complete curation check set and report each check as passed, failed, blocked "
+        "or not run, with its exact command and scope:",
+        "The full `memory_quality_check` operation on `agents-remember-task`.",
+        "Repair every Curator-actionable finding, or escalate it as blocked with its exact returned code.",
+        "Run the full operation at intake and after every repair until `curatorActionableCount=0` "
+        "and the raw `qualityChecklistStatus` is `ready-for-closeout`.",
+        "If coherence is then missing or stale, complete the authority gates below before closeout.",
     ),
     "skills/l-01-agent-lifecycles/roles/curator.md": (
-        "At intake and after every repair, run the full curation operation and coherence gate",
+        "Before running curation checks, read [Run the complete curation checks]"
+        "(../operations/curation.md#run-the-complete-curation-checks) for their full scope, "
+        "intake and repair timing, results and coherence continuation.",
+        "Before validating coherence, read [Authority gates]"
+        "(../operations/curation.md#authority-gates) for the candidate binding and before-closeout timing.",
     ),
 }
 
@@ -741,7 +744,7 @@ def missing_loop_gate_statements(root: Path) -> list[str]:
 
 
 def missing_curation_policy_statements(root: Path, surface: str) -> list[str]:
-    """Every declared compact curation source under ``root`` missing its scoped-check rule."""
+    """Every declared compact curation source missing any required policy clause."""
 
     missing: list[str] = []
     for relative, statements in CURATION_POLICY_STATEMENTS.items():
@@ -750,7 +753,9 @@ def missing_curation_policy_statements(root: Path, surface: str) -> list[str]:
             missing.append(f"{surface}: {relative} is missing")
             continue
         reading = normalize_statement(target.read_text(encoding="utf-8"))
-        if any(normalize_statement(statement) in reading for statement in statements):
+        if statements and all(
+            normalize_statement(statement) in reading for statement in statements
+        ):
             continue
         missing.append(f"{surface}: {relative}")
     return missing

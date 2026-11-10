@@ -1,6 +1,6 @@
 """Source admission, strict manifest/vocabulary and content-addressed compilation.
 
-The frozen ten roles, nine operations and launcher routing condition agree with
+The frozen eight roles, nine operations and launcher routing condition agree with
 shipped declarations. Admission proves containment before reading; revisions
 address exact bytes. Repeated shipped compilation is deterministic and strips
 only typed metadata while preserving complete instruction prose.
@@ -62,14 +62,12 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 LIFECYCLE_ROOT = REPOSITORY_ROOT / "skills" / "l-01-agent-lifecycles"
 MANIFEST_RELATIVE = "composition-manifest.json"
 
-# The ten roles the corpus ships, and the nine frozen operations. Restated here
+# The eight roles the corpus ships, and the nine frozen operations. Restated here
 # rather than imported from the compiler so the two definitions must agree: an
 # imported constant would make this case assert that a tuple equals itself.
 SHIPPED_ROLES = (
     "architect",
     "orchestrator",
-    "designer",
-    "strategist",
     "manager",
     "worker",
     "curator",
@@ -137,9 +135,9 @@ def worker_binding(*, tool_policy: CapsuleToolPolicy | None = None) -> CapsuleBi
 # --------------------------------------------------------------------------------------
 
 
-def test_the_frozen_vocabulary_is_exactly_the_ten_roles_and_nine_operations() -> None:
+def test_the_frozen_vocabulary_is_exactly_the_eight_roles_and_nine_operations() -> None:
     assert CAPSULE_ROLES == SHIPPED_ROLES
-    assert len(CAPSULE_ROLES) == 10
+    assert len(CAPSULE_ROLES) == 8
     assert CAPSULE_OPERATIONS == SHIPPED_OPERATIONS
     assert len(CAPSULE_OPERATIONS) == 9
 

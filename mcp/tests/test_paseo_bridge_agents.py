@@ -272,8 +272,8 @@ class AgentCommandScriptTests(unittest.TestCase):
         assert executable is not None
         fixture_node.symlink_to(executable)
         node_patch = patch(
-            "agents_remember.cli.paseo_bridge.product_node",
-            return_value=type("FixtureNode", (), {"node": fixture_node})(),
+            "agents_remember.cli.paseo_bridge.communication_node",
+            return_value=fixture_node,
         )
         node_patch.start()
         self.addCleanup(node_patch.stop)

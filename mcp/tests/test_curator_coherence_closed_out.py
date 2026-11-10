@@ -19,10 +19,12 @@ import pytest
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherenceAction,
     CuratorCoherenceRequest,
+    CuratorCoherenceResponse,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
+from agents_remember.worktrees.integration.closeout import curator_coherence_publication
 from agents_remember.worktrees.integration.closeout.curator_coherence import (
     curator_coherence_paths,
     load_curator_coherence_authority,
@@ -140,28 +142,46 @@ def _action(contract: WorktreeContract, action: CuratorCoherenceAction) -> dict[
         CuratorCoherenceRequest(action=action, contract_path=contract.contract_path.as_posix()),
     )
     assert isinstance(result, dict)
-    return result
+    return CuratorCoherenceResponse.model_validate(result).to_payload()
 
 
-def test_status_and_validate_answer_closed_out_after_the_closeout(tmp_path: Path) -> None:
+@pytest.mark.parametrize("action", ["status", "validate"])
+def test_status_and_validate_answer_closed_out_after_the_closeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: CuratorCoherenceAction
+) -> None:
     """Rule 10: completed closeout plus a record answers ``closed-out``, never ``stale``."""
 
     contract = _closed(_published(open_external_contract_fixture(tmp_path)))
     digest = load_curator_coherence_authority(contract).record_digest
-    for action in ("status", "validate"):
-        answer = _action(contract, action)
-        assert answer["state"] == "closed-out"
-        assert answer["codeCommit"] == contract.code_commit
-        assert answer["memoryContentCommit"] == contract.memory_content_commit
-        assert answer["recordDigest"] == digest
-        assert "validated before the closeout" in answer["summary"]
+
+    def refuse_live_comparison(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("closed-out answers must not compare the live candidate")
+
+    monkeypatch.setattr(
+        curator_coherence_publication, "observe_curator_coherence_source", refuse_live_comparison
+    )
+    monkeypatch.setattr(
+        curator_coherence_publication, "require_current_curator_coherence", refuse_live_comparison
+    )
+    answer = _action(contract, action)
+    assert answer["state"] == "closed-out"
+    assert answer["codeCommit"] == contract.code_commit
+    assert answer["memoryContentCommit"] == contract.memory_content_commit
+    assert answer["recordDigest"] == digest
+    assert "validated before the closeout" in answer["summary"]
 
 
-def test_status_before_the_closeout_is_not_closed_out(tmp_path: Path) -> None:
+@pytest.mark.parametrize("action", ["status", "validate"])
+def test_status_before_the_closeout_is_not_closed_out(
+    tmp_path: Path, action: CuratorCoherenceAction
+) -> None:
     """Rule 10: the closed-out answer starts at the completed closeout, not at publication."""
 
     contract = _published(open_external_contract_fixture(tmp_path))
-    assert _action(contract, "status")["state"] != "closed-out"
+    answer = _action(contract, action)
+    assert answer["state"] in {"current", "valid"}
+    assert "codeCommit" not in answer
+    assert "memoryContentCommit" not in answer
 
 
 def test_a_completed_closeout_without_a_record_answers_absent(tmp_path: Path) -> None:

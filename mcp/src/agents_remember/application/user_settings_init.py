@@ -3,9 +3,8 @@
 MIK-R196 rule 11 gives this surface one write: the validated harness choice of each role in
 ``~/.config/agents-remember/settings.json`` under ``XDG_CONFIG_HOME``, with model and effort left
 unset so that the harness picks its own defaults. The host authority is not here -- ``paseoRuntime``
-belongs to the installed MCP settings file (the discovery convention in
-:mod:`agents_remember.cli.discovery`, see
-``cli.discovery.SETTINGS_CONVENTION``), which this module never writes.
+belongs to the separate tool-server authority file selected by
+:mod:`agents_remember.kernel.primitives.mcp_settings_location`, which this module never writes.
 
 The write is one exclusive creation (``O_CREAT | O_EXCL``, mode 0600) of a destination that does
 not exist. **An existing destination is never written, merged, completed or re-moded**, whatever

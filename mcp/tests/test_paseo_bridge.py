@@ -20,6 +20,7 @@ from agents_remember.kernel.primitives.paseo_runtime_settings import (
     parse_paseo_runtime_settings,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.serving.paseo import paseo_running_node
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from paseo_runtime_test_support import write_runtime_block
 
@@ -114,7 +115,7 @@ class BridgeProcessTests(unittest.TestCase):
                 with (
                     self.subTest(code=code),
                     patch.object(
-                        paseo_bridge,
+                        paseo_running_node,
                         "product_node",
                         return_value=SimpleNamespace(
                             node=SimpleNamespace(
@@ -152,7 +153,7 @@ class BridgeProcessTests(unittest.TestCase):
             with (
                 patch.dict(os.environ, inherited, clear=True),
                 patch.object(
-                    paseo_bridge,
+                    paseo_running_node,
                     "product_node",
                     return_value=SimpleNamespace(
                         node=SimpleNamespace(is_file=lambda: True, as_posix=lambda: "/usr/bin/node")
@@ -204,7 +205,7 @@ class BridgeProcessTests(unittest.TestCase):
                 with (
                     self.subTest(label),
                     patch.object(
-                        paseo_bridge,
+                        paseo_running_node,
                         "product_node",
                         return_value=SimpleNamespace(
                             node=SimpleNamespace(
@@ -220,7 +221,7 @@ class BridgeProcessTests(unittest.TestCase):
                 self.assertLessEqual(len(str(raised.exception)), 800)
             with (
                 patch.object(
-                    paseo_bridge,
+                    paseo_running_node,
                     "product_node",
                     return_value=SimpleNamespace(
                         node=SimpleNamespace(
@@ -232,7 +233,7 @@ class BridgeProcessTests(unittest.TestCase):
                 self.assertRaises(PaseoBridgeFailure) as raised,
             ):
                 bridge_call(config, "catalog", {"cwd": "/work/folder"})
-            self.assertEqual(raised.exception.code, "paseo_bridge_unavailable")
+            self.assertEqual(raised.exception.code, "node_not_installed")
             run.assert_not_called()
 
             long_error = "RangeError: " + "x" * 500
@@ -268,7 +269,7 @@ class BridgeProcessTests(unittest.TestCase):
                 with (
                     self.subTest(label),
                     patch.object(
-                        paseo_bridge,
+                        paseo_running_node,
                         "product_node",
                         return_value=SimpleNamespace(
                             node=SimpleNamespace(
@@ -296,7 +297,7 @@ class BridgeProcessTests(unittest.TestCase):
                 with (
                     self.subTest("no cause is appended", stderr=label),
                     patch.object(
-                        paseo_bridge,
+                        paseo_running_node,
                         "product_node",
                         return_value=SimpleNamespace(
                             node=SimpleNamespace(
@@ -329,7 +330,7 @@ class BridgeProcessTests(unittest.TestCase):
                 with (
                     self.subTest(stream),
                     patch.object(
-                        paseo_bridge,
+                        paseo_running_node,
                         "product_node",
                         return_value=SimpleNamespace(node=Path(writer.as_posix())),
                     ),
@@ -354,7 +355,7 @@ class BridgeProcessTests(unittest.TestCase):
             stuck.chmod(0o755)
             with (
                 patch.object(
-                    paseo_bridge,
+                    paseo_running_node,
                     "product_node",
                     return_value=SimpleNamespace(node=Path(stuck.as_posix())),
                 ),
@@ -442,8 +443,8 @@ class BridgeScriptTests(unittest.TestCase):
         assert executable is not None
         fixture_node.symlink_to(executable)
         node_patch = patch(
-            "agents_remember.cli.paseo_bridge.product_node",
-            return_value=type("FixtureNode", (), {"node": fixture_node})(),
+            "agents_remember.cli.paseo_bridge.communication_node",
+            return_value=fixture_node,
         )
         node_patch.start()
         self.addCleanup(node_patch.stop)

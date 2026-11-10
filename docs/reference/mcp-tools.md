@@ -1,18 +1,18 @@
 # MCP Tool Reference
 
-The Agents Remember MCP server exposes 40 public tools (`PUBLIC_TOOLS`). Tools **apply by default** — pass
-`dry_run=true` to preview first. Repository-scoped tools
+The public MCP roster is `PUBLIC_TOOLS` in
+`mcp/src/agents_remember/models/tools/public_roster.py`. `dry_run` defaults vary by tool.
+Pass `dry_run=true` explicitly for a preview when the tool supports it. Repository-scoped tools
 take a `repo_id` that must be an allowed repo in the MCP settings. Search the code with
 the harness's own tools: the former `cgc_*`, `grepai_*` and `provider_*` code-search tools
 were removed (MIK-R112) and are not answered by any text on this page.
 
-This page is a map of the surface, not a complete index of it: the tables below name a subset
-of the roster above. Behavior detail lives in the linked skill and reference pages.
+The tables below name every registered public tool. Behavior detail lives in the linked skill and reference pages.
 
 **Skills vs tools.** Many skills wrap one or more of these tools and add the
-procedure, gates, and ordering around them: the `c-00-initialize-memory-repo` skill drives the `memory_init` MCP tool, the `c-05-create-or-update-onboarding-files` skill
-drives drift reporting (`context_packet` / `memory_quality_check`), the `w-02-light-task-workflow` skill drives the `worktree_*`
-MCP tools, and the `w-02-light-task-workflow` skill drives the `*_closeout_*` MCP tools. When the docs say "run a core skill,"
+procedure, gates, and ordering around them: the `c-00-initialize-memory-repo` skill drives the `memory_init` MCP tool; the [curation operation](../../skills/l-01-agent-lifecycles/operations/curation.md)
+uses drift reporting (`context_packet` / `memory_quality_check`), and the [authorized lifecycle operation](../../skills/l-01-agent-lifecycles/operations/closeout.md) coordinates the `worktree_*`
+and `*_closeout_*` MCP tools. When the docs say "run a core skill,"
 the agent runs the skill, which calls the matching tool with the right
 preconditions. Call the raw tool directly only when you do not need the skill's
 surrounding procedure. See the [Skills reference](skills.md).
@@ -102,7 +102,7 @@ assumed default folder is not evidence that no message was sent.
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `runtime_install` | Reconcile package-owned runtime (AGENTS.md templates, skills, docs, runtime folders) into the coordinator; optionally install benchmark fixtures. The final `host` part provisions the build-pinned host/plugin from the per-use shared `system/settings.json` block; shared authority is never written and needed restarts are deferred. Missing block is named; dry run has no host mutations. **Preserves** user data (`memory-repos/`, `providers/data/`, `providers/runners/`) and **replaces** the managed scaffold (`skills/`, `docs/`). No provider install/start/watch path remains (MIK-R112): the install stops leftover watcher processes as its only watcher action and reports enabled provider keys once as unused (`unusedProviderKeys`); `install_provider_deps` no longer drives installation. Leftover provider runtime folders are reported with sizes; only the `providers-remove` command deletes them. `experiment` is a per-call input (never a setting) selecting an experimental cutover for one run; its source is named in the record. | `dry_run=false`, `include_benchmarks=false`, `install_provider_deps=true`, `no_cache=false` |
+| `runtime_install` | Reconcile package-owned runtime (AGENTS.md templates, docs and runtime folders) into the coordinator; optionally install benchmark fixtures. The `host` part reconciles the configured build-pinned host/plugin and reports installation and restart outcomes; configuration authority is not rewritten. Missing block is named; dry run has no host mutations. **Preserves** user data (`memory-repos/`, `providers/data/`, `providers/runners/`) and **replaces** managed documentation (`docs/`). Skills are served as resources from the package; installation creates or replaces no coordination-root skill tree. No provider install/start/watch path remains (MIK-R112): the install stops leftover watcher processes as its only watcher action and reports enabled provider keys once as unused (`unusedProviderKeys`); `install_provider_deps` no longer drives installation. Leftover provider runtime folders are reported with sizes; only the `providers-remove` command deletes them. `experiment` is a per-call input (never a setting) selecting an experimental cutover for one run; its source is named in the record. | `dry_run=false`, `include_benchmarks=false`, `install_provider_deps=true`, `no_cache=false` |
 
 ## Memory & onboarding
 
@@ -171,15 +171,14 @@ artifact for both fresh success and recovery; `resultArtifact` carries its repos
 identity. The immutable machine result never replaces or renames the human summary, and there is no
 universal result filename fallback.
 
-Use the primary `citation_fix` route for moved citation anchors. A correct-input
+Use the primary `citation_fix` route for matching content at stale same-path citation anchors. A correct-input
 refusal follows the delivered Curator recovery procedure only for that refusing
 tool and input class; permission decisions and product guards remain stops. MCP
 `citation_fix(repo_id=<id>,
-contract_path=<enclosure contract>, dry_run=true|false)` regenerates every range that can be
-regenerated from its anchor — the whole tree in one call after a package move — and prints a work
-order for the rest: the anchor, the range, the file, and every location in the code tree that does
-hold that anchor. It repairs pure MOVES only, where a symbol kept its name and changed file; a
-rename, a deletion and an ambiguous match are refused rather than guessed at. `contract_path` is
+contract_path=<enclosure contract>, dry_run=true|false)` authors supplied card citation tables
+and re-records blob/range anchors whose content still matches at the same target path.
+It does not relocate a symbol into another file. Cross-file moves, renamed or deleted targets
+and stale or ambiguous references remain Curator reconciliation work. `contract_path` is
 the ordinary leaf write route; a contract naming the official memory repo is refused.
 The only unscoped admission is the configured converted memory root before baseline
 adoption, with no linked memory worktree; the repository and resolved root must
@@ -206,17 +205,15 @@ application operation, not an agent-facing route around MCP.
 | `worktree_sync` | Pull the moved official line into a live worktree. | `contract_path`, `dry_run=false` |
 | `worktree_pause` | Pause an atomic master and hand control back; publishes nothing. | `contract_path` |
 | `worktree_checkpoint_landing` | Partially publish an unfinished series master by landing its finished leaves; not a pause. | `contract_path`, `strategy`, `dry_run=false` |
-| `worktree_record_landing` | Record a commit the landing target already holds. | `contract_path`, `code_commit`, `memory_commit`, dry-run options |
 | `worktree_status` | Report strict task-addressed lifecycle status without queue input. A live locator resolves to the root manifest/journal and its executable controls; a terminal locator resolves to the exact external archive/receipt plus surviving contract truth, distinguishes archive-ready from cleanup-completed, and returns the archived `cleanupArguments` with exact retry `nextArgs`. | `repo_id`, `task_name` / `contract_path` |
 | `worktree_closeout_preview` | Non-mutating preview of a worktree-backed closeout. On converted memory, the invariant gate judges the exact candidate trees; `knowledge-gate-refused` carries its findings. | `contract_path`, code/memory commit messages |
 | `worktree_closeout_apply` | On converted memory, judge the exact candidate trees with the invariant gate; `knowledge-gate-refused` carries its findings. Validate every enabled explicit nonblank input, claim the exact first-ready door generation through a short CAS, then start or observe its durable task-bound closeout and return promptly. Poll `worktree_status`; no operation ID is exposed. Agents Remember source commits run the leaf change-set-scoped quality contract (`--targeted`) before Git commit — the full wrapper runs once per master at the master integration gate. | `contract_path`, `intent_note`, explicit message for each enabled commit leg |
 | `worktree_integrate` | Start or observe durable task-bound landing (`ff-only` or `replay`) and return promptly. Poll `worktree_status`; retries with conflicting input refuse. | `contract_path`, `strategy`, `dry_run=false` |
-| `worktree_sync` | Pull the moved official line into a live worktree: fetch, merge code, fast-forward memory, advance the recorded base pair. Conflicts are retained for agent resolution (`continue` / `cancel` / `reconcile`). | `contract_path`, `memory_sync_choice`, `resolution_action`, `knowledge_resolution`, `dry_run=false` |
+| `worktree_sync` | Pull the moved official line into a live worktree: fetch, merge code, fast-forward or merge memory under the admitted sync plan, and advance the recorded base pair. Converted knowledge merges structurally and is validated; conflicts retain the advertised `continue` / `cancel` route. | `contract_path`, `memory_sync_choice`, `resolution_action`, `dry_run=false` |
 | `worktree_pause` | Pause an atomic master and hand control back to the developer; publishes nothing. | `contract_path` |
 | `worktree_checkpoint_landing` | Land an unfinished atomic master's accumulated line into its super branch and keep the master open; requires developer approval. | `contract_path`, `strategy`, `dry_run=false` |
-| `worktree_record_landing` | Record a task's code landing through a pull request with the landed commit. | `contract_path`, `landed_code_commit`, `landed_memory_content_commit`, `dry_run=false` |
+| `worktree_record_landing` | Record a commit the landing target already holds. | `contract_path`, `landed_code_commit`, optional `landed_memory_content_commit`, `dry_run=false` |
 | `worktree_operation_control` | Execute one currently advertised task-addressed control for an exact closeout/integrate/direct-landing generation. Retry/recover preserve accepted input; cancellation proves worker exit and Git safety; revise/retire/supersede are evidence-aware. | `contract_path`, `operation_kind`, `action`, `expected_generation`, nonblank `intent_note`, action-specific inputs, `dry_run=false` |
-| `worktree_legacy_operation` | Explicitly inspect, migrate, or archive one exact schema-1 operation. Migration is limited to the proven blank-message incident; normal readers remain current-schema-only. | `contract_path`, `operation_kind`, `action`, inspect-bound `expected_digest`, action-specific messages/reason, `dry_run=false` |
 | `direct_landing` | Grant-gated branch-addressed landing for a named granted leaf, without a leaf worktree enclosure. Verifies the series code commit at the branch HEAD, or creates it from the leaf's uncommitted changes with `code_commit_message`; persists a durable direct-landing generation before Git mutation and recovers it through `worktree_operation_control`. | `contract_path`, `leaf_task_document_ref`, optional `code_commit` (verify) or `code_commit_message` (create), explicit enabled-leg messages, `intent_note`, optional gated `candidate_tree`, `dry_run=false` |
 | `direct_execution_grant` | Give, take back, or reclaim direct-execution grants before work starts, as an architect. The developer gives the same record with the dashboard control; `task_doc` has no operation that gives, changes, or removes a grant. | `task_document_ref`, `action` (`give`, `revoke`, or `reclaim` — reclaim takes back only abandoned leaves' grants with clean checkouts and reports what was preserved and why; started leaves keep their grants under rule 5) |
 | `worktree_cleanup` | After integration, archive/read back canonical lifecycle evidence, publish an external terminal receipt, then remove worktrees, merged task branches, reports, and the enclosure root. Archive-ready is not cleanup-completed; retry this exact public call with its archived `teardown_providers` value until surviving contract truth records completion. Bounded pre-locator exception (MIK-R82 rule 5): with no locator, no worktree folder, and no work branches, the call finishes with nothing to archive/delete, records the why in the surviving contract, and reads it back. This is non-terminal for task documents. | `contract_path`, `dry_run=false`, `teardown_providers=true` |
@@ -258,7 +255,6 @@ the handover, and the answer naming it.
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `closeout_door` | Publish or inspect one contract-owned closeout generation. Declare/update-provenance bind complete current evidence; defer/resume/withdraw change only the exact generation's scheduling disposition. Claim is intentionally absent. | request with `action`, `contract_path`, action-specific `candidate_task_document_ref`, `expected_generation_id`, `grade`, `admission`, optional declared `caller` |
 | `closeout_queue` | Inspect or rebuild one sprint's disposable waiting-only projection. It is either exact-current `valid-built` or non-admitting `invalid-empty`; rebuild derives solely from current task plus waiting-door facts. | request with `action:"status"|"rebuild"`, `sprint_task_document_ref`, optional declared `caller` |
 
 The queue has no declare, select, claim, defer, withdraw, lifecycle, commit, certification,
@@ -299,7 +295,9 @@ none of these calls starts a model turn.
 ### task_doc operations
 
 `task_doc` authors the JSON-primary task document (`ar-task-document/v1`); `task.md` /
-`<slug>.md` is generated and never parsed back. Every operation is a write: `get` and
+`<slug>.md` is generated and never parsed back. Authoring operations write task documents.
+`linkage_report` leaves them unchanged; a non-dry call writes a separate report artifact,
+while its dry run writes nothing. `get` and
 `read_steps` are removed operations (calling one is refused with the rendered `.md` and
 JSON file names to read instead). Locate the doc by `task_name` (also resolves the
 contract for the lifecycle key) or `contract_path`; pass `slug` for a series sub-task
@@ -382,11 +380,11 @@ batch of `mutations` (`add_node`, `remove_node`, `add_edge`, `remove_edge`, `mov
 Register. `attach_master` attaches one master as a single validated batch
 (`masterRef`, `number`, `name?`, `scope?`, `status?`, `executionNature?`, `judgmentId?`);
 `detach_master` takes `{masterRef}` and refuses while any edge touches the node.
-`linkage_report` is the read-only drift report (seat-doc rows, slug-only membership,
-mismatches, uncommanded masters).
+`linkage_report` reports drift without changing task documents (seat-doc rows, slug-only
+membership, mismatches, uncommanded masters); non-dry calls write a separate report artifact.
 - `Completed` refuses while any declared step/substep or master row stays unresolved.
 
-See [w-02-light-task-workflow Worktrees And Closeout](worktrees-c09.md) for the lifecycle and gates.
+See [Worktrees And Closeout](worktrees-c09.md) for the lifecycle and gates.
 
 ## Knowledge operations
 
@@ -401,7 +399,7 @@ See [w-02-light-task-workflow Worktrees And Closeout](worktrees-c09.md) for the 
 See [Knowledge system](knowledge-system.md) for record/sidecar/history ownership,
 worklist and gate fields, validator, derived index, conversion/crossing and the
 reader/review surfaces. The [knowledge command
-reference](../../skills/l-01-agent-lifecycles/reference/knowledge-commands.md)
+reference](../../skills/l-01-agent-lifecycles/reference/knowledge/commands.md)
 lists command callers, timing and examples.
 
 ## Role agents

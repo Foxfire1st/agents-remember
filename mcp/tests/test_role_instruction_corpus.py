@@ -1,5 +1,4 @@
 """Focused behavioral check for the consolidated role-instruction corpus.
-
 The corpus this protects is the canonical root ``skills/l-01-agent-lifecycles/`` tree: a thin
 router, the shared ``core/`` blocks, one self-contained file per role, the ``operations/``
 blocks, and the JSON composition manifest that routes a role to its sources. These cases assert
@@ -8,7 +7,7 @@ the properties a consumer depends on:
 * every role in the registry has exactly one readable role source;
 * role sources remain well-formed, self-contained instructions without operator knobs;
 * the manifest resolves to files that exist, for every role and every operation;
-* the role registry is exactly the ten roles, and native role routing remains separate from the
+* the role registry is exactly the eight roles, and native role routing remains separate from the
   retained ambient launcher metadata;
 * the manifest shares no prose (it is a metadata plane);
 * EVERY relative path the corpus cites resolves, so a consolidation cannot leave a dangling
@@ -20,7 +19,6 @@ the properties a consumer depends on:
 
 from __future__ import annotations
 
-import argparse
 import copy
 import json
 import re
@@ -34,9 +32,15 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
-from agents_remember.cli.__main__ import build_parser
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.tasks import write_task_doc
+from agents_remember_test_support.testing import task_document_instruction_contracts
+from agents_remember_test_support.testing.instruction_consistency import (
+    assert_public_command_reference,
+    command_reference_inputs,
+    misplace_command_documentation,
+    public_commands,
+)
 from curation_statement_surface import fragment_one_surfaces
 from test_task_document import _config, _doc
 
@@ -48,8 +52,6 @@ MANIFEST_PATH = LIFECYCLE_ROOT / "composition-manifest.json"
 ROLE_ORDER = (
     "architect",
     "orchestrator",
-    "designer",
-    "strategist",
     "manager",
     "worker",
     "curator",
@@ -108,12 +110,10 @@ CORPUS_LOCATIONS = (
     "SKILL.md",
 )
 
-# A role is self-contained: naming a sibling role file is the amalgamation the developer's ruling
-# forbids, because a seat learns its duties from its own file and nowhere else. The one sanctioned
-# case is hat-collapse, which genuinely requires running another seat's file: the architect may
-# wear the designer hat inline. Entries elsewhere are removed rather than kept "just in case".
+# A role learns its duties from its own source. The Manager owns the shared
+# questions-received policy; the Architect and Orchestrator refer to that home.
 SANCTIONED_SIBLING_REFERENCES = {
-    "architect": ("roles/designer.md", "roles/manager.md"),
+    "architect": ("roles/manager.md",),
     # F03 one-home repair: the Manager role owns the single questions-received
     # policy; the Architect and Orchestrator carry only a referral to it.
     "orchestrator": ("roles/manager.md",),
@@ -262,7 +262,7 @@ def test_manifest_resolves_every_role_and_operation_source(tmp_path: Path) -> No
 
     assert _resolve_sources(LIFECYCLE_ROOT, manifest) == []
 
-    # The registry is exactly the ten roles; ambient launch metadata remains separate from native
+    # The registry is exactly the eight roles; ambient launch metadata remains separate from native
     # role routing and is still exercised by the existing AR launcher tests.
     assert list(manifest["role_order"]) == list(ROLE_ORDER)
     assert "launcher" not in manifest["roles"]
@@ -390,7 +390,7 @@ def test_manifest_carries_routing_metadata_not_copied_payloads(tmp_path: Path) -
                 # a copied citation whose target does not exist
                 "template": "templates/worker-brief-that-does-not-exist.md",
                 # a citation that does exist must NOT be flagged (negative control)
-                "realTemplate": "templates/worker-brief.md",
+                "realTemplate": "templates/manager-brief.md",
             }
         },
     }
@@ -469,7 +469,7 @@ def test_every_role_source_is_concise_and_well_formed() -> None:
         )
 
         # A role is self-contained: naming a sibling role file is the amalgamation the ruling
-        # forbids, except where the seat genuinely runs that file as a hat.
+        # forbids, except for the explicit policy referrals below.
         allowed = SANCTIONED_SIBLING_REFERENCES.get(role, ())
         for other in ROLE_ORDER:
             if other == role:
@@ -530,7 +530,7 @@ def test_every_relative_path_the_corpus_cites_resolves() -> None:
     * **corpus-relative** — ``core/authority.md``, ``operations/review.md``: resolved against the
       lifecycle root.
     * **file-relative** — ``../core/loop.md``: resolved against the citing file's own directory, and
-      against the skills root for a cross-skill reference such as ``../w-02-light-task-workflow/…``.
+      against the skills root for a cross-skill reference such as ``../c-00-initialize-memory-repo/SKILL.md``.
     * **repository-relative** — ``mcp/src/agents_remember/controlplane/gate_policy.py``: resolved
       against the repository root.
 
@@ -554,9 +554,9 @@ def unresolved_references(lifecycle_root: Path) -> list[str]:
     "consolidated into `core/`: `authority.md`, `invariants.md`, …" form resolves). A
     **coordination-root** anchor and a **context-dependent symbolic name** are skipped and listed in
     `SYMBOLIC_FILE_NAMES` — their resident tree is task-local or route-local, which this checkout
-    cannot contain. The historical ruling's annotated ``system-specialist`` source resolves to
-    its explicitly named ``investigator`` replacement only in ``reference/rulings.md`` and only
-    while that replacement exists. Everything else is reported.
+    cannot contain. Bootstrap also names the bare `memory.md` ledger explicitly at the memory
+    repository root; that contextual citation is external, not a checkout-relative path.
+    Everything else is reported.
     """
 
     skills_root = lifecycle_root.parent
@@ -574,25 +574,20 @@ def unresolved_references(lifecycle_root: Path) -> list[str]:
                 if directory.endswith("/") and f"`{directory}" in line
             ]
             context_dirs = named or context_dirs
-            reference_line = line
-            # R98 preserves the historical ruling's words beside its explicitly renamed home.
-            # This exact annotation is valid only here, and only while the new home exists.
-            if (
-                path.relative_to(lifecycle_root).as_posix() == "reference/rulings.md"
-                and (lifecycle_root / "roles/investigator.md").is_file()
-            ):
-                reference_line = line.replace(
-                    "`roles/system-specialist.md` (now `roles/investigator.md`)",
-                    "`roles/investigator.md`",
-                )
-            for candidate in cited_paths(reference_line):
+            for candidate in cited_paths(line):
                 token = candidate.strip()
                 if any(marker in token for marker in ("<", ">", "{", "}", " ", "*", "|", "…")):
                     continue
                 token = token.split("#", 1)[0].rstrip("/")
                 if not token or COORDINATION_ROOT_RE.search(token):
                     continue
-                if token.rsplit("/", 1)[-1] in SYMBOLIC_FILE_NAMES:
+                # Bootstrap explicitly locates this derived ledger in the resolved memory tree.
+                # A path prefix or a different location claim must still resolve normally.
+                if token.rsplit("/", 1)[-1] in SYMBOLIC_FILE_NAMES or (
+                    path.relative_to(lifecycle_root).as_posix() == "operations/bootstrap.md"
+                    and token == "memory.md"
+                    and "at the memory repository root" in line
+                ):
                     continue
                 if NON_LOCATION_RE.match(token):
                     continue
@@ -624,13 +619,16 @@ def test_the_curator_hand_off_list_contract_has_one_home_its_consequences_declar
         "## The entry",
         "## Shape",
         "## Rule 1 — co-resolution",
-        "## Rule 2 — no paraphrase",
+        "## Rule 2 — carry producer data verbatim",
     ):
         assert section in text, f"{relative} no longer carries '{section}'"
     # F12: every in-scope copy of the hand-off contract requires the current onboarding row
     # and narrows counted sidecar edits to references.
-    copies = [contract] + [
-        REPOSITORY_ROOT / root / "l-01-agent-lifecycles" / relative
+    ingestion_relative = "templates/curator-handoff-ingestion.md"
+    ingestion = LIFECYCLE_ROOT / ingestion_relative
+    assert ingestion.is_file(), f"the curator ingestion detail is missing: {ingestion_relative}"
+    copies = [ingestion] + [
+        REPOSITORY_ROOT / root / "l-01-agent-lifecycles" / ingestion_relative
         for root in GENERATED_SKILL_COPIES
     ]
     for copy_path in copies:
@@ -638,19 +636,30 @@ def test_the_curator_hand_off_list_contract_has_one_home_its_consequences_declar
         assert "its current `onboarding:<path>` row" in copy_text, copy_path
         assert "a counted change of its card alone never answers" in copy_text, copy_path
         assert "its sidecar's `references` beyond mechanical anchor fields" in copy_text, copy_path
-    # F12 narrow (architect): the converted-card workflow's answer sentences require the
-    # current row (rules 1 and 2); nothing else of c-05 is touched.
-    workflow = "workflows/converted-card-workflow.md"
-    c05_copies = [SKILLS_ROOT / "c-05-create-or-update-onboarding-files" / workflow] + [
-        REPOSITORY_ROOT / root / "c-05-create-or-update-onboarding-files" / workflow
-        for root in GENERATED_SKILL_COPIES
-    ]
-    for c05_copy in c05_copies:
-        c05_text = " ".join(c05_copy.read_text(encoding="utf-8").split())
-        assert "its current `onboarding:<route>/overview`" in c05_text, c05_copy
-        assert "a counted change of its overview alone never answers" in c05_text, c05_copy
-        assert "an `updated` row with a counted change" in c05_text, c05_copy
-        assert "a `no_impact` row when the card still holds" in c05_text, c05_copy
+    # Card/overview row schema and current-source binding live in the hand-off contract;
+    # card-authoring guidance points at the same current dispositions.
+    card_detail = "reference/curator/card-formats-and-citations.md"
+    for surface in ("skills", *GENERATED_SKILL_COPIES):
+        lifecycle = REPOSITORY_ROOT / surface / "l-01-agent-lifecycles"
+        card_text = " ".join((lifecycle / card_detail).read_text(encoding="utf-8").split())
+        assert "subject `onboarding:<path>` or `onboarding:<route>/overview`" in card_text
+        assert (
+            "Use `updated` with a counted card change, or `no_impact` with a reason." in card_text
+        )
+        handoff_text = " ".join(
+            (lifecycle / ingestion_relative).read_text(encoding="utf-8").split()
+        )
+        for clause in (
+            "`onboarding:<source path>` or `onboarding:<route>/overview`",
+            "Its disposition is `updated` when the card or overview was brought up to date",
+            "the writer refuses an `updated` row without one",
+            "or `no_impact` when the reviewed file needs no change",
+            "with each file's blob at the code candidate (`sources`)",
+            "When a covered file changes again after the row was written, the item reopens: name the row again.",
+        ):
+            assert clause in handoff_text, (surface, clause)
+            with pytest.raises(AssertionError, match=re.escape(clause)):
+                assert clause in handoff_text.replace(clause, ""), clause
     assert "target: []" in text, f"{relative} no longer encodes a ruling that applies nowhere"
     assert unresolved_references(LIFECYCLE_ROOT) == [], "the contract cites a path that is gone"
 
@@ -661,19 +670,25 @@ def test_the_curator_hand_off_list_contract_has_one_home_its_consequences_declar
             f"role '{role}' emits or consumes the curator hand-off list but does not declare it"
         )
         role_text = (LIFECYCLE_ROOT / roles[role]["file"]).read_text(encoding="utf-8")
-        assert "templates/curator-handoff-list.md" in role_text, (
+        # Q-P5-b split: producers name the list contract; the Curator names the ingestion
+        # sections it consumes (and declares that template too).
+        contract = (
+            "templates/curator-handoff-ingestion.md"
+            if role == "curator"
+            else "templates/curator-handoff-list.md"
+        )
+        assert contract in role_text, (
             f"{roles[role]['file']} does not name the hand-off list contract it depends on"
         )
+    assert "curator-handoff-ingestion.md" in roles["curator"]["templates"]
 
 
 def test_link_check_reports_a_repo_relative_anchor_pointed_at_nothing(tmp_path: Path) -> None:
     """The link check catches a repository-relative anchor whose file does not exist.
 
-    The mutation is **seeded**, not carried by the shipped corpus. The previous version of this
-    case rewrote a repository-relative anchor that one role file happened to cite, so when the
-    260915-CAPS-L22 cut made the corpus cite none, the case failed on a missing seed instead of
-    measuring the resolver. Writing the healthy anchor in and then breaking it is the same
-    measurement and it cannot be disarmed by an edit elsewhere in the tree.
+    Seed a healthy backticked reference, then break it. This check exercises backticked paths,
+    not Markdown link syntax. Missing paths must fail in shared and role files; a deleted target
+    must also fail.
     """
 
     staged = tmp_path / "skills"
@@ -701,23 +716,40 @@ def test_link_check_reports_a_repo_relative_anchor_pointed_at_nothing(tmp_path: 
     healthy.write_text(original + "\nSee `system/tools.md`.\n", encoding="utf-8")
     assert unresolved_references(staged_root) == []
 
-    # A renamed historical anchor must carry its exact annotation and a real new home.
-    rulings = staged_root / "reference/rulings.md"
-    historical = rulings.read_text(encoding="utf-8")
-    annotated = "`roles/system-specialist.md` (now `roles/investigator.md`)"
-    assert annotated in historical
-    rulings.write_text(
-        historical.replace(annotated, "`roles/system-specialist.md`"), encoding="utf-8"
+    # The ledger citation is external only when Bootstrap locates the bare name in memory.
+    bootstrap = staged_root / "operations/bootstrap.md"
+    bootstrap_text = bootstrap.read_text(encoding="utf-8")
+    location = "at the memory repository root"
+    assert "`memory.md`" in bootstrap_text and location in bootstrap_text
+    bootstrap.write_text(bootstrap_text.replace(location, "beside this instruction file"))
+    assert any("bootstrap.md → memory.md" in item for item in unresolved_references(staged_root))
+    bootstrap.write_text(bootstrap_text.replace("`memory.md`", "`missing/memory.md`"))
+    assert any(
+        "bootstrap.md → missing/memory.md" in item for item in unresolved_references(staged_root)
     )
-    assert any("roles/system-specialist.md" in item for item in unresolved_references(staged_root))
-    rulings.write_text(historical, encoding="utf-8")
-    replacement = staged_root / "roles/investigator.md"
+    bootstrap.write_text(bootstrap_text, encoding="utf-8")
+    assert unresolved_references(staged_root) == []
+
+    # Missing backticked paths in shared instructions have no exception.
+    shared = staged_root / "core/acceptance.md"
+    shared_text = shared.read_text(encoding="utf-8")
+    anchor = "roles/investigator.md"
+    assert (staged_root / anchor).is_file()
+    shared.write_text(shared_text + f"\nSee `{anchor}`.\n", encoding="utf-8")
+    assert unresolved_references(staged_root) == []
+    missing = "roles/investigator-missing.md"
+    shared.write_text(shared_text + f"\nSee `{missing}`.\n", encoding="utf-8")
+    assert any(missing in item for item in unresolved_references(staged_root))
+    shared.write_text(shared_text + f"\nSee `{anchor}`.\n", encoding="utf-8")
+    replacement = staged_root / anchor
     replacement_text = replacement.read_text(encoding="utf-8")
     replacement.unlink()
-    assert any("roles/system-specialist.md" in item for item in unresolved_references(staged_root))
+    assert any(anchor in item for item in unresolved_references(staged_root))
     replacement.write_text(replacement_text, encoding="utf-8")
-    healthy.write_text(original + f"\nSee {annotated}.\n", encoding="utf-8")
-    assert any("roles/system-specialist.md" in item for item in unresolved_references(staged_root))
+    assert unresolved_references(staged_root) == []
+    shared.write_text(shared_text, encoding="utf-8")
+    healthy.write_text(original + f"\nSee `{missing}`.\n", encoding="utf-8")
+    assert any(missing in item for item in unresolved_references(staged_root))
     healthy.write_text(original, encoding="utf-8")
     assert unresolved_references(staged_root) == []
 
@@ -819,7 +851,9 @@ class CurationPolicyTests:
             + "\n  ".join(missing)
         )
 
-    def test_every_generated_copy_carries_the_policy_its_canonical_original_states(self) -> None:
+    def test_every_generated_copy_carries_the_policy_its_canonical_original_states(
+        self, tmp_path: Path
+    ) -> None:
         """A stale package copy serves the old policy to its reader."""
 
         missing: list[str] = []
@@ -831,6 +865,45 @@ class CurationPolicyTests:
             "generated skill copies do not carry the complete-curation policy:\n  "
             + "\n  ".join(missing)
         )
+
+        # Seed from the actual canonical bodies; removing any required clause must be visible.
+        for relative in CURATION_POLICY_STATEMENTS:
+            target = tmp_path / relative.removeprefix("skills/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            original = (REPOSITORY_ROOT / relative).read_text(encoding="utf-8")
+            target.write_text(original, encoding="utf-8")
+        assert missing_curation_policy_statements(tmp_path, "seeded") == []
+        for relative, statements in CURATION_POLICY_STATEMENTS.items():
+            target = tmp_path / relative.removeprefix("skills/")
+            original = target.read_text(encoding="utf-8")
+            normalized = normalize_statement(original)
+            for statement in statements:
+                clause = normalize_statement(statement)
+                assert clause in normalized, (relative, statement)
+                mutant = normalized.replace(clause, "")
+                assert mutant != normalized
+                target.write_text(mutant, encoding="utf-8")
+                assert f"seeded: {relative}" in missing_curation_policy_statements(
+                    tmp_path, "seeded"
+                ), (relative, statement)
+            target.write_text(original, encoding="utf-8")
+        assert missing_curation_policy_statements(tmp_path, "seeded") == []
+        role_path = tmp_path / "l-01-agent-lifecycles/roles/curator.md"
+        original_role = role_path.read_text(encoding="utf-8")
+        for old, new in (
+            ("Before running curation checks, read", "Read"),
+            ("#run-the-complete-curation-checks", "#normal-workflow"),
+            ("Before validating coherence, read", "Read"),
+            ("#authority-gates", "#normal-workflow"),
+        ):
+            mutant = original_role.replace(old, new)
+            assert mutant != original_role, old
+            role_path.write_text(mutant, encoding="utf-8")
+            assert "seeded: skills/l-01-agent-lifecycles/roles/curator.md" in (
+                missing_curation_policy_statements(tmp_path, "seeded")
+            )
+        role_path.write_text(original_role, encoding="utf-8")
+        assert missing_curation_policy_statements(tmp_path, "seeded") == []
 
 
 class CurationGuardTeethTests:
@@ -856,19 +929,32 @@ class CurationGuardTeethTests:
         assert retired_curation_findings(REPOSITORY_ROOT) == [], (
             "the corpus must read clean before a seed is meaningful"
         )
+        authorized_absent_sources = frozenset(
+            {
+                "skills/l-01-agent-lifecycles/roles/designer.md",
+                "skills/l-01-agent-lifecycles/roles/strategist.md",
+                "skills/l-01-agent-lifecycles/templates/worker-brief.md",
+            }
+        )
+        for source in authorized_absent_sources:
+            assert not (REPOSITORY_ROOT / source).exists(), source
         for retired in RETIRED_CURATION_STATEMENTS:
             reading = normalize_statement(retired.statement)
             for source in retired.sources:
                 relative = source.removeprefix("skills/")
-                shipped = normalize_statement(
-                    (REPOSITORY_ROOT / source).read_text(encoding="utf-8")
-                )
+                # Every historical seed still exercises its original source-confined reader.
                 assert retired_statement_findings(reading, relative), (
                     f"{source} would not report the retired statement it shipped: {retired.probe!r}"
                 )
-                assert not retired_statement_findings(shipped, relative), (
-                    f"{source} still reads as carrying the retired statement: {retired.probe!r}"
-                )
+                if source in authorized_absent_sources:
+                    assert not (REPOSITORY_ROOT / source).exists(), source
+                else:
+                    shipped = normalize_statement(
+                        (REPOSITORY_ROOT / source).read_text(encoding="utf-8")
+                    )
+                    assert not retired_statement_findings(shipped, relative), (
+                        f"{source} still reads as carrying the retired statement: {retired.probe!r}"
+                    )
 
         # The loop-gate pairing is retired as a *field pairing*, not as a sentence: the carriers
         # phrase the gate differently from each other, so the pairing is what has to be absent. The
@@ -948,15 +1034,7 @@ class CurationGuardTeethTests:
 
 
 def test_new_series_guidance_requires_json_primary_master_before_dependencies() -> None:
-    for surface in ("skills", *GENERATED_SKILL_COPIES):
-        for name in ("SKILL.md", "template.md", "master-template.md", "workflow.md"):
-            path = REPOSITORY_ROOT / surface / "w-02-light-task-workflow" / name
-            text = " ".join(path.read_text(encoding="utf-8").split())
-            assert "runtime ships" not in text and "not tool-managed yet" not in text, path
-            assert "hand-authored markdown for now" not in text, path
-            assert '`kind:"master"`' in text, path
-            assert "before" in text and "`waitsFor`" in text and "`task_doc`" in text, path
-            assert "intentionally migrated" in text, path
+    task_document_instruction_contracts.assert_contract(REPOSITORY_ROOT, GENERATED_SKILL_COPIES)
 
 
 def test_native_new_master_then_indexed_leaf_dependencies(tmp_path: Path) -> None:
@@ -1000,58 +1078,106 @@ def _architect_passages(text: str) -> str:
     )
 
 
+def _require_originating_leaf_home(text: str) -> None:
+    """Keep the Architect action and the complete all-role owning rule together."""
+    pointer = (
+        "Before assigning an issue to another open leaf, follow "
+        "[Complete the plan and preserve its boundaries]"
+        "(#complete-the-plan-and-preserve-its-boundaries) for the originating-leaf default "
+        "and charter exception."
+    )
+    assert pointer in _architect_passages(text)
+    common = "\n".join(re.findall(r"(?s)<!-- ar:roles all -->\s*(.*?)(?=<!-- ar:roles |\Z)", text))
+    section = re.search(
+        r"(?ms)^## Complete the plan and preserve its boundaries\n(.*?)(?=^## |\Z)", common
+    )
+    assert section is not None, "originating-leaf rule needs its common owner"
+    assert (
+        "Keep issues in their originating leaf unless another open leaf's charter already covers them."
+        in " ".join(section[1].split())
+    )
+
+
+def _assert_originating_leaf_home_controls(text: str) -> None:
+    _require_originating_leaf_home(text)
+    for old, new in (
+        ("Before assigning an issue to another open leaf", "Read"),
+        ("#complete-the-plan-and-preserve-its-boundaries)", "#cross-packet-alignment-sweep)"),
+        ("Keep issues in their originating leaf", ""),
+        ("unless another open leaf's charter already covers them.", ""),
+        ("## Complete the plan and preserve its boundaries", "## Unrelated action"),
+        ("<!-- ar:roles all -->", "<!-- ar:roles curator -->"),
+    ):
+        mutant = text.replace(old, new)
+        assert mutant != text, old
+        with pytest.raises(AssertionError):
+            _require_originating_leaf_home(mutant)
+
+
 def test_packet_alignment_and_advisory_review_keep_independent_preparation() -> None:
     """Inherited12/13/19/22/23: omissions or a move to common prose lose the duty."""
     required = {
         "operations/planning.md": (
             "## Cross-packet alignment sweep",
-            "**When.**",
-            "**What.**",
+            "Before releasing a new packet or revision into a master with other open leaves:",
+            "Check counts, paths, leaf identifiers, order and premises.",
             "in both directions",
             "reader other than the drafter",
-            'before the intent-review question "go, or review first?"',
-            "again before the go for a packet revised during the review",
-            "goes to the developer before either leaf proceeds",
-            "drafted and registered",
-            "**No finding** is recorded",
-            "**The default stays.**",
-            "that leaf's charter covers it anyway",
-            "each knowledge answer read to its last page",
+            'before the new leaf\'s intent-review question, "go, or review first?"',
+            "Repeat it before the go for a packet revised during review.",
+            "draft and register the older packet's amendment and update its leaf task document",
+            "including a result with no findings",
+            "Before assigning an issue to another open leaf, follow "
+            "[Complete the plan and preserve its boundaries]"
+            "(#complete-the-plan-and-preserve-its-boundaries) for the originating-leaf default "
+            "and charter exception.",
+            "every knowledge answer through its last page",
             "the code they leave unattributed",
-            "Prepared context before any seat starts",
-            "a row kind, a disposition, a writer field or a gate",
-            "how the leaf's own curation completes on the installed build",
-            "fixtures and scratch copies only",
-            "what it ran and what it left out",
-            "same cause on the base, compared by message and subtest, not by test name",
-            "tell the developer that day: hours, item",
+            "Put that list in the leaf task document's Prepared context before any seat starts.",
+            "a row kind, disposition, writer field or gate",
+            "how its own curation completes on the installed build",
+            "Prove the new behavior only on fixtures and scratch copies.",
+            "tell the developer that day: the hours, the item",
             "Plan-review and super-exit have no startable Reviewer seat",
         ),
         "operations/review.md": (
             "## Advisory independent reviews",
-            "exception to routing",
-            "Architect carries the advisory findings to the Reviewer itself",
-            "They hold no leaf seat",
-            "same material as the Reviewer",
+            "exception to normal routing",
+            "the Architect commissions it and carries the findings to the Reviewer.",
+            "It holds no leaf seat",
+            "Provide the freeze, packets, rulings, design source and Worker evidence supplied to the Reviewer.",
             "own output folder",
-            "own clean copy",
-            "own ports",
+            "clean copy for anything it runs",
+            "and ports.",
             "No advisory reviewer reads the Reviewer's or Curator's files",
             "another advisory reviewer's folders",
-            "reports only to the Architect",
-            "brief names nothing the Architect or developer has already noticed",
-            "an advisory report changes no verdict by itself",
+            "Each reports only to the Architect.",
+            "Name nothing the Architect or developer has already noticed",
+            "An advisory report changes no verdict by itself",
             "one questions file",
-            "tells the Manager once",
+            "Tell the Manager once",
             "rule on each",
-            "extra round",
-            "pre-landing check confirms that every advisory finding has a ruling",
+            "An extra round for these findings is the Architect's grant.",
+            "The Architect's pre-landing check confirms that every advisory finding has a ruling.",
             "sufficient seat permissions",
-            "default/auto-review or a refused approval",
-            "leaves the decision to the user",
-            "without bypass",
+            "Before responding to an advisory reviewer's permission prompt, read "
+            "[Formal permissions](orientation.md#formal-permissions) for the once-only "
+            "developer notice and existing parent route.",
         ),
     }
+    planning = (LIFECYCLE_ROOT / "operations/planning.md").read_text()
+    _assert_originating_leaf_home_controls(planning)
+    # P5-07 OP-138: the contradiction-to-developer rule has one home, the all-role rule of
+    # "Complete the plan and preserve its boundaries"; the Architect-only sweep no longer
+    # restates it.
+    one_home = (
+        "Send a requirement contradiction, a premise that changes a requirement's promise, scope "
+        "expansion or a high-impact unresolved decision to the developer before affected work "
+        "proceeds."
+    )
+    assert planning.count(one_home) == 1
+    assert "goes to the developer before either leaf proceeds" not in planning
+    assert one_home not in _architect_passages(planning)
     for source, clauses in required.items():
         text = (LIFECYCLE_ROOT / source).read_text()
         selected = _architect_passages(text)
@@ -1063,6 +1189,45 @@ def test_packet_alignment_and_advisory_review_keep_independent_preparation() -> 
         # The same prose in the all-roles passage cannot satisfy Architect-only ownership.
         moved = text.replace("<!-- ar:roles architect -->", "<!-- ar:roles all -->")
         assert not _architect_passages(moved)
+    formal_clauses = (
+        "The Architect answers permission prompts that are only formalities itself, "
+        "but only as far as its own seat's permissions reach.",
+        "It never approves a whole class of prompts in advance (no blanket approver) "
+        "without the developer's word.",
+        "If its mode is default or auto-review, or its own answer to a prompt is refused, "
+        "the developer decides:",
+        "name the waiting prompt to him once, and use no way around it.",
+        "Keep required upward notices on the existing parent chain only where a parent exists.",
+        "A parentless Architect speaks to the developer in its own chat.",
+        "Child permission notices retain their source-specific route.",
+    )
+
+    def require_formal_permission_home(text: str) -> None:
+        blocks = re.findall(r"(?s)<!-- ar:roles architect -->\s*(.*?)(?=<!-- ar:roles |\Z)", text)
+        sections = [
+            match[1]
+            for block in blocks
+            if (match := re.search(r"(?ms)^## Formal permissions\n(.*?)(?=^## |\Z)", block))
+        ]
+        assert len(sections) == 1, "Formal permissions needs its Architect-owned home"
+        _require_clauses(" ".join(sections[0].split()), formal_clauses)
+
+    orientation = (LIFECYCLE_ROOT / "operations/orientation.md").read_text()
+    require_formal_permission_home(orientation)
+    for clause in formal_clauses:
+        mutant = orientation.replace(clause, "", 1)
+        assert mutant != orientation, clause
+        with pytest.raises(AssertionError):
+            require_formal_permission_home(mutant)
+    with pytest.raises(AssertionError):
+        require_formal_permission_home(
+            orientation.replace("<!-- ar:roles architect -->", "<!-- ar:roles all -->")
+        )
+    with pytest.raises(AssertionError):
+        require_formal_permission_home(
+            orientation.replace("## Formal permissions\n", "## Unrelated permissions\n")
+        )
+
     architect = (LIFECYCLE_ROOT / "roles/architect.md").read_text()
     for heading, target in (
         ("Establish the work", "operations/planning.md"),
@@ -1082,10 +1247,10 @@ def test_packet_alignment_and_advisory_review_keep_independent_preparation() -> 
         (
             "For integration or master-exit",
             "acceptance and delivery-proof leaf",
-            "if none is named, ask the architect",
+            "If no such leaf is named, ask the Architect.",
             "adding candidate identity and attempt records",
-            "as your first `role_message` to the returned agent ID",
-            "For a pending hand-over, the Manager gives the sender the occasion to retry and relays no contents",
+            "as your first `role_message` on `agents-remember-task` to the returned agent identifier.",
+            "For a pending handover, give the sender the occasion to retry; relay no contents and ask no developer confirmation of that occasion.",
         ),
     )
     # Advice does not recreate the superseded cold-read sweep requirement.
@@ -1093,45 +1258,8 @@ def test_packet_alignment_and_advisory_review_keep_independent_preparation() -> 
     assert "drafted, cold-read and registered" not in alignment
 
 
-def _assert_public_command_reference(reference: str) -> None:
-    pending = [("", build_parser())]
-    while pending:
-        prefix, parser = pending.pop()
-        for action in parser._actions:
-            if isinstance(action, argparse._SubParsersAction):
-                for name, child in action.choices.items():
-                    command = (prefix + " " + name).strip()
-                    assert f"| `{command}` |" in reference, command
-                    pending.append((command, child))
-
-
-def test_knowledge_gate_and_worklist_explanations_cover_actual_landing_steps() -> None:
-    """Inherited2/4/5 retain exact-tree/refusal meaning and field owners after c-02 retirement."""
-    closeout = " ".join((LIFECYCLE_ROOT / "operations/closeout.md").read_text().split())
-    for clause in (
-        "exact candidate code/memory trees",
-        "Leaf integration judges its closeout pair again",
-        "master's memory commit against the parent line's memory tip",
-        "master's net code diff",
-        "every non-abandoned leaf landed",
-        "checkpoint proves the chain of leaves already landed",
-        "Direct landing likewise judges its exact candidate pair",
-        "`knowledge-gate-refused`",
-        "`direct-landing-knowledge-gate-refused`",
-        "Send the findings to the Curator",
-        "Nothing bypasses the gate",
-    ):
-        assert clause in closeout, clause
-        assert clause not in closeout.replace(clause, "", 1)
-    brief = " ".join((LIFECYCLE_ROOT / "templates/manager-brief.md").read_text().split())
-    for clause in (
-        "dependencies before starting",
-        "before integrating",
-        "findings to the Curator",
-        "Nothing bypasses the gate",
-    ):
-        assert clause in brief, clause
-    detail = (LIFECYCLE_ROOT / "reference/curator-worklist-details.md").read_text()
+def _require_worklist_fields_and_knowledge_command_owners() -> None:
+    detail = (LIFECYCLE_ROOT / "reference/curator/worklist.md").read_text()
     worklist, gate = detail.split("`knowledgeGate`", 1)
     for field in ("state", "path", "digest", "itemCount", "itemsByKind", "incomplete"):
         assert f"| `{field}` |" in worklist, field
@@ -1148,14 +1276,163 @@ def test_knowledge_gate_and_worklist_explanations_cover_actual_landing_steps() -
         "reportOnlyCount",
     ):
         assert f"| `{field}` |" in gate, field
-    assert "an absent block\nis not a passing judgment or an empty result" in detail
-    reference = (LIFECYCLE_ROOT / "reference/knowledge-commands.md").read_text()
+    assert "an absent block is not a passing judgment or an empty result" in detail
+    reference, documents = command_reference_inputs(REPOSITORY_ROOT)
     for column in ("What it does", "Who and when", "Example"):
         assert column in reference
     for tool in (name for name in PUBLIC_TOOLS if name.startswith("knowledge_")):
         assert f"| `{tool}` |" in reference
-    _assert_public_command_reference(reference)
+    assert_public_command_reference(reference, documents)
     for role in ROLE_ORDER:
         text = (LIFECYCLE_ROOT / f"roles/{role}.md").read_text()
-        assert "{{detail:reference/knowledge-commands.md}}" in text, role
+        assert "{{detail:reference/knowledge/commands.md}}" in text, role
     assert not (SKILLS_ROOT / "c-02-memory-quality-control").exists()
+
+
+def _require_dependency_owner(text: str) -> None:
+    section = re.search(r"(?ms)^## Check packet dependencies\n(.*?)(?=^## |\Z)", text)
+    assert section is not None, "the Closeout dependency owner is missing"
+    _require_clauses(
+        " ".join(section[1].split()),
+        (
+            "The Manager checks packet dependencies before starting a leaf and before integrating it; "
+            "the product does not perform that check.",
+        ),
+    )
+
+
+def test_knowledge_gate_and_worklist_explanations_cover_actual_landing_steps() -> None:
+    """Inherited2/4/5 retain exact-tree/refusal meaning and field owners after c-02 retirement."""
+    closeout = " ".join((LIFECYCLE_ROOT / "operations/closeout.md").read_text().split())
+    for clause in (
+        "exact candidate code and memory trees",
+        "Leaf integration judges the closeout pair again",
+        "master's memory commit against the parent line's memory tip",
+        "master's net code diff",
+        "every non-abandoned leaf landed",
+        "A checkpoint proves the chain already landed.",
+        "Direct landing judges its exact candidate pair before publication.",
+        "`knowledge-gate-refused`",
+        "`direct-landing-knowledge-gate-refused`",
+        "Send the findings to the Curator",
+        "Bypass no gate.",
+    ):
+        assert clause in closeout, clause
+        assert clause not in closeout.replace(clause, "", 1)
+    brief_routes = (
+        "Before starting or integrating a leaf, read [the Manager\N{RIGHT SINGLE QUOTATION MARK}s dependency check]"
+        "(../roles/manager.md#start-leaf-agents-and-preserve-their-work) for prerequisite packets "
+        "and leaf-stage start authority.",
+        "Before handling a landing-gate refusal, read [Authorized Closeout]"
+        "(../operations/closeout.md#repair-a-gate-refusal-through-its-owner) for the gate-finding route.",
+    )
+    dependency_clauses = (
+        "Check packet dependencies before starting a leaf and before integrating it; "
+        "the product does not perform that check.",
+    )
+    gate_clauses = (
+        "A gate refusal prevents publication and names the findings.",
+        "Closeout and integration report `knowledge-gate-refused`; "
+        "direct landing reports `direct-landing-knowledge-gate-refused`.",
+        "Send the findings to the Curator for repair, then retry the owning route on the corrected pair.",
+        "Bypass no gate.",
+    )
+
+    def require_brief_routes(text: str) -> None:
+        section = re.search(r"(?ms)^### Check dependencies\n(.*?)(?=^### |\Z)", text)
+        assert section is not None, "the Manager brief needs its dependency action"
+        _require_clauses(" ".join(section[1].split()), brief_routes)
+
+    def require_dependency_home(text: str) -> None:
+        section = re.search(
+            r"(?ms)^## Start leaf agents and preserve their work\n(.*?)(?=^## |\Z)", text
+        )
+        assert section is not None, "the Manager dependency home is missing"
+        _require_clauses(" ".join(section[1].split()), dependency_clauses)
+
+    def require_gate_home(text: str) -> None:
+        section = re.search(
+            r"(?ms)^## Repair a gate refusal through its owner\n(.*?)(?=^## |\Z)", text
+        )
+        assert section is not None, "the closeout refusal home is missing"
+        _require_clauses(" ".join(section[1].split()), gate_clauses)
+
+    brief = (LIFECYCLE_ROOT / "templates/manager-brief.md").read_text()
+    manager = (LIFECYCLE_ROOT / "roles/manager.md").read_text()
+    closeout_source = (LIFECYCLE_ROOT / "operations/closeout.md").read_text()
+    for text, clauses, require_home in (
+        (brief, brief_routes, require_brief_routes),
+        (manager, dependency_clauses, require_dependency_home),
+        (closeout_source, gate_clauses, require_gate_home),
+    ):
+        require_home(text)
+        for clause in clauses:
+            mutant = text.replace(clause, "", 1)
+            assert mutant != text, clause
+            with pytest.raises(AssertionError):
+                require_home(mutant)
+        # The same rule after an unrelated heading cannot stand in for its action home.
+        heading = {
+            require_brief_routes: "### Check dependencies",
+            require_dependency_home: "## Start leaf agents and preserve their work",
+            require_gate_home: "## Repair a gate refusal through its owner",
+        }[require_home]
+        with pytest.raises(AssertionError):
+            require_home(text.replace(heading, heading.split(" ", 1)[0] + " Unrelated action", 1))
+    _require_worklist_fields_and_knowledge_command_owners()
+
+
+@pytest.mark.parametrize("command", sorted(public_commands()))
+def test_each_public_command_requires_its_documentation_owner(command: str) -> None:
+    reference, documents = command_reference_inputs(REPOSITORY_ROOT)
+    assert_public_command_reference(reference, documents)
+    reference, documents = misplace_command_documentation(reference, documents, command)
+    with pytest.raises(AssertionError):
+        assert_public_command_reference(reference, documents)
+
+
+def test_root_instructions_name_no_retired_job_lens_or_phase() -> None:
+    """L84-CUR-04: lenses.md is gone and l-01 defines no job lens or reframe-research phase.
+
+    The source checkout's root AGENTS.md therefore states no step that depends on either.
+    """
+
+    retired = ("reframe-research", "as a *lens*")
+    lifecycle = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(LIFECYCLE_ROOT.rglob("*.md"))
+    )
+    assert not (LIFECYCLE_ROOT / "lenses.md").exists()
+    assert [term for term in retired if term in lifecycle] == []
+    root = (REPOSITORY_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    assert [term for term in retired if term in root] == []
+
+
+@pytest.mark.parametrize(
+    ("role", "clause"),
+    [
+        (
+            "manager",
+            "When the resolved memory layer holds `system/task-publication.md`, follow it: claiming "
+            "a leaf assigns its issue and sets In progress before the start; after the landing and "
+            "both pushes, close the issue. Without that file, publish nothing.",
+        ),
+        (
+            "architect",
+            "When the resolved memory layer holds `system/task-publication.md`, follow it: "
+            "registering a leaf creates its open linked issue. Without that file, publish nothing.",
+        ),
+    ],
+)
+def test_role_names_its_publication_moments(role: str, clause: str) -> None:
+    """L84-CUR-07: the publication clause names the role's moments (Architect ruling b2508984).
+
+    The clause is the role's one pointer to task-publication.md; the generic
+    "When publishing task work" sentence does not return in either copy.
+    """
+
+    packaged = REPOSITORY_ROOT / "mcp/src/agents_remember/package_data/runtime/skills"
+    for root in (SKILLS_ROOT, packaged):
+        text = (root / "l-01-agent-lifecycles" / "roles" / f"{role}.md").read_text(encoding="utf-8")
+        assert text.count(clause) == 1
+        assert text.count("system/task-publication.md") == 1
+        assert "When publishing task work" not in text

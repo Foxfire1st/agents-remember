@@ -1,5 +1,7 @@
 # Curator Review — <wave>
 
+<!-- The curator uses this template to record a wave review, required fixes, and the next-wave recommendation. -->
+
 | Field | Value |
 |---|---|
 | repo | <repo> |
@@ -22,6 +24,8 @@
 | Check | Result | Notes |
 |---|---|---|
 | Durable overview placement is route-local and mirrored | pass / fail | |
+| Generated route indexes exist next to changed route overviews | pass / fail / n/a | |
+| Generated route indexes reflect changed file-level sidecar coverage | pass / fail / n/a | |
 | File-level onboarding is strict 1-to-1 | pass / fail / n/a | |
 | File onboarding backlinks to nearest governing overview | pass / fail / n/a | |
 | Overview downlinks list governed files | pass / fail / n/a | |

@@ -35,6 +35,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest import mock
 
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.providers.metrics import ProviderMetricsStore
 from agents_remember.serving import _app_lifespan as serving
 from agents_remember.serving._app_common import _ServingRuntime
@@ -143,7 +144,12 @@ class PreviewLifespanTests(unittest.IsolatedAsyncioTestCase):
             SimpleNamespace(
                 launcher_catalog_prepare=None,
                 stream_shutdown=StreamShutdown(),
-                config=SimpleNamespace(coordination_root=tmp),
+                config=McpRuntimeConfig(
+                    config_path=tmp / "settings.json",
+                    coordination_root=tmp,
+                    workspace_root=tmp / "projects",
+                    transcript_root=tmp / "logs",
+                ),
                 observer_root=tmp,
                 projector=SimpleNamespace(
                     close_readiness=mock.Mock(), prime=mock.AsyncMock(), run=_recorder("projection")

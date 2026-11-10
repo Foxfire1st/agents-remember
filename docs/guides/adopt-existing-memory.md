@@ -10,11 +10,11 @@ Convert first: when the memory is still in the legacy format (no `knowledge/layo
 
 ## Before Adoption
 
-Resolve the target repository with the `c-08-ar-coordination-context-resolver` skill and run `c-05-create-or-update-onboarding-files` drift detection.
+Resolve the target repository through `context_packet` and check drift using the [knowledge command and tool reference](../../skills/l-01-agent-lifecycles/reference/knowledge/commands.md).
 
 If drift is actionable, choose one path:
 
-- refresh affected onboarding through the `c-05-create-or-update-onboarding-files` skill before adoption
+- have the Curator refresh affected onboarding through the [card procedure](../../skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md) before adoption
 - explicitly accept directional drift when the developer decides the current memory is factual enough to baseline
 
 Do not use adoption to hide uncertainty.
@@ -25,8 +25,8 @@ Ask the agent to run the `c-10-adopt-memory-baseline` skill in status mode for t
 
 ## Adopt
 
-When ready, ask the agent to run the `c-10-adopt-memory-baseline` skill adoption. The `c-10-adopt-memory-baseline` skill delegates the Git mutation and ledger creation to the `w-02-light-task-workflow` skill so the memory commit and `memory.md` row are created consistently.
+When ready, ask the agent to run the `c-10-adopt-memory-baseline` skill adoption. It uses the existing `memory_baseline_adopt` tool for the memory-content commit and computed ledger refresh; see [the baseline tool contract](../../skills/l-01-agent-lifecycles/reference/knowledge/commands.md).
 
 ## After Adoption
 
-Future external-memory work runs through `w-02-light-task-workflow` worktrees with `w-02-light-task-workflow` worktree closeout. The ledger gives that flow a known baseline for code-memory compatibility.
+Future external-memory work runs in paired worktrees through the [authorized lifecycle operation](../../skills/l-01-agent-lifecycles/operations/closeout.md). The ledger gives that flow a known baseline for code-memory compatibility.

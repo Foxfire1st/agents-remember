@@ -1,8 +1,0 @@
-{
-  "packages": [
-    "npm:pi-mcp-adapter"
-  ],
-  "extensions": [
-    "extensions/agents-remember-start.ts"
-  ]
-}

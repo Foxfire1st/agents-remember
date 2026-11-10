@@ -4,7 +4,8 @@ The JSON document is the source of truth; this module is the **only** writer of
 the rendered markdown. It mirrors ``worktrees.worktree_contract.contract_to_text``:
 small per-section helpers assemble lines from the model, so a re-render fully
 regenerates the document and freeform markdown prose is never round-tripped back.
-The ``w-02-light-task-workflow`` ``template.md`` is the spec these helpers follow.
+The authoring scaffolds are ``skills/l-01-agent-lifecycles/templates/leaf-task.md``
+and ``master-task.md``; these helpers render the authoritative task model.
 
 Output is deterministic: the same document renders byte-for-byte identically.
 Section bodies carry no leading/trailing blank lines and join their own blocks

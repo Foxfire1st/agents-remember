@@ -48,7 +48,6 @@ from knowledge_validator_test_support import (
     invariant_path,
     tree,
 )
-from mik_r53_rule_surfaces import quality_control_workflow_text
 
 DECISION = "knowledge/decisions/DEC-D12RTE-local-family-routes.json"
 PROOF_SIDECAR = "onboarding/mcp/tests/test_direct_landing.py.json"
@@ -728,14 +727,6 @@ def test_the_command_help_lists_the_ten_rules_with_their_decision() -> None:
     for rule_id in sorted(MERGE_RULES | DEBT_RULES | {"R13.3-governs"}):
         assert rule_id in help_text, rule_id
     assert "merge_reports" in help_text and "migration_debt" in help_text
-
-
-def test_the_c02_skill_lists_the_ten_rules_with_their_decision() -> None:
-    text = quality_control_workflow_text()
-
-    for rule_id in sorted(MERGE_RULES | DEBT_RULES | {"R13.3-governs"}):
-        assert rule_id in text, rule_id
-    assert "merge_reports" in text and "migration_debt" in text
 
 
 def test_registry_module_helpers_do_not_leak() -> None:

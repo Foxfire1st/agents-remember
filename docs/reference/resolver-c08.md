@@ -1,34 +1,34 @@
-# `c-08-ar-coordination-context-resolver` Resolver
+# Product Context Resolution
 
-`c-08-ar-coordination-context-resolver` is the facts resolver for a target code repository.
+The product resolves context facts for a target code repository.
 
 It answers: where is memory, where is coordination state, what settings apply, what task root should be used, and what cross-repo context is allowed?
 
-## Normal Inputs
+## Internal Resolution Inputs
 
-Use one of:
+The internal resolver accepts repository identity through inputs such as:
 
 ```text
 code_repository_name = my-app
 code_repository_root = /path/to/my-app
 ```
 
-Optional inputs include `coordination_root`, `requested_topology`, `task_name`, `worktree_name`, and `contract_path`.
+Internal hints and selectors include coordination-root, topology, task, worktree and contract facts. These are not additional mounted `context_packet` arguments. Mounted callers pass `repo_id` and retain a supplied leaf `task_context`; see [the current tool contract](../../skills/l-01-agent-lifecycles/reference/knowledge/commands.md).
 
 ## Resolution
 
-The `c-08-ar-coordination-context-resolver` skill checks:
+The internal product resolver checks:
 
 1. explicit contract or coordination inputs
 2. the memory repo at `<coordination-root>/memory-repos/ar-<repo>/`
 
-If that memory location does not exist, the `c-08-ar-coordination-context-resolver` skill fails
+If that memory location does not exist, product context resolution fails
 with a missing-memory error naming the checked path. A repository still carrying the removed
 repo-local `<repo>/ar-memory/` root is refused with that exact path and the route out.
 
 ## Key Outputs
 
-Common outputs include:
+The internal context model includes these facts; a mounted tool exposes its own response shape:
 
 - `topology`
 - `code_repository_name`
@@ -46,8 +46,8 @@ Common outputs include:
 - `pathRules`
 - `crossRepo`
 
-For worktree-backed tasks, the `c-08-ar-coordination-context-resolver` skill can also report contract, worktree, and ledger facts.
+For worktree-backed tasks, the internal context also carries contract, worktree, and ledger facts.
 
 ## Boundary
 
-The `c-08-ar-coordination-context-resolver` skill does not mutate Git, create memory roots, update onboarding, or start worktrees. Use the `c-00-initialize-memory-repo`, `c-03-repo-bootstrap`, `c-05-create-or-update-onboarding-files`, and `w-02-light-task-workflow` skills for those actions.
+Context resolution does not mutate Git, create memory roots, update onboarding, or start worktrees. Memory-root setup remains with `c-00-initialize-memory-repo`, bootstrap with `c-03-repo-bootstrap`, onboarding with the [Curator card procedure](../../skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md), and worktree mutation with the existing tools under [lifecycle authority](../../skills/l-01-agent-lifecycles/operations/closeout.md).

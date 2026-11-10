@@ -1,14 +1,14 @@
-# `w-02-light-task-workflow` Worktrees And Closeout
+# Worktrees And Closeout
 
-The `w-02-light-task-workflow` skill owns worktree creation, exact enclosure addressability,
-integration, terminal archival, and cleanup. The `w-02-light-task-workflow` skill owns validated immutable
+The worktree tools own worktree creation, exact enclosure addressability,
+integration, terminal archival, and cleanup. The [authorized closeout operation](../../skills/l-01-agent-lifecycles/operations/closeout.md) retains validated immutable
 closeout input, approval, and code-then-memory commit order. The accepted Git pair,
 its ancestry, and recorded refs supply transaction authority. `memory.md` is an ignored cache
 computed from memory commit trailers; its bytes and rows never authorize or block the transaction.
 
 ## When To Use It
 
-Use the `w-02-light-task-workflow` skill when:
+Use the worktree tools under their [lifecycle authority](../../skills/l-01-agent-lifecycles/operations/closeout.md) when:
 
 - a task needs isolated code and memory worktrees;
 - external-memory closeout needs code and memory commits mapped in `memory.md`;
@@ -118,10 +118,6 @@ Use `worktree_status` for the current task-addressed generation and execute only
 `worktree_operation_control` action. Pre-output failure may retry the same input, cancel, or revise
 through a successor. Ambiguous or proven output must reconcile/recover the same generation. Queue
 rows, raw Git, repeat-from-scratch, reports, and journal edits are not recovery paths.
-
-The explicit `worktree_legacy_operation` tool can inspect and migrate only the proven schema-1
-blank-message incident, or archive exact terminal evidence. It binds the inspected digest and
-never runs from a normal reader.
 
 ## Raw Git Identity Boundary
 

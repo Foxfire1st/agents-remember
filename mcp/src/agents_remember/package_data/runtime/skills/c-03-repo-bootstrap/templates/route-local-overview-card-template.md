@@ -1,5 +1,7 @@
 # Overview Card — <source route>
 
+<!-- The bootstrap orchestrator writes this work order for the worker who will create a route-local overview. -->
+
 | Field | Value |
 |---|---|
 | repo | <repo> |

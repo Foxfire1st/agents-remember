@@ -1,36 +1,93 @@
 <!-- ar:roles all -->
 # Operation — Implementation
 
-The Worker implements the selected leaf's primary requirement and explicit constraints in the supplied code root. Read the rendered task-document files named in your handover with your harness's own file tools before acting; use task_doc first for canonical task-document editing and your own completed step marking; edits to rendered copies are never read back and are lost on the next publication. Read [correct-write recovery]({{detail:reference/refused-write.md}}) when a covered writer or record tool refuses a correct write, not before. The owner's next task_doc publication refreshes the rendered copies. Its inputs are the selected requirement packet, rendered leaf task and code worktree for edits, with the memory root as read-only context. It does not expand scope or edit task status, contract, memory, or onboarding state.
+The Worker uses this operation to implement the selected leaf's primary requirement and explicit constraints in the supplied code root. It defines the implementation report, freeze and direct handover procedure.
+
+## Establish the inputs
+
+Before reading the task inputs, follow [Establish the assignment](../roles/worker.md#establish-the-assignment) for the exact handover file locations and native file reads. The inputs are the selected requirement packet, rendered leaf task and code worktree for edits. The memory root is read-only context.
+
+Before editing a canonical task document or marking your own completed step, read [Confirm the assignment](orientation.md#confirm-the-assignment) for the primary tool and rendered-copy rules.
+
+Implementation does not expand scope or edit task status, the contract, memory or onboarding state.
 
 ## Outputs
 
-Before each freeze, pass the coding guidelines’ handover checks on a clean copy of the final candidate. The freeze report names each check, the copy’s tree and its result; repair failures before freezing. These fast deterministic checks are distinct from full code-quality operations requiring the developer’s explicit request.
+### Verify the final candidate
 
-For measurement tooling, the simple handover names the candidate and case-set identity; the Manager returns the go on the same route. It is not a review freeze and starts no seat.
+Before each freeze, pass the coding guidelines' handover checks on a clean copy of the final candidate. Name each check, the copy's tree and its result in the freeze report. Repair failures before freezing.
 
-One report at the canonical task path records the change, files, requirement/invariant evidence, exact checks and results, the relevant checks not run and why, your agent ID as the `senderLine` of `role_message` on `agents-remember-task` names it (write "agent ID not known" when you sent no message), and open limitations. Do not invent report fields for a nonexistent data consumer.
+These fast deterministic checks are distinct from full code-quality operations, which require the developer's explicit request.
 
-A failure counts as pre-existing only when the base fails with the same cause, not only under the same test name.
+### Make the measurement handover
 
-Freeze the candidate and first tell the Manager to start the Reviewer. Once the Reviewer exists, hand the freeze directly to that Reviewer with `role_message` on `agents-remember-task`, naming the leaf, head and change hash in your report, report path, and whole next stretch. The freeze travels as a file: the message names the freeze report file, never its pasted text. This is a factual hand-over, not a review brief. The freeze report holds one entry per repaired finding: its ID, what was wrong, the files and line ranges changed, and the test that fails before and passes after, with its result; a change that answers no finding is listed too. A check or evidence run carries over when the files it exercises are byte-identical to those of its last run; the freeze report names each carried run with that comparison, and each re-run with the changed file behind it. Repair sealed findings and return a new freeze directly to the same Reviewer. After code PASS and the Manager has started the Curator, send your hand-off list for that freeze directly to the Curator. It names the same entries and the changed paths, so the changed-memory pass reads them. Use the sibling role and exact leaf task references in the handover; product-supplied IDs stay whole and unchanged. The Manager receives the first freeze notice to start the Reviewer, plus its authority or recovery matters, not routine report notices or relayed contents.
+For measurement tooling, send the candidate and case-set identity to the Manager. Await the Manager's go on the same route. This simple handover is not a review freeze and starts no seat.
+
+### Write the report
+
+Write one report at the canonical task path. Include:
+
+- the change and changed files;
+- requirement and invariant evidence;
+- exact checks and results;
+- relevant checks not run and why;
+- your agent identifier as the `senderLine` of `role_message` on `agents-remember-task` names it, or "agent ID not known" if you sent no message;
+- open limitations.
+
+Do not invent fields for a nonexistent data consumer.
+
+For every repaired finding, record its identifier, what was wrong, the files and line ranges changed, and the test that fails before the repair and passes after it, with the result. List a change that answers no finding too.
+
+A check or evidence run carries over only when the files it exercises are byte-identical to those of its last run. Name each carried run with that comparison. For each rerun, name the changed file that required it.
+
+### Hand over the frozen candidate
+
+1. Freeze the candidate and tell the Manager to start the Reviewer.
+2. Once the Reviewer exists, send it the freeze directly with `role_message` on `agents-remember-task`. Name the leaf, the report path and the whole next stretch of work. The report names the head and change hash.
+3. Repair sealed findings and return a new freeze directly to the same Reviewer.
+4. After code review returns `PASS` and the Manager has started the Curator, send the Curator your hand-off list for that freeze directly. Name the same entries and changed paths so the changed-memory pass reads them.
+
+The freeze travels as a file: the message names the freeze report file, never its pasted text. This is a factual handover, not a review brief. Use the sibling role and exact leaf task references in the handover; keep product-supplied identifiers whole and unchanged.
+
+The Manager receives the first-freeze notice so it can start the Reviewer, plus its authority or recovery matters. Do not send it routine report notices or ask it to relay handover contents.
 
 ## Boundaries
 
-Count a hand-over as taken only when the recipient's reply or report names the exact object and shows the requested work or its start.
+### Keep the Worker role
 
-Fix every measured defect inside the task’s aim. When a small fix has taken about an hour or another repair round, report how to bound its complete repair. Dropping applies only to polish that is not a defect.
+Before handing over or attempting a role-start, acceptance or publication action, read [Preserve role and task boundaries](../roles/worker.md#preserve-role-and-task-boundaries) for the Worker's restrictions. An uncertain result does not change the assignment. Follow the role's developer-question rule.
 
-Leave the candidate uncommitted. No Worker self-acceptance, Reviewer work, Curator writes, closeout, merge, or push. A Worker starts no role, including a Reviewer or Curator, and retains the same assignment after an uncertain result. Developer questions follow the role's developer-question rule.
+### Repair defects and report a refused handover
 
-When the master line moves, run the supported sync of your leaf. When no path was changed on both sides, your focused tests run once more and you tell the Manager, whose closeout preview decides; no new freeze goes to the Reviewer and no round is begun. Where a path was changed on both sides, or a focused test fails, repair exactly that and send the same Reviewer one look at the repair. Route memory-file conflicts to the Curator; ask the Manager only for a sync step the operation reserves to it.
+#### Report a costly small repair
 
-A sealed finding in this task's own files is repaired directly in your worktree: no plan, account, census or approval goes ahead of the repair, and the Manager gives no go-ahead for it. The whole supported commit check and the freeze stay as today.
+Fix every measured defect within the task's aim. When one small item costs about an hour, a second repair round or a second freeze, tell the Manager immediately. Give the hours and a proposal to carry or bound its complete repair, then continue the rest. Dropping applies only to nondefect polish.
 
-Report non-work replies and empty or doubled-seat refusals to the Manager once with the seat and quoted text; never pick a candidate yourself. You still send the hand-over yourself when the Manager gives the occasion; it relays none of its contents. Record and retry an unreachable-Manager notice rather than put that transport failure to the developer.
+#### Repair a sealed own-file finding
 
-A native memory-file conflict goes directly to the Curator for content repair. The Manager captures, verifies and stages that resolution; the Worker then calls `worktree_sync` on `agents-remember-task` with the exact contract and `resolution_action="continue"`. The continuation refuses unmerged or unstaged content. Do not repair transaction authority, stage files or take the Manager's closeout writes.
+A sealed finding in this task's own files is repaired directly in your worktree: no plan, account, census or approval goes ahead of the repair, and the Manager gives no go-ahead for it. The full supported commit check and the freeze still apply. The freeze report carries one entry per repaired finding, with its failing-before and passing-after test.
 
-Required input: the permission non-bypass boundary in `operations/orientation.md` — a denied or unanswered harness request is never worked around with another tool, command, helper seat, or later turn.
+#### Report a refused handover
 
-Read [message handover]({{detail:reference/message-handover.md}}) when you reach a step another seat awaits, a handover, or a held/full-store receipt, not before.
+Report non-work replies and empty or doubled-seat refusals to the Manager once, with the seat and quoted text. Never pick a candidate yourself. When the Manager gives the occasion, send the handover yourself; it relays none of the contents.
+
+For a Worker, Curator or Reviewer whose required Manager notice fails delivery, record it as pending, continue independent work and retry the notice through `role_message` on `agents-remember-task`. Do not turn that delivery failure into a question to the developer in your own chat.
+
+### Synchronize the leaf
+
+When the master line moves, run the supported sync of your leaf.
+
+- When no path changed on both sides, run the focused tests once more and tell the Manager. The tools derive the mechanical checks again, and the Manager's closeout preview decides. Send no new freeze to the Reviewer and begin no round. Request no Reviewer confirmation or receipt.
+- When a path changed on both sides or a focused test fails, repair exactly that and send the same Reviewer one look at the repair.
+
+Route memory-file conflicts to the Curator. Ask the Manager only for a sync step the operation reserves to it.
+
+For a native memory-file conflict, the Curator repairs only memory content inside its admitted write surface. The Manager captures, verifies and stages the resolution. Then the Worker calls `worktree_sync` on `agents-remember-task` with the exact contract and `resolution_action="continue"`. The continuation refuses unmerged or unstaged content. The Curator stages no files and changes no transaction authority. The Worker repairs no transaction authority, stages no files and takes none of the Manager's closeout writes.
+
+### Respect permissions and the message procedure
+
+Before acting on a denied or unanswered harness request, read [Honor harness permission decisions](orientation.md#honor-harness-permission-decisions) for the waiting, denial and non-bypass rules.
+
+### Handle delivery receipts
+
+Before responding to a full-store refusal, read [Handle a full-store refusal](../reference/message-handover.md#handle-a-full-store-refusal) for the pending handover, single retry and second-refusal report.

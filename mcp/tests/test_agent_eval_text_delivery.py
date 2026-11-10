@@ -16,6 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
+from agent_evals import text as text_capture
 from agent_evals.adapters import detail_reads
 from agent_evals.adapters.detail_reads import observe_detail_reads
 from agent_evals.adapters.execution import CODEX_ACTOR, HERMES_ACTOR, NativeBinding
@@ -33,8 +34,10 @@ from agent_evals.artifacts import EvidenceFile
 from agent_evals.fixtures import CaseBundle
 from agent_evals.text import capture_curator_text
 from agent_evals.trials import load_trial_text
+from agents_remember.application.skill_resources.provider import shipped_composition_corpus
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from test_l84_capsule_delivery_proofs import _compiled
 
 FIRST = "Run one leaf's coherence pass and write its verified onboarding."
 SECOND = "Keep every valid invariant claim until its cited evidence justifies a change."
@@ -136,6 +139,114 @@ def test_native_first_message_carries_bound_text_for_both_arms(tmp_path, profile
     else:
         assert creates[0]["systemPrompt"] == instructions
         assert creates[-1]["prompt"].startswith("ordinary case prompt\n\n")
+
+
+def test_current_capture_keeps_every_compiled_origin_after_the_shared_prefix(tmp_path):
+    code = Path(__file__).resolve().parents[2]
+    captured = capture_curator_text(code)
+    shared = (code / "skills/l-01-agent-lifecycles/core/every-role.md").read_text()
+    prefix = "## What every role acts on\n\n" + shared + "\n\n"
+    for operation, entry in captured["entries"].items():
+        compiled = _compiled("curator", operation)
+        first, *origins = entry["instructionOrigins"]
+        assert first == {"sourcePath": "core/every-role.md", "start": 0, "end": len(prefix)}
+        assert entry["instructions"][: first["end"]] == prefix
+        cursor = len(prefix)
+        for origin, unit in zip(origins, compiled.capsule.instruction_units, strict=True):
+            assert origin["sourcePath"] == unit.block.source_path
+            assert origin["start"] == cursor
+            assert entry["instructions"][origin["start"] : origin["end"]] == unit.block.content
+            cursor = origin["end"]
+        assert cursor == len(entry["instructions"])
+    before = copy.deepcopy(captured)
+    delivery = bind_text_details(captured, tmp_path / "delivery/curator.md")
+    source_path = "reference/curator/card-formats-and-citations.md"
+    with shipped_composition_corpus() as (root, _):
+        target = root / source_path
+        assert target.is_file()
+        frozen = next(
+            row for row in captured["entries"]["curation"]["details"] if row["path"] == source_path
+        )
+        assert frozen["content"] == target.read_text()
+    detail = next(item for item in delivery.details if item.source_path == source_path)
+    assert detail.path.is_file()
+    assert detail.path.resolve().as_posix() in delivery.instructions
+    assert captured == before
+    assert (
+        delivery.composition["baselineDigest"] == captured["entries"]["curation"]["semanticDigest"]
+    )
+
+
+@pytest.mark.parametrize(
+    "problem",
+    [
+        "missing",
+        "empty",
+        "gap",
+        "overlap",
+        "tail",
+        "duplicate",
+        "boolean",
+        "absolute",
+        "escape",
+        "wrong-shape",
+    ],
+)
+def test_current_capture_never_guesses_missing_or_malformed_origins(tmp_path, problem):
+    captured = capture_curator_text(Path(__file__).resolve().parents[2])
+    entry = captured["entries"]["curation"]
+    origins = entry["instructionOrigins"]
+    if problem == "missing":
+        del entry["instructionOrigins"]
+    elif problem == "empty":
+        origins.clear()
+    elif problem == "gap":
+        origins[1]["start"] += 1
+    elif problem == "overlap":
+        origins[1]["start"] -= 1
+    elif problem == "tail":
+        origins[-1]["end"] -= 1
+    elif problem == "duplicate":
+        origins.insert(1, dict(origins[0]))
+    elif problem == "boolean":
+        origins[0]["start"] = False
+    elif problem == "absolute":
+        origins[0]["sourcePath"] = "/unrelated/origin.md"
+    elif problem == "escape":
+        origins[0]["sourcePath"] = "../unrelated/origin.md"
+    else:
+        entry["instructionOrigins"] = {}
+    with pytest.raises(AuthorityError, match="text-delivery-detail-fault:"):
+        bind_text_details(captured, tmp_path / "delivery/curator.md")
+    assert not (tmp_path / "delivery").exists()
+
+
+@pytest.mark.parametrize("problem", ["missing", "duplicate", "revision"])
+def test_capture_refuses_ambiguous_compiler_shared_provenance(problem):
+    original = text_capture.compile_admitted_capsule
+
+    def damaged(*args, **kwargs):
+        outcome = original(*args, **kwargs)
+        result = outcome.result
+        assert result is not None
+        sources = list(result.manifest.sources)
+        index = next(i for i, source in enumerate(sources) if source.identity == "core:every-role")
+        if problem == "missing":
+            sources.pop(index)
+        elif problem == "duplicate":
+            sources.append(sources[index])
+        else:
+            sources[index] = replace(sources[index], revision="sha256:" + "0" * 64)
+        return replace(
+            outcome,
+            result=replace(result, manifest=replace(result.manifest, sources=tuple(sources))),
+        )
+
+    with (
+        patch.object(text_capture, "compile_admitted_capsule", side_effect=damaged),
+        pytest.raises(AuthorityError, match="ambiguous source provenance"),
+    ):
+        capture_curator_text(Path(__file__).resolve().parents[2])
 
 
 def test_marker_is_selected_from_instructions_and_absent_from_entire_case_inventory(tmp_path):
@@ -330,17 +441,28 @@ def test_real_captured_artifacts_bind_production_details_without_inline_bodies(
 ):
 
     artifact = {"entries": {"curation": row["entry"]}}
+    captured = copy.deepcopy(artifact)
     delivery = bind_text_details(artifact, tmp_path / harness / "curator.md")
     assert len(delivery.details) == (8 if row["arm"] == "old" else 9)
     expected = row["entry"]["instructions"]
     for detail, original in zip(delivery.details, row["entry"]["details"], strict=True):
         assert detail.path.is_absolute()
-        assert detail.path.read_bytes() == original["content"].encode()
+        expected_body = original["content"]
+        with shipped_composition_corpus() as (root, _):
+            for source in ("templates/curator-handoff-list.md", "criteria/onboarding-memory.md"):
+                expected_body = expected_body.replace(
+                    "](../" + source, "](" + (root / source).as_posix()
+                )
+        assert detail.path.read_bytes() == expected_body.encode()
+        assert detail.size_bytes == len(expected_body.encode())
+        assert delivery.frozen_contents[detail.source_path] == expected_body
         assert detail.sha256 == hashlib.sha256(detail.path.read_bytes()).hexdigest()
         assert detail.path.stat().st_mode & 0o777 == 0o444
         assert original["content"] not in delivery.instructions
         expected = expected.replace("{{detail:" + original["path"] + "}}", detail.path.as_posix())
     assert delivery.instructions == expected
+    assert artifact == captured
+    assert "frozen_contents" not in delivery.to_dict()
     assert "{{detail:" not in delivery.instructions
     assert validate_detail_links(delivery)["unknowns"] == []
     marker = prepare_text_delivery(
@@ -374,6 +496,33 @@ def _pointer_artifact(content="Detail prose that is not part of the delivered fi
             }
         }
     }
+
+
+@pytest.mark.parametrize("damage", ["same-size", "size"])
+def test_rewritten_detail_uses_emitted_identity_and_keeps_corruption_refusals(tmp_path, damage):
+    original = "Read [self](control.md#step) and [source](../SKILL.md).\n"
+    artifact = _pointer_artifact(original)
+    captured = copy.deepcopy(artifact)
+    delivery = bind_text_details(artifact, tmp_path / "delivery/curator.md")
+    (detail,) = delivery.details
+    with shipped_composition_corpus() as (root, _):
+        expected = f"Read [self]({detail.path}#step) and [source]({root / 'SKILL.md'}).\n"
+    body = expected.encode()
+    assert body != original.encode()
+    assert detail.path.read_bytes() == body
+    assert detail.size_bytes == len(body)
+    assert detail.revision == "sha256:" + hashlib.sha256(body).hexdigest()
+    assert delivery.frozen_contents == {detail.source_path: expected}
+    assert artifact == captured
+    assert validate_detail_links(delivery)["unknowns"] == []
+    detail.path.chmod(0o644)
+    detail.path.write_bytes(b"X" + body[1:] if damage == "same-size" else body + b"X")
+    validation = validate_detail_links(delivery)
+    assert validation["unknowns"]
+    assert validation["files"][0]["state"] == (
+        "digest-mismatch" if damage == "same-size" else "size-mismatch"
+    )
+    assert delivery.frozen_contents == {detail.source_path: expected}
 
 
 def test_marker_must_also_be_absent_from_every_delivered_detail(tmp_path):
@@ -483,7 +632,7 @@ def _r2_case(index):
         sha256=digest,
         size_bytes=len(body.encode()),
     )
-    delivery = PointerDelivery("", (detail,), {}, "a" * 64)
+    delivery = PointerDelivery("", (detail,), {}, "a" * 64, {detail.source_path: body})
     capture = NativeCapture(
         sample["harness"],
         sample["sourceSessionId"],
@@ -689,6 +838,7 @@ def _d646_case(sample):
         tuple(DetailFile(**{**row, "path": Path(row["path"])}) for row in sample["details"]),
         {},
         "",
+        sample["frozenContents"],
     )
     capture = NativeCapture(
         sample["harness"],

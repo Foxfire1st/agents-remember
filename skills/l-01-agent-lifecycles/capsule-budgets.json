@@ -1,7 +1,7 @@
 {
   "schema": "ar-role-capsule-budgets/v1",
   "authority": "MIK-R101 rule 6",
-  "how": "budget = min(ceil(size_words * 11 / 10), applicable ceiling); capsule ceilings at every stage =4631 Architect and4513 Manager under D656 measured raises;4000 Curator/Reviewer/Bootstrap and3700 other roles; step files2500; shared digest1100 under D656 (former1000, originally900); capsule size=whitespace-split render_instructions(), task data and seals excluded; step size=complete declared source; digest size=complete core/every-role.md source delivered separately.",
+  "how": "D681 sets only the 24 budgets recorded in decisions_D681 to their table13 measured sizes, preserving historical size_words. D682 supersedes only the Architect working-rules detail budget with 2200 words. Other budgets retain budget = min(ceil(size_words * 11 / 10), applicable ceiling). Capsule ceilings at every stage: 4631 for Architect and 4513 for Manager under D656; 4100 for Curator under D681; 4000 for Reviewer and Bootstrap; 3700 for other roles. Step files: 2700 under D681. Shared digest: 1474 under D681. Capsule size: whitespace-split render_instructions(), excluding task data and seals. Step size: complete declared source. Digest size: complete core/every-role.md source delivered separately.",
   "handover": {
     "how": "budget_tokens = min(ceil(size_tokens * 11 / 10), 3300); size_tokens = the o200k_base tokens of the projection's compact JSON as it stands in the first message (not key sorted), measured on the largest projection the role can have: a parented start with every optional field present and a task document naming 12 requirement packets, with the test's temporary root replaced by /home/user/projects/ar-coordination before counting, and below that root the fixture's repository, task, leaf and packet names as long as this master's own (MIK-R193 rule 5); the count moves by under one per cent between runs because a request id's digits tokenize differently, and the eleven-tenths margin covers it",
     "architect/planning": {
@@ -39,162 +39,162 @@
   },
   "capsules": {
     "architect/orientation": {
-      "size_words": 3612,
-      "budget_words": 3974
+      "size_words": 3635,
+      "budget_words": 3999
     },
     "architect/planning": {
-      "size_words": 3632,
-      "budget_words": 3996
+      "size_words": 3652,
+      "budget_words": 4018
     },
     "architect/review": {
-      "size_words": 3812,
-      "budget_words": 4194
+      "size_words": 3829,
+      "budget_words": 4212
     },
     "architect/coordination": {
-      "size_words": 4210,
+      "size_words": 4236,
       "budget_words": 4631
     },
     "architect/authorized-closeout": {
-      "size_words": 2951,
-      "budget_words": 3247
+      "size_words": 2971,
+      "budget_words": 3269
     },
     "architect/recovery": {
-      "size_words": 2895,
-      "budget_words": 3185
+      "size_words": 2915,
+      "budget_words": 3207
     },
     "orchestrator/orientation": {
-      "size_words": 2324,
-      "budget_words": 2557
+      "size_words": 2342,
+      "budget_words": 2677
     },
     "orchestrator/planning": {
-      "size_words": 1765,
-      "budget_words": 1942
+      "size_words": 1799,
+      "budget_words": 2009
     },
     "orchestrator/review": {
-      "size_words": 1984,
-      "budget_words": 2183
+      "size_words": 2018,
+      "budget_words": 2220
     },
     "orchestrator/coordination": {
-      "size_words": 2972,
-      "budget_words": 3270
+      "size_words": 3012,
+      "budget_words": 3325
     },
     "orchestrator/authorized-closeout": {
-      "size_words": 1713,
-      "budget_words": 1885
+      "size_words": 1747,
+      "budget_words": 2045
     },
     "orchestrator/recovery": {
-      "size_words": 1657,
-      "budget_words": 1823
+      "size_words": 1691,
+      "budget_words": 1945
     },
     "designer/orientation": {
-      "size_words": 2272,
-      "budget_words": 2500
+      "size_words": 2280,
+      "budget_words": 2508
     },
     "designer/planning": {
-      "size_words": 1713,
-      "budget_words": 1885
+      "size_words": 1721,
+      "budget_words": 1894
     },
     "strategist/orientation": {
-      "size_words": 2444,
-      "budget_words": 2689
+      "size_words": 2452,
+      "budget_words": 2698
     },
     "strategist/planning": {
-      "size_words": 1885,
-      "budget_words": 2074
+      "size_words": 1893,
+      "budget_words": 2083
     },
     "manager/orientation": {
-      "size_words": 3265,
-      "budget_words": 3592
+      "size_words": 3134,
+      "budget_words": 3448
     },
     "manager/review": {
-      "size_words": 2925,
-      "budget_words": 3218
+      "size_words": 2810,
+      "budget_words": 3091
     },
     "manager/curation": {
-      "size_words": 3240,
-      "budget_words": 3564
+      "size_words": 3118,
+      "budget_words": 3430
     },
     "manager/coordination": {
-      "size_words": 4102,
-      "budget_words": 4513
+      "size_words": 3993,
+      "budget_words": 4393
     },
     "manager/authorized-closeout": {
-      "size_words": 2654,
-      "budget_words": 2920
+      "size_words": 2539,
+      "budget_words": 2793
     },
     "manager/recovery": {
-      "size_words": 2598,
-      "budget_words": 2858
+      "size_words": 2483,
+      "budget_words": 2732
     },
     "worker/orientation": {
-      "size_words": 2883,
-      "budget_words": 3172
+      "size_words": 2916,
+      "budget_words": 3208
     },
     "worker/implementation": {
-      "size_words": 2837,
-      "budget_words": 3121
+      "size_words": 2870,
+      "budget_words": 3157
     },
     "worker/recovery": {
-      "size_words": 2216,
-      "budget_words": 2438
+      "size_words": 2249,
+      "budget_words": 2474
     },
     "curator/orientation": {
-      "size_words": 3175,
-      "budget_words": 3493
+      "size_words": 3178,
+      "budget_words": 3496
     },
     "curator/curation": {
-      "size_words": 3853,
-      "budget_words": 4000
+      "size_words": 3902,
+      "budget_words": 4097
     },
     "curator/recovery": {
-      "size_words": 2508,
-      "budget_words": 2759
+      "size_words": 2527,
+      "budget_words": 2780
     },
     "reviewer/orientation": {
-      "size_words": 3751,
+      "size_words": 3769,
       "budget_words": 4000
     },
     "reviewer/review": {
-      "size_words": 3828,
+      "size_words": 3846,
       "budget_words": 4000
     },
     "reviewer/recovery": {
-      "size_words": 3084,
-      "budget_words": 3393
+      "size_words": 3102,
+      "budget_words": 3413
     },
     "investigator/orientation": {
-      "size_words": 1847,
-      "budget_words": 2032
+      "size_words": 1879,
+      "budget_words": 2139
     },
     "investigator/recovery": {
-      "size_words": 1231,
-      "budget_words": 1355
+      "size_words": 1263,
+      "budget_words": 1427
     },
     "bootstrap/orientation": {
-      "size_words": 2132,
-      "budget_words": 2346
+      "size_words": 2121,
+      "budget_words": 2334
     },
     "bootstrap/recovery": {
-      "size_words": 1788,
-      "budget_words": 1967
+      "size_words": 1777,
+      "budget_words": 1955
     },
     "bootstrap/bootstrap": {
-      "size_words": 3630,
-      "budget_words": 3993
+      "size_words": 3619,
+      "budget_words": 3981
     },
     "launcher/orientation": {
       "size_words": 1093,
       "budget_words": 1203
     },
     "launcher/coordination": {
-      "size_words": 1928,
-      "budget_words": 2121
+      "size_words": 1931,
+      "budget_words": 2125
     }
   },
   "step_details": {
     "reference/curator-authoring-d301.md": {
-      "size_words": 1322,
-      "budget_words": 1455
+      "size_words": 1768,
+      "budget_words": 1945
     },
     "reference/curator-handoff-d301.md": {
       "size_words": 185,
@@ -202,23 +202,23 @@
     },
     "reference/reviewer-orient-d301.md": {
       "size_words": 117,
-      "budget_words": 129
+      "budget_words": 136
     },
     "reference/reviewer-baseline-d301.md": {
       "size_words": 222,
-      "budget_words": 245
+      "budget_words": 256
     },
     "reference/reviewer-adjudication-d301.md": {
       "size_words": 42,
-      "budget_words": 47
+      "budget_words": 56
     },
     "reference/reviewer-memory-d301.md": {
       "size_words": 44,
-      "budget_words": 49
+      "budget_words": 64
     },
     "reference/reviewer-master-exit-d301.md": {
       "size_words": 63,
-      "budget_words": 70
+      "budget_words": 73
     },
     "reference/bootstrap-foundation-d301.md": {
       "size_words": 241,
@@ -229,64 +229,60 @@
       "budget_words": 797
     },
     "reference/curator-intake-details.md": {
-      "size_words": 42,
-      "budget_words": 47
-    },
-    "reference/curator-message-details.md": {
-      "size_words": 56,
-      "budget_words": 62
+      "size_words": 82,
+      "budget_words": 95
     },
     "reference/curator-card-details.md": {
-      "size_words": 374,
-      "budget_words": 412
+      "size_words": 453,
+      "budget_words": 499
     },
     "reference/curator-worklist-details.md": {
       "size_words": 717,
       "budget_words": 789
     },
     "reference/refused-write.md": {
-      "size_words": 453,
-      "budget_words": 499
+      "size_words": 491,
+      "budget_words": 561
     },
     "reference/curator-writer-details.md": {
-      "size_words": 699,
-      "budget_words": 769
+      "size_words": 690,
+      "budget_words": 759
     },
     "reference/shared-writing-profile.md": {
       "size_words": 1334,
       "budget_words": 1468
     },
     "reference/architect-working-rules.md": {
-      "size_words": 1834,
-      "budget_words": 2018
+      "size_words": 1957,
+      "budget_words": 2200
     },
     "reference/manager-working-rules.md": {
-      "size_words": 406,
-      "budget_words": 447
+      "size_words": 705,
+      "budget_words": 776
     },
     "reference/worker-working-rules.md": {
       "size_words": 100,
-      "budget_words": 110
+      "budget_words": 139
     },
     "reference/shared-working-rules.md": {
       "size_words": 318,
-      "budget_words": 350
+      "budget_words": 363
     },
     "reference/coordination-starts.md": {
-      "size_words": 47,
-      "budget_words": 52
+      "size_words": 141,
+      "budget_words": 156
     },
     "reference/message-handover.md": {
-      "size_words": 290,
-      "budget_words": 319
+      "size_words": 266,
+      "budget_words": 328
     },
     "reference/child-questions.md": {
-      "size_words": 273,
-      "budget_words": 301
+      "size_words": 264,
+      "budget_words": 337
     },
     "reference/investigator-instruction-review.md": {
-      "size_words": 42,
-      "budget_words": 47
+      "size_words": 484,
+      "budget_words": 538
     },
     "reference/knowledge-use.md": {
       "size_words": 458,
@@ -294,15 +290,15 @@
     },
     "reference/curator-repository-foundation.md": {
       "size_words": 155,
-      "budget_words": 171
+      "budget_words": 198
     },
     "templates/turn-report.md": {
       "size_words": 1897,
       "budget_words": 2087
     },
     "reference/knowledge-commands.md": {
-      "size_words": 2496,
-      "budget_words": 2500
+      "size_words": 2500,
+      "budget_words": 2674
     }
   },
   "decisions_L88": {
@@ -502,7 +498,7 @@
   "decisions_L101": {
     "leaf": "260928-MIK-L101",
     "method": "post-sweep sizes compiled from canonical texts with the shipped compiler; every capsule re-measured after each edit round; registry refreshed in the same change (rule 6)",
-    "cuts": "A8 decision 2026-10-09 (F09 narrow repair application; supersedes A7, retained in worker report): per-capsule no-growth under a8f1 holds — adjusted (raw minus only the four required rule-8 spans) at or under a1b7 on all 38. Actual totals: before 109616 -> raw final 83786 -> adjusted 82200 (deducted 1586). Exactly one raw row grows (launcher/orientation +29, covered). Two Worker-output attempt-record referrals added (role +21w, operation +22w): worker/implementation +43, worker/orientation +21, worker/recovery +21; reviewer/review +0. No new condensation, allowance or finding.",
+    "cuts": "A8 decision 2026-10-09 (F09 narrow repair application; supersedes A7, retained in worker report): per-capsule no-growth under a8f1 holds \u2014 adjusted (raw minus only the four required rule-8 spans) at or under a1b7 on all 38. Actual totals: before 109616 -> raw final 83786 -> adjusted 82200 (deducted 1586). Exactly one raw row grows (launcher/orientation +29, covered). Two Worker-output attempt-record referrals added (role +21w, operation +22w): worker/implementation +43, worker/orientation +21, worker/recovery +21; reviewer/review +0. No new condensation, allowance or finding.",
     "additions_vs_master": "rule-8 producer clause (curation.md), rule-8 origin-evidence sentence (curation.md), rule-8 permission sentence (orientation.md, read by all ten roles; master carries it nowhere in role/operation texts), D93 closeout-evidence sentence (curator.md; master dropped it with retired comparison procedure, which stays retired), test-pinned Q&A/pending/held-message/relay sentences restored to master wording after a wrong one-place referral was attempted and reverted",
     "capsules_changed": [
       {
@@ -2565,27 +2561,27 @@
     "authority": "THE-FIVE-FAILING-TESTS-OF-THE-TIP-ARE-REPAIRED-IN-L54-AND-L56-TESTS-MADE-INDEPENDENT-OF-THE-MACHINE-BUDGETS-RE-RECORDED-RULING.json, item 2",
     "method": "Native compiled_size on final L54 text; only exceeded entries renewed, ceil(size_words * 11 / 10) unchanged; twenty tip overages plus curator/curation newly over in L54; other text and prior decisions preserved.",
     "changes": {
-      "architect/review": "Registry size/budget 2410/2651; tip 2663; final 2694/2964. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/architect.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 2401→2657 (+256). L54: L54 roles/architect.md declares packet-named expectedKnowledgeEffects before implementation (+31 words per emitted role); planning adds the same rule via operations/planning.md.",
-      "architect/coordination": "Registry size/budget 2980/3278; tip 3467; final 3498/3848. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/architect.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3111→3461 (+350). L54: L54 roles/architect.md declares packet-named expectedKnowledgeEffects before implementation (+31 words per emitted role); planning adds the same rule via operations/planning.md.",
-      "orchestrator/review": "Registry size/budget 1839/2023; tip 2076; final 2076/2284. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/orchestrator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1818→2076 (+258). L54: None: final equals tip.",
-      "orchestrator/coordination": "Registry size/budget 2409/2650; tip 2880; final 2880/3168. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/orchestrator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 2528→2880 (+352). L54: None: final equals tip.",
-      "designer/orientation": "Registry size/budget 1972/2170; tip 2313; final 2313/2545. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/designer.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 2177→2298 (+121). L54: None: final equals tip.",
-      "designer/planning": "Registry size/budget 1319/1451; tip 1642; final 1673/1841. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/designer.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1506→1627 (+121). L54: L54 operations/planning.md declares packet-named expectedKnowledgeEffects before implementation (+31 words).",
-      "strategist/orientation": "Registry size/budget 2262/2489; tip 2492; final 2492/2742. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/strategist.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 2356→2477 (+121). L54: None: final equals tip.",
-      "strategist/planning": "Registry size/budget 1609/1770; tip 1821; final 1852/2038. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/strategist.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1685→1806 (+121). L54: L54 operations/planning.md declares packet-named expectedKnowledgeEffects before implementation (+31 words).",
-      "manager/review": "Registry size/budget 2369/2606; tip 2628; final 2628/2891. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/manager.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 2364→2628 (+264). L54: None: final equals tip.",
-      "manager/coordination": "Registry size/budget 2939/3233; tip 3432; final 3432/3776. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/manager.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3074→3432 (+358). L54: None: final equals tip.",
-      "worker/implementation": "Registry size/budget 1654/1820; tip 1949; final 1949/2144. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/worker.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1696→1973 (+277). L54: None: final equals tip.",
-      "worker/recovery": "Registry size/budget 1404/1545; tip 1561; final 1561/1718. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/worker.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1446→1585 (+139). L54: None: final equals tip.",
-      "curator/orientation": "Registry size/budget 3884/4273; tip 4274; final 4567/5024. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/curator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3937→4058 (+121). L54: L54 roles/curator.md adds Writer and worklist corrections: persisted worklist, local handoff/evidence, grouped changes, reconsideration and generated-copy disposition (+293 words).",
-      "curator/curation": "Registry size/budget 6599/7259; tip 7218; final 7511/8263. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/curator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 6634→6876 (+242). L54: L54 roles/curator.md adds Writer and worklist corrections: persisted worklist, local handoff/evidence, grouped changes, reconsideration and generated-copy disposition (+293 words).",
-      "curator/recovery": "Registry size/budget 3229/3552; tip 3601; final 3894/4284. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/curator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3264→3385 (+121). L54: L54 roles/curator.md adds Writer and worklist corrections: persisted worklist, local handoff/evidence, grouped changes, reconsideration and generated-copy disposition (+293 words).",
-      "reviewer/orientation": "Registry size/budget 3583/3942; tip 4223; final 4221/4644. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/reviewer.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 4046→4183 (+137). L54: This helper removes only the admitted nonexistent standalone-leaf review label in roles/reviewer.md (-2 words per capsule); no other-owner prose shortened.",
-      "reviewer/review": "Registry size/budget 3327/3660; tip 4086; final 4084/4493. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/reviewer.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3772→4046 (+274). L54: This helper removes only the admitted nonexistent standalone-leaf review label in roles/reviewer.md (-2 words per capsule); no other-owner prose shortened.",
-      "reviewer/recovery": "Registry size/budget 2928/3221; tip 3550; final 3548/3903. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/reviewer.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3373→3510 (+137). L54: This helper removes only the admitted nonexistent standalone-leaf review label in roles/reviewer.md (-2 words per capsule); no other-owner prose shortened.",
-      "investigator/orientation": "Registry size/budget 1603/1764; tip 1778; final 1778/1956. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/investigator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1656→1778 (+122). L54: None: final equals tip.",
-      "investigator/recovery": "Registry size/budget 948/1043; tip 1105; final 1105/1216. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/investigator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 983→1105 (+122). L54: None: final equals tip.",
-      "launcher/coordination": "Registry size/budget 1821/2004; tip 2192; final 2192/2412. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/operations/coordination.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1961→2192 (+231). L54: None: final equals tip."
+      "architect/review": "Registry size/budget 2410/2651; tip 2663; final 2694/2964. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/architect.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 2401\u21922657 (+256). L54: L54 roles/architect.md declares packet-named expectedKnowledgeEffects before implementation (+31 words per emitted role); planning adds the same rule via operations/planning.md.",
+      "architect/coordination": "Registry size/budget 2980/3278; tip 3467; final 3498/3848. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/architect.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3111\u21923461 (+350). L54: L54 roles/architect.md declares packet-named expectedKnowledgeEffects before implementation (+31 words per emitted role); planning adds the same rule via operations/planning.md.",
+      "orchestrator/review": "Registry size/budget 1839/2023; tip 2076; final 2076/2284. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/orchestrator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1818\u21922076 (+258). L54: None: final equals tip.",
+      "orchestrator/coordination": "Registry size/budget 2409/2650; tip 2880; final 2880/3168. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/orchestrator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 2528\u21922880 (+352). L54: None: final equals tip.",
+      "designer/orientation": "Registry size/budget 1972/2170; tip 2313; final 2313/2545. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/designer.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 2177\u21922298 (+121). L54: None: final equals tip.",
+      "designer/planning": "Registry size/budget 1319/1451; tip 1642; final 1673/1841. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/designer.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1506\u21921627 (+121). L54: L54 operations/planning.md declares packet-named expectedKnowledgeEffects before implementation (+31 words).",
+      "strategist/orientation": "Registry size/budget 2262/2489; tip 2492; final 2492/2742. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/strategist.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 2356\u21922477 (+121). L54: None: final equals tip.",
+      "strategist/planning": "Registry size/budget 1609/1770; tip 1821; final 1852/2038. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/strategist.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1685\u21921806 (+121). L54: L54 operations/planning.md declares packet-named expectedKnowledgeEffects before implementation (+31 words).",
+      "manager/review": "Registry size/budget 2369/2606; tip 2628; final 2628/2891. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/manager.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 2364\u21922628 (+264). L54: None: final equals tip.",
+      "manager/coordination": "Registry size/budget 2939/3233; tip 3432; final 3432/3776. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/manager.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3074\u21923432 (+358). L54: None: final equals tip.",
+      "worker/implementation": "Registry size/budget 1654/1820; tip 1949; final 1949/2144. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/worker.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1696\u21921973 (+277). L54: None: final equals tip.",
+      "worker/recovery": "Registry size/budget 1404/1545; tip 1561; final 1561/1718. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/worker.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1446\u21921585 (+139). L54: None: final equals tip.",
+      "curator/orientation": "Registry size/budget 3884/4273; tip 4274; final 4567/5024. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/curator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3937\u21924058 (+121). L54: L54 roles/curator.md adds Writer and worklist corrections: persisted worklist, local handoff/evidence, grouped changes, reconsideration and generated-copy disposition (+293 words).",
+      "curator/curation": "Registry size/budget 6599/7259; tip 7218; final 7511/8263. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/curator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 6634\u21926876 (+242). L54: L54 roles/curator.md adds Writer and worklist corrections: persisted worklist, local handoff/evidence, grouped changes, reconsideration and generated-copy disposition (+293 words).",
+      "curator/recovery": "Registry size/budget 3229/3552; tip 3601; final 3894/4284. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/curator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3264\u21923385 (+121). L54: L54 roles/curator.md adds Writer and worklist corrections: persisted worklist, local handoff/evidence, grouped changes, reconsideration and generated-copy disposition (+293 words).",
+      "reviewer/orientation": "Registry size/budget 3583/3942; tip 4223; final 4221/4644. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/reviewer.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 4046\u21924183 (+137). L54: This helper removes only the admitted nonexistent standalone-leaf review label in roles/reviewer.md (-2 words per capsule); no other-owner prose shortened.",
+      "reviewer/review": "Registry size/budget 3327/3660; tip 4086; final 4084/4493. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/reviewer.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3772\u21924046 (+274). L54: This helper removes only the admitted nonexistent standalone-leaf review label in roles/reviewer.md (-2 words per capsule); no other-owner prose shortened.",
+      "reviewer/recovery": "Registry size/budget 2928/3221; tip 3550; final 3548/3903. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/reviewer.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3373\u21923510 (+137). L54: This helper removes only the admitted nonexistent standalone-leaf review label in roles/reviewer.md (-2 words per capsule); no other-owner prose shortened.",
+      "investigator/orientation": "Registry size/budget 1603/1764; tip 1778; final 1778/1956. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/investigator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1656\u21921778 (+122). L54: None: final equals tip.",
+      "investigator/recovery": "Registry size/budget 948/1043; tip 1105; final 1105/1216. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/investigator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 983\u21921105 (+122). L54: None: final equals tip.",
+      "launcher/coordination": "Registry size/budget 1821/2004; tip 2192; final 2192/2412. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/operations/coordination.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1961\u21922192 (+231). L54: None: final equals tip."
     }
   },
   "decisions_L88_L168_sync": {
@@ -3513,15 +3509,15 @@
   "capsule_ceilings_words": {
     "architect": 4631,
     "manager": 4513,
-    "curator": 4000,
+    "curator": 4100,
     "reviewer": 4000,
     "bootstrap": 4000,
     "every_other_role": 3700
   },
-  "budget_authority": "Only the developer sets a capsule ceiling. At every stage, Architect, Curator, Reviewer and Bootstrap have 4,000 words; every other role has 3,700. Remove repetition where clarity is not lost. D656/v11 amendment2 and the recorded measured raises below govern the named later ceilings.",
+  "budget_authority": "Only the developer sets a capsule ceiling. Remove repetition where clarity is not lost. D656/v11 amendment2 and the recorded measured raises govern the named earlier ceilings. D681 sets the Curator ceiling to 4100, the detail ceiling to 2700 and only the 24 budgets recorded in decisions_D681 to their table13 measured sizes. The other role ceilings in capsule_ceilings_words are unchanged. Later growth returns to the Architect for the developer under D670; it authorizes no automatic increase or cut. D682 supersedes only the Architect working-rules detail budget with 2200 words.",
   "digest": {
     "size_words": 1000,
-    "budget_words": 1100
+    "budget_words": 1474
   },
   "decisions_D656": {
     "authority": "D656, MIK-R62 v11 amendment2, v12; Manager20261104T104522Z digest ruling",
@@ -3578,7 +3574,97 @@
         "newLiteral": 4631,
         "formula": "ceil(4210*11/10)=4631",
         "authority": "D656;v11 amendment2;Manager20261104T115843Z",
-        "slack": 421
+        "slack": 421,
+        "dutyWordEvidence": {
+          "kind": "rendered-passage-changes",
+          "beforeTree": "f98a16c6cabccc9b64f95223feee26bedab7b354",
+          "afterTree": "f1e964b8365e4dfd3bdb3cbbd678fc32f21344be",
+          "beforeWords": 4166,
+          "afterWords": 4210,
+          "netWords": 44,
+          "beforeRenderedSha256": "c828762a0e3574f90d2a62c41a4f13e0f7b8a3c11c36eaea1eb45224ed78657c",
+          "afterRenderedSha256": "9feac38496b714d6a8c1e7b568ee00a48c8e4703cea39cc295138b370eeda65a",
+          "passages": [
+            {
+              "id": "architect-1",
+              "duty": "Knowledge-command detail pointer and packet alignment-sweep duty",
+              "unit": "role:architect",
+              "operation": "insert",
+              "beforeWords": 0,
+              "afterWords": 24,
+              "netWords": 24,
+              "beforeText": "",
+              "afterText": "\nRead [knowledge commands]({{detail:reference/knowledge-commands.md}}) when you reach a knowledge command or its result, not before.\n\nBefore releasing a packet, follow the alignment sweep in `../operations/planning.md`.\n",
+              "beforeSource": null,
+              "afterSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+                "firstLine": 14,
+                "lastLine": 16,
+                "sha256": "a176d9b1a6ad4068e83cb3d7f72aba06d1b6fc3bfde2e276e838339aeca5518b"
+              }
+            },
+            {
+              "id": "architect-2",
+              "duty": "Knowledge-use detail pointer when diagnosing",
+              "unit": "role:architect",
+              "operation": "insert",
+              "beforeWords": 0,
+              "afterWords": 6,
+              "netWords": 6,
+              "beforeText": "",
+              "afterText": "Read [knowledge]({{detail:reference/knowledge-use.md}}) when diagnosing, not before.\n\n",
+              "beforeSource": null,
+              "afterSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+                "firstLine": 44,
+                "lastLine": 44,
+                "sha256": "a176d9b1a6ad4068e83cb3d7f72aba06d1b6fc3bfde2e276e838339aeca5518b"
+              }
+            },
+            {
+              "id": "architect-3",
+              "duty": "Advisory independent-review procedure pointer",
+              "unit": "role:architect",
+              "operation": "insert",
+              "beforeWords": 0,
+              "afterWords": 9,
+              "netWords": 9,
+              "beforeText": "",
+              "afterText": "\nFor advisory independent reviews, follow `../operations/review.md` \u00a7Advisory independent reviews.\n",
+              "beforeSource": null,
+              "afterSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+                "firstLine": 62,
+                "lastLine": 62,
+                "sha256": "a176d9b1a6ad4068e83cb3d7f72aba06d1b6fc3bfde2e276e838339aeca5518b"
+              }
+            },
+            {
+              "id": "architect-4",
+              "duty": "Child-question detail pointer at the actual question or developer-answer event",
+              "unit": "role:architect",
+              "operation": "replace",
+              "beforeWords": 12,
+              "afterWords": 17,
+              "netWords": 5,
+              "beforeText": "Read [child-question routing]({{detail:reference/child-questions.md}}) when you reach **Questions received from children**, not before.\n",
+              "afterText": "Read [child questions]({{detail:reference/child-questions.md}}) when you reach a child's question or the developer's answer to it, not before.\n",
+              "beforeSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+                "firstLine": 112,
+                "lastLine": 112,
+                "sha256": "8f6375a779416bb24d19d1c541a350b002e8dbffa57d7ca4479ef7aaf5ecfffc"
+              },
+              "afterSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/architect.md",
+                "firstLine": 120,
+                "lastLine": 120,
+                "sha256": "a176d9b1a6ad4068e83cb3d7f72aba06d1b6fc3bfde2e276e838339aeca5518b"
+              }
+            }
+          ],
+          "method": "Exact historical budget-owner compiled_size() with exact historical compiler/source snapshots from Git. Every changed rendered passage measured by whitespace split; no arithmetic-only reconstruction. Net words sum to the observed full rendered output growth. Replacements retain both before and after words; net growth does not claim all new passage words are newly introduced duties."
+        }
       },
       {
         "subject": "manager",
@@ -3588,7 +3674,176 @@
         "newLiteral": 4513,
         "formula": "ceil(4102*11/10)=4513",
         "authority": "D656;v11 amendment2;Manager20261104T115843Z",
-        "slack": 411
+        "slack": 411,
+        "dutyWordEvidence": {
+          "kind": "rendered-passage-changes",
+          "beforeTree": "f98a16c6cabccc9b64f95223feee26bedab7b354",
+          "afterTree": "f1e964b8365e4dfd3bdb3cbbd678fc32f21344be",
+          "beforeWords": 3910,
+          "afterWords": 4102,
+          "netWords": 192,
+          "beforeRenderedSha256": "05418d3658cb0cf59ac5373da95a8eb55093a901693bf6a616e846171fea579d",
+          "afterRenderedSha256": "f4499b6a071c75033a745b63eaf88f18b47284dbe4ae3b124c7964e99abf3a89",
+          "passages": [
+            {
+              "id": "manager-1",
+              "duty": "Remove repeated topology explanation; retain selected-master scope and parent route",
+              "unit": "role:manager",
+              "operation": "replace",
+              "beforeWords": 85,
+              "afterWords": 36,
+              "netWords": -49,
+              "beforeText": "You coordinate one selected master at Projects altitude. You do not own the portfolio. For one master, the Architect delegates coordination to one Manager. An Orchestrator sits above the Managers when two or more masters are worked on at the same time, or when the developer asks for one above a single master. Direct coordination by the Architect is only the developer-chosen exception. When another agent started you, report to that agent's role with its task references, unless the Architect instructs the reporting-recipient change below.\n",
+              "afterText": "You coordinate one selected master at Projects altitude. You do not own the portfolio. When another agent started you, report to that agent's role with its task references, unless the Architect instructs the reporting-recipient change below.\n",
+              "beforeSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+                "firstLine": 8,
+                "lastLine": 8,
+                "sha256": "5f24e883d7108b288610bd2d710df50bca2a935c0b78a1489f25c24f88ae5e92"
+              },
+              "afterSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+                "firstLine": 8,
+                "lastLine": 8,
+                "sha256": "bc3f93b0c10cac513a68ef982c1cd9a7451c2bb07aa1cea1c475450b09648f50"
+              }
+            },
+            {
+              "id": "manager-2",
+              "duty": "Knowledge-command detail pointer; check packet dependencies and route landing gate findings",
+              "unit": "role:manager",
+              "operation": "insert",
+              "beforeWords": 0,
+              "afterWords": 52,
+              "netWords": 52,
+              "beforeText": "",
+              "afterText": "Read [knowledge commands]({{detail:reference/knowledge-commands.md}}) when you reach a knowledge command or its result, not before.\n\nCheck a packet's dependencies before starting and before integrating its leaf: the product does not check them. Closeout preview and every landing route can refuse with gate findings; send the findings to the Curator and bypass no gate.\n\n",
+              "beforeSource": null,
+              "afterSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+                "firstLine": 20,
+                "lastLine": 22,
+                "sha256": "bc3f93b0c10cac513a68ef982c1cd9a7451c2bb07aa1cea1c475450b09648f50"
+              }
+            },
+            {
+              "id": "manager-3",
+              "duty": "Consolidate direct handover, repair-loop, review-round, memory-pass and relay references",
+              "unit": "role:manager",
+              "operation": "replace",
+              "beforeWords": 132,
+              "afterWords": 129,
+              "netWords": -3,
+              "beforeText": "Read each leaf's reports and task records yourself. Direct leaf handover flow and relay limits follow `../operations/coordination.md`. Inspect the complete changed-file diff and both verdicts before deciding the gate. Keep closeout, integration, acceptance writes and the order of landings. Start, finalize and abandon publish task stage and mirror it into the master's row; do not follow them with a separate status write. Use `task_doc set_status` for an explicit correction and for organizational-master completion, whose completion act remains yours. Reviews are evidence, not gate decisions. Preserve stable requirement/finding IDs and distinguish implementation, review, curation and publication status. A Manager started from the dashboard has no parent and needs none: put a needed developer decision in your own chat and do not invent an Architect ID. Direct leaf repair-loop handovers run as `../operations/coordination.md` states.\n",
+              "afterText": "Read each leaf's reports and task records yourself. Direct leaf hand-overs, repair loops, review rounds, memory passes and relay limits follow `../operations/coordination.md`. Inspect the complete changed-file diff and both verdicts before deciding the gate. Keep closeout, integration, acceptance writes and the order of landings. Start, finalize and abandon publish task stage and mirror it into the master's row; do not follow them with a separate status write. Use `task_doc set_status` for an explicit correction and for organizational-master completion, whose completion act remains yours. Reviews are evidence, not gate decisions. Preserve stable requirement/finding IDs and distinguish implementation, review, curation and publication status. A Manager started from the dashboard has no parent and needs none: put a needed developer decision in your own chat and do not invent an Architect ID.\n",
+              "beforeSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+                "firstLine": 28,
+                "lastLine": 28,
+                "sha256": "5f24e883d7108b288610bd2d710df50bca2a935c0b78a1489f25c24f88ae5e92"
+              },
+              "afterSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+                "firstLine": 32,
+                "lastLine": 32,
+                "sha256": "bc3f93b0c10cac513a68ef982c1cd9a7451c2bb07aa1cea1c475450b09648f50"
+              }
+            },
+            {
+              "id": "manager-4",
+              "duty": "Task construction, one same-operands infrastructure rerun and second-failure escalation",
+              "unit": "role:manager",
+              "operation": "replace",
+              "beforeWords": 91,
+              "afterWords": 134,
+              "netWords": 43,
+              "beforeText": "Decide the order of your leaves, agent starts and replacements, operational problems, ordinary requirement interpretation within the intended promise, checks before and after a landing, and paired closeout and integration within delegated authority. Review rounds, memory passes and relay limits follow `../operations/coordination.md`. Accepting a verdict for the gate stays yours. Assign a check or investigation that belongs to no leaf to an Investigator on your own sprint and master. Send the scoped concern as your first `role_message` on `agents-remember-task` to its returned agent ID; never select a leaf for this role.\n",
+              "afterText": "Decide the order of your leaves, agent starts and replacements, operational problems, ordinary requirement interpretation within the intended promise, checks before and after a landing, and paired closeout and integration within delegated authority. Accepting a verdict for the gate stays yours. The task's construction is yours: step order, evidence form, which existing test or command shows a thing, one rerun on the same operands after a harness, loader or capture fault, and sandbox- or scratch-only instruments that change no product source; a second failure of one cause goes up with what was tried. Assign a check or investigation that belongs to no leaf to an Investigator on your own sprint and master. Send the scoped concern as your first `role_message` on `agents-remember-task` to its returned agent ID; never select a leaf for this role.\n",
+              "beforeSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+                "firstLine": 34,
+                "lastLine": 34,
+                "sha256": "5f24e883d7108b288610bd2d710df50bca2a935c0b78a1489f25c24f88ae5e92"
+              },
+              "afterSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+                "firstLine": 38,
+                "lastLine": 38,
+                "sha256": "bc3f93b0c10cac513a68ef982c1cd9a7451c2bb07aa1cea1c475450b09648f50"
+              }
+            },
+            {
+              "id": "manager-5",
+              "duty": "Escalate an hour-long item or second repair round/freeze with hours and proposal",
+              "unit": "role:manager",
+              "operation": "replace",
+              "beforeWords": 159,
+              "afterWords": 181,
+              "netWords": 22,
+              "beforeText": "When another agent started you, message your parent or the instructed reporting recipient only for a developer decision: new or dropped scope or a change to a requirement's promise; something only the developer can do or approve; an override of a role default; or a blocker that none of your own decisions can remove. Send these with `role_message` on `agents-remember-task` to the parent agent ID in your handover, or to the instructed reporting-recipient ID recorded in your report. When the Orchestrator owns coordination, do not bypass it to the Architect. Forward only questions requiring the developer and permission notices as stated below; send no other role messages or landing notices. Ordinary requirement readings and operational rulings stay with you; keep the work going. Send one further message with the path of your report, addressed to the parent's role with its task references, when the whole assignment is finished or cannot be finished. Send no other messages to that recipient.\n",
+              "afterText": "When another agent started you, message your parent or the instructed reporting recipient only for a developer decision: new or dropped scope or a change to a requirement's promise; something only the developer can do or approve; an override of a role default; a small item that has cost about an hour, or a second repair round or freeze, with its hours and a proposal; or a blocker that none of your own decisions can remove. Send these with `role_message` on `agents-remember-task` to the parent agent ID in your handover, or to the instructed reporting-recipient ID recorded in your report. When the Orchestrator owns coordination, do not bypass it to the Architect. Forward only questions requiring the developer and permission notices as stated below; send no other role messages or landing notices. Ordinary requirement readings and operational rulings stay with you; keep the work going. Send one further message with the path of your report, addressed to the parent's role with its task references, when the whole assignment is finished or cannot be finished. Send no other messages to that recipient.\n",
+              "beforeSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+                "firstLine": 56,
+                "lastLine": 56,
+                "sha256": "5f24e883d7108b288610bd2d710df50bca2a935c0b78a1489f25c24f88ae5e92"
+              },
+              "afterSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+                "firstLine": 60,
+                "lastLine": 60,
+                "sha256": "bc3f93b0c10cac513a68ef982c1cd9a7451c2bb07aa1cea1c475450b09648f50"
+              }
+            },
+            {
+              "id": "manager-6",
+              "duty": "Child-question/developer-answer pointer and no invented developer approval",
+              "unit": "role:manager",
+              "operation": "replace",
+              "beforeWords": 12,
+              "afterWords": 29,
+              "netWords": 17,
+              "beforeText": "Read [child-question routing]({{detail:reference/child-questions.md}}) when you reach **Questions received from children**, not before.\n",
+              "afterText": "Read [child questions]({{detail:reference/child-questions.md}}) when you reach a child's question or the developer's answer to it, not before. An answer of your own is never the developer's answer or approval.\n",
+              "beforeSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+                "firstLine": 102,
+                "lastLine": 102,
+                "sha256": "5f24e883d7108b288610bd2d710df50bca2a935c0b78a1489f25c24f88ae5e92"
+              },
+              "afterSource": {
+                "path": "skills/l-01-agent-lifecycles/roles/manager.md",
+                "firstLine": 106,
+                "lastLine": 106,
+                "sha256": "bc3f93b0c10cac513a68ef982c1cd9a7451c2bb07aa1cea1c475450b09648f50"
+              }
+            },
+            {
+              "id": "manager-7",
+              "duty": "Direct pending handover occasion plus first-message Reviewer intake for leaf and integration/master-exit",
+              "unit": "operation:coordination",
+              "operation": "replace",
+              "beforeWords": 79,
+              "afterWords": 189,
+              "netWords": 110,
+              "beforeText": "The Manager receives the Worker\u2019s freeze notice to start the Reviewer and the Reviewer\u2019s code-PASS notice to start the Curator, plus only what `../roles/manager.md` lists for the Manager. It supplies the occasion for the sender to retry a pending hand-over, without relaying contents or asking for developer confirmation of that occasion. Read reports and task records for routine state and record which seat holds each next step and since when. Starts refused `intent-review-open` wait for architect's `go`; never retry.\n",
+              "afterText": "The Manager receives the Worker\u2019s freeze notice to start the Reviewer and the Reviewer\u2019s code-PASS notice to start the Curator, plus only what `../roles/manager.md` lists for the Manager. For a pending hand-over, the Manager gives the sender the occasion to retry and relays no contents. Do not ask the developer to confirm that occasion. Read reports and task records for routine state and record which seat holds each next step and since when. Starts refused `intent-review-open` wait for architect's `go`; never retry.\n\nAfter the individual `role_start` on `agents-remember-task`, send the leaf Reviewer's intake as your first `role_message` to the returned agent ID: review mode, canonical task and review purpose, seam, requirement set (IDs, versions, packets, durable corpus ruling), bound catalogs and resolved `system/tools.md`. Candidate identity and attempt records arrive with the Worker's freeze; the Reviewer inspects nothing before its intake.\n\nFor integration or master-exit, start the Reviewer on the master task data's acceptance and delivery-proof leaf, with its sprint and master; if none is named, ask the architect. Send the intake above, adding candidate identity and attempt records, as your first `role_message` on `agents-remember-task` to the returned agent ID.\n",
+              "beforeSource": {
+                "path": "skills/l-01-agent-lifecycles/operations/coordination.md",
+                "firstLine": 21,
+                "lastLine": 21,
+                "sha256": "4b1244a9f6519f45e00144249f4dabfada56eafe5cd22ef6e269b5a55c86f32d"
+              },
+              "afterSource": {
+                "path": "skills/l-01-agent-lifecycles/operations/coordination.md",
+                "firstLine": 23,
+                "lastLine": 27,
+                "sha256": "e3cb95ab87a89b81e4c2015f8ca9d616d5819187405fb9964e165710434e9afb"
+              }
+            }
+          ],
+          "method": "Exact historical budget-owner compiled_size() with exact historical compiler/source snapshots from Git. Every changed rendered passage measured by whitespace split; no arithmetic-only reconstruction. Net words sum to the observed full rendered output growth. Replacements retain both before and after words; net growth does not claim all new passage words are newly introduced duties."
+        }
       },
       {
         "subject": "shared digest",
@@ -3597,7 +3852,20 @@
         "newLiteral": 1100,
         "formula": "ceil(1000*11/10)=1100",
         "authority": "D656;v11 amendment2;Manager20261104T115843Z",
-        "slack": 100
+        "slack": 100,
+        "dutyWordEvidence": {
+          "kind": "unchanged-digest",
+          "beforeTree": "f98a16c6cabccc9b64f95223feee26bedab7b354",
+          "afterTree": "f1e964b8365e4dfd3bdb3cbbd678fc32f21344be",
+          "path": "skills/l-01-agent-lifecycles/core/every-role.md",
+          "beforeWords": 1000,
+          "afterWords": 1000,
+          "netWords": 0,
+          "beforeSha256": "fad9d9a793efd91e379357a9a89023c9875730a0c3050443b0dff4c69f84c4ba",
+          "afterSha256": "fad9d9a793efd91e379357a9a89023c9875730a0c3050443b0dff4c69f84c4ba",
+          "text": "Keep your role fixed, refuse another role's brief and report the mismatch to your parent; direct coordination grants no other role (AU1.1, AU2.8, AU3.1, AU3.2)\nArchitect, Orchestrator, Manager: Start each role once with its exact task selection and request ID, reconcile uncertainty with that ID, and report a refusal without another-tool fallback (AU4.1, AU5.5)\nArchitect, Orchestrator, Manager: Settings supply harness, model and effort unless overridden, and starts carry no mode; start Worker, then Reviewer when ready, then Curator after code PASS (AU4.1)\nArchitect, Orchestrator, Manager: After an override start, check and set the seat\u2019s mode and features, recording the product defect rather than removing overrides (AU4.2)\nArchitect, Orchestrator, Manager: Resolve a developer-declared task-seat takeover, start that canonical role rather than become it, and report its dashboard location (AU5.1, AU5.2, AU5.3, AU5.4)\nEscalate high-impact truth questions immediately; decide and log presentation choices yourself (AU6.2)\nRead the active queue before treating clarification as current or future work, expose in-scope changes, record future work durably, and ask your parent when the fit is unclear (AU7.1, AU7.2, AU7.3, AU7.4)\nArchitect, Orchestrator, Manager: Preview and execute accepted-series transactions within delegated authority; preserve distinct gate deciders, human-pinned approvals and developer decisions (AU8.1, AU8.2)\nArchitect: Present developer questions individually, record and relay the actual ruling, and ask the sender once when the item is underspecified (AU9.3, AU9.4)\nCreate no watcher, poll or timer loop; answer a waking message before ending the turn (AU10.2)\nCollect helpers and continue ordinary work, preserving native within-turn collection (AU10.3)\nOn the declared ACP wait path, end with `WAITING FOR SUBAGENTS:`, report each helper in your own chat, collect finished work and declare again or continue, without parent progress messages or another wake mechanism (AU10.3)\nChange instruction text through a task, never by rewriting a role file to settle disagreement (AU11.1)\nArchitect, Orchestrator, Manager, Worker, Curator, Reviewer: Publish only authorized code and memory, report focused checks truthfully, and carry curation's complete memory-quality result without inventing automatic full-suite or review work (AU11.3)\nArchitect, Orchestrator, Manager: Publishing\u2014push to the sprint line, pull requests and release\u2014belongs to the developer unless explicitly delegated (AU11.4)\nA claim about all members checks the complete claimed population; absence searches the relevant tree completely (IN1.2)\nRecord covered scope and truncation, checks run and left out, and same-cause base evidence by message and subtest before calling a failure pre-existing (IN1.2)\nPut decisions and rulings on their durable surface, send developer questions through the named parent, and continue independent work; without a parent ask in your own chat (IN2.1, IN2.3, IN2.4, IN4.2, AU9.2)\nParallelize independent work by default with named reasons for sequencing, without an invented concurrency cap; serial landing order remains (IN3.1, IN3.3)\nName a gate, one-writer dependency, ruling or harness without helpers for sequencing; only the developer authorizes a concurrency limit (IN3.2)\nGuards need observed recurring cause and developer acceptance (IN3.4)\nArchitect, Investigator: Before releasing a requirement, disclose every added refusal, limit or narrowing beyond the developer's words and obtain the developer's yes (IN3.4)\nFull inputs and pages have no invented count cap (IN3.4)\nArchitect, Orchestrator, Designer, Strategist: Planning and design create no branch, worktree or commit (IN5.2)\nArchitect, Orchestrator, Manager, Worker, Bootstrap: Make code changes under an approved task, using the light-task workflow for small work rather than building from chat (IN5.5)\nFulfil the task and fill small unambiguous blanks; escalate a plan delta rather than reshape your assignment (IN6.1, IN6.2)\nOrchestrator, Manager, Worker: Keep the spirit test with the Orchestrator, never move it down to Managers or Workers (IN6.3)\nArchitect, Orchestrator, Manager, Designer, Strategist, Bootstrap: Apply the task-collaboration doctrine when scoping, without paraphrasing it (IN8.1)\nRead the resolved memory-layer tools, coding and publication instructions rather than inventing commands (IN8.3)\nInstructions and requirements point to the repository\u2019s own guideline files and never restate their content (IN8.5)\nDesign rules belong to repository `system/design-guidelines.md`, never role text or code defaults; shipped designs are examples and AR\u2019s look is never imposed (IN8.6)\nArchitect, Orchestrator, Manager, Worker, Investigator: During provider degradation, continue valid native reads, report blockers, start no providers, and leave state changes to the owning Worker under explicit authority (LF2.2, LF2.3, LF2.4)\nArchitect: Propose a strategist pre-run; run it only after developer approval (LO5.1)\nArchitect: Before task topology, obtain developer approval for versioned requirement packets on the canonical template, with required diagrams; revise and rebrief affected leaves when intent changes (LO6.2, LO6.3)\nArchitect, Orchestrator, Manager, Worker: Before dispatch, bind the primary ID, version, packet and corpus ruling, labeling dependency and preservation context separately (AC2.1)\nArchitect, Orchestrator, Manager: Validate the exact handoff artifact, candidate and evidence before advancing a gate; act on missing or stale artifacts (AC0.3, AC0.4)\nWorker, Reviewer, Curator: Check the exact object and requested stretch before taking a peer handover (AC0.3)\nCompletion is not acceptance; write the artifact before handing over and message its waiting recipient; add no model-written completion row or another seat's runtime identity (AC0.1, AC0.5, AC1.9)\nWorker: Deliver one primary acceptance block with status, delivery rationale and anchors, verification rationale naming the caught failure, and exact command/results; explain blocked or approved changes with their developer ruling (AC2.2, AC2.3, AC2.4, AC2.5, AC2.6, AC2.7, AC2.8, AC2.9)\nReviewer: Inspect the exact primary revision and artifacts independently; reject missing or wrong evidence, and retain BLOCK for a truthful but undelivered blocked requirement (AC2.10)\nWorker: Advance attempts only at review handoff; record internal reruns separately with candidate, command, result, cause, repair and next proof (AC3.2, AC3.3)\nWorker: Validate and append immutable candidate-bound journal records before review handoff; preserve and void malformed unsent rows without consuming an ID, and let the Reviewer reject already-handed-off rows (AC3.4, AC3.5)\nWorker, Reviewer: Repair through a successor citing predecessor and sealed findings; never reopen closed attempts, and send outside-list changes through the parent without resetting review (AC3.7)\nManager: Keep a rebuildable journal summary that never becomes authority or blocks work (AC4.1)\nWorker, Reviewer: Give retained evidence either contract identity, owner, executable node and consumers, or expiry, executable removal/replacement, owner and compatibility consequence; missing catalog metadata is implementation work, independent of requirement acceptance (AC5.1, AC5.2, AC5.3, AC5.4, AC5.5)\n",
+          "reason": "The complete retained 1000-word digest is unchanged at this raise; the literal grows to1100 for capped eleven-tenths headroom, not for invented new duty words."
+        }
       }
     ],
     "preservedLiterals": {
@@ -3607,5 +3875,1521 @@
       "handoverTokens": 3300
     },
     "reason": "Inherited rule delivery, exact protected duties and their named working steps; no obligation cut to fit. Worker formula recomputed, no raise: isolated tail adds five words; this recut also carries other explicitly declared duties."
+  },
+  "decision_L84_rule26_facet": {
+    "authority": "MIK-R84 v5 part 1; MIK-R62 rule 26 and v11 amendment 2; D656, D657",
+    "source": "reference/investigator-instruction-review.md",
+    "measurement": "Whitespace-split words of the complete source, as detail_sizes() in mcp/tests/test_role_capsule_budgets.py measures them",
+    "beforeWords": 42,
+    "currentWords": 484,
+    "addedDutyWords": 442,
+    "formerBudgetWords": 47,
+    "newBudgetWords": 533,
+    "formula": "min(ceil(484 * 11 / 10), 2500) = 533",
+    "formerLiteralCeilingWords": 2500,
+    "newLiteralCeilingWords": 2500,
+    "ceilingChanged": false,
+    "titleWords": 3,
+    "dutyWordsBySectionIncludingHeading": {
+      "When this facet applies": 37,
+      "Sources and helpers": 99,
+      "What counts": 73,
+      "Each theme": 105,
+      "Ranking and causes": 15,
+      "Evidence and report": 39,
+      "Boundaries": 75,
+      "Worked case": 38
+    },
+    "reason": "Restores rule 26's eight headed parts: scoped concern and window, seven parallel evidence shares, recurrence counting, each theme's delivery and fix account, cost ranking, checked citation evidence, report-only boundaries and the worked delivery failure. The former 42-word summary omitted these required duties; net restored source growth is 442 words. Only this detail's measured budget changes; no capsule or shared-digest ceiling changes."
+  },
+  "decision_L84_final_inputs": {
+    "authority": "MIK-R84 v5 part 1; MIK-R62 rule 51, v11 amendment 2; D656, D657; D661",
+    "baseCommit": "81180617aed517835314526b8309d37d5be8b3b7",
+    "method": "Canonical budget-test compiler over each full manifest matrix. Compare base Git inputs and current inputs with unchanged compiler code, bind their source hashes and actual rendered words. Re-record only differing entries with changed inputs, under unchanged literal ceilings.",
+    "duties": "R62 instruction and delivery corrections in the named role/operation inputs. Curator-card detail restores R07 v2 rule 5 family subject/dispositions, examined member revisions, ID-only members and re-examination after member change; current citation workflow remains explicit. Other changed details carry corrected writer, start and knowledge-command semantics.",
+    "changedSources": {
+      "composition-manifest.json": {
+        "baseSha256": "ddd3fee28376e08816029e90b0e40c7d480d3e566235c051a5d470d0a379bd48",
+        "currentSha256": "92c1982dccdad1ac86c69f08d8ce1efcb46992545c999b87fccc90ae564e6d63",
+        "baseWords": 2561,
+        "currentWords": 2612,
+        "netChangedSourceWords": 51
+      },
+      "core/authority.md": {
+        "baseSha256": "4ccb7e95482d04ff2b4865088b70df63cf565b3ea3d90260575063feb71c909e",
+        "currentSha256": "fcde435df19e5c67932762ad5f15cafe93fb811c99eba462af4c3c71a54d1cdd",
+        "baseWords": 1643,
+        "currentWords": 1672,
+        "netChangedSourceWords": 29
+      },
+      "core/invariants.md": {
+        "baseSha256": "625625de04e7f0df97215b84e7378ff0efa96c3b0b84763995bf462ed7581862",
+        "currentSha256": "f6394ed6a76850dd40dd0499b7ed3c624c9b28ff631e2f06ad9124985f8d6250",
+        "baseWords": 948,
+        "currentWords": 949,
+        "netChangedSourceWords": 1
+      },
+      "core/loop.md": {
+        "baseSha256": "7dd7e3c186a345bb3cfe9e803e73f68f820d67066f70fea9792860c8d1ec90f5",
+        "currentSha256": "914fcf167e9c1b207577b515012345a126464dbfe38dccd6909e78f69d84ae3d",
+        "baseWords": 960,
+        "currentWords": 945,
+        "netChangedSourceWords": -15
+      },
+      "operations/closeout.md": {
+        "baseSha256": "2861b5d5b09c9e4f84c6c217cfe418849592e197f0d5e9c5cc9a5c42110fc0cc",
+        "currentSha256": "d961de85c5fb8a4a05f1464dfbe717e04661106de153f4fc2034ff18da8b4dd3",
+        "baseWords": 359,
+        "currentWords": 367,
+        "netChangedSourceWords": 8
+      },
+      "operations/coordination.md": {
+        "baseSha256": "e3cb95ab87a89b81e4c2015f8ca9d616d5819187405fb9964e165710434e9afb",
+        "currentSha256": "1725098e90860b29ac79da721691e2334dc163de8e4708aa75a47f1bac6932f9",
+        "baseWords": 1861,
+        "currentWords": 1875,
+        "netChangedSourceWords": 14
+      },
+      "operations/curation.md": {
+        "baseSha256": "d4419241535f8cc0f0b8e8685fc6b740dea5a79428fec70d372001fd95d6a711",
+        "currentSha256": "0a2167d4cb32375badef04c7f2d82eb12b1960b037c859505a58d11a010be48b",
+        "baseWords": 2022,
+        "currentWords": 2060,
+        "netChangedSourceWords": 38
+      },
+      "operations/implementation.md": {
+        "baseSha256": "f79d875a5459baea525fba1d9b6e0b924517fc636c5b0041b5a428c810945a38",
+        "currentSha256": "32a8e7f63bf9a420f2fb561bb83e90a979315dc43574c701095c6b7f59f9558c",
+        "baseWords": 928,
+        "currentWords": 936,
+        "netChangedSourceWords": 8
+      },
+      "operations/orientation.md": {
+        "baseSha256": "127ead9498fbd9811abe4acfab1edbb53a446122a58924e1d1f045443759a651",
+        "currentSha256": "261b7e80035a87d2041ae0767da76d44b98a56b7b5ba9212d818ec25ffabf8ea",
+        "baseWords": 1103,
+        "currentWords": 1134,
+        "netChangedSourceWords": 31
+      },
+      "operations/planning.md": {
+        "baseSha256": "ec4e036bb3190f1e55609b940535c59cceaf5563d3116f54041cb7cbdc28de5c",
+        "currentSha256": "f7d6b112a2276a1f83de6006d18d3cf4b256784f49477e4b2e9efd1cc3163d0f",
+        "baseWords": 1072,
+        "currentWords": 1080,
+        "netChangedSourceWords": 8
+      },
+      "operations/recovery.md": {
+        "baseSha256": "77bf9d941b300f292480f66fd7528066ce9d744c69da740a16648849b559f8f8",
+        "currentSha256": "c2af2a551aeb93064d3b8f185e1e64c74d176912a3b284565d6d9792d74ac892",
+        "baseWords": 370,
+        "currentWords": 378,
+        "netChangedSourceWords": 8
+      },
+      "operations/review.md": {
+        "baseSha256": "9ce18b86a587453034f52c538aab64b29200a8c53586813a078d41352ee64539",
+        "currentSha256": "fbcdef470eb3c54d5c23b48c60e3563a0d673ad0e2bedc7720cebb30bb6421f5",
+        "baseWords": 1686,
+        "currentWords": 1691,
+        "netChangedSourceWords": 5
+      },
+      "reference/architect-working-rules.md": {
+        "baseSha256": "dec5e622886e96e723656b2c9d7707c626fe640405ed2feb0f5a73ce31288bcc",
+        "currentSha256": "13ee80d0da0324602eb5296343bbeddf8da9884afb973d550d19b4eae3e9724a",
+        "baseWords": 1834,
+        "currentWords": 1957,
+        "netChangedSourceWords": 123
+      },
+      "reference/child-questions.md": {
+        "baseSha256": "0c629a18e88f8261cae4558d61468347a7cefc93de93dce80b3ca796de05026a",
+        "currentSha256": "504e542382d5fd998076a116ba7b0efaa3726686f7265b20feb1bc1e77f53315",
+        "baseWords": 273,
+        "currentWords": 264,
+        "netChangedSourceWords": -9
+      },
+      "reference/coordination-starts.md": {
+        "baseSha256": "cc301bbf204467ee21671faf3fda41a429f3d9fff83162d6d543e1f81b28fc29",
+        "currentSha256": "7775ea0fbfd979f3e68ff5b1cf3c36a89687eca6adff3b73957b5ed364872c9f",
+        "baseWords": 47,
+        "currentWords": 141,
+        "netChangedSourceWords": 94
+      },
+      "reference/curator-card-details.md": {
+        "baseSha256": "569baa68b666b1fe9911717d455e7a0906f1842e3facdffdb039f2a615b3ae04",
+        "currentSha256": "24dcdd2c3bc83b238af8f298b268709aa4971e95faa890d431e992472550f624",
+        "baseWords": 374,
+        "currentWords": 453,
+        "netChangedSourceWords": 79
+      },
+      "reference/curator-writer-details.md": {
+        "baseSha256": "b3c0e194c7450a59932ae02333703d1cc16ae5414997ddc155de1095f3f0a164",
+        "currentSha256": "2d9b12da89a4c04bde9bdf332926c24e0709eb83d2edcbbcfda2effc214ac581",
+        "baseWords": 699,
+        "currentWords": 690,
+        "netChangedSourceWords": -9
+      },
+      "reference/investigator-instruction-review.md": {
+        "baseSha256": "fbfc4ca89fdf00b873e45d932549f31ec9e9c95672d0a14b32cf0576659df998",
+        "currentSha256": "e8fbb02dd22bd86680399ddef82833c41eae53e3745c7f7b7b8b5a3b6f3286a4",
+        "baseWords": 42,
+        "currentWords": 484,
+        "netChangedSourceWords": 442
+      },
+      "reference/knowledge-commands.md": {
+        "baseSha256": "3bcd29fc9a1033bfbd9869a025c730ca99d00626aa8afa6493716c85c7935c1f",
+        "currentSha256": "e0fb17a8ac10ff679d35fcd24a809f64638fb58b0c8f51dfa0627f2a54d23125",
+        "baseWords": 2496,
+        "currentWords": 2499,
+        "netChangedSourceWords": 3
+      },
+      "reference/manager-working-rules.md": {
+        "baseSha256": "352a8c00be55d86844a93a5c2eb245dec1ebc88537158cb7cc4a61e54de27c76",
+        "currentSha256": "d3d03a409fa2e7ec43450e82d3e4069fa5bcc0499f540181cc86c0fe5b105ca8",
+        "baseWords": 406,
+        "currentWords": 705,
+        "netChangedSourceWords": 299
+      },
+      "roles/architect.md": {
+        "baseSha256": "a176d9b1a6ad4068e83cb3d7f72aba06d1b6fc3bfde2e276e838339aeca5518b",
+        "currentSha256": "c5025da729d8cfedca1a3040cd442a7102e59782e858f70fe1545b87e4e3cc3e",
+        "baseWords": 2610,
+        "currentWords": 2584,
+        "netChangedSourceWords": -26
+      },
+      "roles/bootstrap.md": {
+        "baseSha256": "31d750f9fc72a40da8a15be0b670549d0fb5d1d318c60f41330160eecbeaf488",
+        "currentSha256": "410c115ab536d88277d02c169b4ee2aaad21ba9f866004cdbcb2fe2d5bcb3c04",
+        "baseWords": 1648,
+        "currentWords": 1637,
+        "netChangedSourceWords": -11
+      },
+      "roles/curator.md": {
+        "baseSha256": "d8a9e0a838a2074862aff79c874ea350dd48652aec3a8f002cd553845d3cd8e4",
+        "currentSha256": "5d7da8ec76cf9a4edbca8d0c527aeb67ada373c6c088e2d5d9075a336e1afed2",
+        "baseWords": 2210,
+        "currentWords": 2221,
+        "netChangedSourceWords": 11
+      },
+      "roles/investigator.md": {
+        "baseSha256": "1422a784e3e117184f58475045293b255534e3f29b4ec78ae00fe26ce4f8c342",
+        "currentSha256": "5bd25eddfd62a996ac5d781933c57d2d464b66a452f5d7074adb4202051db3bc",
+        "baseWords": 953,
+        "currentWords": 977,
+        "netChangedSourceWords": 24
+      },
+      "roles/manager.md": {
+        "baseSha256": "bc3f93b0c10cac513a68ef982c1cd9a7451c2bb07aa1cea1c475450b09648f50",
+        "currentSha256": "24de987f0847630c93ba869cdee789c0e625b23b46bf562780c4f7e25ce09dba",
+        "baseWords": 2314,
+        "currentWords": 2191,
+        "netChangedSourceWords": -123
+      },
+      "roles/reviewer.md": {
+        "baseSha256": "7243360414c46e081ffc5bb33d3fb9eec4031b82f97bff0f7c9304b888558cba",
+        "currentSha256": "f9e86497d7cf88221073a520e14e5bf18f85002a6d6496dcdd779a5ba16c56b5",
+        "baseWords": 2858,
+        "currentWords": 2875,
+        "netChangedSourceWords": 17
+      },
+      "roles/worker.md": {
+        "baseSha256": "8cc45eaf2fac5f180dbd904da6575fffab0eb238e11e03a70772c0a7bd318825",
+        "currentSha256": "af18fc6b90bb6d6daf85d4a68d6f3c5c94ecec8592b425d672f3c19779e18574",
+        "baseWords": 1951,
+        "currentWords": 1963,
+        "netChangedSourceWords": 12
+      }
+    },
+    "changedEntries": {
+      "capsules": {
+        "architect/orientation": {
+          "recordedBeforeWords": 3612,
+          "baseWords": 3612,
+          "currentWords": 3597,
+          "netChangedDutyWords": -15,
+          "formerBudgetWords": 3974,
+          "newBudgetWords": 3957,
+          "literalCeilingWords": 4631,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "roles/architect.md",
+            "operations/orientation.md",
+            "reference/architect-working-rules.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "architect/planning": {
+          "recordedBeforeWords": 3632,
+          "baseWords": 3632,
+          "currentWords": 3614,
+          "netChangedDutyWords": -18,
+          "formerBudgetWords": 3996,
+          "newBudgetWords": 3976,
+          "literalCeilingWords": 4631,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "roles/architect.md",
+            "operations/planning.md",
+            "reference/architect-working-rules.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "architect/review": {
+          "recordedBeforeWords": 3812,
+          "baseWords": 3812,
+          "currentWords": 3791,
+          "netChangedDutyWords": -21,
+          "formerBudgetWords": 4194,
+          "newBudgetWords": 4171,
+          "literalCeilingWords": 4631,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "roles/architect.md",
+            "operations/review.md",
+            "reference/architect-working-rules.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "architect/coordination": {
+          "recordedBeforeWords": 4210,
+          "baseWords": 4210,
+          "currentWords": 4198,
+          "netChangedDutyWords": -12,
+          "formerBudgetWords": 4631,
+          "newBudgetWords": 4618,
+          "literalCeilingWords": 4631,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "roles/architect.md",
+            "operations/coordination.md",
+            "reference/architect-working-rules.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "architect/authorized-closeout": {
+          "recordedBeforeWords": 2951,
+          "baseWords": 2951,
+          "currentWords": 2933,
+          "netChangedDutyWords": -18,
+          "formerBudgetWords": 3247,
+          "newBudgetWords": 3227,
+          "literalCeilingWords": 4631,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "roles/architect.md",
+            "operations/closeout.md",
+            "reference/architect-working-rules.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "architect/recovery": {
+          "recordedBeforeWords": 2895,
+          "baseWords": 2895,
+          "currentWords": 2877,
+          "netChangedDutyWords": -18,
+          "formerBudgetWords": 3185,
+          "newBudgetWords": 3165,
+          "literalCeilingWords": 4631,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "roles/architect.md",
+            "operations/recovery.md",
+            "reference/architect-working-rules.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "orchestrator/orientation": {
+          "recordedBeforeWords": 2324,
+          "baseWords": 2324,
+          "currentWords": 2316,
+          "netChangedDutyWords": -8,
+          "formerBudgetWords": 2557,
+          "newBudgetWords": 2548,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "operations/orientation.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "orchestrator/planning": {
+          "recordedBeforeWords": 1765,
+          "baseWords": 1765,
+          "currentWords": 1773,
+          "netChangedDutyWords": 8,
+          "formerBudgetWords": 1942,
+          "newBudgetWords": 1951,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "operations/planning.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "orchestrator/review": {
+          "recordedBeforeWords": 1984,
+          "baseWords": 1984,
+          "currentWords": 1992,
+          "netChangedDutyWords": 8,
+          "formerBudgetWords": 2183,
+          "newBudgetWords": 2192,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "operations/review.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "orchestrator/coordination": {
+          "recordedBeforeWords": 2972,
+          "baseWords": 2972,
+          "currentWords": 2986,
+          "netChangedDutyWords": 14,
+          "formerBudgetWords": 3270,
+          "newBudgetWords": 3285,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "operations/coordination.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "orchestrator/authorized-closeout": {
+          "recordedBeforeWords": 1713,
+          "baseWords": 1713,
+          "currentWords": 1721,
+          "netChangedDutyWords": 8,
+          "formerBudgetWords": 1885,
+          "newBudgetWords": 1894,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "operations/closeout.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "orchestrator/recovery": {
+          "recordedBeforeWords": 1657,
+          "baseWords": 1657,
+          "currentWords": 1665,
+          "netChangedDutyWords": 8,
+          "formerBudgetWords": 1823,
+          "newBudgetWords": 1832,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "operations/recovery.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "designer/orientation": {
+          "recordedBeforeWords": 2272,
+          "baseWords": 2272,
+          "currentWords": 2280,
+          "netChangedDutyWords": 8,
+          "formerBudgetWords": 2500,
+          "newBudgetWords": 2508,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "operations/orientation.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "designer/planning": {
+          "recordedBeforeWords": 1713,
+          "baseWords": 1713,
+          "currentWords": 1721,
+          "netChangedDutyWords": 8,
+          "formerBudgetWords": 1885,
+          "newBudgetWords": 1894,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "operations/planning.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "strategist/orientation": {
+          "recordedBeforeWords": 2444,
+          "baseWords": 2444,
+          "currentWords": 2452,
+          "netChangedDutyWords": 8,
+          "formerBudgetWords": 2689,
+          "newBudgetWords": 2698,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "operations/orientation.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "strategist/planning": {
+          "recordedBeforeWords": 1885,
+          "baseWords": 1885,
+          "currentWords": 1893,
+          "netChangedDutyWords": 8,
+          "formerBudgetWords": 2074,
+          "newBudgetWords": 2083,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "operations/planning.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "manager/orientation": {
+          "recordedBeforeWords": 3265,
+          "baseWords": 3265,
+          "currentWords": 3134,
+          "netChangedDutyWords": -131,
+          "formerBudgetWords": 3592,
+          "newBudgetWords": 3448,
+          "literalCeilingWords": 4513,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "roles/manager.md",
+            "operations/orientation.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/curator-writer-details.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "manager/review": {
+          "recordedBeforeWords": 2925,
+          "baseWords": 2925,
+          "currentWords": 2810,
+          "netChangedDutyWords": -115,
+          "formerBudgetWords": 3218,
+          "newBudgetWords": 3091,
+          "literalCeilingWords": 4513,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "roles/manager.md",
+            "operations/review.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/curator-writer-details.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "manager/curation": {
+          "recordedBeforeWords": 3240,
+          "baseWords": 3240,
+          "currentWords": 3118,
+          "netChangedDutyWords": -122,
+          "formerBudgetWords": 3564,
+          "newBudgetWords": 3430,
+          "literalCeilingWords": 4513,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "roles/manager.md",
+            "operations/curation.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/curator-writer-details.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "manager/coordination": {
+          "recordedBeforeWords": 4102,
+          "baseWords": 4102,
+          "currentWords": 3993,
+          "netChangedDutyWords": -109,
+          "formerBudgetWords": 4513,
+          "newBudgetWords": 4393,
+          "literalCeilingWords": 4513,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "roles/manager.md",
+            "operations/coordination.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/curator-writer-details.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "manager/authorized-closeout": {
+          "recordedBeforeWords": 2654,
+          "baseWords": 2654,
+          "currentWords": 2539,
+          "netChangedDutyWords": -115,
+          "formerBudgetWords": 2920,
+          "newBudgetWords": 2793,
+          "literalCeilingWords": 4513,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "roles/manager.md",
+            "operations/closeout.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/curator-writer-details.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "manager/recovery": {
+          "recordedBeforeWords": 2598,
+          "baseWords": 2598,
+          "currentWords": 2483,
+          "netChangedDutyWords": -115,
+          "formerBudgetWords": 2858,
+          "newBudgetWords": 2732,
+          "literalCeilingWords": 4513,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "roles/manager.md",
+            "operations/recovery.md",
+            "reference/child-questions.md",
+            "reference/coordination-starts.md",
+            "reference/curator-writer-details.md",
+            "reference/knowledge-commands.md",
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "worker/orientation": {
+          "recordedBeforeWords": 2883,
+          "baseWords": 2883,
+          "currentWords": 2903,
+          "netChangedDutyWords": 20,
+          "formerBudgetWords": 3172,
+          "newBudgetWords": 3194,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "roles/worker.md",
+            "operations/orientation.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "worker/implementation": {
+          "recordedBeforeWords": 2837,
+          "baseWords": 2837,
+          "currentWords": 2857,
+          "netChangedDutyWords": 20,
+          "formerBudgetWords": 3121,
+          "newBudgetWords": 3143,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "roles/worker.md",
+            "operations/implementation.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "worker/recovery": {
+          "recordedBeforeWords": 2216,
+          "baseWords": 2216,
+          "currentWords": 2236,
+          "netChangedDutyWords": 20,
+          "formerBudgetWords": 2438,
+          "newBudgetWords": 2460,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "roles/worker.md",
+            "operations/recovery.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "curator/orientation": {
+          "recordedBeforeWords": 3175,
+          "baseWords": 3175,
+          "currentWords": 3178,
+          "netChangedDutyWords": 3,
+          "formerBudgetWords": 3493,
+          "newBudgetWords": 3496,
+          "literalCeilingWords": 4000,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "roles/curator.md",
+            "operations/orientation.md",
+            "reference/curator-card-details.md",
+            "reference/curator-writer-details.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "curator/curation": {
+          "recordedBeforeWords": 3853,
+          "baseWords": 3853,
+          "currentWords": 3902,
+          "netChangedDutyWords": 49,
+          "formerBudgetWords": 4000,
+          "newBudgetWords": 4000,
+          "literalCeilingWords": 4000,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "roles/curator.md",
+            "operations/curation.md",
+            "reference/curator-card-details.md",
+            "reference/curator-writer-details.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "curator/recovery": {
+          "recordedBeforeWords": 2508,
+          "baseWords": 2508,
+          "currentWords": 2527,
+          "netChangedDutyWords": 19,
+          "formerBudgetWords": 2759,
+          "newBudgetWords": 2780,
+          "literalCeilingWords": 4000,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "roles/curator.md",
+            "operations/recovery.md",
+            "reference/curator-card-details.md",
+            "reference/curator-writer-details.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "reviewer/orientation": {
+          "recordedBeforeWords": 3751,
+          "baseWords": 3751,
+          "currentWords": 3776,
+          "netChangedDutyWords": 25,
+          "formerBudgetWords": 4000,
+          "newBudgetWords": 4000,
+          "literalCeilingWords": 4000,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "roles/reviewer.md",
+            "operations/orientation.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "reviewer/review": {
+          "recordedBeforeWords": 3828,
+          "baseWords": 3828,
+          "currentWords": 3853,
+          "netChangedDutyWords": 25,
+          "formerBudgetWords": 4000,
+          "newBudgetWords": 4000,
+          "literalCeilingWords": 4000,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "roles/reviewer.md",
+            "operations/review.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "reviewer/recovery": {
+          "recordedBeforeWords": 3084,
+          "baseWords": 3084,
+          "currentWords": 3109,
+          "netChangedDutyWords": 25,
+          "formerBudgetWords": 3393,
+          "newBudgetWords": 3420,
+          "literalCeilingWords": 4000,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "core/loop.md",
+            "roles/reviewer.md",
+            "operations/recovery.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "investigator/orientation": {
+          "recordedBeforeWords": 1847,
+          "baseWords": 1847,
+          "currentWords": 1879,
+          "netChangedDutyWords": 32,
+          "formerBudgetWords": 2032,
+          "newBudgetWords": 2067,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "roles/investigator.md",
+            "operations/orientation.md",
+            "reference/investigator-instruction-review.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "investigator/recovery": {
+          "recordedBeforeWords": 1231,
+          "baseWords": 1231,
+          "currentWords": 1263,
+          "netChangedDutyWords": 32,
+          "formerBudgetWords": 1355,
+          "newBudgetWords": 1390,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "roles/investigator.md",
+            "operations/recovery.md",
+            "reference/investigator-instruction-review.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "bootstrap/orientation": {
+          "recordedBeforeWords": 2132,
+          "baseWords": 2132,
+          "currentWords": 2121,
+          "netChangedDutyWords": -11,
+          "formerBudgetWords": 2346,
+          "newBudgetWords": 2334,
+          "literalCeilingWords": 4000,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "roles/bootstrap.md",
+            "operations/orientation.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "bootstrap/recovery": {
+          "recordedBeforeWords": 1788,
+          "baseWords": 1788,
+          "currentWords": 1777,
+          "netChangedDutyWords": -11,
+          "formerBudgetWords": 1967,
+          "newBudgetWords": 1955,
+          "literalCeilingWords": 4000,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "roles/bootstrap.md",
+            "operations/recovery.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "bootstrap/bootstrap": {
+          "recordedBeforeWords": 3630,
+          "baseWords": 3630,
+          "currentWords": 3619,
+          "netChangedDutyWords": -11,
+          "formerBudgetWords": 3993,
+          "newBudgetWords": 3981,
+          "literalCeilingWords": 4000,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "core/authority.md",
+            "core/invariants.md",
+            "roles/bootstrap.md",
+            "reference/knowledge-commands.md"
+          ]
+        },
+        "launcher/coordination": {
+          "recordedBeforeWords": 1928,
+          "baseWords": 1928,
+          "currentWords": 1931,
+          "netChangedDutyWords": 3,
+          "formerBudgetWords": 2121,
+          "newBudgetWords": 2125,
+          "literalCeilingWords": 3700,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "composition-manifest.json",
+            "operations/coordination.md"
+          ]
+        }
+      },
+      "step_details": {
+        "reference/curator-card-details.md": {
+          "recordedBeforeWords": 374,
+          "baseWords": 374,
+          "currentWords": 453,
+          "netChangedDutyWords": 79,
+          "formerBudgetWords": 412,
+          "newBudgetWords": 499,
+          "literalCeilingWords": 2500,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "reference/curator-card-details.md"
+          ]
+        },
+        "reference/curator-writer-details.md": {
+          "recordedBeforeWords": 699,
+          "baseWords": 699,
+          "currentWords": 690,
+          "netChangedDutyWords": -9,
+          "formerBudgetWords": 769,
+          "newBudgetWords": 759,
+          "literalCeilingWords": 2500,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "reference/curator-writer-details.md"
+          ]
+        },
+        "reference/architect-working-rules.md": {
+          "recordedBeforeWords": 1834,
+          "baseWords": 1834,
+          "currentWords": 1957,
+          "netChangedDutyWords": 123,
+          "formerBudgetWords": 2018,
+          "newBudgetWords": 2153,
+          "literalCeilingWords": 2500,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "reference/architect-working-rules.md"
+          ]
+        },
+        "reference/manager-working-rules.md": {
+          "recordedBeforeWords": 406,
+          "baseWords": 406,
+          "currentWords": 705,
+          "netChangedDutyWords": 299,
+          "formerBudgetWords": 447,
+          "newBudgetWords": 776,
+          "literalCeilingWords": 2500,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "reference/manager-working-rules.md"
+          ]
+        },
+        "reference/coordination-starts.md": {
+          "recordedBeforeWords": 47,
+          "baseWords": 47,
+          "currentWords": 141,
+          "netChangedDutyWords": 94,
+          "formerBudgetWords": 52,
+          "newBudgetWords": 156,
+          "literalCeilingWords": 2500,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "reference/coordination-starts.md"
+          ]
+        },
+        "reference/child-questions.md": {
+          "recordedBeforeWords": 273,
+          "baseWords": 273,
+          "currentWords": 264,
+          "netChangedDutyWords": -9,
+          "formerBudgetWords": 301,
+          "newBudgetWords": 291,
+          "literalCeilingWords": 2500,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "reference/child-questions.md"
+          ]
+        },
+        "reference/investigator-instruction-review.md": {
+          "recordedBeforeWords": 42,
+          "baseWords": 42,
+          "currentWords": 484,
+          "netChangedDutyWords": 442,
+          "formerBudgetWords": 47,
+          "newBudgetWords": 533,
+          "literalCeilingWords": 2500,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "reference/investigator-instruction-review.md"
+          ]
+        },
+        "reference/knowledge-commands.md": {
+          "recordedBeforeWords": 2496,
+          "baseWords": 2496,
+          "currentWords": 2499,
+          "netChangedDutyWords": 3,
+          "formerBudgetWords": 2500,
+          "newBudgetWords": 2500,
+          "literalCeilingWords": 2500,
+          "ceilingChanged": false,
+          "changedInputs": [
+            "reference/knowledge-commands.md"
+          ]
+        }
+      }
+    },
+    "digestDecision": "D661 approves the shared digest at 1,000 words within its unchanged 1,100-word budget; MIK-R62's 900-word stop is lifted for it."
+  },
+  "decision_L84_D669": {
+    "authority": "D669; MIK-R84 v5 part 1; Manager message 20261105T155828Z (23727186a28b41af8aaacb437329fd450b3f1ec21119cdc859e1ee310f116bc9)",
+    "scope": "Successor measurement for the exact Curator authoring correction; earlier decision objects retain their own source epochs. No role ceiling, formula, inline capsule size or handover budget changes.",
+    "baselineCandidateTree": "b1f715abdd63bfbfb97e0c6be6697b43d237b406",
+    "method": "Existing native budget-test compiler over all 38 actual capsule cells (36 role/operation plus 2 launcher); complete declared-source whitespace word count for the authoring detail. The same fixed synthetic test binding was used before and after; these are compiler measurements, not actor behavior, review or acceptance.",
+    "source": {
+      "path": "reference/curator-authoring-d301.md",
+      "beforeSha256": "753cc4508aee6cbbe504221f9632ee8e9d81a25fa909ae908c09e4b5ef5cb754",
+      "afterSha256": "d14dac1d565f6f28478c022aa7d27772a201248317ee5c0efaea11e433b8c2c7",
+      "beforeWords": 1322,
+      "afterWords": 1461,
+      "addedWords": 139,
+      "beforeBudgetWords": 1455,
+      "afterBudgetWords": 1608,
+      "literalCeilingWords": 2500,
+      "formula": "min(ceil(size_words * 11 / 10), 2500)",
+      "ceilingChanged": false,
+      "patchSha256": "55d3d5157de7e2730ce81ce940cdcfd805453c94d9763b14971a419e498d747d",
+      "deliveryStep": "when you reach Curation workflow 1: Reconcile, not before"
+    },
+    "capsuleInputsAndSeals": {
+      "curator/orientation": {
+        "sizeWordsBefore": 3178,
+        "sizeWordsAfter": 3178,
+        "renderedDigestBefore": "sha256:956aef4b8ef298f639f70bbcb2c8563c36bb78660ef6d9eaeee15addcd530b48",
+        "renderedDigestAfter": "sha256:956aef4b8ef298f639f70bbcb2c8563c36bb78660ef6d9eaeee15addcd530b48",
+        "semanticDigestBefore": "sha256:a0a9940bbb5440b8c1cbd6322ff1864927c1292a9e93d48f24cc7086d6b7dc38",
+        "semanticDigestAfter": "sha256:5ef937d73b115aebb3fe7cf1f8d725098a910d202124b65c76d8d71c6dd8252f",
+        "changedInputs": [
+          {
+            "path": "reference/curator-authoring-d301.md",
+            "beforeRevision": "sha256:753cc4508aee6cbbe504221f9632ee8e9d81a25fa909ae908c09e4b5ef5cb754",
+            "afterRevision": "sha256:d14dac1d565f6f28478c022aa7d27772a201248317ee5c0efaea11e433b8c2c7"
+          }
+        ]
+      },
+      "curator/curation": {
+        "sizeWordsBefore": 3902,
+        "sizeWordsAfter": 3902,
+        "renderedDigestBefore": "sha256:44c917c721936f17719a82c164c873c468c07931b22ff9532d266f5e89aab751",
+        "renderedDigestAfter": "sha256:44c917c721936f17719a82c164c873c468c07931b22ff9532d266f5e89aab751",
+        "semanticDigestBefore": "sha256:b9c8e0744706efe7670a9f55fba01b7b595e15eaa6059ab889da07e61e10ef0b",
+        "semanticDigestAfter": "sha256:da3016496d3e54236b01fd7d07a2b3eb5c16129007f35747c1f8e453c190fbb0",
+        "changedInputs": [
+          {
+            "path": "reference/curator-authoring-d301.md",
+            "beforeRevision": "sha256:753cc4508aee6cbbe504221f9632ee8e9d81a25fa909ae908c09e4b5ef5cb754",
+            "afterRevision": "sha256:d14dac1d565f6f28478c022aa7d27772a201248317ee5c0efaea11e433b8c2c7"
+          }
+        ]
+      },
+      "curator/recovery": {
+        "sizeWordsBefore": 2527,
+        "sizeWordsAfter": 2527,
+        "renderedDigestBefore": "sha256:7a1e313870294914807a4770a8e147c40394ac098a1576ee0bf1022144cf8337",
+        "renderedDigestAfter": "sha256:7a1e313870294914807a4770a8e147c40394ac098a1576ee0bf1022144cf8337",
+        "semanticDigestBefore": "sha256:3bc0f990262e1a5d92c3389ad6a5f0437c5550c35ebc8fb96ed60ddcab4c412e",
+        "semanticDigestAfter": "sha256:1d8308bd9e69ed08aeed0b1f28ba1596d84728254ada0b25a5c8e9641ac66a74",
+        "changedInputs": [
+          {
+            "path": "reference/curator-authoring-d301.md",
+            "beforeRevision": "sha256:753cc4508aee6cbbe504221f9632ee8e9d81a25fa909ae908c09e4b5ef5cb754",
+            "afterRevision": "sha256:d14dac1d565f6f28478c022aa7d27772a201248317ee5c0efaea11e433b8c2c7"
+          }
+        ]
+      }
+    },
+    "completeMatrixComparison": {
+      "capsules": 38,
+      "roleOperationCapsules": 36,
+      "launcherCapsules": 2,
+      "changedSemanticDigests": 3,
+      "unchangedSemanticDigests": 35,
+      "byteIdenticalInlineInstructionRenders": 38,
+      "changedCompilerInputPaths": [
+        "reference/curator-authoring-d301.md"
+      ]
+    },
+    "preserved": "All existing decision objects, including D661, remain byte-for-byte text as recorded. The separately delivered shared digest remains 1000 words with budget 1100. This detail correction adds no injected instruction text or role audience."
+  },
+  "decision_L84_EE3_postrun": {
+    "authority": [
+      "Architect211849 c05008e1",
+      "Architect2127264ae88b1c",
+      "Architect213302dbbd316f",
+      "Manager21274719899fc5 and213321ec200cac"
+    ],
+    "scope": "Conditional post-cold Curator instruction corrections; original trial untouched. No code/tool-message change, new cold run, cutoff/ceiling raise or acceptance.",
+    "method": "Existing repository budget owner matrix_measurements/detail_sizes;38actualcapsules and28declaredsourcefiles, same synthetic binding; whitespace words exclude task data/seals.",
+    "wordCounts": {
+      "authoringBefore": 1461,
+      "authoringAfter": 1744,
+      "intakeBefore": 42,
+      "intakeAfter": 82,
+      "labelBlock": 113,
+      "otherApprovedSentences": 204,
+      "digest": 1000
+    },
+    "changedDetails": {
+      "reference/curator-authoring-d301.md": {
+        "before": {
+          "size_words": 1461,
+          "budget_words": 1608
+        },
+        "measured": 1744,
+        "newBudget": 1919
+      },
+      "reference/curator-intake-details.md": {
+        "before": {
+          "size_words": 42,
+          "budget_words": 47
+        },
+        "measured": 82,
+        "newBudget": 91
+      }
+    },
+    "changedRenderedCapsules": [
+      "curator/orientation",
+      "curator/curation",
+      "curator/recovery"
+    ],
+    "changedSemanticCapsules": [
+      "curator/orientation",
+      "curator/curation",
+      "curator/recovery"
+    ],
+    "all38CapsuleSizesUnchanged": true,
+    "literalCeilingsAndFormulaUnchanged": true,
+    "labelBlockNotCut": true,
+    "factBoundary": "Instruction compiler/static source measurements only; no actor behavior, review or acceptance claim."
+  },
+  "decision_L84_EE3_citation_clause": {
+    "authority": "/home/firefox/projects/ar-coordination/tasks/agents-remember/260928_maintained-invariant-knowledge/notes/messages/20261105T213906Z_manager-a310b8b8_to_worker-02367965.md",
+    "authoritySHA256": "c12806d76f11955786ae82bd4354d083140479c9622e9d0b8f8a584c5f682dbe",
+    "scope": "Exact revised citation clause. Same path/symbol mechanical hash refresh is not a content change. Original trial remains untouched.",
+    "oldClauseWords": 10,
+    "newClauseWords": 20,
+    "labelBlockWordsBefore": 113,
+    "labelBlockWordsAfter": 123,
+    "authoringWordsBefore": 1744,
+    "authoringWordsAfter": 1754,
+    "budgetWordsBefore": 1919,
+    "budgetWordsAfter": 1930,
+    "all38ActualCapsuleSizesUnchanged": true,
+    "digestWords": 1000,
+    "sameFormulaAndCeilings": true,
+    "noCuts": true,
+    "overview": "No second content/truth miss. Wrong file-card label on overview answered by item7 correction; no trial repair or round.",
+    "CARD02": "Unrepaired separate truth miss retained."
+  },
+  "provisional_measurements": {
+    "digest": {
+      "source": "core/every-role.md",
+      "sha256": "5af4c1760f17eaec4aea167fdd96ec22cfdbe0e81384f8efcd654adccfa9f94d",
+      "size_words": 1321,
+      "previous": {
+        "size_words": 1000,
+        "budget_words": 1100
+      },
+      "previous_ceiling": 1100,
+      "state": "awaiting-developer-size-decision",
+      "authority": "MIK-R84@v6 part 3 requirement 7"
+    },
+    "orchestrator": {
+      "source": "roles/orchestrator.md",
+      "sha256": "298e162a901b25976f1781c8667f23c9f3f88dbcaa8a6399f7711c1f4932591c",
+      "current_sizes": {
+        "orchestrator/orientation": 2499,
+        "orchestrator/planning": 1956,
+        "orchestrator/review": 2175,
+        "orchestrator/coordination": 3169,
+        "orchestrator/authorized-closeout": 1904,
+        "orchestrator/recovery": 1848
+      },
+      "previous": {
+        "orchestrator/orientation": {
+          "size_words": 2342,
+          "budget_words": 2577
+        },
+        "orchestrator/planning": {
+          "size_words": 1799,
+          "budget_words": 1979
+        },
+        "orchestrator/review": {
+          "size_words": 2018,
+          "budget_words": 2220
+        },
+        "orchestrator/coordination": {
+          "size_words": 3012,
+          "budget_words": 3314
+        },
+        "orchestrator/authorized-closeout": {
+          "size_words": 1747,
+          "budget_words": 1922
+        },
+        "orchestrator/recovery": {
+          "size_words": 1691,
+          "budget_words": 1861
+        }
+      },
+      "previous_ceiling": 3700,
+      "state": "awaiting-developer-size-decision",
+      "authority": "MIK-R84@v6 part 3 requirement 7"
+    }
+  },
+  "decisions_D681": {
+    "authority": "D681; Manager20261106T110429Z",
+    "budgets": [
+      {
+        "subject": "orchestrator/orientation",
+        "surface": "capsule",
+        "formerBudgetWords": 2577,
+        "newBudgetWords": 2677,
+        "measuredWords": 2677,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "orchestrator/planning",
+        "surface": "capsule",
+        "formerBudgetWords": 1979,
+        "newBudgetWords": 2009,
+        "measuredWords": 2009,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "orchestrator/coordination",
+        "surface": "capsule",
+        "formerBudgetWords": 3314,
+        "newBudgetWords": 3325,
+        "measuredWords": 3325,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "orchestrator/authorized-closeout",
+        "surface": "capsule",
+        "formerBudgetWords": 1922,
+        "newBudgetWords": 2045,
+        "measuredWords": 2045,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "orchestrator/recovery",
+        "surface": "capsule",
+        "formerBudgetWords": 1861,
+        "newBudgetWords": 1945,
+        "measuredWords": 1945,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "curator/curation",
+        "surface": "capsule",
+        "formerBudgetWords": 4000,
+        "newBudgetWords": 4097,
+        "measuredWords": 4097,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "investigator/orientation",
+        "surface": "capsule",
+        "formerBudgetWords": 2067,
+        "newBudgetWords": 2139,
+        "measuredWords": 2139,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "investigator/recovery",
+        "surface": "capsule",
+        "formerBudgetWords": 1390,
+        "newBudgetWords": 1427,
+        "measuredWords": 1427,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/reference/architect-working-rules.md",
+        "surface": "detail",
+        "formerBudgetWords": 2153,
+        "newBudgetWords": 2166,
+        "measuredWords": 2166,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/reference/child-questions.md",
+        "surface": "detail",
+        "formerBudgetWords": 291,
+        "newBudgetWords": 337,
+        "measuredWords": 337,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/reference/curator-intake-details.md",
+        "surface": "detail",
+        "formerBudgetWords": 91,
+        "newBudgetWords": 95,
+        "measuredWords": 95,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/reference/curator-repository-foundation.md",
+        "surface": "detail",
+        "formerBudgetWords": 171,
+        "newBudgetWords": 198,
+        "measuredWords": 198,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/reference/investigator-instruction-review.md",
+        "surface": "detail",
+        "formerBudgetWords": 533,
+        "newBudgetWords": 538,
+        "measuredWords": 538,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/reference/knowledge-commands.md",
+        "surface": "detail",
+        "formerBudgetWords": 2500,
+        "newBudgetWords": 2674,
+        "measuredWords": 2674,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/reference/message-handover.md",
+        "surface": "detail",
+        "formerBudgetWords": 293,
+        "newBudgetWords": 328,
+        "measuredWords": 328,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/reference/refused-write.md",
+        "surface": "detail",
+        "formerBudgetWords": 541,
+        "newBudgetWords": 561,
+        "measuredWords": 561,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/reference/reviewer-adjudication-d301.md",
+        "surface": "detail",
+        "formerBudgetWords": 47,
+        "newBudgetWords": 56,
+        "measuredWords": 56,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/reference/reviewer-baseline-d301.md",
+        "surface": "detail",
+        "formerBudgetWords": 245,
+        "newBudgetWords": 256,
+        "measuredWords": 256,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/reference/reviewer-master-exit-d301.md",
+        "surface": "detail",
+        "formerBudgetWords": 70,
+        "newBudgetWords": 73,
+        "measuredWords": 73,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/reference/reviewer-memory-d301.md",
+        "surface": "detail",
+        "formerBudgetWords": 49,
+        "newBudgetWords": 64,
+        "measuredWords": 64,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/reference/reviewer-orient-d301.md",
+        "surface": "detail",
+        "formerBudgetWords": 129,
+        "newBudgetWords": 136,
+        "measuredWords": 136,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/reference/shared-working-rules.md",
+        "surface": "detail",
+        "formerBudgetWords": 350,
+        "newBudgetWords": 363,
+        "measuredWords": 363,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/reference/worker-working-rules.md",
+        "surface": "detail",
+        "formerBudgetWords": 110,
+        "newBudgetWords": 139,
+        "measuredWords": 139,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "skills/l-01-agent-lifecycles/core/every-role.md",
+        "surface": "digest",
+        "formerBudgetWords": 1100,
+        "newBudgetWords": 1474,
+        "measuredWords": 1474,
+        "authority": "D681; Manager20261106T110429Z"
+      }
+    ],
+    "ceilingRaises": [
+      {
+        "subject": "curator",
+        "formerLiteral": 4000,
+        "newLiteral": 4100,
+        "authority": "D681; Manager20261106T110429Z"
+      },
+      {
+        "subject": "step details",
+        "formerLiteral": 2500,
+        "newLiteral": 2700,
+        "authority": "D681; Manager20261106T110429Z"
+      }
+    ],
+    "digestMaximum": {
+      "formerLiteral": 1000,
+      "newLiteral": 1474,
+      "authority": "D681; Manager20261106T110429Z"
+    },
+    "historicalSizeWordsPreserved": true,
+    "laterGrowth": "D670: remeasure settled text before shipping; later growth returns to the Architect for the developer, without an automatic increase or cut."
+  },
+  "decisions_D682": {
+    "authority": "D682; Manager20261106T111829Z",
+    "subject": "skills/l-01-agent-lifecycles/reference/architect-working-rules.md",
+    "area": "step_details",
+    "key": "reference/architect-working-rules.md",
+    "previousBudgetWords": 2166,
+    "newBudgetWords": 2200,
+    "supersedes": "D681 budget for this detail only"
   }
 }

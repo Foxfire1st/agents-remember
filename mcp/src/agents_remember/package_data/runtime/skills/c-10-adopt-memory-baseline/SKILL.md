@@ -7,7 +7,7 @@ description: "Adopt existing external-memory onboarding as the first Git-attribu
 
 Use this skill when an external memory repo already contains onboarding content and the developer wants to adopt that content as its first Git-attributed baseline and compute the consumer ledger cache.
 
-This skill does not decide that stale onboarding is true. It makes the trust boundary explicit: the memory quality control procedure in `c-05-create-or-update-onboarding-files` (`workflows/memory-quality-control.md`, kept from a retired skill) is checked first, and actionable drift blocks adoption unless the developer explicitly accepts the current onboarding as the baseline.
+This skill does not decide that stale onboarding is true. It makes the trust boundary explicit: check memory quality first through the [knowledge command and tool reference](../l-01-agent-lifecycles/reference/knowledge/commands.md), and actionable drift blocks adoption unless the developer explicitly accepts the current onboarding as the baseline.
 
 Carrying memory from one branch to another is `workflows/carryover-from-branch.md`, kept here
 from the retired carryover skill (MIK-R196 rule 8): plan then apply, candidate units, code evidence
@@ -34,8 +34,8 @@ installed and development workflows use the MCP/package route.
 
 ## Workflow
 
-1. Resolve the code repository with the `c-08-ar-coordination-context-resolver` skill and confirm external topology.
-2. Run the `c-05-create-or-update-onboarding-files` skill's drift classification (`workflows/memory-quality-control.md` §2) against the resolved onboarding root. `context_packet(include_drift=true)` answers that classification in its own response and files no temporary report; the contract-scoped result is the checklist `memory_quality_check` replaces at the `reportPath` it returns (the enclosure's `reports/curator-memory-quality.md`), when a leaf enclosure is in scope.
+1. Resolve the code repository through the [knowledge command and tool reference](../l-01-agent-lifecycles/reference/knowledge/commands.md) and confirm external topology.
+2. Run drift classification through the [knowledge command and tool reference](../l-01-agent-lifecycles/reference/knowledge/commands.md) against the resolved onboarding root. `context_packet(include_drift=true)` answers that classification in its own response and files no temporary report; the contract-scoped result is the checklist `memory_quality_check` replaces at the `reportPath` it returns (the enclosure's `reports/curator-memory-quality.md`), when a leaf enclosure is in scope.
 3. Inspect reachable memory commits for existing `Code-Commit:` attribution.
 4. If attributed memory already exists, report `already-adopted` and stop; cache presence does not determine adoption.
 5. If drift has actionable findings, stop unless `accept_drift=true` is part of the approved `memory_baseline_adopt` request. On converted memory, `blocked-invalid` (the knowledge validator refuses the tree) stops adoption with or without `accept_drift`: accepting drift lifts the stale-anchor gate only and never waives a validator violation, and a code or test reference anchor that does not hold at the exact paired code tree is refused with `R198.1-reference-anchor` whether the option is passed or not. The first baseline of a converted tree is validated before it is committed.
@@ -64,6 +64,6 @@ and a curator re-authors a stale one.
 ## Boundaries
 
 1. Baseline adoption commits real memory content and computes the cache; it never commits the cache.
-2. The `c-10-adopt-memory-baseline` skill must not refresh onboarding content itself; use the `c-05-create-or-update-onboarding-files` skill for that.
+2. The `c-10-adopt-memory-baseline` skill must not refresh onboarding content itself; use the [Curator card procedure](../l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md) for that.
 3. A missing, stale, or malformed `memory.md` is a cache state, not evidence that a baseline exists or is absent.
-4. `accept_drift=true` means the developer is asserting the current onboarding content is factual enough to become the baseline despite the `c-05-create-or-update-onboarding-files` skill's warnings. On converted memory it lifts the stale-anchor gate only: it never lets a tree with a validator violation through, and a code or test reference anchor that does not hold at the exact paired code tree is itself refused with `R198.1-reference-anchor`, so the tree stays `blocked-invalid` with or without the option.
+4. `accept_drift=true` means the developer is asserting the current onboarding content is factual enough to become the baseline despite memory-quality findings. On converted memory it lifts the stale-anchor gate only: it never lets a tree with a validator violation through, and a code or test reference anchor that does not hold at the exact paired code tree is itself refused with `R198.1-reference-anchor`, so the tree stays `blocked-invalid` with or without the option.

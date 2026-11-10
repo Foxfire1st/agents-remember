@@ -7,9 +7,24 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.models.base import ResponseModel
+from agents_remember.models.build_currentness import BuildCurrentnessPayload
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 Transport = Literal["stdio"]
+
+
+class RunningServerPayload(BaseModel):
+    """A live server's recorded boot identity and its observed currentness."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pid: int
+    role: str
+    loadedDigest: str | None = None
+    startedAt: str
+    configPath: str
+    packageRoot: str | None = None
+    currentness: BuildCurrentnessPayload
 
 
 class ServingBuildPayload(BaseModel):
@@ -74,6 +89,7 @@ class ServerInfoResponse(ResponseModel):
     # open, the command that closes it and the command the user runs before an edit.
     openUserSettings: OpenUserSettingsPayload | None = None
     servingBuild: ServingBuildPayload
+    runningServers: list[RunningServerPayload] = Field(default_factory=list)
     # MIK-R83 rule 7: present only in a process loaded from a linked checkout
     # without a declared execution mode -- the disposable root it is bound to,
     # the worktree it was loaded from, and the configured root it did not use.

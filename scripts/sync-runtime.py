@@ -51,11 +51,6 @@ class RuntimeDiff:
 
 
 TARGETS = (
-    RuntimeTarget(
-        "agents-md-files",
-        REPO_ROOT / "agents-md-files",
-        PACKAGE_DATA / "runtime/agents-md-files",
-    ),
     RuntimeTarget("benchmarks", REPO_ROOT / "benchmarks", PACKAGE_DATA / "benchmarks"),
     RuntimeTarget("providers", REPO_ROOT / "providers", PACKAGE_DATA / "runtime/providers"),
     RuntimeTarget("system", REPO_ROOT / "system", PACKAGE_DATA / "runtime/system"),

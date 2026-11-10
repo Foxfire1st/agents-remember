@@ -11,18 +11,18 @@ session reads belong to exactly one installed build.
 
 The steps, once per workspace:
 
-1. **Write the MCP authority settings.** Copy `examples/mcp/settings.example.json` to a path of
-   your own and replace its paths with absolute ones: `coordinationRoot` (the installation's
-   coordination folder — it may not exist yet), `workspaceRoot`, `transcriptRoot`, and one entry
-   per code repository under `repositories`. The server reads this file at boot and resolves
-   workspace paths from it, not from where a directory happens to sit.
-2. **Register the MCP server** in your harness's own MCP configuration, pointing `--config` at
-   that file:
+1. **Write the MCP authority settings.** Copy [the settings example](../../examples/mcp/settings.example.json)
+   to `~/.config/agents-remember/agents-remember-settings.json` and replace its paths with
+   absolute ones. When `XDG_CONFIG_HOME` is set, use its `agents-remember/` folder instead.
+   Keep this authority file beside the separate user `settings.json`.
+2. **Register the MCP server** using the [one common registration example](../../examples/mcp/server.example.json).
+   Replace its config-folder marker with your absolute user-config folder and adapt the
+   declaration to your harness's registration format. JSON argument arrays do not expand `~`.
 
-   ```text
-   uvx agents-remember-mcp@latest --config <absolute path to your settings file>
-   ```
-
+   An install creates an absent tool-server file from the workspace's convention file
+   `.claude/mcp/agents-remember-settings.json`. It preserves the source and never overwrites
+   a file already in the user-config folder. A closed config folder must be opened by its owner
+   before that write; the installer does not change its permissions.
 3. **Restart or reload the harness once** so it starts the server.
 4. **Make one call** in a chat of that harness, naming no task, sprint or repository:
 
@@ -45,8 +45,9 @@ The steps, once per workspace:
    the Architect, which organises memory and knowledge bootstrapping as ordinary task, master or
    sprint work. Bootstrap authors no onboarding and no knowledge, and it starts no role.
 
-The skills themselves — `c-00-initialize-memory-repo` to `c-14-knowledge-bootstrap`,
-`l-01-agent-lifecycles` and `w-02-light-task-workflow` — are served by the server. A harness that
+The kept skills — `c-00-initialize-memory-repo`, `c-03-repo-bootstrap`,
+`c-10-adopt-memory-baseline`, `c-13-install-and-onboard`, `c-14-knowledge-bootstrap`
+and `l-01-agent-lifecycles` — are served by the server. A harness that
 reads MCP resources finds them without any install step, and no project or home skill folder has to
 be kept in sync.
 
@@ -72,13 +73,7 @@ git config --global core.longpaths true
 `worktree_start` checks this up front and refuses with the projected path length when the host
 cannot represent the worktree's deepest files. WSL is not affected.
 
-## Optional per-harness instruction files
-
-Each guide below names the instruction file, hook or rule that makes a harness's free chat load the
-Agents Remember first-action notice at session start. Those files are conveniences for a chat the
-product did not start: they carry a directive and nothing else, they hold no skill folder, and
-copying one is optional. Replace their `<PATH/TO/YOUR/PROJECTS_FOLDER>` markers with your absolute
-path by hand; there is no renderer.
+## Choose your harness
 
 Then choose the guide for your tool:
 

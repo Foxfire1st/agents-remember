@@ -4,8 +4,8 @@ Three stages, in this order, each through the owner that already exists:
 
 1. **The scaffold** -- ``runtime_install``'s own install pass, run only when the configured
    coordination root has no scaffold yet. The predicate names the retained assets the surviving
-   installer creates in *every* delivery mode (:data:`SCAFFOLD_ENTRIES`); the capsule mode
-   deliberately withholds ``AGENTS.md``, so a predicate that required it would read a correctly
+   installer creates in *every* delivery mode (:data:`SCAFFOLD_ENTRIES`); every install
+   removes the retired ``AGENTS.md`` files, so a predicate requiring one would read a correctly
    installed root as unprepared forever. A missing memory root, task or repository is not a
    reason to stop: setup is what this seat is for.
 2. **The host authority** -- the ``paseoRuntime`` block of the installed MCP settings file, created
@@ -56,9 +56,8 @@ from agents_remember.serving.paseo.paseo_provision import provision_for_install
 
 # The retained assets a prepared coordination root holds, as the surviving installer creates them
 # (L188-B01). ``runtime_install`` writes both in the unmodified and in the capsule delivery mode:
-# the packaged tool-detail docs and the user-owned task tree. It writes ``AGENTS.md`` only in the
-# unmodified mode and removes it in the capsule mode, and it writes no ``skills`` copy at all since
-# MIK-R196 rule 7 -- so neither of those can be a scaffold entry.
+# the packaged tool-detail docs and the user-owned task tree. Every mode removes the retired
+# ``AGENTS.md`` files and writes no ``skills`` copy, so neither can be a scaffold entry.
 SCAFFOLD_ENTRIES = ("docs", "tasks")
 
 _RETRY = "Resolve the reason named in detail, then call role_start again with the same request id."

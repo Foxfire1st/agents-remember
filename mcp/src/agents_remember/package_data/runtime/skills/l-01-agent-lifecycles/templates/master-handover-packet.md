@@ -1,13 +1,12 @@
 # Master-Handover-Packet Template
 
-The artifact a **manager** hands to the **orchestrator** at master exit (`roles/manager.md`), after
-the leaf handoffs and any explicitly requested master-exit review. The artifact is durable, and
-terminal/finalizer truth — which attests only that the manager's turn ended — wakes the current
-orchestrator, who validates the packet. It tells the orchestrator which completion boundary is
-ready: the final accumulated organizational candidate containing prior landed contributions plus the
-proposed final leaf, or one isolated atomic branch ready to land.
+The Manager uses this template to hand a master to the named coordination recipient after the leaf handoffs and any explicitly requested master-exit review. Without a parent, the recipient is the developer. The recipient inspects the exact completion candidate and its evidence.
 
-The truth boundary this template obeys is authored once in `../core/acceptance.md`.
+In this template, JSON means JavaScript Object Notation.
+
+The candidate fields below distinguish the accumulated organizational candidate from an isolated atomic candidate. Before deciding the received handover, read [Keep relay and gate-owner duties separate](../core/acceptance.md#keep-relay-and-gate-owner-duties-separate) for exact-artifact and candidate validation.
+
+The completion and handover boundary this template follows is owned by [acceptance](../core/acceptance.md).
 
 ## Rules
 
@@ -26,14 +25,9 @@ The truth boundary this template obeys is authored once in `../core/acceptance.m
    pointer — never a branch name or bare “yes.” Do not copy lineage or cache maps into the packet.
    Carry-over appears only when actual divergence required the recovery; it is not the normal
    landing plan.
-4. The receiving orchestrator resolves every ref and revalidates its subject against the same
-   proposed candidate before deciding the handover. A missing, stale, unresolvable, or
-   candidate-mismatched Git/operation ref blocks; summaries never substitute for this evidence.
-   Cache availability and attribution gaps for unchanged memory do not block a proven pair.
-5. Do not address an orchestrator occupant. `role_message` (by role plus task references) is available for clarification or a
-   blocking issue; ordinary completion comes from the packet plus terminal/finalizer truth, and that
-   terminal outcome attests only that the turn ended — rule 4's validation is what accepts it.
-6. Hand the packet over as a file. Messages wake; files carry. A message says what is asked or what is handed over, and names the files: evidence, verdicts, lists and logs are files, never pasted into a message. The full text goes in `body` and its files in `attach`; the tool files every message in the `messages` folder of the narrowest task the two agents share, and a leaf workspace links that folder as `messages`. The recipient reads the message and, where a file belongs to it, one last line naming the file and its SHA-256. A text holds at most the limit of the settings. A return goes to the parent's role with its task references, never to an id read from an earlier message.
+4. Candidate-validation result: `<resolved Git/operation refs, mismatches or blockers, and the named recipient’s decision>`. Who decides is in [the handoff-artifact table](../core/acceptance.md#write-and-send-the-handoff-artifact).
+5. Write the packet as a file for the named coordination recipient, addressed by its role and task references. Without a parent, report it to the developer in your own chat.
+6. Before sending the packet, read [Send a message that names the files](../reference/message-handover.md#send-a-message-that-names-the-files) for the sender and payload rules. Before handling a full-store refusal, read [full-store receipt handling](../reference/message-handover.md#handle-a-full-store-refusal) for the pending record, one resend and second-refusal report.
 
 ## Shape
 
@@ -49,7 +43,7 @@ The truth boundary this template obeys is authored once in `../core/acceptance.m
 | proposed candidate | <immutable organizational super tree; immutable atomic branch tree> |
 | candidate evidence | <canonical Git / operation evidence ref resolving that exact tree> |
 | handover evidence  | <delegated decision / accepted-series authority ref> |
-| super source       | <canonical sprint document / plane-owned current edge> |
+| super source       | <canonical sprint document / current edge owned by the lifecycle tools> |
 | worker checks      | <targeted commands/results, including failed or not-run> |
 | curator checks     | <complete onboarding/full-operation commands/results, or N/A> |
 | transaction legs   | <code commit · prepared memory commit · exact Git/operation refs> |

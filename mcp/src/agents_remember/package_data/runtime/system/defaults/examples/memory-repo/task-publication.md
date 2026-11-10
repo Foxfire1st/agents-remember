@@ -57,15 +57,15 @@ Adapt to your repo; a gated-`main` repo typically does:
 
 1. `<gh issue create>` for feat/fix/chore (skip for pure research).
 2. Cut `feat/<slug>` | `fix/<slug>` from the spear.
-3. The `w-02-light-task-workflow` skill creates a worktree on that branch (task adds `task.md`; chat doesn't).
+3. The `worktree_start` tool creates a worktree on that branch (task adds `task.md`; chat doesn't).
 4. Work in the worktree; memory parks on the worktree memory branch.
-5. **Commit gate (human)** — nothing is committed before explicit developer approval (the `w-02-light-task-workflow` skill
-   worktree closeout preview first).
+5. **Commit gate (human)** — nothing is committed before explicit developer approval (the [authorized closeout procedure](skill://agents-remember/skills/l-01-agent-lifecycles/operations/closeout.md)
+   requires a worktree closeout preview first).
 6. **Push gate (human — one question)** — after commit approval, a single "push?" approval hands the
    tail to the agent.
 7. Agent owns the tail: **push branch → `gh pr create` (target spear) → checks green →
    `gh pr merge --delete-branch`.**
-8. The `w-02-light-task-workflow` skill handles closeout + worktree/provider cleanup.
+8. The [authorized lifecycle owner](skill://agents-remember/skills/l-01-agent-lifecycles/operations/closeout.md) handles closeout and worktree cleanup through the existing tools.
 9. The `c-10-adopt-memory-baseline` skill carries parked memory into an ordinary recovery
    leaf against the merged spear. Each actual memory-content commit attributes the landed code
    HEAD. If no content needs carrying, it creates no commit. The consumer ledger is computed

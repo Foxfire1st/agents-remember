@@ -18,8 +18,7 @@ you continue. It creates no task or other role. If preparation refuses, read the
 actual effects and remaining host state, resolve that reason, and retry the same request UUID.
 
 No skill folder, starter package or renderer is required. The MCP server serves canonical
-skills from its package as resources. Optional harness-native instruction/hook files carry only
-the first-action directive; the install guides describe them separately from server wiring.
+skills from its package as resources. Use the common server registration from the install guide.
 
 ## Example Workspace
 
@@ -35,19 +34,10 @@ The source checkout is not required by an installation built from a wheel.
 
 ## MCP Registration
 
-Use the [install guide](install/README.md) for your harness and the build you installed. It
-names the command and an absolute MCP settings path. A source-built Python3.14 wheel can be
-registered with:
-
-```json
-{
-  "command": "uvx",
-  "args": [
-    "--python", "3.14", "--from", "/absolute/path/to/built-wheel.whl",
-    "agents-remember-mcp", "--config", "/absolute/path/to/agents-remember-settings.json"
-  ]
-}
-```
+Use the [install guide](install/README.md) and adapt the
+[common registration example](../examples/mcp/server.example.json) to your harness.
+The tool-server settings live at `~/.config/agents-remember/agents-remember-settings.json`
+(under `XDG_CONFIG_HOME` when set); use the absolute path in the registration.
 
 The MCP settings name your absolute `workspaceRoot`, `coordinationRoot`, and repository
 allow-list; see the [settings reference](reference/settings-json.md). This authority file is

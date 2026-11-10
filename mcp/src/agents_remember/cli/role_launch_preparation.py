@@ -359,7 +359,7 @@ def _task_document_read_metadata(
     first_read = (
         "Read this rendered task document first with your harness's own file tools: "
         + ", ".join(primary_files)
-        + ". task_doc first, then logged canonical amendment on correct-input refusal; owner's next publication refreshes renders/projections, rendered copies never parsed back. Follow skills/l-01-agent-lifecycles/reference/refused-write.md for that same-tool recovery; read/check/validation/sync, starts, product guards and commit gates retain stops."
+        + ". Use task_doc first. A correct-input refusal of a covered write (task_doc edits (including an admitted task retirement or folder movement), knowledge_write, citation_fix, citation_note_revision and curator_coherence publication) follows the same-tool/input-class ladder in skills/l-01-agent-lifecycles/reference/refused-write.md before applying a stop. If no admitted route works, record the refusal, tell the owner, then make that write openly by hand and log it; never keep a blanket ban on writing it by hand. The owner's next publication refreshes renders/projections; rendered copies are never parsed back. Read/check/validation/sync refusals, starts, other product guards and commit gates retain stops."
         if primary_files
         else "This taskless role has no task document to read."
     )

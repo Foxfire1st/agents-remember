@@ -43,7 +43,6 @@ from agents_remember.worktrees.modules.landing_commit_check import (
     commit_check_trailer,
     run_landing_commit_check,
 )
-from closeout_skill_surface import closeout_texts
 
 PASS_HOOK = '#!/bin/sh\necho "[gate] result: unit PASS"\nexit 0\n'
 FAIL_HOOK = '#!/bin/sh\necho "[gate] result: ruff FAIL"\necho "[gate] ruff found one unused import" >&2\nexit 1\n'
@@ -438,10 +437,6 @@ class AnswerAndTextTests(unittest.TestCase):
         """MIK-R152 rule 10: the texts that stated the old behavior are corrected."""
 
         checkout = Path(__file__).resolve().parent.parent.parent
-        for skill in closeout_texts():
-            self.assertIn("no landing publishes without", skill)
-            self.assertNotIn("uses `--no-verify`", skill)
-            self.assertNotIn("runs no `pre-commit`", skill)
 
         self.assertNotIn("runs no Git commit hook", git_module.publish_tree_commit.__doc__ or "")
         hook_head = (checkout / ".githooks" / "pre-commit").read_text(encoding="utf-8")
@@ -451,7 +446,7 @@ class AnswerAndTextTests(unittest.TestCase):
     def test_canonical_and_generated_skills_match(self) -> None:
         """MIK-R152 rule 10: the generated copies come from the canonical skill.
 
-        The repository's own generator check passes: every copy of w-02-light-task-workflow
+        The repository's own generator check passes: every generated skill copy
         (packaged serving data) matches the canonical source.
         """
 

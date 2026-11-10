@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi.sse import ServerSentEvent
 from pydantic import BaseModel
 
+from agents_remember.models.build_currentness import BuildCurrentnessPayload
 from agents_remember.observer import observer_root
 from agents_remember.serving.background_accounting import BackgroundLedger
 from agents_remember.serving.build_info import ServingBuild
@@ -105,6 +106,7 @@ async def stream_events(
     build: ServingBuild | None = None,
     watcher_health: dict[str, Any] | None = None,
     checkout_binding: dict[str, Any] | None = None,
+    build_currentness: BuildCurrentnessPayload | None = None,
 ) -> AsyncGenerator[ServerSentEvent]:
     """The SSE event sequence for one atomic projector subscription.
 
@@ -136,6 +138,7 @@ async def stream_events(
                         build=build,
                         watcher_health=watcher_health,
                         checkout_binding=checkout_binding,
+                        build_currentness=build_currentness,
                     )
                 )
             yield ServerSentEvent(data=payload, event=delta.event, id=str(seq), retry=2000)

@@ -16,6 +16,7 @@ from typing import Any
 
 from agents_remember.cli.paseo_bridge import require_bridge_runtime
 from agents_remember.errors import AuthorityError
+from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, config_from_mapping
 from agents_remember.serving.paseo.paseo_command import PaseoCli
 from pnt_sandbox.environment import is_removed
@@ -67,6 +68,14 @@ TOOL_ENVIRONMENT = frozenset(
         "NPM_CONFIG_GLOBALCONFIG",
         "NPM_CONFIG_CACHE",
     }
+)
+
+
+_SCRATCH_CLI = (
+    "from agents_remember.kernel.primitives.checkout_coordination import declare_test_process;"
+    "declare_test_process();"
+    "from agents_remember.cli.__main__ import main;"
+    "raise SystemExit(main())"
 )
 
 
@@ -144,8 +153,8 @@ class BatchHost:
         argv = [
             str(self.candidate_code_root / "mcp/.venv/bin/python"),
             "-P",
-            "-m",
-            "agents_remember.cli",
+            "-c",
+            _SCRATCH_CLI,
             "paseo",
             operation,
             "--config",
@@ -636,6 +645,9 @@ def provision_trial(
             layout.write_bytes(NATIVE_LAYOUT_BYTES)
         _git_baseline(code, environment)
         _git_baseline(memory, environment)
+        # Only this disposable fixture setup is a test process; native actors and
+        # the fixture MCP server retain their own regular entrypoints.
+        declare_test_process()
         native_setup = {
             "worklist": import_native_sides(case, fixture, environment),
             "leaf": prepare_native_leaf(case, fixture, code, memory, environment),

@@ -13,7 +13,6 @@ import copy
 import json
 import os
 import threading
-import urllib.request
 from functools import partial
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -30,6 +29,7 @@ from agents_remember.application.review_planned_comparison import (
     explainer_application_ports,
 )
 from agents_remember.application.worktree_services import build_default_worktree_services
+from agents_remember.cli.dashboard_daemon import run_daemon_command
 from agents_remember.cli.dashboard_review_summary import review_intent_summary_port
 from agents_remember.cli.developer_messages import register_developer_chat_routes
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
@@ -694,9 +694,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--config",
         default=None,
-        help="Path to trusted MCP settings JSON. Omit to discover it from the working "
-        "directory: the nearest .claude/mcp/agents-remember-settings.json, or the "
-        "--config recorded in an .mcp.json agents-remember entry.",
+        help="Path to trusted MCP settings JSON. Omit to use "
+        "~/.config/agents-remember/agents-remember-settings.json "
+        "(under XDG_CONFIG_HOME when set).",
     )
     parser.add_argument(
         "--host", default="127.0.0.1", help="Bind host (localhost-only by default; do not expose)."
@@ -747,7 +747,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Detach: ensure a background dashboard daemon (state and log under "
         "<coordinationRoot>/logs/dashboard/) and return. Adopts a healthy matching daemon; "
-        "restarts one whose version, host, or port differs. Also starts the installed host; never installs or upgrades it. Exit 0 dashboard and host up/unconfigured, 1 dashboard down, 3 configured host down. Dashboard stop/restart leaves host sessions running.",
+        "restarts one whose version, Python source digest, host, or port differs. Also starts the installed host; never installs or upgrades it. Exit 0 dashboard and host up/unconfigured, 1 dashboard down, 3 configured host down. Dashboard stop/restart leaves host sessions running.",
     )
     control.add_argument(
         "--status",
@@ -889,62 +889,10 @@ def _build_app(
     return _DashboardApp(app, sim)
 
 
-def _print_background_status(host: str, port: int) -> None:
-    """Print the dashboard's own background-work totals (MIK-R81 rule 1).
-
-    Best-effort: the diagnostics route is observability, so its failure prints
-    one unavailable line and never changes the status exit code.
-    """
-    from agents_remember.serving.background_accounting import (  # noqa: PLC0415
-        describe_snapshot,
-    )
-
-    url = f"http://{host}:{port}/api/diagnostics/background"
-    try:
-        with urllib.request.urlopen(url, timeout=STATUS_TIMEOUT_SECONDS) as response:
-            payload = json.load(response)
-        print(describe_snapshot(payload))
-    except Exception as error:
-        print(f"background work: unavailable ({error})")
-
-
 def _run_daemon_command(
     args: argparse.Namespace, config: serving_daemon.McpRuntimeConfig, port: int
 ) -> int:
-    """Dispatch --status/--stop/--daemon against the recorded daemon state."""
-    if args.sim or args.reload:
-        print("error: --daemon/--status/--stop are not supported with --sim or --reload")
-        return 1
-    directory = serving_daemon.daemon_dir(config)
-    if args.status:
-        state, alive = serving_daemon.probe(directory)
-        if alive and state is not None:
-            print(
-                f"dashboard daemon running: pid {state.pid}, http://{state.host}:{state.port}/ "
-                f"(v{state.version}); log: {state.log_path}"
-            )
-            _print_background_status(state.host, state.port)
-        else:
-            print("dashboard daemon not running")
-        host = observe_host(config)
-        print(host.line)
-        return 1 if not alive else (0 if host.ready else 3)
-    if args.stop:
-        print(f"dashboard daemon: {serving_daemon.stop(directory)}")
-        return 0
-    result = serving_daemon.ensure(
-        config,
-        serving_daemon.DaemonEndpoint(host=args.host, port=port),
-        cadence=ProjectionCadence(interval=args.interval, heartbeat=args.heartbeat),
-    )
-    print(f"dashboard daemon {result.action}: {result.detail}")
-    host = ensure_host(config)
-    print(host.line)
-    if result.action == "adopted":
-        serving_daemon.record_host_outcome(config, host.line)
-    if result.action not in ("adopted", "started", "restarted"):
-        return 1
-    return 0 if host.ready else 3
+    return run_daemon_command(args, config, port, observe=observe_host, start_host=ensure_host)
 
 
 def _start_host_background(config: McpRuntimeConfig) -> None:

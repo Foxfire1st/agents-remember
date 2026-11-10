@@ -6,8 +6,6 @@
   "role_order": [
     "architect",
     "orchestrator",
-    "designer",
-    "strategist",
     "manager",
     "worker",
     "curator",
@@ -43,8 +41,6 @@
       "applies_to_roles": [
         "architect",
         "orchestrator",
-        "designer",
-        "strategist",
         "manager",
         "worker",
         "curator",
@@ -59,8 +55,6 @@
       "audience": "sections",
       "applies_to_roles": [
         "architect",
-        "designer",
-        "strategist",
         "orchestrator"
       ]
     },
@@ -163,7 +157,18 @@
     },
     "every-role": {
       "source": "core/every-role.md",
-      "purpose": "Shared standing duties delivered once beside the capsule in the first message, not composed into it."
+      "purpose": "Shared standing duties delivered once beside the capsule in the first message, not composed into it.",
+      "roles": [
+        "architect",
+        "orchestrator",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "investigator",
+        "bootstrap"
+      ],
+      "step": "first message"
     }
   },
   "roles": {
@@ -205,10 +210,7 @@
         "recovery",
         "authorized-closeout"
       ],
-      "templates": [
-        "architect-brief.md",
-        "conversation-handover-packet.md"
-      ],
+      "templates": [],
       "criteria": [
         "plan-review.md"
       ]
@@ -255,65 +257,9 @@
       "templates": [
         "manager-brief.md",
         "master-handover-packet.md",
-        "conversation-handover-packet.md",
         "impact-analysis.md",
         "onboarding-coherency.md",
         "curator-handoff-list.md"
-      ],
-      "criteria": [
-        "plan-review.md"
-      ]
-    },
-    "designer": {
-      "file": "roles/designer.md",
-      "altitude": "sprint",
-      "tools": [
-        "read_ar_files"
-      ],
-      "skills": [
-        "l-01-agent-lifecycles"
-      ],
-      "seat": "a HAT the architect pulls inline, or an optional separate sprint chair; evidence-backed problem framing at the assigned scope",
-      "core": [
-        "authority",
-        "invariants",
-        "loop",
-        "acceptance",
-        "every-role"
-      ],
-      "operations": [
-        "orientation",
-        "planning"
-      ],
-      "templates": [
-        "architect-brief.md"
-      ],
-      "criteria": []
-    },
-    "strategist": {
-      "file": "roles/strategist.md",
-      "altitude": "sprint",
-      "tools": [
-        "read_ar_files",
-        "task_doc"
-      ],
-      "skills": [
-        "l-01-agent-lifecycles"
-      ],
-      "seat": "the sprint planner, spawn-first under the architect's propose-first question; reader, not mutator",
-      "core": [
-        "authority",
-        "invariants",
-        "loop",
-        "acceptance",
-        "every-role"
-      ],
-      "operations": [
-        "orientation",
-        "planning"
-      ],
-      "templates": [
-        "orchestration-task.md"
       ],
       "criteria": [
         "plan-review.md"
@@ -362,7 +308,6 @@
       ],
       "templates": [
         "manager-brief.md",
-        "worker-brief.md",
         "curator-brief.md",
         "master-handover-packet.md",
         "verdict.md",
@@ -404,7 +349,6 @@
         "recovery"
       ],
       "templates": [
-        "worker-brief.md",
         "turn-report.md",
         "curator-handoff-list.md"
       ],
@@ -449,7 +393,8 @@
       ],
       "templates": [
         "curator-brief.md",
-        "curator-handoff-list.md"
+        "curator-handoff-list.md",
+        "curator-handoff-ingestion.md"
       ],
       "criteria": [
         "onboarding-memory.md"
@@ -457,7 +402,7 @@
     },
     "reviewer": {
       "file": "roles/reviewer.md",
-      "altitude": "leaf | master | sprint, by seam",
+      "altitude": "leaf",
       "tools": [
         "context_packet",
         "curator_coherence",
@@ -472,7 +417,7 @@
       "skills": [
         "l-01-agent-lifecycles"
       ],
-      "seat": "Independent reviewer for one selected leaf candidate and named requirement.",
+      "seat": "Independent Reviewer hosted on a leaf; its intake selects the reviewed candidate, requirement and seam.",
       "core": [
         "authority",
         "invariants",
@@ -554,7 +499,9 @@
         "bootstrap",
         "recovery"
       ],
-      "templates": [],
+      "templates": [
+        "bootstrap-report.md"
+      ],
       "criteria": []
     }
   },
@@ -576,138 +523,72 @@
       "orientation",
       "coordination"
     ],
-    "templates": [
-      "architect-brief.md"
-    ],
+    "templates": [],
     "criteria": []
   },
   "references": {
-    "curator-authoring-d301": {
-      "source": "reference/curator-authoring-d301.md",
-      "description": "Named-step authoring procedures; capsule retains inputs, whole output and step limits.",
+    "digest-map": {
+      "source": "core/digest-map.json",
+      "description": "Source dispositions backing the shared every-role digest.",
+      "injected": false,
+      "step_detail": false,
+      "roles": [
+        "architect",
+        "orchestrator",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "investigator",
+        "bootstrap"
+      ]
+    },
+    "curator/memory-handover": {
+      "source": "reference/curator/memory-handover.md",
+      "description": "The reviewed trees a memory handover names, and the whole requested review or repair it sends.",
       "injected": false,
       "step_detail": true,
-      "step": "when you reach Curation workflow 1: Reconcile, not before",
+      "step": "before sending a memory candidate for review or returning a memory repair",
       "roles": [
         "curator"
       ]
     },
-    "curator-handoff-d301": {
-      "source": "reference/curator-handoff-d301.md",
-      "description": "Memory comparison and handover procedures; capsule retains output identities and lane limits.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach Curation workflow 7: Undergo the independent fact-check, not before; reuse at Curation workflow 8: Repair, then republish",
-      "roles": [
-        "curator"
-      ]
-    },
-    "reviewer-orient-d301": {
-      "source": "reference/reviewer-orient-d301.md",
-      "description": "Scope inspection before Reviewer Process step 1.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach step 1 (orient and scope), not before",
-      "roles": [
-        "reviewer"
-      ]
-    },
-    "reviewer-baseline-d301": {
-      "source": "reference/reviewer-baseline-d301.md",
-      "description": "Route, evidence-class and sealing instructions before Reviewer baseline steps.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach step 3 (baseline steps 3–5), not before",
-      "roles": [
-        "reviewer"
-      ]
-    },
-    "reviewer-adjudication-d301": {
-      "source": "reference/reviewer-adjudication-d301.md",
-      "description": "Knowledge-effects check before requirement adjudication.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach step 7 (requirement adjudication), not before",
-      "roles": [
-        "reviewer"
-      ]
-    },
-    "reviewer-memory-d301": {
-      "source": "reference/reviewer-memory-d301.md",
-      "description": "Cut-card and added-file checks before memory review.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach step 8 (memory review), not before",
-      "roles": [
-        "reviewer"
-      ]
-    },
-    "reviewer-master-exit-d301": {
-      "source": "reference/reviewer-master-exit-d301.md",
-      "description": "Master-exit completeness checks.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach master-exit review, not before",
-      "roles": [
-        "reviewer"
-      ]
-    },
-    "bootstrap-foundation-d301": {
-      "source": "reference/bootstrap-foundation-d301.md",
+    "bootstrap/foundation-state": {
+      "source": "reference/bootstrap/foundation-state.md",
       "description": "The foundation state this seat reports and the Architect handover that follows it.",
       "injected": false,
       "step_detail": true,
-      "step": "when you reach step 8, not before",
+      "step": "before naming the next step in the conversation and report; before reading and reporting the knowledge foundation's state; before finishing; before reporting this state and naming the next step; before reporting the identity or naming the authoring owner; for setup’s state report and next step",
       "roles": [
         "bootstrap"
       ]
     },
-    "bootstrap-failure-states": {
-      "source": "reference/bootstrap-failure-states.md",
+    "bootstrap/failure-states": {
+      "source": "reference/bootstrap/failure-states.md",
       "description": "The states a new user's setup actually hits, and the move for each.",
       "injected": false,
       "step_detail": true,
-      "step": "when you reach a step that answers with a state you cannot name, not before",
+      "step": "when a step returns a state you cannot name",
       "roles": [
         "bootstrap"
       ]
     },
-    "curator-intake-details": {
-      "source": "reference/curator-intake-details.md",
-      "description": "Supplied reader arguments and scoped read-tool signatures.",
+    "curator/card-formats-and-citations": {
+      "source": "reference/curator/card-formats-and-citations.md",
+      "description": "Card and overview scope, history dispositions, current card content, citation input and repair, and entity-catalog maintenance.",
       "injected": false,
       "step_detail": true,
-      "step": "when you reach Curation workflow 1: Reconcile, not before",
+      "step": "before maintaining the entity catalog; before creating or maintaining cards or overviews; before writing card history; before checking or repairing citations; before filling it; before routing an item; before checking citations",
       "roles": [
         "curator"
       ]
     },
-    "curator-message-details": {
-      "source": "reference/curator-message-details.md",
-      "description": "Message payload fields and automatic filed-message location.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach Curation workflow 1: Reconcile, not before",
-      "roles": [
-        "curator"
-      ]
-    },
-    "curator-card-details": {
-      "source": "reference/curator-card-details.md",
-      "description": "Overview/card and trace-row formats and the batch citation command.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach Curation workflow 2: Before ingest, not before",
-      "roles": [
-        "curator"
-      ]
-    },
-    "curator-worklist-details": {
-      "source": "reference/curator-worklist-details.md",
+    "curator/worklist": {
+      "source": "reference/curator/worklist.md",
       "description": "Writer row refusals and format syntax, read when answering the worklist.",
       "injected": false,
       "step_detail": true,
-      "step": "when you reach Curation workflow 2: Before ingest, not before",
+      "step": "before answering the persisted leaf worklist",
       "roles": [
         "curator"
       ]
@@ -717,65 +598,37 @@
       "description": "Scoped same-tool/input-class recovery after a refused correct record write.",
       "injected": false,
       "step_detail": true,
-      "step": "when a covered writer or record tool refuses a correct write, not before",
+      "step": "for a correct-input refusal of a covered write (`task_doc` edits (including an admitted task retirement or folder movement), `knowledge_write`, `citation_fix`, `citation_note_revision` and `curator_coherence` publication); before retiring or moving a task; before responding to a correct-input write refusal",
       "roles": [
         "architect",
         "orchestrator",
-        "designer",
-        "strategist",
         "manager",
         "worker",
         "curator",
-        "reviewer"
+        "reviewer",
+        "investigator",
+        "bootstrap"
       ]
     },
-    "curator-writer-details": {
-      "source": "reference/curator-writer-details.md",
-      "description": "Command/options and check messages at step 2; record formats and read-back call at step 3.",
+    "writing/technical-english-profile": {
+      "source": "reference/writing/technical-english-profile.md",
+      "description": "One Simplified Technical English authoring profile with independent meaning comparison; no automatic semantic gate.",
       "injected": false,
       "step_detail": true,
-      "step": "before a CLI deciding run or write; use record formats at Curation workflow 2: Before ingest",
+      "step": "before drafting invariant statements, family guarantees or history reasons; before writing walkthrough prose, labels or narrated obligations",
       "roles": [
-        "curator",
-        "manager"
+        "curator"
       ]
     },
-    "shared-writing-profile": {
-      "source": "reference/shared-writing-profile.md",
-      "description": "One STE-inspired authoring profile with independent meaning comparison; no automatic semantic gate.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach Curation workflow 2: Before ingest, not before",
-      "roles": [
-        "curator",
-        "worker",
-        "reviewer"
-      ]
-    },
-    "visual-explainer-authoring": {
-      "source": "reference/visual-explainer-authoring.md",
+    "writing/visual-explainers": {
+      "source": "reference/writing/visual-explainers.md",
       "description": "Apply the shared writing profile to optional visual walkthroughs without replacing required evidence.",
       "injected": false,
       "roles": [
-        "worker",
-        "curator",
-        "reviewer"
-      ]
-    },
-    "rationale": {
-      "source": "reference/rationale.md",
-      "description": "Reference-only: rationale, provenance, and credits consolidated out of the normative path.",
-      "injected": false
-    },
-    "rulings": {
-      "source": "reference/rulings.md",
-      "description": "Reference-only: durable developer rulings and the superseded rules they replace, with citations.",
-      "injected": false
-    },
-    "lenses": {
-      "source": "lenses.md",
-      "description": "The four job lenses the scoping seats read. Reference material for the architect, orchestrator, and designer; a dispatched role never picks a lens.",
-      "injected": false
+        "worker"
+      ],
+      "step_detail": true,
+      "step": "before you add an optional walkthrough to your freeze report"
     },
     "criteria": {
       "source": "criteria/",
@@ -787,152 +640,90 @@
       "description": "Field schemas for start handovers and handoff artifacts, and the plan/report template library for the seats that compile them.",
       "injected": false
     },
-    "architect-working-rules": {
-      "source": "reference/architect-working-rules.md",
-      "description": "Named-step architect working rules duties.",
+    "message-handover": {
+      "source": "reference/message-handover.md",
+      "description": "Message payload, delivery and full-store refusal procedures.",
       "injected": false,
       "step_detail": true,
-      "step": "when you reach Establish the work, Delegate and decide, Developer decisions and permissions, a Curator text/model/role-set change, or measurement/unknown/failure/cost discussion, not before",
-      "roles": [
-        "architect"
-      ]
-    },
-    "manager-working-rules": {
-      "source": "reference/manager-working-rules.md",
-      "description": "Named-step manager working rules duties.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach progress judgment, provider replacement or the named coordination step, not before",
-      "roles": [
-        "manager",
-        "architect",
-        "orchestrator"
-      ]
-    },
-    "worker-working-rules": {
-      "source": "reference/worker-working-rules.md",
-      "description": "Named-step worker working rules duties.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach the named working-folder, sandbox or helper step, not before",
-      "roles": [
-        "worker"
-      ]
-    },
-    "shared-working-rules": {
-      "source": "reference/shared-working-rules.md",
-      "description": "Named-step shared working rules duties.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach its named clock, evidence, sandbox, configuration or host step, not before",
+      "step": "before responding to a full-store refusal; before composing a message; before locating a filed message or receipt; before delivering a developer question to a recipient or parent; before handing work to a waiting seat; before sending a message; before handing over work; before sending a handover; before sending a question or developer answer to its waiting child; before handling a full-store refusal",
       "roles": [
         "architect",
         "orchestrator",
-        "designer",
-        "strategist",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "investigator"
+      ]
+    },
+    "coordination/shared/child-questions": {
+      "source": "reference/coordination/shared/child-questions.md",
+      "description": "Child question relay, attribution and answer delivery rules.",
+      "injected": false,
+      "step_detail": true,
+      "step": "before answering a child's question or returning the developer's answer; before handling a child's question or returning the developer's answer; before handling a child's question or the developer's answer to it; before delivering that ruling",
+      "roles": [
+        "architect",
+        "orchestrator",
+        "manager"
+      ]
+    },
+    "instruction-shortfall-review": {
+      "source": "reference/instruction-shortfall-review.md",
+      "description": "Investigator instruction-shortfall review procedure.",
+      "injected": false,
+      "step_detail": true,
+      "step": "before reviewing an instruction shortfall named by the concern",
+      "roles": [
+        "investigator"
+      ]
+    },
+    "knowledge/use": {
+      "source": "reference/knowledge/use.md",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "architect",
+        "orchestrator",
         "manager",
         "worker",
         "curator",
         "reviewer",
         "investigator",
         "bootstrap"
-      ]
-    },
-    "coordination-starts": {
-      "source": "reference/coordination-starts.md",
-      "description": "Named-step coordination starts duties.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach a role start or override verification, not before",
-      "roles": [
-        "manager",
-        "architect",
-        "orchestrator"
-      ]
-    },
-    "message-handover": {
-      "source": "reference/message-handover.md",
-      "description": "Named-step message handover duties.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach a waiting-seat handover or held/full-store receipt, not before",
-      "roles": [
-        "architect",
-        "orchestrator",
-        "designer",
-        "strategist",
-        "manager",
-        "worker",
-        "curator",
-        "reviewer",
-        "investigator"
-      ]
-    },
-    "child-questions": {
-      "source": "reference/child-questions.md",
-      "description": "Named-step child questions duties.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach a child's question or the developer's answer to it, not before",
-      "roles": [
-        "manager",
-        "orchestrator",
-        "architect"
-      ]
-    },
-    "investigator-instruction-review": {
-      "source": "reference/investigator-instruction-review.md",
-      "description": "Named-step investigator instruction review duties.",
-      "injected": false,
-      "step_detail": true,
-      "step": "when you reach a concern that asks for an instruction-shortfall review, not before",
-      "roles": [
-        "investigator"
-      ]
-    },
-    "knowledge-use": {
-      "source": "reference/knowledge-use.md",
-      "injected": false,
-      "step_detail": true,
-      "roles": [
-        "architect",
-        "investigator",
-        "worker",
-        "reviewer"
       ],
-      "description": "Knowledge and code reads for diagnosis, investigation, editing and review.",
-      "step": "when you reach Architect diagnosis, Investigator repository-code investigation, Worker editing or a failing test, or Reviewer inspection of changes, not before"
+      "description": "Knowledge and code reads for diagnosis, investigation, editing, review and curation.",
+      "step": "before relying on storage or path eligibility, cross-repository allowances, or serving-build metadata; before diagnosing; before interpreting their resolution; before checking code and memory; before interpreting a knowledge read; before investigating repository code; when inspecting changes; before editing source; before diagnosing a failing test; before gathering that evidence"
     },
-    "curator-repository-foundation": {
-      "source": "reference/curator-repository-foundation.md",
+    "curator/repository-foundation": {
+      "source": "reference/curator/repository-foundation.md",
       "injected": false,
       "step_detail": true,
       "roles": [
+        "manager",
         "curator"
       ],
-      "step": "when you reach a repository's first or resumed knowledge foundation, not before"
+      "step": "before beginning a repository's first or resumed knowledge foundation; before a repository's first or resumed knowledge foundation"
     },
     "worker-turn-report": {
       "source": "templates/turn-report.md",
       "description": "Requirement Attempt Journal shape at the Worker freeze report.",
       "injected": false,
       "step_detail": true,
-      "step": "when you reach the freeze report, not before",
+      "step": "before writing the freeze report",
       "roles": [
         "worker"
       ]
     },
-    "knowledge-commands": {
-      "source": "reference/knowledge-commands.md",
+    "knowledge/commands": {
+      "source": "reference/knowledge/commands.md",
       "description": "Registry-bound CLI and knowledge MCP command reference at use.",
       "injected": false,
       "step_detail": true,
-      "step": "when you reach a knowledge command or its result, not before",
+      "step": "before retrieving its context again; before planning repository work; before using a knowledge command or its result; before using a knowledge-system command or interpreting its result; before using a knowledge command or interpreting its result; before using a knowledge command or acting on its result; before a knowledge-system command or check; for a false note whose targets remain current; before using the public gate commands or tools",
       "roles": [
         "architect",
         "orchestrator",
-        "designer",
-        "strategist",
         "manager",
         "worker",
         "curator",
@@ -940,6 +731,352 @@
         "investigator",
         "bootstrap"
       ]
+    },
+    "leaf-task": {
+      "source": "templates/leaf-task.md",
+      "description": "Leaf task scaffold: the task fields and sections a planning role authors through task_doc.",
+      "injected": false,
+      "step_detail": false,
+      "roles": [
+        "architect",
+        "manager"
+      ],
+      "rolesReason": "The Manager reaches it from reference/tasks/document-authoring.md:13, a detail its manager.md task-authoring pointer delivers."
+    },
+    "master-task": {
+      "source": "templates/master-task.md",
+      "description": "Master task scaffold: the shared outcome, sub-tasks and ordered sections of a master.",
+      "injected": false,
+      "step_detail": false,
+      "roles": [
+        "architect",
+        "manager"
+      ],
+      "rolesReason": "The Manager reaches it from reference/tasks/document-authoring.md:13, a detail its manager.md task-authoring pointer delivers."
+    },
+    "requirement-packet": {
+      "source": "templates/requirement-packet.md",
+      "description": "Requirement packet scaffold: the sections of one version-addressed canonical promise.",
+      "injected": false,
+      "step_detail": false,
+      "roles": [
+        "architect",
+        "manager"
+      ],
+      "rolesReason": "The Manager reaches it from reference/tasks/document-authoring.md:13, a detail its manager.md task-authoring pointer delivers."
+    },
+    "tasks/document-authoring": {
+      "source": "reference/tasks/document-authoring.md",
+      "description": "Task prose conventions and leaf, master and requirement templates.",
+      "injected": false,
+      "step_detail": true,
+      "step": "before making the change; before authoring a task document or requirement packet; before editing, skipping or previewing task-document fields, or using `task_doc append_decision`; before using `task_doc append_decision`; before editing, skipping or previewing task-document fields; when filling the task fields; before writing the proposed code examples; when authoring its fields and ordered sections through `task_doc`; before authoring a packet; before writing the planned structure",
+      "roles": [
+        "architect",
+        "orchestrator",
+        "manager",
+        "worker",
+        "bootstrap"
+      ]
+    },
+    "curator-file-card-layout": {
+      "source": "templates/file-card.md",
+      "description": "File-card construction layout.",
+      "injected": false,
+      "step_detail": false,
+      "step": "before creating a source-file card",
+      "roles": [
+        "curator"
+      ]
+    },
+    "curator-repository-overview-layout": {
+      "source": "templates/repo-overview.md",
+      "description": "Repository overview with purpose first and evidence last.",
+      "injected": false,
+      "step_detail": false,
+      "step": "before creating the repository overview or a source-area overview",
+      "roles": [
+        "curator"
+      ]
+    },
+    "curator-route-overview-layout": {
+      "source": "templates/route-local-overview.md",
+      "description": "Cohesive route overview with purpose first and evidence last.",
+      "injected": false,
+      "step_detail": false,
+      "step": "before creating the repository overview or a source-area overview",
+      "roles": [
+        "curator"
+      ]
+    },
+    "curator-entity-catalog-layout": {
+      "source": "templates/repo-entity-catalog.md",
+      "description": "Supported selective entity catalog with matching inventory and fingerprints.",
+      "injected": false,
+      "step_detail": false,
+      "step": "before creating or maintaining the entity catalog",
+      "roles": [
+        "curator"
+      ]
+    },
+    "tasks/collaboration-method": {
+      "source": "reference/tasks/collaboration-method.md",
+      "description": "Scope and risk framing, evidence-first planning and reviewable task collaboration.",
+      "injected": false,
+      "step_detail": false,
+      "roles": [
+        "architect",
+        "orchestrator",
+        "manager",
+        "worker",
+        "bootstrap"
+      ],
+      "step": "before scoping work with the developer; before writing the design",
+      "rolesReason": "The Worker reaches it from reference/tasks/document-authoring.md:15, a detail its worker.md task-authoring pointer delivers."
+    },
+    "review-baseline": {
+      "source": "reference/review-baseline.md",
+      "description": "Route, evidence-class and sealing instructions before Reviewer baseline steps.",
+      "injected": false,
+      "step_detail": true,
+      "step": "before preparing a baseline review",
+      "roles": [
+        "reviewer"
+      ]
+    },
+    "coordination/shared/requirement-design": {
+      "source": "reference/coordination/shared/requirement-design.md",
+      "description": "Requirement and task design against recorded callers and phases, topic merges and splits, restriction disclosure, control placement and independent dashboard use.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "architect",
+        "orchestrator"
+      ],
+      "step": "before grouping primary and additional same-topic packets; before authoring or amending a requirement and its task structure"
+    },
+    "coordination/architect/curator-measurement": {
+      "source": "reference/coordination/architect/curator-measurement.md",
+      "description": "Curator measurement changes and discussion.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "architect"
+      ],
+      "step": "before running or discussing a Curator measurement; for measurement-loop changes"
+    },
+    "coordination/architect/developer-decisions": {
+      "source": "reference/coordination/architect/developer-decisions.md",
+      "description": "Developer questions and instruction delivery.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "architect"
+      ],
+      "step": "before relaying a developer decision from question through instruction delivery"
+    },
+    "coordination/architect/models-and-settings": {
+      "source": "reference/coordination/architect/models-and-settings.md",
+      "description": "Model and role settings.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "architect"
+      ],
+      "step": "before selecting a seat model and its authorized settings"
+    },
+    "coordination/architect/process-decisions": {
+      "source": "reference/coordination/architect/process-decisions.md",
+      "description": "Coordinating rules, formal process decisions, standing construction rulings, escalation of dead ends and blockers, and process weaknesses.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "architect"
+      ],
+      "step": "before deciding or escalating a coordination issue"
+    },
+    "coordination/architect/claim-verification": {
+      "source": "reference/coordination/architect/claim-verification.md",
+      "description": "Verify reported claims.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "architect"
+      ],
+      "step": "before ruling on a reported claim"
+    },
+    "coordination/shared/master-state": {
+      "source": "reference/coordination/shared/master-state.md",
+      "description": "Master updates after starts, handovers and landings, and the documentation finished before master completion.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "architect",
+        "orchestrator",
+        "manager"
+      ],
+      "step": "before updating the master after a start, handover or landing; before updating master state through completion"
+    },
+    "coordination/shared/third-rejected-round": {
+      "source": "reference/coordination/shared/third-rejected-round.md",
+      "description": "Judge progress at the third rejected round.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "architect",
+        "manager"
+      ],
+      "step": "before judging a third rejected round during direct coordination; before judging repair progress at a third rejected round, an earlier coder switch or a Reviewer replacement"
+    },
+    "coordination/shared/seat-recovery": {
+      "source": "reference/coordination/shared/seat-recovery.md",
+      "description": "Recover seat work.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "architect",
+        "orchestrator",
+        "manager"
+      ],
+      "step": "before recovering idle, unfinished, stopped or unavailable-provider work"
+    },
+    "sandbox-actors": {
+      "source": "reference/sandbox-actors.md",
+      "description": "Per-run sandbox harness settings, user-owned configuration boundaries, test-actor models, the sandbox launch home and actor binding proof.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "architect",
+        "orchestrator",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "investigator",
+        "bootstrap"
+      ],
+      "step": "before configuring or inspecting a sandbox harness without changing user-owned configuration; before setting up or inspecting a sandbox harness; before configuring or inspecting a sandbox harness; before configuring or inspecting a sandbox harness, choosing its launch home or starting its actors"
+    },
+    "curator/card-sentence-decisions": {
+      "source": "reference/curator/card-sentence-decisions.md",
+      "description": "Decide card sentences before editing.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "curator"
+      ],
+      "step": "before editing a card or its paired notes; before routing or refreshing a card"
+    },
+    "curator/change-routing": {
+      "source": "reference/curator/change-routing.md",
+      "description": "Route changed files and notes.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "curator"
+      ],
+      "step": "before routing a changed file or notes item"
+    },
+    "curator/coherence-judgments": {
+      "source": "reference/curator/coherence-judgments.md",
+      "description": "Prepare coherence judgments.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "curator"
+      ],
+      "step": "before preparing a coherence judgment"
+    },
+    "curator/current-prose-and-history": {
+      "source": "reference/curator/current-prose-and-history.md",
+      "description": "Separate current prose from authored history.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "curator"
+      ],
+      "step": "before updating current overview prose or answering changed-file history"
+    },
+    "curator/encountered-records": {
+      "source": "reference/curator/encountered-records.md",
+      "description": "Record weaknesses and document dependencies.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "curator"
+      ],
+      "step": "before authoring an encountered weakness or document dependency"
+    },
+    "curator/family-obligations": {
+      "source": "reference/curator/family-obligations.md",
+      "description": "Examine and author family obligations.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "curator"
+      ],
+      "step": "before deciding family coverage or updating a family"
+    },
+    "curator/governing-sources": {
+      "source": "reference/curator/governing-sources.md",
+      "description": "Selecting and reading governing documentation, and preserving durable governing decisions and rejected alternatives.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "curator"
+      ],
+      "step": "before explaining an assigned contract; before authoring a governing decision record; before choosing domain evidence"
+    },
+    "curator/knowledge-ingest": {
+      "source": "reference/curator/knowledge-ingest.md",
+      "description": "Prepare an authored knowledge ingest.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "curator"
+      ],
+      "step": "before preparing or ingesting authored knowledge"
+    },
+    "curator/publication-report": {
+      "source": "reference/curator/publication-report.md",
+      "description": "Read the ingest report before claiming publication.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "curator"
+      ],
+      "step": "before interpreting an ingest result or claiming publication; before interpreting final writer checks; before interpreting the ingest result"
+    },
+    "curator/intent-reconciliation": {
+      "source": "reference/curator/intent-reconciliation.md",
+      "description": "Reconcile intent for curation.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "curator"
+      ],
+      "step": "before promoting a historical oddity; before reconciling current intent, ruled intent and implementation"
+    },
+    "knowledge/serving-build": {
+      "source": "reference/knowledge/serving-build.md",
+      "description": "Bind command-line work to the serving build.",
+      "injected": false,
+      "step_detail": true,
+      "roles": [
+        "worker",
+        "curator"
+      ],
+      "step": "before a command-line run that decides or writes; before calling a deciding or writing surface; for the Curator's command-line interface binding; before command-line interface (CLI) work; when the admitted binding is unavailable; before checking writer admission"
+    },
+    "bootstrap-report": {
+      "source": "templates/bootstrap-report.md",
+      "description": "Bootstrap report sections and setup-state fields.",
+      "injected": false,
+      "step_detail": false,
+      "roles": [
+        "bootstrap"
+      ],
+      "step": "before writing the report"
     }
   },
   "composition_order": [
@@ -948,9 +1085,9 @@
   ],
   "notes": [
     "Routing metadata only: the role route composes exactly one role source and one applicable operation source.",
-    "The frozen core map remains metadata for compiler compatibility; shared core blocks are not injected into role capsules; the digest travels beside the capsule in the first message.",
+    "Core metadata records source ownership; shared core blocks are not injected into role capsules; the digest accompanies the capsule in the first message.",
     "Canonical task references and workspace bindings travel in the handover as data, separate from instruction blocks.",
-    "The compiler vocabulary retains ten role ids and nine operation ids; the role launcher exposes only the seven current UI roles.",
+    "The manifest names eight launchable roles and nine operations; role and operation applicability must agree.",
     "Paseo is the host. Role agents start and message each other with the AR tools role_start and role_message on the agents-remember-task tool server."
   ]
 }

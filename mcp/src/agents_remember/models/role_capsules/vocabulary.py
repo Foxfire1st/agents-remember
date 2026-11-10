@@ -11,10 +11,8 @@ launcher is a routing condition, not a role; it is reached through
 :data:`CAPSULE_LAUNCHER_MODE` and its own core block.
 
 ``bootstrap`` is a real role and is present: it is the new user's first-hour seat, and
-it is the only role that carries the ``bootstrap`` operation. It is deliberately *last*
-in the registry order so that the nine roles that pre-date it keep their existing
-positions — a compilation, a settings key, or a dashboard projection addressed to an
-earlier role therefore cannot shift because this one was added.
+it is the only role that carries the ``bootstrap`` operation. It remains last in the
+registry order; the active role vocabulary below owns the available names.
 
 **``bootstrap`` is a FREE agent, not a structural seat** (developer ruling 2026-09-16:
 *"It is not a task related agent. Can't be. It needs to be free agent. All what it needs
@@ -28,14 +26,11 @@ from __future__ import annotations
 
 from typing import Literal, get_args
 
-#: The ten lifecycle roles. Every one of them has its own canonical
-#: ``roles/<role>.md`` source; nine are dispatched task seats and ``bootstrap`` is the
-#: free agent the module docstring describes.
+#: The eight lifecycle roles each have a canonical ``roles/<role>.md`` source.
+#: ``bootstrap`` is the free agent the module docstring describes.
 type CapsuleRole = Literal[
     "architect",
     "orchestrator",
-    "designer",
-    "strategist",
     "manager",
     "worker",
     "curator",
@@ -73,15 +68,13 @@ CAPSULE_ROLE_MODE: CapsuleSeatKind = "role"
 
 CAPSULE_SEAT_KINDS: tuple[CapsuleSeatKind, ...] = get_args(CapsuleSeatKind)
 
-#: The ten roles, in the registry's canonical order. This tuple and the
+#: The eight roles, in the registry's canonical order. This tuple and the
 #: :data:`CapsuleRole` literal above are one registry with two readers — the type
 #: checker reads the literal, runtime selection reads the tuple — so a test holds the
 #: literal's own arguments to this exact tuple and the pair cannot drift apart.
 CAPSULE_ROLES: tuple[CapsuleRole, ...] = (
     "architect",
     "orchestrator",
-    "designer",
-    "strategist",
     "manager",
     "worker",
     "curator",
@@ -141,7 +134,7 @@ CAPSULE_LAUNCHER_COMPOSITION_ORDER: tuple[CapsuleCompositionRoot, ...] = ("core"
 
 
 def is_capsule_role(value: str) -> bool:
-    """Whether ``value`` is one of the ten frozen roles (exact, not normalized)."""
+    """Whether ``value`` is one of the eight frozen roles (exact, not normalized)."""
 
     return value in CAPSULE_ROLES
 

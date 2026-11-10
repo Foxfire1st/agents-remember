@@ -14,12 +14,8 @@ separate migration operation.
 
 ## 1. Inventory (read-only preview)
 
-```text
-task_doc.inventory_execution_topology
-  coordination_root, repo_id, code_repository
-```
-
-Reports, without writing anything:
+Read the sprint's canonical `task.json` and the files of its commanded masters with
+the harness's file tools. Inventory, without writing anything:
 
 - every orchestration sprint and its commanded masters,
 - the proposed explicit nature (atomic when an `ar/<slug>` branch already backs the master,
@@ -27,7 +23,7 @@ Reports, without writing anything:
 - the sprint graph state (present vs. missing), and
 - the declared completion blockers.
 
-Proposed edges are always empty (parallel) until a strategist/orchestrator ruling supplies
+Proposed edges are always empty (parallel) until an Architect or Orchestrator ruling supplies
 them. The inventory never infers edges from file order, names, or status.
 
 ## 2. Author the graph (atomic batch)
@@ -104,14 +100,14 @@ step.
 
 Rollback restores a snapshot — it does not re-enable a compatibility path.
 
-1. Snapshot `tasks/<repo>/` before authoring (e.g. `git add -A && git commit` in the
-   coordination tree, or a tarball).
+1. Snapshot `tasks/<repo>/` into an archive before authoring. Keep the archive outside
+   the coordination tree; do not run Git against that tree as a whole.
 2. If an authored graph is wrong, restore that snapshot or edit the graph back with
    `author_execution_graph`.
 3. Re-run the inventory to confirm the restored state matches expectations.
 
-A branch that was already recorded `atomic` is only reclassified by an accepted
-strategist/orchestrator ruling, never by the authoring mechanism itself.
+A branch that was already recorded `atomic` is only reclassified by an Architect or
+Orchestrator ruling that has been accepted, never by the authoring mechanism itself.
 
 ## 6. Release notes
 

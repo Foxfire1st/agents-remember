@@ -19,12 +19,13 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from agents_remember.errors import PaseoRuntimeFailure
 from agents_remember.kernel.primitives.host_environment import carried_session_variables
-from agents_remember.serving.paseo.paseo_command import PaseoRuntimeFailure
+from agents_remember.serving.paseo.paseo_harness_homes import home_variable_names
 
 PROCESS_RECORD = "paseo.pid"
 # ``process.title`` of Paseo's supervisor entry point (0.10 and 0.11).
@@ -39,6 +40,7 @@ class ProcessFacts:
     paseo_home: str | None
     session_variables: tuple[str, ...] = ()
     node_executable: str | None = None
+    harness_homes: tuple[tuple[str, str], ...] | None = field(default=(), repr=False)
 
 
 class ProcessUnreadable(Exception):
@@ -87,6 +89,11 @@ def read_process(pid: int) -> ProcessFacts | None:
         paseo_home=None if home is None else os.fsdecode(home),
         session_variables=carried_session_variables(os.fsdecode(name) for name in variables),
         node_executable=executable,
+        harness_homes=tuple(
+            (name, os.fsdecode(variables[os.fsencode(name)]))
+            for name in home_variable_names()
+            if os.fsencode(name) in variables
+        ),
     )
 
 

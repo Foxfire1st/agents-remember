@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import json
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator
 from typing import TYPE_CHECKING, Annotated
@@ -17,6 +19,7 @@ from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
 )
+from agents_remember.models.build_currentness import BuildCurrentnessPayload
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.projection import TaskSummary
@@ -32,6 +35,7 @@ from agents_remember.serving.actions import (
     DismissalIntent,
     evaluate_action,
 )
+from agents_remember.serving.build_currentness import build_currentness
 from agents_remember.serving.conditional_read import if_none_match_matches
 from agents_remember.serving.direct_execution_grants import (
     DeveloperGrantRequest,
@@ -94,7 +98,12 @@ async def _wait_for_projection(runtime: _ServingRuntime) -> None:
         raise HTTPException(status_code=503, detail="projection owner stopped") from error
 
 
-def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Response:
+def _state_response(
+    runtime: _ServingRuntime,
+    if_none_match: str | None,
+    *,
+    currentness: BuildCurrentnessPayload | None = None,
+) -> Response:
     # The change gate: the ETag is the projector's content revision, which only
     # advances when the stable projection form changes (volatile ages excluded -- delta.py).
     # An If-None-Match poll of an unchanged projection therefore costs a header exchange
@@ -104,6 +113,12 @@ def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Resp
     if snapshot is None:
         raise HTTPException(status_code=503, detail="projection not ready")
     revision = runtime.projector.revision(seq)
+    currentness = currentness or build_currentness(runtime.config, role="dashboard")
+    if currentness is not None:
+        # The projection can stay unchanged across an install. Its revision alone
+        # must not turn the first stale-build answer into an empty 304.
+        stamp = json.dumps(currentness.model_dump(mode="json", exclude_none=True), sort_keys=True)
+        revision += ":" + hashlib.sha256(stamp.encode()).hexdigest()[:16]
     headers = {"ETag": f'W/"{revision}"', "Cache-Control": "no-cache"}
     if if_none_match_matches(if_none_match, revision):
         return Response(status_code=304, headers=headers)
@@ -119,9 +134,20 @@ def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Resp
             build=runtime.build,
             watcher_health=runtime.projector.watcher_health(),
             checkout_binding=_checkout_binding(runtime),
+            build_currentness=currentness,
         )
     )
     return JSONResponse(content=body, headers=headers)
+
+
+def _state_request(runtime: _ServingRuntime, if_none_match: str | None, status: bool) -> Response:
+    if status:
+        return _state_response(
+            runtime,
+            None,
+            currentness=build_currentness(runtime.config, inspect_checkout=True, role="dashboard"),
+        )
+    return _state_response(runtime, if_none_match)
 
 
 def _task_document_response(
@@ -203,6 +229,22 @@ async def _alive_events() -> AsyncGenerator[ServerSentEvent]:
     while True:
         await asyncio.sleep(STREAM_ALIVE_SECONDS)
         yield ServerSentEvent(event=STREAM_ALIVE_EVENT, data={})
+
+
+async def _status_events(
+    config: McpRuntimeConfig, previous: BuildCurrentnessPayload | None
+) -> AsyncGenerator[ServerSentEvent]:
+    """The existing liveness beat also publishes build-status transitions to open pages."""
+    async with contextlib.aclosing(_alive_events()) as beats:
+        async for event in beats:
+            yield event
+            current = build_currentness(config, role="dashboard")
+            if current is not None and current != previous:
+                yield ServerSentEvent(
+                    event="buildCurrentness",
+                    data=current.model_dump(mode="json", exclude_none=True),
+                )
+            previous = current
 
 
 async def _next_event(source: AsyncGenerator[ServerSentEvent]) -> ServerSentEvent:
@@ -325,8 +367,9 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     )
     def api_state(
         if_none_match: Annotated[str | None, Header()] = None,
+        status: bool = False,
     ) -> Response:
-        return _state_response(runtime, if_none_match)
+        return _state_request(runtime, if_none_match, status)
 
     @app.get(
         "/api/task-document",
@@ -377,11 +420,13 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
                 reviewLeaf or "",
             )
         )
+        currentness = build_currentness(runtime.config, role="dashboard")
         ordinary = stream_events(
             runtime.projector,
             build=runtime.build,
             watcher_health=runtime.projector.watcher_health(),
             checkout_binding=_checkout_binding(runtime),
+            build_currentness=currentness,
         )
         # ``aclose`` the inner stream explicitly: ``async for`` does not close its iterator, and
         # a disconnected page must release the projector's subscription at once (MIK-R81).
@@ -395,7 +440,9 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
                     identity is not None,
                 )
             ) as streamed,
-            contextlib.aclosing(_merged_stream(streamed, _alive_events())) as alive,
+            contextlib.aclosing(
+                _merged_stream(streamed, _status_events(runtime.config, currentness))
+            ) as alive,
             contextlib.aclosing(until_shutdown(alive, runtime.stream_shutdown)) as served,
         ):
             with OPEN_OBSERVATIONS.page_stream(page):

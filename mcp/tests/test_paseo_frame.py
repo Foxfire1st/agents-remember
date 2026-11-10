@@ -414,7 +414,7 @@ class RuntimeInfoCommandTests(unittest.TestCase):
         assert executable is not None
         node = Path(executable)
         node_patch = patch(
-            "agents_remember.cli.paseo_bridge.product_node",
+            "agents_remember.serving.paseo.paseo_running_node.product_node",
             return_value=type("FixtureNode", (), {"node": node})(),
         )
         node_patch.start()

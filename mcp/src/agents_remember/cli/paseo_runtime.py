@@ -33,7 +33,10 @@ from agents_remember.kernel.primitives.runtime_config import (
 from agents_remember.kernel.primitives.user_settings_location import user_settings_path
 from agents_remember.serving.paseo.paseo_command import PaseoRuntimeFailure
 from agents_remember.serving.paseo.paseo_daemon import runtime_status, stop_runtime
-from agents_remember.serving.paseo.paseo_provision import provision_runtime
+from agents_remember.serving.paseo.paseo_provision import (
+    provision_runtime,
+    provision_with_home_change,
+)
 
 _COMMANDS: dict[str, tuple[str, Callable[[PaseoRuntimeSettings], dict[str, Any]]]] = {
     "provision": (
@@ -58,6 +61,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             required=True,
             help="Absolute path of the active MCP settings file that holds the paseoRuntime host block.",
         )
+        if name == "provision":
+            command.add_argument(
+                "--accept-harness-home-change",
+                action="store_true",
+                help="Accept changing inherited harness homes when the host must restart.",
+            )
 
 
 def run(args: argparse.Namespace) -> int:
@@ -76,9 +85,15 @@ def run(args: argparse.Namespace) -> int:
         return _refuse("settings_invalid", f"cannot parse {args.config}: {problem}")
     _help_text, operation = _COMMANDS[args.paseo_command]
     try:
-        report = operation(settings)
+        report = (
+            provision_with_home_change(settings)
+            if args.paseo_command == "provision" and args.accept_harness_home_change
+            else operation(settings)
+        )
     except PaseoRuntimeFailure as failure:
         report = {"ok": False, "error": failure.as_payload()}
+        if failure.code == "process_record_unverifiable":
+            report.update(inheritedHarnessHomes="unknown", harnessHomeRemedy=None)
     except OSError as error:
         report = _failed("filesystem_error", args.paseo_command, str(error))
     except Exception as error:

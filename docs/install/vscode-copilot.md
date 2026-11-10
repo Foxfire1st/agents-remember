@@ -12,30 +12,10 @@ Official references:
 
 ## Register The MCP Server
 
-Write an MCP authority settings file (copy `examples/mcp/settings.example.json` and replace its
-paths), then add the server to `.vscode/mcp.json` in your workspace:
-
-```json
-{
-  "servers": {
-    "agents-remember": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": [
-        "--refresh-package",
-        "agents-remember-mcp@latest",
-        "--config",
-        "<PATH/TO/YOUR/PROJECTS_FOLDER>/.vscode/mcp/agents-remember-settings.json"
-      ]
-    }
-  }
-}
-```
-
-This repository keeps the templates under `.github-vscode/` and `.vscode/` so they do not collide
-with its own `.github/workflows/`. Copy `.vscode/` to your workspace root if you use it, and replace
-the `<PATH/TO/YOUR/PROJECTS_FOLDER>` markers by hand; no script renders them. Restart the window
-once so VS Code starts the server.
+Use the [common registration example](../../examples/mcp/server.example.json) and the
+[shared settings setup](README.md). Adapt its command and arguments to the `servers.agents-remember` entry in VS Code’s MCP configuration.
+The settings path is the absolute user-config path, not a workspace file.
+Restart or reload the harness after changing its registration.
 
 ## Start With One Call
 
@@ -58,32 +38,3 @@ foundation as ordinary task work. Bootstrap starts no role and authors no onboar
 VS Code discovers project skills from folders it scans; Agents Remember writes none. The tool
 server publishes each skill as an MCP resource (the SEP-2640 skills extension) and Copilot reads
 them from the running server, so there is no skill tree to copy, render or keep in sync.
-
-## Optional: Repository Instructions And Hook
-
-Copilot supports repository instructions at `.github/copilot-instructions.md`. Copy
-`.github-vscode/copilot-instructions.md` into your workspace `.github/` folder, replace
-`<PATH/TO/YOUR/PROJECTS_FOLDER>` with your absolute path, and keep repository-specific guidance
-separate when the repository already owns that file.
-
-If you want the first-action directive injected as session context, copy
-`.github-vscode/hooks/` into `.github/hooks/` the same way. VS Code discovers workspace hooks from
-`.github/hooks/*.json`, and the template registers a `SessionStart` command with per-platform
-overrides:
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "type": "command",
-        "command": "python3 .github/hooks/agents-remember-session-start.py",
-        "windows": "py -3 .github\\hooks\\agents-remember-session-start.py",
-        "linux": "python3 .github/hooks/agents-remember-session-start.py",
-        "osx": "python3 .github/hooks/agents-remember-session-start.py",
-        "timeout": 60
-      }
-    ]
-  }
-}
-```

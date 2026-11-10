@@ -1,3 +1,4 @@
+import { ServingBuildStamp } from './serving-build-stamp/ServingBuildStamp';
 import { statusLabel, type TaskStatusKey } from '../panels/detail-panel/pageParts';
 import {
   memo,
@@ -18,8 +19,6 @@ import { ReviewChatClose, ReviewMain, reviewRailView } from './reviewPage';
 import { useReviewHash, parseReviewHash } from './reviewHash';
 import { RoleChatsPane } from './RoleChats';
 import { seatChatTarget, type AgentChatTarget } from './roleChatTarget';
-import { clientMatchesServingBuild, servingCommitLabel } from '../data/buildIdentity';
-import { humanizeDuration } from '../data/conversation/format';
 import { startScreenWakeLock } from '../data/screenWakeLock';
 import { selectHostActivityUnknown, selectQueue } from '../data/selectors';
 import type { ConnState } from '../data/store';
@@ -900,43 +899,6 @@ function ViewBody({ view, onOpen }: { view: CockpitView; onOpen: (id: string) =>
     default:
       return null;
   }
-}
-
-// The serving-build stamp, muted: commit
-// short-hash (or the package version off-checkout) + process boot time, so a STALE serving
-// process is visible at a glance. Data rides the snapshot (`servingBuild`, boot-time cached).
-// A `dirty` serving checkout renders as `hash*` (git-prompt convention; the word `dirty` stays
-// in the tooltip) — uncommitted fix-round code is visible without widening the one-line bar.
-function ServingBuildStamp() {
-  const build = useDashboard((s) => s.servingBuild);
-  if (!build) return null;
-  const clientCurrent = clientMatchesServingBuild(build);
-  const commitLabel = servingCommitLabel(build);
-  const booted = new Date(build.bootedAt);
-  // "up" reads as an uptime, so show a humanized duration (one time format in the bar); the
-  // absolute start stamp stays in the tooltip below. Removes the bar's second, 12h clock format.
-  const bootLabel = Number.isNaN(booted.getTime())
-    ? build.bootedAt
-    : humanizeDuration(Date.now() - booted.getTime());
-  // The client-vs-serving-build honesty cue. When the bundle executing in
-  // this tab provably differs from the one the daemon now ships (`clientCurrent === false`), a stale
-  // tab silently renders wrong data; append that to the hoverable stamp tooltip so the operator knows
-  // to reload. `null` (a legacy server advertising no comparable bundle identity) and `true` (a real
-  // match) add nothing — never assert a state we cannot prove, and never fabricate a match.
-  const clientMismatchNote =
-    clientCurrent === false
-      ? ' · client bundle differs from the serving build — reload to update'
-      : '';
-  return (
-    <span
-      className={dim}
-      data-testid="serving-build"
-      data-client-build-current={clientCurrent === null ? 'unknown' : String(clientCurrent)}
-      title={`Serving build v${build.version}${commitLabel ? ` @ ${commitLabel}` : ''}${build.dirty ? ' (dirty — serving uncommitted code)' : ''} · process up since ${build.bootedAt}${clientMismatchNote}`}
-    >
-      {commitLabel ?? `v${build.version}`} · up {bootLabel}
-    </span>
-  );
 }
 
 // Memoized (tab-switch CPU): the top bar takes no props — every update it shows arrives via

@@ -59,6 +59,7 @@ from agents_remember.serving.heap_diag import (
     trim_malloc,
 )
 from agents_remember.serving.projections.host_activity import UsageReadPort
+from agents_remember.serving.server_registry import register_server
 
 if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
@@ -443,6 +444,7 @@ def _serving_lifespan(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        unregister = register_server(runtime.config, "dashboard")
         # This is the preview's own read-only preparation, not the live host's agent
         # warmup. It starts before projection priming and shares the catalog's lock.
         preparation = (
@@ -455,6 +457,7 @@ def _serving_lifespan(
             async with serving(app):
                 yield
         finally:
+            unregister()
             runtime.stream_shutdown.uninstall()
             if preparation is not None:
                 preparation.cancel()

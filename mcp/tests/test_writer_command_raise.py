@@ -19,14 +19,14 @@ from agents_remember.worktrees.worktree_contract import load_contract
 from knowledge_writer_test_support import BASE_INVARIANT, build_world, tree_bytes
 from reconsideration_test_support import _config
 
-NO_SETTINGS = "no trusted settings file is found at or above"
+NO_SETTINGS = "no trusted settings file is found in the user config directory"
 GUARD = "the checkout guard refuses settings to an undeclared run from the primary checkout"
 UNREADABLE = "cannot be loaded"
 OTHER_ROOT = "name coordination root"
 
 DECISION_ID = "DEC-CA5E01"
 SUBJECT = f"reconsider:{DECISION_ID}#1"
-SETTINGS = Path(".claude") / "mcp" / "agents-remember-settings.json"
+SETTINGS = Path("config/agents-remember/agents-remember-settings.json")
 
 
 def _decision() -> str:
@@ -108,10 +108,11 @@ def test_no_trusted_settings_at_or_above_the_working_directory(
     world = build_world(tmp_path / "world")
     list_path, _rows = _prepare(world, tmp_path)
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     before = tree_bytes(world.memory)
     code, text = _run(world, list_path, capsys)
     assert code == 1
-    _assert_names_the_mounted_route(world, list_path, text, f"{NO_SETTINGS} {tmp_path}")
+    _assert_names_the_mounted_route(world, list_path, text, NO_SETTINGS)
     assert tree_bytes(world.memory) == before
 
 
@@ -124,6 +125,7 @@ def test_the_checkout_guard_refuses_settings_to_an_undeclared_primary_checkout(
     settings.parent.mkdir(parents=True)
     settings.write_text(json.dumps({"coordinationRoot": str(tmp_path)}), encoding="utf-8")
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
     def refuse() -> None:
         raise CheckoutCoordinationError("undeclared run refused")
@@ -145,6 +147,7 @@ def test_a_settings_file_that_cannot_be_loaded(
     settings.parent.mkdir(parents=True)
     settings.write_text(json.dumps({"coordinationRoot": str(tmp_path)}), encoding="utf-8")
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     before = tree_bytes(world.memory)
     code, text = _run(world, list_path, capsys)
     assert code == 1
@@ -162,6 +165,7 @@ def test_settings_for_another_coordination_root_keep_both_roots_and_the_file(
     settings.parent.mkdir(parents=True)
     settings.write_text(json.dumps({"coordinationRoot": str(tmp_path)}), encoding="utf-8")
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setattr(knowledge_write_route, "load_config", lambda _path: other)
     before = tree_bytes(world.memory)
     code, text = _run(world, list_path, capsys)
@@ -180,6 +184,7 @@ def test_the_batch_without_the_raise_row_commits(
     world = build_world(tmp_path / "world")
     list_path, rows = _prepare(world, tmp_path)
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     list_path.write_text(json.dumps({"history": rows[1:]}), encoding="utf-8")
     code, text = _run(world, list_path, capsys)
     assert code == 0, text
@@ -249,10 +254,11 @@ def test_the_mounted_route_publishes_the_raise_the_command_refuses(
 
     published.clear()
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     before = tree_bytes(world.memory)
     code, text = _run(world, list_path, capsys)
     assert code == 1
-    _assert_names_the_mounted_route(world, list_path, text, f"{NO_SETTINGS} {tmp_path}")
+    _assert_names_the_mounted_route(world, list_path, text, NO_SETTINGS)
     assert published == [], published
     assert tree_bytes(world.memory) == before
 

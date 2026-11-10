@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest import mock
 
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving import _app_lifespan as serving
 from agents_remember.serving._app_common import _ServingRuntime
 from agents_remember.serving.stream_shutdown import StreamShutdown
@@ -50,7 +51,12 @@ class CatalogPreparationLifetimeTests(unittest.IsolatedAsyncioTestCase):
         return cast(
             _ServingRuntime,
             SimpleNamespace(
-                config=SimpleNamespace(coordination_root=self.root),
+                config=McpRuntimeConfig(
+                    config_path=self.root / "settings.json",
+                    coordination_root=self.root,
+                    workspace_root=self.root / "projects",
+                    transcript_root=self.root / "logs",
+                ),
                 observer_root=self.root,
                 projector=SimpleNamespace(
                     close_readiness=mock.Mock(),

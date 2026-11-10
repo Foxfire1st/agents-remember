@@ -103,7 +103,7 @@ class Lines:
         """Commit on the official line, attributed to a code commit that moved with it."""
 
         code = self.fixture.code_repo
-        moves = len(git(code, "rev-list", "main").split())
+        moves = len(git(code, "rev-list", self.fixture.source_branch).split())
         code_tip = commit_files(code, {"src/moved.py": f"MOVES = {moves}\n"}, "code moves")
         return _commit(self.line, files, render_memory_content_message(message, code_tip))
 
@@ -134,10 +134,12 @@ def _commit(root: Path, files: dict[str, bytes | None], message: str) -> str:
     return git(root, "rev-parse", "HEAD")
 
 
-def _unconverted_line(tmp_path: Path) -> tuple[SyncFixture, CodeFixture]:
+def _unconverted_line(
+    tmp_path: Path, *, source_branch: str = "main"
+) -> tuple[SyncFixture, CodeFixture]:
     """The official memory line holding the conversion fixture's unconverted memory."""
 
-    fixture = SyncFixture(tmp_path, converted=False)
+    fixture = SyncFixture(tmp_path, converted=False, source_branch=source_branch)
     code = fixture.code_repo
     first = commit_files(
         code,
@@ -168,8 +170,8 @@ def _unconverted_line(tmp_path: Path) -> tuple[SyncFixture, CodeFixture]:
     return fixture, held
 
 
-def _converted_lines(tmp_path: Path) -> Lines:
-    fixture, code = _unconverted_line(tmp_path)
+def _converted_lines(tmp_path: Path, *, source_branch: str = "main") -> Lines:
+    fixture, code = _unconverted_line(tmp_path, source_branch=source_branch)
     outcome = convert_memory(
         memory_from_directory(fixture.memory_repo), CodeObjects(code.root), paired_commit=code.head
     )

@@ -136,7 +136,12 @@ def test_benchmark_preparation_discovers_package_skills_without_installing_copie
             text=True,
         ).stdout.strip()
         assert actual == commit
-    assert (memory / "ar-coordination/AGENTS.md").is_file()
+    coordination = memory / "ar-coordination"
+    assert not {
+        path.relative_to(coordination).as_posix()
+        for path in coordination.rglob("AGENTS.md")
+        if path.is_file()
+    }
     assert not (root / "source-only/.codex").exists()
     assert not list(root.rglob("skills")), "preparation must not install any skill tree"
     registration = tomllib.loads((memory / ".codex" / "config.toml").read_text(encoding="utf-8"))

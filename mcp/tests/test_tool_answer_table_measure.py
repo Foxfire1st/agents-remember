@@ -14,6 +14,7 @@ from typing import Any
 from unittest import mock
 
 import agents_remember.application.tool_answer_log as tool_log_module
+import agents_remember.application.tool_response as tool_response_module
 from agents_remember.application.tool_answer_log import (
     TOOL_LOG_BASENAME_PREFIX,
     LineRequest,
@@ -62,23 +63,63 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
         return json.loads(files[0].read_text(encoding="utf-8").splitlines()[-1])
 
     def test_exact_edge_answer_guarded_by_its_log_location(self) -> None:
+        bound = bound_for("memory_quality_check")
+        whole: dict[str, Any] = {"ok": True, "blob": ""}
+        # Measure every candidate; repeated-text token counts need not be monotone.
+        for size in range(bound + 1):
+            whole["blob"] = " x" * size
+            if count_response_tokens(whole) == bound:
+                break
+        self.assertEqual(count_response_tokens(whole), bound, "no exact-bound fixture")
+        self.assertLessEqual(count_response_tokens(whole), bound)
         with tempfile.TemporaryDirectory() as tmp:
-            coord = Path(tmp)
-            bound = bound_for("memory_quality_check")
-            whole = {"ok": True, "blob": ""}
-            size = 0
-            while not bound - 40 <= count_response_tokens(whole) <= bound - 5:
-                size += 64
-                whole["blob"] = "x" * size
-            self.assertLessEqual(count_response_tokens(whole), bound)
-            answer, seen = self._complete(coord, "memory_quality_check", whole)
-            delivered = count_response_tokens(answer)
-            self.assertTrue(answer.get("overflow"))
-            self.assertLessEqual(delivered, TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
-            (line,) = [self._read_line(coord)]
-            self.assertEqual(line["answerTokens"], delivered)
-            self.assertTrue(line["guardCut"])
-            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
+            for relative in ("", "deeper-log-location/inside-this-owned-test"):
+                coord = Path(tmp) / relative
+                with (
+                    self.subTest(relative=relative),
+                    mock.patch.object(
+                        tool_response_module,
+                        "_apply_answer_guard",
+                        wraps=tool_response_module._apply_answer_guard,
+                    ) as guard,
+                ):
+                    answer, seen = self._complete(coord, "memory_quality_check", whole)
+                    call = guard.call_args_list[0]
+                    precut = call.args[0]
+                    location = call.kwargs["log"]
+                    self.assertIsInstance(location, str)
+                    self.assertTrue(Path(location).is_file())
+                    self.assertIsNone(call.kwargs["log_error"])
+                    self.assertEqual(precut, {**whole, "log": location})
+                    self.assertEqual(call.kwargs["final_tokens"], count_response_tokens(precut))
+                    self.assertGreater(call.kwargs["final_tokens"], bound)
+                    self.assertEqual(json.loads(Path(location).read_text())["blob"], whole["blob"])
+                    delivered = count_response_tokens(answer)
+                    self.assertTrue(answer.get("overflow"))
+                    self.assertLessEqual(delivered, TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
+                    (line,) = [self._read_line(coord)]
+                    self.assertEqual(line["answerTokens"], delivered)
+                    self.assertTrue(line["guardCut"])
+                    self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
+                    print(
+                        json.dumps(
+                            {
+                                "phase": "exact-bound-actual-operands",
+                                "relative": relative,
+                                "bareTokens": count_response_tokens(whole),
+                                "blobLength": len(whole["blob"]),
+                                "blobUnit": " x",
+                                "bound": bound,
+                                "actualPrecutTokens": call.kwargs["final_tokens"],
+                                "actualLog": location,
+                                "logError": call.kwargs["log_error"],
+                                "line": line,
+                                "deliveredTokens": delivered,
+                                "observerTokens": seen[-1][1]["delivered_tokens"],
+                            },
+                            sort_keys=True,
+                        )
+                    )
 
     def test_ordinary_answer_observer_matches_delivered(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

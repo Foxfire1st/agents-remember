@@ -4,11 +4,6 @@ from pathlib import Path
 
 from agents_remember.models.benchmarks import CODEX_BENCHMARK_SANDBOX
 
-AGENTS_MD_TARGETS = {
-    Path("runtime/agents-md-files/coordinator/AGENTS.md"): Path("AGENTS.md"),
-    Path("runtime/agents-md-files/system/AGENTS.md"): Path("system/AGENTS.md"),
-    Path("runtime/agents-md-files/tasks/AGENTS.md"): Path("tasks/AGENTS.md"),
-}
 PROVIDER_ASSET_DIRS = (Path("requirements"), Path("patches"))
 BENCHMARK_PROVIDER_IDS = ("grepai-memory", "codegraphcontext-code")
 

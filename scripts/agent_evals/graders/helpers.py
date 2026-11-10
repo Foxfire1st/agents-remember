@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
+from ..adapters.helper_wait import TERMINAL_HELPER_STATUSES
 from ..adapters.models import NativeCapture, NativeEvent
 from .models import Grade, native_reference, referenced_events
 
@@ -64,7 +65,7 @@ def _host_helper(event: NativeEvent, owner: str) -> HelperEvent | None:
         if not all(
             isinstance(helper.get(key), str) and helper[key]
             for key in ("id", "status", "createdAt")
-        ):
+        ) or helper["status"] not in TERMINAL_HELPER_STATUSES | {"running"}:
             return None
         kind = "helper_running" if helper["status"] == "running" else "helper_stopped"
         return HelperEvent(event.sequence, kind, helper_id=helper["id"])
@@ -177,6 +178,7 @@ class _Wait:
 @dataclass(slots=True)
 class _State:
     running: set[str]
+    started: set[str]
     waits: list[_Wait]
     failures: list[str]
     unknowns: list[str]
@@ -236,7 +238,12 @@ def _observe(state: _State, fact: HelperEvent) -> None:
         if fact.helper_id is not None:
             if fact.kind == "helper_running":
                 state.running.add(fact.helper_id)
+                state.started.add(fact.helper_id)
             else:
+                if fact.helper_id not in state.started:
+                    state.unknowns.append(
+                        f"event {fact.sequence}: helper stop has no captured start: {fact.helper_id}"
+                    )
                 state.running.discard(fact.helper_id)
     elif fact.kind == "turn_end":
         state.turn_ends += 1
@@ -314,7 +321,7 @@ def grade_helpers(observation: HelperObservation) -> Grade:
     events, issues = referenced_events(
         observation.capture, [event.sequence for event in observation.capture.events]
     )
-    state = _State(set(), [], [], [*issues, *observation.capture.unknowns])
+    state = _State(set(), set(), [], [], [*issues, *observation.capture.unknowns])
     extracted: dict[int, HelperEvent] = {}
     for event in events:
         fact = _fact(event, observation.owner_id)

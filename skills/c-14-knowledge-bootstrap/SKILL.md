@@ -3,11 +3,13 @@ name: c-14-knowledge-bootstrap
 description: "Build or resume a repository's first knowledge foundation through the existing curator, as regular task work the user-started Architect organises: resolve the repository and its code/memory line, inventory bounded sources, hand the evidence to the curator, author invariants/families through the curator's own file writer on the task's leaf, read the result back, and report coverage and unresolved work."
 ---
 
-# c-14-knowledge-bootstrap Knowledge Bootstrap
+# Build or resume a knowledge foundation
+
+Use this procedure as the Curator assigned to a repository foundation task. The Architect arranges the task; you inventory its sources, author through the existing writer, read the result back and report both coverage and work not reached.
 
 A repository's memory has two halves that are created in different ways. Onboarding is **cards a
 seat writes**: overviews and file cards, scaffolded by the `c-03-repo-bootstrap` skill and maintained
-by `c-05-create-or-update-onboarding-files`. The knowledge foundation is **authored records, stored
+by [Curator card authoring](../l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md). The knowledge foundation is **authored records, stored
 as text files in the memory repository**: invariants, the families and guarantees that hold
 obligations together, decisions and the other record kinds under `knowledge/`, and the exact source
 realizations and proofs in the file sidecars. Nothing scaffolds that half. It is authored, and this
@@ -47,11 +49,9 @@ Architect organises.** That order is fixed: every clause below is one link of it
    onboarding and the knowledge state it read, and tells the developer to start the Architect. It
    neither reaches this procedure nor authors a record — see
    `skills/l-01-agent-lifecycles/operations/bootstrap.md` step 8 and its
-   `reference/bootstrap-foundation-d301.md`.
+   `reference/bootstrap/foundation-state.md`.
 2. **The developer starts the Architect**, the one next step setup names.
-3. **The Architect opens a task for the foundation** — one leaf with its task document, or a leaf under
-   a master, or under a sprint, according to the size of the work. That task owns the foundation's
-   making: its scope, its order and its completion are decided there, not in this skill.
+3. **The Architect opens a registered leaf for the foundation under a master, following the current planning rules.** That task owns the foundation's making: its scope, its order and its completion are decided there, not in this skill.
 4. **The curator authors the foundation inside that task**, started on the task's document through the
    ordinary launch route. Step 4's writer writes into the memory worktree that task's enclosure
    contract names, and the leaf's own closeout publishes it like any other memory change.
@@ -60,15 +60,9 @@ Architect organises.** That order is fixed: every clause below is one link of it
 curator's authoring seat is opened on a task document, and an instruction to author a repository's
 foundation "before any task exists" is reported as the missing task it names rather than improvised
 into an authorship. Reading and reporting the knowledge state before such a task exists stays with the
-bootstrap seat, where it is a fact about setup rather than a production route. A curator started from
-the dashboard has no task and therefore no authoring entry here: it reads and reports, and the writing
-happens once the Architect has opened the task the work belongs to.
+bootstrap seat, where it is a fact about setup rather than a production route. A Curator started from the dashboard still needs its selected sprint, master and leaf. Follow the [Curator’s task admission](../l-01-agent-lifecycles/roles/curator.md#bind-the-leaf-and-its-memory); starting without a parent does not remove the task requirement.
 
-**Collection and search assistance may be delegated; the authored result may not.** A curator may
-spawn read-only sub-agents to read source at exact revisions, search providers, or summarize declared
-external documents, and may accept evidence collected by another seat — but the semantic
-reconciliation, the record actions, the family guarantees and the memberships are authored by the
-curator, and the curator's hand-off list is the only thing handed to the writer.
+Use helpers under the [Curator’s work-organization rules](../l-01-agent-lifecycles/roles/curator.md#organise-helpers-within-the-assignment). For the foundation, the Curator authors the reconciliation, the record actions, the family guarantees and the memberships. Only the Curator’s hand-off list goes to the writer.
 
 ## Inputs
 
@@ -152,10 +146,10 @@ The reconciliation is the substance of the run, and it is the curator's:
 - **external documents** are never written as a repository path with a Git blob;
 - **existing records are reused or revised, not duplicated.** Text that matches is not an identity
   rule; a correction names the stored record's ID and updates it;
-- **admission** for every new invariant, family and decision (MIK-R27): the criterion it meets and a
+- **admission** for every new invariant, family and decision: the criterion it meets and a
   one-sentence justification, as below.
 
-**Admission (MIK-R27).** A foundation is a small set of meaningful records, not a second test suite
+**Admission.** A foundation is a small set of meaningful records, not a second test suite
 written as prose. Each new invariant claims `spans_locations` (realized in more than one file),
 `guarded_by_test` (a proof entry names it), `family_guarantee` or `prevents_costly_mistake` (naming
 the costly error); a family claims `joint_guarantee`; a decision claims `real_alternatives` or
@@ -163,8 +157,7 @@ the costly error); a family claims `joint_guarantee`; a decision claims `real_al
 criterion, with `legacy-unassessed` (the export's mark), with a justification made only of task,
 leaf, requirement or ruling (`D14`) references, commit hashes and provenance words ("Per ruling
 D14", "Added in commit a4eba7b7"), or with a `spans_locations` or `guarded_by_test` claim its
-entries do not support. An exported record (its `legacyId` derives its ID) or an already-stored
-record is only reported. A statement that meets no criterion is not a record: it stays prose in the
+entries do not support. Existing and exported records are judged by [worklist and gate response blocks](../l-01-agent-lifecycles/reference/curator/worklist.md#worklist-and-gate-response-blocks): `R27.2-existing-record` refuses; `R27.4-legacy-unassessed` is migration debt. A statement that meets no criterion is not a record: it stays prose in the
 onboarding Markdown under "Boundaries". A code change alone is never a reason. The reviewer judges
 whether each justification is plausible.
 
@@ -179,8 +172,7 @@ whether each justification is plausible.
 - *Refused:* an invariant claiming `guarded_by_test` "because test_direct_landing covers it" while
   no proof entry names it: add the proof, or claim a criterion that holds.
 
-The full rule, with the checked and the judged criteria, is in the hand-off template's "The
-admission rule (MIK-R27)" section.
+For the complete checked and judged criteria, apply [admission of new records](../l-01-agent-lifecycles/templates/curator-handoff-ingestion.md#admission-of-new-records) in the handoff template.
 
 Where code contradicts accepted intent, **preserve the intent and record the contradiction** rather
 than quietly rewriting either half.
@@ -202,17 +194,21 @@ the developer's commit word.
 The writer is the curator file writer, reached by the shipped command line, and the run happens on the
 task the Architect opened for this foundation. `--contract` is that task's leaf enclosure contract: the
 run reads the code worktree and writes the memory worktree the contract names, so no argument list can
-aim a knowledge write at another line. Plan first:
+aim a knowledge write at another line. Bind `AR_SERVING_PYTHON` and `AR_SERVING_PARENT` through
+[Knowledge commands](../l-01-agent-lifecycles/reference/knowledge/commands.md) before either CLI call.
+Plan first:
 
 ```text
-agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <hand-off list>
+PYTHONPATH="$AR_SERVING_PARENT" "$AR_SERVING_PYTHON" -P -m agents_remember.cli \
+    knowledge-ingest --contract <this leaf's enclosure contract> --list <hand-off list> \
     --authorization-ref <ref> --json
 ```
 
 Then, with the developer's commit word, the same call writes:
 
 ```text
-agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <hand-off list>
+PYTHONPATH="$AR_SERVING_PARENT" "$AR_SERVING_PYTHON" -P -m agents_remember.cli \
+    knowledge-ingest --contract <this leaf's enclosure contract> --list <hand-off list> \
     --authorization-ref <ref> --commit --json
 ```
 
@@ -277,9 +273,9 @@ list on the same task writes the same files with the same IDs, so a resumed run 
 work. A run that did not examine a required area **cannot claim the foundation complete for it**. A
 tree with no records, a refused run, or an exit status of zero is not a populated foundation.
 
-### 7. A weakness met while reading a file is recorded in the same step (MIK-R118 rule 8)
+### 7. Record a weakness when you encounter it while reading
 
-The full migration of MIK-R19 reads every file of the code, and this procedure reads a bounded part
+The full legacy migration reads every file of the code, and this procedure reads a bounded part
 of it. **Whatever the run reads, a weakness it meets in that file is recorded in the same step**, as
 a `WKN-` record of kind `context`, `compute`, `storage`, `time`, `fault` or `debt`, on the file and
 the symbol where it occurs, with one sentence and any measurement the reader took. The author is the
@@ -300,7 +296,7 @@ and its absence from a file is not an omission. A run that meets none records no
 | The enclosure contract cannot be loaded, or names no leaf | the refusal the command prints | Report it and stop: `--contract` is the write guard, so a contract that cannot be loaded writes nothing. No other destination and no invented enclosure is substituted. |
 | The memory worktree is in the legacy format (`legacy-format`) | the refusal the command prints | Report it. Conversion (`agents-remember knowledge-convert`) is its own step and the developer's decision. **Nothing was written.** |
 | The writer refused the list | the report: `state: refused`, with every problem named | For faulty input, correct the list and run the same tool again. For a correct-input write refusal, follow step 4's same-tool procedure. The refused run wrote nothing; any subsequent manual write has separate provenance. |
-| A run was interrupted, or a later run is narrower than an earlier one | the leaf's history file and the records in the tree | Resume on the same task with the same list. A rerun of the same list writes the same files with the same IDs and does not duplicate records. A rerun removes the sidecar entries this run wrote earlier from an entry the list no longer names, and reports them `removed`. |
+| A run was interrupted, or a later run is narrower than an earlier one | the leaf's history file and the records in the tree | Resume on the same task with the same list. A rerun of the same list writes the same files with the same IDs and does not duplicate records. For each supplied handoff entry, a rerun removes omitted targets/proofs written earlier by the same task/wave and handoff entry, reporting them `removed`. Omitting a whole handoff entry performs no cleanup. |
 | A moved input revision | the code revision the admission bound, against the checkout | A moved source is an explicit new observation, not a silent reuse: re-observe and decide. Anchors are resolved at the revision the run was admitted on. |
 | A missing optional source | the source inventory | Absent, not failed. It becomes no fact. |
 
@@ -337,8 +333,8 @@ and its absence from a file is not an omission. A run that meets none records no
 | `c-03-repo-bootstrap` | Builds onboarding. Its handoff names the knowledge foundation as this skill's step in both directions: onboarding is optional input here, and this procedure does not write onboarding. |
 | `c-00-initialize-memory-repo` | Creates or repairs the memory root. `memory_init` creates a new memory root in the text format (it writes `knowledge/layout.json`) and reports whether the bootstrap context is admitted — part of the state step 1 reads. It creates no knowledge and never pretends to. |
 | `c-10-adopt-memory-baseline` | Commits memory *content* as the first attributed baseline. A baseline is not a knowledge foundation: neither substitutes for the other, and this procedure neither adopts a baseline nor claims one. |
-| `c-05-create-or-update-onboarding-files` | Owns onboarding content. The curator writes onboarding there, and authors the foundation here. |
-| `c-05-create-or-update-onboarding-files` | The complete curation operation the curator runs around its work; the foundation's authored records are not a substitute for it, and it is not a substitute for authoring them. |
+| [Curator card authoring](../l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md) | Owns onboarding content. The curator writes onboarding there, and authors the foundation here. |
+| [Curation operation](../l-01-agent-lifecycles/operations/curation.md) | The complete curation operation the Curator runs around its work; the foundation’s authored records are not a substitute for it, and it is not a substitute for authoring them. |
 | `l-01-agent-lifecycles` | Houses the carriers: `skills/l-01-agent-lifecycles/roles/curator.md` and `skills/l-01-agent-lifecycles/operations/curation.md` (the semantic owner and its authoring route), and `skills/l-01-agent-lifecycles/roles/bootstrap.md` and `skills/l-01-agent-lifecycles/operations/bootstrap.md` (the first-hour seat, which reads the knowledge state, reports it and hands its making to the Architect). |
 | `templates/curator-handoff-list.md` | The shape the hand-off list is authored in. This skill names the shape; that template owns it. |
 

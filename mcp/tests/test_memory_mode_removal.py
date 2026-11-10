@@ -958,24 +958,19 @@ CORRECTED_SURFACES: tuple[tuple[str, tuple[str, ...], str], ...] = (
         "Removed-layout note",
     ),
     (
-        "skills/c-08-ar-coordination-context-resolver/SKILL.md",
-        ("using repo-local internal memory or selected external memory",),
-        "only supported topology",
-    ),
-    (
         "skills/c-03-repo-bootstrap/templates/bootstrap-state-template.md",
         ("internal / external / mixed",),
-        "external / mixed",
+        "| topology | external |",
     ),
     (
         "skills/c-03-repo-bootstrap/templates/cross-repo-boundary-pack-template.md",
         ("internal / external / mixed",),
-        "external / mixed",
+        "| topology | external |",
     ),
     (
         "skills/c-03-repo-bootstrap/templates/bootstrap-input-ledger-template.md",
         ("internal / external / mixed",),
-        "external / mixed",
+        "| topology | external |",
     ),
     (
         "docs/architecture.md",

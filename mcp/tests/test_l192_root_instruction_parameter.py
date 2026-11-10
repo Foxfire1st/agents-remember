@@ -9,8 +9,7 @@ here -- reads every ``context_packet(...)`` example out of the root instruction 
 any example naming a parameter the request does not admit. It fails on the pre-repair bytes, where
 ``include_providers`` appears in the example.
 
-The coordinator variant under ``agents-md-files/`` is read too when it carries such an example: it
-must satisfy the same rule.
+The retired coordinator templates are absent; the source checkout instruction remains checked.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ from pathlib import Path
 from agents_remember.application.context_packet import ContextPacketRequest
 
 ROOT = Path(__file__).resolve().parents[2]
-INSTRUCTION_FILES = (ROOT / "AGENTS.md", ROOT / "agents-md-files" / "coordinator" / "AGENTS.md")
+INSTRUCTION_FILES = (ROOT / "AGENTS.md",)
 CALL = re.compile(r"context_packet\(([^)]*)\)")
 NAME = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*=")
 

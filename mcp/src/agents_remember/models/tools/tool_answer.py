@@ -245,6 +245,8 @@ RUNTIME_INSTALL_ANSWER_FIELDS = frozenset(
         "dryRun",
         "experiment",
         "host",
+        "runningServers",
+        "dashboard",
         "includeBenchmarks",
         "installProviderDeps",
         "summary",
@@ -436,6 +438,8 @@ def _fixed_short_part(
         short["ok"] = answer["ok"]
     if "code" in answer:
         short["code"] = answer["code"] if is_valid_tool_code(answer["code"]) else "invalid-code"
+    if "buildCurrentness" in answer:
+        short["buildCurrentness"] = answer["buildCurrentness"]
     short["overflow"] = True
     short["answerTokens"] = answer_tokens
     return short
@@ -643,6 +647,7 @@ FRAMEWORK_ANSWER_KEYS = frozenset(
         "answerTokens",
         "droppedFields",
         "errorCut",
+        "buildCurrentness",
     }
 )
 

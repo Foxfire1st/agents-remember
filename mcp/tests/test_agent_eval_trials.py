@@ -601,9 +601,8 @@ class TrialCommandTests(unittest.TestCase):
                 self.assertFalse(report["textDelivery"]["received"])
 
     def test_both_models_receive_production_pointers_from_each_real_captured_arm(self) -> None:
-        rows = read_object(Path(__file__).parent / "fixtures/text-delivery-pointer-artifacts.json")[
-            "rows"
-        ]
+        fixture = Path(__file__).parent / "fixtures/text-delivery-pointer-artifacts.json"
+        rows = read_object(fixture)["rows"]
         for row in rows:
             for model in ("codex", "hermes"):
                 with (
@@ -657,6 +656,7 @@ class TrialCommandTests(unittest.TestCase):
                     self.assertTrue(report["textDelivery"]["received"])
                     self.assertEqual(report["unknowns"], [])
                     self.assertTrue(report["textDetailReads"]["observationOnly"])
+                    self.assertEqual(report["textDetailReads"]["diagnostics"], [])
                     details = report["textPointerDelivery"]["details"]
                     self.assertEqual(len(details), len(row["entry"]["details"]))
                     for phase in ("Before", "After"):

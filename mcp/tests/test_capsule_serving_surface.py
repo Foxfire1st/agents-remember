@@ -75,9 +75,20 @@ def test_the_shipped_corpus_parses_and_every_served_skill_has_a_root_revision() 
 
     catalog = skill_catalog_registry()
     assert catalog.unreadable == ()
-    # MIK-R196 rule 8 retired five skills into kept workflows, so the shipped corpus is smaller;
-    # the floor follows the authored tree rather than the pre-retirement count.
-    assert len(catalog.entries) >= 10
+    # The served, canonical and packaged trees carry these six retained skills.
+    expected_names = {
+        "c-00-initialize-memory-repo",
+        "c-03-repo-bootstrap",
+        "c-10-adopt-memory-baseline",
+        "c-13-install-and-onboard",
+        "c-14-knowledge-bootstrap",
+        "l-01-agent-lifecycles",
+    }
+    assert {entry.name for entry in catalog.entries} == expected_names
+    assert len(catalog.entries) == len(expected_names)
+    packaged_skills = SHIPPED_SKILLS.parent / "mcp/src/agents_remember/package_data/runtime/skills"
+    for root in (SHIPPED_SKILLS, packaged_skills):
+        assert {path.parent.name for path in root.glob(f"*/{SKILL_ROOT_FILE}")} == expected_names
     for entry in catalog.entries:
         root = entry.root
         assert root is not None, entry.name
@@ -548,19 +559,17 @@ def test_altitude_admission_admits_every_role_the_document_can_carry_and_refuses
             continue
         admitted.append(role)
     assert admitted == ["worker", "curator", "reviewer"]
-    # The rest are refused: four need a sprint, one needs a master, and ``bootstrap``
+    # The rest are refused: three need a sprint, one needs a master, and ``bootstrap``
     # carries no structural task altitude at all -- it is the seat a workspace reaches
     # before a task document exists.
     assert refused == [
         "architect",
         "orchestrator",
-        "designer",
-        "strategist",
         "manager",
         "investigator",
         "bootstrap",
     ]
-    # A role outside the frozen ten is refused as unsupported, not as a wrong altitude.
+    # A role outside the frozen eight is refused as unsupported, not as a wrong altitude.
     with pytest.raises(Exception) as raised:
         topology.validate_role(ref, "not-a-role")
     assert "no structural task altitude" in str(raised.value)

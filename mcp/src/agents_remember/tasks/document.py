@@ -86,7 +86,7 @@ DocKind = Literal["light", "subTask", "master"]
 # The structural task altitude per role. Reviewer is deliberately polymorphic across the three
 # review seams; SprintSeat admits it in addition to the ordinary sprint roles. ``document_refs``
 # re-exports these constants for its altitude checks, so their canonical home is here.
-SPRINT_ROLES = frozenset({"architect", "orchestrator", "strategist", "designer", "investigator"})
+SPRINT_ROLES = frozenset({"architect", "orchestrator", "investigator"})
 MASTER_ROLES = frozenset({"manager"})
 LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
 REVIEWER_ALTITUDES = frozenset({"sprint", "master", "leaf"})

@@ -84,8 +84,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--config",
         default=None,
-        help="Path to the MCP authority settings file. Omit to use the umbrella CLI's trusted "
-        "settings discovery from the current directory.",
+        help="Path to the MCP authority settings file. Omit to use the user settings file "
+        "~/.config/agents-remember/agents-remember-settings.json "
+        "(under XDG_CONFIG_HOME when set), whatever the current directory.",
     )
     parser.add_argument(
         "--wave",
@@ -119,9 +120,7 @@ def _settings(args: argparse.Namespace) -> McpRuntimeConfig | str:
     """The MCP authority settings path this invocation resolved, or the reason it could not."""
 
     try:
-        return load_config(
-            require_config_path(args.config) if args.config else discover_config(Path.cwd())
-        )
+        return load_config(require_config_path(args.config) if args.config else discover_config())
     except ConfigDiscoveryError as error:
         return (
             f"no MCP authority settings could be resolved ({error}); pass --config with the "

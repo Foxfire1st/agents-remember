@@ -740,7 +740,7 @@ def _converted_adopt_gate(
     if int(drift_info.get("actionableCount") or 0) and not accept_drift:
         payload["message"] = (
             "actionable drift blocks adoption; refresh onboarding with the "
-            "c-05-create-or-update-onboarding-files skill or rerun with --accept-drift"
+            "l-01-agent-lifecycles Curator procedure or rerun with --accept-drift"
         )
         return 2, payload
     return None
@@ -862,7 +862,7 @@ def add_common(parser: argparse.ArgumentParser) -> None:
         help="Optional topology override. `external` is the only supported topology.",
     )
     parser.add_argument("--coordination-root", type=Path, help="Optional coordination root.")
-    parser.add_argument("--report", type=Path, help="Optional c-05 drift report path.")
+    parser.add_argument("--report", type=Path, help="Optional drift report path.")
 
 
 def build_parser() -> argparse.ArgumentParser:

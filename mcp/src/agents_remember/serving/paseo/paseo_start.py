@@ -25,6 +25,7 @@ from agents_remember.serving.paseo.paseo_command import (
     run_command,
 )
 from agents_remember.serving.paseo.paseo_daemon import is_running
+from agents_remember.serving.paseo.paseo_harness_homes import harness_home_status
 from agents_remember.serving.paseo.paseo_lock import runtime_lock
 from agents_remember.serving.paseo.paseo_node import node_executable_valid, node_status
 from agents_remember.serving.paseo.paseo_process_record import (
@@ -97,7 +98,11 @@ def observe_host(
         return settings
     return _observe(
         settings,
-        PaseoCli(settings, _bounded_runner(runner, time.monotonic() + STATUS_TIMEOUT_SECONDS)),
+        PaseoCli(
+            settings,
+            _bounded_runner(runner, time.monotonic() + STATUS_TIMEOUT_SECONDS),
+            reader=reader,
+        ),
         reader,
     )
 
@@ -105,7 +110,13 @@ def observe_host(
 def _observe(
     settings: PaseoRuntimeSettings, cli: PaseoCli, reader: ProcessReader
 ) -> HostObservation:
-    base: dict[str, Any] = {"home": settings.home.as_posix(), "version": None, "listen": None}
+    base: dict[str, Any] = {
+        "home": settings.home.as_posix(),
+        "version": None,
+        "listen": None,
+        "inheritedHarnessHomes": "unknown",
+        "harnessHomeRemedy": None,
+    }
     try:
         record = inspect_record(settings.home, "status", reader)
         base["staleRecord"] = record.as_payload()
@@ -113,6 +124,7 @@ def _observe(
         facts = reader(record.pid) if record.pid is not None and record.kind == "own" else None
         base["sessionVariables"] = list(facts.session_variables) if facts else []
         base["nodeExecutable"] = facts.node_executable if facts else None
+        base.update(harness_home_status(settings, facts))
         if record.kind == "own":
             status = cli.json("status", "daemon", "status", "--json")
             if not is_running(status) or not status.get("daemonVersion"):
@@ -157,6 +169,9 @@ def _line(state: str, settings: PaseoRuntimeSettings, facts: dict[str, Any]) -> 
     if facts.get("sessionVariables"):
         line += f"; carried session variables: {', '.join(facts['sessionVariables'])}; "
         line += "remove them with paseo stop and a new start when you choose"
+    if facts.get("harnessHomeRemedy"):
+        line += f"; inherited harness homes: {', '.join(facts['inheritedHarnessHomes'])}; "
+        line += facts["harnessHomeRemedy"]
     if settings.version_notice:
         line += f"; {settings.version_notice}"
     line += _remedy_line(state, settings, facts)
@@ -198,7 +213,7 @@ def ensure_host(
         return settings
     entered = time.monotonic()
     deadline = entered + START_TIMEOUT_SECONDS
-    cli = PaseoCli(settings, _bounded_runner(runner, deadline))
+    cli = PaseoCli(settings, _bounded_runner(runner, deadline), reader=reader)
     observed = _observe(settings, cli, reader)
     if observed.state not in {"not running", "not answering"}:
         return observed

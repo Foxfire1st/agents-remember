@@ -25,7 +25,11 @@ from agents_remember.models.role_capsules.types import (
     CapsuleDetailReference,
     compute_content_digest,
 )
-from agents_remember.serving.capsule_delivery import CapsuleBindingIdentity, CapsuleDelivery
+from agents_remember.serving.capsule_delivery import (
+    CapsuleBindingIdentity,
+    CapsuleDelivery,
+    CapsuleInstructionOrigin,
+)
 from agents_remember.tasks import write_task_doc
 
 
@@ -49,12 +53,20 @@ def leaf_preparation(monkeypatch: pytest.MonkeyPatch):
         )
         delivery = capsule.delivery
         assert delivery is not None
+        extra = "\nRead {{detail:reference/worker-fixture.md}}."
         return replace(
             capsule,
             delivery=replace(
                 delivery,
-                trusted_instructions=delivery.trusted_instructions
-                + "\nRead {{detail:reference/worker-fixture.md}}.",
+                trusted_instructions=delivery.trusted_instructions + extra,
+                instruction_origins=(
+                    *delivery.instruction_origins,
+                    CapsuleInstructionOrigin(
+                        "reference/worker-fixture.md",
+                        len(delivery.trusted_instructions),
+                        len(delivery.trusted_instructions) + len(extra),
+                    ),
+                ),
                 semantic_digest=compute_content_digest(detail.content),
                 detail_references=(*delivery.detail_references, detail),
             ),

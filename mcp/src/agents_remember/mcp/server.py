@@ -29,6 +29,7 @@ from agents_remember.application.tool_answer_log import (
     resolve_log_roots,
     tool_call_context,
 )
+from agents_remember.application.tool_build_currentness import tool_build_currentness
 from agents_remember.canvas.explainer_answers import refusal
 from agents_remember.canvas.explainer_binding import LaunchedSeat, require_launched_seat
 from agents_remember.canvas.explainer_state import ExplainerRefused
@@ -40,7 +41,10 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     load_config,
 )
+from agents_remember.serving.build_currentness import build_currentness
+from agents_remember.serving.server_registry import register_server
 
+from .build_staleness import is_stale_build_write, stale_build_refusal
 from .compact_content import install_compact_content
 from .read_only import apply_read_only_marks
 from .registration import TOOL_REGISTRARS
@@ -111,7 +115,25 @@ class AgentsRememberMCP(FastMCP):
                 if not_this_seat is not None:
                     return not_this_seat
             try:
-                return await self._dispatch_tool(name, arguments)
+                reading = (
+                    await asyncio.to_thread(build_currentness, config)
+                    if config is not None
+                    else None
+                )
+                with tool_build_currentness(reading):
+                    if (
+                        reading is not None
+                        and reading.mode == "installed"
+                        and reading.state == "stale"
+                    ):
+                        tool = self._tool_manager.get_tool(name)
+                        if tool is not None:
+                            admitted = tool.fn_metadata.arg_model.model_validate(
+                                arguments
+                            ).model_dump()
+                            if is_stale_build_write(name, admitted):
+                                return await asyncio.to_thread(stale_build_refusal, name, reading)
+                    return await self._dispatch_tool(name, arguments)
             except Exception as error:
                 _log_raised_tool_call(name, arguments, config, error)
                 raise
@@ -303,7 +325,11 @@ def create_server(config: McpRuntimeConfig) -> Any:
 
 
 def run_server(config: McpRuntimeConfig) -> None:
-    create_server(config).run()
+    cleanup = register_server(config, "mcp")
+    try:
+        create_server(config).run()
+    finally:
+        cleanup()
 
 
 def main(argv: list[str] | None = None) -> int:

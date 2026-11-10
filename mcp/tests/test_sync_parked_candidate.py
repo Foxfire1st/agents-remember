@@ -45,6 +45,7 @@ from agents_remember.worktrees.sync_transaction_state import (
     SyncSideRecord,
 )
 from agents_remember.worktrees.worktree_contract import load_contract
+from agents_remember_test_support.testing.memory_orphan_checkpoint import MemoryOrphanCheckpoint
 from test_review_result_blocks_through_real_tools import (
     _config as _review_sync_config,
 )
@@ -2123,63 +2124,11 @@ class KilledProcessCancelTests(unittest.TestCase):
         return fixture
 
     def test_killed_after_memory_park_adopts_orphan_and_retains(self) -> None:
-        """W2m: a death after the memory stash push adopts the memory orphan.
-
-        The memory orphan is adopted exactly like the code one — clean tree,
-        exact contract message, stash parent the pinned head — and the sync
-        proceeds; the adopted stash stays journaled until it is restored and
-        no byte is lost.
-        """
-
-        holders: list = []
-        try:
-            fixture = None
-            for _ in range(3):
-                holder = tempfile.TemporaryDirectory()
-                holders.append(holder)
-                candidate = self._memory_wip_fixture(holder.name)
-                memory_worktree = candidate.contract.memory_worktree
-                assert memory_worktree is not None
-                pid = self._fork_sync_child(candidate.sync)
-                if not self._window_open(
-                    lambda memory_worktree=memory_worktree, candidate=candidate: (
-                        "parked memory WIP" in git(memory_worktree, "stash", "list")
-                        and git(memory_worktree, "status", "--porcelain") == ""
-                        and self._journal(candidate) is None
-                    ),
-                    pid,
-                    120,
-                ):
-                    self._reap(pid)
-                    continue
-                self._kill_group(pid)
-                fixture = candidate
-                break
-            assert fixture is not None, "missed the memory orphan window three times"
-            memory_worktree = fixture.contract.memory_worktree
-            assert memory_worktree is not None
-            # The orphan stash holds the memory candidate; the worktree is clean.
-            self.assertIn("parked memory WIP", git(memory_worktree, "stash", "list"))
-            self.assertEqual(git(memory_worktree, "status", "--porcelain"), "")
-            # The rerun adopts the memory orphan and proceeds; the adopted
-            # stash stays journaled on the stack until it is restored.
-            rerun = fixture.sync()
-            record = self._journal(fixture)
-            assert isinstance(record, SyncOperationRecord)
-            assert record.memory is not None
-            self.assertTrue(record.memory.wipStash, record.memory)
-            self.assertIn(rerun.payload["state"], ("synced", "memory-resolution-required"))
-            if rerun.payload["state"] == "synced":
-                self.assertEqual(git(memory_worktree, "stash", "list"), "")
-                restored = sorted(memory_worktree.glob("mem-*.txt"))
-                self.assertEqual(len(restored), 500)
-                self.assertEqual(restored[0].read_bytes(), b"parked memory 0\n")
-                self.assertEqual(restored[-1].read_bytes(), b"parked memory 499\n")
-            else:
-                self.assertIn("parked memory WIP", git(memory_worktree, "stash", "list"))
-        finally:
-            for holder in holders:
-                holder.cleanup()
+        """Hold the real first journal publish after memory parking, then kill and recover."""
+        checkpoint = MemoryOrphanCheckpoint(self, git)
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = self._memory_wip_fixture(tmp)
+            checkpoint.run(fixture)
 
     def test_killed_after_fast_forward_move_completes_without_removing(self) -> None:
         """W-FF: a death after the memory fast-forward moved its ref.

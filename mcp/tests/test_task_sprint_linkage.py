@@ -59,7 +59,7 @@ def _judgment_register(rows: list[str]) -> str:
     return "\n".join([JUDGMENT_HEADER, JUDGMENT_SEPARATOR, *rows])
 
 
-def _judgment_row(judgment_id: str, author: str = "strategist") -> str:
+def _judgment_row(judgment_id: str, author: str = "architect") -> str:
     return (
         f"| {judgment_id} | execution nature | graph | nature=ruled | Explicit ruling. | "
         f"notes.md | {author} | high | |"

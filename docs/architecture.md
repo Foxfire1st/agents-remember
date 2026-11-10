@@ -34,7 +34,6 @@ ar-coordination/
     runners/
     data/
     logs/
-  skills/
   system/
   memory-repos/
   tasks/
@@ -92,24 +91,24 @@ system](reference/knowledge-system.md) for the layout, commands and boundaries.
 
 ## Resolution Order
 
-The `c-08-ar-coordination-context-resolver` skill resolves a target repository by checking:
+Product context resolution checks the selected repository using its internal resolver:
 
-1. explicit inputs such as `code_repository_root`, `coordination_root`, or task contract
+1. internal explicit repository, contract and coordination inputs (not additional mounted MCP arguments)
 2. the external memory repo at `<coordination-root>/memory-repos/ar-<repo>/`
 
-If that memory location does not exist, the `c-08-ar-coordination-context-resolver` skill fails
+If that memory location does not exist, product context resolution fails
 and asks the caller to initialize memory instead of inventing an empty context. A repository
 still carrying the removed repo-local `ar-memory/` root is refused by name with that exact path.
 
 ## Retrieval Substrates
 
-Once memory is resolved, agents reach into memory and code through three substrates, routed by the `c-04-retrieval-strategy-router` skill:
+Once memory is resolved, agents reach into memory and code through three substrates; follow [knowledge-use guidance](../skills/l-01-agent-lifecycles/reference/knowledge/use.md):
 
 - **By path (Intent)** — a known file's onboarding note, located directly from its path. Always available; needs no provider.
 - **By meaning (Semantics)** — semantic search over the memory, for when the concept is known but the file is not. Its provider is retired; the route has no engine now.
 - **By relationship (Relationship)** — a code-relationship graph for callers, callees, and dependencies. Its provider is retired as well.
 
-The meaning and relationship substrates were served by two providers — GrepAI for semantic memory search, CodeGraphContext for the code graph. Both are retired (MIK-R112): no product path installs, enables, starts, indexes, or queries them, and the `providers/` tree shown above holds only what an older installation left behind.
+The meaning and relationship substrates were served by two providers — GrepAI for semantic memory search, CodeGraphContext for the code graph. Both are retired (MIK-R112): no product path enables, starts, indexes, or queries them. Runtime installation still copies inert shipped scaffolding into the `providers/` tree shown above; that tree can also contain user data and leftovers from older installations.
 
 These providers were accelerators for *finding* knowledge; they were never the source of truth. Durable memory stays Markdown/JSON + Git, drift-checked and approval-gated, whatever surfaced a candidate. `runtime_install` stops a leftover provider watcher and reports old provider keys once as unused; deleting leftover folders takes the explicit `providers-remove` command — see the [Providers guide](guides/providers.md), now a retirement and old-install cleanup account, and [MCP tool reference](reference/mcp-tools.md).
 
@@ -121,13 +120,13 @@ The `c-00-initialize-memory-repo` skill owns memory-root creation or repair.
 
 The `c-03-repo-bootstrap` skill owns repo onboarding bootstrap and route/slice maintenance.
 
-The `c-05-create-or-update-onboarding-files` skill owns file-level onboarding and repo entity catalog maintenance.
+The Curator follows the [card procedure](../skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md) for file-level onboarding and repo entity catalog maintenance.
 
-The `c-08-ar-coordination-context-resolver` skill owns context resolution facts only.
+The product resolver owns context resolution facts only. Mounted callers use `context_packet(repo_id="<repo-id>")`; see [the tool reference](../skills/l-01-agent-lifecycles/reference/knowledge/commands.md).
 
-The `w-02-light-task-workflow` skill owns worktree lifecycle, integration, and cleanup.
+The worktree tools own worktree lifecycle, integration, and cleanup; the [authorized lifecycle operation](../skills/l-01-agent-lifecycles/operations/closeout.md) retains the role and approval boundaries.
 
-The `w-02-light-task-workflow` skill owns closeout approval and the code → memory-content commit sequence for
+The authorized closeout owner coordinates approval and the code → memory-content commit sequence for
 worktree-backed tasks and the sanctioned branch-direct landing route. Memory commit messages carry
 `Code-Commit` attribution. `memory.md` is an ignored consumer cache computed from that history,
 outside staging, commits, and transaction admission or recovery. Regenerating the cache does not

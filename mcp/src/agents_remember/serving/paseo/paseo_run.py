@@ -44,6 +44,7 @@ class _Run:
     live_from: int | None = None
     # An undone provider write: a running daemon may have loaded the file that was undone.
     reload_owed: bool = False
+    accept_harness_home_change: bool = False
 
     def change(self, step: str, action: str, **facts: Any) -> None:
         self.changes.append({"step": step, "action": action, **facts})
