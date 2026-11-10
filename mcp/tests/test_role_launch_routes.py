@@ -284,7 +284,7 @@ class RoleExecutionResultTests(unittest.TestCase):
             "orchestrator": "sprint",
             "manager": "master",
             "worker": "leaf",
-            "reviewer": "leaf | master | sprint, by seam",
+            "reviewer": "leaf",
             "curator": "leaf",
             "bootstrap": "free-agent",
         }

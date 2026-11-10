@@ -42,11 +42,15 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 TASK_DOCUMENT_RECOVERY_CLAUSES = (
-    "task_doc first, then logged canonical amendment on correct-input refusal",
+    "Use task_doc first.",
+    "A correct-input refusal of a covered write (task_doc edits (including an admitted task "
+    "retirement or folder movement), knowledge_write, citation_fix, citation_note_revision "
+    "and curator_coherence publication)",
+    "follows the same-tool/input-class ladder in "
+    "skills/l-01-agent-lifecycles/reference/refused-write.md before applying a stop.",
     "owner's next publication refreshes renders/projections",
-    "rendered copies never parsed back",
-    "Follow skills/l-01-agent-lifecycles/reference/refused-write.md for that same-tool recovery",
-    "read/check/validation/sync, starts, product guards and commit gates retain stops",
+    "rendered copies are never parsed back",
+    "Read/check/validation/sync refusals, starts, other product guards and commit gates retain stops.",
 )
 
 

@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agents_remember.models.build_currentness import BuildCurrentnessPayload
+
 _RESERVED_DECISION_WIRE_KEYS = frozenset({"developer_decision_required", "decision_surface"})
 
 
@@ -79,6 +81,7 @@ class ResponseModel(StrictResponseModel):
     # is a key of THIS envelope. Optional -- an answer with no detail file emits neither.
     log: str | None = None
     logError: str | None = None
+    buildCurrentness: BuildCurrentnessPayload | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude_none=True)
@@ -105,6 +108,7 @@ class FlexibleResponseEnvelope(FlexibleResponseModel):
     # tolerated-drift surface tolerates the PROVIDER's fields, not ours.
     log: str | None = None
     logError: str | None = None
+    buildCurrentness: BuildCurrentnessPayload | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude_none=True)
@@ -125,3 +129,10 @@ union lets ``models.tool_registry`` say what it holds, which is what lets
 ``_tool_payload`` set the choke-point field on the validated response *before*
 dumping it rather than writing it into the dump afterwards.
 """
+
+
+class StaleBuildRefusalResponse(ResponseModel):
+    """Dispatch refusal shared by writers whose normal success fields differ."""
+
+    code: str
+    error: str

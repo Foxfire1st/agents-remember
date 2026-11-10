@@ -136,8 +136,22 @@ agents-remember knowledge-validate /path/to/memory --code /path/to/code --base <
 These examples inspect or plan; add the writer's explicit `--commit` only under
 its admitted write authority. Invocation details, callers and examples for every
 knowledge command and tool are in the [knowledge command
-reference](../../skills/l-01-agent-lifecycles/reference/knowledge-commands.md).
+reference](../../skills/l-01-agent-lifecycles/reference/knowledge/commands.md).
 The [MCP reference](mcp-tools.md#knowledge-operations) names the mounted tools.
+
+## Maintenance commands
+
+The same registered CLI also exposes these knowledge-maintenance operations. Preserve
+the selected code/memory bindings and each operation's write authority.
+
+| Command | Purpose |
+| --- | --- |
+| `knowledge-format` | Canonicalize knowledge JSON; `--check` reports formatting changes without rewriting files. |
+| `knowledge-routes` | Read family routes, their state and mechanical route suggestions. |
+| `knowledge-census` | Select an inventory or report operation; a child subcommand is required. |
+| `knowledge-census inventory` | Pin the code/memory baseline and write a migration census inventory. |
+| `knowledge-census report` | Report a census's measurements and route status from the selected memory tree. |
+| `knowledge-copies` | Inventory retired database copies; the default is a dry run. `--apply --reviewed REPORT` deletes only the reviewed set or refuses. |
 
 ## Conversion and crossing
 

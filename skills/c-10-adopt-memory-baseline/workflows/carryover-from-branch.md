@@ -62,4 +62,4 @@ Retry skips files already equal to the intended payload. A different uncommitted
 
 The recovery leaf closes and integrates normally. Its closeout makes the one memory commit from the tree its invariant gate judged, attributed to the leaf's code commit (the official tip). `carryover-pending` still means landed memory has not reached its line: cleanup/finalization wait for that normal recovery publication.
 
-See `docs/guides/carryover-from-branch.md`. The skill tree is instruction-only; installed and development workflows use the existing MCP/package route.
+For `memory_quality_check`, `curator_coherence` and their tool-returned result/report paths, read the [knowledge command and tool reference](../../l-01-agent-lifecycles/reference/knowledge/commands.md). The skill tree is instruction-only; installed and development workflows use the existing MCP/package route.

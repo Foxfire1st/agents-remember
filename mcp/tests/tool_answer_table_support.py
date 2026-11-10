@@ -126,9 +126,9 @@ _CASE_ROOT = "/tmp/ar-answer-cases/coord"
 # The ordinary case the operation produces: a dry run on a fresh root with an
 # ok watcher stop. Produced by run_runtime_install + the row projection
 # (compact_runtime_install_payload), paths normalized to _CASE_ROOT; the
-# producer test below pins it byte-for-byte. Measured 251 tokens against the
-# row bound 600. No host settings file exists, so the host step reports its
-# error shape and ok is false.
+# producer test pins it byte-for-byte. Measured 266 tokens against the row
+# bound 600. No host is configured, so the host step reports a successful
+# no-change result. The fresh root has no running server or dashboard.
 _INSTALL_ORDINARY_CASE = {
     "coordinationRoot": "/tmp/ar-answer-cases/coord",
     "dryRun": True,
@@ -167,9 +167,10 @@ _INSTALL_ORDINARY_CASE = {
         "phases": [{"action": "stop", "ok": True, "phase": "pre-provider-refresh-stop"}],
     },
     "reportPath": "/tmp/ar-answer-cases/coord/report.json",
+    "runningServers": [],
     "summary": {
-        "copiedFiles": 18,
-        "createdDirs": 44,
+        "copiedFiles": 15,
+        "createdDirs": 42,
         "dependencyRuns": 0,
         "removedPaths": 0,
         "replacedLinks": 0,
@@ -185,7 +186,7 @@ _INSTALL_ORDINARY_CASE = {
 # root holds a store of a removed part and a gate log (MIK-R113 rule 5), so
 # the answer counts them and names the command and the way out of a stored
 # gate; their `logs/` folder is there before the run, so one folder fewer is
-# created. Measured 453 tokens; the row bound 600 sits between it and twice it.
+# created. Measured 460 tokens; the row bound 600 sits between it and twice it.
 _INSTALL_LARGEST_CASE = {
     "coordinationRoot": "/tmp/ar-answer-cases/coord",
     "dryRun": True,
@@ -250,9 +251,10 @@ _INSTALL_LARGEST_CASE = {
         "removes them on your word",
     },
     "reportPath": "/tmp/ar-answer-cases/coord/report.json",
+    "runningServers": [],
     "summary": {
-        "copiedFiles": 18,
-        "createdDirs": 43,
+        "copiedFiles": 15,
+        "createdDirs": 41,
         "dependencyRuns": 0,
         "removedPaths": 0,
         "replacedLinks": 0,
@@ -268,6 +270,8 @@ _INSTALL_FIELDS = {
     "dryRun": "confirm the run wrote nothing before treating it as a preview",
     "experiment": "confirm which experiment selection the run applied",
     "host": "check the host settings step before starting agents on it",
+    "runningServers": "check each server's currentness and restart reason before claiming the running servers are current",
+    "dashboard": "check the refresh or preview outcome before claiming the running dashboard is current",
     "includeBenchmarks": "confirm the knobs that ran before rerunning with different ones",
     "installProviderDeps": "confirm the knobs that ran before rerunning with different ones",
     "summary": "read how many paths the run created, copied, replaced, or removed",

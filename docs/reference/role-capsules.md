@@ -2,7 +2,7 @@
 
 A role's launch delivers its role and operation instructions with the selected task and the
 handover file locations. Skills are read from the serving package's MCP resources; there is no
-public `role_capsule_compile` tool or installed harness skill copy to edit. See
+public capsule-compilation tool or installed harness skill copy to edit. See
 [Skills](skills.md) for the canonical and generated source trees.
 
 ## Launch and message holds

@@ -1,13 +1,16 @@
-"""Positive R99 clauses, classified by the role/operation that must deliver them.
+"""Current affirmative clauses and explicit whole-obligation equivalence fixtures.
 
-Match affirmative propositions rather than disconnected vocabulary. Alternatives cover the
-actual role variants and equivalent preserved boundaries, not weaker permissions.
+Each alternative must express the whole named obligation. Separate conditions are
+kept together, so deleting any condition cannot leave a weaker alternative passing.
+The four equivalent phrasings below exercise existing positive controls; they
+retain the full obligation and do not admit historical source versions.
 """
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 from agents_remember.application.role_capsules.compilation import compile_admitted_capsule
 from agents_remember.application.skill_resources.capsule import (
@@ -29,11 +32,48 @@ from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.serving.capsule_delivery import capsule_delivery_from
 
 
+def assert_action_pointer(instructions: str, source: str, action: str) -> None:
+    """Require one pointer at the named action, independently of metadata prose."""
+    assert action.strip(), "an expected action is required"
+    marker = "{{detail:" + source + "}}"
+    pattern = re.compile(
+        re.escape(normalized(action)) + r"(?:(?!\{\{detail:).)*?" + re.escape(marker)
+    )
+    matches = [
+        match
+        for paragraph in instructions.split("\n\n")
+        for match in pattern.finditer(normalized(paragraph))
+    ]
+    assert len(matches) == 1, (source, action, "missing or repeated action pointer")
+
+
+def assert_emitted_detail_links(instructions: str, compiled: str, source: str, path: Path) -> None:
+    """Check each marker's label occurrence, emitted path, suffix and exact count."""
+    marker = "{{detail:" + source + "}}"
+    links = re.findall(r"\[([^]\n]+)\]\(([^)\n]+)\)", compiled)
+    emitted = re.findall(r"\[([^]\n]+)\]\(([^)\n]+)\)", instructions)
+    labels = {label for label, target in links if target.startswith(marker)}
+    assert labels, (source, "no compiled detail links")
+    for label in labels:
+        original = [target for name, target in links if name == label]
+        actual = [target for name, target in emitted if name == label]
+        assert len(actual) == len(original), (source, label, original, actual)
+        for target, resolved in zip(original, actual, strict=True):
+            if not target.startswith(marker):
+                continue
+            suffix = target.removeprefix(marker)
+            expected = urlsplit(path.as_posix() + suffix)
+            parts = urlsplit(resolved)
+            assert not parts.scheme and not parts.netloc and not parts.query, resolved
+            assert unquote(parts.path) == path.as_posix(), resolved
+            assert parts.fragment == expected.fragment, (source, target, resolved)
+
+
 def delivered_step(
     root: Path,
     role_operation: tuple[CapsuleRole, CapsuleOperation],
     source: str,
-    step: str,
+    action: str,
     report_path: Path,
 ) -> tuple[str, str]:
     """Read one declared detail through real admission, compilation and launch delivery.
@@ -65,35 +105,52 @@ def delivered_step(
     references = [entry for entry in delivery.detail_references if entry.source_path == source]
     assert len(references) == 1, f"{role}/{operation}: missing or duplicate {source}"
     reference = references[0]
-    assert reference.step == step
+    assert reference.step.strip()
+    assert_action_pointer(outcome.result.render_instructions(), source, action)
     assert reference.content == (root / source).read_bytes()
+    assert reference.revision == compute_content_digest(reference.content)
     instructions, record = compose_launch_instructions(delivery, str(report_path), {})
     entries = [entry for entry in record["detailReferences"] if entry["sourcePath"] == source]
     assert len(entries) == 1
     entry = entries[0]
-    assert entry["step"] == step
+    assert entry["step"] == reference.step
     path = Path(entry["path"])
-    assert f"]({path.as_posix()})" in instructions
+    assert_emitted_detail_links(instructions, outcome.result.render_instructions(), source, path)
     assert "{{detail:" not in instructions
-    assert path.read_bytes() == reference.content
-    return instructions, path.read_text(encoding="utf-8")
+    emitted = path.read_bytes()
+    assert entry["sizeBytes"] == len(emitted)
+    assert entry["revision"] == compute_content_digest(emitted)
+    return instructions, emitted.decode("utf-8")
 
 
-# MIK-R62 rules44/BA3: pin the expected step independently of the manifest.
+# These action contracts are independent of manifest step descriptions.
 MESSAGE_HANDOVER_SOURCE = "reference/message-handover.md"
-MESSAGE_HANDOVER_STEP = (
-    "when you reach a waiting-seat handover or held/full-store receipt, not before"
+MESSAGE_HANDOVER_ACTIONS = {
+    "architect": "Before handing work to a waiting seat, read",
+    "orchestrator": "Before handing work to a waiting seat, read",
+    "manager": "Before handing work to a waiting seat, read",
+    "worker": "Before sending a handover, read",
+    "reviewer": "Before handing over work, read",
+    "curator": "Before sending a message, read",
+    "investigator": "Before handing over work, read",
+}
+# P5-18: one refused-write pointer per first message. The shared every-role paragraph
+# links the served file for every role; only the Manager's capsule also carries the
+# detail, for its separate task retirement and movement action.
+REFUSED_WRITE_ACTIONS = {
+    "manager": "Before retiring or moving a task, read",
+}
+SERVED_REFUSED_WRITE = (
+    "skill://agents-remember/skills/l-01-agent-lifecycles/reference/refused-write.md"
 )
 
 ROLES = (
     "architect",
     "bootstrap",
     "curator",
-    "designer",
     "manager",
     "orchestrator",
     "reviewer",
-    "strategist",
     "investigator",
     "worker",
 )
@@ -127,331 +184,580 @@ def forbidden_autonomy_clauses(role: str, text: str) -> list[str]:
     return [name for name, pattern in checks.items() if re.search(pattern, reading)]
 
 
-def autonomy_clauses(role: str) -> dict[str, tuple[str, ...]]:
-    clauses = {
+AUTONOMY_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
+    "architect": {
         "affirmative freedom": (
-            "Inside your assignment, organise your work yourself with what your harness offers, including sub-agents.",
-            "Organise your own work inside the assignment, with whatever your harness offers, at any size.",
+            "Organise your own work inside the assignment, with "
+            "whatever your harness offers, at any size.",
         ),
-        "own split": (
-            "You decide how to split it; the roles order work at task boundaries.",
-            "You decide the split; the roles order work at task boundaries.",
-            "You may split the work among harness sub-agents as you see fit; no rule prescribes how many or how deep.",
-        ),
+        "own split": ("You decide the split; the roles order work at task boundaries.",),
         "seat checks credits and answers": (
-            "You answer for all their work: check it, credit it in your report, and hand it over under your own name.",
-            "The seat answers for all of it: check their work, report which parts they did, and hand it over under your own name.",
+            "You answer for all of it: check the helpers' "
+            "work, report which parts they did, and hand it "
+            "over under your own name.",
         ),
         "seat boundary acts": (
-            "Messages to other seats, task records and product operations that change leaf state are your own acts.",
-            "Every boundary act is yours: a message to another seat, a task record or a product operation changing leaf state.",
+            "Perform every boundary act yourself: a message to another "
+            "seat, a task record or a product operation changing leaf "
+            "state.",
         ),
         "helper seat role and scope": (
-            "A harness sub-agent holds no AR seat, starts no role, and has the same working folder, permissions and assignment as you.",
-            "A harness sub-agent is no AR role, holds no seat, starts no role and has the same working folder, permissions and assignment.",
-            "A harness sub-agent holds no AR seat, does not start a role, and has the same working folder, permissions and assignment as you.",
-            "A harness sub-agent is no AR role, holds no seat, does not start a role and has the same working folder, permissions and assignment.",
+            "A harness sub-agent holds no AR role or seat and "
+            "does not start a role. It has the same working "
+            "folder, permissions and assignment.",
         ),
         "independent review": (
-            "Nobody checks itself through a sub-agent: independent code and memory review belongs to the Reviewer.",
-            "Nobody checks itself through a sub-agent: code and memory changes still require the independent Reviewer, never their author's helper.",
-            "Nobody checks itself through a sub-agent: the Reviewer's check of your memory candidate stays the Reviewer's.",
+            "A helper cannot provide independent review of its author: "
+            "code and memory changes still require the independent "
+            "Reviewer.",
         ),
-        "no harness dependency": (
-            "A harness without sub-agents retains the same duties.",
-            "A harness without sub-agents can do all the same work.",
+        "no harness dependency": ("A harness without sub-agents can do all the same work.",),
+    },
+    "orchestrator": {
+        "affirmative freedom": (
+            "Organise your own work inside the assignment, with "
+            "whatever your harness offers, at any size.",
         ),
-    }
-    if role == "reviewer":
-        equivalents = {
-            "affirmative freedom": "Organise assignment work at any size with any harness facilities.",
-            "own split": "You choose the split; roles order work at task boundaries.",
-            "seat checks credits and answers": "You answer for all work: check helpers\u2019 work, report their parts, and hand over under your name.",
-            "seat boundary acts": "Every boundary act remains yours: inter-seat messages, task records and product operations changing leaf state.",
-            "helper seat role and scope": "Harness sub-agents hold no AR role or seat, start no role, and share your working folder, permissions and assignment.",
-            "independent review": "Sub-agents cannot self-check: code and memory changes require the independent Reviewer, never their author\u2019s helper.",
-            "no harness dependency": "Harnesses without sub-agents can do the same work.",
-        }
-        for name, equivalent in equivalents.items():
-            clauses[name] += (equivalent,)
-    if role == "curator":
-        equivalents = {
-            "affirmative freedom": "Organise assignment work with any harness facilities, at any size.",
-            "own split": "Use harness sub-agents freely; neither number nor depth is prescribed.",
-            "seat checks credits and answers": "You answer for all work: verify delegates, report their parts and hand over under your name.",
-            "seat boundary acts": "You own every boundary act: cross-seat messages, task records and leaf-state-changing product operations.",
-            "helper seat role and scope": "Sub-agents hold no AR role or seat, start no role and share your folder, permissions and assignment.",
-            "independent review": "No self-check through sub-agents: the Reviewer retains your memory-candidate check.",
-        }
-        for name, equivalent in equivalents.items():
-            clauses[name] += (equivalent,)
-        clauses["one curator writer"] = (
-            "Keep exactly one Curator writer through the admitted writer",
-            "Keep exactly one Curator writer through the admitted route, never a helper lane.",
-        )
-        completed_forms = {
-            "affirmative freedom": "Organise work at any size with any harness facilities.",
-            "own split": "Helper number/depth is unrestricted.",
-            "seat checks credits and answers": "You answer for all work. Verify helpers, report their parts and hand over under your name.",
-            "seat boundary acts": "You own inter-seat messages, task records and leaf-state-changing operations.",
-            "helper seat role and scope": "Helpers share your assignment, folder and permissions; they hold no AR role/seat and start none.",
-            "independent review": "No helper self-checking: the independent Reviewer retains memory-candidate review.",
-        }
-        for name, equivalent in completed_forms.items():
-            clauses[name] += (equivalent,)
-    return clauses
+        "own split": ("You decide the split; the roles order work at task boundaries.",),
+        "seat checks credits and answers": (
+            "Check your helpers' work, report which "
+            "parts they did, and hand it over under your "
+            "own name.",
+        ),
+        "seat boundary acts": (
+            "Every boundary act is yours: a message to another seat, "
+            "a task record or a product operation changing leaf "
+            "state.",
+        ),
+        "helper seat role and scope": (
+            "A harness sub-agent holds no AR role or seat and "
+            "does not start a role. It has the same working "
+            "folder, permissions and assignment.",
+        ),
+        "independent review": (
+            "Nobody checks itself through a sub-agent: code and "
+            "memory changes still require the independent Reviewer, "
+            "never their author's helper.",
+        ),
+        "no harness dependency": ("A harness without sub-agents can do all the same work.",),
+    },
+    "worker": {
+        "affirmative freedom": (
+            "Organise work inside the assignment with whatever your harness offers, at any size.",
+        ),
+        "own split": ("You decide the split; roles order work at task boundaries.",),
+        "seat checks credits and answers": (
+            "You answer for all helper work: check it, report "
+            "each helper's contribution and hand it over under "
+            "your own name.",
+        ),
+        "seat boundary acts": (
+            "Every boundary act is yours, including messages to another "
+            "seat, task records and product operations that change leaf "
+            "state.",
+        ),
+        "helper seat role and scope": (
+            "A harness sub-agent holds no AR seat, starts no role, "
+            "and shares your working folder, permissions and "
+            "assignment.",
+            "A harness sub-agent holds no AR seat, does not start a role, and shares "
+            "your working folder, permissions and assignment.",
+        ),
+        "independent review": (
+            "It cannot independently review its author's work: code and "
+            "memory changes still require the independent Reviewer.",
+        ),
+        "no harness dependency": ("A harness without sub-agents can do all the same work.",),
+    },
+    "reviewer": {
+        "affirmative freedom": (
+            "Organise work at any size with the harness facilities available.",
+        ),
+        "own split": (
+            "Choose the split, check helpers' work, report their parts and hand "
+            "over under your name.",
+        ),
+        "seat checks credits and answers": (
+            "Choose the split, check helpers' work, report "
+            "their parts and hand over under your name.",
+        ),
+        "seat boundary acts": (
+            "Every boundary act stays yours: inter-seat messages, task "
+            "records and product operations changing leaf state.",
+        ),
+        "helper seat role and scope": (
+            "Helpers hold no Agents Remember role or seat, start "
+            "no role, and share the working folder, permissions "
+            "and assignment.",
+        ),
+        "independent review": (
+            "An author's helper cannot provide its independent code or memory review.",
+        ),
+        "no harness dependency": ("A harness without helpers can do the same work.",),
+    },
+    "curator": {
+        "affirmative freedom": (
+            "Use any available harness facilities at any size, with no "
+            "helper-number or depth limit.",
+        ),
+        "own split": (
+            "Use any available harness facilities at any size, with no "
+            "helper-number or depth limit.",
+        ),
+        "seat checks credits and answers": (
+            "Verify helpers' work, report their parts and hand over under your own name.",
+        ),
+        "seat boundary acts": (
+            "You own inter-seat messages, task records and operations that change leaf state.",
+        ),
+        "helper seat role and scope": (
+            "Helpers share your assignment, folder and "
+            "permissions. They hold no Agents Remember role or "
+            "seat and start none.",
+        ),
+        "independent review": (
+            "A helper cannot provide independent review of its author's "
+            "work; the Reviewer retains memory-candidate review.",
+        ),
+        "no harness dependency": ("A harness without helpers can perform the same work.",),
+        "one curator writer": (
+            "Keep exactly one Curator writer through the admitted route, "
+            "never a helper writer lane.",
+        ),
+    },
+    "manager": {
+        "affirmative freedom": (
+            "Organize work inside your assignment with the facilities "
+            "your harness offers, at any size.",
+        ),
+        "own split": ("You decide the split; roles order work at task boundaries.",),
+        "seat checks credits and answers": (
+            "Check helpers' work, credit their parts and hand over under your own name.",
+        ),
+        "seat boundary acts": (
+            "Every boundary act is yours: messages to other seats, task "
+            "records and product operations that change leaf state.",
+        ),
+        "helper seat role and scope": (
+            "A harness sub-agent has no AR role or seat and starts "
+            "no role. It shares your working folder, permissions "
+            "and assignment.",
+            "A harness sub-agent has no AR role or seat and does not start a role. It "
+            "shares your working folder, permissions and assignment.",
+        ),
+        "independent review": (
+            "It cannot independently review your work; code and memory "
+            "changes still require the independent Reviewer.",
+        ),
+        "no harness dependency": ("A harness without sub-agents can do the same work.",),
+    },
+    "investigator": {
+        "affirmative freedom": (
+            "Organise work inside your assignment with whatever your harness offers, at any size.",
+        ),
+        "own split": ("You decide the split; the roles order work at task boundaries.",),
+        "seat checks credits and answers": (
+            "You answer for all of it: check helpers' "
+            "work, report which parts they did and hand "
+            "it over under your own name.",
+        ),
+        "seat boundary acts": (
+            "You perform every boundary act yourself: a message to "
+            "another seat, a task record or a product operation "
+            "changing leaf state.",
+        ),
+        "helper seat role and scope": (
+            "A harness sub-agent holds no role seat in Agents "
+            "Remember, starts no role and has the same "
+            "working folder, permissions and assignment.",
+            "A harness sub-agent holds no role seat in Agents Remember, does not start "
+            "a role and has the same working folder, permissions and assignment.",
+        ),
+        "independent review": (
+            "Nobody checks itself through a sub-agent. Code and "
+            "memory changes still require the independent Reviewer, "
+            "never their author's helper.",
+        ),
+        "no harness dependency": ("A harness without sub-agents can do the same work.",),
+    },
+    "bootstrap": {
+        "affirmative freedom": (
+            "Use harness helpers within this assignment and its "
+            "permissions, including permitted read-only setup-status "
+            "queries.",
+        ),
+        "own split": (
+            "You decide the split, at any size, and answer for all their work: "
+            "check it, credit their parts in your report and hand over under your "
+            "own name. Roles order work at task boundaries.",
+        ),
+        "seat checks credits and answers": (
+            "answer for all their work: check it, credit "
+            "their parts in your report and hand over under "
+            "your own name.",
+        ),
+        "seat boundary acts": (
+            "Boundary acts also remain yours: a message to another seat, "
+            "a task record or a product operation changing leaf state. "
+            "This ownership grants none of the acts prohibited above.",
+        ),
+        "helper seat role and scope": (
+            "Helpers share your working folder, permissions and "
+            "assignment. They hold no Agents Remember seat and "
+            "start no role.",
+        ),
+        "independent review": (
+            "A helper cannot independently review its author. Code and "
+            "memory changes still require the independent Reviewer, "
+            "never the author's helper.",
+        ),
+        "no harness dependency": ("A harness without helpers can do the same work.",),
+    },
+}
+
+
+def autonomy_clauses(role: str) -> dict[str, tuple[str, ...]]:
+    """Return the role's current clauses and explicit whole-obligation equivalents."""
+    return AUTONOMY_CLAUSES[role]
+
+
+IMPLEMENTATION_CLAUSES = {
+    "freeze to reviewer": (
+        "1. Freeze the candidate and tell the Manager to start the Reviewer.\n"
+        "2. Once the Reviewer exists, send it the freeze directly with "
+        "`role_message` on `agents-remember-task`. Name the leaf, the report path "
+        "and the whole next stretch of work. The report names the head and change "
+        "hash.",
+    ),
+    "identity and whole stretch": (
+        "2. Once the Reviewer exists, send it the freeze directly with "
+        "`role_message` on `agents-remember-task`. Name the leaf, the "
+        "report path and the whole next stretch of work. The report names "
+        "the head and change hash.",
+    ),
+    "repair return": (
+        "3. Repair sealed findings and return a new freeze directly to the same Reviewer.",
+    ),
+    "producer to curator": (
+        "4. After code review returns `PASS` and the Manager has started the "
+        "Curator, send the Curator your hand-off list for that freeze directly. "
+        "Name the same entries and changed paths so the changed-memory pass reads "
+        "them.",
+    ),
+    "factual independence": ("This is a factual handover, not a review brief.",),
+    "upward notice recovery": (
+        "For a Worker, Curator or Reviewer whose required Manager "
+        "notice fails delivery, record it as pending, "
+        "continue independent work and retry the notice "
+        "through `role_message` on `agents-remember-task`. "
+        "Do not turn that delivery failure into a question "
+        "to the developer in your own chat.",
+    ),
+    "busy retry": (
+        "Full-store recipient-busy is a refusal:\n"
+        "\n"
+        "1. Record the handover as pending and continue independent work.\n"
+        "2. Resend once before the turn ends.\n"
+        "3. If it is refused again, report the second refusal and leave it pending.",
+    ),
+}
+
+
+REVIEW_CLAUSES = {
+    "verdict to worker": (
+        "2. Send the verdict directly to the Worker through `role_message` on "
+        "`agents-remember-task`. The message names the verdict file; it never "
+        "pastes the text. A block names the sealed-findings report and requests the "
+        "whole repair stretch.",
+    ),
+    "sealed whole repair": (
+        "A block names the sealed-findings report and requests the whole repair stretch.",
+    ),
+    "pass to curator": (
+        "1. On code `PASS`, first tell the Manager to start the Curator, before peer "
+        "handover.\n"
+        "2. Send the verdict directly to the Worker through `role_message` on "
+        "`agents-remember-task`. The message names the verdict file; it never pastes "
+        "the text. A block names the sealed-findings report and requests the whole "
+        "repair stretch.\n"
+        "3. Once the Curator exists, send it the passed freeze and code-`PASS` "
+        "verdict directly.",
+    ),
+    "memory verdict to curator": (
+        "4. Review the Curator's memory change and return findings or `PASS` directly to it.",
+    ),
+    "identity and whole stretch": (
+        "Every handover names the leaf, exact object, report or verdict "
+        "path, and whole next stretch. Identify a code candidate by the "
+        "head and change hash in the Worker's report, or identify the "
+        "exact memory change. Use the sibling role and exact leaf task "
+        "references from the handover, preserving product-supplied "
+        "identifiers whole and unchanged.",
+    ),
+    "own code begin": (
+        "The Reviewer opens each ordinary leaf code round with "
+        '`task_doc(operation="begin_review")` and records its own verdict through '
+        "`record_review` or the applicable `record_route_review`. Include any "
+        "preceding result required before the next begin.",
+    ),
+    "own code result": (
+        "records its own verdict through `record_review` or the applicable `record_route_review`.",
+    ),
+    "preceding result": ("Include any preceding result required before the next begin.",),
+    "manager acceptance": (
+        "The Manager retains gate acceptance and records the Architect's or developer's "
+        "extra-round approval.",
+    ),
+    "memory leaves code untouched": (
+        "Code state stays unchanged. Memory review "
+        "opens no code review-state round, resets no "
+        "passed code review, code verdict or code "
+        "baseline, and adds no identifiers to that "
+        "baseline.",
+    ),
+    "memory extra approval": (
+        "A pass beyond the settings limit needs the "
+        "Architect's or developer's instruction recorded by "
+        "the Manager.",
+    ),
+    "post-pass concern": (
+        "Send evidenced code concerns to both Worker and "
+        "Reviewer, including after passing code review. Show the "
+        "requirement or report mismatch. Repair no code and "
+        "author no knowledge claiming behavior the code lacks. "
+        "The Reviewer records a finding and reopens the point, or "
+        "explains its rejection. The Curator records the answer. "
+        "Report the finding and answer; send unresolved "
+        "disagreement to the Manager.",
+    ),
+    "reopen or refute answer": (
+        (
+            "Two routes may add a finding after the list is sealed:\n"
+            "\n"
+            "- a valid code finding from the Curator;\n"
+            "- a valid finding from an advisory review the Architect commissioned and "
+            "forwarded in its questions file.\n"
+            "\n"
+            "For both routes, add a new sealed finding with its own identifier and reopen "
+            "the verdict for that point only. Earlier sealed findings stay as they are. "
+            "Give the reason for an invalid finding. The Worker repairs an accepted finding"
+            " in a successor.\n"
+            "\n"
+            "A repair round for a Curator finding counts under the settings limit. Beyond "
+            "it, send the extra-round question to the instructed reporting recipient where "
+            "your role has one; otherwise send it through your parent, or ask in your own "
+            "chat when you have no parent. An extra round for advisory findings is the "
+            "Architect's grant. Every other new observation follows your role's "
+            "developer-question route."
+        ),
+    ),
+    "upward notice recovery": (
+        "Report non-work replies and empty or doubled-seat refusals to the Manager "
+        "once, with the seat and quoted text. Never pick a candidate yourself. When "
+        "the Manager gives the occasion, send the handover yourself; it relays none "
+        "of the contents.\n"
+        "\n"
+        "For a Worker, Curator or Reviewer whose required Manager notice fails "
+        "delivery, record it as pending, continue independent work and retry the "
+        "notice through `role_message` on `agents-remember-task`. Do not turn that "
+        "delivery failure into a question to the developer in your own chat.",
+    ),
+    "memory extra approval authority": (
+        "The Manager retains gate acceptance and records the Architect's or developer's "
+        "extra-round approval.\n"
+        "\n"
+        "Memory review uses separate sealed "
+        "reports, finding identifiers and its own "
+        "pass count. The Reviewer records its own "
+        "lane with `begin_review` and "
+        "`record_review`, using "
+        "`reviewKind=memory`. Code state stays "
+        "unchanged. Memory review opens no code "
+        "review-state round, resets no passed code "
+        "review, code verdict or code baseline, and "
+        "adds no identifiers to that baseline. Its "
+        "ordinary pass limit is the same as code "
+        "review's. A pass beyond the settings limit "
+        "needs the Architect's or developer's "
+        "instruction recorded by the Manager.",
+    ),
+    "busy retry": (
+        "Full-store recipient-busy is a refusal:\n"
+        "\n"
+        "1. Record the handover as pending and continue independent work.\n"
+        "2. Resend once before the turn ends.\n"
+        "3. If it is refused again, report the second refusal and leave it pending.",
+    ),
+}
+
+
+CURATION_CLAUSES = {
+    "memory to reviewer": (
+        "For an Agents Remember leaf, send the memory candidate directly to the "
+        "Reviewer through `role_message` on `agents-remember-task`, using the "
+        "handover's role and task arguments.",
+    ),
+    "identity and whole stretch": (
+        "Each handover names the leaf, the Worker's exact code head and "
+        "change hash, the memory candidate's identity, the report or "
+        "verdict path, and the whole next stretch requested.",
+    ),
+    "post-pass code finding": (
+        "Send evidenced code concerns to both Worker and Reviewer, including "
+        "after passing code review. Show the requirement or report mismatch.",
+    ),
+    "code answer": (
+        "The Reviewer records a finding and reopens the point, or explains its rejection.",
+    ),
+    "finding and answer report": (
+        "Report the finding and answer; send unresolved disagreement to the Manager.",
+    ),
+    "memory lane and count": (
+        "Memory review uses separate sealed reports, finding "
+        "identifiers and its own pass count. The Reviewer "
+        "records its own lane with `begin_review` and "
+        "`record_review`, using `reviewKind=memory`.",
+    ),
+    "memory leaves code untouched": (
+        "Code state stays unchanged. Memory review "
+        "opens no code review-state round, resets no "
+        "passed code review, code verdict or code "
+        "baseline, and adds no identifiers to that "
+        "baseline.",
+    ),
+    "memory ordinary limit": ("Its ordinary pass limit is the same as code review's.",),
+    "upward notice recovery": (
+        "For a Worker, Curator or Reviewer whose required Manager "
+        "notice fails delivery, record it as pending, "
+        "continue independent work and retry the notice "
+        "through `role_message` on `agents-remember-task`. "
+        "Do not turn that delivery failure into a question "
+        "to the developer in your own chat.",
+    ),
+    "memory extra approval": (
+        "A pass beyond the settings limit needs the Architect's or developer's "
+        "instruction recorded by the Manager.",
+    ),
+    "busy retry": (
+        "Full-store recipient-busy is a refusal:\n"
+        "\n"
+        "1. Record the handover as pending and continue independent work.\n"
+        "2. Resend once before the turn ends.\n"
+        "3. If it is refused again, report the second refusal and leave it pending.",
+    ),
+}
 
 
 LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
     "roles/worker.md": {
-        "freeze to reviewer": (
-            "Freeze the candidate as `../operations/implementation.md` §Outputs states. Worker first tells Manager to start Reviewer, then hands freeze directly to that Reviewer.",
-        ),
+        **IMPLEMENTATION_CLAUSES,
         "Reviewer start notice": (
-            "Worker first tells Manager to start Reviewer, then hands freeze directly to that Reviewer.",
+            "1. Freeze the candidate and tell the Manager to start the Reviewer.\n"
+            "2. Once the Reviewer exists, send it the freeze directly with `role_message` on "
+            "`agents-remember-task`. Name the leaf, the report path and the whole next stretch "
+            "of work. The report names the head and change hash.",
         ),
-        "identity and whole stretch": (
-            "Freeze the candidate as `../operations/implementation.md` §Outputs states. Worker first tells Manager to start Reviewer, then hands freeze directly to that Reviewer.",
-        ),
-        "repair return": (
-            "Freeze the candidate as `../operations/implementation.md` §Outputs states. Worker first tells Manager to start Reviewer, then hands freeze directly to that Reviewer.",
-        ),
-        "producer to curator": (
-            "After code PASS, send the Curator your structured hand-off list for that exact freeze with producer data preserved verbatim",
-        ),
-        "factual independence": (
-            "Freeze the candidate as `../operations/implementation.md` §Outputs states. Worker first tells Manager to start Reviewer, then hands freeze directly to that Reviewer.",
+        "producer data preserved": (
+            "4. After code review returns `PASS` and the Manager has started the Curator, send the "
+            "Curator your hand-off list for that freeze directly. Name the same entries and "
+            "changed paths so the changed-memory pass reads them.",
         ),
         "seat address": ("Use the sibling role and exact leaf task references from the handover.",),
         "whole product identity": (
-            "Use an agent ID only whole and unchanged as the product supplied it",
-            "Use only the whole, unchanged agent ID supplied by the product",
+            "Use a product-supplied agent identifier only whole and unchanged; never invent an "
+            "owner, recipient or identifier.",
+            "Use only the whole, unchanged agent ID supplied by the product; never "
+            "invent an owner, recipient or identifier.",
         ),
         "action evidence": (
-            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/implementation.md` §Boundaries states.",
+            "Count a handover as taken only when the recipient's reply, report or intake names the "
+            "exact object and shows the requested work or its start.",
+            "Open every supplied recipient artifact before you call one absent.",
         ),
         "nonaction notice": (
-            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/implementation.md` §Boundaries states.",
+            "Report non-work replies and empty or doubled-seat refusals to the Manager once, with "
+            "the seat and quoted text. Never pick a candidate yourself. When the Manager gives "
+            "the occasion, send the handover yourself; it relays none of the contents.",
         ),
         "empty doubled refusal": (
-            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/implementation.md` §Boundaries states.",
-        ),
-        "busy retry": (
-            "Full-store recipient-busy is a refusal: pending record, independent work, one resend before turn end, then remain pending.",
+            "Report non-work replies and empty or doubled-seat refusals to the Manager once, with "
+            "the seat and quoted text. Never pick a candidate yourself. When the Manager gives "
+            "the occasion, send the handover yourself; it relays none of the contents.",
         ),
         "sender owes contents": (
-            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/implementation.md` §Boundaries states.",
-        ),
-        "upward notice recovery": (
-            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/implementation.md` §Boundaries states.",
+            "When the Manager gives the occasion, send the handover yourself; it relays none of "
+            "the contents.",
         ),
         "useful report": (
-            "Write one useful report at the canonical task report path as `../operations/implementation.md` §Outputs states.",
+            (
+                "Write one useful report at the local report path named by the handover, and keep its "
+                "evidence in that report folder. The product copies them to canonical notes before "
+                "removal. Before writing the report, follow [Implementation outputs]"
+                "(../operations/implementation.md#outputs) "
+                "for report contents, checks and the freeze procedure."
+            ),
         ),
     },
     "operations/implementation.md": {
-        "freeze to reviewer": (
-            "Freeze the candidate and first tell the Manager to start the Reviewer. Once the Reviewer exists, hand the freeze directly to that Reviewer",
-        ),
-        "identity and whole stretch": (
-            "naming the leaf, head and change hash in your report, report path, and whole next stretch",
-        ),
-        "repair return": (
-            "Repair sealed findings and return a new freeze directly to the same Reviewer.",
-        ),
-        "producer to curator": (
-            "After code PASS and the Manager has started the Curator, send your hand-off list for that freeze directly to the Curator.",
-        ),
-        "factual independence": ("This is a factual hand-over, not a review brief.",),
-        "busy retry": (
-            "Full-store recipient-busy is a refusal: pending record, independent work, one resend before turn end, then remain pending.",
-        ),
-        "upward notice recovery": (
-            "Record and retry an unreachable-Manager notice rather than put that transport failure to the developer.",
-        ),
+        **IMPLEMENTATION_CLAUSES,
     },
     "roles/reviewer.md": {
-        "verdict to worker": (
-            "Write and record the verdict, then hand it directly to the leaf's Worker.",
-        ),
-        "sealed whole repair": (
-            "A block names the report with sealed findings and requests the whole repair stretch",
-            "A block names the sealed-findings report and requests the whole repair stretch",
-        ),
-        "pass to curator": (
-            "code PASS also goes directly to the Curator with your hand-off list for that freeze",
-            "Reviewer first tells Manager code PASS; Manager starts Curator, then peer content stays direct. Send your freeze hand-off list directly to the Curator.",
-        ),
-        "memory verdict to curator": (
-            "hand it directly to the leaf's Worker as `../operations/review.md` §Outputs states",
-            "Review the Curator\u2019s memory change in its separate sealed lane; send findings or PASS directly to the Curator.",
-        ),
-        "identity and whole stretch": (
-            "candidate head and change hash from the Worker's report, or memory change identity), report or verdict path, and request the recipient's whole next stretch",
-            "Every leaf hand-over names the leaf, exact object (Worker-reported candidate head and change hash, or memory change identity), report/verdict path, and requests the recipient\u2019s whole next stretch.",
-        ),
-        "own code begin": (
-            "record your own begin and result as `../operations/review.md` §Outputs states",
-            "On taking a leaf code hand-over within the settings limit, record your begin/result per `../operations/review.md` §Outputs.",
-        ),
-        "own code result": (
-            "record your own begin and result as `../operations/review.md` §Outputs states",
-            "On taking a leaf code hand-over within the settings limit, record your begin/result per `../operations/review.md` §Outputs.",
-        ),
-        "preceding result": (
-            "record your own begin and result as `../operations/review.md` §Outputs states",
-            "On taking a leaf code hand-over within the settings limit, record your begin/result per `../operations/review.md` §Outputs.",
-        ),
-        "manager acceptance": (
-            "The Manager accepts the verdict for the gate and records the architect's or the developer's authorization beyond the limit.",
-            "The Manager accepts the gate verdict and records architect/developer authorization beyond the limit.",
-        ),
+        **REVIEW_CLAUSES,
         "sealed memory lane": (
-            "Curator memory review keeps its separately sealed lane as `../operations/review.md` §Boundaries states",
-            "Curator memory review keeps its separately sealed lane per `../operations/review.md` §Boundaries",
-            "Record memory rounds with `begin_review`/`record_review`, `reviewKind=memory`: separate baseline/list",
-        ),
-        "memory leaves code untouched": (
-            "Curator memory review keeps its separately sealed lane as `../operations/review.md` §Boundaries states",
-            "Curator memory review keeps its separately sealed lane per `../operations/review.md` §Boundaries",
-            "unchanged code state",
+            (
+                "Memory review uses separate sealed reports, finding identifiers and its "
+                "own pass count. The Reviewer records its own lane with `begin_review` "
+                "and `record_review`, using `reviewKind=memory`. Code state stays "
+                "unchanged. Memory review opens no code review-state round, resets no "
+                "passed code review, code verdict or code baseline, and adds no "
+                "identifiers to that baseline. Its ordinary pass limit is the same as "
+                "code review's. A pass beyond the settings limit needs the Architect's or "
+                "developer's instruction recorded by the Manager."
+            ),
         ),
         "memory ordinary limit": (
-            "Curator memory review keeps its separately sealed lane as `../operations/review.md` §Boundaries states",
-            "Curator memory review keeps its separately sealed lane per `../operations/review.md` §Boundaries",
-            "same limit; extras need architect/developer approval recorded by Manager in leaf decisions.",
-        ),
-        "memory extra approval": (
-            "the task's architect or the developer must authorize an extra pass, and the Manager records that authorization in the leaf's decisions",
-            "extra passes require the task\u2019s architect or developer\u2019s authorization, recorded by the Manager in leaf decisions",
-            "extras need architect/developer approval recorded by Manager in leaf decisions.",
-        ),
-        "post-pass concern": (
-            "Answer a Curator finding that code fails the requirement or contradicts the Worker's report as `../operations/review.md` §Boundaries states, including after code PASS.",
-            "Answer Curator findings of code failing requirements or contradicting the Worker\u2019s report per `../operations/review.md` §Boundaries, even after code PASS.",
-        ),
-        "reopen or refute answer": (
-            "Answer a Curator finding that code fails the requirement or contradicts the Worker's report as `../operations/review.md` §Boundaries states, including after code PASS.",
-            "Answer Curator findings of code failing requirements or contradicting the Worker\u2019s report per `../operations/review.md` §Boundaries, even after code PASS.",
-        ),
-        "busy retry": (
-            "Full-store recipient-busy is a refusal: pending record, independent work, one resend before turn end, then remain pending.",
-        ),
-        "upward notice recovery": (
-            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/review.md` §Boundaries states.",
-            "Apply `../operations/review.md` §Boundaries to taken hand-overs and provider, seat and busy refusals.",
+            (
+                "Memory review uses separate sealed reports, finding identifiers and its "
+                "own pass count. The Reviewer records its own lane with `begin_review` "
+                "and `record_review`, using `reviewKind=memory`. Code state stays "
+                "unchanged. Memory review opens no code review-state round, resets no "
+                "passed code review, code verdict or code baseline, and adds no "
+                "identifiers to that baseline. Its ordinary pass limit is the same as "
+                "code review's. A pass beyond the settings limit needs the Architect's or "
+                "developer's instruction recorded by the Manager."
+            ),
         ),
     },
     "operations/review.md": {
-        "verdict to worker": ("Hand the verdict directly to the Worker",),
-        "sealed whole repair": (
-            "a block names the sealed findings report and asks for the whole repair stretch",
-        ),
-        "pass to curator": (
-            "Once the Curator exists, send it the passed freeze and code-PASS verdict directly.",
-        ),
-        "memory verdict to curator": (
-            "Review its memory change and return findings or PASS directly to it.",
-        ),
-        "identity and whole stretch": (
-            "candidate head and change hash from the Worker's report, or memory change identity), report/verdict path, and the whole next stretch",
-        ),
-        "own code begin": (
-            'The Reviewer opens each ordinary leaf code round with task_doc(operation="begin_review")',
-        ),
-        "own code result": (
-            "records its own verdict with record_review or applicable record_route_review",
-        ),
-        "preceding result": ("including any preceding result required before the next begin",),
-        "manager acceptance": (
-            "The Manager retains gate acceptance and records the architect's or the developer's approval for any extra round.",
+        **REVIEW_CLAUSES,
+        "extra round beyond the limit": (
+            "Within the settings limit, this is an ordinary fix-verification round. Beyond "
+            "the limit, the round needs the Architect's or developer's approval, which the "
+            "Manager records. No new finding or item is covered.",
         ),
         "sealed memory lane and count": (
-            "Curator memory checks keep separately sealed reports, IDs and a count with the same settings limit as code",
-            "Curator memory checks use their own sealed reports, IDs and recorded lane: `begin_review`/`record_review` with `reviewKind=memory`, same settings limit and extra-round approval as code.",
-        ),
-        "memory leaves code untouched": (
-            "they open no review-state round, reset no passed code review and add no IDs to its baseline",
-            "They open no code review-state round, reset no passed code review and add no IDs to its baseline.",
-        ),
-        "memory extra approval": (
-            "Any extra memory pass follows `../operations/curation.md` §Handoff / exit.",
-        ),
-        "post-pass concern": (
-            "Answer Curator code findings directly to Curator and Worker, even after code PASS",
-        ),
-        "reopen or refute answer": (
-            "take a valid finding into your findings and reopen the verdict for that point, or state why it does not hold",
-        ),
-        "busy retry": (
-            "Full-store recipient-busy is a refusal: pending record, independent work, one resend before turn end, then remain pending.",
-        ),
-        "upward notice recovery": (
-            "Handle non-work replies, empty or doubled seats and unreachable-Manager notices as `../operations/implementation.md` §Boundaries states.",
+            (
+                "Memory review uses separate sealed reports, finding identifiers and its "
+                "own pass count. The Reviewer records its own lane with `begin_review` "
+                "and `record_review`, using `reviewKind=memory`. Code state stays "
+                "unchanged. Memory review opens no code review-state round, resets no "
+                "passed code review, code verdict or code baseline, and adds no "
+                "identifiers to that baseline. Its ordinary pass limit is the same as "
+                "code review's. A pass beyond the settings limit needs the Architect's or "
+                "developer's instruction recorded by the Manager."
+            ),
         ),
     },
     "roles/curator.md": {
-        "memory to reviewer": (
-            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit",
-        ),
-        "identity and whole stretch": (
-            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit",
-        ),
-        "post-pass code finding": (
-            "Send code questions and evidenced code concerns as `../operations/curation.md` §Failure handling states, even after the Reviewer has passed the code",
-        ),
-        "code answer": (
-            "Send code questions and evidenced code concerns as `../operations/curation.md` §Failure handling states, even after the Reviewer has passed the code",
-        ),
-        "finding and answer report": ("Your report names the finding and the Reviewer's answer.",),
-        "memory lane and count": (
-            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit",
-        ),
-        "memory leaves code untouched": (
-            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit",
-        ),
-        "memory ordinary limit": (
-            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit",
-        ),
-        "busy retry": (
-            "Full-store recipient-busy is a refusal: pending record, independent work, one resend before turn end, then remain pending.",
-        ),
-        "upward notice recovery": (
-            "If a required Manager notice cannot be delivered, record it as pending and retry it as `../operations/curation.md` §Handoff / exit states; do not turn this transport failure into a developer question in your own chat.",
-        ),
+        **CURATION_CLAUSES,
         "manager contact": (
-            "Contact the Manager only as `../operations/curation.md` §Handoff / exit states.",
+            "The Manager receives Curator messages only for delivery or seat problems, ownership "
+            "or authority, a pass beyond the settings limit, a code finding disputed with the "
+            "Reviewer, or a sync step reserved to the Manager. It reads ordinary state from "
+            "reports and relays no handover contents.",
         ),
     },
     "operations/curation.md": {
-        "memory to reviewer": (
-            "The curator's memory candidate goes directly to the Reviewer for its whole memory check",
-        ),
-        "identity and whole stretch": (
-            "the memory candidate's identity), its report or verdict path, and the whole next stretch requested",
-        ),
-        "post-pass code finding": (
-            "A code concern goes to the Reviewer and Worker, even after code PASS.",
-        ),
-        "code answer": (
-            "The Reviewer answers by taking it into its findings and reopening that point, or explaining why it does not hold.",
-        ),
-        "finding and answer report": ("Name the finding and answer in the Curator report",),
-        "memory lane and count": (
-            "The memory check keeps separate sealed reports, finding IDs and its own pass count",
-        ),
-        "memory leaves code untouched": (
-            "it opens no code-review round, resets no code verdict and adds no IDs to the code baseline",
-        ),
-        "memory ordinary limit": (
-            "Its ordinary limit is the same number of passes as the code review.",
-        ),
-        "busy retry": (
-            "Full-store recipient-busy is a refusal: pending record, independent work, one resend before turn end, then remain pending.",
-        ),
-        "upward notice recovery": (
-            "If a required Manager notice cannot be delivered, record it as pending",
-            "Handle non-work replies, empty or doubled seats and unreachable-Manager notices as `../operations/implementation.md` §Boundaries states.",
-        ),
+        **CURATION_CLAUSES,
     },
 }

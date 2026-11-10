@@ -7,7 +7,7 @@ hand-off's label and the authorization reference. Both halves live here rather t
 modules, which keep only the calls that use them.
 
 A clause is never an error's own text. The causes are sorted in the order the write meets them: no
-trusted settings at or above the working directory, the checkout guard refusing an undeclared run from
+trusted settings in the user config directory, the checkout guard refusing an undeclared run from
 the primary checkout, a settings file that cannot be loaded, or settings for another coordination root,
 which the caller compares against the contract.
 """
@@ -70,9 +70,8 @@ def checked_guard(guard: Callable[[], Any]) -> str | None:
 
 
 def discovered_settings(
-    cwd: Path,
     *,
-    discover: Callable[[Path], Path],
+    discover: Callable[[], Path],
     guard: Callable[[], Any],
     load: Callable[[Path], Any],
     unreadable: tuple[type[BaseException], ...],
@@ -80,15 +79,15 @@ def discovered_settings(
     """The settings this command line would use, or the one fixed clause naming why it cannot.
 
     ``discover``, ``guard`` and ``load`` are the command's own three moves, passed in so this module
-    holds the sorting rather than importing the command layer: no trusted settings at or above ``cwd``,
+    holds the sorting rather than importing the command layer: missing user-config settings,
     the checkout guard's clause, a settings file that cannot be loaded, or the loaded settings, whose
     coordination root the caller compares against the contract.
     """
 
     try:
-        path = discover(cwd)
+        path = discover()
     except Exception:
-        return f"no trusted settings file is found at or above {cwd}"
+        return "no trusted settings file is found in the user config directory"
     clause = checked_guard(guard)
     if clause is not None:
         return clause

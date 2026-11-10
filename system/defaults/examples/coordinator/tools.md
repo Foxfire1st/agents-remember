@@ -83,6 +83,6 @@ layer.
 
 ## Notes
 
-Agents should resolve the target repository with the `c-08-ar-coordination-context-resolver` skill before choosing task,
+Agents should resolve the target repository through `context_packet` using the [tool reference](skill://agents-remember/skills/l-01-agent-lifecycles/reference/knowledge/commands.md) before choosing task,
 worktree, memory, or validation paths. Prefer memory-layer tool instructions
 when a command is repository-specific.

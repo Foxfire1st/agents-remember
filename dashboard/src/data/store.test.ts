@@ -3,7 +3,7 @@ import { beforeEach,describe,expect,it } from 'vitest';
 import snapshot from '../fixtures/snapshot.json';
 import { reparsed } from '../test/fixtures/wire';
 import { asServedProjection } from '../test/servedProjection';
-import type { CloseoutQueueNode,WorkspaceProjection } from '../types/projection';
+import type { BuildCurrentness,CloseoutQueueNode,WorkspaceProjection } from '../types/projection';
 import { dashboardStore } from './store';
 
 // `asServedProjection`, not `snapshot as unknown as WorkspaceProjection`. The double cast turned
@@ -119,6 +119,52 @@ function volatileBump(source: WorkspaceProjection, tick: number): WorkspaceProje
 }
 
 describe('dashboard store change gate (260703-L15)', () => {
+  it('applies build currentness independently, reuses equal observations and clears them on reset', () => {
+    const currentness: BuildCurrentness = {
+      mode: 'installed', state: 'current', loadedDigest: 'old', installedDigest: 'old',
+    };
+    const seed = { ...projection, buildCurrentness: currentness, servingProcessId: 123 };
+    dashboardStore.getState().applySnapshot(seed);
+    const before = dashboardStore.getState();
+    dashboardStore.getState().applySnapshot(reparsed(seed));
+    expect(dashboardStore.getState()).toBe(before);
+    expect(dashboardStore.getState().buildCurrentness).toBe(currentness);
+    const stale: BuildCurrentness = {
+      ...currentness, state: 'stale', installedDigest: 'new', firstSeenAt: '2026-11-05T00:00:00Z',
+    };
+    dashboardStore.getState().applyDelta('buildCurrentness', stale);
+    const changed = dashboardStore.getState();
+    expect(changed.buildCurrentness).toBe(stale);
+    expect(changed.tasks).toBe(before.tasks);
+    expect(changed.servingBuild).toBe(before.servingBuild);
+    expect(changed.servingProcessId).toBe(123);
+    dashboardStore.getState().applyDelta('buildCurrentness', { ...stale });
+    expect(dashboardStore.getState()).toBe(changed);
+    dashboardStore.getState().reset();
+    expect(dashboardStore.getState().buildCurrentness).toBeNull();
+    expect(dashboardStore.getState().servingProcessId).toBeNull();
+  });
+
+  it('drops a build currentness frame the producer cannot send and keeps the last observation', () => {
+    const current: BuildCurrentness = { mode: 'checkout', state: 'current', loadedDigest: 'a' };
+    dashboardStore.getState().applyDelta('buildCurrentness', current);
+    const before = dashboardStore.getState();
+    for (const frame of [
+      null,
+      [current],
+      { state: 'current' },
+      { mode: 'checkout' },
+      { ...current, state: 'gone' },
+      { ...current, mode: 'remote' },
+      { ...current, reason: 7 },
+      { ...current, servingProcessId: 1 },
+    ]) {
+      dashboardStore.getState().applyDelta('buildCurrentness', frame);
+      expect(dashboardStore.getState(), JSON.stringify(frame)).toBe(before);
+    }
+    expect(dashboardStore.getState().buildCurrentness).toBe(current);
+  });
+
   it('applies N idle re-snapshots with zero store writes and stable identity', () => {
     dashboardStore.getState().applySnapshot(volatileBump(projection, 0));
     const before = dashboardStore.getState();

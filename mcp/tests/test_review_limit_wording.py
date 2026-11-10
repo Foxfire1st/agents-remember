@@ -8,10 +8,9 @@ with the parts of rules 6 to 8.
 Evidence 10: the same test holds the texts of the Reviewer, the Worker and the
 Manager to the sentences of rule 9.
 
-The nine skill trees are the canonical ``skills/`` tree plus the nine copies
-``scripts/sync-skills.py`` projects (the MCP package data and the eight harness
-starter packages); ``test_sync_scripts.py`` pins their byte equality, and the
-compiled capsule is read from the packaged copy the role start uses.
+The two skill trees are the canonical ``skills/`` tree and its MCP package-data
+copy. ``test_sync_scripts.py`` pins their byte equality. Compiled checks cover
+every declared role operation and bind linked procedures to the same skill tree.
 """
 
 from __future__ import annotations
@@ -20,7 +19,9 @@ import re
 from pathlib import Path
 
 import pytest
-from agents_remember.application.role_capsules.compilation import compile_admitted_capsule
+from agents_remember.application.role_capsules.compilation import (
+    compile_admitted_capsule,
+)
 from agents_remember.application.role_capsules.sources import CapsuleAdmissionRequest
 from agents_remember.application.skill_resources.capsule import (
     CapsuleSeatAddress,
@@ -100,7 +101,6 @@ ROUND_NUMBER_PATTERNS = tuple(
     )
 )
 
-SECTION_HEADING = "## Where your stage ends"
 RETIRED_WORKER_CHECKS = "the focused tests, the lint and the type check pass on its final bytes"
 
 #: Stops every stage section names (rule 8): the permission prompt, the
@@ -113,8 +113,7 @@ STOPS = (
 )
 
 #: Rule 6 end states, rule 7 repair-own-slips and rule 8 stops, per role. Every
-#: facet must hold inside that role's single stage-end section, not merely
-#: somewhere in the file.
+#: facet keeps its identity below and is bound to its current owning section.
 STAGE_PARTS = {
     "worker": (
         "Your stage ends when the candidate meets the requirement",
@@ -122,7 +121,7 @@ STAGE_PARTS = {
         "the report is with the Reviewer",
         "you repair, and you go on",
         "Your report names what you repaired",
-        "sends what it waits for, and from whom, to its parent with `role_message`",
+        "tell that parent what and whom you await with `role_message` on `agents-remember-task`",
         "the same Reviewer checks it on the round it last recorded, with no new round",
         *STOPS,
     ),
@@ -130,8 +129,10 @@ STAGE_PARTS = {
         "Your stage ends when a verdict over the whole requirement",
         "with its findings and its coverage",
         "you repair, and you go on",
+        "Repair faults in your work or instruments",
+        "Product guards and commit gates keep their stops",
         "Your verdict names what you repaired",
-        "sends what it waits for, and from whom, to its parent with `role_message`",
+        "tell that parent what and whom you await with `role_message` on `agents-remember-task`",
         "check the repaired record on the round you last recorded",
         "byte for byte",
         *STOPS,
@@ -145,9 +146,8 @@ STAGE_PARTS = {
         "If unfinished, report what you await and from whom to your parent via `role_message` "
         "on `agents-remember-task`.",
         "Stop for open permission prompts",
-        "Stop for open permission prompts, other correct-input refusals, unowned state, "
-        "requirement-meaning questions or effects outside worktree/scratch/task; "
-        "covered correct writes follow recovery.",
+        "Stop for open permission prompts, correct-input refusals other than of a covered write, "
+        "unowned state, requirement-meaning questions or effects outside worktree/scratch/task.",
         "requirement-meaning questions",
         "effects outside worktree/scratch/task",
     ),
@@ -156,49 +156,308 @@ STAGE_PARTS = {
         "the sync to the master's line",
         "you repair, and you go on",
         "Your report names what you repaired",
-        "sends what it waits for, and from whom, to its parent with `role_message`",
+        "tell that parent what and whom you await with `role_message` on `agents-remember-task`",
         *STOPS,
     ),
 }
 
-# Reviewer equivalents only: untouched roles still require their own wording.
-REVIEWER_STAGE_EQUIVALENTS = {
-    "Your stage ends when a verdict over the whole requirement": "Your stage ends at a recorded verdict covering the whole requirement",
-    "with its findings and its coverage": "its findings and coverage",
-    "you repair, and you go on": "Repair faults from your work or instrument and continue",
-    "sends what it waits for, and from whom, to its parent with `role_message`": "send what and whom you await to your parent with `role_message`",
-    "You stop for an open permission prompt": "Stop for open permission prompts",
-    "a refusal by a product guard": "product-guard/AR-tool refusals with correct input or naming unowned state",
-    "a question about what the requirement means": "requirement-meaning questions",
-    "an effect outside your own worktree": "effects outside your worktree, scratch folder and task",
+# Current source homes for the existing rule 6-8 facet identities above.
+# Linked procedures are checked through their explicit role pointer, never as
+# an alternative substring anywhere in the role or compiled text.
+_WORKER_REPAIR = "Repair what your own work or instrument breaks, then continue. This includes your failing tests, lint or type findings, scripts or checks, wrong paths and failed commands. Do not bypass or hide failed checks or excuse them as pre-existing."
+_WORKER_REPAIR_REPORT = "Apply the role-owned repair route and bounded writer ladder. A validation or transaction guard is not a writer refusal. If a refusal names a fault in your input, correct the input and call the same tool. Name your repairs in the report. Leave a failed or unrun check visible only when you cannot make it pass on your own ground, and say so."
+_WORKER_NOTICE = "Work step to step and wave to wave in one turn, collecting helper results. End only at your handover, a named wait or a nearly full context. Outside a helper wait that your launch directs you to handle with the Agent Client Protocol, if you have a parent and the stage remains unfinished when you end, send that parent what you await and from whom, using `role_message` on `agents-remember-task`. That helper wait follows your shared instructions."
+_WORKER_RECORD = "If every candidate finding is closed and only a finding on your record remains, repair the record. The candidate stays unchanged, and the same Reviewer checks the record on its last recorded round, without a new round."
+_WORKER_STOPS = "Stop for an open permission prompt, a product-guard refusal, or a correct-input AR-tool refusal, except a covered same-tool/input-class write following the supplied recovery procedure. Also stop for a refusal naming a state you do not own, a question about the requirement's meaning, or an effect outside your worktree, scratch folder and task."
+_REVIEWER_REPAIR_AND_STOPS = "Repair faults in your work or instruments, including mistaken records, wrong evidence anchors and misread candidate identities, and continue. Correct input faults through the same tool; name repairs in the verdict. Product guards, read/check/validation/sync refusals and commit gates keep their stops. Stop for an open permission prompt, an Agents Remember tool refusal other than of a covered correct write, unowned state, requirement-meaning questions, or effects outside the assigned worktree, scratch folder and task."
+_REVIEWER_NOTICE = "Work step to step and wave to wave in one turn, collecting helpers' results. End only at the verdict, a named wait or nearly full context. Outside a helper wait that your launch directs you to handle with the Agent Client Protocol, if you have a parent and remain unfinished at turn end, tell that parent what and whom you await with `role_message` on `agents-remember-task`. That helper wait follows your shared instructions."
+_CURATOR_REPAIR = "Correct your own faulty-input refusal through the same writer. Repair faults caused by your work or tools, and repair rather than relabel coherence findings. Report each repair."
+_CURATOR_NOTICE = "Work from step to step and wave to wave in one turn, collecting helpers' results. End only at the handover, a named wait or a nearly full context. Outside a helper wait that your launch directs you to handle with the Agent Client Protocol, if you have a parent and remain unfinished, report what you await and from whom to that parent with `role_message` on `agents-remember-task`. That helper wait follows your shared instructions."
+_CURATOR_STOPS = "Stop for open permission prompts, correct-input refusals other than of a covered write, unowned state, requirement-meaning questions or effects outside worktree, scratch and task."
+_MANAGER_REPAIR = "Repair what your own work or instrument breaks and continue. This includes a mistaken record, wrong agent address or misread report. If a refusal identifies faulty input, correct it through the same tool. Name the repair in your report."
+_MANAGER_NOTICE = "Outside a helper wait that your launch directs you to handle with the Agent Client Protocol, if you have a parent and end a turn with your stage unfinished, send what you await, and from whom, to that parent through `role_message` on `agents-remember-task`. That helper wait follows your shared instructions."
+_MANAGER_STOPS = "A covered correct write follows the recovery in your shared instructions. Otherwise you stop for: - an open permission prompt; - a refusal by a product guard or an AR tool that stands with a correct input, or that names a state you do not own; - a question about a requirement's meaning beyond your own interpretation authority; - an effect outside your own worktree, your scratch folder and your task."
+
+STAGE_CONTRACTS = {
+    "worker": {
+        "Your stage ends when the candidate meets the requirement": (
+            "role",
+            "## Stop conditions and stage completion",
+            "Your stage ends when the candidate meets the requirement",
+            "Your stage ends when the candidate meets the requirement",
+        ),
+        "the handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of its final bytes": (
+            "role",
+            "## Stop conditions and stage completion",
+            "the handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of the final bytes",
+            "the handover checks named in `system/coding-guidelines.md` under `workspace.memoryRoot` pass on a clean copy of the final bytes",
+        ),
+        "the report is with the Reviewer": (
+            "role",
+            "## Stop conditions and stage completion",
+            "the report is with the Reviewer",
+            "the report is with the Reviewer",
+        ),
+        "you repair, and you go on": (
+            "role",
+            "## Repair findings and failed checks",
+            _WORKER_REPAIR,
+            "Repair what your own work or instrument breaks, then continue.",
+        ),
+        "Your report names what you repaired": (
+            "role",
+            "## Repair findings and failed checks",
+            _WORKER_REPAIR_REPORT,
+            "Name your repairs in the report.",
+        ),
+        "tell that parent what and whom you await with `role_message` on `agents-remember-task`": (
+            "role",
+            "## Stop conditions and stage completion",
+            _WORKER_NOTICE,
+            "Outside a helper wait that your launch directs you to handle with the Agent Client Protocol, if you have a parent and the stage remains unfinished when you end, send that parent what you await and from whom, using `role_message` on `agents-remember-task`.",
+        ),
+        "the same Reviewer checks it on the round it last recorded, with no new round": (
+            "role",
+            "## Repair findings and failed checks",
+            _WORKER_RECORD,
+            "The candidate stays unchanged, and the same Reviewer checks the record on its last recorded round, without a new round.",
+        ),
+        "You stop for an open permission prompt": (
+            "role",
+            "## Stop conditions and stage completion",
+            _WORKER_STOPS,
+            "an open permission prompt",
+        ),
+        "a refusal by a product guard": (
+            "role",
+            "## Stop conditions and stage completion",
+            _WORKER_STOPS,
+            "a product-guard refusal",
+        ),
+        "a question about what the requirement means": (
+            "role",
+            "## Stop conditions and stage completion",
+            _WORKER_STOPS,
+            "a question about the requirement's meaning",
+        ),
+        "an effect outside your own worktree": (
+            "role",
+            "## Stop conditions and stage completion",
+            _WORKER_STOPS,
+            "an effect outside your worktree, scratch folder and task",
+        ),
+    },
+    "reviewer": {
+        "Your stage ends when a verdict over the whole requirement": (
+            "role",
+            "## Organise and continue the assigned work",
+            "The stage ends with a recorded verdict covering the whole requirement",
+            "The stage ends with a recorded verdict covering the whole requirement",
+        ),
+        "with its findings and its coverage": (
+            "role",
+            "## Organise and continue the assigned work",
+            "its findings and coverage",
+            "its findings and coverage",
+        ),
+        "you repair, and you go on": (
+            "role",
+            "## Organise and continue the assigned work",
+            _REVIEWER_REPAIR_AND_STOPS,
+            "Repair faults in your work or instruments, including mistaken records, wrong evidence anchors and misread candidate identities, and continue.",
+        ),
+        "Repair faults in your work or instruments": (
+            "role",
+            "## Organise and continue the assigned work",
+            _REVIEWER_REPAIR_AND_STOPS,
+            "Repair faults in your work or instruments, including mistaken records, wrong evidence anchors and misread candidate identities, and continue.",
+        ),
+        "Product guards and commit gates keep their stops": (
+            "role",
+            "## Organise and continue the assigned work",
+            _REVIEWER_REPAIR_AND_STOPS,
+            "Product guards, read/check/validation/sync refusals and commit gates keep their stops.",
+        ),
+        "Your verdict names what you repaired": (
+            "role",
+            "## Organise and continue the assigned work",
+            _REVIEWER_REPAIR_AND_STOPS,
+            "name repairs in the verdict.",
+        ),
+        "tell that parent what and whom you await with `role_message` on `agents-remember-task`": (
+            "role",
+            "## Organise and continue the assigned work",
+            _REVIEWER_NOTICE,
+            "Outside a helper wait that your launch directs you to handle with the Agent Client Protocol, if you have a parent and remain unfinished at turn end, tell that parent what and whom you await with `role_message` on `agents-remember-task`.",
+        ),
+        "check the repaired record on the round you last recorded": (
+            "operations/review.md",
+            "## Recheck a repaired Worker record",
+            "When all candidate findings are closed and only a finding on the Worker's record remains, check the repaired record on the last recorded round. The record may be its report, evidence table, hash or anchor.",
+            "check the repaired record on the last recorded round.",
+        ),
+        "byte for byte": (
+            "operations/review.md",
+            "## Recheck a repaired Worker record",
+            "Do not call `begin_review`; the count stays. This applies only while the candidate is byte-for-byte the candidate that round recorded. If it changes, the tool refuses and names `begin_review` as the next step.",
+            "byte-for-byte",
+        ),
+        "You stop for an open permission prompt": (
+            "role",
+            "## Organise and continue the assigned work",
+            _REVIEWER_REPAIR_AND_STOPS,
+            "an open permission prompt",
+        ),
+        "a refusal by a product guard": (
+            "role",
+            "## Organise and continue the assigned work",
+            _REVIEWER_REPAIR_AND_STOPS,
+            "Product guards, read/check/validation/sync refusals and commit gates keep their stops.",
+        ),
+        "a question about what the requirement means": (
+            "role",
+            "## Organise and continue the assigned work",
+            _REVIEWER_REPAIR_AND_STOPS,
+            "requirement-meaning questions",
+        ),
+        "an effect outside your own worktree": (
+            "role",
+            "## Organise and continue the assigned work",
+            _REVIEWER_REPAIR_AND_STOPS,
+            "effects outside the assigned worktree, scratch folder and task",
+        ),
+    },
+    "curator": {
+        "Your stage ends when task knowledge is written and checked and quality is clean. Distinguish installed-writer publication from scoped manual provenance.": (
+            "role",
+            "## Repair and finish the stage",
+            "Your stage ends when task knowledge is written and checked and quality is clean. Distinguish installed-writer publication from scoped manual provenance.",
+            "Your stage ends when task knowledge is written and checked and quality is clean. Distinguish installed-writer publication from scoped manual provenance.",
+        ),
+        "quality is clean.": (
+            "role",
+            "## Repair and finish the stage",
+            "quality is clean.",
+            "quality is clean.",
+        ),
+        "Repair faults your work or instrument causes:": (
+            "role",
+            "## Repair and finish the stage",
+            _CURATOR_REPAIR,
+            "Repair faults caused by your work or tools, and repair rather than relabel coherence findings.",
+        ),
+        "Report your repairs.": (
+            "role",
+            "## Repair and finish the stage",
+            _CURATOR_REPAIR,
+            "Report each repair.",
+        ),
+        "If unfinished, report what you await and from whom to your parent via `role_message` on `agents-remember-task`.": (
+            "role",
+            "## Repair and finish the stage",
+            _CURATOR_NOTICE,
+            "Outside a helper wait that your launch directs you to handle with the Agent Client Protocol, if you have a parent and remain unfinished, report what you await and from whom to that parent with `role_message` on `agents-remember-task`.",
+        ),
+        "Stop for open permission prompts": (
+            "role",
+            "## Repair and finish the stage",
+            _CURATOR_STOPS,
+            "Stop for open permission prompts",
+        ),
+        "Stop for open permission prompts, correct-input refusals other than of a covered write, unowned state, requirement-meaning questions or effects outside worktree/scratch/task.": (
+            "role",
+            "## Repair and finish the stage",
+            _CURATOR_STOPS,
+            "correct-input refusals other than of a covered write",
+        ),
+        "requirement-meaning questions": (
+            "role",
+            "## Repair and finish the stage",
+            _CURATOR_STOPS,
+            "requirement-meaning questions",
+        ),
+        "effects outside worktree/scratch/task": (
+            "role",
+            "## Repair and finish the stage",
+            _CURATOR_STOPS,
+            "effects outside worktree, scratch and task",
+        ),
+    },
+    "manager": {
+        "You hand a stage over whole": (
+            "role",
+            "## Correct your own work and respect stops",
+            "Hand over a whole stage, not a chain of steps.",
+            "Hand over a whole stage, not a chain of steps.",
+        ),
+        "the sync to the master's line": (
+            "role",
+            "## Correct your own work and respect stops",
+            "sync to the master's line",
+            "sync to the master's line",
+        ),
+        "you repair, and you go on": (
+            "role",
+            "## Correct your own work and respect stops",
+            _MANAGER_REPAIR,
+            "Repair what your own work or instrument breaks and continue.",
+        ),
+        "Your report names what you repaired": (
+            "role",
+            "## Correct your own work and respect stops",
+            _MANAGER_REPAIR,
+            "Name the repair in your report.",
+        ),
+        "tell that parent what and whom you await with `role_message` on `agents-remember-task`": (
+            "role",
+            "## Correct your own work and respect stops",
+            _MANAGER_NOTICE,
+            "Outside a helper wait that your launch directs you to handle with the Agent Client Protocol, if you have a parent and end a turn with your stage unfinished, send what you await, and from whom, to that parent through `role_message` on `agents-remember-task`.",
+        ),
+        "You stop for an open permission prompt": (
+            "role",
+            "## Correct your own work and respect stops",
+            _MANAGER_STOPS,
+            "an open permission prompt",
+        ),
+        "a refusal by a product guard": (
+            "role",
+            "## Correct your own work and respect stops",
+            _MANAGER_STOPS,
+            "a refusal by a product guard or an AR tool that stands with a correct input",
+        ),
+        "a question about what the requirement means": (
+            "role",
+            "## Correct your own work and respect stops",
+            _MANAGER_STOPS,
+            "a question about a requirement's meaning beyond your own interpretation authority",
+        ),
+        "an effect outside your own worktree": (
+            "role",
+            "## Correct your own work and respect stops",
+            _MANAGER_STOPS,
+            "an effect outside your own worktree, your scratch folder and your task",
+        ),
+    },
 }
 
-
-def _facet_variants(parts: tuple[str, ...], facet: str) -> tuple[str, ...]:
-    if parts == STAGE_PARTS["reviewer"] and facet in REVIEWER_STAGE_EQUIVALENTS:
-        return facet, REVIEWER_STAGE_EQUIVALENTS[facet]
-    return (facet,)
-
-
-def _delete_facet(section: str, parts: tuple[str, ...], facet: str) -> str:
-    flat = _flatten(section)
-    for variant in _facet_variants(parts, facet):
-        flat = flat.replace(_flatten(variant), "", 1)
-    return flat
-
+REVIEWER_RECORD_POINTER = "Read the current review-state limit from the `task_doc` answer on `agents-remember-task`. Never run an unapproved round or split the scope to avoid that limit. Before checking repaired findings at the round limit, read [round-limit verification](../operations/review.md#verify-repaired-findings-at-the-round-limit) for repaired-item rounds. Before rechecking a repaired Worker record, read [record-only rechecks](../operations/review.md#recheck-a-repaired-worker-record) for the unchanged-candidate exception. Non-leaf seams retain their owner's recording act."
 
 #: Rule 9 sentences (evidence 10).
 RULE_NINE = {
     "reviewer": (
-        "A finding names the property that the requirement asks for and the candidate breaks.",
-        "The case that shows it is its proof and not the finding.",
+        "A finding names the property the requirement asks for and the candidate breaks.",
+        "The case demonstrating the failure is its proof, not the finding itself.",
     ),
     "worker": (
-        "Where a finding is still open after a repair, the next repair does not answer the new case.",
-        "Write the property down for every case, and either show why the construction holds it or change the construction.",
+        "If a finding stays open after a repair, the next repair must not merely answer the "
+        "new case.",
+        "Write down the property for every case. Either show why the construction holds it or "
+        "change the construction, and state which you did in the report.",
     ),
     "manager": (
-        "the question carries the Worker's account of the property and the construction behind the open finding.",
+        "Include the Worker's account of the property and the construction behind the open "
+        "finding.",
     ),
 }
 
@@ -292,9 +551,9 @@ def test_no_compiled_capsule_names_a_review_round_number() -> None:
     assert offending == [], "\n".join(offending)
 
 
-def _section_of(text: str, heading: str = SECTION_HEADING) -> str | None:
-    """Return the single stage-end section body, or ``None`` when absent."""
-    start = text.find(heading)
+def _section_of(text: str, heading: str) -> str | None:
+    """Return the named owning section, never text from a later section."""
+    start = text.find(heading + "\n")
     if start < 0:
         return None
     body = text[start + len(heading) :]
@@ -302,57 +561,93 @@ def _section_of(text: str, heading: str = SECTION_HEADING) -> str | None:
     return body if end < 0 else body[:end]
 
 
-def _section_missing(section: str | None, parts: tuple[str, ...]) -> list[str]:
-    """Facets of one section that do not hold inside it."""
-    if section is None:
-        return ["no stage-end section"]
-    flat = _flatten(section)
-    missing = [
-        part
-        for part in parts
-        if not any(_flatten(variant) in flat for variant in _facet_variants(parts, part))
-    ]
-    if parts == STAGE_PARTS["worker"] and RETIRED_WORKER_CHECKS in flat:
-        missing.append("retired focused/lint/type handover rule")
+def _stage_documents(root: Path, role: str, text: str) -> dict[str, str]:
+    documents = {"role": text}
+    if role == "reviewer":
+        documents["operations/review.md"] = (root / "operations/review.md").read_text(
+            encoding="utf-8"
+        )
+    return documents
+
+
+def _section_missing(documents: dict[str, str], role: str) -> list[str]:
+    """Each original facet must hold at its current authoritative location."""
+    missing = []
+    for facet, (owner, heading, clause, _deletion) in STAGE_CONTRACTS[role].items():
+        section = _section_of(documents[owner], heading)
+        if section is None or _flatten(clause) not in _flatten(section):
+            missing.append(facet)
+    if role == "reviewer":
+        pointer_section = _section_of(
+            documents["role"], "## Report problems without expanding review"
+        )
+        if pointer_section is None or _flatten(REVIEWER_RECORD_POINTER) not in _flatten(
+            pointer_section
+        ):
+            missing.append("record-only procedure pointer")
+    if role == "worker":
+        section = _section_of(documents["role"], "## Stop conditions and stage completion")
+        if section is not None and RETIRED_WORKER_CHECKS in _flatten(section):
+            missing.append("retired focused/lint/type handover rule")
     return missing
 
 
-def test_worker_stage_requires_named_clean_copy_checks_and_refuses_the_retired_rule() -> None:
-    source = (CANONICAL_SKILLS / LIFECYCLE / "roles/worker.md").read_text()
-    section = _section_of(source)
+def _mutate_section(documents: dict[str, str], owner: str, heading: str, mutate) -> dict[str, str]:
+    changed = dict(documents)
+    text = changed[owner]
+    section = _section_of(text, heading)
     assert section is not None
-    parts = STAGE_PARTS["worker"]
-    assert _section_missing(section, parts) == []
-    live = parts[1]
-    replaced = section.replace(live, RETIRED_WORKER_CHECKS)
-    assert replaced != section
-    assert live in _section_missing(replaced, parts)
-    assert "retired focused/lint/type handover rule" in _section_missing(replaced, parts)
-    assert "retired focused/lint/type handover rule" in _section_missing(
-        section + "\n" + RETIRED_WORKER_CHECKS, parts
+    start = text.index(heading + "\n") + len(heading)
+    changed[owner] = text[:start] + mutate(section) + text[start + len(section) :]
+    return changed
+
+
+def test_worker_stage_requires_named_clean_copy_checks_and_refuses_the_retired_rule() -> None:
+    root = CANONICAL_SKILLS / LIFECYCLE
+    documents = _stage_documents(root, "worker", (root / "roles/worker.md").read_text())
+    assert _section_missing(documents, "worker") == []
+    facet = STAGE_PARTS["worker"][1]
+    owner, heading, live, _deletion = STAGE_CONTRACTS["worker"][facet]
+    replaced = _mutate_section(
+        documents,
+        owner,
+        heading,
+        lambda section: section.replace(live, RETIRED_WORKER_CHECKS),
     )
+    assert replaced != documents
+    assert facet in _section_missing(replaced, "worker")
+    assert "retired focused/lint/type handover rule" in _section_missing(replaced, "worker")
+    appended = _mutate_section(
+        documents,
+        owner,
+        heading,
+        lambda section: section + "\n" + RETIRED_WORKER_CHECKS,
+    )
+    assert "retired focused/lint/type handover rule" in _section_missing(appended, "worker")
 
 
 def _check_source_sections(role: str, parts: tuple[str, ...], missing: list[str]) -> None:
+    assert tuple(STAGE_CONTRACTS[role]) == parts
     for tree in SKILL_TREES:
-        path = tree / LIFECYCLE / "roles" / f"{role}.md"
-        section = _section_of(path.read_text(encoding="utf-8"))
-        for gap in _section_missing(section, parts):
-            missing.append(f"{path}: stage-end section {gap}")
+        root = tree / LIFECYCLE
+        path = root / "roles" / f"{role}.md"
+        documents = _stage_documents(root, role, path.read_text(encoding="utf-8"))
+        for gap in _section_missing(documents, role):
+            missing.append(f"{path}: owning section {gap}")
 
 
 def _check_compiled_sections(role: str, parts: tuple[str, ...], missing: list[str]) -> None:
+    assert tuple(STAGE_CONTRACTS[role]) == parts
     for root in (CANONICAL_SKILLS / LIFECYCLE, PACKAGED_SKILLS / LIFECYCLE):
         for operation in _role_operations(role):
-            compiled = _compile(root, role, operation)
-            section = _section_of(compiled)
-            for gap in _section_missing(section, parts):
-                missing.append(f"compiled {root.name} {role}/{operation}: stage-end section {gap}")
+            documents = _stage_documents(root, role, _compile(root, role, operation))
+            for gap in _section_missing(documents, role):
+                missing.append(f"compiled {root} {role}/{operation}: owning section {gap}")
 
 
 @pytest.mark.parametrize("role", STAGE_PARTS)
 def test_stage_end_sections_hold_in_sources_and_compiled_texts(role: str) -> None:
-    """Evidence 6, rules 6 to 8: the four roles hold the section and its parts."""
+    """Evidence 6, rules 6 to 8: every facet holds in its current source home."""
     missing: list[str] = []
     parts = STAGE_PARTS[role]
     _check_source_sections(role, parts, missing)
@@ -398,68 +693,59 @@ def test_number_detector_catches_limit_forms_and_exempts_labels() -> None:
         assert _number_hits(text) == [], f"label or allowance flagged: {text!r}"
 
 
-def _mutate_section(role: str, mutate) -> str:
-    text = (CANONICAL_SKILLS / LIFECYCLE / "roles" / f"{role}.md").read_text(encoding="utf-8")
-    start = text.find(SECTION_HEADING)
-    assert start >= 0
-    body = text[start:]
-    end = body.find("\n## ")
-    head, section, tail = (
-        text[:start],
-        body if end < 0 else body[:end],
-        "" if end < 0 else body[end:],
-    )
-    return head + mutate(section) + tail
+def _assert_facet_mutations(documents: dict[str, str], role: str) -> None:
+    assert _section_missing(documents, role) == [], role
+    for facet, (owner, heading, _clause, deletion) in STAGE_CONTRACTS[role].items():
+        section = _section_of(documents[owner], heading)
+        assert section is not None
+        assert _flatten(deletion) in _flatten(section), "control must delete the named facet"
+        deleted = _mutate_section(
+            documents,
+            owner,
+            heading,
+            lambda section, deletion=deletion: (
+                "\n" + _flatten(section).replace(_flatten(deletion), "", 1) + "\n"
+            ),
+        )
+        assert deleted != documents, f"{role}: deletion must change text"
+        assert facet in _section_missing(deleted, role), f"{role}: deleting {facet!r} still holds"
+        relocated = dict(deleted)
+        relocated[owner] += "\n\n## Elsewhere\n\n" + deletion
+        assert facet in _section_missing(relocated, role), (
+            f"{role}: relocating {facet!r} still holds"
+        )
+    if role == "reviewer":
+        heading = "## Report problems without expanding review"
+        deleted = _mutate_section(
+            documents,
+            "role",
+            heading,
+            lambda section: (
+                "\n" + _flatten(section).replace(_flatten(REVIEWER_RECORD_POINTER), "", 1) + "\n"
+            ),
+        )
+        assert deleted != documents
+        assert "record-only procedure pointer" in _section_missing(deleted, role)
+        relocated = dict(deleted)
+        relocated["role"] += "\n\n## Elsewhere\n\n" + REVIEWER_RECORD_POINTER
+        assert "record-only procedure pointer" in _section_missing(relocated, role)
 
 
 @pytest.mark.parametrize("role", STAGE_PARTS)
 def test_stage_section_binding_fails_on_deletion_and_relocation(role: str) -> None:
-    """Every required facet, deleted or moved out of the section, fails the check."""
-    parts = STAGE_PARTS[role]
-    original = (CANONICAL_SKILLS / LIFECYCLE / "roles" / f"{role}.md").read_text()
-    assert _section_missing(_section_of(original), parts) == [], role
-    for facet in parts:
-        deleted = _mutate_section(
-            role, lambda section, facet=facet: _delete_facet(section, parts, facet)
-        )
-        assert _flatten(deleted) != _flatten(original), f"{role}: deletion must change text"
-        assert _section_missing(_section_of(deleted), parts), (
-            f"{role}: deleting {facet!r} still holds"
-        )
-        relocated = _mutate_section(
-            role,
-            lambda section, facet=facet: (
-                _delete_facet(section, parts, facet)
-                + "\n\n## Elsewhere\n\n"
-                + "\n".join(_facet_variants(parts, facet))
-                + "\n"
-            ),
-        )
-        assert _section_missing(_section_of(relocated), parts), (
-            f"{role}: relocating {facet!r} still holds"
-        )
+    """Every facet, deleted or moved out of its owning section, fails."""
+    root = CANONICAL_SKILLS / LIFECYCLE
+    original = (root / "roles" / f"{role}.md").read_text()
+    _assert_facet_mutations(_stage_documents(root, role, original), role)
 
 
 @pytest.mark.parametrize("role", STAGE_PARTS)
 def test_compiled_section_binding_fails_on_deletion_and_relocation(role: str) -> None:
-    """The same deletion/relocation proof on one compiled capsule per role."""
+    """The same owning-section proof on one compiled capsule per role."""
     root = CANONICAL_SKILLS / LIFECYCLE
-    parts = STAGE_PARTS[role]
     operation = _role_operations(role)[0]
     compiled = _compile(root, role, operation)
-    for facet in parts:
-        assert _section_missing(_section_of(compiled), parts) == []
-        section = _section_of(compiled)
-        assert section is not None
-        deleted = compiled.replace(section, "\n" + _delete_facet(section, parts, facet) + "\n", 1)
-        assert _flatten(deleted) != _flatten(compiled), "control must delete real instructions"
-        assert _section_missing(_section_of(deleted), parts), (
-            f"compiled {role}/{operation}: deleting {facet!r} still holds"
-        )
-        relocated = deleted + "\n\n## Elsewhere\n\n" + "\n".join(_facet_variants(parts, facet))
-        assert _section_missing(_section_of(relocated), parts), (
-            f"compiled {role}/{operation}: relocating {facet!r} still holds"
-        )
+    _assert_facet_mutations(_stage_documents(root, role, compiled), role)
 
 
 def test_rule_nine_sentences_hold_for_reviewer_worker_manager() -> None:

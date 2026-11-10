@@ -4,6 +4,7 @@ import { createStore } from 'zustand/vanilla';
 import type { ObserverEvent } from '../types/event';
 import type {
 Analytics,
+BuildCurrentness,
 CloseoutQueueNode,
 EnclosureNode,
 Metrics,
@@ -44,6 +45,8 @@ export interface DashboardState {
   // The boot-time serving stamp (260703-L15): which build/process is answering. Rides the
   // snapshot; rendered muted in the top bar so a stale server is visible at a glance.
   servingBuild: ServingBuild | null;
+  buildCurrentness: BuildCurrentness | null;
+  servingProcessId: number | null;
   events: ObserverEvent[]; // raw observer feed retained client-side until reset/reload
   eventsHydrated: boolean;
   // The newest event timestamp the store knows, from the /api/events `ready`
@@ -147,7 +150,33 @@ const pruneSuppressedAttention = (
 
 type DeltaReducer = (state: DashboardState, data: unknown) => Partial<DashboardState> | null;
 
+const BUILD_MODES: ReadonlySet<unknown> = new Set(['installed', 'checkout']);
+const BUILD_STATES: ReadonlySet<unknown> = new Set(['current', 'stale', 'unknown']);
+const BUILD_CURRENTNESS_TEXT = new Set([
+  'firstSeenAt',
+  'installedDigest',
+  'loadedDigest',
+  'reason',
+  'remedy',
+]);
+
+// The `buildCurrentness` frame is a checked parse, not a cast: it reads as the producer's
+// BuildCurrentnessPayload (two literal fields, optional text, no other key) or it is dropped.
+function readsAsBuildCurrentness(data: unknown): data is BuildCurrentness {
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return false;
+  if (!('mode' in data) || !BUILD_MODES.has(data.mode)) return false;
+  if (!('state' in data) || !BUILD_STATES.has(data.state)) return false;
+  return Object.entries(data).every(
+    ([key, value]) =>
+      key === 'mode' || key === 'state' || (BUILD_CURRENTNESS_TEXT.has(key) && typeof value === 'string'),
+  );
+}
+
 const DELTA_REDUCERS: Record<string, DeltaReducer> = {
+  buildCurrentness: (state, data) => {
+    if (!readsAsBuildCurrentness(data)) return null;
+    return stableEquals(state.buildCurrentness, data) ? null : { buildCurrentness: data };
+  },
   task: (state, data) => {
     const node = data as TaskEntry;
     if (stableEquals(state.tasks[node.key], node)) return null;
@@ -233,6 +262,8 @@ function applySnapshotState(
   const analytics = reuse(state.analytics, projection.analytics);
   if (analytics !== state.analytics) stampAnalytics(analytics);
   const servingBuild = reuse(state.servingBuild, projection.servingBuild ?? null);
+  const buildCurrentness = reuse(state.buildCurrentness, projection.buildCurrentness ?? null);
+  const servingProcessId = projection.servingProcessId ?? null;
   const suppressedAttentionIds = pruneSuppressedAttention(state.suppressedAttentionIds, analytics);
   const incoming = {
     tasks,
@@ -243,6 +274,8 @@ function applySnapshotState(
     metrics,
     analytics,
     servingBuild,
+    buildCurrentness,
+    servingProcessId,
     suppressedAttentionIds,
   };
   const unchanged = snapshotUnchanged(state, incoming);
@@ -272,6 +305,8 @@ type WorkspaceState = Pick<
   | 'metrics'
   | 'analytics'
   | 'servingBuild'
+  | 'buildCurrentness'
+  | 'servingProcessId'
   | 'events'
   | 'eventsHydrated'
   | 'eventsLastTs'
@@ -292,6 +327,8 @@ const emptyWorkspace = (): WorkspaceState => ({
   metrics: null,
   analytics: null,
   servingBuild: null,
+  buildCurrentness: null,
+  servingProcessId: null,
   events: [],
   eventsHydrated: false,
   eventsLastTs: null,

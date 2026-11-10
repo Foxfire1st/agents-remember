@@ -10,6 +10,7 @@ probes have one home.
 from __future__ import annotations
 
 import hashlib
+import re
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -45,33 +46,41 @@ from test_worktree_support import git, init_repo
 LAYOUT_MARKER = '{\n  "conversion": "1",\n  "schema": "ar-memory-layout/v2"}\n'
 SIDECAR = '{"schema": "ar-onboarding-file/v1", "path": "%s", "references": {}}\n'
 
+CURATOR_HANDOVER_HEADING = "## Produce the handover"
+
 CURATOR_SENTENCES = (
-    "the handover names the change of this task that made the removed text untrue",
-    "Text is never removed to clear a finding of the quality check",
-    "never into the memory worktree",
+    "For every card cut by the quality check, name the source evidence that makes the removed text untrue.",
+    "Never remove text merely to clear a quality finding.",
+    "Evidence and working files belong in the task record or scratch root, never the memory worktree.",
 )
 CURATOR_SENTENCE_EQUIVALENTS = {
     CURATOR_SENTENCES[
         0
-    ]: "For every quality-check cut card, name in the handover this task's change that made its removed text untrue.",
+    ]: "For every quality-check cut card, name in the handover the source evidence that makes its removed text untrue.",
 }
 
 
 def _curator_landing_missing(text: str) -> list[str]:
-    reading = " ".join(text.replace("**", "").split())
+    text = text.replace("**", "")
+    reading = " ".join(text.split())
+    handover = re.search(
+        r"(?ms)^" + re.escape(CURATOR_HANDOVER_HEADING) + r"\n(.*?)(?=^## |\Z)", text
+    )
+    handover_reading = " ".join(handover[1].split()) if handover else ""
     return [
         sentence
         for sentence in CURATOR_SENTENCES
         if not any(
-            " ".join(variant.split()) in reading
+            " ".join(variant.split())
+            in (handover_reading if sentence == CURATOR_SENTENCES[0] else reading)
             for variant in (sentence, CURATOR_SENTENCE_EQUIVALENTS.get(sentence, sentence))
         )
     ]
 
 
 REVIEWER_SENTENCES = (
-    "text removed\n   without a named change is a finding",
-    "an added file outside the knowledge without a place in the task's requirement",
+    "Report a finding when text was removed without a named change.",
+    "Also report a finding when a file was added outside the knowledge without a place in the task's requirement.",
 )
 
 

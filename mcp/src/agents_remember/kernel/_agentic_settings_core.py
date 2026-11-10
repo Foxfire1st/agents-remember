@@ -87,7 +87,7 @@ KNOWN_LOOP_LEVEL_FIELDS = frozenset({"loop"})
 # The dispatch-time complexity scale (blast radius x novelty x size) the loop
 # thresholds are expressed on (l-01 The Three-Party Loop).
 COMPLEXITY_SCALE = ("low", "medium", "high")
-# The ten portable role lifecycles the l-01 registry defines. Kept in step with
+# The eight portable role lifecycles the l-01 registry defines. Kept in step with
 # ``models.role_capsules.vocabulary.CAPSULE_ROLES`` by a test: an orchestration knob
 # addressed to a role the registry does not publish must fail loud, and a role the
 # registry publishes must be configurable.
@@ -95,8 +95,6 @@ KNOWN_ROLES = frozenset(
     {
         "architect",
         "orchestrator",
-        "designer",
-        "strategist",
         "manager",
         "worker",
         "curator",
@@ -105,6 +103,9 @@ KNOWN_ROLES = frozenset(
         "bootstrap",
     }
 )
+# Removed role names remain readable as reported, inert settings keys.
+UNUSED_ROLES = frozenset({"designer", "strategist"})
+
 # The host capabilities that carry a launch block but are not lifecycle seats (L104-B17). The
 # role family is the one landed owner of launch choices and of their per-field provenance, so a
 # capability's choices are admitted under ``orchestration.roles.<capability id>`` -- the key the
@@ -245,7 +246,6 @@ DEFAULT_REVIEWER_REUSE = "delta-verify"
 DEFAULT_LOOP_PER_LEVEL: dict[str, str] = {
     "leaf": "scored",
     "master": "seam-required",
-    "portfolio": "strategist",
 }
 
 
@@ -549,9 +549,21 @@ def unused_orchestration_keys(raw: dict[str, Any]) -> tuple[str, ...]:
     )
     for owner, roles in role_tables:
         for role, knobs in roles.items():
+            if role in UNUSED_ROLES:
+                names.append(f"{owner}.{role}")
+                continue
             names.extend(
                 f"{owner}.{role}.{key}" for key in sorted(UNUSED_ROLE_KNOB_FIELDS & knobs.keys())
             )
+    loops = raw.get("loops") or {}
+    level_tables = [("orchestration.loops.perLevel", loops.get("perLevel") or {})]
+    level_tables.extend(
+        (f"orchestration.loops.perMaster.{master}", levels)
+        for master, levels in (loops.get("perMaster") or {}).items()
+    )
+    for owner, levels in level_tables:
+        if levels is not None and levels.get("portfolio", {}).get("loop") == "strategist":
+            names.append(f"{owner}.portfolio.loop")
     return tuple(names)
 
 

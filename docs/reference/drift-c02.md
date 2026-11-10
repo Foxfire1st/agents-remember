@@ -1,10 +1,10 @@
-# `c-05-create-or-update-onboarding-files` Memory Quality Control
+# Memory Quality Control
 
-`c-05-create-or-update-onboarding-files` controls whether onboarding can be trusted before planning and whether refreshed memory is clean enough to commit during closeout.
+Memory-quality checks determine whether onboarding can be trusted before planning and whether refreshed memory is clean enough to commit during closeout. The [curation operation](../../skills/l-01-agent-lifecycles/operations/curation.md) owns the surrounding Curator work.
 
 ## What It Checks
 
-For file-level sidecar onboarding, the `c-05-create-or-update-onboarding-files` skill reads verification metadata and compares the source file against the recorded commit through `HEAD`, including staged or unstaged local changes.
+For file-level sidecar onboarding, the memory-quality tools read verification metadata and compare the source file against the recorded commit through `HEAD`, including staged or unstaged local changes.
 
 Before MIK-R112, the task-start `drift_check` wrote its temporary drift report under the resolved coordination
 root (the tool has since left the surface):
@@ -48,4 +48,4 @@ Drifted onboarding can still have directional value. The report should qualify t
 
 ## Boundary
 
-The [memory-quality diagnostic procedure](../../skills/c-05-create-or-update-onboarding-files/workflows/memory-quality-control.md) detects and reports; that procedure does not refresh onboarding. File-level authorship and maintenance belong to the same skill's [converted-card workflow](../../skills/c-05-create-or-update-onboarding-files/workflows/converted-card-workflow.md). Use `c-03-repo-bootstrap` when structural route or slice changes need bootstrap-style maintenance. These procedure boundaries grant no extra role/tool authority: approval gates, the prohibition on raw Git writes, closeout ownership and the separate push approval remain in force.
+The [memory-quality tools](../../skills/l-01-agent-lifecycles/reference/knowledge/commands.md) detect and report; they do not refresh onboarding. File-level authorship and maintenance follow the [Curator card procedure](../../skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md). Use `c-03-repo-bootstrap` when structural route or slice changes need bootstrap-style maintenance. These procedure boundaries grant no extra role/tool authority: approval gates, the prohibition on raw Git writes, closeout ownership and the separate push approval remain in force.

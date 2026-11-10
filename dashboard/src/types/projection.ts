@@ -59,6 +59,16 @@ export interface AttentionItem {
   waitSeconds?: number;
 }
 
+export interface BuildCurrentness {
+  firstSeenAt?: string;
+  installedDigest?: string;
+  loadedDigest?: string;
+  mode: "installed" | "checkout";
+  reason?: string;
+  remedy?: string;
+  state: "current" | "stale" | "unknown";
+}
+
 export interface CheckoutBinding {
   configuredRoot?: string;
   coordinationRoot: string;
@@ -689,7 +699,9 @@ export interface WorkspaceProjection {
   taskCounts: TaskCounts;
   tasks: TaskEntry[];
   version: number;
+  buildCurrentness?: BuildCurrentness;
   checkoutBinding?: CheckoutBinding;
   servingBuild?: ServingBuild;
+  servingProcessId?: number;
   watcherHealth?: WatcherHealth;
 }

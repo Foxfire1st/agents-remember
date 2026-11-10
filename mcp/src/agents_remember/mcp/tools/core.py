@@ -30,6 +30,8 @@ from agents_remember.models.tools.tool_answer import (
     RUNTIME_INSTALL_ANSWER_FIELDS,
     TOOL_ANSWER_SHORT_STRING_MAX,
 )
+from agents_remember.serving.build_currentness import build_currentness
+from agents_remember.serving.server_registry import server_inventory
 
 from .. import SERVER_NAME, SERVER_VERSION
 from .base import TRANSPORT, _tool_payload
@@ -59,6 +61,7 @@ def server_info_payload(
     # The user's settings file or its folder, named only while it is open to writing, with
     # the user's two commands (MIK-R137 rule 5). The answer changes no mode and no byte.
     open_settings = open_user_settings_notice()
+    currentness = build_currentness(config, inspect_checkout=True)
     return _tool_payload(
         "server_info",
         {
@@ -80,6 +83,15 @@ def server_info_payload(
             ),
             **({"openUserSettings": open_settings} if open_settings is not None else {}),
             "servingBuild": serving_build.model_dump(mode="json", exclude_none=True),
+            "buildCurrentness": (
+                currentness.model_dump(mode="json", exclude_none=True)
+                if currentness is not None
+                else None
+            ),
+            "runningServers": [
+                server.model_dump(mode="json", exclude_none=True)
+                for server in server_inventory(config)
+            ],
             **(
                 {"toolServer": TOOL_SERVER_NAME, "agentBinding": binding.as_report()}
                 if binding is not None

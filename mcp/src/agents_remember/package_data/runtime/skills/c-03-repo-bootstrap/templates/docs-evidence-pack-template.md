@@ -1,5 +1,7 @@
 # Docs Evidence Pack — <area-or-route>
 
+<!-- The documentation researcher uses this template to record checked sources, confirmed findings, and unresolved documentation questions. -->
+
 | Field | Value |
 |---|---|
 | repo | <repo> |

@@ -56,7 +56,7 @@ memory-repos/ar-agents-remember/onboarding/src/orchestrator/core_editor.py.md
 - **Retrieval that names its evidence:** By-path reads name cards and recorded knowledge; agents read those files beside source. The former semantic and code-graph providers are retired.
 - **Memory that lands with code:** External memory repos pair code and memory worktrees. Converted memory holds current cards, structured records and Curator judgment rows; closeout and landing judge the exact candidate trees. `memory.md` is an ignored cache derived from memory commits’ `Code-Commit` attribution.
 - **Repo-owned agent behavior:** Each memory repo carries `system/` files for path rules, tools, coding guidelines, documentation sources, branch policy, and reporting shape, so the same project rules load across harnesses.
-- **Harness-ready first run:** Starter packages for Claude Code, Codex, Cursor, Antigravity, VS Code Copilot, Hermes, Pi.dev, and OpenClaw carry the native MCP, skills, hooks, rules, and instruction files each harness needs.
+- **Harness-ready first run:** Register the MCP server with your harness. The server serves skills from its installed package; server registration does not install a second skill tree.
 
 The setup stores durable memory in a memory repository of its own, under `ar-coordination/memory-repos/ar-<repo>/`. Repo-local internal memory under `<repo>/ar-memory/` was removed from the product and is refused with the exact path. For the full tour, see [Features](docs/features.md).
 
@@ -93,22 +93,21 @@ Before the Quickstart, make sure the host has:
 
 - **[uv](https://docs.astral.sh/uv/)** (for `uvx`) or pip, and **Python 3.14** — the package supports `>=3.14,<3.15`; repository development uses the verified source-built 3.14.8 contract documented in the MCP README.
 - **Git**, with `user.name` / `user.email` configured (memory and worktree commits need an author; otherwise a placeholder identity is used).
-- **Docker** running, only if you enable the optional providers. The semantic-memory provider (grepai) also uses a Dockerized Ollama and pulls an embedding model (`nomic-embed-text`) on first setup — no host Ollama install needed.
 
-Providers, Docker, and Ollama are only needed for the optional Docker-backed
-providers; the core by-path memory works without them. Claude Code hooks do not
-require `jq`; the optional session-start hooks in this repository are Python
-programs. Full detail and troubleshooting live in the
+The former semantic and code-graph providers are retired; setup does not enable
+them or require Docker, Ollama, or an embedding-model download.
+Full detail and troubleshooting live in the
 [current MCP README](mcp/README.md).
 
 ## Quickstart
 
 This is the short path for a new workspace. The detailed walkthrough lives in [Getting Started](docs/getting-started.md).
 
-Ask your agent to:
+Set up the server, then ask your agent to make the call:
 
 1. **Write the MCP authority settings** — Copy `examples/mcp/settings.example.json`
-   to a path of your own and replace its paths with absolute ones: the
+   to `~/.config/agents-remember/agents-remember-settings.json` (under
+   `XDG_CONFIG_HOME` when set) and replace its paths with absolute ones: the
    coordination folder (it may not exist yet), the workspace root, the transcript
    folder, and one entry per code repository. The server reads that file at boot
    and resolves workspace paths from it.
@@ -116,11 +115,11 @@ Ask your agent to:
    and register that local artifact with `uvx`, or use the published package:
 
    ```text
-   uvx --python 3.14 --from /absolute/path/to/built-wheel.whl agents-remember-mcp --config /absolute/path/to/agents-remember-settings.json
+   uvx --python 3.14 --from /absolute/path/to/built-wheel.whl agents-remember-mcp --config /absolute/user-config/agents-remember/agents-remember-settings.json
    ```
 
-   Each harness guide under [docs/install](docs/install/README.md) carries the
-   registration file that harness reads. Then **restart the harness once** so it
+   Adapt the [common registration example](examples/mcp/server.example.json) using
+   the configuration envelope in your [harness guide](docs/install/README.md). Then **restart the harness once** so it
    starts the server.
 3. **Make one call** — In a chat of that harness, name no task, sprint or
    repository:
@@ -144,7 +143,7 @@ settings is copied into a harness: the tool server serves the canonical skills t
 a harness as MCP resources, so the skills a session reads belong to exactly one
 installed build. There is no separate skill-install route to run.
 
-After that, normal work runs through the `l-01-agent-lifecycles` skill: developer-facing free chat answers a question inline and, for work on a managed repository, creates or resolves the sprint document, writes the request of the developer into it, starts an Architect with `role_start` (the call for an Architect names no document), and tells the developer that the agent is in the dashboard and which sprint document holds the request. Another role is started this way only when the developer names the role and the task. Role agents follow their handovers. The agent resolves the active context with `c-08-ar-coordination-context-resolver`, checks memory quality with `c-05-create-or-update-onboarding-files`, reads relevant onboarding beside code, and updates onboarding after approved changes.
+After that, normal work runs through the `l-01-agent-lifecycles` skill: developer-facing free chat answers a question inline and, for work on a managed repository, creates or resolves the sprint document, writes the request of the developer into it, starts an Architect with `role_start` (the call for an Architect names no document), and tells the developer that the agent is in the dashboard and which sprint document holds the request. Another role is started this way only when the developer names the role and the task. Role agents follow their handovers. The agent resolves the active context with `context_packet`, checks memory quality through [knowledge commands](skills/l-01-agent-lifecycles/reference/knowledge/commands.md), reads relevant onboarding beside code, and updates onboarding after approved changes.
 
 ## Run The Dashboard
 
@@ -155,7 +154,7 @@ with uv, then start the cockpit from your workspace:
 
 ```text
 uv tool install --python 3.14 /absolute/path/to/built-wheel.whl
-agents-remember dashboard --daemon --config /absolute/path/to/active-harness-settings.json
+agents-remember dashboard --daemon --config /absolute/user-config/agents-remember/agents-remember-settings.json
 ```
 
 The install brings the build-pinned Paseo host and its whole locked tree on the
@@ -168,10 +167,9 @@ with a five-second host limit. Both --status and --daemon exit 0 when the
 dashboard and host are up (or host unconfigured), 1 when the dashboard is down,
 and 3 when a configured host is down.
 
-`--config` is optional: the CLI walks up from the current directory and uses
-the nearest `.claude/mcp/agents-remember-settings.json`, or the `--config`
-recorded in an `.mcp.json` `agents-remember` entry — the same settings file
-the MCP server boots from.
+`--config` is optional: the CLI reads
+`~/.config/agents-remember/agents-remember-settings.json` (under `XDG_CONFIG_HOME`
+when set), independently of the working directory. An explicit path overrides discovery.
 
 For a dashboard that survives closing the terminal, use daemon mode:
 
@@ -198,7 +196,7 @@ not an installation example for the current Python 3.14 build.
 - [Concepts](docs/concepts.md) - onboarding units, memory roots, drift, and approval gates.
 - [Knowledge system](docs/reference/knowledge-system.md) - records, sidecars, judgment history, worklists and exact-tree gates.
 - [Architecture](docs/architecture.md) - runtime, coordination, and memory repos.
-- [Workflows](docs/workflows.md) - the `l-01-agent-lifecycles` skill and its build modes (research-only exit / `w-02-light-task-workflow` skill task / master + light sub-task series), and when to use each.
+- [Workflows](docs/workflows.md) - the `l-01-agent-lifecycles` skill and its build modes (research-only exit / durable task / master + light sub-task series), and when to use each.
 - [Benchmark Methodology](docs/benchmarks-methodology.md) - how paired `codex exec --json` runs are captured and compared.
 - [FAQ](docs/FAQ.md) - design principles, objections, and comparisons.
 - [External Memory Guide](docs/guides/use-external-memory.md) - separate memory repos for selected code repos.
@@ -241,14 +239,9 @@ and `system/`, then run `python3 scripts/sync-runtime.py` to refresh MCP package
 data only. The pre-commit and pre-push hooks run
 `python3 scripts/sync-runtime.py --check`.
 
-The self-hosted harness configuration in `.claude/`, `.codex/`, `.cursor/`,
-`.github-vscode/`, `.vscode/`, `.hermes/`, `.openclaw/`, `.pi/` and `.agents/` is
-maintained in place, one file per harness: MCP registration, optional
-instructions, and the optional session-start hook or rule. It carries no skill
-folder and no placeholder renderer — installing Agents Remember does not copy or
-render it. The hooks and rules are the convenience described in
-[docs/install](docs/install/README.md), and their `<PATH/TO/YOUR/PROJECTS_FOLDER>`
-markers are replaced by hand.
+Use the [common MCP registration example](examples/mcp/server.example.json), adapted to your
+harness as described in [docs/install](docs/install/README.md). Product installation leaves
+existing harness folders alone; server settings use the user-config directory.
 
 The hooks are tiered, and both are thin wrappers over `.githooks/_gate.sh`.
 pre-commit runs the fast tier over the **staged** content: the generated-copy
@@ -285,8 +278,8 @@ Git selectors, live opt-ins and credentials. They never declare a daemon identit
 
 Delivery runs both populations together (`-m ""`) in the existing shared Dagger environment.
 Only explicit `--certify` loads the retained certification plugins and requires genuine
-Dagger admission. Combined branch coverage feeds the **90% changed-production-code floor**
-and the existing **CRAP threshold of 30**. Tests and verification-only support are excluded
+Dagger admission. Combined branch coverage supplies diagnostic changed-code coverage and
+the **CRAP review threshold of 20**; these scores do not block delivery. Tests and verification-only support are excluded
 from production scoring. Coverage and CRAP are not part of the ordinary unit command.
 Direct targeted Vitest unit/component commands also remain available.
 
@@ -341,13 +334,13 @@ resources, so the coordination root carries no second skill tree to keep current
 
 ## Status
 
-The source package version remains `3.0.0rc8` while this Python 3.14 candidate awaits an official release. The published artifact with that version is the historical Python 3.13 release. Agents Remember is actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the notes for your target version in [GitHub Releases](https://github.com/Foxfire1st/agents-remember/releases) — the repository's canonical changelog — before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
+The source package version remains `3.0.0rc8` while this Python 3.14 candidate awaits an official release. The published artifact with that version is the historical Python 3.13 release. Agents Remember is actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump; the internals beneath them may still evolve, so pin a version and read the notes for your target version in [GitHub Releases](https://github.com/Foxfire1st/agents-remember/releases) — the repository's canonical changelog — before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
 
 The 3.0 arc: the working session itself is now observable and steerable — a system-managed agent lifecycle with durable approval gates and an event/projection layer, served as the mission-control browser cockpit directly from the MCP package (`agents-remember dashboard`; [#2](https://github.com/Foxfire1st/agents-remember/issues/2), [#43](https://github.com/Foxfire1st/agents-remember/issues/43)). The `rc` tag means the cockpit surface is still settling toward the final 3.0.0 contract; the architecture beneath it is the one described above.
 
 ## Stability
 
-Following semantic versioning from `1.0.0`, these public contracts will not change without a **major** version bump: **skill IDs** (e.g. the `c-08-ar-coordination-context-resolver` and `w-02-light-task-workflow` skills), **MCP tool names and their inputs/outputs**, the **`ar-coordination/` and `memory-repos/ar-<repo>/` layout**, and the **settings schema**. Internal modules, provider internals, and prompt wording are not part of this promise and may change in minor releases.
+Following semantic versioning from `1.0.0`, these public contracts will not change without a **major** version bump: **skill IDs** (e.g. the `l-01-agent-lifecycles` and `c-10-adopt-memory-baseline` skills), **MCP tool names and their inputs/outputs**, the **`ar-coordination/` and `memory-repos/ar-<repo>/` layout**, and the **settings schema**. Internal modules, provider internals, and prompt wording are not part of this promise and may change in minor releases.
 
 ## Contributing
 

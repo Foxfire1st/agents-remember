@@ -74,8 +74,6 @@ def create_runtime_source(root: Path) -> Path:
     runtime_root = source_root / "runtime"
     write_file(source_root / "mcp" / "src" / "agents_remember" / "mcp" / "__init__.py")
     write_file(source_root / "mcp" / "requirements.txt", "mcp==1.12.4\n")
-    for source_rel in install_runtime.AGENTS_MD_TARGETS:
-        write_file(runtime_root / source_rel)
     write_file(runtime_root / "skills" / "U-01-core-skills" / "C-04" / "SKILL.md")
     write_file(runtime_root / "providers" / "requirements" / "codegraphcontext.txt")
     write_file(runtime_root / "providers" / "requirements" / "grepai.txt")
@@ -203,7 +201,8 @@ class InstallRuntimeTests(unittest.TestCase):
             self.assertEqual(summary.unused_provider_keys, ["grepai-memory"])
             self.assertIn("unused_provider_keys=[grepai-memory]", summary.report())
             # The install itself completed: scaffold files landed.
-            self.assertTrue((coordination_root / "AGENTS.md").exists())
+            self.assertFalse((coordination_root / "AGENTS.md").exists())
+            self.assertTrue((coordination_root / "providers/requirements/grepai.txt").is_file())
 
     def test_runtime_install_failed_stop_continues_and_reports_the_process(self) -> None:
         """MIK-R112 F03: a failed old-watcher stop is reported, not fatal; install continues."""
@@ -238,7 +237,8 @@ class InstallRuntimeTests(unittest.TestCase):
                 )
 
             self.assertEqual(events, ["watchers:stop"])
-            self.assertTrue((coordination_root / "AGENTS.md").exists())
+            self.assertFalse((coordination_root / "AGENTS.md").exists())
+            self.assertTrue((coordination_root / "providers/requirements/grepai.txt").is_file())
             assert summary.provider_watcher_rebind is not None
             self.assertIs(summary.provider_watcher_rebind.ok, False)
             self.assertTrue(summary.provider_watcher_rebind.recovery_actions)

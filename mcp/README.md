@@ -31,8 +31,7 @@ other role. On refusal, use the reported stage/effects and recovery action, then
 retry the same request UUID.
 
 Skills are MCP resources served from the package. No starter package, renderer or
-harness/project/coordination-root skill folder is required. Optional native
-instruction/hook files carry only the first-action directive. Bootstrap previews
+harness/project/coordination-root skill folder is required. Bootstrap previews
 role settings and sets up or reads memory; the user starts an Architect for
 optional onboarding and knowledge work as a regular task.
 
@@ -52,9 +51,6 @@ The requirements here describe the current checkout and wheels built from it: Py
   keys are reported once as unused. The grepai embedder used to run
   Ollama as a Docker container and pull an embedding model (`nomic-embed-text`)
   on first setup — no host Ollama install is required.
-
-Optional first-action hooks are described in the harness install guides. They do
-not distribute skills or render setup settings.
 
 ### Canonical Linux/WSL development runtime
 
@@ -113,7 +109,7 @@ wheel (run `npm --prefix dashboard run build`, then `python3 scripts/sync-dashbo
 
 ```text
 uv tool install --python 3.14 /absolute/path/to/built-wheel.whl
-agents-remember dashboard --daemon --config /absolute/path/to/active-harness-settings.json
+agents-remember dashboard --daemon --config /absolute/user-config/agents-remember/agents-remember-settings.json
 ```
 
 The install brings the build-pinned Paseo host and its whole locked tree on the
@@ -126,9 +122,8 @@ with a five-second host limit. Both --status and --daemon exit 0 when the
 dashboard and host are up (or host unconfigured), 1 when the dashboard is down,
 and 3 when a configured host is down.
 
-`dashboard` finds its `--config` on its own: it walks up from the current
-directory to the nearest `.claude/mcp/agents-remember-settings.json`, or the
-`--config` recorded in an `.mcp.json` `agents-remember` entry. `--daemon`
+`dashboard` discovers `~/.config/agents-remember/agents-remember-settings.json`
+(under `XDG_CONFIG_HOME` when set), independently of the working directory. `--daemon`
 detaches it so it survives the terminal that started it (`--status` /
 `--stop` manage it; state and log live under
 `<coordinationRoot>/logs/dashboard/`), and the
@@ -140,8 +135,7 @@ restarting on version mismatch.
 > checkout build uses the local wheel until an official release is available.
 
 The config path must be **absolute**, the settings file must live **outside the
-`ar-coordination/` runtime folder**, and it should live **under your harness's
-registration folder in an `mcp/` subdirectory** (see
+`ar-coordination/` runtime folder**, and its home is **the user config folder** (see
 [Settings file location](#settings-file-location)). The server reads this file
 **only at startup** — if you edit it later (add repos, change
 `timeoutCaps`), **restart the harness** for the change to take effect; run
@@ -192,53 +186,22 @@ stops leftover watchers and reports enabled provider keys once as unused.)
 
 ### Settings file location
 
-Use the absolute settings path in the MCP registration. The per-harness guides
-use the locations below; this authority file is separate from the user's
-role-harness settings file.
-
-| Harness | Registration folder | MCP settings path |
-| --- | --- | --- |
-| Claude Code | `.claude/` | `.claude/mcp/agents-remember-settings.json` |
-| Codex | `.codex/` | `.codex/mcp/agents-remember-settings.json` |
-| Cursor | `.cursor/` | `.cursor/mcp/agents-remember-settings.json` |
-| Antigravity | `.agents/` | `.agents/mcp/agents-remember-settings.json` |
-| VS Code + Copilot | `.github-vscode/` + `.vscode/` | `.vscode/mcp/agents-remember-settings.json` |
-| Hermes | `.hermes/` | `.hermes/mcp/agents-remember-settings.json` |
-| Pi.dev | `.pi/` | `.pi/mcp/agents-remember-settings.json` |
-| OpenClaw | `.openclaw/` | `.openclaw/mcp/agents-remember-settings.json` |
-
-See your harness page under
-[docs/install/](https://github.com/Foxfire1st/agents-remember/tree/main/docs/install)
-for the exact registration folder.
+Use `~/.config/agents-remember/agents-remember-settings.json`, beside the separate user
+`settings.json` (under `XDG_CONFIG_HOME` when set). Supply its absolute path in the harness
+registration; JSON argv arrays do not expand `~`. The [common example](../examples/mcp/server.example.json)
+has the one command/arguments declaration; each [install guide](../docs/install/README.md)
+names its harness's configuration envelope.
 
 ## Harness Setup
 
-Register the MCP server with your harness by pointing it at `uvx` (or the
-installed console command) and the absolute settings path:
-
-```json
-{
-  "command": "uvx",
-  "args": [
-    "--python",
-    "3.14",
-    "--from",
-    "/absolute/path/to/built-wheel.whl",
-    "agents-remember-mcp",
-    "--config",
-    "/absolute/path/to/agents-remember-settings.json"
-  ]
-}
-```
+Adapt the [common registration example](../examples/mcp/server.example.json) to your harness.
 
 After installing or changing the MCP server registration, restart the harness so
-it reloads the server and discovers the tools and packaged skill resources. The
-per-harness guide separately describes optional native first-action directives.
+it reloads the server and discovers the tools and packaged skill resources.
 
 ### Per-harness setup pages
 
-Harnesses differ in their MCP registration and optional native instruction files;
-follow your harness's page:
+Harnesses differ in their MCP registration; follow your harness's page:
 
 | Harness | Setup guide |
 | --- | --- |

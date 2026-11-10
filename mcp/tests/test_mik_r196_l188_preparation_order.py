@@ -147,8 +147,9 @@ def test_the_installed_scaffold_is_what_the_cold_path_accepts(
     assert (root / "tasks").is_dir()
     assert not (root / "skills").exists(), "no coordination-root skills copy may be created"
     assert first_run.scaffold_present(config) is True
-    # The instruction target the capsule mode withholds is not part of the predicate.
-    assert (root / "AGENTS.md").exists() is (mode == "legacy")
+    # Retired instruction files are absent in both delivery modes.
+    for relative in ("AGENTS.md", "system/AGENTS.md", "tasks/AGENTS.md"):
+        assert not (root / relative).exists()
 
 
 def test_the_cold_path_crosses_the_scaffold_gate_to_the_host_stage(

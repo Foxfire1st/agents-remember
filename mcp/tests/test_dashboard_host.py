@@ -52,14 +52,24 @@ def test_status_exit_codes_print_both_and_do_not_start(monkeypatch, tmp_path, ca
     cfg = config(tmp_path)
     start = Mock()
     monkeypatch.setattr(dashboard, "ensure_host", start)
-    state = SimpleNamespace(pid=42, host="127.0.0.1", port=8765, version="build", log_path="log")
+    state = SimpleNamespace(
+        pid=42,
+        host="127.0.0.1",
+        port=8765,
+        version="build",
+        log_path="log",
+        source_digest="digest",
+        build_currentness=None,
+    )
     for alive, host_state, expected in (
         (True, "running", 0),
         (True, "not configured", 0),
         (True, "not running", 3),
         (False, "running", 1),
     ):
-        monkeypatch.setattr(daemon, "probe", lambda root, alive=alive: (state, alive))
+        monkeypatch.setattr(
+            daemon, "probe", lambda root, endpoint=None, alive=alive: (state, alive)
+        )
         monkeypatch.setattr(
             dashboard,
             "observe_host",
@@ -243,7 +253,8 @@ def test_supervised_child_does_not_start_host_again(monkeypatch, tmp_path):
 
 def test_discovered_config_path_is_named_in_normal_and_transition_outcomes(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
-    path = workspace / ".claude/mcp/agents-remember-settings.json"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    path = tmp_path / "config/agents-remember/agents-remember-settings.json"
     path.parent.mkdir(parents=True)
     (tmp_path / "coordination").mkdir()
     path.write_text(
@@ -252,7 +263,7 @@ def test_discovered_config_path_is_named_in_normal_and_transition_outcomes(tmp_p
         )
     )
     nested = workspace / "nested"
-    nested.mkdir()
+    nested.mkdir(parents=True)
     monkeypatch.chdir(nested)
     resolution = dashboard._resolve_settings(args())
     assert resolution is not None

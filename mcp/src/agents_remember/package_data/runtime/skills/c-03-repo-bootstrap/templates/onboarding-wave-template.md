@@ -1,11 +1,13 @@
 # Onboarding Wave <number> — <short name>
 
+<!-- The bootstrap orchestrator uses this template to assign a bounded wave of route-overview or file-onboarding work. -->
+
 | Field | Value |
 |---|---|
 | repo | <repo> |
 | generated | <YYYY-MM-DDThh:mm> |
 | waveType | route-overview / file-onboarding |
-| mode | quick-orientation / safe-starter-memory / cross-repo-focused / domain-doc-focused / full-bootstrap |
+| mode | quick-orientation / safe-starter-memory / cross-repo-focused / domain-doc-focused / existing-memory-slice-maintenance / full-bootstrap |
 | status | planned / in-progress / blocked / curator-review / complete |
 
 ## Goal
@@ -35,8 +37,8 @@
 
 1. Read the assigned card first.
 2. Read only the files and evidence listed in the card.
-3. For route overview waves, use `route-local-overview-template.md`.
-4. For file onboarding waves, invoke or follow `c-05-create-or-update-onboarding-files`.
+3. Before writing a route overview in a route-overview wave, read and use the [route-local overview template](route-local-overview-template.md).
+4. Before writing file onboarding in a file-onboarding wave, read and follow [the Curator card procedure](../../l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md).
 5. Keep planning notes out of durable onboarding.
 6. Preserve strict file-level 1-to-1 mapping.
 7. Add backlinks from file onboarding to nearest governing overview.

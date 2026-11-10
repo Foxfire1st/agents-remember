@@ -12,22 +12,10 @@ Official references:
 
 ## Register The MCP Server
 
-Write an MCP authority settings file (copy `examples/mcp/settings.example.json` and replace its
-paths), then merge this into `~/.hermes/config.yaml`:
-
-```yaml
-mcp_servers:
-  agents-remember:
-    command: "uvx"
-    args:
-      - "--refresh-package"
-      - "agents-remember-mcp@latest"
-      - "--config"
-      - "<PATH/TO/YOUR/PROJECTS_FOLDER>/.hermes/mcp/agents-remember-settings.json"
-```
-
-`.hermes/config.yaml` in this repository is that snippet with the marker to replace by hand; no
-script renders it. If you edit MCP configuration while Hermes is running, use `/reload-mcp`.
+Use the [common registration example](../../examples/mcp/server.example.json) and the
+[shared settings setup](README.md). Adapt its command and arguments to the `mcp_servers.agents-remember` entry in `~/.hermes/config.yaml`.
+The settings path is the absolute user-config path, not a workspace file.
+Restart or reload the harness after changing its registration.
 
 ## Start With One Call
 
@@ -51,24 +39,3 @@ Hermes reads the Agents Remember skills from the tool server: each skill is publ
 resource (the SEP-2640 skills extension) by the running server. That is the served copy, the
 package's own, so what a session reads belongs to one installed build and no external skill folder
 is added to `~/.hermes/config.yaml`.
-
-## Optional: Project Context File
-
-Hermes uses `HERMES.md` (or `.hermes.md`) as its highest-priority project context file, and also
-supports `AGENTS.md` and `CLAUDE.md`.
-
-Copy `.hermes/HERMES.md` to your workspace root as `HERMES.md` and replace
-`<PATH/TO/YOUR/PROJECTS_FOLDER>` with your absolute path:
-
-```markdown
-# Workspace Agent Instructions
-
-Read and follow `<PATH/TO/YOUR/PROJECTS_FOLDER>/ar-coordination/AGENTS.md` as workspace
-instructions.
-
-@<PATH/TO/YOUR/PROJECTS_FOLDER>/ar-coordination/AGENTS.md
-```
-
-If the workspace root already has a different `HERMES.md`, merge the directive into it. Do not
-overwrite a repository's root `AGENTS.md` just to wire Agents Remember; root `AGENTS.md` is
-project-specific.

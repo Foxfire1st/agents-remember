@@ -1,9 +1,11 @@
 ---
 name: c-13-install-and-onboard
-description: "After the MCP tool server is installed and registered, run the setup path the one Bootstrap call starts (runtime scaffold, agentic settings, memory repo and first baseline), read the knowledge foundation's state, hand its making to the user-started Architect's regular task under c-14-knowledge-bootstrap, and configure providers to index the code and memory."
+description: "After the MCP tool server is installed and registered, run the setup path the one Bootstrap call starts (runtime scaffold, agentic settings, memory repo and first baseline), read the knowledge foundation's state, hand its making to the user-started Architect's regular task under c-14-knowledge-bootstrap, and report retired index-provider entries without starting them."
 ---
 
-# c-13-install-and-onboard Install And Onboard
+# Install and onboard a repository
+
+Use this reference during the Bootstrap setup conversation after the developer has installed and registered the Model Context Protocol (MCP) server. It maps the first-run stages to their owning procedures and explains the maintenance and conversion paths separately.
 
 Take over setup **after** the developer has installed the Agents Remember MCP tool
 server and registered it with the harness.
@@ -72,9 +74,8 @@ Run this sequence in order:
    onboarding or knowledge and runs no citation fixer. Read and report existing
    onboarding and foundation state; the user starts the Architect, which organises
    optional onboarding and the knowledge foundation as regular task work through
-   the existing Curator procedures (MIK-R196 rules 4-5).
-6. Providers: when providers are enabled, start/refresh indexing and verify
-   readiness.
+   the existing Curator procedures.
+6. Report any configured index-provider entry as retired and start nothing; follow [the retired-provider procedure](#stage-6---retire-providers).
 
 This skill orchestrates and delegates. It does not reimplement
 `c-00-initialize-memory-repo`, `c-03-repo-bootstrap`,
@@ -128,14 +129,11 @@ Check, in order:
    }
    ```
 4. **Runtime state.** Check whether the coordinator scaffold already exists under
-   `coordinationRoot` (`AGENTS.md`, `tasks/`, `memory-repos/`, `system/` as
+   `coordinationRoot` (`tasks/`, `memory-repos/`, `system/` as
    applicable). If it is missing or stale, Stage 1 will run `runtime_install()`.
    The scaffold carries no skills copy, so a missing skill folder is not a
    scaffold defect.
-5. **Provider prerequisites, only when providers are enabled.** Providers run in
-   Docker. If provider diagnostics report Docker/Ollama/image problems, explain
-   the gap. A developer may explicitly defer providers and continue with core
-   memory setup.
+5. Report any configured index-provider entry as retired and start nothing; follow [the retired-provider procedure](#stage-6---retire-providers).
 6. **Topology consistency.** `external` is the only supported memory topology. Never
    let memory setup create a repo-local `ar-memory/` root: it was removed from the
    product, and a request for it is refused by name rather than substituted.
@@ -170,10 +168,7 @@ transition; the developer chooses a terminal outside the host for explicit
 A dry run downloads nothing, runs no npm, writes no host settings and starts
 nothing. No separate host provision is an install step.
 
-After it runs, verify the coordinator root exists and contains the expected
-package-owned runtime files. `runtime_install()` may also prepare provider
-runtime assets when providers are enabled, but it does not create memory repos,
-bootstrap onboarding, or start provider indexing.
+After it runs, verify the coordinator root exists and contains the expected package-owned runtime files. `runtime_install()` copies the packaged `providers/` files and preserves provider data and logs; enabled legacy provider keys do not request dependency installation. Apply [the retired-provider rules](#stage-6---retire-providers). Runtime installation does not create memory repositories or author onboarding.
 
 Do not install skills as part of first-run setup, and do not create a skill folder
 anywhere. The tool server serves the canonical skills from its packaged copy, and a
@@ -199,9 +194,7 @@ run on ANY harness. The schema reference is `docs/reference/settings-json.md`
 (Agentic Settings); unknown `orchestration.*` keys fail loud, so write only
 documented keys.
 
-Walk the developer through the four knob families and edit the global file with
-their answers (leave a family at its built-in default when they have no
-preference):
+Walk the developer through the four knob families. Write their answers only through the one initial `user_settings_init`; leave a family at its built-in default when they have no preference. When the file already holds choices, read and report them and tell the developer the file path and documented keys and values to change. Edit nothing yourself:
 
 1. **Gate delegation posture** (`orchestration.gateDelegation`; GLOBAL file only - the
    loader refuses it repo-locally and the boot snapshot reads the user file) - keep every
@@ -213,8 +206,8 @@ preference):
    (`defaults.maxRounds`), reviewer reuse (`defaults.reviewerReuse`),
    complexity thresholds (`defaults.complexity`), and per-level loop postures
    (`perLevel`). Read per-use; edits apply on the next use, no restart.
-3. **Concurrency caps** (`orchestration.concurrency`) - `maxParallelMasters`,
-   `maxParallelLeaves`, `maxSubAgents`. Default: uncapped.
+3. **Concurrency settings** (`orchestration.concurrency`) - `maxParallelMasters`,
+   `maxParallelLeaves`, `maxSubAgents`. These keys are accepted, but no code reads or enforces them, so reaching a value refuses no start. Default: uncapped.
 4. **Agent kind + role knobs** (`orchestration.spawn.harness`,
    per-role `orchestration.roles.<role>`, per-level
    `orchestration.rolesPerLevel.<level>.<role>`) - which agent kind a role start
@@ -236,13 +229,9 @@ If the developer wants to skip the interview, confirm the built-in defaults
 apply and continue; tell them the file can be edited any time (picked up
 per-use, except the gateDelegation restart note above).
 
-For every role offered by the Paseo launcher, guide a new user through permission mode choice. The accepted designer and strategist role entries have no Paseo start route in this build; name that limit instead of inventing an options request. Bootstrap is admitted: `role_start(role="bootstrap", request_id=<UUID>)` is its one native entry, it needs no task reference, and it is the call that starts this setup path. Read the running host's modes
-and descriptions once per agent kind from the existing public `POST /api/role-launch/options`
-route with `{"role":"architect","refreshCatalog":true}`. This taskless catalog read needs no
-sprint, master or leaf; use the returned agent kinds to interview each launcher role. A running host/dashboard is a named setup
-prerequisite: if unavailable, report it and defer this interview, without a guessed or second
-catalog. Write `orchestration.roles.<role>.mode` in the user's configuration settings only after
-the user chooses it. No shipped settings contain a mode. With no choice, new Claude starts state
+For every role offered by the Paseo launcher, guide a new user through permission mode choice. Bootstrap is admitted: `role_start(role="bootstrap", request_id=<UUID>)` is its one native entry, it needs no task reference, and it is the call that starts this setup path. Read mode choices and descriptions once per agent kind from the existing public `POST /api/role-launch/options` route with `{"role":"architect","refreshCatalog":true}`. This taskless read needs no sprint, master or leaf; use only the returned agent kinds and choices to interview each launcher role. A running dashboard is required because it serves this route. If the dashboard is unavailable, report that and defer the interview.
+
+Read `catalogDiscovery.source` and each returned agent’s `discovery.modes.source`. When either says `saved` or `unknown`, say so. Use only choices returned in `agents[].modes`; when `agents[].modesKnown` is false or a mode cannot be seen, report that mode as unknown. Do not invent a second catalog or another fallback. After the user chooses a mode, include `orchestration.roles.<role>.mode` only in the one initial `user_settings_init`. If the file already holds choices, report its path and the documented mode key and chosen value for the developer to change; edit nothing yourself. No shipped settings contain a mode. With no choice, new Claude starts state
 `default` (host label Always Ask), new Codex starts state `auto` (the host's workspace-write,
 on-request preset). This explicitly changes Codex starts that previously inherited a different
 user configuration; existing agents retain their settings. Pi has no selectable permission mode;
@@ -336,7 +325,7 @@ migrated. If a checkout still carries one, report the exact path and the route o
 worktree contracts, or re-initialize with `c-00-initialize-memory-repo`); never
 rewrite or delete it, and never treat it as an already-present memory layer.
 
-## First Conversion Of Unconverted Memory (MIK-R46 rule 6)
+## First conversion of unconverted memory
 
 When the memory is still in the legacy format (no `knowledge/layout.json`), every
 ordinary memory operation refuses it with the code `legacy-format` and names this
@@ -349,7 +338,7 @@ the ordinary converted route.
 1. **Memory with no attributed baseline** (it has no commit that a leaf could start
    from): run `agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY`
    on the memory root itself, paired with the code repository it documents, then adopt
-   the baseline, which validates the tree (MIK-R44 rule 7). Before the conversion,
+   the baseline, which validates the tree. Before the conversion,
    `memory_baseline_status` answers the state `legacy-format` with this step.
    `memory_init` on an existing unconverted root still writes no marker; its result
    names this procedure.
@@ -360,19 +349,30 @@ the ordinary converted route.
    change, naming the paired code commit explicitly (`--code-commit`; the default is
    the code worktree's HEAD). Then close the leaf out and land it like any leaf: its candidate is
    converted, so the validator and the invariant gate run against the converted base
-   (MIK-R24 rule 7) and the conversion itself counts as no change. The landing moves
+   and the conversion itself counts as no change. The landing moves
    the leaf's source branches (the series line), not the base; read back the landed
    memory commit (message plus `Code-Commit` trailer) and the marker at its tip. Every other open
-   line of that repository crosses at its next `worktree_sync` with `merge-memory`
-   (MIK-R24 rule 8).
+   line of that repository crosses at its next `worktree_sync` with `merge-memory`.
+
+Before answering onboarding trace findings, read
+[card sentence decisions](../l-01-agent-lifecycles/reference/curator/card-sentence-decisions.md)
+and [onboarding history rows](../l-01-agent-lifecycles/templates/curator-handoff-ingestion.md#history-rows)
+for the current writer-row requirements and the nearest governing route. For missing
+onboarding reported for worktree additions, follow
+[memory-quality tool guidance](../l-01-agent-lifecycles/reference/knowledge/commands.md)
+before the Curator handoff. After answering findings, rerun `memory_quality_check` and
+preview the closeout again; apply only after a passing preview and the ordinary approvals.
+
+A standalone `knowledge-validate` against the unconverted base is refused because that
+route does not convert comparison bases. After landing, validate ordinary follow-up
+work against the landed, converted tip.
 
 A conversion that fails validation writes nothing and names the failing files. After a
 conversion or a crossing, the refused operation is repeated and runs the ordinary
-converted route. The full procedure also lives in `docs/guides/first-conversion.md`;
-`knowledge-convert --help` states the same entry points.
+converted route. `knowledge-convert --help` states the same entry points.
 
 Authored migration prose uses the
-[shared STE-inspired writing profile](../l-01-agent-lifecycles/reference/shared-writing-profile.md).
+[shared STE-inspired writing profile](../l-01-agent-lifecycles/reference/writing/technical-english-profile.md).
 The converter is not a cosmetic rewrite. Before assessment waves, the migration procedure links
 that profile; later authored statements, family guarantees and history reasons preserve scope,
 source/evidence identities and frozen history, and proposed rewrites receive independent meaning
@@ -380,7 +380,7 @@ review before the normal writer publishes. A shorter sentence does not prove equ
 
 The converter stays: the conversion command, its read-only reader of the legacy
 database, and conversion-format version 1 are permanent parts of the product, because
-unconverted lines live in other clones and on other machines (MIK-R46 rule 7). Never
+unconverted lines live in other clones and on other machines. Never
 propose retiring them as part of this master's work.
 
 ## Stage 5 - Bootstrap, The First Baseline, Then The Architect's Foundation
@@ -388,7 +388,7 @@ propose retiring them as part of this master's work.
 Run this stage's initialisation and baseline halves only when Stage 4 scaffolded a new memory repo; the
 knowledge part applies to **both** memory-repo answers, because a `recorded` knowledge foundation is not
 something an existing memory repo is guaranteed to have. For a new memory repo the order is
-`memory_init` and then `memory_baseline_adopt`. Setup authors no onboarding: MIK-R196 rules 4-5 leave
+`memory_init` and then `memory_baseline_adopt`. Setup authors no onboarding: the existing procedures leave
 the knowledge foundation to the user-started Architect's regular task, and `c-14-knowledge-bootstrap`
 treats onboarding as optional input rather than a step of setup. Stage 5 has three parts, and the third
 is a handover rather than a production step:
@@ -409,9 +409,7 @@ is a handover rather than a production step:
    the repository's foundation lives and what a read of that location finds now
    (`not-recorded`, `recorded` at an exact identity, `unusable`, or a refused admission
    with its own `nextAction`). Say which state it is, and name the next step in words the
-   developer can act on: **start the Architect**. The Architect organises the foundation as
-   regular task work — one leaf, or a task under a master or a sprint, according to the size
-   of the work — and `c-14-knowledge-bootstrap` is the procedure its Curator runs there. An
+   developer can act on: **start the Architect**. The Architect organises the foundation through the [registered-leaf task route](../c-14-knowledge-bootstrap/SKILL.md#who-runs-it); the assigned Curator follows that procedure. An
    `unusable` location is reported with its code and path; nothing is written over it. A
    memory tree in the legacy format is refused by the writer as `legacy-format`, naming the
    conversion command.
@@ -434,13 +432,17 @@ part is not skipped with them: see Stage 4 case 2.
 
 ## Stage 6 - Retire Providers
 
-MIK-R112 removed every product install/start/watch path for the two providers. Do not start watchers and do not verify with the removed provider tools:
+The semantic and relationship index providers, including their Docker and Ollama paths, are retired. Their product installation, start and watch operations are removed. Report configured index-provider entries as retired and start nothing. Do not verify them with removed provider tools.
+
+The `paseoRuntime.providers` host agent-provider map, hosted connector accounts and MCP server providers are different: their reconnect, authorization, installation and enabling procedures remain unchanged.
+
+For retired index-provider state:
 
 1. Confirm the install stopped leftover watcher processes: the install result's watcher report holds the single `stop` phase.
 2. Confirm old provider keys are reported once as unused: the install result's `unusedProviderKeys` and `server_info` carry them. Enabled keys drive nothing.
-3. Remove the keys from settings when the older installation is retired.
+3. Bootstrap reports the settings file path and the obsolete keys, and the developer removes them. No tool other than the initial `user_settings_init` writes that file, so no other caller has removal authority.
 
-Providers are accelerators. Core by-path memory works without them; a provider gap is reported from the install result and `server_info`, never polled.
+Core by-path memory works without the retired index providers. Report their state from the install result and `server_info`; never poll them.
 
 ## Report Result
 
@@ -464,7 +466,7 @@ Summarize:
 8. knowledge foundation: the state read from `memory_init`'s `knowledge` block, and the
    handover to the user-started Architect, naming `c-14-knowledge-bootstrap` as the
    procedure its task runs for it; setup reports no knowledge records of its own;
-9. providers: indexing status and any deferred/degraded state;
+9. Report any configured index-provider entry as retired and start nothing; follow [the retired-provider procedure](#stage-6---retire-providers).
 10. host: shared settings path, pinned host/product Node, provision result,
     no-change repeat or deferred restart, and any incomplete migration.
 
@@ -504,7 +506,7 @@ skill, because this skill no longer installs hooks.
 5. It delegates memory init to `c-00-initialize-memory-repo`, bootstrap to
    `c-03-repo-bootstrap`, baseline adoption to
    `c-10-adopt-memory-baseline`, and context resolution to
-   `c-08-ar-coordination-context-resolver`. The fresh-scaffold path reaches baseline
+   the product through [the context-resolution tool guidance](../l-01-agent-lifecycles/reference/knowledge/commands.md). The fresh-scaffold path reaches baseline
    adoption in Stage 5; it does not stop at the scaffold.
 6. It hands the repository's knowledge foundation to the user-started Architect, whose
    task runs `c-14-knowledge-bootstrap` for it, and its own stages never author knowledge

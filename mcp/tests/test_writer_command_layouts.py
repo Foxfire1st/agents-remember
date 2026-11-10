@@ -120,8 +120,7 @@ def test_the_primary_layouts_clause_reaches_the_report_and_writes_nothing(tmp_pa
 
     assert (
         knowledge_write_command.discovered_settings(
-            tmp_path,
-            discover=lambda _cwd: tmp_path / "settings.json",
+            discover=lambda: tmp_path / "settings.json",
             guard=guard,
             load=lambda _path: "unused",
             unreadable=(ValueError,),
@@ -190,9 +189,9 @@ def _decision_document() -> str:
 
 
 def _settings(root: Path, coordination_root: Path) -> Path:
-    """Real discovery's own convention, under a directory the command is run from."""
+    """Real discovery's user-config location, isolated per command world."""
 
-    settings = root / ".claude" / "mcp" / "agents-remember-settings.json"
+    settings = root / "config" / "agents-remember" / "agents-remember-settings.json"
     settings.parent.mkdir(parents=True, exist_ok=True)
     settings.write_text(
         canonical_text(
@@ -240,14 +239,19 @@ def _handoff(root: Path) -> Path:
     return hand_off
 
 
-def _source_environment(checkout: Path) -> dict[str, str]:
+def _source_environment(checkout: Path, settings: Path) -> dict[str, str]:
     """Import this candidate from the fixture checkout, without inheriting pytest's mode."""
 
     source = Path(knowledge_write_command.__file__).resolve().parents[1]
     destination = checkout / "mcp/src/agents_remember"
     shutil.copytree(source, destination, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     shutil.copyfile(source.parents[1] / "pyproject.toml", checkout / "mcp/pyproject.toml")
-    return {**os.environ, "PYTHONPATH": str(destination.parent), "PYTHONDONTWRITEBYTECODE": "1"}
+    return {
+        **os.environ,
+        "PYTHONPATH": str(destination.parent),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "XDG_CONFIG_HOME": str(settings.parent.parent),
+    }
 
 
 def _probe(checkout: Path, environment: dict[str, str]) -> dict[str, Any]:
@@ -343,7 +347,7 @@ def test_the_real_command_refuses_from_a_primary_checkout(tmp_path: Path) -> Non
     world = build_world(tmp_path / "coordination")
     _prepare(world)
     settings = _settings(tmp_path, world.root)
-    environment = _source_environment(world.code)
+    environment = _source_environment(world.code, settings)
     probe = _probe(world.code, environment)
     assert probe["kind"] == "primary" and (world.code / ".git").is_dir()
     assert probe["settings"] == str(settings)
@@ -369,7 +373,7 @@ def test_the_real_command_writes_from_a_linked_checkout(tmp_path: Path) -> None:
     world.contract.write_text(contract.replace(str(world.code), str(linked)), encoding="utf-8")
     _prepare(world)
     settings = _settings(tmp_path, world.root)
-    environment = _source_environment(linked)
+    environment = _source_environment(linked, settings)
     probe = _probe(linked, environment)
     disposable = tmp_path / "provider-runtime/dev-ar-coordination"
     assert probe["kind"] == "linked" and (linked / ".git").is_file()

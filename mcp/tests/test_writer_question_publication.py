@@ -132,9 +132,7 @@ def test_loaded_settings_root_mismatch_refuses_raise_before_publication(
     world = build_world(tmp_path / "writer")
     port, path = setup_port(tmp_path / "questions")
     port.config.config_path.write_text("{}")
-    monkeypatch.setattr(
-        knowledge_write_route, "discover_config", lambda _start: port.config.config_path
-    )
+    monkeypatch.setattr(knowledge_write_route, "discover_config", lambda: port.config.config_path)
     monkeypatch.setattr(knowledge_write_route, "load_config", lambda _path: port.config)
     questions = knowledge_write_route.LeafQuestions(
         load_contract(world.contract),

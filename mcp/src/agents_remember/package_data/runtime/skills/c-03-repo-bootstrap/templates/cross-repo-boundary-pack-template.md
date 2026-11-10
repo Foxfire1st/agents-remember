@@ -1,11 +1,13 @@
 # Cross-Repo Boundary Pack — <area-or-route>
 
+<!-- The boundary researcher uses this template to record evidence from allowed adjacent repositories and external system boundaries. -->
+
 | Field | Value |
 |---|---|
 | repo | <repo> |
 | areaOrRoute | `<area-or-route>` |
 | generated | <YYYY-MM-DDThh:mm> |
-| topology | external / mixed |
+| topology | external |
 | status | complete / partial / blocked / no-boundary-found |
 
 ## Allowed Adjacent Repos

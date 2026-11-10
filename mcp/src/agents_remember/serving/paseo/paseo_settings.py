@@ -47,10 +47,16 @@ def daemon_settings(settings: PaseoRuntimeSettings) -> tuple[DaemonSetting, ...]
 
 def pending_settings(cli: PaseoCli) -> list[DaemonSetting]:
     document = cli.json("config", "daemon", "config", "get", "--json")
-    current = document.get("value")
+    return pending_settings_from_document(cli.settings, document.get("value"))
+
+
+def pending_settings_from_document(
+    settings: PaseoRuntimeSettings, current: object
+) -> list[DaemonSetting]:
+    """Compare the daemon's configured document, including before its CLI is installed."""
     return [
         setting
-        for setting in daemon_settings(cli.settings)
+        for setting in daemon_settings(settings)
         if _configured_value(current, setting) != setting.value
     ]
 

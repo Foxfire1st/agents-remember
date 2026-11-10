@@ -94,24 +94,39 @@ def restore_previous_config(home: Path) -> Restored | None:
     """
     previous = previous_config_path(home)
     digest = written_digest_path(home)
-    if not previous.is_file():
+    restored, document = provider_recovery_plan(home)
+    if restored is None:
         digest.unlink(missing_ok=True)
         return None
     path = home / CONFIG_FILE
+    if restored == "providers" and document is not None:
+        _write_private(path, _serialised(document))
+        previous.unlink()
+    else:
+        os.replace(previous, path)
+    digest.unlink(missing_ok=True)
+    return restored
+
+
+def provider_recovery_plan(home: Path) -> tuple[Restored | None, dict[str, Any] | None]:
+    """Observe the configured document after recovery, without changing recovery files.
+
+    Installation preview and the real recovery use this same whole-file-versus-provider-only
+    decision; the preview never reports provider values.
+    """
+    path = home / CONFIG_FILE
     current = path.read_bytes() if path.is_file() else b""
+    previous = previous_config_path(home)
+    if not previous.is_file():
+        return None, _configuration(current)
+    digest = written_digest_path(home)
     written = digest.read_text(encoding="ascii").strip() if digest.is_file() else None
     merged = None if hashlib.sha256(current).hexdigest() == written else _configuration(current)
     kept = _configuration(previous.read_bytes()) or {}
     if merged is None or not isinstance(merged.setdefault("agents", {}), dict):
-        os.replace(previous, path)
-        restored: Restored = "file"
-    else:
-        _put_back_provider_entries(merged, kept)
-        _write_private(path, _serialised(merged))
-        previous.unlink()
-        restored = "providers"
-    digest.unlink(missing_ok=True)
-    return restored
+        return "file", kept
+    _put_back_provider_entries(merged, kept)
+    return "providers", merged
 
 
 def agent_tools_setting(home: Path) -> dict[str, Any]:

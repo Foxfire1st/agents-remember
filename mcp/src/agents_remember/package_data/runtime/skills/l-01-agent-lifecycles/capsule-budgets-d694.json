@@ -1,0 +1,450 @@
+{
+  "schema": "ar-role-capsule-budget-current/v1",
+  "decision": {
+    "authority": "D694; Architect20261106T213301Z; Manager20261106T213325Z",
+    "scope": "Exact measured TABLE and SOURCE-SIZES rows; later growth returns to Architect for developer",
+    "tableSha256": "2a370be39fc17c784cb8be4fa8428fa3187458990c974d61dc2461c326a5fe84",
+    "sourceSizesSha256": "cf5cee15e58c216b21230a6c9a90c1da90e8791dca873e78144d6ac99a5f2dcb",
+    "historicalRegistrySha256": "f1b84da5dee66bac5819350ada5de35fb725fd821ff08a2ee32de5f60f257dc4",
+    "historicalSnapshotSha256": "3432085b1c50bb1f28167ea3a0505905cc0f94c32cb5943264c7117395522af0",
+    "classificationAuthority": "Architect20261106T221343Z Q1; Manager20261106T221412Z; 28 declared step details plus 4 linked source-budgeted templates"
+  },
+  "current_limits": {
+    "capsules": {
+      "architect/orientation": 4005,
+      "architect/planning": 4018,
+      "architect/review": 4212,
+      "architect/coordination": 4631,
+      "architect/authorized-closeout": 3269,
+      "architect/recovery": 3207,
+      "orchestrator/orientation": 2677,
+      "orchestrator/planning": 2009,
+      "orchestrator/review": 2220,
+      "orchestrator/coordination": 3325,
+      "orchestrator/authorized-closeout": 2045,
+      "orchestrator/recovery": 1945,
+      "designer/orientation": 2508,
+      "designer/planning": 1894,
+      "strategist/orientation": 2698,
+      "strategist/planning": 2083,
+      "manager/orientation": 3448,
+      "manager/review": 3091,
+      "manager/curation": 3430,
+      "manager/coordination": 4393,
+      "manager/authorized-closeout": 2793,
+      "manager/recovery": 2732,
+      "worker/orientation": 3208,
+      "worker/implementation": 3157,
+      "worker/recovery": 2474,
+      "curator/orientation": 3496,
+      "curator/curation": 4177,
+      "curator/recovery": 2780,
+      "reviewer/orientation": 4000,
+      "reviewer/review": 4000,
+      "reviewer/recovery": 3413,
+      "investigator/orientation": 2139,
+      "investigator/recovery": 1427,
+      "bootstrap/orientation": 2334,
+      "bootstrap/recovery": 1955,
+      "bootstrap/bootstrap": 3981,
+      "launcher/orientation": 1203,
+      "launcher/coordination": 2125
+    },
+    "step_details": {
+      "reference/curator-authoring-d301.md": 1945,
+      "reference/curator-handoff-d301.md": 204,
+      "reference/reviewer-orient-d301.md": 136,
+      "reference/reviewer-baseline-d301.md": 256,
+      "reference/reviewer-adjudication-d301.md": 56,
+      "reference/reviewer-memory-d301.md": 64,
+      "reference/reviewer-master-exit-d301.md": 73,
+      "reference/bootstrap-foundation-d301.md": 266,
+      "reference/bootstrap-failure-states.md": 797,
+      "reference/curator-intake-details.md": 95,
+      "reference/curator-card-details.md": 1788,
+      "reference/curator-worklist-details.md": 789,
+      "reference/refused-write.md": 561,
+      "reference/curator-writer-details.md": 759,
+      "reference/shared-writing-profile.md": 1468,
+      "reference/architect-working-rules.md": 2200,
+      "reference/manager-working-rules.md": 776,
+      "reference/worker-working-rules.md": 139,
+      "reference/shared-working-rules.md": 363,
+      "reference/coordination-starts.md": 156,
+      "reference/message-handover.md": 328,
+      "reference/child-questions.md": 337,
+      "reference/investigator-instruction-review.md": 538,
+      "reference/knowledge-use.md": 691,
+      "reference/curator-repository-foundation.md": 198,
+      "templates/turn-report.md": 2087,
+      "reference/knowledge-commands.md": 2674,
+      "reference/task-document-authoring.md": 497,
+      "templates/file-card.md": 121,
+      "templates/repo-overview.md": 254,
+      "templates/route-local-overview.md": 275,
+      "templates/repo-entity-catalog.md": 276
+    },
+    "digest": {
+      "core/every-role.md": 1474
+    }
+  },
+  "current_measurements": {
+    "capsules": {
+      "architect/orientation": 4005,
+      "architect/planning": 3821,
+      "architect/review": 3813,
+      "architect/coordination": 4549,
+      "architect/authorized-closeout": 3268,
+      "architect/recovery": 3169,
+      "orchestrator/orientation": 2677,
+      "orchestrator/planning": 2004,
+      "orchestrator/review": 2142,
+      "orchestrator/coordination": 3325,
+      "orchestrator/authorized-closeout": 2044,
+      "orchestrator/recovery": 1945,
+      "designer/orientation": 2087,
+      "designer/planning": 1395,
+      "strategist/orientation": 2385,
+      "strategist/planning": 1693,
+      "manager/orientation": 3381,
+      "manager/review": 2846,
+      "manager/curation": 3287,
+      "manager/coordination": 4224,
+      "manager/authorized-closeout": 2748,
+      "manager/recovery": 2649,
+      "worker/orientation": 3086,
+      "worker/implementation": 3034,
+      "worker/recovery": 2319,
+      "curator/orientation": 3444,
+      "curator/curation": 4177,
+      "curator/recovery": 2694,
+      "reviewer/orientation": 3675,
+      "reviewer/review": 3711,
+      "reviewer/recovery": 2927,
+      "investigator/orientation": 2139,
+      "investigator/recovery": 1427,
+      "bootstrap/orientation": 1992,
+      "bootstrap/recovery": 1596,
+      "bootstrap/bootstrap": 2971,
+      "launcher/orientation": 1109,
+      "launcher/coordination": 1906
+    },
+    "step_details": {
+      "reference/curator-authoring-d301.md": 1615,
+      "reference/curator-handoff-d301.md": 176,
+      "reference/reviewer-orient-d301.md": 136,
+      "reference/reviewer-baseline-d301.md": 256,
+      "reference/reviewer-adjudication-d301.md": 56,
+      "reference/reviewer-memory-d301.md": 64,
+      "reference/reviewer-master-exit-d301.md": 73,
+      "reference/bootstrap-foundation-d301.md": 169,
+      "reference/bootstrap-failure-states.md": 606,
+      "reference/curator-intake-details.md": 95,
+      "reference/curator-card-details.md": 1788,
+      "reference/curator-worklist-details.md": 743,
+      "reference/refused-write.md": 561,
+      "reference/curator-writer-details.md": 671,
+      "reference/shared-writing-profile.md": 1237,
+      "reference/architect-working-rules.md": 2171,
+      "reference/manager-working-rules.md": 748,
+      "reference/worker-working-rules.md": 139,
+      "reference/shared-working-rules.md": 363,
+      "reference/coordination-starts.md": 117,
+      "reference/message-handover.md": 328,
+      "reference/child-questions.md": 337,
+      "reference/investigator-instruction-review.md": 515,
+      "reference/knowledge-use.md": 691,
+      "reference/curator-repository-foundation.md": 198,
+      "templates/turn-report.md": 1873,
+      "reference/knowledge-commands.md": 2318,
+      "reference/task-document-authoring.md": 497,
+      "templates/file-card.md": 121,
+      "templates/repo-overview.md": 254,
+      "templates/route-local-overview.md": 275,
+      "templates/repo-entity-catalog.md": 276
+    },
+    "digest": {
+      "core/every-role.md": 1474
+    }
+  },
+  "current_detail_population": [
+    "reference/architect-working-rules.md",
+    "reference/bootstrap-failure-states.md",
+    "reference/bootstrap-foundation-d301.md",
+    "reference/child-questions.md",
+    "reference/coordination-starts.md",
+    "reference/curator-authoring-d301.md",
+    "reference/curator-card-details.md",
+    "reference/curator-handoff-d301.md",
+    "reference/curator-intake-details.md",
+    "reference/curator-repository-foundation.md",
+    "reference/curator-worklist-details.md",
+    "reference/curator-writer-details.md",
+    "reference/investigator-instruction-review.md",
+    "reference/knowledge-commands.md",
+    "reference/knowledge-use.md",
+    "reference/manager-working-rules.md",
+    "reference/message-handover.md",
+    "reference/refused-write.md",
+    "reference/reviewer-adjudication-d301.md",
+    "reference/reviewer-baseline-d301.md",
+    "reference/reviewer-master-exit-d301.md",
+    "reference/reviewer-memory-d301.md",
+    "reference/reviewer-orient-d301.md",
+    "reference/shared-working-rules.md",
+    "reference/shared-writing-profile.md",
+    "reference/task-document-authoring.md",
+    "reference/worker-working-rules.md",
+    "templates/turn-report.md"
+  ],
+  "current_capsule_ceilings_words": {
+    "architect": 4631,
+    "manager": 4513,
+    "curator": 4177,
+    "reviewer": 4000,
+    "bootstrap": 4000,
+    "every_other_role": 3700
+  },
+  "current_step_ceiling_words": 2700,
+  "current_digest_ceiling_words": 1474,
+  "new_source_budgets": {
+    "reference/task-document-authoring.md": 497,
+    "templates/file-card.md": 121,
+    "templates/leaf-task.md": 278,
+    "templates/master-task.md": 240,
+    "templates/repo-entity-catalog.md": 276,
+    "templates/repo-overview.md": 254,
+    "templates/requirement-packet.md": 373,
+    "templates/route-local-overview.md": 275
+  },
+  "approved_source_sizes": {
+    "skills/l-01-agent-lifecycles/composition-manifest.json": {
+      "size_words": 2803,
+      "sha256": "2ed11a4d6e55781946f7f223d5f985edac77e972d01c1078533fe2701642e50a",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/core/digest-map.json": {
+      "size_words": 15775,
+      "sha256": "29ba1db7ff23fa127e8a8d90f7e8592b6567cc470bcb815d7ddf8138df55bfa8",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/core/invariants.md": {
+      "size_words": 989,
+      "sha256": "2b9388885285f9b7de7c2550a3f91be661ac5ffd1d9fce40e448ca7699932adf",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/core/loop.md": {
+      "size_words": 1264,
+      "sha256": "1df0bfe99f912ea6099e661d8232205d17d1f4ffdd0096148e457f3ca6046726",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/lenses.md": {
+      "size_words": 403,
+      "sha256": "a9ec60742f6ee2c2cfb1a9288d65e1efab4b5af9bfd3c6bd593cd6e8f0076e37",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/operations/bootstrap.md": {
+      "size_words": 1577,
+      "sha256": "3162861e069fa963a20a2677532cd42d81fbd4b785a2f6b2bf02f62d0f7c42e6",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/operations/closeout.md": {
+      "size_words": 429,
+      "sha256": "4947b8afdfd85674be274796455d6263dfb1f7722102a128e9a5753b765d9971",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/operations/curation.md": {
+      "size_words": 1986,
+      "sha256": "c5a883a2e0d87828a0fe19a2a2f92768f76b6de6bfd40e80075f16177ca62e25",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/reference/collaboration-method.md": {
+      "size_words": 845,
+      "sha256": "b33b90bee868d73db80a469c5c45d42db73107762023e17db671fc5297400c44",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/reference/curator-authoring-d301.md": {
+      "size_words": 1615,
+      "sha256": "3a858755afe2d8131722a884159aa240bb0deade80b6d02174fc2474396965bd",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/reference/curator-card-details.md": {
+      "size_words": 1788,
+      "sha256": "032534ffda991be537eebce3c9a7698a41236492e771114dfa1381bcdaa0a9d3",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/reference/knowledge-commands.md": {
+      "size_words": 2318,
+      "sha256": "0241c9985998cde0ed1319e99270e447d56b640dd6832616b88c75f745be727b",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/reference/knowledge-use.md": {
+      "size_words": 691,
+      "sha256": "a3a87f50e514e134f7689fb3cc0d4accdfd9c4140f6c2b777e0c8a8f09922ef3",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/reference/task-document-authoring.md": {
+      "size_words": 497,
+      "sha256": "db80eefe1e5908ad79d6224c66d63772a126ed2ad5a5737f722133a9ff4b223f",
+      "kind": "added"
+    },
+    "skills/l-01-agent-lifecycles/roles/architect.md": {
+      "size_words": 2857,
+      "sha256": "d1fffd67f96039fe14a0ee52fe17b0b8f884609e49887f222c2d151beedbba36",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/roles/curator.md": {
+      "size_words": 2376,
+      "sha256": "9229071f5d128eab43b8bda5c834ed4f58379b6742becb7327d1008d43868365",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/roles/designer.md": {
+      "size_words": 1042,
+      "sha256": "4809e47a546176f201f858dc198684d8c69c9fb6e179306dd6107fffa120fff5",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/roles/strategist.md": {
+      "size_words": 1345,
+      "sha256": "34a3bdae67f35a5eeb354493d72b3b6421df80b0712639b9b428be82f87b3d56",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/templates/architect-brief.md": {
+      "size_words": 642,
+      "sha256": "f29a0b23e092daa3e3dca04e9bd65cdc386cce5c71185a66abca05345d2d5ac7",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/templates/curator-brief.md": {
+      "size_words": 974,
+      "sha256": "27cf7578a0e69fc2cf40d334a2389a86390418944ad76a1f1990d4304857e65a",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/templates/curator-handoff-list.md": {
+      "size_words": 9088,
+      "sha256": "c17ba23736b634b8d994f7eb83fcde144d6c44a0027811f538939b5258181b6e",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/templates/deep-research-report.md": {
+      "size_words": 705,
+      "sha256": "b9f663d24658cba3fdaacfa35f18a60c5801b9eee8bf94821c3afc449a74913b",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/templates/file-card.md": {
+      "size_words": 121,
+      "sha256": "1128f5a40e0660611fefa89ac13944e504e5def2accb8e7361bbaaf03885f07f",
+      "kind": "added"
+    },
+    "skills/l-01-agent-lifecycles/templates/leaf-task.md": {
+      "size_words": 278,
+      "sha256": "85df9340ad3d9cdf85065ab446d2d2908bf36860bc9e80cb55ea8edfac7a59a6",
+      "kind": "added"
+    },
+    "skills/l-01-agent-lifecycles/templates/master-task.md": {
+      "size_words": 240,
+      "sha256": "53e09ff5e2544b99fb9b30d199cdb1f7a14d38aa0d4feb93899fd4daca3eb4e5",
+      "kind": "added"
+    },
+    "skills/l-01-agent-lifecycles/templates/onboarding-coherency.md": {
+      "size_words": 480,
+      "sha256": "b1a2c437c037ac9169462b9190131310d776bc92f7b609da95b2d8e170def9f6",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/templates/repo-entity-catalog.md": {
+      "size_words": 276,
+      "sha256": "c1b0b575cc1482dcc1485de6f1fd32d2d5f428720b8b7333d3fd8a8651152b3e",
+      "kind": "added"
+    },
+    "skills/l-01-agent-lifecycles/templates/repo-overview.md": {
+      "size_words": 254,
+      "sha256": "bf10678c73621949fa7feff0a176856a2bc7802761ab83b3d11ee5bbacbfcd9e",
+      "kind": "added"
+    },
+    "skills/l-01-agent-lifecycles/templates/requirement-packet.md": {
+      "size_words": 373,
+      "sha256": "7e834455daf39e1b442b6ea0a2d391e73df499d61180bdedec10aad04ce9a97c",
+      "kind": "added"
+    },
+    "skills/l-01-agent-lifecycles/templates/route-local-overview.md": {
+      "size_words": 275,
+      "sha256": "18e9d43989773d747d2c887fe6e3a2a5e1860905d8214b5be1ec6af21ad9d219",
+      "kind": "added"
+    },
+    "skills/l-01-agent-lifecycles/templates/turn-report.md": {
+      "size_words": 1873,
+      "sha256": "38b5d9613c1747a1fa12b6621f5a52dcb5721faaf1a1f78d046a002f3fe33bf4",
+      "kind": "changed"
+    },
+    "skills/l-01-agent-lifecycles/templates/verdict.md": {
+      "size_words": 3467,
+      "sha256": "103435ed2133254824312694615f27356e5ad9624564eda8c11f998cd7bc898b",
+      "kind": "changed"
+    }
+  },
+  "compiler_input_revisions": {
+    "composition-manifest.json": "sha256:2ed11a4d6e55781946f7f223d5f985edac77e972d01c1078533fe2701642e50a",
+    "core/acceptance.md": "sha256:8ba230e8b41fec64df26dbfa5a8c2d2a13644def313318e9cb6752c7b67ec331",
+    "core/authority.md": "sha256:7183d87be488a76a79fc5cb4f0b4742ddcc0ccf0dfd1c2d408455d906eb0b1be",
+    "core/every-role.md": "sha256:965c735053aa612ca7347907a42bbdf40b450c6f4df6b0ee9d33ae1d3a226fa5",
+    "core/invariants.md": "sha256:2b9388885285f9b7de7c2550a3f91be661ac5ffd1d9fce40e448ca7699932adf",
+    "core/lifecycle-frame.md": "sha256:78456d0d2be267de0544a26611c0e4dcd459339cd779d92ddd2b04a3c92241fa",
+    "core/loop.md": "sha256:1df0bfe99f912ea6099e661d8232205d17d1f4ffdd0096148e457f3ca6046726",
+    "roles/architect.md": "sha256:d1fffd67f96039fe14a0ee52fe17b0b8f884609e49887f222c2d151beedbba36",
+    "operations/orientation.md": "sha256:183d9fef314d1c1fb5c65438990d492a0f71e43880a8fbec50a7b55e7fe53eaf",
+    "SKILL.md": "sha256:548198e38aa4e18aa38abadb482f78e7778227d89f72a78d57ac837c6b8854aa",
+    "reference/architect-working-rules.md": "sha256:e1c5b3cd7f4d7569756f91436ef6fbef9a563e352793a6621235015e15458cba",
+    "reference/child-questions.md": "sha256:989f46e63898cdbc024d06d63cfed97d41d8d7d548837d19ac9531383b72e941",
+    "reference/coordination-starts.md": "sha256:c9444ec0870ea6b065d05e3dbb6fff6a2e24cdac89024dbb1b5f2155ed87484f",
+    "reference/knowledge-commands.md": "sha256:0241c9985998cde0ed1319e99270e447d56b640dd6832616b88c75f745be727b",
+    "reference/knowledge-use.md": "sha256:a3a87f50e514e134f7689fb3cc0d4accdfd9c4140f6c2b777e0c8a8f09922ef3",
+    "reference/manager-working-rules.md": "sha256:9603e3cdc1a4e9bf23f2a68cb7fb71e27aba68f21c2277d4588602d8f20aa567",
+    "reference/message-handover.md": "sha256:21601447b0345b38366458ea4dc7955bab19c8f500775800a56682619d68b501",
+    "reference/refused-write.md": "sha256:3d3ae85a5e562cc499c77853f4323da62bf17be0315790cd0f0775ec5ee5cd6b",
+    "reference/shared-working-rules.md": "sha256:92cb334311c207599a6a1aa3aca7edfb125858bf016421bd5ec190e1049c6482",
+    "reference/task-document-authoring.md": "sha256:db80eefe1e5908ad79d6224c66d63772a126ed2ad5a5737f722133a9ff4b223f",
+    "operations/planning.md": "sha256:5b5c342a12500886a15c716be6d403f74b14a2b1cf139c78dc712c02f95bb239",
+    "operations/review.md": "sha256:0c6279be3c92574efedbd296610cf81c406c3a974b367442ce441938108d32fb",
+    "operations/coordination.md": "sha256:f78f1209c2557b777bfebce5ae001a76972456df2f2f2025920698b669d8a904",
+    "operations/closeout.md": "sha256:4947b8afdfd85674be274796455d6263dfb1f7722102a128e9a5753b765d9971",
+    "operations/recovery.md": "sha256:7026b9224b435099da7e2c934595f8203504d4fdf064450385c3fea94e54dced",
+    "roles/orchestrator.md": "sha256:713a33de062edaa501637131be26f464583ce553b739ccec1d4edc64ca5c91db",
+    "roles/designer.md": "sha256:4809e47a546176f201f858dc198684d8c69c9fb6e179306dd6107fffa120fff5",
+    "roles/strategist.md": "sha256:34a3bdae67f35a5eeb354493d72b3b6421df80b0712639b9b428be82f87b3d56",
+    "roles/manager.md": "sha256:c1285b3e99b1d3502806b283afb99e154012518b55090b05d27a3cd3cefaaa7a",
+    "reference/curator-writer-details.md": "sha256:2485d329565753f25dcab9b81075247ff23626ee169dcc2a037454e147967c1c",
+    "operations/curation.md": "sha256:c5a883a2e0d87828a0fe19a2a2f92768f76b6de6bfd40e80075f16177ca62e25",
+    "roles/worker.md": "sha256:26342174e2ac04e63d0461f6003c9da18b921a7a53ebd9adfa012d5544434e46",
+    "reference/shared-writing-profile.md": "sha256:6b8ed08134afdef8ef5a1129943337e585f1eab48fa10e4dd0d5345a007f0ff1",
+    "reference/worker-working-rules.md": "sha256:5620f1e72b729f0afe85c70a25494eb90c9924a70d299724589f01a6665069e2",
+    "templates/turn-report.md": "sha256:38b5d9613c1747a1fa12b6621f5a52dcb5721faaf1a1f78d046a002f3fe33bf4",
+    "operations/implementation.md": "sha256:a4f1528a621a29895750a28acc0023dc2980f06b36186d3847655dd000d54215",
+    "roles/curator.md": "sha256:9229071f5d128eab43b8bda5c834ed4f58379b6742becb7327d1008d43868365",
+    "reference/curator-authoring-d301.md": "sha256:3a858755afe2d8131722a884159aa240bb0deade80b6d02174fc2474396965bd",
+    "reference/curator-card-details.md": "sha256:032534ffda991be537eebce3c9a7698a41236492e771114dfa1381bcdaa0a9d3",
+    "reference/curator-handoff-d301.md": "sha256:fefa595ccba9baed483fb71a13a03955c08aa3a1e543a4ccb9e209891dadfcdb",
+    "reference/curator-intake-details.md": "sha256:393996fe1acacab770ef84b9564007887a279c5a1e5381838f10d856f54f2d4c",
+    "reference/curator-repository-foundation.md": "sha256:af1a190f727ef438f9f20b96f748b08245f2480a434cc589bc5e1aa61ad46d90",
+    "reference/curator-worklist-details.md": "sha256:ef29da2149b37109563f8083cf46ce5c5f216c7ad81e66d1ed4ae00b75883789",
+    "templates/file-card.md": "sha256:1128f5a40e0660611fefa89ac13944e504e5def2accb8e7361bbaaf03885f07f",
+    "templates/repo-entity-catalog.md": "sha256:c1b0b575cc1482dcc1485de6f1fd32d2d5f428720b8b7333d3fd8a8651152b3e",
+    "templates/repo-overview.md": "sha256:bf10678c73621949fa7feff0a176856a2bc7802761ab83b3d11ee5bbacbfcd9e",
+    "templates/route-local-overview.md": "sha256:18e9d43989773d747d2c887fe6e3a2a5e1860905d8214b5be1ec6af21ad9d219",
+    "roles/reviewer.md": "sha256:eac91f095778ef8c405aedbd5c07b22bd3de5d364c2f37d37d17e362c96577dc",
+    "reference/reviewer-adjudication-d301.md": "sha256:4ab3ba6842937ec5f20e06e234899e915bfe2ce90a62cf9ab2693d784686d3cf",
+    "reference/reviewer-baseline-d301.md": "sha256:9d191e58c540933407c6798394fb9d738bba815f9b5166b0ff923b55a38946eb",
+    "reference/reviewer-master-exit-d301.md": "sha256:139532f82bbcf5133050def5898a8069f18ad0b93c4dfc5c3f32c91e75917210",
+    "reference/reviewer-memory-d301.md": "sha256:867828e3ae613f0ac34bcb3d9482b54002b05cc15a0582a5c082caa6ba074f8b",
+    "reference/reviewer-orient-d301.md": "sha256:21bc09160b880ef0dd1d194bf33cd47eaa4a555da5b4b3f694ea32cfcdf1241d",
+    "roles/investigator.md": "sha256:8ac976f1f12a7ecad1585185ea9eff8cc543bf974d63b5466068cb76f85ca54c",
+    "reference/investigator-instruction-review.md": "sha256:5d2abe3c7ff4ae09dca2ae200b41bff100027d308df995eac74a1ac679625b30",
+    "roles/bootstrap.md": "sha256:5d8805a28d5b81622b9d98a60eb5529513a976f3b08861eff1abb2e05ccbd6f7",
+    "reference/bootstrap-failure-states.md": "sha256:1845f993633f33ca7969f3261caf17e5f736fc9c513a84b218ffe586314de4b1",
+    "reference/bootstrap-foundation-d301.md": "sha256:776ce1b31f245437249c00f8896abf2e7962135a4ee88aa5c45a734f737d55ed",
+    "operations/bootstrap.md": "sha256:3162861e069fa963a20a2677532cd42d81fbd4b785a2f6b2bf02f62d0f7c42e6",
+    "core/launcher.md": "sha256:90ad416359a39a15bad2d88c9da719ac09255de55f82ed1127077ef027bc490e"
+  },
+  "current_linked_template_population": [
+    "templates/file-card.md",
+    "templates/repo-entity-catalog.md",
+    "templates/repo-overview.md",
+    "templates/route-local-overview.md"
+  ]
+}

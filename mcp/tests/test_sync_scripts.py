@@ -121,12 +121,17 @@ class BoundaryClause:
 # fails, which is what `test_a_clause_missing_from_one_...` pins by deleting one clause from one copy.
 PROJECTED_BOUNDARY_CLAUSES: tuple[BoundaryClause, ...] = (
     BoundaryClause(
-        "core/acceptance.md", "Terminal truth is mechanical; acceptance is the owner's."
+        "core/acceptance.md",
+        "A canonical terminal or finalizer outcome of `completed` means only that the provider turn ended normally.",
+    ),
+    BoundaryClause(
+        "core/acceptance.md",
+        "On wake, the current gate owner opens and validates the required artifact, candidate identity, evidence and acceptance envelope before advancing lifecycle state.",
     ),
     BoundaryClause("roles/worker.md", "A finished turn is not AR acceptance."),
     BoundaryClause(
-        "reference/shared-writing-profile.md",
-        "A clearer rewrite is never proof of preserved meaning.",
+        "reference/writing/technical-english-profile.md",
+        "Clearer wording is not proof that meaning was preserved.",
     ),
 )
 

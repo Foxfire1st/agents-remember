@@ -68,6 +68,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shlex
 import shutil
 import tempfile
 from collections.abc import Iterator
@@ -83,6 +84,7 @@ from agents_remember.application.skill_resources.catalog import (
 from agents_remember.application.skill_resources.operation import (
     skill_catalog_registry,
 )
+from agents_remember.application.skill_resources.provider import shipped_composition_corpus
 from agents_remember.application.skill_resources.responses import (
     skill_catalog_list_response,
     skill_catalog_read_response,
@@ -93,7 +95,14 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_capsules.types import compute_content_digest
 from agents_remember.serving.capsule_delivery import CapsuleDelivery
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
-from agents_remember_test_support.testing.leaf_instruction_wording import normalized
+from agents_remember_test_support.testing.capsule_budget_d695 import (
+    current_budget_view,
+    load_current_budget_view,
+)
+from agents_remember_test_support.testing.leaf_instruction_wording import (
+    assert_action_pointer,
+    normalized,
+)
 from test_capsule_launch_wiring import LEAF_REF, _scratch_world
 
 pytestmark = pytest.mark.evidence_unit
@@ -102,20 +111,26 @@ REPOSITORY_ROOT = Path(__file__).parents[2]
 CANONICAL_SKILLS = REPOSITORY_ROOT / "skills"
 PROCEDURE_SKILL = "c-14-knowledge-bootstrap"
 PROCEDURE_FILE = CANONICAL_SKILLS / PROCEDURE_SKILL / "SKILL.md"
-FOUNDATION_SOURCE = "reference/curator-repository-foundation.md"
-FOUNDATION_STEP = "when you reach a repository's first or resumed knowledge foundation, not before"
-FOUNDATION_HEADING = "# Curator \N{EM DASH} repository knowledge foundation"
+FOUNDATION_SOURCE = "reference/curator/repository-foundation.md"
+FOUNDATION_ACTION = "Before a repository's first or resumed knowledge foundation, read"
+FOUNDATION_HEADING = "# Curator repository foundation"
+FOUNDATION_WORKFLOW_CLAUSE = (
+    "Before authoring the foundation, follow [the knowledge-bootstrap workflow]"
+    "(skill://agents-remember/skills/c-14-knowledge-bootstrap/SKILL.md)."
+)
 FOUNDATION_PROCEDURE_CLAUSES = (
     "Repository foundation is regular task work.",
-    "After setup reports memory/baseline state, the user starts the Architect, which opens the real foundation task under a master.",
-    "Start this seat on that task document and use its actual enclosure contract.",
-    "Receive the repository id, resolved context, scope, sources and current knowledge state; no incidental code delta is required.",
-    "Run `c-14-knowledge-bootstrap`.",
-    "Onboarding is optional input, never a start prerequisite; this foundation procedure authors no onboarding.",
+    "The user-started Architect opens the real foundation task under a master and starts the Curator on that task document.",
+    "The Curator uses its actual enclosure contract.",
+    "Receive the repository identifier, resolved context, scope, sources and current knowledge state. "
+    "No incidental code delta is required.",
+    FOUNDATION_WORKFLOW_CLAUSE,
+    "Onboarding is optional input and never a start prerequisite.",
+    "This foundation procedure authors no onboarding.",
 )
 FOUNDATION_AUTHORITY_CLAUSES = (
-    "Without a task, Bootstrap reads and reports state and names the user-started Architect as the next step.",
-    "No instructed session substitutes for task admission.",
+    "For setup\N{RIGHT SINGLE QUOTATION MARK}s state report and next step, follow [Name the next step]",
+    "An instructed session cannot replace task admission.",
     "Report a missing task; never fabricate a task, worktree or enclosure.",
 )
 
@@ -127,28 +142,47 @@ def delivered_foundation(
 
     The budget declaration is a guard assertion here, not a claimed compiler refusal.
     """
-    budgets = json.loads((root / "capsule-budgets.json").read_text())
+    budgets = current_budget_view(load_current_budget_view(root / "capsule-budgets-current.json"))
     assert FOUNDATION_SOURCE in budgets["step_details"], "undeclared budget detail"
     manifest = json.loads((root / "composition-manifest.json").read_text())
-    declared = manifest["references"]["curator-repository-foundation"]
+    declared = manifest["references"]["curator/repository-foundation"]
     assert declared["source"] == FOUNDATION_SOURCE
     assert declared["step_detail"] is True
     assert "curator" in declared["roles"]
-    assert declared["step"] == FOUNDATION_STEP
+    assert declared["step"].strip()
+    assert_action_pointer(capsule.trusted_instructions, FOUNDATION_SOURCE, FOUNDATION_ACTION)
     assert "]({{detail:" + FOUNDATION_SOURCE + "}})" in capsule.trusted_instructions
     references = [r for r in capsule.detail_references if r.source_path == FOUNDATION_SOURCE]
     assert len(references) == 1
     reference = references[0]
-    assert reference.step == FOUNDATION_STEP
+    assert reference.step == declared["step"]
     assert reference.content == (root / FOUNDATION_SOURCE).read_bytes()
     instructions, record = compose_launch_instructions(capsule, str(report_path), {})
     entries = [r for r in record["detailReferences"] if r["sourcePath"] == FOUNDATION_SOURCE]
     assert len(entries) == 1
-    assert entries[0]["step"] == FOUNDATION_STEP
+    assert entries[0]["step"] == reference.step
     path = Path(entries[0]["path"])
     assert f"]({path.as_posix()})" in instructions
     assert "{{detail:" not in instructions
-    assert path.read_bytes() == reference.content
+
+    # The emitted copy equals the source byte for byte except that each relative link is
+    # rewritten to the absolute shipped file; every rewritten target names the same file
+    # and anchor (A004 pinned plain byte equality before the foundation gained links).
+    link = re.compile(r"\]\(([^)]+)\)")
+    emitted_text, source_text = path.read_text(), reference.content.decode("utf-8")
+    assert link.sub("](target)", emitted_text) == link.sub("](target)", source_text)
+    with shipped_composition_corpus() as (origin, _manifest):
+        owner = origin / FOUNDATION_SOURCE
+        for emitted, written in zip(
+            link.findall(emitted_text), link.findall(source_text), strict=True
+        ):
+            if written.startswith("skill://"):
+                assert emitted == written
+                continue
+            emitted_path, _, emitted_anchor = emitted.partition("#")
+            written_path, _, written_anchor = written.partition("#")
+            assert emitted_anchor == written_anchor, (emitted, written)
+            assert Path(emitted_path).resolve() == (owner.parent / written_path).resolve()
     detail = path.read_text()
     assert detail.splitlines()[0] == FOUNDATION_HEADING
     for clause in clauses:
@@ -163,23 +197,41 @@ def foundation_delivery_controls(
     clauses: tuple[str, ...],
     sentence: str,
 ) -> None:
-    """All four corruptions fail the same delivery proof, without editing shipped sources.
+    """All five corruptions fail the same delivery proof, without editing shipped sources.
 
     These are assertion-boundary controls on a captured capsule and copied declarations;
     they make no claim that the compiler consumes the budget registry.
     """
-    for mutation in ("step_details", "heading", "sentence", "undeclared-pointer"):
+    for mutation in (
+        "step_details",
+        "heading",
+        "sentence",
+        "undeclared-pointer",
+        "relocated-pointer",
+    ):
         copied = output / mutation / "lifecycle"
-        for relative in ("capsule-budgets.json", "composition-manifest.json", FOUNDATION_SOURCE):
+        for relative in (
+            "capsule-budgets-current.json",
+            "composition-manifest.json",
+            FOUNDATION_SOURCE,
+        ):
             target = copied / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(root / relative, target)
         changed_capsule = capsule
         if mutation == "step_details":
-            target = copied / "capsule-budgets.json"
+            target = copied / "capsule-budgets-current.json"
             budgets = json.loads(target.read_text())
-            del budgets["step_details"][FOUNDATION_SOURCE]
+            del budgets["current_measurements"]["step_details"][FOUNDATION_SOURCE]
             target.write_text(json.dumps(budgets))
+        elif mutation == "relocated-pointer":
+            marker = "{{detail:" + FOUNDATION_SOURCE + "}}"
+            assert capsule.trusted_instructions.count(marker) == 1
+            changed = capsule.trusted_instructions.replace(marker, "", 1)
+            changed += "\n\nAt an unrelated action, read [foundation](" + marker + ")."
+            assert FOUNDATION_ACTION in changed
+            assert changed.count(marker) == 1
+            changed_capsule = replace(capsule, trusted_instructions=changed)
         elif mutation == "undeclared-pointer":
             changed = capsule.trusted_instructions.replace(
                 "{{detail:" + FOUNDATION_SOURCE + "}}", "{{detail:reference/undeclared.md}}"
@@ -212,10 +264,12 @@ def foundation_delivery_controls(
 #: The shipped umbrella CLI's own program name, as the procedure prints it.
 PROGRAM = "agents-remember"
 
-#: A printed invocation: the program name opens the line (optionally indented), so an inline mention
-#: of a command inside a sentence is prose rather than a command line the document prints.
-_INVOCATION = re.compile(rf"^(\s*){PROGRAM}\s+([a-z][a-z0-9-]*)")
-_LONG_OPTION = re.compile(r"--[a-z][a-z0-9-]*")
+#: Both launchers printed by the procedure. A launcher opens the line (optionally indented), so an
+#: inline mention inside a sentence is prose rather than a command line the document prints.
+_INVOCATION = re.compile(
+    rf'^\s*(?:{PROGRAM}\s+|PYTHONPATH="\$AR_SERVING_PARENT"\s+'
+    r'"\$AR_SERVING_PYTHON"\s+-P\s+-m\s+agents_remember\.cli\s+)'
+)
 _CONTINUATION = re.compile(r"^\s+--")
 _PLACEHOLDER = re.compile(r"<[^>]*>")
 
@@ -254,24 +308,62 @@ def body_of(text: str) -> str:
 def printed_invocations(text: str) -> Iterator[list[str]]:
     """Each ``agents-remember`` invocation ``text`` prints, as a placeholder-filled argv.
 
-    A command in this corpus wraps across continuation lines that begin with an option, so one
-    invocation's span is its own line plus every following line that starts with one. The extraction
-    is deliberately over-inclusive: an option read from a neighbouring sentence still has to parse, so
-    over-reading makes the case stricter rather than weaker.
+    Join explicit shell continuations before recognizing the launcher, then include option-only
+    continuation lines. Normalize the serving-bound Python launcher to the parser's program name;
+    every following token remains subject to the real parser. Placeholders are filled before shell
+    tokenization because their descriptive text can contain spaces and apostrophes.
     """
 
-    lines = text.splitlines()
+    lines = re.sub(r"\\\r?\n", "", text).splitlines()
     for index, line in enumerate(lines):
         found = _INVOCATION.match(line)
         if found is None:
             continue
-        span = [line[len(found.group(1)) :]]
+        span = [line[found.end() :]]
         for following in lines[index + 1 :]:
             if not _CONTINUATION.match(following):
                 break
             span.append(following)
         filled = _PLACEHOLDER.sub(PLACEHOLDER_VALUE, "\n".join(span))
-        yield filled.split()
+        yield [PROGRAM, *shlex.split(filled)]
+
+
+@pytest.mark.parametrize(
+    "launcher",
+    [
+        PROGRAM,
+        'PYTHONPATH="$AR_SERVING_PARENT" "$AR_SERVING_PYTHON" -P -m agents_remember.cli \\\n',
+    ],
+)
+def test_printed_invocations_preserve_arguments_and_parser_failures(launcher: str) -> None:
+    command = (
+        f"{launcher} knowledge-ingest --contract <this leaf's enclosure contract> \\\n"
+        "    --list <hand-off list> --authorization-ref <ref> --commit --json"
+    )
+    invocations = list(
+        printed_invocations(f"Prose mentions {PROGRAM} knowledge-ingest.\n{command}")
+    )
+    assert invocations == [
+        [
+            PROGRAM,
+            "knowledge-ingest",
+            "--contract",
+            PLACEHOLDER_VALUE,
+            "--list",
+            PLACEHOLDER_VALUE,
+            "--authorization-ref",
+            PLACEHOLDER_VALUE,
+            "--commit",
+            "--json",
+        ]
+    ]
+    parser = build_parser()
+    parser.parse_args(invocations[0][1:])
+    for invalid in (command + " --not-a-real-option", f"{launcher} not-a-real-subcommand"):
+        [argv] = list(printed_invocations(invalid))
+        with pytest.raises(SystemExit) as refused:
+            parser.parse_args(argv[1:])
+        assert refused.value.code == 2
 
 
 def served_body(skill_name: str) -> str:
@@ -336,26 +428,63 @@ def free_agent_capsule(role: str) -> CapsuleDelivery:
         return delivery
 
 
-def test_the_bootstrap_free_agent_receives_the_foundation_step() -> None:
+def test_the_bootstrap_free_agent_receives_the_foundation_step(tmp_path: Path) -> None:
     """The bootstrap seat compiles with no document, and its own instructions reach the foundation.
 
     The bootstrap seat is the read-and-report carrier for a repository whose foundation is absent: its
-    capsule is bound to the named absence of a task document, and its own compiled instructions name
-    the procedure and the knowledge states, so a greenfield repository reaches the step at all. It is
-    not the only capsule compiled without a task document — an instructed session that authors the
-    foundation holds the curator's — which is why the curator case below owns that shape.
+    capsule is bound to the named absence of a task document. Its default compiled instructions
+    name the procedure and bind the state-reporting action to the exact emitted state detail.
+    Compilation proves delivery, not authoring admission; the separate Curator case owns its
+    compiler shape.
     """
 
     capsule = free_agent_capsule("bootstrap")
     instructions = capsule.trusted_instructions
-    assert PROCEDURE_SKILL in instructions, (
-        "the bootstrap free agent is not instructed about the knowledge-foundation procedure, so "
-        f"ordinary setup cannot reach it ({capsule.binding.as_report()})"
+    source = "reference/bootstrap/foundation-state.md"
+    action = "Before reading and reporting the knowledge foundation's state, read"
+    root = CANONICAL_SKILLS / "l-01-agent-lifecycles"
+    declared = json.loads((root / "composition-manifest.json").read_text())["references"][
+        "bootstrap/foundation-state"
+    ]
+    assert declared["source"] == source
+    assert declared["step_detail"] is True
+    assert "bootstrap" in declared["roles"]
+    assert declared["step"].strip()
+    assert_action_pointer(instructions, source, action)
+    [reference] = [r for r in capsule.detail_references if r.source_path == source]
+    assert reference.step == declared["step"]
+    assert reference.content == (root / source).read_bytes()
+    assert reference.revision == compute_content_digest(reference.content)
+    emitted, record = compose_launch_instructions(capsule, str(tmp_path / "report.md"), {})
+    [entry] = [r for r in record["detailReferences"] if r["sourcePath"] == source]
+    path = Path(entry["path"])
+    assert f"]({path.as_posix()}#read-the-state)" in emitted
+    assert "{{detail:" not in emitted
+    assert entry["step"] == reference.step
+    assert entry["sizeBytes"] == len(path.read_bytes())
+    assert entry["revision"] == compute_content_digest(path.read_bytes())
+    state_detail = normalized(path.read_text())
+    assert PROCEDURE_SKILL in state_detail, (
+        "the default-emitted Bootstrap foundation detail must reach the registered procedure "
+        f"({capsule.binding.as_report()})"
     )
-    assert "not-recorded" in instructions, (
-        "the bootstrap seat's instructions name no knowledge state, so a repository whose foundation "
-        "is absent cannot be reported as anything but a ready setup"
+    assert (
+        "Author or refresh no onboarding content. Do not edit a memory file to make a check pass. "
+        "Author no knowledge records, run no knowledge writer, invent no invariants and populate "
+        "no database to claim readiness. Do not organise their production." in instructions
     )
+    for clause in (
+        "Read memory_init's knowledge block and report its state:",
+        "not-recorded",
+        "recorded, with the exact identity",
+        "unusable",
+        "a refused admission, with its own next action.",
+        "Before acting on the reported state, apply",
+        "for its setup-only authority and authoring prohibitions.",
+        "Name one next step in both the conversation and report: start the Architect.",
+        "do not claim that Bootstrap created or completed the foundation.",
+    ):
+        assert normalized(clause) in state_detail, clause
     assert capsule.binding.task_path == "free-agent:bootstrap", capsule.binding.as_report()
 
 
@@ -426,6 +555,12 @@ def test_every_invocation_the_procedure_prints_resolves_in_the_shipped_parser() 
         f"only {len(invocations)} invocation(s) were extracted from the procedure; the extraction "
         "stopped covering the document it grades"
     )
+    ingest = [argv for argv in invocations if argv[1] == "knowledge-ingest"]
+    assert any("--commit" not in argv for argv in ingest), "the planning invocation was not read"
+    assert any("--commit" in argv for argv in ingest), "the commit invocation was not read"
+    assert any(argv[1] == "knowledge-validate" for argv in invocations), (
+        "the validation invocation was not read"
+    )
 
     problems: list[str] = []
     for argv in invocations:
@@ -463,7 +598,7 @@ def test_the_compiled_curator_shape_names_the_procedure_it_would_receive(tmp_pat
         CANONICAL_SKILLS / "l-01-agent-lifecycles",
         tmp_path / "controls",
         FOUNDATION_PROCEDURE_CLAUSES,
-        "Run `c-14-knowledge-bootstrap`.",
+        FOUNDATION_WORKFLOW_CLAUSE,
     )
 
 

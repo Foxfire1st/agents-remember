@@ -2,9 +2,8 @@
 
 Developer-only Claude Code skills. **Not distributed.**
 
-`scripts/sync-skills.py` only copies the canonical `skills/` tree into the MCP `package_data`
-(`mcp/src/agents_remember/package_data/runtime/skills/`) and every harness starter package
-(`.claude/`, `.codex/`, `.cursor/`, …). Nothing under `dev-skills/` is synced, shipped, or required by
+`scripts/sync-skills.py` copies the canonical `skills/` tree into the MCP `package_data`
+(`mcp/src/agents_remember/package_data/runtime/skills/`). Nothing under `dev-skills/` is synced, shipped, or required by
 any Agents Remember user, and the pre-commit `sync-skills.py --check` gate never inspects it.
 
 These skills are also **outside the memory `pathRules` include scope**, so they carry no onboarding

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This file decides where durable route-local `overview.md` files should be placed in the mirrored onboarding hierarchy.
+The bootstrap orchestrator uses this map to decide where durable route-local `overview.md` files belong in the mirrored onboarding hierarchy. Overview workers use the recorded placement decisions.
 
 ## Placement Principles
 
@@ -22,7 +22,7 @@ This file decides where durable route-local `overview.md` files should be placed
 
 | Source Route | Reason Deferred | Revisit Trigger |
 |---|---|---|
-| `src/dto/` | mostly passive data containers | promote if DTOs encode behavior or cross-repo schema |
+| `src/dto/` | mostly passive data containers | promote if data transfer objects encode behavior or cross-repo schema |
 
 ## Moved Or Deleted Routes
 

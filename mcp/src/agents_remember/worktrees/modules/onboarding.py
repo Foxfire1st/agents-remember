@@ -41,9 +41,7 @@ ENTITIES_CATALOG_NAME = "entities.md"
 ENTITY_EVIDENCE_CHECK = "entity-evidence"
 ENTITY_EVIDENCE_ABSENT = "entity-evidence-absent"
 _EVIDENCE_CLEARING = "re-point the row's evidence list to files the candidate holds"
-_FINGERPRINT_CLEARING = (
-    "run the c-05-create-or-update-onboarding-files skill, then rerun the closeout"
-)
+_FINGERPRINT_CLEARING = "run the l-01-agent-lifecycles Curator procedure, then rerun the closeout"
 
 
 def entities_catalog_path(context) -> Path:
@@ -504,7 +502,7 @@ def refresh_entity_fingerprints_for_context(
             raise RuntimeError(
                 f"external-memory closeout requires entity fingerprint values before memory "
                 f"commit; {catalog_path.as_posix()} row {entity!r} is missing a fingerprint. "
-                "Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
+                "Run the l-01-agent-lifecycles Curator procedure, then rerun closeout."
             )
         lines[line_index] = lines[line_index].replace(old_fingerprint, fingerprint, 1)
         refreshed.append(
@@ -666,7 +664,7 @@ def _require_onboarded_sources(
         raise RuntimeError(
             "external-memory closeout requires current onboarding for changed source files before memory commit; "
             + "; ".join(details)
-            + ". Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
+            + ". Run the l-01-agent-lifecycles Curator procedure, then rerun closeout."
         )
     return plan
 

@@ -58,41 +58,6 @@
   "generatedInputs": [
     {
       "checkRail": {
-        "railId": "generated-harness",
-        "version": "1.0.0"
-      },
-      "generatedScopes": [
-        ".agents/GEMINI.md",
-        ".agents/mcp/agents-remember-settings.json",
-        ".claude/hooks/agents-remember-session-start.md",
-        ".claude/hooks/agents-remember-session-start.py",
-        ".claude/mcp/agents-remember-settings.json",
-        ".codex/hooks/agents-remember-session-start.md",
-        ".codex/hooks/agents-remember-session-start.py",
-        ".codex/mcp/agents-remember-settings.json",
-        ".cursor/hooks/agents-remember-session-start.md",
-        ".cursor/hooks/agents-remember-session-start.py",
-        ".cursor/mcp/agents-remember-settings.json",
-        ".cursor/rules/agents-remember.mdc",
-        ".github-vscode/copilot-instructions.md",
-        ".github-vscode/hooks/agents-remember-session-start.md",
-        ".github-vscode/hooks/agents-remember-session-start.py",
-        ".hermes/HERMES.md",
-        ".hermes/mcp/agents-remember-settings.json",
-        ".openclaw/mcp/agents-remember-settings.json",
-        ".openclaw/workspace/AGENTS.md",
-        ".pi/mcp/agents-remember-settings.json",
-        ".vscode/mcp/agents-remember-settings.json"
-      ],
-      "inputId": "generated-harness",
-      "schemaVersion": "generated-candidate-input/v1",
-      "sourceScopes": [
-        "generated-copies.json",
-        "skills"
-      ]
-    },
-    {
-      "checkRail": {
         "railId": "generated-projection-types",
         "version": "1.0.0"
       },
@@ -117,14 +82,12 @@
       },
       "generatedScopes": [
         "mcp/src/agents_remember/package_data/benchmarks",
-        "mcp/src/agents_remember/package_data/runtime/agents-md-files",
         "mcp/src/agents_remember/package_data/runtime/providers",
         "mcp/src/agents_remember/package_data/runtime/system"
       ],
       "inputId": "generated-runtime",
       "schemaVersion": "generated-candidate-input/v1",
       "sourceScopes": [
-        "agents-md-files",
         "benchmarks",
         "providers",
         "scripts/sync-runtime.py",
@@ -148,7 +111,7 @@
       ]
     }
   ],
-  "profileDigest": "2f8a46eafa2c46eac48b59915b7865fae0bb05ee2dc7d92315a49283125d6f7f",
+  "profileDigest": "eb72aa5cbd0fddfcf1da2fc22e8ed737cd72b6e73bebab8a006a771dfd9d4fc9",
   "profileId": "agents-remember-certification",
   "publishedArtifacts": [
     {

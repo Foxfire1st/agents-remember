@@ -575,6 +575,8 @@ class CuratorCoherenceResponse(ToolResponse):
     pairIdentity: MemoryCandidatePairIdentity | None = None
     codeCandidateTree: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
     memoryCandidateTree: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
+    codeCommit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
+    memoryContentCommit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
     taskTopologyFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     taskIntent: TaskIntentIdentity | None = None
     currentnessStatus: str | None = Field(default=None, max_length=256)

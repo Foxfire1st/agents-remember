@@ -275,6 +275,8 @@ const VOCABULARIES: Record<
   ClosedUnionPaths<WorkspaceProjection, 'projection'>,
   readonly string[]
 > = {
+  'projection.buildCurrentness.mode': ['installed', 'checkout'],
+  'projection.buildCurrentness.state': ['current', 'stale', 'unknown'],
   'projection.tasks[].stage': ['planned', 'started', 'aborted', 'completed'],
   'projection.tasks[].activity': ['works', 'paused', 'unknown'],
   'projection.tasks[].disagreements[].kind': [

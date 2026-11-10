@@ -18,6 +18,7 @@ from typing import Any
 from agents_remember.install.assets import long_path, packaged_source_root
 from agents_remember.install.effects import observe_install_effect
 from agents_remember.install.experiment import (
+    RETIRED_STARTUP_TARGETS,
     WITHHELD_STARTUP_TARGETS,
     CapabilityReport,
     ExperimentError,
@@ -27,12 +28,11 @@ from agents_remember.install.experiment import (
     InstructionDelivery,
     build_run_record,
     decide_instruction_delivery,
-    experiment_rollback_plan,
     probe_capabilities,
     resolve_experiment_selection,
-    rollback_payload,
     source_identity,
 )
+from agents_remember.install.mcp_settings import copy_mcp_settings
 from agents_remember.install.provider_watchers import (
     ProviderWatcherRebind,
     ProviderWatcherRebindReport,
@@ -52,12 +52,6 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
 from agents_remember.providers.settings import lifecycle_settings_from_config
-
-AGENTS_MD_TARGETS = {
-    "agents-md-files/coordinator/AGENTS.md": "AGENTS.md",
-    "agents-md-files/system/AGENTS.md": "system/AGENTS.md",
-    "agents-md-files/tasks/AGENTS.md": "tasks/AGENTS.md",
-}
 
 IGNORED_COPY_NAMES = {"__pycache__"}
 IGNORED_COPY_SUFFIXES = {".pyc", ".pyo"}
@@ -152,17 +146,13 @@ class ExperimentInstall:
 
     ``record`` is the per-run record the caller reports; ``capabilities`` is the
     probe that decided the delivery mode, kept whole so a refusal names every
-    failed capability rather than the first one. ``coordination_root`` and
-    ``install_roots`` are carried so the payload's rollback rows are derived from
-    the roots this run actually used rather than re-parsed out of a path string.
+    failed capability rather than the first one.
     """
 
     selection: ExperimentSelection
     capabilities: CapabilityReport
     delivery: InstructionDelivery
     record: ExperimentRunRecord
-    coordination_root: Path
-    install_roots: tuple[Path, ...] = ()
 
     def payload(self) -> dict[str, object]:
         return {
@@ -171,12 +161,7 @@ class ExperimentInstall:
             "record": self.record.payload(),
             "capabilities": self.capabilities.payload(),
             "withheldStartupTargets": list(WITHHELD_STARTUP_TARGETS),
-            "rollback": rollback_payload(
-                experiment_rollback_plan(
-                    coordination_root=self.coordination_root,
-                    install_roots=self.install_roots,
-                )
-            ),
+            "rollback": [],
         }
 
 
@@ -533,7 +518,6 @@ def ensure_gitignore_entry(path: Path, entry: str, summary: InstallSummary, dry_
 
 def require_runtime_tree(runtime_root: Path) -> None:
     required = [
-        runtime_root / "agents-md-files",
         runtime_root / "providers",
         runtime_root / "providers" / "requirements" / "codegraphcontext.txt",
         runtime_root / "providers" / "requirements" / "grepai.txt",
@@ -664,7 +648,6 @@ class RuntimeInstallScope:
     provider_deps: ProviderDependencyInstall
     include_benchmarks: bool = False
     experiment: ExperimentSelection | None = None
-    install_roots: tuple[Path, ...] = ()
 
 
 def install_runtime(
@@ -710,15 +693,13 @@ def _capsule_cutover(
     summary: InstallSummary,
     dry_run: bool,
 ) -> None:
-    """Withhold the legacy startup chain.
+    """Remove retired startup targets in every accepted installation.
 
-    The removal is the cutover, not housekeeping: a root that already carries an
-    earlier install's ``AGENTS.md`` targets would otherwise hold both instruction
-    paths at once, which is the duplicate-corpus state this behaviour exists to
-    prevent.
+    The existing capsule cutover also retires earlier installed AGENTS.md files
+    during ordinary installs. No delivery mode restores those instruction copies.
     """
 
-    for target_rel in WITHHELD_STARTUP_TARGETS:
+    for target_rel in RETIRED_STARTUP_TARGETS:
         remove_path(coordination_root / target_rel, summary, dry_run)
 
 
@@ -726,9 +707,8 @@ def _install_assets(
     scope: RuntimeInstallScope,
     runtime_root: Path,
     summary: InstallSummary,
-    delivery: InstructionDelivery,
 ) -> None:
-    """Write the runtime assets: providers, the startup chain, user dirs, extras.
+    """Write provider assets, retire startup files, and prepare user dirs and extras.
 
     Split out of :func:`_install_runtime` so the refusal gate and the watcher
     recovery each stay readable; the two are the parts whose order matters.
@@ -758,17 +738,7 @@ def _install_assets(
     summary.leftover_provider_folders = leftover_provider_folders(coordination_root)
     summary.removed_part_stores = removed_part_stores(coordination_root)
 
-    if delivery.mode == "capsule":
-        # One delivery path. The coordinator ``skills/`` tree copied above is the authored
-        # copy this root carries (what a human, the dashboard or a curator reads); it is NOT
-        # the compiler's corpus -- in production the compiler reads the packaged tree
-        # (``packaged_source_root()/runtime/skills`` through ``application/skill_resources``),
-        # so the installed copy is neither injected nor compiled. Running the installer again
-        # with no experiment selected copies the withheld startup targets back: the undo.
-        _capsule_cutover(coordination_root, summary, dry_run)
-    else:
-        for source_rel, target_rel in AGENTS_MD_TARGETS.items():
-            copy_file(runtime_root / source_rel, coordination_root / target_rel, summary, dry_run)
+    _capsule_cutover(coordination_root, summary, dry_run)
 
     for user_owned in (
         "memory-repos",
@@ -819,8 +789,6 @@ def _install_runtime(scope: RuntimeInstallScope) -> InstallSummary:
             capabilities=capabilities,
             delivery=delivery,
             record=record,
-            coordination_root=coordination_root,
-            install_roots=scope.install_roots,
         )
     ensure_dir(coordination_root, summary, dry_run)
 
@@ -861,7 +829,7 @@ def _install_runtime(scope: RuntimeInstallScope) -> InstallSummary:
             f"{json.dumps(stop_result)}"
         )
 
-    _install_assets(scope, runtime_root, summary, delivery)
+    _install_assets(scope, runtime_root, summary)
 
     return summary
 
@@ -922,6 +890,7 @@ def install_runtime_from_config(
     payload = {
         "ok": ok,
         "operation": "runtime_install",
+        "mcpSettings": copy_mcp_settings(config.workspace_root, dry_run=dry_run),
         "dryRun": dry_run,
         "coordinationRoot": config.coordination_root.as_posix(),
         "includeBenchmarks": include_benchmarks,

@@ -1,7 +1,7 @@
 """Tests for the JSON-primary task-document layer (slice 3c, commit 1).
 
 Covers the ``ar-task-document/v1`` schema (round-trip, alias, strictness, progress
-helpers), the deterministic markdown renderer (the ``w-02-light-task-workflow``
+helpers), the deterministic markdown renderer (the ``l-01-agent-lifecycles``
 template shape, checkbox mapping, escaping, empty sections), the JSON+markdown
 store, the ``task_doc`` application operations and error paths (including contract
 lifecycle-key pickup), and the MCP tool registration.

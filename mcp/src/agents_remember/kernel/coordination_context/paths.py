@@ -16,8 +16,7 @@ DEFAULT_AR_COORDINATION_ROOT = "../ar-coordination"
 
 def looks_like_installed_coordination_root(path: Path) -> bool:
     return (
-        (path / "skills").is_dir()
-        and (path / "system").is_dir()
+        (path / "system").is_dir()
         and (path / "memory-repos").is_dir()
         and (path / "tasks").is_dir()
     )
@@ -26,8 +25,6 @@ def looks_like_installed_coordination_root(path: Path) -> bool:
 def agents_repo_from_script() -> Path:
     script_path = Path(__file__).resolve()
     for parent in script_path.parents:
-        if (parent / "runtime" / "skills").exists() and (parent / "AGENTS.md").exists():
-            return parent
         if looks_like_installed_coordination_root(parent):
             return parent
     return script_path.parents[6]

@@ -18,7 +18,7 @@ Semantics (``docs/reference/settings-json.md`` is the schema reference):
   the offending file -- the MCP-authority-file discipline, extended. This also
   fixes the historic silent drop of ``orchestration.roles``/``concurrency``.
 - Unknown TOP-LEVEL families are tolerated-not-parsed: the same user
-  file doubles as the c-08 memory-settings fallback, and it is the earmarked
+  file doubles as the shared memory-settings fallback, and it is the earmarked
   future home of further families (``contextProviders`` first in line, gate
   amendment 2026-07-06), so the fail-loud scope must not foreclose them.
 - Absent files (or an absent ``orchestration`` key) mean the documented
@@ -33,8 +33,7 @@ Semantics (``docs/reference/settings-json.md`` is the schema reference):
   module) load without an error and are not read; ``AgenticSettings.unused_keys``
   names the ones the merged files hold (MIK-R113 rule 4).
 
-Doctrine floors are NOT knobs: no key here touches the master-exit seam gate or
-the strategist's mandatory pre-run (L12 ruling; restated in the schema doc).
+Doctrine floors are NOT knobs: no key here touches the master-exit seam gate.
 
 The typed models, constants, validators, and the per-section parsers live in
 responsibility-split sibling modules; this module owns the loader and the
@@ -75,6 +74,7 @@ from agents_remember.kernel._agentic_settings_core import (
     UNUSED_HARNESS_ENTRY_FIELDS,
     UNUSED_ORCHESTRATION_FIELDS,
     UNUSED_ROLE_KNOB_FIELDS,
+    UNUSED_ROLES,
     AgenticSettings,
     AgenticSettingsError,
     ConcurrencySettings,
@@ -258,6 +258,8 @@ def _attach_role_origins(
     for rank, (path, raw) in enumerate(layers):
         provider = raw.get("spawn", {}).get("harness", provider)
         for role, row in raw.get("roles", {}).items():
+            if role in UNUSED_ROLES:
+                continue
             flat[role] = _role_row_origins(
                 flat.get(role, {}),
                 row,
@@ -268,6 +270,8 @@ def _attach_role_origins(
         for level, roles in raw.get("rolesPerLevel", {}).items():
             scope = levels.setdefault(level, {})
             for role, row in roles.items():
+                if role in UNUSED_ROLES:
+                    continue
                 authored = _role_row_origins(
                     {**flat.get(role, {}), **scope.get(role, {})},
                     row,
@@ -383,6 +387,8 @@ def _refuse_repository_role_authority(raw: dict[str, Any], path: Path) -> None:
     )
     for owner, roles in families:
         for role, knobs in roles.items():
+            if role in UNUSED_ROLES:
+                continue
             keys = [key for key in ("mode", "notes", "stepUp", "extraArgs") if key in knobs]
             keys.extend(
                 f"featureValues.{key}"

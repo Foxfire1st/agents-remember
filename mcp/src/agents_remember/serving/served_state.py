@@ -30,10 +30,12 @@ give back everything the memo exists to save.
 from __future__ import annotations
 
 import contextlib
+import os
 from typing import Any
 
 from pydantic import BaseModel
 
+from agents_remember.models.build_currentness import BuildCurrentnessPayload
 from agents_remember.models.core import ServingBuildPayload
 from agents_remember.observer.projection import WorkspaceProjection
 from agents_remember.serving.build_info import ServingBuild
@@ -72,9 +74,17 @@ class ServedWorkspaceProjection(WorkspaceProjection):
     servingBuild: ServingBuildPayload | None = None
     watcherHealth: WatcherHealthPayload | None = None
     checkoutBinding: CheckoutBindingPayload | None = None
+    buildCurrentness: BuildCurrentnessPayload | None = None
+    servingProcessId: int | None = None
 
 
-SERVED_TAIL_FIELDS: tuple[str, ...] = ("servingBuild", "watcherHealth", "checkoutBinding")
+SERVED_TAIL_FIELDS: tuple[str, ...] = (
+    "servingBuild",
+    "watcherHealth",
+    "checkoutBinding",
+    "buildCurrentness",
+    "servingProcessId",
+)
 """The keys :func:`served_state_tail` may add -- exactly this model's extension over the
 projection it wraps. Named so the assembly and the contract cannot drift apart silently."""
 
@@ -84,6 +94,7 @@ def served_state_tail(
     build: ServingBuild | None,
     watcher_health: dict[str, Any] | None = None,
     checkout_binding: dict[str, Any] | None = None,
+    build_currentness: BuildCurrentnessPayload | None = None,
 ) -> dict[str, Any]:
     """The serve-time tail, JSON-ready, to be merged onto a copy of the memoized dump.
 
@@ -94,6 +105,9 @@ def served_state_tail(
     tail: dict[str, Any] = {}
     if build is not None:
         tail["servingBuild"] = build.payload().model_dump(mode="json", exclude_none=True)
+        tail["servingProcessId"] = os.getpid()
+    if build_currentness is not None:
+        tail["buildCurrentness"] = build_currentness.model_dump(mode="json", exclude_none=True)
     if checkout_binding is not None:
         with contextlib.suppress(ValueError):
             tail["checkoutBinding"] = CheckoutBindingPayload.model_validate(

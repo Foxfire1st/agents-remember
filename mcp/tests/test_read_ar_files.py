@@ -26,9 +26,9 @@ from typing import Any, cast
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
-# The canonical retrieval carrier that documents this route: the one file a reader follows to
-# discover it, and therefore the file a carrier-parity case has to measure.
-CARRIER = Path(__file__).resolve().parents[2] / "skills/c-04-retrieval-strategy-router/SKILL.md"
+# The response contract owns the field catalog; role instructions own how to read it.
+# Keep field-spelling parity here without copying that catalog into the role prose.
+CARRIER = MCP_SRC / "agents_remember/models/read_files.py"
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
@@ -54,6 +54,7 @@ from agents_remember.models.knowledge_files import (
     derived_realization_id,
     derived_record_id,
 )
+from agents_remember.models.read_files import NamedFile
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from knowledge_index_test_support import write_review_tree
 from knowledge_writer_test_support import CODE_FILE, build_world, canonical, commit_all
@@ -891,15 +892,7 @@ class PublishedIntentDirectTests(unittest.TestCase):
 
 
 class CarrierParityTests(unittest.TestCase):
-    def test_the_carrier_uses_the_field_spellings_the_answer_returns(self) -> None:
-        """The carrier names the answer's own keys, not a guess.
-
-        A carrier that spells a field the answer never carries is a reader's
-        dead end, and no behavioural case can catch it: the code is right and
-        the instruction is wrong.
-        """
-
-        carrier = CARRIER.read_text(encoding="utf-8")
+    def _assert_carrier_spellings(self, carrier: str) -> None:
         for spelling in (
             "`card`",
             "`recordCounts`",
@@ -916,6 +909,41 @@ class CarrierParityTests(unittest.TestCase):
             "served_earlier",
         ):
             self.assertNotIn(retired, carrier)
+
+    def test_the_carrier_uses_the_field_spellings_the_answer_returns(self) -> None:
+        """The response contract documents the actual answer fields, without a role-text copy."""
+
+        carrier = CARRIER.read_text(encoding="utf-8")
+        self._assert_carrier_spellings(carrier)
+        self.assertLessEqual({"card", "recordCounts", "actionNeeded"}, set(NamedFile.model_fields))
+        self.assertLessEqual(
+            {"overviews", "codeState", "memoryState"},
+            set(TOOL_RESPONSE_MODELS["read_ar_files"].model_fields),
+        )
+        for field in (
+            "card",
+            "recordCounts",
+            "actionNeeded",
+            "overviews",
+            "codeState",
+            "memoryState",
+        ):
+            with self.subTest(renamed_documented_field=field):
+                damaged = carrier.replace(f"``{field}``", "``wrongField``")
+                self.assertNotEqual(damaged, carrier)
+                with self.assertRaises(AssertionError):
+                    self._assert_carrier_spellings(damaged)
+        for retired in (
+            "published_intent",
+            "repository_overview",
+            "route_overviews",
+            "served_earlier",
+        ):
+            with (
+                self.subTest(retired_documented_field=retired),
+                self.assertRaises(AssertionError),
+            ):
+                self._assert_carrier_spellings(carrier + f"\n``{retired}``\n")
 
 
 # --------------------------------------------------------------------------

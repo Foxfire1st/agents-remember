@@ -3,7 +3,7 @@
 The task documents are not written here. They are handed, as field sets, to the tool server of the
 PNT build under test (``build_tool_calls.py``), so the build's own task tooling creates documents it
 can read and list. The requirement packets follow the build's canonical packet template
-(``skills/w-02-light-task-workflow/requirement-packet-template.md``).
+(``skills/l-01-agent-lifecycles/templates/requirement-packet.md``).
 """
 
 from __future__ import annotations

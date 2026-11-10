@@ -15,14 +15,45 @@ from agents_remember.models.role_capsules.manifest import parse_composition_mani
 from agents_remember.models.role_capsules.types import (
     CapsuleAdmittedFacts,
     CapsuleBinding,
+    CapsuleCompilationResult,
     CapsuleRoleSeat,
     CapsuleToolPolicy,
     compute_content_digest,
 )
 from agents_remember.models.role_capsules.vocabulary import capsule_operation_or_none
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
+from agents_remember.serving.capsule_delivery import capsule_delivery_from
 
 from .artifacts import json_digest, sha256_file
+
+
+def _captured_origins(
+    result: CapsuleCompilationResult, shared: str, shared_block: str | None
+) -> list[dict]:
+    """Retain the compiled source spans and the admitted shared digest's own source."""
+    origins = []
+    if shared:
+        sources = [
+            source for source in result.manifest.sources if source.identity == "core:every-role"
+        ]
+        if (
+            len(sources) != 1
+            or shared_block is None
+            or sources[0].revision != compute_content_digest(shared_block.encode())
+        ):
+            raise AuthorityError(
+                "captured shared instruction prefix has ambiguous source provenance"
+            )
+        origins.append({"sourcePath": sources[0].path, "start": 0, "end": len(shared)})
+    origins.extend(
+        {
+            "sourcePath": origin.source_path,
+            "start": len(shared) + origin.start,
+            "end": len(shared) + origin.end,
+        }
+        for origin in capsule_delivery_from(result).instruction_origins
+    )
+    return origins
 
 
 def capture_curator_text(code: Path) -> dict:
@@ -61,6 +92,7 @@ def capture_curator_text(code: Path) -> dict:
         )
         entries[operation] = {
             "instructions": shared + result.render_instructions(),
+            "instructionOrigins": _captured_origins(result, shared, outcome.shared_block),
             "semanticDigest": str(result.semantic_digest),
             "details": [
                 {

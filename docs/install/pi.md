@@ -15,40 +15,11 @@ Official references:
 
 ## Register The MCP Server
 
-Write an MCP authority settings file (copy `examples/mcp/settings.example.json` and replace its
-paths), then write your workspace `.pi/settings.json` and `.pi/mcp.json`:
-
-```json
-{
-  "packages": [
-    "npm:pi-mcp-adapter"
-  ],
-  "extensions": [
-    "extensions/agents-remember-start.ts"
-  ]
-}
-```
-
-```json
-{
-  "mcpServers": {
-    "agents-remember": {
-      "command": "uvx",
-      "args": [
-        "--refresh-package",
-        "agents-remember-mcp@latest",
-        "--config",
-        "<PATH/TO/YOUR/PROJECTS_FOLDER>/.pi/mcp/agents-remember-settings.json"
-      ]
-    }
-  }
-}
-```
-
-The files under `.pi/` in this repository are those two documents with
-`<PATH/TO/YOUR/PROJECTS_FOLDER>` markers to replace by hand; no script renders them. Pi installs a
-missing project package on startup. Use `/mcp` to inspect adapter status. Restart or `/reload` Pi
-once so it starts the server.
+Use the [common registration example](../../examples/mcp/server.example.json) and the
+[shared settings setup](README.md). Adapt its command and arguments to the `mcpServers.agents-remember` entry in the Pi MCP adapter’s configuration.
+The settings path is the absolute user-config path, not a workspace file.
+Pi needs `npm:pi-mcp-adapter`; configure that package through Pi’s package settings.
+Restart or reload the harness after changing its registration.
 
 ## Start With One Call
 
@@ -73,13 +44,6 @@ skill as an MCP resource (the SEP-2640 skills extension) and Pi reads them from 
 through the adapter, so its settings name no skill folder and there is no skill tree to copy,
 render or keep in sync.
 
-## Optional: First-Action Extension
+## Harness-created files
 
-Pi runs `before_agent_start` before an agent turn and lets a project extension inject the
-first-action directive into the system prompt. Copy `.pi/extensions/` into your workspace and
-replace `<PATH/TO/YOUR/PROJECTS_FOLDER>` in `agents-remember-start.ts` with your absolute path. If
-you edit the extension while Pi is running, use `/reload`.
-
-Do not overwrite a repository's root `AGENTS.md` just to wire Agents Remember; root `AGENTS.md` is
-project-specific. Pi also supports global context under `~/.pi/agent/AGENTS.md`, which this setup
-does not need.
+Pi agents can create `~/.pi/agent/mcp.json` in the user's home. Agents Remember's agents leave that file unchanged and report it, so the developer decides about it. Running `pi` with a worktree as its working folder creates `.pi/npm` there; Agents Remember runs harness commands only in its scratch folders and removes such a folder by its literal path.

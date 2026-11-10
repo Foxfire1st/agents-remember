@@ -42,7 +42,7 @@ The coordination root is the installed runtime and local work area:
 ar-coordination/
 ```
 
-It owns installed skills, installed `AGENTS.md` templates, task files, notes, worktrees, temporary drift reports, and external memory repo checkouts.
+It owns installed `AGENTS.md` templates, task files, notes, worktrees, temporary drift reports, and external memory repo checkouts. Skills are served from the tool server’s package, outside this coordination tree.
 
 ## How Agents Find Memory
 
@@ -58,7 +58,7 @@ By-path notes are the core and need nothing extra. Meaning and relationship were
 
 File-level onboarding remains path-derived and verifiable, but agents often need
 different retrieval strategies before they know which file-level memory to read.
-The `c-04-retrieval-strategy-router` skill is the retrieval strategy router for that job.
+Use [knowledge-use guidance](../skills/l-01-agent-lifecycles/reference/knowledge/use.md) to choose how to read the needed context.
 
 The router starts from the model's current intent: what kind of missing context
 does the agent need next, and in what shape should that context arrive? It then
@@ -76,9 +76,9 @@ chooses the memory substrate that best fits that intent.
   unknown. Onboarding plus bounded source confirmation is the default substrate
   for this layer.
 
-These substrates are complementary. A triage task may start from anchors in a
-ticket, use the Relationship substrate to understand nearby structure, then move
-to the Intent substrate to learn the code truths that make a change safe.
+A triage task can start from anchors in a ticket, use native source searches to
+trace nearby relationships, then read onboarding beside bounded source to learn
+the code truths that make a change safe.
 
 Provider output is candidate routing evidence, not proof. Source files,
 verified onboarding, drift checks, branch validity, and approved memory
@@ -91,13 +91,11 @@ in JSON sidecars. Currentness compares those recorded anchors with the selected
 code tree. Read the card beside its sidecar and source; a card’s prose alone does
 not establish that an anchor still names the current code.
 
-Common outcomes:
-
-- `up to date`: no source diff since verification
-- `drifted`: source changed and onboarding needs review
-- `missing verification`: the onboarding unit lacks enough metadata to trust
-- `orphaned`: the source file no longer exists
-- `unsupported`: the storage or file shape cannot be verified safely
+The converted drift summary counts reference anchors as `current` or `stale`
+and reports validation findings and unreadable sidecars. It does not use the
+legacy verification-metadata classification. Separately, knowledge reads report
+invariant currentness as `current`, `stale`, `unverifiable`, or `unrealized`, using
+the recorded anchor content at the selected code tree.
 
 Stale onboarding can still be read directionally when that trust level is explicit, but it should not silently become current truth.
 
@@ -107,7 +105,7 @@ Onboarding records approved current state. It does not record speculation.
 
 That means:
 
-- `w-02-light-task-workflow` tasks wait for task approval before implementation
+- [leaf-task](../skills/l-01-agent-lifecycles/templates/leaf-task.md) tasks wait for task approval before implementation
 - a master + light sub-task series gates each slice's approval and commit in turn
 - onboarding updates happen after approved changes, not before
 

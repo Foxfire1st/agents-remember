@@ -5,7 +5,13 @@ approver copy and discussion with the developer. The Worker supplies the runner,
 graders and unchanged D637 case set. A tooling smoke is not a measurement or a
 review freeze.
 
-Run native trials with the candidate's bootstrapped interpreter:
+Run native trials with the candidate's bootstrapped interpreter. The runner
+uses the product's explicit test execution mode for disposable fixture setup
+and for its Paseo provisioning and stop CLI children, so their supplied
+`--config` selects the sandbox's settings instead of a checkout-local root.
+Actors and the fixture MCP server keep their regular entrypoints and isolated
+case settings. Use a disposable `--sandbox-home`; no linked-worktree or
+worktree-relative reports location is required by this runner setup.
 
 ```sh
 mcp/.venv/bin/python scripts/agent_evals/run_curator.py trials \
@@ -15,18 +21,26 @@ mcp/.venv/bin/python scripts/agent_evals/run_curator.py trials \
   --sandbox-home /absolute/path/to/disposable-sandbox
 ```
 
-`--case` accepts one case folder or the fourteen-case parent directory. Models
-are `codex` (`gpt-6.1-sol`, high, priority, auto-review) and `hermes`
-(`opencode-go:deepseek-v4.1-flash`, accept_edits, auto_accept false). The normal
-measurement uses `--trials 3 --phase measurement`. `--phase tooling-check`
+`--case` accepts one case folder or the fourteen-case parent directory. `--model`
+accepts these four existing actor selectors or their exact model names:
+
+| Selector | Model | Profile |
+| --- | --- | --- |
+| `codex` | `gpt-6.1-sol` | high, priority, auto-review |
+| `hermes` | `opencode-go:deepseek-v4.1-flash` | accept_edits, auto_accept false |
+| `hermes-kimi` | `opencode-go:kimi-k3.1-pro` | accept_edits, auto_accept false |
+| `hermes-gpt` | `openai-codex:gpt-6.1-sol-900k` | high, accept_edits, auto_accept false |
+
+The normal measurement uses `--trials 3 --phase measurement`. `--phase tooling-check`
 records a smoke with its costs and causes separately, excluded from measurement
 outcomes, comparisons and measurement repeat eligibility. `--phase final-full` selects the authorized final
 full-set step after targeted work; ordinary graded resampling stays refused.
 `--text old` compiles this code line's Curator text; an explicit captured JSON or
 plain instruction file selects different text. Captured text uses the production
-launch composer: only the capsule and operation enter the first part, and each
-declared detail is written byte-exactly beside the trial's report and linked by
-its bound path. Old and new arms keep their own declared detail inventories.
+launch composer: the shared every-role block precedes the role capsule and
+operation in the inline first-message instructions. Each declared detail is
+written byte-exactly beside the trial's report and linked by its bound path. Old
+and new arms keep their own declared detail inventories.
 The marker is absent from the case bundle and every detail; each emitted link is
 checked before and after the actor. Detail reads are kept-log observations, with
 unseen files labelled `not seen in kept log`, never a completeness rate or grade
@@ -111,8 +125,12 @@ counts. Unrecognized wrappers remain unknown with their shape, source location
 and hash; normalization establishes no semantic verdict.
 
 The command runs code graders and, where needed, a native cross-family
-judge. Codex outcomes go to Opus; Hermes outcomes go to Codex. The judge receives
-selected evidence without old/new labels, credentials, tools or Claude memory.
+judge. Codex and Hermes GPT outcomes go to Opus (`claude-opus-5-5`); Hermes
+DeepSeek and Kimi outcomes go to Codex (`gpt-6.1-sol`). Routing follows the exact
+actor profile, not just its harness. Selected evidence omits old/new labels and
+credentials. Judges have ordinary native tools in the evidence workspace, shell
+included, with no AR server; Claude memory is disabled and native authentication
+is preserved.
 
 Judge evidence starts with the effect-tree delta and full selected artifacts,
 including every changed card, sidecar and history file before and after. The
@@ -135,14 +153,19 @@ estimated tokens and largest contributors. The roughly 100,000-token cost target
 is advisory; required evidence remains intact when fidelity conflicts with it.
 A separate measured input ceiling blocks oversized requests before any native
 judge call: 1,692,965 UTF-8 bytes, derived from the retained CE02 rejection with
-20% margin. Rejection records `input-package-over-budget`, the request hash and
-contributors; it neither trims evidence nor counts as a judge invocation.
+20% margin. Codex requests also have a ceiling of 838,860 characters. Rejection
+records `mandatory-evidence-over-budget` when the manifest carries
+`mandatoryClasses`, and `input-package-over-budget` otherwise, along with the
+request hash and contributors. It neither trims evidence nor counts as a judge
+invocation.
 Estimates are not provider token counts or a guarantee of admission. Each native
 result records actual usage. A large required diff remains visible as case size.
 
-Verdicts admit a JSON object either as bare JSON or inside one whole-response
-`json` code fence, with whitespace outside. Prose around a fenced verdict stays
-unknown. Model, criterion order, outcomes and evidence checks apply to both.
+Verdicts admit a raw JSON object or the unique schema-valid last complete `json`
+code fence in the final assistant message. Surrounding prose is allowed and
+retained in parse provenance. Multiple valid fenced candidates or an invalid last
+complete fence are refused. Model, criterion order, outcomes and evidence checks
+still apply.
 
 The command prints the resulting `attempts.json`. That ledger and the per-trial
 evidence folders retain actor/judge token usage separately, actual native
@@ -197,8 +220,9 @@ texts change.
 
 
 `census` and `regrade` operate on retained Codex or Hermes attempts; they never rerun an
-actor. The original attempt records the actor model and determines the cross-family
-judge: Codex uses `claude-opus-5-5`, Hermes uses `gpt-6.1-sol`. A census batch must
+actor. The original attempt's actor model determines the same profile-based judge as
+live trials: Codex and Hermes GPT use `claude-opus-5-5`; Hermes DeepSeek and Kimi
+use `gpt-6.1-sol`. A census batch must
 name one actor family; the bound executable must match its judge route. Freeze a batch after its producer stops. Use absolute paths so the same
 commands work from any working directory:
 

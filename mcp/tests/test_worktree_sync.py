@@ -46,12 +46,17 @@ from agents_remember.worktrees.worktree_contract import (
 class SyncFixture:
     """Live code/memory worktrees whose official lines can be moved."""
 
-    def __init__(self, root: Path, *, converted: bool = True) -> None:
+    def __init__(self, root: Path, *, converted: bool = True, source_branch: str = "main") -> None:
         self.root = root
+        self.source_branch = source_branch
         self.code_repo = root / "repo-a"
         self.code_base = make_repo(self.code_repo)
+        if source_branch != "main":
+            git(self.code_repo, "switch", "-c", source_branch)
         self.memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
         memory_seed = make_repo(self.memory_repo)
+        if source_branch != "main":
+            git(self.memory_repo, "switch", "-c", source_branch)
         if converted:
             # MIK-R46 rule 8: shared fixtures build converted memory -- the layout marker
             # rides the base commit, so ordinary syncs run the converted routes.
@@ -81,13 +86,13 @@ class SyncFixture:
             leaf=LeafIdentity(worktree_name="sync-thing"),
             code=RepoBranchPlan(
                 repo_path=self.code_repo,
-                source_branch="main",
+                source_branch=source_branch,
                 work_branch="ar/sync-thing",
                 base_commit=self.code_base,
             ),
             memory=RepoBranchPlan(
                 repo_path=self.memory_repo,
-                source_branch="main",
+                source_branch=source_branch,
                 work_branch="ar/sync-thing",
                 base_commit=self.memory_base,
             ),
@@ -100,7 +105,7 @@ class SyncFixture:
             "-b",
             self.contract.code_work_branch,
             str(self.contract.code_worktree),
-            "main",
+            source_branch,
         )
         git(
             self.memory_repo,
@@ -109,13 +114,13 @@ class SyncFixture:
             "-b",
             self.contract.memory_work_branch,
             str(self.contract.memory_worktree),
-            "main",
+            source_branch,
         )
         write_contract(self.contract.contract_path, self.contract)
 
     def move_official_code(self) -> str:
         commit_file(self.code_repo, "src/new.py", "VALUE = 'landed'")
-        return git(self.code_repo, "rev-parse", "main")
+        return git(self.code_repo, "rev-parse", self.source_branch)
 
     def map_official_memory(self, code_tip: str) -> str:
         """Land memory content attributed to the admitted code commit."""
@@ -129,7 +134,7 @@ class SyncFixture:
             "-m",
             render_memory_content_message("Update new.py onboarding", code_tip),
         )
-        return git(self.memory_repo, "rev-parse", "main")
+        return git(self.memory_repo, "rev-parse", self.source_branch)
 
     def sync(self, **kwargs: Any):
         return sync_result(WorktreeArgs(contract_path=self.contract.contract_path, **kwargs))

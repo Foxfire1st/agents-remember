@@ -19,6 +19,7 @@ from agents_remember.controlplane.durable_store import (
     exclusive_access,
     rewrite_lines,
 )
+from agents_remember.kernel.coordination_context import paths as coordination_paths
 from agents_remember.kernel.primitives import checkout_coordination
 from agents_remember.kernel.primitives.checkout_coordination import (
     CheckoutCoordinationError,
@@ -31,6 +32,66 @@ from agents_remember.serving.app import LiveProjectionInputs, create_app
 from agents_remember_test_support.testing.global_state import preserve_owned_mutable_state
 from fastapi.testclient import TestClient
 from tool_entry_point_world import EntryPointWorld
+
+
+class InstalledCoordinationRootTests(unittest.TestCase):
+    def test_installed_scaffold_needs_no_retired_skill_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ("system", "memory-repos", "tasks"):
+                (root / name).mkdir()
+
+            self.assertFalse((root / "skills").exists())
+            self.assertTrue(coordination_paths.looks_like_installed_coordination_root(root))
+
+    def test_installed_root_still_requires_each_remaining_scaffold_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            for missing in ("system", "memory-repos", "tasks"):
+                for shape in ("absent", "file"):
+                    with self.subTest(missing=missing, shape=shape):
+                        root = Path(temporary) / f"{missing}-{shape}"
+                        root.mkdir()
+                        for name in ("system", "memory-repos", "tasks"):
+                            if name != missing:
+                                (root / name).mkdir()
+                            elif shape == "file":
+                                (root / name).touch()
+                        self.assertFalse(
+                            coordination_paths.looks_like_installed_coordination_root(root)
+                        )
+
+    def test_implicit_root_discovery_recognizes_installed_scaffold_without_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "coordination"
+            source = root / "mcp/src/agents_remember/kernel/coordination_context/paths.py"
+            source.parent.mkdir(parents=True)
+            source.touch()
+            for name in ("system", "memory-repos", "tasks"):
+                (root / name).mkdir()
+
+            with patch.object(coordination_paths, "__file__", str(source)):
+                self.assertEqual(coordination_paths.agents_repo_from_script(), root)
+                self.assertEqual(coordination_paths.resolve_coordination_root_hint(None), root)
+
+            explicit = root / "explicit-authority"
+            self.assertEqual(
+                coordination_paths.resolve_coordination_root_hint(explicit), explicit.resolve()
+            )
+
+    def test_retired_package_source_shape_uses_the_ancestor_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "package"
+            source = root / "mcp/src/agents_remember/kernel/coordination_context/paths.py"
+            source.parent.mkdir(parents=True)
+            source.touch()
+            (root / "runtime/skills").mkdir(parents=True)
+            (root / "AGENTS.md").touch()
+
+            self.assertTrue((root / "runtime/skills").is_dir())
+            self.assertTrue((root / "AGENTS.md").is_file())
+            self.assertFalse(coordination_paths.looks_like_installed_coordination_root(root))
+            with patch.object(coordination_paths, "__file__", str(source)):
+                self.assertEqual(coordination_paths.agents_repo_from_script(), source.parents[6])
 
 
 class CheckoutCoordinationIsolationTests(unittest.TestCase):

@@ -6,8 +6,10 @@ the binding of its tool server says who it is, and a tool server without a bindi
 :func:`start_role` starts one role agent for a canonical selection through the launcher's own
 start path, with the caller recorded as the new agent's parent. :func:`send_role_message` sends
 one text message to one role agent of this line's receipts: the delivered text opens with a line
-that names the sender, a recipient's running turn is never cancelled, a closed session is resumed
-first under the scope check of Revive, and an archived or missing recipient is refused. With
+that names the sender. A message to a recipient already in a turn may be held until that turn ends.
+If the host delivers it into the running turn, that turn may be cancelled. If the host has not
+delivered it, the answer names held and its reason. A closed session is resumed first under the
+scope check of Revive, and an archived or missing recipient is refused. With
 ``wait`` the call returns the outcome of the turn that consumed the message. The wait is a
 sequence of bridge calls inside this one tool call; nothing here polls outside a call and no
 message is stored.

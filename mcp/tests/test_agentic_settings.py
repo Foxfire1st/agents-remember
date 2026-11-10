@@ -112,7 +112,7 @@ class MergePrecedenceTests(unittest.TestCase):
         self.assertEqual(settings.loops.defaults.complexity.builder_at, "medium")
         self.assertEqual(
             settings.loops.per_level,
-            {"leaf": "scored", "master": "seam-required", "portfolio": "strategist"},
+            {"leaf": "scored", "master": "seam-required"},
         )
         self.assertEqual(settings.loops.per_master, {})
         self.assertEqual(settings.roles, {})
@@ -463,6 +463,116 @@ class UnusedKeysTests(unittest.TestCase):
             ),
         )
         self.assertEqual(settings.resolved_role_knobs("worker", "leaf"), RoleKnobs(harness="codex"))
+
+
+class RemovedPlanningRoleSettingsTests(unittest.TestCase):
+    """Removed role settings are accepted as inert input and reported through unused_keys."""
+
+    def test_old_file_keeps_loading_without_rewriting_or_launch_choices(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            coordination = Path(folder) / "coord"
+            repo = Path(folder) / "repo"
+            old = {
+                "orchestration": {
+                    "roles": {
+                        "designer": {"model": "old-designer", "mode": "old-mode"},
+                        "strategist": {"model": "old-strategist"},
+                        "worker": {"model": "active-worker"},
+                    },
+                    "rolesPerLevel": {
+                        level: {
+                            "designer": {"model": "old-level-designer"},
+                            "strategist": {"model": "old-level-strategist"},
+                        }
+                        for level in ("leaf", "master", "portfolio")
+                    },
+                    "loops": {
+                        "perLevel": {"portfolio": {"loop": "strategist"}},
+                        "perMaster": {"one-master": {"portfolio": {"loop": "strategist"}}},
+                    },
+                }
+            }
+            paths = [write_settings(coordination, old), write_settings(repo, old, user=False)]
+            before = {path: path.read_bytes() for path in paths}
+            settings = load_agentic_settings(coordination, repo)
+            self.assertEqual(settings.roles, {"worker": RoleKnobs(model="active-worker")})
+            self.assertEqual(settings.roles_per_level, {"leaf": {}, "master": {}, "portfolio": {}})
+            self.assertEqual(
+                settings.loops.per_level, {"leaf": "scored", "master": "seam-required"}
+            )
+            self.assertEqual(settings.loops.per_master, {"one-master": {}})
+            self.assertEqual(
+                set(settings.unused_keys),
+                {"orchestration.roles.designer", "orchestration.roles.strategist"}
+                | {
+                    f"orchestration.rolesPerLevel.{level}.{role}"
+                    for level in ("leaf", "master", "portfolio")
+                    for role in ("designer", "strategist")
+                }
+                | {
+                    "orchestration.loops.perLevel.portfolio.loop",
+                    "orchestration.loops.perMaster.one-master.portfolio.loop",
+                },
+            )
+            self.assertEqual(len(settings.unused_keys), 10)
+            self.assertEqual({path: path.read_bytes() for path in paths}, before)
+
+    def test_active_unknown_role_and_permission_guards_still_refuse(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            coordination = Path(folder) / "coord"
+            repo = Path(folder) / "repo"
+            write_settings(coordination, {"orchestration": {"roles": {"unknown-role": {}}}})
+            with self.assertRaisesRegex(AgenticSettingsError, "unsupported orchestration.roles"):
+                load_agentic_settings(coordination)
+            write_settings(coordination, {"orchestration": {}})
+            write_settings(
+                repo,
+                {"orchestration": {"roles": {"worker": {"mode": "auto"}}}},
+                user=False,
+            )
+            with self.assertRaisesRegex(AgenticSettingsError, "user-layer only"):
+                load_agentic_settings(coordination, repo)
+
+    def test_null_loop_blocks_keep_existing_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            coordination = Path(folder) / "coord"
+            write_settings(coordination, {"orchestration": {"loops": None}})
+            with self.assertRaisesRegex(AgenticSettingsError, "orchestration.loops is null"):
+                load_agentic_settings(coordination)
+            for loops in (
+                {"perLevel": None, "perMaster": None},
+                {"perMaster": {"one-master": None}},
+            ):
+                with self.subTest(loops=loops):
+                    write_settings(coordination, {"orchestration": {"loops": loops}})
+                    settings = load_agentic_settings(coordination)
+                    self.assertEqual(settings.unused_keys, ())
+                    self.assertEqual(
+                        settings.loops.per_level, {"leaf": "scored", "master": "seam-required"}
+                    )
+
+    def test_other_loop_postures_and_unknown_fields_keep_their_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            coordination = Path(folder) / "coord"
+            write_settings(
+                coordination,
+                {"orchestration": {"loops": {"perLevel": {"portfolio": {"loop": "custom"}}}}},
+            )
+            self.assertEqual(
+                load_agentic_settings(coordination).loops.per_level["portfolio"], "custom"
+            )
+            write_settings(
+                coordination,
+                {
+                    "orchestration": {
+                        "loops": {
+                            "perLevel": {"portfolio": {"loop": "strategist", "unknown": True}}
+                        }
+                    }
+                },
+            )
+            with self.assertRaisesRegex(AgenticSettingsError, "unsupported"):
+                load_agentic_settings(coordination)
 
 
 class RoleMessageLimitSettingsTests(unittest.TestCase):

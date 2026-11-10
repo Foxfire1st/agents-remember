@@ -596,3 +596,42 @@ class HistoryHelperGraderTests(unittest.TestCase):
             "text": "All helpers completed; checks passed.",
         }
         self.assertEqual(grade_helpers(self.native_helpers(rows)).status, "unknown")
+
+    def test_helper_terminal_callbacks_require_a_captured_start(self) -> None:
+        removed = {
+            "type": "agent.provider_subagents.update",
+            "payload": {"kind": "remove", "parentAgentId": OWNER, "subagentId": "helper-one"},
+        }
+        stops = [
+            helper_update(status) for status in ("completed", "failed", "cancelled", "interrupted")
+        ]
+        for stopped in [*stops, removed]:
+            with self.subTest(stopped=stopped):
+                without_start = self.native_helpers([stopped, turn_end()])
+                self.assertEqual(grade_helpers(without_start).status, "unknown")
+                with_start = self.native_helpers(
+                    [helper_update("running"), stopped, stopped, removed, turn_end()]
+                )
+                self.assertEqual(grade_helpers(with_start).status, "pass")
+
+    def test_unknown_or_incomplete_helper_status_does_not_prove_a_stop(self) -> None:
+        for status in ("future-status", "", None, 7):
+            update = helper_update("completed")
+            update["payload"]["subagent"]["status"] = status
+            with self.subTest(status=status):
+                self.assertEqual(
+                    grade_helpers(self.native_helpers([update, turn_end()])).status, "unknown"
+                )
+                self.assertNotEqual(
+                    grade_helpers(
+                        self.native_helpers([helper_update("running"), update, turn_end()])
+                    ).status,
+                    "pass",
+                )
+        for missing in ("id", "status", "createdAt"):
+            update = helper_update("completed")
+            del update["payload"]["subagent"][missing]
+            with self.subTest(missing=missing):
+                self.assertEqual(
+                    grade_helpers(self.native_helpers([update, turn_end()])).status, "unknown"
+                )

@@ -1,6 +1,7 @@
 # <repo> — Onboarding Overview
 
-<!-- Converted card: kind and source are its place in the tree; currentness comes from the
+<!-- The overview worker uses this template to explain the repository to future agents and developers.
+Converted card: kind and source are its place in the tree; currentness comes from the
 card's reference anchors. Write the reference sections below as citation tables (the fixer's
 input) and run `citation_fix` on the card, which replaces each table with `- <finding> [n]`
 lines where the table stood and writes the sidecar. Never write sidecar JSON by hand and never
@@ -12,12 +13,12 @@ choose a reference number. -->
 
 ## Hot Path Summary
 
-<One or two short sentences for fast route discovery. Name the most likely entry areas, exact source anchors, config keys, command names, APIs, or files that help an agent narrow source reads without rereading the full overview.>
+<One or two short sentences for fast route discovery. Name the most likely entry areas, exact source anchors, config keys, command names, application programming interfaces, or files that help an agent narrow source reads without rereading the full overview.>
 
 ## Architecture At A Glance
 
 ```text
-<ASCII diagram showing the major components and how they interact>
+<Text diagram showing the major components and how they interact>
 ```
 
 ## Code Structure

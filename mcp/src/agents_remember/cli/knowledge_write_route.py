@@ -199,7 +199,6 @@ def command_settings() -> McpRuntimeConfig | str:
     """
 
     return knowledge_write_command.discovered_settings(
-        Path.cwd(),
         discover=discover_config,
         guard=checkout_cli_location,
         load=load_config,

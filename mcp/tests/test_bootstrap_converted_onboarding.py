@@ -36,6 +36,15 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
+from agents_remember.application.skill_resources.provider import shipped_composition_corpus
+from agents_remember_test_support.testing.curator_contracts import (
+    SectionLink,
+    linked_section,
+    require_clauses,
+)
+from agents_remember_test_support.testing.curator_contracts import (
+    normalized as normalized_contract,
+)
 from agents_remember_test_support.testing.leaf_instruction_wording import delivered_step
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -469,27 +478,101 @@ def test_bootstrap_skill_texts_state_the_fixer_and_the_order(tmp_path: Path) -> 
     # follows the step that survives: the baseline still comes before the foundation is reported
     # and handed over. Retiring the assertion instead would drop the order it protects.
     assert operation.index("Adopt the first attributed baseline") < operation.index(
-        "Report the knowledge foundation's state and hand its making to the Architect"
+        "Report the knowledge foundation's state"
     )
-    instructions, _foundation = delivered_step(
+    instructions, foundation = delivered_step(
         REPO_ROOT / "skills/l-01-agent-lifecycles",
         ("bootstrap", "bootstrap"),
-        "reference/bootstrap-foundation-d301.md",
+        "reference/bootstrap/foundation-state.md",
         # MIK-R196 rule 4 inserted the user-settings step and moved the foundation to the
         # Architect's work: the eighth step still stands after the baseline, and it now reads
         # "Report the knowledge foundation's state and hand its making to the Architect".
-        "when you reach step 8, not before",
+        # P5-18 (round 5): the role file's state pointer is the one pointer for this action.
+        "Before reading and reporting the knowledge foundation's state, read",
         tmp_path / "bootstrap.md",
     )
-    # MIK-R196 rule 4: the foundation is the Architect's work and the operation reports it at
-    # step 8. Read off the compiled instruction rather than reconstructed:
-    assert (
-        "8. **Report the knowledge foundation's state and hand its making to the Architect.**"
-        in (instructions)
-    )
+    # The compiled step heading and its delivered detail jointly retain ordering and ownership.
+    foundation_step = "### 8. Report the knowledge foundation's state"
+    assert foundation_step in instructions
     assert instructions.index("Adopt the first attributed baseline") < instructions.index(
-        "8. **Report the knowledge foundation's state and hand its making to the Architect.**"
+        foundation_step
     )
+    assert (
+        "Read and report the knowledge foundation's state, then name the next step at the "
+        "handover below." in instructions
+    )
+    assert (
+        "Before reading and reporting the knowledge foundation's state, read "
+        "[knowledge-foundation states](" in instructions
+    )
+    # The emitted state procedure owns the report and next step; its actual boundary link
+    # owns Bootstrap's standing no-author rule, also carried by the compiled role itself.
+    lifecycle = REPO_ROOT / "skills/l-01-agent-lifecycles"
+    foundation_clauses = (
+        "Read `memory_init`'s `knowledge` block and report its state:",
+        "Name one next step in both the conversation and report: start the Architect.",
+    )
+    require_clauses(foundation, foundation_clauses, "actual emitted foundation")
+    for clause in foundation_clauses:
+        reading = normalized_contract(foundation)
+        mutant = reading.replace(normalized_contract(clause), "", 1)
+        assert mutant != reading
+        with pytest.raises(AssertionError):
+            require_clauses(mutant, foundation_clauses, "deleted state or next-step duty")
+    no_author = (
+        "This role sets up and reports. It does not maintain, refactor, curate or repair the workspace it set up.",
+        "Author or refresh no onboarding content. Do not edit a memory file to make a check pass. "
+        "Author no knowledge records, run no knowledge writer, invent no invariants and populate "
+        "no database to claim readiness. Do not organise their production.",
+    )
+    with shipped_composition_corpus() as (origin, _):
+        target = origin / "roles/bootstrap.md"
+        assert target.read_bytes() == (lifecycle / "roles/bootstrap.md").read_bytes()
+
+        def require_bootstrap_boundary(text: str) -> str:
+            boundary = linked_section(
+                text,
+                lifecycle / "reference/bootstrap/foundation-state.md",
+                SectionLink(
+                    target,
+                    "Bootstrap's boundaries",
+                    "Before acting on the reported state, apply",
+                    "## Boundaries",
+                ),
+            )
+            require_clauses(boundary, no_author, "actual reached Bootstrap boundary")
+            return boundary
+
+        boundary = require_bootstrap_boundary(foundation)
+        for surface, where in (
+            (boundary, "actual reached role boundary"),
+            (instructions, "actual compiled and emitted Bootstrap instructions"),
+        ):
+            require_clauses(surface, no_author, where)
+            for clause in no_author:
+                reading = normalized_contract(surface)
+                mutant = reading.replace(normalized_contract(clause), "", 1)
+                assert mutant != reading
+                with pytest.raises(AssertionError):
+                    require_clauses(mutant, no_author, (where, "deleted no-author duty"))
+        for mutant in (
+            foundation.replace("[Bootstrap's boundaries]", "[missing boundaries]", 1),
+            foundation.replace("#boundaries", "#wrong-boundaries", 1),
+            foundation.replace(
+                "[Bootstrap's boundaries](", "[Bootstrap's boundaries](wrong-owner/", 1
+            ),
+        ):
+            assert mutant != foundation
+            with pytest.raises(AssertionError):
+                require_bootstrap_boundary(mutant)
+    # Curator ownership lives in the foundation procedure; Bootstrap only reports its state.
+    knowledge_bootstrap = (REPO_ROOT / "skills/c-14-knowledge-bootstrap/SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "The curator authors the foundation, the Architect organises the task it is authored under, "
+        "and the bootstrap seat reports the state it read"
+    ) in " ".join(knowledge_bootstrap.split())
     # MIK-R196 rule 4 moved the foundation's ordering rules out of the bootstrap detail and
     # they survive on the install-and-onboard surface; read from the owner that states them.
     flat_install = " ".join(install.split())

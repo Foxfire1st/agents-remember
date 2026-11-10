@@ -1,205 +1,141 @@
 <!-- ar:roles all -->
 # Operation — Curation
 
-<!-- ar:roles all -->
-**Scope:** reconcile a leaf's intended, current and implemented meaning; write affected onboarding. The Manager starts the Curator after code PASS; Worker and Reviewer supply candidate-bound inputs directly. When an approved packet's prerequisite sync reaches memory reconciliation the Curator owns, the Manager starts the Curator for that reconciliation. Ordinary delivery curation and the knowledge check still follow code PASS. It also covers **first or resumed repository knowledge foundation** inside the real task the user-started Architect opens, with that task's leaf admission and scope.
+Curators use this operation to reconcile a leaf's intent, code and memory, and to prepare its memory handover. Managers use it to assign that work and retain transaction and acceptance authority.
 
-<!-- ar:roles all -->
-**Select:** leaf Worker freeze plus affected memory. The Manager assigns; the Worker sends its list; the Reviewer sends its passed code freeze.
-For foundation work, the role's Inputs name the Architect's task and its enclosure; no incidental code delta is required.
+## Select the admitted work
 
-<!-- ar:roles all -->
-## Who carries it, and their job
+The Worker supplies the exact freeze and handoff list directly; the Reviewer supplies the passed code freeze directly. The selected work is that freeze and its affected memory.
 
-<!-- ar:roles curator -->
-| Role | Its job in this operation |
-| --- | --- |
-| curator | performs the three-way reconciliation, writes through one admitted writer and hands the memory candidate directly to the Reviewer |
-| worker | supplies the exact freeze and hand-off list; answers code questions and receives evidenced code concerns directly |
-| reviewer | supplies the passed code freeze, checks the memory candidate and answers code findings, including after code PASS |
 <!-- ar:roles manager -->
-| manager | starts the Curator, reads leaf state from reports and retains task acceptance and landing authority |
-
+Before beginning a repository's first or resumed knowledge foundation, read [Enter through the real foundation task](../reference/curator/repository-foundation.md#enter-through-the-real-foundation-task) for its task, enclosure, scope and code-delta admission.
 
 <!-- ar:roles all -->
-Reconciliation and transaction ownership stay disjoint: the Curator reconciles and writes memory; the Manager owns the
-transaction. The curator runs no Git write: no stage, commit, branch or ref change, or stash operation.
-The curator never runs the closeout preview, never stages a sync resolution or repairs closeout transaction state, and
-never decides whether a leaf lands.
+## Keep ownership distinct
+
+The Curator reconciles intent and writes memory through one admitted writer. The Worker answers code questions and receives evidenced code concerns directly. The Reviewer checks the memory candidate and answers code findings, including after passing code review. The Manager reads ordinary leaf state from reports and retains task acceptance and landing authority.
+
+The Manager owns the Git transaction. The Curator runs no Git write: no staging, commit, branch or reference change, or stash operation. It never runs closeout preview, stages a sync resolution, repairs closeout transaction state, or decides whether a leaf lands.
 
 <!-- ar:roles curator -->
-The same task/Manager ownership applies to a foundation leaf. Setup reads and reports its state; it does not author the foundation.
+The same task and Manager ownership applies to foundation work.
 
-<!-- ar:roles curator -->
+<!-- ar:roles all -->
 ## Required inputs
 
-<!-- ar:roles all -->
-1. **The captured change set** — code diff from the leaf's base to its actual pre-closeout candidate with counters and paths,
-   identified by the Worker against the leaf contract's recorded range, not a guess.
+The Worker identifies the captured change set against the leaf contract's recorded range: the diff from the leaf's base to its actual pre-closeout candidate, with counters and paths. Do not guess that range.
 
 <!-- ar:roles curator -->
-3. **`notes/`**: builder report and, when requested, candidate-bound route-review verdict.
+Read the complete input set that your role instructions name. Read the Worker report in `notes/` and, when requested, the candidate-bound route-review verdict.
 
-<!-- ar:roles curator -->
 <!-- ar:roles all -->
-Intake is **rejected** when an applicable packet is missing, unapproved, or version-mismatched. A
-rejected or worker-blocked requirement is a contradiction/blocker to report, never ruled current
-intent to write. Atomic child leaves have no leaf route-review record; when review is requested,
-their accumulated change is reviewed on the canonical master at master-to-parent integration.
+Reject intake when an applicable packet is missing, unapproved or version-mismatched. Report a rejected or Worker-blocked requirement as a contradiction or blocker; never write it as ruled current intent.
+
+Atomic child leaves have no leaf route-review record. When route review is requested, their accumulated change is reviewed on the canonical master at master-to-parent integration.
 
 <!-- ar:roles curator -->
 ## Bound Paseo intake and capabilities
 
-<!-- ar:roles curator -->
-For AR-launched Paseo, use your file tools to read rendered task and canonical JSON at `documents[0].taskDocReadArgs`' exact `rendered_path` and `json_path`.
-`task_doc` writes and does not read. Call these AR tools only on `agents-remember-task`.
-Read [scoped read signatures]({{detail:reference/curator-intake-details.md}}) when you reach **Curation workflow 1: Reconcile**, not before. Missing scope or refused capabilities block work; never switch AR servers or use unscoped commands. Read assignment-applicable packets, not unrelated roles or the whole hierarchy by default.
+For an Agents Remember launch on Paseo, use your own file tools to read the rendered task and canonical JavaScript Object Notation (JSON) file. Use exactly `rendered_path` and `json_path` from `documents[0].taskDocReadArgs`. `task_doc` writes; it does not read. Call Agents Remember tools only on `agents-remember-task`.
 
-<!-- ar:roles curator -->
-Before authoring an affected card or entity, read the [converted-card workflow](../../c-05-create-or-update-onboarding-files/workflows/converted-card-workflow.md) or [entity-catalog workflow](../../c-05-create-or-update-onboarding-files/workflows/repo-entity-catalog-workflow.md) at its affected removal, re-anchoring or fingerprint operation. Restores follow the case’s recorded authority and order.
+Missing scope or a refused capability blocks dependent work. Never switch Agents Remember servers or use unscoped commands. Read the packets applicable to the assignment, not unrelated roles or the whole hierarchy by default. The role supplies the direct intake-detail read before scoped input reads.
 
-Preserve the immutable baseline; compare fully and read admitted records back.
-The MIK writer retains ownership. Use its mounted writer or an admitted CLI bound to the selected serving build. If this capsule exposes no writer and admits none, report the missing capability and required records not written: a missing capability is not a correct-input refusal. Verify every output resolves inside the selected memory root.
+Restore memory only under the case's recorded authority and order.
 
-
-<!-- ar:roles curator -->
-
+The knowledge writer retains ownership: use the mounted writer or an admitted command-line interface (CLI) bound to the selected serving build. If the capsule exposes no writer and admits none, report the missing capability and the required records not written. A missing capability is not a correct-input refusal. Verify every output resolves inside the selected memory root.
 
 <!-- ar:roles all -->
-Decide and write through the starting server or its serving-build CLI. Development uses clean main and its stated serving commit as ruler; name it. Leaf source never produces leaf memory: test leaf writer/check changes on fixtures or scratch. Install nothing; disable no guard.
+Before deciding or writing memory, read [Bind curation to the serving build](orientation.md#bind-curation-to-the-serving-build) for the starting-server authority, development reference and fixture-only boundary.
 
-<!-- ar:roles curator -->
-
-<!-- ar:roles curator -->
 <!-- ar:roles curator -->
 ## Normal workflow
 
-<!-- ar:roles curator -->
-A report naming the next authorised step needs no new Manager go. Continue the normal workflow through the whole handover under `../roles/curator.md` §Where your stage ends: its own-input correction, three-own-repairs escalation and genuine stops apply here. Step 8 supplies the bounded encountered-memory repair.
+A report naming the next authorized step needs no new Manager approval. Continue through the whole handover. Before repairing a failed curation step, read [Repair and finish the stage](../roles/curator.md#repair-and-finish-the-stage) for faulty-input correction, escalation after three own repairs, encountered-memory repair and genuine stops.
 
-<!-- ar:roles curator -->
-1. **Reconcile** current intent, ruled intent and implemented reality; surface every material divergence.
-   Verify each card sentence against the code yourself; a memory line is a claim, not proof.
-<!-- ar:roles curator -->
-2. **Before ingest**, each invariant's `scope` states applicability, conditions and exclusions; provenance is not scope.
-<!-- ar:roles curator -->
-3. Group only justified obligations; membership changes prompt a fresh guarantee check. Implementation alone never changes invariant or family meaning.
-<!-- ar:roles curator -->
-4. L3 is last resort; entity edits need real entity changes.
-<!-- ar:roles curator -->
-5. No task/date overview headings or task-log dumping.
+Before writing memory, read `worktree_status` on `agents-remember-task` for the assigned task and inspect its source-freshness observation. Make the admitted code and memory line explicit. Report a binding or transaction problem to its existing owner; this informational read grants no sync or approval authority and adds no cleanliness or known-staleness gate.
+
+Record staleness known at task intake as the task’s curation work. Repair stale assigned or encountered memory, including pre-existing staleness, without a whole-memory sweep.
+
+1. Reconcile current intent, ruled intent and implemented reality. Surface every material divergence and verify every card sentence against code; a memory claim is not its proof.
+2. Ingest each invariant within its Curator-authored semantic scope.
+3. Group obligations and change family membership only with a grouping justification and a re-examined guarantee.
+4. Route each notes item to its file, route, entity or last-resort Operational-Notes home. Maintain the entity catalog, and edit an entity only for a real entity change.
+5. Create, refresh, move or remove cards within their scope, and update current overview prose in its meaning-owning body.
+
 <!-- ar:roles all -->
-Use `agents-remember-task`.
-6. **Run the complete curation check set** and report each as passed, failed, blocked, or not-run with
-   its exact command and scope: the changed sidecars, the affected overviews/indexes/entities,
-   `git diff --check` in the memory worktree, and the full `memory_quality_check` operation. Curation is always complete: a named scoped check never stands in
-   for the full operation, and every curator-actionable finding it returns is repaired or escalated as
-   blocked with its exact returned code. Run it at intake and after every repair until
-   `curatorActionableCount=0` and the **raw** `qualityChecklistStatus` reads `ready-for-closeout`. When the coherence record is then missing or stale, clear the coherence gate as §Authority gates states, before the closeout.
-<!-- ar:roles all -->
-7. **Undergo the independent fact-check (second reader, MIK-R53 rule 5).** Before the closeout of a leaf
-   on converted memory, a seat that wrote none of the leaf's cards or records fact-checks the
-   curation: every changed card, sidecar and record statement by statement against the leaf's final
-   code; every history row's disposition, effect and reason against the code diff; and that nothing
-   important about the change is left unsaid. The check runs the fact-check criteria in
-   `../criteria/onboarding-memory.md` (they replace that file's Update History criteria). Blocking
-   findings are repaired before the closeout, with a re-run of the full operation after each repair.
-   This is a lifecycle step: the closeout does not check it.
-<!-- ar:roles curator -->
-8. **Repair, then republish.** Apply the bounded encountered-memory repair in `../roles/curator.md` §Discovery routing. Report each repair and continue; make no broad sweep. Re-run the complete checks and independent fact-check before handover.
+### Run the complete curation checks
+
+In a multi-repository check, check every enabled repository first, present the results together, and only then ask about updates.
+
+Use `agents-remember-task`. Run the complete curation check set and report each check as passed, failed, blocked or not run, with its exact command and scope:
+
+- Changed sidecars.
+- Affected overviews, indexes and entities.
+- `git diff --check` in the memory worktree.
+- The full `memory_quality_check` operation on `agents-remember-task`.
+
+A named scoped check never substitutes for the full operation. Repair every Curator-actionable finding, or escalate it as blocked with its exact returned code. Run the full operation at intake and after every repair until `curatorActionableCount=0` and the raw `qualityChecklistStatus` is `ready-for-closeout`. If coherence is then missing or stale, complete the authority gates below before closeout.
+
+### Obtain the independent fact-check
+
+Before the independent fact-check of a converted-memory leaf, read [Independent fact-check of curated knowledge](../criteria/onboarding-memory.md#om-2--independent-fact-check-of-curated-knowledge) for the statement-by-statement, history and omission checks. A seat that wrote none of the leaf's cards or records performs this check before closeout. Repair blocking findings before closeout and rerun the full operation after every repair. This is a lifecycle step; closeout does not perform the check.
 
 <!-- ar:roles curator -->
+### Repair and republish
 
+Apply the bounded encountered-memory repair of your role's instructions. Report every repair and continue without a broad sweep. Rerun the complete checks and independent fact-check before handover.
 
-<!-- ar:roles curator -->
+If one memory tool fails, continue independent work through the other admitted memory tools. Existing refusal stops still bind dependent work. Change no provider, permission, scope or tool boundary.
 
-
-<!-- ar:roles curator -->
-Reviewer compares Git bases/candidates; Curator records no separate comparison.
-
-<!-- ar:roles curator -->
 <!-- ar:roles all -->
 ## Authority gates
 
 <!-- ar:roles manager -->
-- **Onboarding writes only.** The curator never writes code, task-doc edits follow scoped recovery; never edits gates, lifecycle
-  state, worktree contracts, or closeout state, never mutates task-doc status, and never performs
-  closeout/integration/finalization.
-<!-- ar:roles curator -->
-<!-- ar:roles curator -->
-**Scope the MCP tools on `agents-remember-task` with the enclosure contract path** (`../roles/curator.md` §Inputs): an unscoped `route_index_refresh` also blocks the next `worktree_start` until a human reverts it.
-<!-- ar:roles manager -->
-- **Do not invent a future code commit hash**, advance fingerprints to an uncommitted tree, or add
-  attestation prose to silence a finding. The closeout transaction records the actual code and
-  memory commits after this handoff.
-<!-- ar:roles all -->
-- **The completed curation result is evidence for the curator handoff, not a closeout or integration
-  gate**, and it is not a claim about the whole repository. A subset never substitutes for the full
-  operation, and the full operation is never deferred as an optional curator, closeout, or integration
-  extra: it is the prerequisite.
-<!-- ar:roles all -->
-- **`curator_coherence` is the authority a curator produces when the checklist requires it** — run
-  `prepare` → `publish` → `validate` and publish when a healthy memory reports
-  `checklistStatus=coherence-required` with a successful `prepare` and `candidateCount 0`.
-  If it refuses, report the typed blocker without changing the closeout/integration transaction.
-  Validate before closeout. The frozen record names that candidate; closeout's history and
-  fingerprint writes do not make it evidence about the later live tree, so do not validate that
-  tree again after closeout as a prerequisite to integration.
-<!-- ar:roles curator -->
-- Apply the role's discovery/current-intent rule. Use `capture-candidate`; put explicit evidence/confidence in the rationale; let the owning hierarchy route it. Do not create a
-  new register or silently turn novelty into truth.
+The Curator's admitted memory writes include no code. Task-document edits use their scoped recovery. The Curator never edits gates, lifecycle state, worktree contracts or closeout state. It never changes task status or performs closeout, integration or finalization.
 
 <!-- ar:roles curator -->
+Scope the Model Context Protocol (MCP) tools on `agents-remember-task` with the admitted enclosure contract. An unscoped `route_index_refresh` also blocks the next `worktree_start` until a human reverts it.
+
+<!-- ar:roles manager -->
+Never invent a future code commit hash, advance fingerprints to an uncommitted tree or add attestation prose to silence a finding. Closeout records the actual code and memory commits after this handover.
+
+<!-- ar:roles all -->
+The completed curation result is handover evidence, not a closeout or integration gate or a claim about the whole repository. Before handover, complete [the full curation checks](#run-the-complete-curation-checks); they remain a prerequisite and cannot be deferred as an optional closeout or integration extra.
+
+`curator_coherence` on `agents-remember-task` supplies the authority when the checklist requires it. Run `prepare`, then `publish`, then `validate`. Publish when healthy memory returns `checklistStatus=coherence-required`, preparation succeeds and `candidateCount` is zero.
+
+If it refuses, report the typed blocker. Change no closeout or integration transaction state. Validate before closeout. The frozen record names that candidate: closeout's history and fingerprint writes do not turn it into evidence about the later live tree. Do not validate that later tree again as a prerequisite to integration.
+
+<!-- ar:roles curator -->
+Before capturing a discovery, read [Reconcile, author and check](../roles/curator.md#reconcile-author-and-check) for the current-intent boundary, capture evidence and hierarchy routing.
+
 ## Failure handling
 
-<!-- ar:roles curator -->
-Tests do not prove intent coherence.
-<!-- ar:roles curator -->
-Historical oddities need causal applicability and a reconsideration condition.
-<!-- ar:roles curator -->
-- **Keep partial/refused hand-offs partial.** `planned` and `refused` wrote nothing. Correct faulty input through the same tool; for a refused correct write, read [correct-write recovery]({{detail:reference/refused-write.md}}) when a covered writer or record tool refuses a correct write, not before. Validator and gate findings remain D229 repairs.
+Before promoting a historical oddity, read [Reconcile intent for curation](../reference/curator/intent-reconciliation.md) for the limits of test evidence and the causal-applicability and reconsideration checks.
 
-<!-- ar:roles curator -->
-- **If any comparison side is missing or guesswork-level ambiguous**, ask the Worker directly about code or Reviewer about verdict; ask the Manager only for ownership/authority.
-<!-- ar:roles curator -->
-- **Send code concerns to Reviewer and Worker, including after code PASS.** Evidence the requirement/report mismatch; repair no code or author knowledge claiming absent behaviour.
-  The Reviewer records a finding and reopens the point, or explains its rejection. Report the finding and answer; send unresolved disagreement to the Manager.
+Keep partial and refused handovers partial. `planned` and `refused` wrote nothing. Correct faulty input through the same tool. Validator and gate findings still require repair.
 
-<!-- ar:roles all -->
-<!-- ar:roles curator -->
+If a comparison side is missing or too ambiguous to establish, ask the Worker directly about code or the Reviewer about its verdict. Ask the Manager only about ownership or authority.
+
+Send evidenced code concerns to both Worker and Reviewer, including after passing code review. Show the requirement or report mismatch. Repair no code and author no knowledge claiming behavior the code lacks. The Reviewer records a finding and reopens the point, or explains its rejection. The Curator records the answer. Report the finding and answer; send unresolved disagreement to the Manager.
+
 ## Handoff / exit
 
-<!-- ar:roles curator -->
-For AR-launched leaves, send directly to Reviewer via `role_message` on `agents-remember-task` with handover role/task arguments. Use only whole, unchanged agent IDs from sender lines, start results or handovers.
+For an Agents Remember leaf, send the memory candidate directly to the Reviewer through `role_message` on `agents-remember-task`, using the handover's role and task arguments. Use only whole, unchanged agent identifiers from sender lines, start results or handovers.
 
-<!-- ar:roles curator -->
-Send the memory candidate directly to Reviewer for its whole memory check; use `../roles/curator.md` §Outputs.
-The coherence record/projection, not the transcript, are durable output. Write the record before turn end; terminal/finalizer evidence proves only turn end. Declare manual recovery; claim no tool-generated certification or acceptance.
+Before writing the handover output, read [Produce the handover](../roles/curator.md#produce-the-handover) for its required records and evidence. The coherence record and projection are durable; the transcript is not. Write the record before turn end. Terminal or finalizer evidence proves only turn end. Declare manual recovery and claim no tool-generated certification or acceptance for it.
 
-<!-- ar:roles curator -->
-Read [handoff procedures]({{detail:reference/curator-handoff-d301.md}}) when you reach **Curation workflow 7: Undergo the independent fact-check**, not before; reuse at **Curation workflow 8: Repair, then republish**. Each handover names leaf, code head/change hash, memory identity, report/verdict path and whole next stretch. Reviewer records `begin_review`/`record_review`, `reviewKind=memory`: separate sealed memory IDs/reports/count, code-review limit; code state unchanged. Extras need Manager-recorded architect/developer approval. Under-way reviews finish as begun; new lanes apply after landing.
-
-<!-- ar:roles curator -->
-Handle non-work replies, empty or doubled seats and unreachable-Manager notices as `../operations/implementation.md` §Boundaries states.
-
-<!-- ar:roles curator -->
-If required Manager notice fails delivery, report it pending, continue independent work and retry via `role_message` on `agents-remember-task`; never ask the developer in your chat instead.
+Before responding to a non-work reply, an empty or doubled-seat refusal, an unreachable-Manager notice, or failed delivery of a required Manager notice, read [Report a refused handover](implementation.md#report-a-refused-handover) for the seat/problem report, pending state, independent continuation and notice retry. It transfers no Worker or transaction authority. The permitted Manager notice occasions below remain unchanged.
 
 <!-- ar:roles all -->
-The Manager hears from the Curator only for these delivery and seat problems, ownership or authority,
-a pass beyond the settings limit, a code finding disputed with the Reviewer, or a sync step assigned
-to the Manager. It reads ordinary state from reports and never relays the contents. Memory conflicts
-in the Worker's supported leaf sync come directly to the Curator; transaction steps stay with the
-Manager. Contact another leaf only for a dependency named by a requirement or the Manager; other
-cross-leaf matters go through the Manager.
+The Manager receives Curator messages only for delivery or seat problems, ownership or authority, a pass beyond the settings limit, a code finding disputed with the Reviewer, or a sync step reserved to the Manager. It reads ordinary state from reports and relays no handover contents.
 
-<!-- ar:roles curator -->
-<!-- ar:roles all -->
-For a native memory-file sync conflict, repair only the memory content inside your admitted write surface. The Manager captures, verifies and stages the resolution; the Worker continues the supported sync with `resolution_action="continue"`. Do not stage files or change transaction authority.
+Memory conflicts in the Worker's supported leaf sync go directly to the Curator; transaction steps remain with the Manager. Contact another leaf only for a dependency named by a requirement or the Manager. Other cross-leaf matters go through the Manager.
 
-<!-- ar:roles curator -->
-<!-- ar:roles all -->
-Required input: the permission non-bypass boundary in `operations/orientation.md` — a denied or unanswered harness request is never worked around with another tool, command, helper seat, or later turn.
+Before repairing a native memory-file sync conflict, read [Synchronize the leaf](implementation.md#synchronize-the-leaf) for the content-repair boundary and the Manager and Worker continuation sequence.
 
-<!-- ar:roles all -->
-Read [message handover]({{detail:reference/message-handover.md}}) when you reach a step another seat awaits, a handover, or a held/full-store receipt, not before.
+Before acting on a denied or unanswered harness request, read [Honor harness permission decisions](orientation.md#honor-harness-permission-decisions) for the waiting, denial and non-bypass rules.
+
+### Handle delivery receipts
+
+Before responding to a full-store refusal, read [Handle a full-store refusal](../reference/message-handover.md#handle-a-full-store-refusal) for the pending handover, single retry and second-refusal report.

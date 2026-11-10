@@ -5,11 +5,19 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.skill_resources.provider import shipped_composition_corpus
 from agents_remember.cli.role_handover_artifacts import write_detail_artifacts
+from agents_remember.cli.role_instruction_links import bind_markdown_links, require_no_unbound_links
 from agents_remember.cli.role_instructions import compose_role_instructions
+from agents_remember.errors import CapsuleDeliveryError
+from agents_remember.models.role_capsules.types import (
+    CapsuleDetailReference,
+    compute_content_digest,
+)
 from agents_remember.serving.capsule_delivery import CapsuleDelivery
 
 
@@ -17,8 +25,9 @@ def compose_launch_instructions(
     delivery: CapsuleDelivery, report_path: str, choice: dict[str, Any]
 ) -> tuple[str, dict[str, Any]]:
     """Preserve user-note composition while binding the baseline's frozen details."""
-    baseline = delivery.trusted_instructions
-    paths = write_detail_artifacts(report_path, delivery.detail_references)
+    references, targets = _bound_details(delivery, Path(report_path))
+    baseline = _bound_baseline(delivery, targets)
+    paths = write_detail_artifacts(report_path, references)
     for source, path in paths.items():
         baseline = baseline.replace("{{detail:" + source + "}}", path.as_posix())
     instructions, record = compose_role_instructions(baseline, delivery.semantic_digest, choice)
@@ -28,11 +37,66 @@ def compose_launch_instructions(
                 "sourcePath": reference.source_path,
                 "path": paths[reference.source_path].as_posix(),
                 "revision": reference.revision,
+                "sizeBytes": len(reference.content),
                 "step": reference.step,
             }
-            for reference in delivery.detail_references
+            for reference in references
         ]
     return instructions, record
+
+
+def _detail_path(report: Path, source_path: str) -> Path:
+    source_hash = hashlib.sha256(source_path.encode("utf-8")).hexdigest()
+    return report.with_name(f"{report.stem}.detail-{source_hash}.md")
+
+
+def _bound_details(
+    delivery: CapsuleDelivery, report: Path
+) -> tuple[tuple[CapsuleDetailReference, ...], dict[Path, Path]]:
+    """Freeze launch-relative destinations without changing the admitted compiler value."""
+    if not delivery.detail_references:
+        return (), {}
+    with shipped_composition_corpus() as (root, _manifest):
+        targets = {
+            (root / reference.source_path).resolve(): _detail_path(
+                report.absolute(), reference.source_path
+            )
+            for reference in delivery.detail_references
+        }
+        references = []
+        for reference in delivery.detail_references:
+            content = bind_markdown_links(
+                reference.content.decode("utf-8"), root / reference.source_path, targets
+            ).encode("utf-8")
+            references.append(
+                replace(reference, content=content, revision=compute_content_digest(content))
+            )
+    return tuple(references), targets
+
+
+def _bound_baseline(delivery: CapsuleDelivery, targets: dict[Path, Path]) -> str:
+    """Bind inline links to frozen details or their original non-detail sources."""
+    baseline = delivery.trusted_instructions
+    if not delivery.instruction_origins:
+        require_no_unbound_links(baseline)
+        return baseline
+    offset = 0
+    parts: list[str] = []
+    with shipped_composition_corpus() as (root, _manifest):
+        for origin in delivery.instruction_origins:
+            if origin.start != offset or not origin.start <= origin.end <= len(baseline):
+                raise CapsuleDeliveryError(
+                    "instruction source origins do not cover the trusted stream"
+                )
+            parts.append(
+                bind_markdown_links(
+                    baseline[origin.start : origin.end], root / origin.source_path, targets
+                )
+            )
+            offset = origin.end
+    if offset != len(baseline):
+        raise CapsuleDeliveryError("instruction source origins do not cover the trusted stream")
+    return "".join(parts)
 
 
 def validate_instruction_detail_artifacts(receipt: dict[str, Any]) -> None:
@@ -85,7 +149,6 @@ def _require_detail_target(receipt: dict[str, Any], reference: dict[str, Any], p
         for key in ("path", "canonicalPath")
     ):
         raise _detail_refusal(reference, "the saved handover has no path and canonical target")
-    source_hash = hashlib.sha256(reference["sourcePath"].encode("utf-8")).hexdigest()
     given_report = Path(report["path"])
     given_artifact = given_report.with_suffix(".handover.txt")
     # The artifact's own file sits beside the report; the path the agent was given reaches it
@@ -95,9 +158,10 @@ def _require_detail_target(receipt: dict[str, Any], reference: dict[str, Any], p
         or Path(artifact["canonicalPath"]).name != given_artifact.name
     ):
         raise _detail_refusal(reference, "the saved handover is not beside its report")
-    name = f"{given_report.stem}.detail-{source_hash}.md"
+    detail = _detail_path(given_report, reference["sourcePath"])
+    name = detail.name
     expected = Path(artifact["canonicalPath"]).with_name(name)
-    if path != given_report.with_name(name) or path.parent.resolve() / path.name != expected:
+    if path != detail or path.parent.resolve() / path.name != expected:
         raise _detail_refusal(
             reference, f"the path no longer names its canonical target {expected}"
         )

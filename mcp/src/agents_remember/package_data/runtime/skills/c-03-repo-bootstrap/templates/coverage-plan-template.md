@@ -1,5 +1,7 @@
 # Bootstrap Coverage Plan — <repo>
 
+<!-- The bootstrap orchestrator uses this template to turn research into prioritized route, file, and evidence work. -->
+
 | Field | Value |
 |---|---|
 | generated | <YYYY-MM-DDThh:mm> |
@@ -39,7 +41,7 @@
 
 | Path | Reason For Deferral | Revisit Trigger |
 |---|---|---|
-| `<path>` | simple DTO / generated / routine helper | when modified / when promoted by task |
+| `<path>` | simple data transfer object / generated / routine helper | when modified / when promoted by task |
 
 ## Slice Cleanup Queue
 

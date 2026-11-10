@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from agents_remember.models.base import FlexibleToolResponse
+from agents_remember.models.core import RunningServerPayload
 
 
 class RuntimeInstallResponse(FlexibleToolResponse):
@@ -17,6 +18,8 @@ class RuntimeInstallResponse(FlexibleToolResponse):
     installProviderDeps: bool | None = None
     summary: dict[str, Any] | None = None
     host: dict[str, Any] | None = None
+    runningServers: list[RunningServerPayload] = Field(default_factory=list)
+    dashboard: dict[str, Any] | None = None
     messages: list[str] = Field(default_factory=list)
     reportPath: str | None = Field(
         default=None,

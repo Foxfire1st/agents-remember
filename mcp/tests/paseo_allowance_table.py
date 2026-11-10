@@ -35,6 +35,10 @@ MANIFEST = "names paseo in a manifest"
 RUNTIME_COMMANDS = "PNT-R01: "
 ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
     PACKAGE: {
+        RUNTIME + "paseo_install_plan.py": (
+            1,
+            "reads the installed CLI package manifest version for read-only action planning; imports no host client and starts no process",
+        ),
         "scripts/agent_evals/adapters/recorder_plugin/index.server.ts": (
             2,
             "the eval recorder imports Paseo's supported plugin interface, as the shipped AR plugin does; no daemon client or command runner",
@@ -56,6 +60,10 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
     },
     PROGRAM: {},
     LITERAL: {
+        "mcp/test_support/agents_remember_test_support/testing/agent_eval_checkout_provisioning.py": (
+            1,
+            "the test double's own provisioning command line, asserted against the runner; no product path",
+        ),
         "scripts/agent_evals/adapters/recorder_plugin/index.server.ts": (
             3,
             "the typed context.paseo door of Paseo's plugin interface for native event subscription",
@@ -82,6 +90,10 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
         ),
     },
     COMMAND_LINE: {
+        RUNTIME + "paseo_harness_homes.py": (
+            1,
+            "the home-change refusal names the existing explicit provision command and its accept flag; it executes no command",
+        ),
         RUNTIME + "paseo_daemon.py": (
             3,
             RUNTIME_COMMANDS + "its docstring quotes the command line the runner builds, and "
@@ -126,23 +138,18 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
             RUNTIME_COMMANDS + "imports the failure class from the runner's module",
         ),
         RUNTIME + "paseo_provision.py": (
-            7,
+            8,
             RUNTIME_COMMANDS
-            + "explicit provision and install build the same runner for their steps",
+            + "explicit provision, its accepted-home-change variant and install build the same runner for their steps",
         ),
         RUNTIME + "paseo_settings.py": (
             3,
             RUNTIME_COMMANDS + "reads pending settings through the one runtime runner",
         ),
         CLI + "paseo_runtime.py": (
-            5,
+            6,
             RUNTIME_COMMANDS + "imports the failure class from the runner's module; "
-            "`paseo_command` is also the name under which it parses its own sub-command",
-        ),
-        RUNTIME + "paseo_process_record.py": (
-            1,
-            RUNTIME_COMMANDS + "imports the failure class from the runner's module; it starts "
-            "nothing",
+            "`paseo_command` parses and dispatches its sub-command, including the explicit accepted-home-change choice",
         ),
     },
     ADDRESS: {
@@ -150,7 +157,14 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
             2,
             "writes and verifies the private fixture installPrefix passed to AR's runtime CLI; recorder uses require_bridge_runtime and the product runner",
         ),
-        RUNTIME + "paseo_install.py": (4, "install result and read-only preview of selected host"),
+        RUNTIME + "paseo_install.py": (
+            5,
+            "install result and read-only preview of selected host, including the prefix manifest observation",
+        ),
+        RUNTIME + "paseo_install_plan.py": (
+            3,
+            "read-only inventory names the selected install prefix and configured daemon listen in the same provision action plan; no independent host connection",
+        ),
         RUNTIME + "paseo_run.py": (1, "checks the selected prefix before replacement"),
         RUNTIME + "paseo_start.py": (3, "reports/comparisons for the configured listen address"),
         RUNTIME + "paseo_start_outcome.py": (

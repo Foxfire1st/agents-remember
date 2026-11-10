@@ -66,6 +66,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 import agents_remember.serving._app_lifespan as lifespan_module
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.providers.metrics import ProviderMetricsStore
 from agents_remember.serving._app_common import _ServingRuntime
 from agents_remember.serving._app_lifespan import _serving_lifespan
@@ -189,7 +190,12 @@ class _ServingFixture:
             SimpleNamespace(
                 launcher_catalog_prepare=None,
                 stream_shutdown=StreamShutdown(),
-                config=SimpleNamespace(coordination_root=root),
+                config=McpRuntimeConfig(
+                    config_path=root / "settings.json",
+                    coordination_root=root,
+                    workspace_root=root / "projects",
+                    transcript_root=root / "logs",
+                ),
                 observer_root=root,
                 projector=SimpleNamespace(
                     close_readiness=mock.Mock(), prime=mock.AsyncMock(), run=_parked_forever

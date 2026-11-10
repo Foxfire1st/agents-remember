@@ -861,6 +861,8 @@ class PaseoRuntimeTests(unittest.TestCase):
                 "ok": True,
                 "home": settings.home.as_posix(),
                 "running": False,
+                "inheritedHarnessHomes": [],
+                "harnessHomeRemedy": None,
                 "sessionVariables": [],
                 "sessionRemedy": None,
                 "version": None,

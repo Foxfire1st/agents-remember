@@ -46,6 +46,18 @@ afterEach(() => {
 });
 
 describe("connectState liveness (260723 sleep/wake)", () => {
+  it("receives build currentness on the existing stream without reconnecting", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("EventSource", ControlledSource);
+    ControlledSource.instances = [];
+    const dispose = connectState();
+    const currentness = { mode: "installed", state: "stale", loadedDigest: "old", installedDigest: "new" };
+    ControlledSource.instances[0].fire("buildCurrentness", { data: JSON.stringify(currentness) });
+    expect(dashboardStore.getState().buildCurrentness).toEqual(currentness);
+    expect(ControlledSource.instances).toHaveLength(1);
+    dispose();
+    dashboardStore.getState().reset();
+  });
   it("cycles a wake-judged corpse to a fresh subscribe without flashing SIGNAL LOST", () => {
     vi.useFakeTimers();
     vi.stubGlobal("EventSource", ControlledSource);

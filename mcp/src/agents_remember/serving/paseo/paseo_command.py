@@ -20,6 +20,8 @@ from agents_remember.errors import PaseoRuntimeFailure
 from agents_remember.kernel.primitives.host_environment import host_environment
 from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettings
+from agents_remember.serving.paseo.paseo_process_record import ProcessReader, read_process
+from agents_remember.serving.paseo.paseo_running_node import communication_node
 
 COMMAND_NOT_FOUND = 127
 COMMAND_TIMED_OUT = 124
@@ -73,6 +75,7 @@ class PaseoCli:
     settings: PaseoRuntimeSettings
     runner: CommandRunner = run_command
     root: Path | None = None
+    reader: ProcessReader = read_process
 
     @property
     def executable(self) -> Path:
@@ -100,14 +103,18 @@ class PaseoCli:
         return version if result.returncode == 0 and version else None
 
     def call(self, *args: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> CommandResult:
-        if not self.node.is_file():
+        starts_host = (
+            args[:2] in {("daemon", "start"), ("daemon", "restart")} or self.root is not None
+        )
+        node = self.node if starts_host else communication_node(self.settings, self.reader)
+        if not node.is_file():
             raise PaseoRuntimeFailure(
                 "node_not_installed",
                 "node",
-                f"The product Node at {self.node} is not installed; run runtime_install.",
+                f"The product Node at {node} is not installed; run runtime_install.",
             )
         argv = [
-            self.node.as_posix(),
+            node.as_posix(),
             self.executable.as_posix(),
             *args,
             "--home",

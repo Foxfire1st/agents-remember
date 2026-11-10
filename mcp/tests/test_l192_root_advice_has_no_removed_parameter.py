@@ -10,7 +10,7 @@ These tests derive the admitted parameter set from the real advertised schema --
 server built from ``TOOL_REGISTRARS``, the same way the other tool-schema cases do -- and then
 require every ``context_packet(...)`` call written in a live carrier to name only those
 parameters.  The carrier inventory is the shipped instruction and declaration surface: the root
-``AGENTS.md``, the canonical ``skills/`` tree, every committed projection of it, ``agents-md-files/``,
+``AGENTS.md``, the canonical ``skills/`` tree and every committed projection of it,
 the packaged runtime copies, ``docs/``, ``README.md``, ``mcp/README.md`` and ``system/``.
 
 Nothing here fixes the carriers: a failing case names the file and line that still prescribes the
@@ -44,7 +44,6 @@ CARRIER_GLOBS = (
     "AGENTS.md",
     "README.md",
     "mcp/README.md",
-    "agents-md-files/**/*.md",
     "docs/**/*.md",
     "skills/**/*.md",
     *(f"{copy}/**/*.md" for copy in GENERATED_SKILL_COPIES),
@@ -58,7 +57,6 @@ REQUIRED_SURFACE_ROOTS = (
     "AGENTS.md",
     "skills",
     "docs",
-    "agents-md-files",
     "mcp/src/agents_remember/package_data/runtime",
     "system",
 )

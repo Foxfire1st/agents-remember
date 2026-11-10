@@ -23,11 +23,7 @@ LAUNCH_CODE_PATTERNS = (
     "application/agent_binding.py",
     "application/role_launch_context.py",
 )
-# The one place in the scanned code where a harness's name stays: the dashboard command's help
-# text for --config names the folder in which its settings discovery looks. It is a folder name
-# the discovery (cli/discovery.py) reads; no launch decision depends on it, and the word cannot
-# go without changing that help text.
-NAMED_EXCEPTIONS = {"cli/dashboard.py": ".claude/mcp/agents-remember-settings.json"}
+NAMED_EXCEPTIONS: dict[str, str] = {}
 # Modules where an agent kind's name IS this build's launch decision, required by MIK-R71:
 # rule 21 names the least permissive mode for each agent kind (Claude `default`, Codex
 # `auto`), and the launch grants a new agent the read of its own assignment through the
@@ -238,7 +234,7 @@ class NoHarnessNameTests(unittest.TestCase):
             with self.subTest(text):
                 self.assertEqual(harness_names_in(text), harnesses)
         # The named exception covers its one phrase and nothing else in that file.
-        phrase = NAMED_EXCEPTIONS["cli/dashboard.py"]
+        phrase = ".claude/mcp/agents-remember-settings.json"
         self.assertEqual(harness_names_in(f"the nearest {phrase}", phrase), [])
         self.assertEqual(harness_names_in(f"{phrase} for claude", phrase), ["claude"])
 

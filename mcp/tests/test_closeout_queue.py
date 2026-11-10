@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
 from agents_remember.application.knowledge_writer.memory_state import Owner
 from agents_remember.application.knowledge_writer.writer import WriteRequest
 from agents_remember.kernel.direct_execution_grants import (
@@ -24,6 +26,7 @@ from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.lifecycles.door import CloseoutDoorAction, CloseoutDoorRequest
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
+from agents_remember.tasks.document import Section
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.worktrees.integration.closeout.door import live_closeout_door
 from agents_remember.worktrees.integration.closeout.door_control import (
@@ -37,6 +40,12 @@ from agents_remember.worktrees.queue.closeout_queue import (
     CloseoutQueueRequest,
     QueueActor,
     closeout_queue_tool,
+)
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
+from agents_remember.worktrees.queue.closeout_queue_evidence import (
+    GradeAuthority,
+    canonical_grade,
+    planning_authorities,
 )
 from agents_remember.worktrees.route_review import build_route_review
 from agents_remember.worktrees.task_resolver import series_contract_path
@@ -817,3 +826,64 @@ class QueueFixture:
             actor=actor or QueueActor(role="orchestrator", task_document_ref=SPRINT),
             now=NOW,
         )
+
+
+def _grade_authority(tmp_path: Path, author: str) -> GradeAuthority:
+    (tmp_path / "grade.md").write_text("Canonical scheduling evidence.\n", encoding="utf-8")
+    judgment = _judgment_row(LEAF_A, "normal").replace("orchestrator", author)
+    document = TaskDocument.model_validate(
+        {
+            "id": "SPRINT",
+            "slug": "sprint",
+            "title": "Sprint",
+            "kind": "master",
+            "status": "inProgress",
+            "repo": REPO,
+            "createdAt": NOW,
+            "orchestrates": ["master-a"],
+            "sections": [
+                Section(heading=JUDGMENT_HEADING, body=_judgment_table([judgment])),
+                Section(
+                    heading=PRIORITY_HEADING,
+                    body=_priority_table([_priority_row(LEAF_A, "normal")]),
+                ),
+            ],
+        }
+    )
+    sprint = ResolvedTaskDocument(ref=SPRINT, path=tmp_path / "task.json", document=document)
+    judgments, priorities = planning_authorities(sprint)
+    return GradeAuthority(sprint=sprint, judgments=judgments, priorities=priorities)
+
+
+@pytest.mark.parametrize("author", ["architect", "orchestrator"])
+def test_canonical_grade_uses_admitted_register_author(tmp_path: Path, author: str) -> None:
+    authority = _grade_authority(tmp_path, author)
+    grade, digest, evidence = canonical_grade(
+        _grade("normal", LEAF_A), authority=authority, candidate_ref=LEAF_A, owning_master=MASTER_A
+    )
+    assert grade.decidedBy == author
+    assert (grade.subject, grade.priority, grade.evidenceRefs) == (
+        LEAF_A.key,
+        "normal",
+        ["grade.md"],
+    )
+    priority_row = authority.priorities[LEAF_A.key].source_row
+    judgment_row = authority.judgments[grade.judgmentId].source_row
+    assert digest == hashlib.sha256(f"{priority_row}\n{judgment_row}".encode()).hexdigest()
+    assert [fact.path for fact in evidence] == ["grade.md"]
+    assert evidence[0].sha256 == hashlib.sha256((tmp_path / "grade.md").read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("author", ["worker", "designer", "strategist"])
+def test_canonical_grade_refuses_other_register_authors(tmp_path: Path, author: str) -> None:
+    authority = _grade_authority(tmp_path, author)
+    before = (tmp_path / "grade.md").read_bytes()
+    with pytest.raises(CloseoutQueueError, match="closeout-grade-author-refused") as refused:
+        canonical_grade(
+            _grade("normal", LEAF_A),
+            authority=authority,
+            candidate_ref=LEAF_A,
+            owning_master=MASTER_A,
+        )
+    assert "architect/orchestrator" in refused.value.detail
+    assert (tmp_path / "grade.md").read_bytes() == before

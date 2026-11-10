@@ -12,7 +12,8 @@ selected", because silently running the unmodified path for a typo is the silent
 behaviour forbids.
 
 **The delivery decision.** :func:`decide_instruction_delivery` answers exactly one of ``capsule``,
-``legacy`` or ``refused``. Not selected is ``legacy`` — the existing installation, unchanged.
+``legacy`` or ``refused``. Not selected is ``legacy``: the run keeps the old startup chain's
+unmodified install path, but the cutover described below still retires the ``AGENTS.md`` copies.
 Selected and able is ``capsule``. Selected and unable is ``refused``, naming the failure: it is
 never ``legacy``. A runtime failure therefore reports itself and preserves the selected mode; it
 never quietly runs the old startup chain.
@@ -22,21 +23,14 @@ never quietly runs the old startup chain.
 it. It is one record for one run, returned to the caller that ran the install and written beside
 it — an example-shaped record, not a new configuration framework.
 
-**What the cutover is.** ``capsule`` mode replaces the legacy AR startup chain *in the installation*
-by not installing it: the coordinator ``AGENTS.md`` targets (``AGENTS.md``, ``system/AGENTS.md``,
-``tasks/AGENTS.md``) are withheld. No skill tree is installed beside the runtime at all (MIK-R196
-rule 7): the canonical skills are authored in the source tree and served from the *packaged* copy
-(``application/skill_resources`` → ``packaged_source_root()/runtime/skills``) by the tool server's
-own resource surface, so there is exactly one delivery of the corpus and nothing in the
-coordination root that could stand in for it.
-:data:`WITHHELD_STARTUP_TARGETS` names the withheld paths so the install can report them and a reader
-can see exactly what changed.
-
-**Returning to the unmodified configuration.** :func:`experiment_rollback_plan` renders the exact
-undo rows: one for each harness skill root a separate ``skills_install`` run populated, and the one
-command that restores the legacy startup chain (run the installer again with no experiment
-selected). The adopt / revise / discard decision itself belongs to the developer and the owning
-seat; this module only makes the route back executable and checkable.
+**What the cutover is.** Every accepted install removes the retired coordinator
+``AGENTS.md``, ``tasks/AGENTS.md`` and ``system/AGENTS.md`` files through the existing
+capsule cutover. No delivery mode installs or restores these files. No skill tree is
+installed beside the runtime: canonical skills are authored in the source tree and
+served from the packaged copy by the tool server's resource surface.
+:data:`WITHHELD_STARTUP_TARGETS` names the removed paths in the experiment report.
+The per-run experiment selection still controls its capability probe and record;
+removing the experiment selection does not restore retired instruction copies.
 
 **What this module is not.** It does not compile a capsule, does not decide what a role launch
 carries as instructions (that is the value ``serving/launch_capsule.py`` holds for each launch), and
@@ -49,7 +43,7 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,16 +59,13 @@ EXPERIMENTS = (ROLE_CAPSULES,)
 CORPUS_ANCHOR = Path("skills") / "l-01-agent-lifecycles" / "composition-manifest.json"
 """The canonical corpus anchor this installation digests: routing metadata for the authored tree."""
 
-WITHHELD_STARTUP_TARGETS = (
-    "AGENTS.md",
-    "system/AGENTS.md",
-    "tasks/AGENTS.md",
-)
-"""The legacy AR startup chain's installation surface, withheld in ``capsule`` mode.
+RETIRED_STARTUP_TARGETS = ("AGENTS.md", "system/AGENTS.md", "tasks/AGENTS.md")
+"""Earlier-install startup targets removed by every accepted installation."""
 
-These are the coordinator instruction targets ``install/runtime.py::AGENTS_MD_TARGETS`` writes. The
-harness-level session-start hook is a *developer-workspace* surface, maintained in each starter
-package's own directory; it is not install-managed and is not removed here.
+WITHHELD_STARTUP_TARGETS = RETIRED_STARTUP_TARGETS
+"""Retired startup targets reported as withheld by an experimental install.
+
+This cutover removes only the three coordinator files named above.
 """
 
 
@@ -400,60 +391,3 @@ def source_identity(source_root: Path, environ: Mapping[str, str] | None = None)
         if branch.returncode == 0 and commit.returncode == 0 and branch_name and commit_id:
             return f"{branch_name}@{commit_id}"
     return source_root.as_posix()
-
-
-@dataclass(frozen=True)
-class UndoRow:
-    """One row of the machine-change inventory: what the experiment did and how to undo it."""
-
-    path: str
-    action: str
-    undo_command: str
-
-
-def experiment_rollback_plan(
-    *,
-    coordination_root: Path,
-    install_roots: Sequence[Path] = (),
-) -> tuple[UndoRow, ...]:
-    """The executable route back to the unmodified installation.
-
-    The one command that restores the legacy startup chain — the same installer, run with no
-    experiment selected, which copies the withheld ``AGENTS.md`` targets back from the packaged
-    runtime.
-
-    ``install_roots`` is for a **separate** ``skills_install`` run and is never populated by the
-    runtime install: ``install_runtime`` copies runtime assets and nothing else, so a row for a
-    harness skill root is rendered only when the caller actually ran that other install operation, and its action
-    and undo text say so.
-    """
-
-    rows: list[UndoRow] = []
-    for install_root in install_roots:
-        rows.append(
-            UndoRow(
-                path=install_root.as_posix(),
-                action="created-by-skills_install",
-                undo_command=(
-                    f"rm -rf {install_root.as_posix()}   # only if skills_install populated it; "
-                    "runtime_install does not write this root"
-                ),
-            )
-        )
-    rows.append(
-        UndoRow(
-            path=(coordination_root / "AGENTS.md").as_posix(),
-            action="restored",
-            undo_command=(
-                "re-run the installer with no experiment selected "
-                "(RuntimeInstallRequest(experiment=None)) to copy the legacy startup chain back"
-            ),
-        )
-    )
-    return tuple(rows)
-
-
-def rollback_payload(rows: Sequence[UndoRow]) -> list[dict[str, str]]:
-    return [
-        {"path": row.path, "action": row.action, "undoCommand": row.undo_command} for row in rows
-    ]

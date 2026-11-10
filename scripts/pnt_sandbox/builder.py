@@ -201,8 +201,8 @@ def _corpus_request(layout: SandboxLayout, ops: Operations, out: Out) -> dict[st
     target = {"repo_id": REPOSITORY_ID}
     steps: list[tuple[bool, dict[str, Any]]] = [
         (
-            # The two folders the runtime install always creates: a capsule-delivery install
-            # withholds AGENTS.md, so `system/` is not a reliable marker of a prepared root.
+            # The runtime install creates these two folders and leaves AGENTS.md absent.
+            # Use docs/tasks, not an instruction file, as the preparation marker.
             all((layout.coordination / name).is_dir() for name in ("docs", "tasks")),
             {
                 "name": "coordination root",

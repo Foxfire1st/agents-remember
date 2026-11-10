@@ -15,7 +15,7 @@ The core rules are:
 3. implementation waits for developer approval
 4. onboarding records approved current state, not plans
 
-Research-only answers, minimal `w-02-light-task-workflow` tasks, and master + light sub-task series are different weights of the same discipline.
+Research-only answers, minimal [leaf-task](../skills/l-01-agent-lifecycles/templates/leaf-task.md) tasks, and master + light sub-task series are different weights of the same discipline.
 
 ### How does an agent find the right memory?
 
@@ -49,7 +49,7 @@ When an onboarding unit grows too large, that is often a signal that the source 
 
 ### How does the agent know memory is not stale?
 
-File-level sidecar onboarding records verification metadata. `c-05-create-or-update-onboarding-files` compares the source file against that verification point before the agent plans against onboarding.
+File-level sidecar onboarding records verification metadata. The [memory-quality tools](../skills/l-01-agent-lifecycles/reference/knowledge/commands.md) compare source against its recorded verification point before the agent plans against onboarding.
 
 Typical outcomes are `up to date`, `drifted`, `missing verification`, `missing`, `orphaned`, `disabled`, or `unsupported`.
 
@@ -57,7 +57,7 @@ Drifted onboarding can still be useful historical context, but the agent must tr
 
 ### What happens when a file moves?
 
-The onboarding should move with the source path. If it does not, drift detection can classify the old onboarding as orphaned. The `c-05-create-or-update-onboarding-files` skill owns file-level onboarding relocation, while structural route changes can route through the `c-03-repo-bootstrap` skill.
+The onboarding should move with the source path. If it does not, drift detection can classify the old onboarding as orphaned. The Curator follows the [card procedure](../skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md) for file-level onboarding relocation, while structural route changes can route through the `c-03-repo-bootstrap` skill.
 
 ### How does this handle cross-file or cross-repo coupling?
 
@@ -69,21 +69,21 @@ Repo-wide context belongs in `overview.md`. Larger repos can use route-local ove
 
 ### Do I need a durable task?
 
-Yes, but it can be thin. Chat is never a build route: every code change lives under an approved task document, and a change that fits in one session takes the minimal `w-02-light-task-workflow` artifact — a thin doc with a title and a few steps.
+Yes, but it can be thin. Chat is never a build route: every code change lives under an approved task document, and a change that fits in one session takes the minimal [leaf-task](../skills/l-01-agent-lifecycles/templates/leaf-task.md) artifact — a thin doc with a title and a few steps.
 
-Use a full `w-02-light-task-workflow` light task when the work needs a durable task file or checklist. When it outgrows a single-page plan — broad, high-risk, or many distinct slices — escalate to a master + light sub-task series.
+Use a full [leaf-task](../skills/l-01-agent-lifecycles/templates/leaf-task.md) light task when the work needs a durable task file or checklist. When it outgrows a single-page plan — broad, high-risk, or many distinct slices — escalate to a master + light sub-task series.
 
 ### Is this overengineered?
 
 The memory layer is intentionally small: Markdown files, Git metadata, and deterministic paths. The workflow layer can be heavier, but it is optional and should match task risk.
 
-If a change fits in one session, use a minimal `w-02-light-task-workflow` task. If it needs a durable plan, use a full `w-02-light-task-workflow` light task. If it outgrows one page or spans several slices, use a master + light sub-task series.
+If a change fits in one session, use a minimal [leaf-task](../skills/l-01-agent-lifecycles/templates/leaf-task.md) task. If it needs a durable plan, use a full [leaf-task](../skills/l-01-agent-lifecycles/templates/leaf-task.md) light task. If it outgrows one page or spans several slices, use a master + light sub-task series.
 
 ### What happens when the agent discovers something during implementation?
 
 The agent should route the discovery to the right artifact instead of quietly changing requirements or memory.
 
-Durable current-state findings can go through the `c-05-create-or-update-onboarding-files` skill. Requirement or architecture changes need explicit developer approval. The `c-05-create-or-update-onboarding-files` skill keeps that routing visible.
+Durable current-state findings go to the Curator through the [curation operation](../skills/l-01-agent-lifecycles/operations/curation.md). Requirement or architecture changes need explicit developer approval. The same operation keeps that routing visible.
 
 ### Why keep task files separate from onboarding?
 
@@ -102,11 +102,11 @@ makes a memory update attributable.
 
 ### What is `memory.md`?
 
-`memory.md` is the external-memory ledger. It records which memory commit was verified against which code commit. The `w-02-light-task-workflow` skill writes it during closeout and the `w-02-light-task-workflow` skill uses it during worktree integration, so code and memory do not drift apart silently.
+`memory.md` is the external-memory ledger. It records which memory commit was verified against which code commit. The [authorized closeout owner](../skills/l-01-agent-lifecycles/operations/closeout.md) coordinates publication; the worktree tools refresh the ledger during closeout and use code-memory attribution during integration, so code and memory do not drift apart silently.
 
 ### How is a repository's memory located?
 
-The `c-08-ar-coordination-context-resolver` skill resolves it per target repository: each
+The product resolves it per target repository: each
 configured repository binds to `<coordination-root>/memory-repos/ar-<repo>/`, and one
 repository's memory never moves a sibling's. Repo-local internal memory under
 `<repo>/ar-memory/` was removed from the product; a repository that still carries that layout is

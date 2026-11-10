@@ -1,39 +1,38 @@
 # Impact-Analysis Template
 
-A durable report a fan-out sub-agent writes for the **orchestrator** (portfolio phase) or the
-**adversarial reviewer** (completion + code-quality lenses). It is the **integrity-bulwark** artifact:
-planned-vs-planned **and** planned-vs-past blast radius. Sub-agents WRITE it; AR state mutations stay in
-the spawning agent's main loop.
+The Reviewer uses this template to report planned-work conflicts and risks to landed work, including analyses delegated to its helpers. The Orchestrator and developer can inspect the report for planning and review decisions; the report decides nothing.
+
+The Reviewer writes the report or checks and owns its helper’s contribution. When a helper writes the analysis, the spawning agent alone changes Agents Remember (AR) state in its main loop.
 
 ## Rules
 
 1. Cover **two axes**: planned-vs-planned (does this change collide with another master/leaf, present or
-   future?) and planned-vs-past (does it regress something already landed — the "fixed one, broke two"
-   surface?).
-2. Evidence-first: cite the route indexes and
-   `read_ar_files` reads that back each finding.
+   future?) and planned-vs-past (does it regress something already landed?).
+2. Evidence-first: cite the route indexes and the files opened from
+   `read_ar_files` results that support each finding.
 3. State limits per finding — what the evidence does **not** prove.
-4. This is a report, not a decision: it feeds the orchestrator's spirit test / reshape proposals or the
-   reviewer's verdict; it never decides.
+4. This is a report, not a decision: it feeds the Orchestrator's
+   [spirit test and proposals to reshape the plan](../roles/orchestrator.md#changes-to-the-plan)
+   or the Reviewer's verdict; it never decides.
 
 ## Shape
 
 ```md
-# Impact Analysis — <subject: master id | change set | leaf group>
+# Impact Analysis — <subject: master identifier | change set | leaf group>
 
 | Field     | Value                                        |
 | --------- | -------------------------------------------- |
-| for       | orchestrator (portfolio) | reviewer (<seam>) |
-| author    | <analysis role / bounded fan-out label>      |
+| for       | orchestrator (portfolio) \| reviewer (<seam>) |
+| author    | <analysis role / helper label identifying the assigned routes>      |
 | subject   | <what was analyzed>                          |
 | written   | <YYYY-MM-DDTHH:MM>                            |
 
 ## Surface Swept
-- Routes / areas touched: <route index refs>
+- Routes / areas touched: <route index references>
 - Anchors: <symbols / files>
 
-## Planned-vs-Planned (collisions with other masters/leaves — incl. FUTURE)
-| Collision | With (master/leaf) | Kind (code | memory | sequencing) | Evidence | Limits |
+## Planned-vs-Planned (collisions with other masters/leaves — including future work)
+| Collision | With (master/leaf) | Kind (code \| memory \| sequencing) | Evidence | Limits |
 | --------- | ------------------ | --------------------------------- | -------- | ------ |
 - Recommended resolution: up-front foundation-master extraction | leaf move | sequential ordering | none needed
 
@@ -43,8 +42,8 @@ the spawning agent's main loop.
 
 ## Evidence Inventory
 - Route indexes read:
-- read_ar_files namings (IDs and cards, then natively opened):
+- Identifiers and card paths returned by `read_ar_files`, and the files opened with native file tools:
 
-## Bottom Line (for the spawning agent's main loop)
+## Actions for the spawning agent's main loop
 - <the one or two things the orchestrator/reviewer must act on> — no mutation performed here.
 ```

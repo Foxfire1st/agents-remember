@@ -1,5 +1,7 @@
 # Bootstrap Input Ledger — <repo>
 
+<!-- The bootstrap orchestrator uses this template to record the reviewed source inventory before research proceeds. -->
+
 | Field | Value |
 |---|---|
 | targetRepo | `<repo>` |
@@ -7,7 +9,7 @@
 | bootstrapMode | quick-orientation / safe-starter-memory / cross-repo-focused / domain-doc-focused / existing-memory-slice-maintenance / full-bootstrap |
 | memoryRoot | `<path>` |
 | onboardingRoot | `<path>` |
-| topology | external / mixed |
+| topology | external |
 | targetBranch | `<branch>` |
 | generated | <YYYY-MM-DDThh:mm> |
 | sourceInventoryGate | pending / accepted / corrected / blocked |
@@ -52,7 +54,7 @@ Use this section for `existing-memory-slice-maintenance`.
 
 ## Settings Path-Rule Exclude Review
 
-Record whether the `c-08-ar-coordination-context-resolver` skill resolved `system/settings.json` already includes the standard path-rule excludes. Use this list as a settings review checklist, not as a hidden replacement for `pathRules`.
+Record whether the resolved `system/settings.json` already includes the standard path-rule excludes. Use this list as a settings review checklist, not as a hidden replacement for `pathRules`.
 
 ```text
 node_modules/**

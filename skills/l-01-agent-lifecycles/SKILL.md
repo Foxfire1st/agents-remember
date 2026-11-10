@@ -5,13 +5,13 @@ description: "Route explicit role capsules for canonical AR work or taskless Pro
 
 # Role-capsule router
 
-This is a thin router. It does not define a shared lifecycle or inject shared core instructions. A role capsule contains exactly the selected `roles/<role>.md` and one applicable `operations/<operation>.md`; canonical task facts and workspace bindings arrive separately in the AR handover. `composition-manifest.json` is the routing metadata authority.
+This reference describes role-capsule routing for maintainers and agents checking their supplied launch. A role capsule contains the selected `roles/<role>.md` and one applicable `operations/<operation>.md`; its first message also carries the every-role digest and the handover facts, and no other core file is loaded. `composition-manifest.json` is the routing metadata authority.
 
 ## Select the supplied role and operation
 
-The role launcher supports these eight role IDs: `architect`, `investigator`, `orchestrator`, `manager`, `worker`, `reviewer`, `curator`, and `bootstrap`. `system-specialist` is the earlier ID of the same Investigator role. The manifest retains other registry entries, but this router does not launch them. If the handover lacks a supported role or one applicable operation, report the exact missing or unsupported field in your own chat and stop. Do not infer a role, operation, task, repository, or owner from a chat title, runtime directory, or nearby document.
+The role launcher supports these eight role IDs: `architect`, `investigator`, `orchestrator`, `manager`, `worker`, `reviewer`, `curator`, and `bootstrap`. If the handover lacks a supported role or one applicable operation, report the exact missing or unsupported field in your own chat and stop. Do not infer a role, operation, task, repository, or owner from a chat title, runtime directory, or nearby document.
 
-For a task-bound launch, use only the canonical task reference and paired workspace supplied in the handover. Follow that role and operation's exact task-read arguments. Do not manufacture task IDs or parent relationships. Projects is a shared execution workspace, not a repository identity; leaf roles use the selected AR-paired task enclosure already bound by the launcher.
+For a task-bound launch, use only the canonical task reference and paired workspace supplied in the handover. Follow that role and operation's exact task-read arguments. Do not manufacture task IDs or parent relationships. Projects is a shared execution workspace, not a repository identity; leaf roles use the selected Agents Remember (AR) paired task enclosure already bound by the launcher.
 
 Architect and Investigator may be started manually at Projects altitude without task references. A taskless Architect asks only for missing outcome or registered repository details. An Investigator takes any scoped concern from its parent's first message and asks that parent for missing scope; without a parent it asks the developer in its own chat. It may also be selected on a sprint or on a sprint and master, never on a leaf. Neither role creates a fake sprint, master, or task.
 

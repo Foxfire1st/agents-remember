@@ -57,6 +57,15 @@ class CapsuleBindingIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class CapsuleInstructionOrigin:
+    """The exact character span contributed by one admitted source file."""
+
+    source_path: str
+    start: int
+    end: int
+
+
+@dataclass(frozen=True, slots=True)
 class CapsuleDelivery:
     """One admitted capsule, ready for the launch that carries it.
 
@@ -68,6 +77,7 @@ class CapsuleDelivery:
     trusted_instructions: str
     semantic_digest: str
     detail_references: tuple[CapsuleDetailReference, ...] = ()
+    instruction_origins: tuple[CapsuleInstructionOrigin, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.trusted_instructions.strip():
@@ -163,4 +173,20 @@ def capsule_delivery_from(compilation: object) -> CapsuleDelivery:
         trusted_instructions=str(render()),
         semantic_digest=str(getattr(capsule, "semantic_digest", "")),
         detail_references=getattr(capsule, "detail_references", ()),
+        instruction_origins=_instruction_origins(capsule),
     )
+
+
+def _instruction_origins(capsule: object) -> tuple[CapsuleInstructionOrigin, ...]:
+    """Copy compiler-owned provenance without changing its instruction bytes."""
+    origins: list[CapsuleInstructionOrigin] = []
+    offset = 0
+    units = getattr(capsule, "instruction_units", None)
+    if units is None:
+        raise CapsuleDeliveryError("compiled capsule carries no instruction_units source origins")
+    for unit in units:
+        block = unit.block
+        end = offset + len(block.content)
+        origins.append(CapsuleInstructionOrigin(block.source_path, offset, end))
+        offset = end
+    return tuple(origins)

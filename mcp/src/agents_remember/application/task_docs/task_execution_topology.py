@@ -370,11 +370,11 @@ def verify_sprint_judgment_ids(
                 "task-execution-graph-judgment-unknown: "
                 f"canonical Judgment Register has no row {judgment_id!r} (mutation {op})"
             )
-        if judgment.author not in {"strategist", "orchestrator"}:
+        if judgment.author not in {"architect", "orchestrator"}:
             raise ExecutionTopologyError(
                 "task-execution-graph-judgment-author-refused: "
                 f"judgment {judgment_id!r} was authored by {judgment.author!r}; "
-                "only strategist/orchestrator rows may back graph authoring"
+                "graph authoring requires an Architect or Orchestrator ruling"
             )
 
 
@@ -668,8 +668,9 @@ def inventory_execution_topology(
     Read-only. The proposed explicit nature preserves current behavior: a commanded master
     that already has an ``ar/<slug>`` branch is proposed ``atomic`` (it keeps its branch),
     everything else is proposed ``organizational`` (direct-super ancestry). Legacy sprints
-    carry no dependency edges, so the proposed graph is parallel and edges are left for an
-    accepted strategist/orchestrator ruling — never inferred from file order or names.
+    carry no dependency edges, so the proposed graph is parallel and edges are left for
+    an Architect or Orchestrator ruling that has been accepted — never inferred from file
+    order or names.
     """
 
     topology = TaskDocumentTopology(request.coordination_root)

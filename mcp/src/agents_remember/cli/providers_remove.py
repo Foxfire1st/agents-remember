@@ -42,8 +42,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--config",
         default=None,
-        help="Path to trusted MCP settings JSON. Omit to discover it from the working "
-        "directory, as the other subcommands do.",
+        help="Path to trusted MCP settings JSON. Omit to use the user settings file "
+        "~/.config/agents-remember/agents-remember-settings.json "
+        "(under XDG_CONFIG_HOME when set), whatever the current directory.",
     )
     parser.add_argument(
         "--dry-run",
@@ -202,7 +203,7 @@ def _remove_folders(folders: list[dict[str, Any]], root_real: Path) -> tuple[int
 
 def _resolve_config(args: argparse.Namespace) -> McpRuntimeConfig | None:
     try:
-        return load_config(args.config if args.config else discover_config(Path.cwd()))
+        return load_config(args.config if args.config else discover_config())
     except (ConfigError, ConfigDiscoveryError, OSError) as error:
         print(f"providers-remove: cannot resolve configuration: {error}", file=sys.stderr)
         return None

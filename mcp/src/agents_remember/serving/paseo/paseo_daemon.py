@@ -24,6 +24,7 @@ from agents_remember.serving.paseo.paseo_command import (
     run_command,
 )
 from agents_remember.serving.paseo.paseo_daemon_config import agent_tools_setting
+from agents_remember.serving.paseo.paseo_harness_homes import harness_home_status
 from agents_remember.serving.paseo.paseo_lock import runtime_lock
 from agents_remember.serving.paseo.paseo_node import node_status
 from agents_remember.serving.paseo.paseo_plugin_files import PLUGIN_ID, read_embed
@@ -61,7 +62,7 @@ def runtime_status(
     ``agentTools`` is the setting for Paseo's own agent tools as the home's configuration file
     holds it; ``differs`` is true when that is not the value provision writes.
     """
-    cli = PaseoCli(settings, runner)
+    cli = PaseoCli(settings, runner, reader=reader)
     record = inspect_record(settings.home, "status", reader)
     status = None
     if record.kind != "stale":
@@ -77,6 +78,7 @@ def runtime_status(
         **node,
         "restartRemedy": terminal_provision_remedy(settings) if node["restartRequired"] else None,
         "sessionVariables": list(facts.session_variables) if facts else [],
+        **harness_home_status(settings, facts),
         "sessionRemedy": "paseo stop, then a new start at a time you choose"
         if facts and facts.session_variables
         else None,
@@ -101,6 +103,8 @@ def _not_running(settings: PaseoRuntimeSettings, record: RecordState) -> dict[st
         "ok": True,
         "home": settings.home.as_posix(),
         "running": False,
+        "inheritedHarnessHomes": [],
+        "harnessHomeRemedy": None,
         "sessionVariables": [],
         "sessionRemedy": None,
         "version": None,
@@ -137,7 +141,7 @@ def stop_runtime(
     signalled: the process it names belongs to someone else.
     """
     inspect_record(settings.home, "stop", reader)
-    cli = PaseoCli(settings, runner)
+    cli = PaseoCli(settings, runner, reader=reader)
     if not cli.executable.is_file() and not settings.home.exists():
         return _stop_locked(settings, runner, reader)
     with runtime_lock(settings.home, time.monotonic() + 60):
@@ -147,7 +151,7 @@ def stop_runtime(
 def _stop_locked(
     settings: PaseoRuntimeSettings, runner: CommandRunner, reader: ProcessReader
 ) -> dict[str, Any]:
-    cli = PaseoCli(settings, runner)
+    cli = PaseoCli(settings, runner, reader=reader)
     stale = inspect_record(settings.home, "stop", reader)
     record = None
     if stale.kind == "stale":
@@ -173,7 +177,7 @@ def _home_record(
     cli: PaseoCli, step: str, args: Sequence[str], reader: ProcessReader
 ) -> dict[str, Any] | None:
     """Run one home-addressed command; ``None`` when nothing was ever installed or started."""
-    if not cli.node.is_file() or not cli.executable.is_file():
+    if not cli.executable.is_file():
         if (cli.settings.home / PROCESS_RECORD).exists():
             remedy = (
                 terminal_provision_remedy(cli.settings)
@@ -181,7 +185,7 @@ def _home_record(
                 else "Run runtime_install, then the one dashboard start."
             )
             raise PaseoRuntimeFailure(
-                "node_not_installed" if not cli.node.is_file() else "paseo_cli_unavailable",
+                "paseo_cli_unavailable",
                 step,
                 f"The configured host needs the product Node and Paseo CLI. {remedy}",
             )

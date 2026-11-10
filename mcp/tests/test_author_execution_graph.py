@@ -43,7 +43,7 @@ def _judgment_register(rows: list[str]) -> str:
     return "\n".join([JUDGMENT_HEADER, JUDGMENT_SEPARATOR, *rows])
 
 
-def _judgment_row(judgment_id: str, author: str = "strategist") -> str:
+def _judgment_row(judgment_id: str, author: str = "architect") -> str:
     return (
         f"| {judgment_id} | leaf move | graph | segmentation=a | Explicit graph ruling. | "
         f"notes.md | {author} | high | |"
@@ -72,7 +72,7 @@ class ExecutionGraphAuthoringTests(unittest.TestCase):
         *,
         register: bool = True,
         graph: dict[str, Any] | None = None,
-        judgment_author: str = "strategist",
+        judgment_author: str = "architect",
         leafs_a: list[str] | None = None,
     ) -> None:
         leafs = leafs_a or ["L1", "L2", "L3"]
@@ -213,3 +213,55 @@ class ExecutionGraphAuthoringTests(unittest.TestCase):
                 ]
             )
         self.assertEqual(before, self._snapshot())
+
+    def test_orchestrator_ruling_still_authors_the_graph(self) -> None:
+        self._write_fixture(judgment_author="orchestrator")
+        applied = self._author(
+            [
+                {
+                    "op": "add_edge",
+                    "predecessor": MASTER_B.model_dump(),
+                    "successor": MASTER_A.model_dump(),
+                    "reason": "framework first",
+                    "judgmentId": "J-1",
+                }
+            ]
+        )
+        self.assertEqual(applied["state"], "authored")
+        sprint = read_task_doc(self.tasks / "sprint" / "task.json")
+        assert sprint.executionGraph is not None
+        self.assertEqual(len(sprint.executionGraph.edges), 1)
+        self.assertEqual(sprint.executionGraph.edges[0].judgmentId, "J-1")
+
+    def test_other_and_retired_ruling_authors_refuse_without_writes(self) -> None:
+        for author in (
+            "worker",
+            "manager",
+            "reviewer",
+            "curator",
+            "investigator",
+            "bootstrap",
+            "designer",
+            "strategist",
+        ):
+            for dry_run in (False, True):
+                with self.subTest(author=author, dry_run=dry_run):
+                    self._write_fixture(judgment_author=author)
+                    before = self._snapshot()
+                    with self.assertRaisesRegex(
+                        TaskDocError, "task-execution-graph-judgment-author-refused"
+                    ) as refused:
+                        self._author(
+                            [
+                                {
+                                    "op": "add_edge",
+                                    "predecessor": MASTER_B.model_dump(),
+                                    "successor": MASTER_A.model_dump(),
+                                    "reason": "framework first",
+                                    "judgmentId": "J-1",
+                                }
+                            ],
+                            dry_run=dry_run,
+                        )
+                    self.assertIn("an Architect or Orchestrator ruling", str(refused.exception))
+                    self.assertEqual(before, self._snapshot())

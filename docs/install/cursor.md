@@ -12,29 +12,10 @@ Official references:
 
 ## Register The MCP Server
 
-Write an MCP authority settings file (copy `examples/mcp/settings.example.json` and replace its
-paths), then add the server to `.cursor/mcp.json` in your workspace:
-
-```json
-{
-  "mcpServers": {
-    "agents-remember": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": [
-        "--refresh-package",
-        "agents-remember-mcp@latest",
-        "--config",
-        "<PATH/TO/YOUR/PROJECTS_FOLDER>/.cursor/mcp/agents-remember-settings.json"
-      ]
-    }
-  }
-}
-```
-
-`.cursor/mcp.json` in this repository is that registration with
-`<PATH/TO/YOUR/PROJECTS_FOLDER>` markers to replace by hand; no script renders it. Restart Cursor
-once so it starts the server.
+Use the [common registration example](../../examples/mcp/server.example.json) and the
+[shared settings setup](README.md). Adapt its command and arguments to the `mcpServers.agents-remember` entry in Cursor’s MCP configuration.
+The settings path is the absolute user-config path, not a workspace file.
+Restart or reload the harness after changing its registration.
 
 ## Start With One Call
 
@@ -57,27 +38,3 @@ foundation as ordinary task work. Bootstrap starts no role and authors no onboar
 Cursor discovers skills from folders it scans; Agents Remember writes none. The tool server
 publishes each skill as an MCP resource (the SEP-2640 skills extension) and Cursor reads them from
 the running server, so there is no skill tree to copy, render or keep in sync.
-
-## Optional: Always-Applied Rule
-
-An always-applied project rule is the dependable instruction surface: Cursor documents
-`sessionStart` hooks as fire-and-forget, so the rule is what a chat reliably reads.
-
-Copy `.cursor/rules/agents-remember.mdc` into your workspace `.cursor/rules/`, replace
-`<PATH/TO/YOUR/PROJECTS_FOLDER>` with your absolute path, and keep the front matter:
-
-```markdown
----
-description: Agents Remember memory system conventions
-alwaysApply: true
----
-
-Read and follow `ar-coordination/AGENTS.md` before working in any sibling project.
-Treat these rules as workspace instructions!
-
-@ar-coordination/AGENTS.md
-```
-
-Do not overwrite a repository's root `AGENTS.md` just to wire Agents Remember; root `AGENTS.md` is
-project-specific. If you also want the session-start hook, copy `.cursor/hooks/` and
-`.cursor/hooks.json` the same way and replace the same marker there.

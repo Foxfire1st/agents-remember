@@ -44,6 +44,10 @@ from agents_remember.errors import AuthorityError
 from agents_remember.models.memory import MemoryQualitySyncRequest
 from agents_remember.serving.paseo.paseo_command import CommandResult, PaseoCli
 from agents_remember.worktrees.worktree_contract import load_contract
+from agents_remember_test_support.testing.agent_eval_checkout_provisioning import (
+    assert_native_leaf_checkout_provisioning,
+    assert_scratch_cli_config_binding,
+)
 
 
 class RecorderDaemon:
@@ -818,6 +822,12 @@ class TrialSetupTests(unittest.TestCase):
         self.assertFalse((trial.code_root / "retired.py").exists())
         self.assertTrue(all(Path(item["path"]).is_file() for item in result["reports"]))
 
+    def test_native_leaf_publication_declares_its_own_checkout_test_mode(self):
+        assert_native_leaf_checkout_provisioning(self, CODEX_ACTOR)
+
+    def test_batch_cli_declares_fresh_child_test_mode_and_uses_trial_settings(self):
+        assert_scratch_cli_config_binding(self, CODEX_ACTOR)
+
     def test_native_citation_probe_keeps_absent_candidate_subjects_absent(self):
         self.native_leaf_case()
         trial = self.provision()
@@ -1041,7 +1051,7 @@ class TrialSetupTests(unittest.TestCase):
         with (
             patch("agent_evals.trial_setup.PaseoCli", side_effect=cli),
             patch(
-                "agents_remember.serving.paseo.paseo_command.product_node",
+                "agents_remember.serving.paseo.paseo_running_node.product_node",
                 return_value=SimpleNamespace(node=Path(sys.executable)),
             ),
         ):

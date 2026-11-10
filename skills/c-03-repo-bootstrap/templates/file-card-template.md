@@ -1,5 +1,7 @@
 # File Card — <source path>
 
+<!-- The bootstrap orchestrator writes this work order for the worker who will create or update onboarding for one source file. -->
+
 | Field | Value |
 |---|---|
 | repo | <repo> |
@@ -8,6 +10,8 @@
 | generated | <YYYY-MM-DDThh:mm> |
 
 ## Classification
+
+<!-- In the Role field, config means configuration and DTO means data transfer object. -->
 
 | Field | Value |
 |---|---|

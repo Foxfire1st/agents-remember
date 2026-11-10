@@ -612,10 +612,7 @@ def _observe_actor_text(
             delivery,
             capture,
             runtime.provisioned.project_root,
-            frozen_contents={
-                row["path"]: row["content"]
-                for row in runtime.context.text_artifact["entries"]["curation"]["details"]
-            },
+            frozen_contents=dict(delivery.frozen_contents),
         )
 
 

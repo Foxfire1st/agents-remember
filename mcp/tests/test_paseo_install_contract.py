@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import json
+import shutil
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 from _user_settings_guard import user_settings_path_for_write
 from agents_remember.application.runtime.install import RuntimeInstallRequest, run_runtime_install
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
+from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.mcp.tools.core import runtime_install_payload
 from agents_remember.serving.paseo import paseo_install
+from agents_remember.serving.paseo.paseo_daemon_config import write_provider_entries
+from agents_remember.serving.paseo.paseo_plugin_files import PLUGIN_ID, installed_plugin_path
 from agents_remember.serving.paseo.paseo_provision import provision_for_install
-from paseo_runtime_test_support import FakePaseo, file_states, free, runtime_settings
+from agents_remember.serving.paseo.paseo_settings import daemon_settings
+from paseo_runtime_test_support import FakePaseo, file_states, free, runtime_settings, write_plugin
 
 
 def setup_config(root):
@@ -224,3 +230,181 @@ def test_build_pin_wins_all_settings_selectors_and_legacy_harness_block_is_ignor
     # L188 moved the host authority to the MCP settings file: the old user-settings block is
     # ignored, not read, and the authority file remains the only source of `paseoRuntime`.
     assert load_config(config.config_path).paseo_runtime is None
+
+
+def preview_matches_real(settings, fake, source, root):
+    """Compare the entire ordered host action list, and prove the preview only observed."""
+    before = file_states(root)
+    daemon = fake.daemon
+    at = len(fake.calls)
+    with patch.object(paseo_install, "plugin_source_root", return_value=source):
+        preview = paseo_install.preview_host(settings, runner=fake, reader=fake.reader)
+    assert file_states(root) == before
+    assert fake.daemon is daemon and fake.mutations(at) == []
+    real = provision_for_install(
+        settings, runner=fake, reader=fake.reader, plugin_source=source, probe=free
+    )
+    assert real["ok"], real
+    assert preview["changes"] == real["changes"]
+    assert preview["changed"] == real["changed"]
+    return preview, real
+
+
+def test_host_preview_lists_first_install_settings_destinations_and_start(tmp_path):
+    settings = runtime_settings(tmp_path)
+    fake = FakePaseo(settings)
+    source = write_plugin(tmp_path, "initial")
+    preview, _real = preview_matches_real(settings, fake, source, tmp_path)
+    actions = preview["changes"]
+    assert {
+        "step": "config",
+        "action": "set",
+        "path": "daemon.relay.enabled",
+        "value": False,
+        "applies": "live",
+    } in actions
+    assert any(item["step"] == "embed" and item["path"].endswith("embed.json") for item in actions)
+    assert any(
+        item["step"] == "plugin"
+        and item["action"] == "copied"
+        and item["path"] == installed_plugin_path(settings.home).as_posix()
+        for item in actions
+    )
+    assert any(item["step"] == "daemon" and item["action"] == "started" for item in actions)
+    assert any(item["step"] == "plugin" and item["action"] == "installed" for item in actions)
+    assert "pnt-provider-value" not in json.dumps(preview)
+    repeat, _ = preview_matches_real(settings, fake, source, tmp_path)
+    assert repeat["changes"] == []
+
+
+def test_host_preview_lists_setting_only_and_provider_reload_without_secret(tmp_path):
+    settings = runtime_settings(tmp_path)
+    fake = FakePaseo(settings)
+    source = write_plugin(tmp_path, "initial")
+    preview_matches_real(settings, fake, source, tmp_path)
+    fake.write("daemon.relay.enabled", True)
+    preview, real = preview_matches_real(settings, fake, source, tmp_path)
+    assert preview["changes"] == [
+        {
+            "step": "config",
+            "action": "set",
+            "path": "daemon.relay.enabled",
+            "value": False,
+            "applies": "live",
+        }
+    ]
+    assert real["daemon"]["action"] == "reloaded"
+    changed = replace(
+        settings, providers={"custom": {"extends": "acp", "env": {"KEY": "private-value"}}}
+    )
+    preview, _ = preview_matches_real(changed, fake, source, tmp_path)
+    assert preview["changes"] == [
+        {
+            "step": "config",
+            "action": "set",
+            "path": "agents.providers",
+            "providerIds": ["custom"],
+            "applies": "live",
+        },
+        {"step": "config", "action": "reloaded", "path": "agents.providers"},
+    ]
+    assert "private-value" not in json.dumps(preview)
+
+
+def test_host_preview_matches_plugin_copy_reload_enable_and_replacement(tmp_path):
+    settings = runtime_settings(tmp_path)
+    fake = FakePaseo(settings)
+    source = write_plugin(tmp_path, "initial")
+    preview_matches_real(settings, fake, source, tmp_path)
+    write_plugin(tmp_path, "changed")
+    changed = replace(settings, embed=())
+    preview, _ = preview_matches_real(changed, fake, source, tmp_path)
+    assert [item["action"] for item in preview["changes"]] == ["written", "copied", "reloaded"]
+    fake.plugins[PLUGIN_ID]["enabled"] = False
+    preview, _ = preview_matches_real(changed, fake, source, tmp_path)
+    assert preview["changes"] == [{"step": "plugin", "action": "enabled"}]
+    wrong = (tmp_path / "earlier-plugin").as_posix()
+    fake.plugins[PLUGIN_ID]["path"] = wrong
+    preview, _ = preview_matches_real(changed, fake, source, tmp_path)
+    assert preview["changes"] == [
+        {"step": "plugin", "action": "removed", "path": wrong},
+        {"step": "plugin", "action": "installed"},
+    ]
+
+
+def test_host_preview_names_deferred_transition_without_promising_actions(tmp_path):
+    settings = runtime_settings(tmp_path)
+    fake = FakePaseo(settings)
+    source = write_plugin(tmp_path, "initial")
+    preview_matches_real(settings, fake, source, tmp_path)
+    fake.write("features.webUi.enabled", False)
+    preview, real = preview_matches_real(settings, fake, source, tmp_path)
+    assert preview["changes"] == [] and not preview["changed"]
+    assert (
+        preview["restartRequired"] == real["restartRequired"] == ["setting:features.webUi.enabled"]
+    )
+    assert preview["deferred"][0]["action"] == "restart"
+    assert "preserves the running host" in preview["deferred"][0]["reason"]
+    assert not preview["wouldInstallHost"] and not preview["wouldStart"]
+
+
+def test_host_preview_matches_stopped_recovery_record_and_install_cleanup(tmp_path):
+    settings = runtime_settings(tmp_path)
+    fake = FakePaseo(settings)
+    source = write_plugin(tmp_path, "initial")
+    fake.install(settings.install_prefix, settings.version)
+    fake.write_settings(daemon_settings(settings))
+    write_provider_entries(settings.home, {"incomplete": {"extends": "acp"}})
+    fake.record(9999)
+    staging = settings.install_prefix / ".ar-staging"
+    staging.mkdir()
+    preview, _ = preview_matches_real(settings, fake, source, tmp_path)
+    assert preview["changes"][:3] == [
+        {"step": "config", "action": "restored", "path": "agents.providers", "restored": "file"},
+        {
+            "step": "daemon",
+            "action": "removed-stale-record",
+            "pid": 9999,
+            "reason": "the recorded process no longer exists",
+        },
+        {"step": "install", "action": "removed-leftover", "path": staging.as_posix()},
+    ]
+
+
+def test_host_preview_observes_existing_cli_before_node_acquisition_and_cleanup(tmp_path):
+    settings = runtime_settings(tmp_path)
+    fake = FakePaseo(settings)
+    source = write_plugin(tmp_path, "initial")
+    fake.install(settings.install_prefix, settings.version)
+    fake.write_settings(daemon_settings(settings))
+    node = product_node()
+    shutil.rmtree(node.root)
+
+    def acquire_node(_runner):
+        for path in (node.node, node.npm):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        return {**node.payload(), "changed": True}
+
+    with patch(
+        "agents_remember.serving.paseo.paseo_provision.ensure_node", side_effect=acquire_node
+    ):
+        preview, _ = preview_matches_real(settings, fake, source, tmp_path)
+    assert preview["changes"][0] == {
+        "step": "node",
+        "action": "installed",
+        "version": node.version,
+        "path": node.node.as_posix(),
+    }
+    assert not any(item["step"] == "install" for item in preview["changes"])
+    archive = node.cache / f"{node.root.name}.tar.xz.partial"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    archive.write_bytes(b"partial archive")
+    staging = node.root.with_name(f".{node.root.name}.unpack")
+    staging.mkdir()
+    preview, real = preview_matches_real(settings, fake, source, tmp_path)
+    assert preview["changes"] == [
+        {"step": "node", "action": "removed-leftover", "path": archive.as_posix()},
+        {"step": "node", "action": "removed-leftover", "path": staging.as_posix()},
+    ]
+    assert preview["daemon"] == real["daemon"] == {"action": "untouched", "reasons": []}

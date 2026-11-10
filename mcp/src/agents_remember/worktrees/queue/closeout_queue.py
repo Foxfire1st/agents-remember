@@ -135,7 +135,6 @@ def _authorize_projection_access(
 def _is_sprint_planning_actor(actor: QueueActor, sprint_ref: TaskDocumentRef) -> bool:
     return (actor.task_document_ref, actor.role) in {
         (sprint_ref, "architect"),
-        (sprint_ref, "strategist"),
         (sprint_ref, "orchestrator"),
     }
 

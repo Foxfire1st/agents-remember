@@ -91,13 +91,11 @@ ALL_OPERATIONS = (
     "recovery",
     "bootstrap",
 )
-#: The ten frozen roles. Spelled here rather than imported so the fixture can
+#: The eight frozen roles. Spelled here rather than imported so the fixture can
 #: disagree with the code under test instead of moving with it.
 ALL_ROLES = (
     "architect",
     "orchestrator",
-    "designer",
-    "strategist",
     "manager",
     "worker",
     "curator",
@@ -109,8 +107,6 @@ ALL_ROLES = (
 ROLE_ALTITUDES = {
     "architect": "sprint",
     "orchestrator": "sprint",
-    "strategist": "sprint",
-    "designer": "master",
     "manager": "master",
     "worker": "leaf",
     "curator": "leaf",
@@ -130,8 +126,6 @@ OPERATIONS_BY_ROLE = {
         "authorized-closeout",
         "recovery",
     ),
-    "designer": ("orientation", "planning"),
-    "strategist": ("orientation", "planning"),
     "manager": (
         "orientation",
         "coordination",
@@ -681,7 +675,7 @@ def test_a_caller_changing_the_role_string_cannot_acquire_another_role(world: Wo
 
 
 def test_an_unknown_role_is_refused_with_its_own_status(world: World) -> None:
-    """A string outside the frozen ten is a typed refusal, not a nearest match."""
+    """A string outside the frozen eight is a typed refusal, not a nearest match."""
 
     refused = world.compile(world.request(role="not-a-role"))
     assert not refused.ok and refused.refusal is not None

@@ -26,7 +26,6 @@ from agents_remember.kernel.primitives.control_vocabulary import (
     SEND_OUTCOME_UNKNOWN,
 )
 from agents_remember.kernel.primitives.paseo_authority import authority_settings_path
-from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
     NO_PASEO_RUNTIME_CONFIGURED,
     PaseoRuntimeNotConfigured,
@@ -37,8 +36,14 @@ from agents_remember.serving.paseo.paseo_daemon_config import (
     DAEMON_CONFIG_COMMAND,
     DAEMON_CONFIG_UNVERIFIED,
 )
-from agents_remember.serving.paseo.paseo_process_record import inspect_record, read_process
+from agents_remember.serving.paseo.paseo_node import node_status
+from agents_remember.serving.paseo.paseo_process_record import (
+    ProcessUnreadable,
+    inspect_record,
+    read_process,
+)
 from agents_remember.serving.paseo.paseo_remedy import terminal_provision_remedy
+from agents_remember.serving.paseo.paseo_running_node import communication_node
 
 # Every bridge call ends within this limit; a call that does not is stopped and reported as a
 # timeout. An operation that has to wait longer is a sequence of calls.
@@ -96,9 +101,10 @@ def bridge_call(
         timeout_seconds = PASEO_BRIDGE_TIMEOUT_SECONDS
     settings = require_bridge_runtime(config)
     try:
-        node = product_node().node
+        node = communication_node(settings, read_process)
     except PaseoRuntimeFailure as error:
-        raise PaseoBridgeFailure(BRIDGE_UNAVAILABLE, str(error)) from error
+        code = error.code if error.code == "node_not_installed" else BRIDGE_UNAVAILABLE
+        raise PaseoBridgeFailure(code, str(error)) from error
     script = Path(__file__).with_name("paseo_bridge.mjs")
     if not node.is_file() or not script.is_file():
         remedy = (
@@ -138,7 +144,26 @@ def bridge_call(
         raise PaseoBridgeFailure(
             BRIDGE_UNAVAILABLE, f"The Paseo bridge could not be started: {error}"
         ) from error
-    return _bridge_reply(command, completed)
+    reply = _bridge_reply(command, completed)
+    try:
+        record = inspect_record(settings.home, "bridge", read_process)
+        facts = (
+            read_process(record.pid) if record.kind == "own" and record.pid is not None else None
+        )
+    except (PaseoRuntimeFailure, ProcessUnreadable):
+        # The host can exit or become unreadable after acknowledging the command. That
+        # observation must never change the acknowledged result into an uncertain failure.
+        return reply
+    if facts is None:
+        return reply
+    state = node_status(facts.node_executable if facts else None)
+    if not state["restartRequired"]:
+        return reply
+    return {
+        **reply,
+        **state,
+        "restartRemedy": terminal_provision_remedy(settings) if state["restartRequired"] else None,
+    }
 
 
 def daemon_configuration(config: McpRuntimeConfig) -> dict[str, Any]:

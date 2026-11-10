@@ -74,10 +74,10 @@ A repo-level `overview.md` is enough to start. Larger repositories can add route
 
 When a task touches a file, the agent should:
 
-1. resolve context with the `c-08-ar-coordination-context-resolver` skill
-2. check drift with the `c-05-create-or-update-onboarding-files` skill
+1. resolve context with `context_packet` using the [tool reference](../../skills/l-01-agent-lifecycles/reference/knowledge/commands.md)
+2. check drift with the [memory-quality tools](../../skills/l-01-agent-lifecycles/reference/knowledge/commands.md)
 3. read or create the relevant onboarding
 4. implement approved work
-5. refresh onboarding through the `c-05-create-or-update-onboarding-files` skill
+5. have the Curator refresh onboarding through the [card procedure](../../skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md)
 
 This avoids a giant up-front documentation project. The first task on a file pays the onboarding cost; later tasks benefit.

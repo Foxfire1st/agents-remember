@@ -417,7 +417,7 @@ button { font: inherit; cursor: pointer; color: inherit; background: none; borde
       <button class="nav-item" data-view="lifecycles" data-title="Lifecycles" data-path="l-01 · lifecycle → worktree → task"><span class="ni">02</span><span class="nl">Lifecycles</span></button>
       <button class="nav-item" data-view="providers" data-title="Provider Health" data-path="isolated per-worktree instances"><span class="ni">03</span><span class="nl">Providers</span><span class="nb" id="badge-prov"></span></button>
       <button class="nav-item" data-view="health" data-title="Memory Health" data-path="memory_quality · drift · gates"><span class="ni">04</span><span class="nl">Memory Health</span><span class="nb" id="badge-health"></span></button>
-      <button class="nav-item" data-view="retrieval" data-title="Retrieval" data-path="c-04 strategy router"><span class="ni">05</span><span class="nl">Retrieval</span></button>
+      <button class="nav-item" data-view="retrieval" data-title="Retrieval" data-path="retrieval strategies"><span class="ni">05</span><span class="nl">Retrieval</span></button>
       <button class="nav-item" data-view="topology" data-title="Topology" data-path="workspace constellation"><span class="ni">06</span><span class="nl">Topology</span></button>
     </nav>
     <div class="rail-foot">
@@ -472,7 +472,7 @@ button { font: inherit; cursor: pointer; color: inherit; background: none; borde
                 <div class="feed-row"><span class="ft">14:31:44</span><span class="dot crit"></span><div class="fd"><div class="fk">Conflict · T-119</div><div class="fx">rebase conflict · 2 files · intent-router</div></div></div>
                 <div class="feed-row"><span class="ft">14:30:58</span><span class="dot ok"></span><div class="fd"><div class="fk">Provider · spawn</div><div class="fx">wt-205 grepai instance booting</div></div></div>
                 <div class="feed-row"><span class="ft">14:30:12</span><span class="dot ok"></span><div class="fd"><div class="fk">Worktree · integration</div><div class="fx">T-117 gates passed · ready to merge</div></div></div>
-                <div class="feed-row"><span class="ft">14:29:30</span><span class="dot ok"></span><div class="fd"><div class="fk">Retrieval · semantic</div><div class="fx">c-08 resolver · 6 hits</div></div></div>
+                <div class="feed-row"><span class="ft">14:29:30</span><span class="dot ok"></span><div class="fd"><div class="fk">Retrieval · semantic</div><div class="fx">context resolution · 6 hits</div></div></div>
               </div>
             </div>
           </div>
@@ -561,7 +561,7 @@ button { font: inherit; cursor: pointer; color: inherit; background: none; borde
       <div class="view-head">
         <div>
           <h1>Retrieval</h1>
-          <p class="vh-sub">The c-04 strategy router across three substrates — semantics for known concepts, relationships for known anchors, intent for hidden contracts and code truths.</p>
+          <p class="vh-sub">The retrieval strategies across three substrates — semantics for known concepts, relationships for known anchors, intent for hidden contracts and code truths.</p>
         </div>
         <div class="vh-side">762 queries · 24h<br>avg 71 ms · hit-rate 86%</div>
       </div>
@@ -648,17 +648,17 @@ button { font: inherit; cursor: pointer; color: inherit; background: none; borde
   var WS = { name:"nexu-ops", repos:[
     { id:"ar", name:"agents-remember", worktrees:[
       { id:"wt-118", branch:"feat/harness-root-starter-packages", providers:PRO(["healthy",88,0.42],["healthy",130,0.31],["healthy",42,0.55],["healthy",12,0.18]),
-        tasks:[{ id:"T-118", title:"Harness root starter packages", stage:"build", lens:"Feature", mode:"durable · w-02", status:"running",
+        tasks:[{ id:"T-118", title:"Harness root starter packages", stage:"build", lens:"Feature", mode:"durable · task", status:"running",
           art:"3 file cards · onboarding wave 3", ckpt:"checkpoint @ step 5 · 14:21", mem:"memory archive · staged",
           attn:{type:"approval", text:"Commit approval held — review starter-package manifest before commit.", wait:"22m"},
           steps:[["Resolve coordination context","d"],["Scaffold starter package layout","d"],["Wire harness root manifest","d"],["Bind MCP server entry","d"],["Run runtime_install verify","d"],["Commit — approval held","w"]] }] },
       { id:"wt-119", branch:"feat/retrieval-intent-router", providers:PRO(["degraded",210,0.78],["healthy",140,0.49],["healthy",46,0.40],["healthy",14,0.20]),
-        tasks:[{ id:"T-119", title:"Intent router substrate", stage:"build", lens:"Feature", mode:"durable · w-02", status:"blocked",
+        tasks:[{ id:"T-119", title:"Intent router substrate", stage:"build", lens:"Feature", mode:"durable · task", status:"blocked",
           art:"grepai adapter · router contract", ckpt:"checkpoint @ step 4 · 13:58", mem:"memory archive · pending",
           attn:{type:"conflict", text:"Rebase on main hit a conflict in 2 files — needs human resolve.", wait:"36m"},
           steps:[["Define intent substrate contract","d"],["Implement grepai adapter","d"],["Route unknown-contract queries","d"],["Add router fallback","d"],["Rebase on main — conflict","b"],["Integration tests","i"]] }] },
       { id:"wt-117", branch:"fix/mcp-package-readme", providers:PRO(["healthy",80,0.20],["healthy",120,0.15],["healthy",40,0.22],["healthy",11,0.10]),
-        tasks:[{ id:"T-117", title:"MCP package README fix", stage:"close", lens:"Bug", mode:"durable · w-02", status:"done",
+        tasks:[{ id:"T-117", title:"MCP package README fix", stage:"close", lens:"Bug", mode:"durable · task", status:"done",
           art:"README · version bump", ckpt:"all gates passed · 14:30", mem:"memory archive · refreshed",
           attn:null,
           steps:[["Fix package README","d"],["Update version","d"],["Missing-onboarding check","d"],["Memory quality gate","d"],["Ledger align — ready to merge","d"]] }] },
@@ -670,12 +670,12 @@ button { font: inherit; cursor: pointer; color: inherit; background: none; borde
     ]},
     { id:"cw", name:"coordination-workbench", worktrees:[
       { id:"wt-204", branch:"feat/lifecycle-eventlog", providers:PRO(["healthy",92,0.38],["healthy",135,0.30],["healthy",44,0.50],["healthy",13,0.16]),
-        tasks:[{ id:"T-204", title:"Event log schema", stage:"build", lens:"Feature", mode:"durable · w-02", status:"running",
+        tasks:[{ id:"T-204", title:"Event log schema", stage:"build", lens:"Feature", mode:"durable · task", status:"running",
           art:"event schema draft", ckpt:"checkpoint @ step 3 · 14:12", mem:"memory archive · staged",
           attn:null,
           steps:[["Draft event schema","d"],["Define event types","d"],["Wire emitter","d"],["Persist to ledger","a"],["Stream to console","i"],["Backfill","i"],["Tests","i"]] }] },
       { id:"wt-205", branch:"chore/provider-isolation", providers:PRO(["spawning",0,0],["spawning",0,0],["healthy",45,0.20],["healthy",15,0.12]),
-        tasks:[{ id:"T-205", title:"Provider isolation harness", stage:"context", lens:"Feature", mode:"durable · w-02", status:"waiting",
+        tasks:[{ id:"T-205", title:"Provider isolation harness", stage:"context", lens:"Feature", mode:"durable · task", status:"waiting",
           art:"spawn survey", ckpt:"context checkpoint · 13:40", mem:"memory archive · n/a",
           attn:{type:"answer", text:"Per-worktree or per-task provider isolation? Affects instance pool sizing.", wait:"48m"},
           steps:[["Survey current provider spawn","d"],["Choose isolation level","w"],["Per-worktree instance pool","i"],["Port / pid allocation","i"],["Teardown on integrate","i"],["Health probes","i"]] }] },
@@ -1139,7 +1139,7 @@ button { font: inherit; cursor: pointer; color: inherit; background: none; borde
   });
   var feed = document.getElementById("feed");
   var pool = [
-    ["ok", "Semantic · retrieval", "concept resolved · c-04 router · 5 hits"],
+    ["ok", "Semantic · retrieval", "concept resolved · retrieval · 5 hits"],
     ["ok", "Provider · health", "wt-119 codegraphcontext recovering"],
     ["warn", "Attention · T-205", "answer needed · isolation level"],
     ["ok", "Lifecycle · l-01", "T-204 advanced to build stage"],

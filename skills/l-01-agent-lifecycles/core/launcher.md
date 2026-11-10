@@ -1,64 +1,40 @@
-# Core — The Ambient Launcher (a chat without a role, not a role)
+# Core — The launcher for a chat without a role
 
-The developer-facing **free chat** is a **launcher, not a role seat** (ruled 2026-07-09). It is
-deliberately **not** a role: the role registry
-holds only roles, and no file under `roles/` describes this mode. It has no binding
-or worktree of its own.
+This authoring reference defines the duties of developer-facing free chat when it launches role work. The launcher is not a role seat: it has no binding or worktree, and the role registry and `roles/` contain only actual roles.
 
-## What it is
+## Answer research questions in chat
 
-A developer opened this session and the product did not start it: it has no binding. The
-launcher is the workspace entrypoint's developer-facing face.
+A developer opens this session; the product did not start it and supplied no role binding. It is the developer-facing entry to the workspace.
 
-- **Research-only questions are answered inline, with no role taken.** Reading, explaining,
-  assessing, and answering change no code and need no task file: chat is the right medium, and
-  there is no worktree and no task artifact.
-- **The launcher is never the architect, and never becomes one.** It does not assume the architect
-  role, does not own the developer conversation for a sprint, and does not accumulate portfolio
-  state. The architect is a *separate, spawned* seat.
+Answer research-only questions inline without taking a role. Reading, explaining, assessing and answering change no code. They need no task file, worktree or task artifact.
 
-## Ordinary role-shaped work — the one call
+Before handling a request for role work, read [Keep the launcher's boundaries](#keep-the-launchers-boundaries) for the role the launcher never takes and its single `role_start` route.
 
-For ordinary role-shaped work (a sprint, a task, any durable change that is not an explicit
-task-seat takeover), the launcher:
+## Launch ordinary role work once
 
-1. resolves the canonical target sprint and its **canonical sprint document**;
-2. writes the request of the developer into that document;
-3. starts an Architect with `role_start` **once** (the call carries no brief, and for
-   an Architect it names no document);
-4. tells the developer that the agent is in the dashboard and which sprint document holds
-   the request, and stops role work here.
+For a sprint, task or other durable change that is not an explicit task-seat takeover, first read [Keep the launcher's boundaries](#keep-the-launchers-boundaries) for the role the launcher never takes and its single `role_start` route. Then:
 
-The call carries no parent and no brief: what the new agent must know stands in the sprint
-document before the start, and the developer names that document to the Architect in the
-dashboard. The role settings choose harness, model, effort and permission mode.
-The agent is shown in the dashboard and the developer speaks with it there; `role_message` from
-this chat is refused. A refusal never falls back to another tool.
+1. Resolve the canonical target sprint and its canonical sprint document.
+2. Write the developer's request in that document.
+3. Call `role_start` once to start an Architect. The call carries no brief and, for an Architect, names no document.
+4. Tell the developer that the agent is in the dashboard and name the sprint document holding the request.
 
-For a **first sprint**, free chat uses the ordinary durable task workflow to create the master and
-first leaf *before* this launch; that bounded bootstrap creates scope data, not a global role seat.
+The call carries no parent or brief. Everything the new agent must know is in the sprint document before the start; the developer names that document to the Architect in the dashboard. Role settings choose the harness, model, effort and permission mode.
 
-## Task-seat takeover — the bounded exception
+For a first sprint only, create the sprint document, a master and its first leaf before you start the Architect. Write into them the developer's request and scope only: no requirement packets and no approved order.
 
-An explicit developer-declared task-seat takeover starts the **named role** on that role's
-canonical task document instead of first creating an architect — and only when the
-developer names the role and the task. The full contract is in
-`core/authority.md`; the launcher's part is that it makes the same single `role_start`
-call with the named role and that role's canonical document.
+## Handle an explicit task-seat takeover
 
-If the named role does not fit the named document, `role_start` refuses, and the launcher says
-what is missing rather than guessing.
+When the developer explicitly names both a role and its task, start that named role on its canonical task document instead of first creating an Architect. Follow [Handle a developer-declared takeover](authority.md#handle-a-developer-declared-takeover) for the complete takeover contract.
 
-## What the launcher must not do
+The takeover contract supplies the single start call, canonical selection and refusal response.
 
-- Do not take a role, wear a hat, or "temporarily be" the architect to get started.
-- Do not start an agent any other way than `role_start`, and do not message it: the developer
-  speaks with it in the dashboard.
-- Do not keep working locally after the agent is started.
+## Keep the launcher's boundaries
 
-## Why it is authored here rather than in `roles/`
+Take no role, wear no role's hat and do not temporarily act as the Architect to get started. The launcher never becomes the Architect. It does not own a sprint's developer conversation or accumulate portfolio state. The Architect is a separate, started seat.
 
-The architecture requires the launcher to remain a **distinct routing condition** rather than an
-invented role. Authoring its obligations in `core/` keeps that boundary structural — a reader
-enumerating `roles/` sees only seats — while still giving the launcher a complete, single home for
-its own duties.
+Use `role_start` to start the agent; no other route is allowed. Do not message it. The developer speaks to the agent in the dashboard. A `role_message` from launcher chat is refused. Report a refusal without switching to another tool. After the start, stop working locally on that role's work.
+
+## Keep this routing condition outside the role registry
+
+The launcher is a distinct routing condition, not an invented role. Its instructions live in `core/` so that readers enumerating `roles/` see only seats, while the launcher has one complete home for its own duties.

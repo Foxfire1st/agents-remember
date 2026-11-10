@@ -178,7 +178,7 @@ def publish_completed_disposition_task_authority(
                                 "priority=normal",
                                 "Fixture scheduling authority.",
                                 planning_ref,
-                                "strategist",
+                                "orchestrator",
                                 "high",
                                 "",
                             ),

@@ -28,6 +28,10 @@ def _invoke(world, document, capsys, *, memory=False, tree="HEAD"):
     args = ["handoff-check", str(listed), "--code", str(world.code), "--tree", tree]
     if memory:
         args += ["--memory", str(world.memory)]
+    return _invoke_cli(args, capsys)
+
+
+def _invoke_cli(args, capsys):
     try:
         status = main(args)
     except SystemExit as error:
@@ -44,8 +48,35 @@ def test_clean_producer_does_not_need_curator_admission(tmp_path, capsys) -> Non
     world = build_world(tmp_path)
     status, text = _invoke(world, _producer(), capsys)
     assert status == 0, text
-    assert "fired link: checked by the writer" in text
-    assert "record links: not run" in text
+    assert text == (
+        "handoff-check: clean\nfired link: checked by the writer\nrecord links: not run\n"
+    )
+
+
+def test_handoff_check_rejects_worklist_input(tmp_path, capsys) -> None:
+    world = build_world(tmp_path)
+    listed = world.root / "producer-list.json"
+    listed.write_text(json.dumps(_producer()))
+    worklist = world.root / "worklist.json"
+    worklist.write_text("[]")
+    status, text = _invoke_cli(
+        [
+            "handoff-check",
+            str(listed),
+            "--code",
+            str(world.code),
+            "--tree",
+            "HEAD",
+            "--worklist",
+            str(worklist),
+        ],
+        capsys,
+    )
+    assert status == 2, text
+    assert text.splitlines()[-1] == (
+        f"agents-remember: error: unrecognized arguments: --worklist {worklist}"
+    )
+    assert "handoff-check: clean" not in text.splitlines()
 
 
 @pytest.mark.parametrize("defect", ["rationale", "symbol", "target-shape", "last-entry"])
@@ -120,7 +151,7 @@ def test_repoint_checks_shape_and_new_target_but_not_fired_link_judgment(tmp_pat
     document = {"entries": _producer(), "history": [row]}
     status, text = _invoke(world, document, capsys)
     assert status == 0, text
-    assert "fired link: checked by the writer" in text
+    assert "fired link: checked by the writer" in text.splitlines()
     row["repoint"][0]["path"] = "gone.py"
     status, text = _invoke(world, document, capsys)
     assert status == 1, text

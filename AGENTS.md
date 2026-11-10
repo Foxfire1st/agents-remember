@@ -4,11 +4,8 @@ This repository is the source package for Agents Remember. It is not the live
 coordination runtime after installation.
 
 If this file is being read from a workspace-level pointer while you are working
-on a sibling repository, use the installed runtime instructions instead:
-
-```text
-<workspace>/ar-coordination/AGENTS.md
-```
+on a sibling repository, use that repository's role instructions and resolved
+memory-layer guidance instead.
 
 When working on this repository itself, use `agents-remember` as the target
 code repository for resolver, onboarding, workflow, and closeout commands.
@@ -23,44 +20,36 @@ document, writes the request of the developer into it, starts an Architect with
 that the agent is in the dashboard and which sprint document holds the request. The
 launcher is never a global architect identity.
 Another role is started this way only when the developer names the role and the task.
-Classify the job (bug / feature / triage / research) as a *lens* during
-reframe-research — a hint, re-pickable, never a gate.
 
 The build decision is taken at `decide`. Chat is never a build route — every
 code change lives under an approved task doc:
 
 1. **Research-only exit** — answers or assessments that change no code: no
    worktree, no task file; chat is the right medium.
-2. **Durable task** — `w-02-light-task-workflow`: a task document with
+2. **Durable task** — [task document authoring](skills/l-01-agent-lifecycles/reference/tasks/document-authoring.md): a task document with
    checklist, decision log, and proposed code examples; small code work takes
-   the minimal `w-02-light-task-workflow` artifact, and the work escalates to a
+   the minimal [leaf-task artifact](skills/l-01-agent-lifecycles/templates/leaf-task.md), and the work escalates to a
    master + light sub-task series when it outgrows a single-page plan.
 
-The task-collaboration doctrine in `tasks/AGENTS.md` applies inside the
-architect lifecycle's reframe-research phase, in plain chat, before any task
-file or format is chosen.
+Before scoping work in the architect lifecycle, read
+the [collaboration method](skills/l-01-agent-lifecycles/reference/tasks/collaboration-method.md).
+It applies in plain chat, before any task file or format is chosen.
 
 ---
 
 **IMPORTANT:**
 Do not change code or documentation without entering the architect lifecycle and clearing its plan gate.
 Do not change task plan items without approval. Think before acting.
-Do not randomly commit. Use the `w-02-light-task-workflow` skill instead!
+Do not randomly commit. Follow [Authorized Closeout](skills/l-01-agent-lifecycles/operations/closeout.md) instead!
 
 ---
 
 ## Memory And Onboarding
 
 Before relying on onboarding, task files, docs, or tools, resolve the active
-Agents Remember context with `c-08-ar-coordination-context-resolver`.
+Agents Remember context through the [context_packet tool reference](skills/l-01-agent-lifecycles/reference/knowledge/commands.md).
 
-For this source checkout, the normal resolver input is:
-
-```text
-code_repository_name = agents-remember
-```
-
-After the `c-08-ar-coordination-context-resolver` skill resolves the target repository and coordination root, prefer the
+After resolving the target repository and coordination root, prefer the
 Agents Remember `context_packet` MCP tool when that server is configured.
 Provider authority comes from the MCP settings file.
 
@@ -74,10 +63,10 @@ context_packet(repo_id="agents-remember")
 Legacy provider keys in the settings are still reported by the product's own provider summary
 and cleanup routes; they change nothing about how this packet is asked for.
 
-Then run `c-05-create-or-update-onboarding-files` for the resolved context before
+Then use the [memory-quality tool guidance](skills/l-01-agent-lifecycles/reference/knowledge/commands.md) for the resolved context before
 reasoning from onboarding or source files.
 
-After the `c-08-ar-coordination-context-resolver` skill resolves `memory_root`, read that memory layer's repository-specific
+After resolving `memory_root`, read that memory layer's repository-specific
 guidance:
 
 - `system/settings.md`
@@ -102,7 +91,7 @@ runtime settings live under the selected `ar-coordination/` or memory root.
   branch-valid truths, behavioral expectations, or code intent are unknown. Use
   onboarding plus bounded source confirmation.
 
-Use `c-04-retrieval-strategy-router` to understand the full benefit of the strategies as they allow you to complete the task faster.
+Read [knowledge use at the working step](skills/l-01-agent-lifecycles/reference/knowledge/use.md) before applying these retrieval strategies.
 
 ## Source Layout
 
@@ -111,19 +100,12 @@ Use `c-04-retrieval-strategy-router` to understand the full benefit of the strat
   which is the only generated skill copy: the tool server serves skills to a
   harness as MCP resources, and no harness starter package carries a skill
   folder (MIK-R196). Run it after any skill edit.
-- `agents-md-files/`, `benchmarks/`, `providers/`, and `system/` are canonical
+- `benchmarks/`, `providers/`, and `system/` are canonical
   runtime asset source folders. Edit them at the root and run
   `python3 scripts/sync-runtime.py` to refresh MCP package data.
-- The eight self-hosted harness starter packages keep their configuration,
-  hooks and instruction files in their own directories (`.claude/`, `.codex/`,
-  `.cursor/`, `.github-vscode/` with `.vscode/`, `.hermes/`, `.openclaw/`, `.pi/`,
-  `.agents/`). Maintain those files in place, including each harness's specific
-  configuration and hooks. A starter package carries no skill folder, because
-  skills are served by the tool server.
+- Harness configuration belongs to user-level harness settings; this source checkout carries no harness starter packages.
 - `mcp/` contains the MCP server, tool surface, and package-owned runtime
   services.
-- `mcp/src/agents_remember/package_data/runtime/agents-md-files/` contains the
-  generated package-owned copy of root `agents-md-files/`.
 - `mcp/src/agents_remember/package_data/runtime/skills/` is the generated
   package-owned skill copy used by `runtime_install`.
 - `mcp/src/agents_remember/package_data/runtime/providers/`,
@@ -136,15 +118,14 @@ Use `c-04-retrieval-strategy-router` to understand the full benefit of the strat
 ## Boundaries
 
 - Keep this root `AGENTS.md` scoped to working on the source checkout.
-- Keep installed coordinator instructions in `runtime/agents-md-files/`.
+- Keep shared instructions in the role corpus and the coordination root's `system/` files.
 - Do not edit generated skill copies directly; edit root `skills/` and run
   `python3 scripts/sync-skills.py`.
 - Do not edit generated runtime asset copies directly; edit the matching root
   folder and run `python3 scripts/sync-runtime.py`.
-- Edit harness starter configuration, hooks and instruction files in their own
-  package directories; they are source files, not generated projections.
+- Do not recreate repository harness starter packages or workspace harness configuration.
 - Keep user-specific behavior, project notes, and repo policy in the resolved
-  memory layer, not in package-owned installed `AGENTS.md` templates.
+  memory layer.
 - Do not create, close out, integrate, push, or clean up worktrees without the
   approval gates required by the selected workflow.
 - Implementation approval is not commit approval. After checks or closeout

@@ -457,10 +457,10 @@ PLANTS: dict[str, tuple[str, str, tuple[str, ...]]] = {
         'paseo = sub.add_parser("paseo")\nsubprocess.run(["paseo", "daemon", "status"])',
         (LITERAL,),
     ),
-    "a file allowed for the runner's failure class names the program": (
+    "the process inspector no longer admits the runner or program": (
         RUNTIME + "paseo_process_record.py",
         'from agents_remember.serving.paseo.paseo_command import PaseoRuntimeFailure\nPROGRAM = "paseo"',
-        (LITERAL,),
+        (LITERAL, RUNNER),
     ),
     "a boundary file's name in another directory": (
         "scripts/paseo_command.py",
