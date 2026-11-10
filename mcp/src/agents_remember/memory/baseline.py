@@ -512,12 +512,12 @@ def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> d
     if not context.memory_root.exists():
         raise RuntimeError(
             f"memory root does not exist: {context.memory_root}. "
-            "Run c-00-initialize-memory-repo before adopting a memory baseline."
+            "Initialize the memory repository before adopting a baseline; see docs/guides/onboard-existing-repo.md."
         )
     if not (context.memory_root / ".git").exists():
         raise RuntimeError(
             f"external memory root is not a Git repo: {context.memory_root}. "
-            "Run c-00-initialize-memory-repo before adopting a memory baseline."
+            "Initialize the memory repository before adopting a baseline; see docs/guides/onboard-existing-repo.md."
         )
 
     if has_adopted_baseline(context.memory_root):
@@ -540,7 +540,7 @@ def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> d
     if not existing_paths:
         raise RuntimeError(
             f"memory root has no onboarding, docs, or system content: {context.memory_root}. "
-            "Run c-00-initialize-memory-repo first, then add onboarding before adopting."
+            "Initialize the memory repository first, then add onboarding before adopting; see docs/guides/onboard-existing-repo.md."
         )
 
     # Resolve attribution once; the consumer cache derives the same pair from this commit.

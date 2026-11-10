@@ -60,19 +60,12 @@ def test_every_qualification_rail_runs_a_script_the_repository_holds() -> None:
 def test_the_setup_skills_assign_no_onboarding() -> None:
     """MIK-R196 rules 4-5: setup initialises the memory root; the foundation is a regular task."""
 
-    canonical = REPOSITORY_ROOT / "skills/c-13-install-and-onboard/SKILL.md"
-    packaged = (
-        REPOSITORY_ROOT
-        / "mcp/src/agents_remember/package_data/runtime/skills/c-13-install-and-onboard/SKILL.md"
+    canonical = REPOSITORY_ROOT / "docs/getting-started.md"
+    text = canonical.read_text(encoding="utf-8")
+    assert "Setup authors no onboarding or knowledge and runs no citation fixer" in text, canonical
+    assert "Scaffold onboarding" not in text, (
+        f"{canonical} still hands onboarding authorship to setup"
     )
-    for path in (canonical, packaged):
-        text = path.read_text(encoding="utf-8")
-        relative = path.relative_to(REPOSITORY_ROOT)
-        assert "Setup authors no onboarding" in text, relative
-        assert "Scaffold onboarding" not in text, (
-            f"{relative} still hands onboarding authorship to setup"
-        )
-        assert "citation fixer here" in text, f"{relative} must keep the fixer out of setup"
 
 
 def test_benchmark_preparation_discovers_package_skills_without_installing_copies(
@@ -161,9 +154,9 @@ def test_benchmark_preparation_discovers_package_skills_without_installing_copie
         assert "skill://index.json" in listed
         index_contents = list(await server.read_resource("skill://index.json"))
         index = json.loads(str(index_contents[0].content))
-        assert "c-13-install-and-onboard" in {row["name"] for row in index["skills"]}
+        assert "l-01-agent-lifecycles" in {row["name"] for row in index["skills"]}
         for relative in (
-            "c-13-install-and-onboard/SKILL.md",
+            "l-01-agent-lifecycles/SKILL.md",
             "l-01-agent-lifecycles/roles/worker.md",
         ):
             uri = f"skill://agents-remember/skills/{relative}"

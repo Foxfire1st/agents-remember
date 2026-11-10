@@ -2,7 +2,7 @@
 
 The packet's flow, in order, against the fixtures ``fresh_user_fixture`` creates:
 
-    install runtime -> memory_init (with the spear-branch choice) -> thin bootstrap (c-03)
+    install runtime -> memory_init (with the spear-branch choice) -> documented repository preparation
     -> exclusion review -> baseline adoption -> first worktree task (light leaf)
     -> citation_fix + memory_quality_check + closeout validation
 
@@ -607,16 +607,16 @@ def run_fixture_scenario(
             StepRecord(
                 step=STEP_BOOTSTRAP,
                 fixture=fixture.name,
-                call="write_thin_bootstrap(fixture)  # c-03 has no runtime entry point",
+                call="write_thin_bootstrap(fixture)  # fixture setup: the minimum onboarding artifact",
                 status="emulated-outcome",
                 result={
                     "artifact": overview.as_posix(),
                     "bytes": overview.stat().st_size,
                     "note": (
-                        "c-03-repo-bootstrap is an LLM-driven procedure: it has no MCP tool, no CLI "
-                        "subcommand and no operation in the capsule vocabulary. A script can only "
-                        "produce its documented minimum artifact, which is this file; the procedure "
-                        "itself is not an executable surface at this base."
+                        "Repository preparation has no runtime entry point in this build: it is a set of "
+                        "documented procedures, not an MCP tool or CLI subcommand. A script can only "
+                        "produce the minimum onboarding artifact, which is this file; the procedure "
+                        "itself is not an executable surface."
                     ),
                 },
             )

@@ -253,25 +253,5 @@ def _fragment_problems(skill: Path, overrides: Overrides | None = None) -> list[
 def test_every_fragment_link_in_every_skill_resolves(skills: Path) -> None:
     """L84-CUR-06: a section link from any skill, not only l-01, names an existing section."""
     roots = sorted(path for path in skills.iterdir() if (path / "SKILL.md").is_file())
-    assert {"c-13-install-and-onboard", "c-14-knowledge-bootstrap", "l-01-agent-lifecycles"} <= {
-        root.name for root in roots
-    }
+    assert "l-01-agent-lifecycles" in {root.name for root in roots}
     assert [problem for root in roots for problem in _fragment_problems(root)] == []
-
-
-@pytest.mark.parametrize(
-    ("skill", "fragment"),
-    [
-        ("c-14-knowledge-bootstrap", "admission-of-new-records"),
-        ("c-13-install-and-onboard", "history-rows"),
-    ],
-)
-def test_the_round_7_handoff_template_fragments_are_caught(skill: str, fragment: str) -> None:
-    """L84-CUR-06: pointing either link back at curator-handoff-list.md fails the scan."""
-    root = REPOSITORY_ROOT / "skills" / skill
-    text = (root / "SKILL.md").read_text(encoding="utf-8")
-    fixed = f"templates/curator-handoff-ingestion.md#{fragment}"
-    assert fixed in text
-    broken = text.replace(fixed, f"templates/curator-handoff-list.md#{fragment}")
-    problems = _fragment_problems(root, {"SKILL.md": broken})
-    assert any(problem.endswith(": missing anchor") and fragment in problem for problem in problems)

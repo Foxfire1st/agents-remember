@@ -23,7 +23,7 @@ RUNTIME_DIRECTORY = "paseo"
 
 
 def fresh_host_block(port: int) -> dict[str, Any]:
-    """The complete ``paseoRuntime`` block of a fresh installation (c-13 step 3)."""
+    """The complete ``paseoRuntime`` block of a fresh installation (the installed setup procedure's step 3)."""
 
     data = xdg_home("XDG_DATA_HOME", Path.home() / ".local/share")
     state = xdg_home("XDG_STATE_HOME", Path.home() / ".local/state")

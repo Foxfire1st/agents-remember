@@ -417,31 +417,3 @@ def test_memory_init_hands_unavailable_nonlegacy_knowledge_to_the_architect(tmp_
     _assert_architect_handover(knowledge)
     assert tree(one.memory_root) == before
     assert cache.read_text(encoding="utf-8") == "an existing file prevents index creation"
-
-
-def test_the_bootstrap_skill_describes_the_states_memory_init_reports(tmp_path: Path) -> None:
-    """L26-R1-F05: the skill's paragraph about ``memory_init`` names the states the reporter
-    really returns, in the canonical file and in every generated copy.
-
-    Catches the earlier text that said a converted tree always reports ``not-recorded`` and
-    measures no record population, which contradicted the reporter's ``recorded`` and ``unusable``.
-    """
-
-    repository = Path(__file__).resolve().parents[2]
-    canonical = (repository / "skills/c-14-knowledge-bootstrap/SKILL.md").read_text("utf-8")
-    start = canonical.index("For an admitted converted memory tree")
-    paragraph = " ".join(canonical[start : canonical.index("###", start)].split())
-    reported = memory_init_tool(
-        load_config(world(tmp_path / "legacy").settings_path),
-        repo_id=REPO_ID,
-        dry_run=True,
-        initial_branch="main",
-    )["knowledge"]
-    for word in ("not-recorded", "recorded", "unusable", "context-not-admitted", reported["code"]):
-        assert word in paragraph, word
-    assert "measures no record population" not in paragraph
-    assert "complete index contains authored records" in paragraph.replace("the ", "")
-    # MIK-R196 rule 7: the packaged serving copy is the only copy beside the canonical source.
-    roots = ("mcp/src/agents_remember/package_data/runtime/skills",)
-    copies = [repository / root / "c-14-knowledge-bootstrap/SKILL.md" for root in roots]
-    assert {path.read_text("utf-8") for path in copies} == {canonical}

@@ -21,24 +21,12 @@ def build_route_indexes(
     storage: StorageSettings,
 ) -> RouteIndexBuildResult:
     """Build absent derived caches through their owner; keep existing stale bytes untouched."""
-    try:
-        return build_missing_route_indexes(
-            code_root=code_root,
-            onboarding_root=onboarding_root,
-            repository=repository,
-            storage=storage,
-        )
-    except FileNotFoundError as error:
-        if not code_root.is_dir() or onboarding_root.exists():
-            raise
-        return RouteIndexBuildResult(
-            routes=0,
-            written=0,
-            unchanged=0,
-            indexes=[],
-            stale_indexes=[],
-            build_errors=[{"path": onboarding_root.as_posix(), "error": str(error)}],
-        )
+    return build_missing_route_indexes(
+        code_root=code_root,
+        onboarding_root=onboarding_root,
+        repository=repository,
+        storage=storage,
+    )
 
 
 def without_proof(memory_root: Path, coordination_root: Path | None = None) -> WithoutProof | None:

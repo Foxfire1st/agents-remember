@@ -50,4 +50,4 @@ For worktree-backed tasks, the internal context also carries contract, worktree,
 
 ## Boundary
 
-Context resolution does not mutate Git, create memory roots, update onboarding, or start worktrees. Memory-root setup remains with `c-00-initialize-memory-repo`, bootstrap with `c-03-repo-bootstrap`, onboarding with the [Curator card procedure](../../skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md), and worktree mutation with the existing tools under [lifecycle authority](../../skills/l-01-agent-lifecycles/operations/closeout.md).
+Context resolution does not mutate Git, create memory roots, update onboarding, or start worktrees. Memory-root setup follows `docs/guides/onboard-existing-repo.md`, onboarding follows the [Curator card procedure](../../skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md), and worktree mutation uses the existing tools under [lifecycle authority](../../skills/l-01-agent-lifecycles/operations/closeout.md).

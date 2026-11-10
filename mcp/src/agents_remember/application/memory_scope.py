@@ -284,11 +284,10 @@ def _leaf_scope(
 ) -> MemoryScope:
     assert contract.memory_worktree is not None
     onboarding_root = contract.memory_worktree / "onboarding"
-    if not onboarding_root.is_dir():
+    if not contract.memory_worktree.is_dir() or not (contract.memory_worktree / ".git").exists():
         raise ValueError(
             f"contract {contract.contract_path.as_posix()} names memory worktree "
-            f"{contract.memory_worktree.as_posix()}, which has no onboarding tree at "
-            f"{onboarding_root.as_posix()}; the worktree was removed or never opened"
+            f"{contract.memory_worktree.as_posix()}; the worktree was removed or never opened"
         )
     return MemoryScope(
         repo_id=repo.repo_id,

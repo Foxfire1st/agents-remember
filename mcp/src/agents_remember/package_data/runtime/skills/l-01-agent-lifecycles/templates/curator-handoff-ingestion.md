@@ -134,7 +134,7 @@ The procedures below call the base code tree B and the candidate code tree C.
 
 `agents-remember knowledge-ingest` and the mounted `knowledge_write` use the task's leaf
 enclosure contract and the same curator file writer. Repository foundation work enters through
-the user-started Architect's regular task under `c-14-knowledge-bootstrap`, with this same writer and no taskless authoring session. The writer requires the knowledge layout marker
+the user-started Architect's regular task under [the repository foundation detail](../reference/curator/repository-foundation.md), with this same writer and no taskless authoring session. The writer requires the knowledge layout marker
 in the memory tree. The producer's thirteen fields do not
 change: everything below is the **curator's**.
 

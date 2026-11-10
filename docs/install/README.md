@@ -43,13 +43,13 @@ The steps, once per workspace:
    it reports an existing file instead of overwriting it.
 6. **Start the Architect.** Bootstrap hands the knowledge foundation to you: it tells you to start
    the Architect, which organises memory and knowledge bootstrapping as ordinary task, master or
-   sprint work. Bootstrap authors no onboarding and no knowledge, and it starts no role.
+   sprint work. Adopt the first attributed baseline before that foundation task starts; the
+   baseline commits memory content, the foundation authors records. Bootstrap authors no
+   onboarding and no knowledge, and it starts no role.
 
-The kept skills — `c-00-initialize-memory-repo`, `c-03-repo-bootstrap`,
-`c-10-adopt-memory-baseline`, `c-13-install-and-onboard`, `c-14-knowledge-bootstrap`
-and `l-01-agent-lifecycles` — are served by the server. A harness that
-reads MCP resources finds them without any install step, and no project or home skill folder has to
-be kept in sync.
+The kept `l-01-agent-lifecycles` skill is served by the server. A harness that reads MCP resources
+finds it without any install step, and no project or home skill folder has to be kept in sync.
+Setup and repository-preparation procedures live in these public docs, not in a skill folder.
 
 ## Host notes
 

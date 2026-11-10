@@ -75,15 +75,8 @@ def test_the_shipped_corpus_parses_and_every_served_skill_has_a_root_revision() 
 
     catalog = skill_catalog_registry()
     assert catalog.unreadable == ()
-    # The served, canonical and packaged trees carry these six retained skills.
-    expected_names = {
-        "c-00-initialize-memory-repo",
-        "c-03-repo-bootstrap",
-        "c-10-adopt-memory-baseline",
-        "c-13-install-and-onboard",
-        "c-14-knowledge-bootstrap",
-        "l-01-agent-lifecycles",
-    }
+    # The served, canonical and packaged trees carry the one retained skill.
+    expected_names = {"l-01-agent-lifecycles"}
     assert {entry.name for entry in catalog.entries} == expected_names
     assert len(catalog.entries) == len(expected_names)
     packaged_skills = SHIPPED_SKILLS.parent / "mcp/src/agents_remember/package_data/runtime/skills"

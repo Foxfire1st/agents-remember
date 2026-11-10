@@ -248,7 +248,7 @@ def initialize_memory(
             f"coordination root {config.coordination_root.as_posix()} does not exist or is not "
             f"a directory, so repo_id {repo_id!r} has no workspace to initialize memory in; "
             "run runtime_install to create the coordinator scaffold first (the "
-            "c-13-install-and-onboard skill owns that sequence)"
+            "install and onboarding guide in docs/getting-started.md owns that sequence)"
         )
 
     resolved_branch, branch_source = _resolved_initial_branch(repo.path, initial_branch)
@@ -323,7 +323,7 @@ def initialize_memory(
         result["nextStep"] = (
             "this memory root is unconverted (no knowledge/layout.json): convert first with "
             "`agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY`, as the "
-            "c-13-install-and-onboard skill and docs/guides/first-conversion.md describe "
+            "docs/guides/first-conversion.md and the install guide describe "
             "(MIK-R46 rule 6)"
         )
     return result

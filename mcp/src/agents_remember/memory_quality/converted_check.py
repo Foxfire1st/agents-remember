@@ -107,7 +107,7 @@ def converted_knowledge_check(
         else code_root
     )
     code_root = code_root if isinstance(code_root, Path) else code_root.root
-    report = validate_tree(tree, bases=bases, code=code)
+    report = validate_tree(tree, bases=bases, code=code, conversion_debt=not bases)
     findings = [_unbuildable_base(problem)] if problem is not None else []
     refused = [violation.to_document() for violation in report.refusals]
     if problem is not None:

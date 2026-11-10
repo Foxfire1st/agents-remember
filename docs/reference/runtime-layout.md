@@ -25,7 +25,6 @@ agents-remember/
             requirements/
             patches/
           skills/
-            c-00-initialize-memory-repo/   # generated copy of root skills/
             l-01-agent-lifecycles/
           system/defaults/examples/
         benchmarks/

@@ -500,14 +500,8 @@ def _leaf_range(
 
 def _leaf_onboarding_root(contract: WorktreeContract, mode: str) -> Path | None:
     """The onboarding root for sidecar pairing: the live worktree's for ``working``, else the repo's."""
-    if mode == "working":
-        candidates = [contract.memory_worktree, contract.memory_repo_path]
-    else:
-        candidates = [contract.memory_repo_path, contract.memory_worktree]
-    for cand in candidates:
-        if cand is not None and (cand / "onboarding").is_dir():
-            return cand / "onboarding"
-    return None
+    memory_root = contract.memory_worktree if mode == "working" else contract.memory_repo_path
+    return None if memory_root is None else memory_root / "onboarding"
 
 
 def leaf_changeset(

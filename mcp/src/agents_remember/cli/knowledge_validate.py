@@ -60,7 +60,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                                the next leaf publication refuses the row)
   migration_debt (a base-carried finding reports until every onboarding route is migrated
   or excluded; a new finding refuses at once):
-    R22.3-sidecar-without-markdown  entries whose card is gone
+    R22.3-sidecar-without-markdown  a carried sidecar without Markdown, or references without their card
     R22.3-unresolved-target         a citation the conversion could not resolve
     R04.4-route-unassigned          an exported family with no route
     R27.4-legacy-unassessed         an exported record nobody assessed

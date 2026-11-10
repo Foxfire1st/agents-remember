@@ -17,10 +17,9 @@ class DriftSummary(StrictResponseModel):
     actionableCount: int | None = Field(default=None, ge=0)
     reportPath: str | None = None
     actionableSample: list[dict[str, Any]] | None = None
-    # `run_drift_summary` returns `{"status": "error", "error": ...}` when the onboarding root
-    # is missing. Both halves were absent here, so `include_drift=true` against a repo without
-    # onboarding raised out of the tool instead of reporting why -- the strict model rejected
-    # the status *and* the key. `DriftCheckResponse` has carried both all along.
+    # `run_drift_summary` reports errors for a non-directory onboarding root, legacy memory,
+    # or a failed converted-tree measurement. An absent onboarding root is valid and yields
+    # a checked summary with zero cards.
     error: str | None = None
     # Converted-tree measurement (MIK-R44): what was really read. Absent on legacy results;
     # legacy fields are never invented for a converted card, and vice versa.

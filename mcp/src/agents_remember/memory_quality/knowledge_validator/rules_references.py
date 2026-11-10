@@ -4,10 +4,9 @@ None of these rules reads a history file: its anchors and subjects are historica
 
 * **Rule 3, markers.** Every unescaped ``[n]`` marker of an onboarding Markdown file has a reference
   in its sidecar, and every reference is used. A Markdown file without a sidecar -- a record's
-  Markdown included -- has no markers. A file sidecar without Markdown holds no references; the
-  sidecar itself is conversion-written migration debt (``migration_debt``, MIK-R53 rule 10), by a
-  ``migration_debt`` rule. A route sidecar
-  sits beside its ``overview.md``.
+  Markdown included -- has no markers. A file sidecar holding only realization or proof entries
+  needs no Markdown. A file sidecar with references needs its Markdown card; a missing card is
+  migration debt (``migration_debt``, MIK-R53 rule 10). A route sidecar sits beside its ``overview.md``.
 * **Rule 3, record links.** Every record ID a sidecar reference, a sidecar entry or a record's
   ``links`` and ``supersedes`` names exists in the tree. Records are never deleted, so a retired
   record still resolves.
@@ -110,10 +109,18 @@ def check_markers(context: ValidationContext) -> Iterator[Finding]:
         yield from _markdown_findings(path, text, sidecar)
 
 
-def _base_sidecars_without_markdown(bases: Iterable[KnowledgeTree]) -> frozenset[str]:
-    """The sidecar paths a comparison base holds as a file sidecar without Markdown."""
+def _base_sidecars_without_markdown(
+    bases: Iterable[KnowledgeTree],
+) -> tuple[frozenset[str], frozenset[str]]:
+    """The file sidecar paths a comparison base holds without Markdown.
+
+    Returns every such path and, separately, those whose base sidecar carries references. A
+    candidate that adds references to a base sidecar without Markdown is a new reference finding,
+    not a carried one.
+    """
 
     missing: set[str] = set()
+    referencing: set[str] = set()
     for base in bases:
         parsed = parse_tree(base)
         for sidecar in parsed.sidecars:
@@ -122,29 +129,44 @@ def _base_sidecars_without_markdown(bases: Iterable[KnowledgeTree]) -> frozenset
                 and sidecar.markdown_path not in parsed.markdown
             ):
                 missing.add(sidecar.path)
-    return frozenset(missing)
+                if sidecar.sidecar.references:
+                    referencing.add(sidecar.path)
+    return frozenset(missing), frozenset(referencing)
 
 
 def check_sidecar_without_markdown(context: ValidationContext) -> Iterator[Finding]:
-    carried_paths = _base_sidecars_without_markdown(context.bases)
+    carried_paths, reference_carried_paths = _base_sidecars_without_markdown(context.bases)
     migration = context.migration
     for sidecar in context.parsed.sidecars:
-        if isinstance(sidecar.sidecar, FileSidecar) and (
-            sidecar.markdown_path not in context.parsed.markdown
-        ):
-            carried = sidecar.path in carried_paths
+        if not isinstance(sidecar.sidecar, FileSidecar):
+            continue
+        if sidecar.markdown_path in context.parsed.markdown:
+            continue
+        if sidecar.sidecar.references:
+            carried = sidecar.path in reference_carried_paths
+            message = "file sidecar references need their Markdown card (MIK-R21 rule 5)"
+        elif sidecar.path in carried_paths:
+            carried = True
             message = (
-                "file sidecar without Markdown: its entries wait for a curator to re-home or retire "
-                "them (MIK-R21 rule 5)"
+                "carried file sidecar without Markdown: its entries wait for a curator to re-home "
+                "or retire them (MIK-R21 rule 5)"
             )
-            if debt_reports_at(context, carried=carried):
-                message += f"; {debt_report_note(migration)}"
-            yield Finding(
-                sidecar.path,
-                "",
-                message,
-                carried=carried,
+        else:
+            if not (context.conversion or context.conversion_debt):
+                continue
+            carried = False
+            message = (
+                "file sidecar without Markdown in a conversion: its entries wait for a curator "
+                "to re-home or retire them (MIK-R21 rule 5)"
             )
+        if debt_reports_at(context, carried=carried):
+            message += f"; {debt_report_note(migration)}"
+        yield Finding(
+            sidecar.path,
+            "",
+            message,
+            carried=carried,
+        )
 
 
 def _missing(context: ValidationContext, path: str, field: str, target: str) -> Iterator[Finding]:
@@ -297,7 +319,7 @@ REFERENCE_RULES = (
     ValidationRule(
         "R22.3-sidecar-without-markdown",
         "MIK-R22 rule 3 (MIK-R21 rule 5)",
-        "a file sidecar without Markdown is migration debt",
+        "a carried sidecar without Markdown, or references without their card, is migration debt",
         check_sidecar_without_markdown,
         migration_debt=True,
     ),

@@ -53,7 +53,7 @@ durable memory lives beside it, under the coordination root.
 A repository that still carries the removed repo-local `ar-memory/` root is reported by exact
 path and refused, not migrated. The route out is to re-point the repository at its external
 memory root and record `memory_mode: external` on the worktree contracts, or to re-initialize
-with the `c-00-initialize-memory-repo` skill.
+following the memory initialization guide (`docs/guides/onboard-existing-repo.md`).
 
 ## External Memory
 
@@ -116,9 +116,9 @@ These providers were accelerators for *finding* knowledge; they were never the s
 
 Runtime install owns package assets under `ar-coordination`.
 
-The `c-00-initialize-memory-repo` skill owns memory-root creation or repair.
+The memory initialization guide (`docs/guides/onboard-existing-repo.md`) owns memory-root creation or repair.
 
-The `c-03-repo-bootstrap` skill owns repo onboarding bootstrap and route/slice maintenance.
+Structural repository preparation and route/slice maintenance follow the public guides, and onboarding authorship follows the card procedure below.
 
 The Curator follows the [card procedure](../skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md) for file-level onboarding and repo entity catalog maintenance.
 

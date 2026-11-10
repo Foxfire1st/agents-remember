@@ -33,7 +33,7 @@ the `<placeholders>` for yours and delete what doesn't apply.
   land via PR>` or `<no — direct pushes allowed>`. State it explicitly so agents don't guess.
 - Work branches are cut from the spear: **`feat/<slug>`** (features) and **`fix/<slug>`** (fixes).
 - **Worktree-backed?** `<yes — chat and task both>` keeps external memory consistent: memory parks on
-  the worktree memory branch and lands on the spear via the **`c-10-adopt-memory-baseline` skill** *after* the code lands.
+  the worktree memory branch and lands on the spear through the **memory-baseline and carryover procedures** *after* the code lands.
   Repos with `disabled` memory can relax this.
 
 ---
@@ -66,7 +66,7 @@ Adapt to your repo; a gated-`main` repo typically does:
 7. Agent owns the tail: **push branch → `gh pr create` (target spear) → checks green →
    `gh pr merge --delete-branch`.**
 8. The [authorized lifecycle owner](skill://agents-remember/skills/l-01-agent-lifecycles/operations/closeout.md) handles closeout and worktree cleanup through the existing tools.
-9. The `c-10-adopt-memory-baseline` skill carries parked memory into an ordinary recovery
+9. The memory carryover procedure (`docs/guides/carryover-from-branch.md`) carries parked memory into an ordinary recovery
    leaf against the merged spear. Each actual memory-content commit attributes the landed code
    HEAD. If no content needs carrying, it creates no commit. The consumer ledger is computed
    from history and never authorizes the next worktree.

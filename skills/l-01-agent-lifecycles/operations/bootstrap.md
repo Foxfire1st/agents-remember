@@ -15,7 +15,7 @@ With an attributed baseline and resolving context, apply [Bootstrap's scope boun
 
 Only Bootstrap carries this operation. Before asking a setup question, follow [its own-chat reporting boundary](../roles/bootstrap.md#boundaries).
 
-Establish the developer's situation and decisions, then follow the normal workflow below. Where a `c-*` skill owns a procedure, hand that procedure to its owner.
+Establish the developer's situation and decisions, then follow the normal workflow below. Where a step needs more detail, read the setup guide named at that step.
 
 ## Required workspace facts and decisions
 
@@ -60,7 +60,7 @@ Preview with `dry_run=true`, write, then read back the state. Read and report an
 
 ### 5. Initialize or repair the memory root
 
-Before initializing or repairing the memory root, read [Initialize memory repository](../../c-00-initialize-memory-repo/SKILL.md) for the owning procedure and scaffolding details. Use `memory_init` on `agents-remember-task`, previewing with `dry_run=true` first.
+Before initializing or repairing the memory root, read the install and onboarding guide (`docs/guides/onboard-existing-repo.md`) for the scaffold details. Use `memory_init` on `agents-remember-task`, previewing with `dry_run=true` first.
 
 ### 6. Inspect what the baseline will carry
 
@@ -70,7 +70,7 @@ Explain that optional onboarding and the knowledge foundation are later regular 
 
 ### 7. Adopt the first attributed baseline
 
-Before adopting the first attributed baseline, read [Adopt memory baseline](../../c-10-adopt-memory-baseline/SKILL.md#workflow) for the procedure. Use `memory_baseline_adopt` on `agents-remember-task`, first previewed with `dry_run=true`. Read `memory_baseline_status` before and after adoption. Ask the developer for the drift-acceptance decision; do not assume it.
+Before adopting the first attributed baseline, read the adopt-existing-memory guide (`docs/guides/adopt-existing-memory.md`) for the procedure. Use `memory_baseline_adopt` on `agents-remember-task`, first previewed with `dry_run=true`. Read `memory_baseline_status` before and after adoption. Ask the developer for the drift-acceptance decision; do not assume it.
 
 A validator refusal is unconditional. Report its actual output.
 

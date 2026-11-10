@@ -77,7 +77,7 @@ MEMORY_MODE_REMEDIES: tuple[str, ...] = (
     "Re-point the repository to an external memory root at "
     "`<coordination-root>/memory-repos/ar-<code-repository-name>` and set the contract's "
     "`memory_mode` to `external`, or re-initialize the memory root with the "
-    "`c-00-initialize-memory-repo` skill.",
+    "memory initialization guide (`docs/guides/onboard-existing-repo.md`).",
     "Nothing is migrated automatically and no existing memory root, contract or settings "
     "file is rewritten in place.",
 )
@@ -167,7 +167,7 @@ START_AGAIN_ACTION = "start again without `memory_mode`, in the default `externa
 """The action every start refusal names."""
 
 SETUP_FIRST_ACTION = (
-    "set up the memory repository first (`c-00-initialize-memory-repo`), then "
+    "set up the memory repository first (`docs/guides/onboard-existing-repo.md`), then "
     "start again without `memory_mode`"
 )
 """The action where the memory repository is not set up."""

@@ -12,7 +12,7 @@ from agents_remember_test_support.testing.capsule_budget_d694 import (
 
 __all__ = ["current_capsule_ceiling"]
 
-_RECORD_FINGERPRINT = "42f5f83e079d3e631c365d5d78247f5148203136e6d412dc3a9a47af462e3db0"
+_RECORD_FINGERPRINT = "8fd6924a66fcdf17ee127330592864a0dbccc20c851ce8ec4f7e8e53c340489b"
 
 _ORDINARY_TEMPLATE_POPULATION = (
     "templates/file-card.md",

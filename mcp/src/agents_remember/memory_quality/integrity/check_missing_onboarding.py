@@ -283,8 +283,6 @@ def main(argv: list[str] | None = None) -> int:
     # official memory repo, and they differ for a leaf's memory worktree, whose settings live in
     # the official repo the enclosure was cut from (D-34).
     onboarding_root = context.onboarding_root if requested_root is None else requested_root
-    if not filesystem.exists(onboarding_root):
-        parser.error(f"onboarding root does not exist: {onboarding_root}")
     result = check_missing_onboarding(
         code_repository_root=code_repository_root,
         onboarding_root=onboarding_root,

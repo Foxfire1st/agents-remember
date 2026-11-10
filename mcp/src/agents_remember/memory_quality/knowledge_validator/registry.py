@@ -317,6 +317,9 @@ class ValidationContext:
     bases: tuple[KnowledgeTree, ...] = ()
     code: CodeTree | None = None
     conversion: bool = False
+    conversion_debt: bool = False
+    """A converted-tree check with no comparison base: a sidecar's entries are conversion debt,
+    not a newly authored record (MIK-R53 rule 10; MIK-R217 rule 7)."""
     leaf_publication: bool = False
     """The commit publishes a leaf (its closeout, direct landing or recorded landing): every history
     file not closed in a base is its own and is checked whatever its ``closed`` flag (MIK-R09)."""

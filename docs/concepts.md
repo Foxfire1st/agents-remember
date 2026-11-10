@@ -134,4 +134,6 @@ block publication. These checks do not invent the Curator's judgment.
 Memory-content commits carry `Code-Commit` attribution. `memory.md` is an ignored,
 computed cache of that history, outside staging, commits and transaction authority.
 The code and memory commits remain the durable pair; a missing cache does not
-block closeout or landing.
+block closeout or landing. Baseline adoption commits real memory content and
+computes the cache from it; it never commits the cache, and a missing or stale cache
+is not evidence that a baseline exists or is absent.

@@ -109,14 +109,11 @@ pytestmark = pytest.mark.evidence_unit
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
 CANONICAL_SKILLS = REPOSITORY_ROOT / "skills"
-PROCEDURE_SKILL = "c-14-knowledge-bootstrap"
-PROCEDURE_FILE = CANONICAL_SKILLS / PROCEDURE_SKILL / "SKILL.md"
 FOUNDATION_SOURCE = "reference/curator/repository-foundation.md"
 FOUNDATION_ACTION = "Before a repository's first or resumed knowledge foundation, read"
 FOUNDATION_HEADING = "# Curator repository foundation"
 FOUNDATION_WORKFLOW_CLAUSE = (
-    "Before authoring the foundation, follow [the knowledge-bootstrap workflow]"
-    "(skill://agents-remember/skills/c-14-knowledge-bootstrap/SKILL.md)."
+    "Before authoring the foundation, follow [the curation operation](../../operations/curation.md)"
 )
 FOUNDATION_PROCEDURE_CLAUSES = (
     "Repository foundation is regular task work.",
@@ -278,12 +275,6 @@ _PLACEHOLDER = re.compile(r"<[^>]*>")
 PLACEHOLDER_VALUE = "placeholder"
 
 
-def procedure_text() -> str:
-    """The canonical procedure's bytes, as the shipped source tree holds them."""
-
-    return PROCEDURE_FILE.read_text(encoding="utf-8")
-
-
 def digest(text: str) -> str:
     """The content address the catalog publishes a served file under."""
 
@@ -428,66 +419,6 @@ def free_agent_capsule(role: str) -> CapsuleDelivery:
         return delivery
 
 
-def test_the_bootstrap_free_agent_receives_the_foundation_step(tmp_path: Path) -> None:
-    """The bootstrap seat compiles with no document, and its own instructions reach the foundation.
-
-    The bootstrap seat is the read-and-report carrier for a repository whose foundation is absent: its
-    capsule is bound to the named absence of a task document. Its default compiled instructions
-    name the procedure and bind the state-reporting action to the exact emitted state detail.
-    Compilation proves delivery, not authoring admission; the separate Curator case owns its
-    compiler shape.
-    """
-
-    capsule = free_agent_capsule("bootstrap")
-    instructions = capsule.trusted_instructions
-    source = "reference/bootstrap/foundation-state.md"
-    action = "Before reading and reporting the knowledge foundation's state, read"
-    root = CANONICAL_SKILLS / "l-01-agent-lifecycles"
-    declared = json.loads((root / "composition-manifest.json").read_text())["references"][
-        "bootstrap/foundation-state"
-    ]
-    assert declared["source"] == source
-    assert declared["step_detail"] is True
-    assert "bootstrap" in declared["roles"]
-    assert declared["step"].strip()
-    assert_action_pointer(instructions, source, action)
-    [reference] = [r for r in capsule.detail_references if r.source_path == source]
-    assert reference.step == declared["step"]
-    assert reference.content == (root / source).read_bytes()
-    assert reference.revision == compute_content_digest(reference.content)
-    emitted, record = compose_launch_instructions(capsule, str(tmp_path / "report.md"), {})
-    [entry] = [r for r in record["detailReferences"] if r["sourcePath"] == source]
-    path = Path(entry["path"])
-    assert f"]({path.as_posix()}#read-the-state)" in emitted
-    assert "{{detail:" not in emitted
-    assert entry["step"] == reference.step
-    assert entry["sizeBytes"] == len(path.read_bytes())
-    assert entry["revision"] == compute_content_digest(path.read_bytes())
-    state_detail = normalized(path.read_text())
-    assert PROCEDURE_SKILL in state_detail, (
-        "the default-emitted Bootstrap foundation detail must reach the registered procedure "
-        f"({capsule.binding.as_report()})"
-    )
-    assert (
-        "Author or refresh no onboarding content. Do not edit a memory file to make a check pass. "
-        "Author no knowledge records, run no knowledge writer, invent no invariants and populate "
-        "no database to claim readiness. Do not organise their production." in instructions
-    )
-    for clause in (
-        "Read memory_init's knowledge block and report its state:",
-        "not-recorded",
-        "recorded, with the exact identity",
-        "unusable",
-        "a refused admission, with its own next action.",
-        "Before acting on the reported state, apply",
-        "for its setup-only authority and authoring prohibitions.",
-        "Name one next step in both the conversation and report: start the Architect.",
-        "do not claim that Bootstrap created or completed the foundation.",
-    ):
-        assert normalized(clause) in state_detail, clause
-    assert capsule.binding.task_path == "free-agent:bootstrap", capsule.binding.as_report()
-
-
 def test_the_curator_capsule_compiles_on_a_task_document_and_taskless(tmp_path: Path) -> None:
     """The curator's capsule compiles WITH a task document, and it also compiles with none.
 
@@ -512,117 +443,4 @@ def test_the_curator_capsule_compiles_on_a_task_document_and_taskless(tmp_path: 
     assert taskless.task_path == "free-agent:curator", taskless.as_report()
     assert bound.task_path != taskless.task_path, (
         "a document-bound curator and a taskless one must not report the same task reference"
-    )
-
-
-def test_the_served_catalog_publishes_the_bootstrap_procedure() -> None:
-    """A fresh session discovers the procedure, and the bytes it reads are the canonical tree's.
-
-    The catalog is the delivery route: an agent does not read ``skills/`` directly, it lists what the
-    server publishes and reads one entry back. Serving a stale or hand-edited copy would therefore be
-    indistinguishable, from inside a session, from shipping the wrong instruction — so the served
-    content is compared with the canonical file rather than trusted.
-    """
-
-    listing = skill_catalog_list_response(skill_catalog_registry())
-    entries = [entry for entry in listing.skills if entry.name == PROCEDURE_SKILL]
-    assert entries, (
-        f"the shipped catalog publishes no {PROCEDURE_SKILL!r} skill, so no fresh session can "
-        f"discover the procedure; published: {sorted(entry.name for entry in listing.skills)}"
-    )
-    assert entries[0].uri.endswith(f"/{PROCEDURE_SKILL}/SKILL.md"), entries[0].uri
-    assert "SKILL.md" in entries[0].files, entries[0].files
-
-    canonical = procedure_text()
-    assert served_body(PROCEDURE_SKILL) == canonical, (
-        "the served bytes differ from the canonical tree's; run python3 scripts/sync-skills.py"
-    )
-    assert entries[0].revision == f"sha256:{digest(canonical)}", entries[0].revision
-
-
-def test_every_invocation_the_procedure_prints_resolves_in_the_shipped_parser() -> None:
-    """The requirement's own failure: a document that describes commands which do not exist.
-
-    Each printed invocation is filled in and run through the real parser, so both halves are graded at
-    once — the subcommand must be declared, and every option printed with it must belong to that
-    subcommand. An option that moved to another subcommand is a failure here, which is the shape a
-    reorganisation produces. Nothing is executed: the parser is the whole subject.
-    """
-
-    parser = build_parser()
-    invocations = list(printed_invocations(procedure_text()))
-    assert len(invocations) >= 3, (
-        f"only {len(invocations)} invocation(s) were extracted from the procedure; the extraction "
-        "stopped covering the document it grades"
-    )
-    ingest = [argv for argv in invocations if argv[1] == "knowledge-ingest"]
-    assert any("--commit" not in argv for argv in ingest), "the planning invocation was not read"
-    assert any("--commit" in argv for argv in ingest), "the commit invocation was not read"
-    assert any(argv[1] == "knowledge-validate" for argv in invocations), (
-        "the validation invocation was not read"
-    )
-
-    problems: list[str] = []
-    for argv in invocations:
-        assert argv[0] == PROGRAM, argv
-        try:
-            parser.parse_args(argv[1:])
-        except SystemExit as exit_status:
-            problems.append(f"`{' '.join(argv)}` does not parse ({exit_status.code})")
-    assert problems == [], (
-        "the procedure prints commands the shipped command line does not accept:\n  "
-        + "\n  ".join(problems)
-    )
-
-
-def test_the_compiled_curator_shape_names_the_procedure_it_would_receive(tmp_path: Path) -> None:
-    """The curator SHAPE's compiled instructions name the procedure — the compiler, not an admission.
-
-    This case is deliberately named for the compiler, because that is all it measures: the launch
-    compiler builds a synthetic free-agent shape for any declared role. This measures its actual
-    pointer and delivered detail; it admits no taskless Curator or instructed foundation session.
-    Foundation work requires the real task admission stated in that detail.
-    """
-
-    capsule = free_agent_capsule("curator")
-    detail = delivered_foundation(
-        capsule,
-        CANONICAL_SKILLS / "l-01-agent-lifecycles",
-        tmp_path / "report.md",
-        FOUNDATION_PROCEDURE_CLAUSES,
-    )
-    assert PROCEDURE_SKILL in detail
-    assert "knowledge-bootstrap" in detail
-    foundation_delivery_controls(
-        capsule,
-        CANONICAL_SKILLS / "l-01-agent-lifecycles",
-        tmp_path / "controls",
-        FOUNDATION_PROCEDURE_CLAUSES,
-        FOUNDATION_WORKFLOW_CLAUSE,
-    )
-
-
-def test_the_served_setup_and_onboarding_surfaces_reach_the_procedure() -> None:
-    """The two skills an ordinary setup follows name the procedure and report the knowledge state.
-
-    This is the reachability half of the delivery, read through the same served route as the procedure
-    itself and on the bodies rather than on the frontmatter descriptions: the setup skill a first run
-    follows, and the onboarding skill whose handoff follows it. Both are asserted on the bytes a
-    session actually loads and follows, not on the files beside them.
-    """
-
-    setup = body_of(served_body("c-13-install-and-onboard"))
-    assert PROCEDURE_SKILL in setup, (
-        "the served setup skill's instructions never name the knowledge-bootstrap procedure, so "
-        "ordinary setup cannot reach the repository's knowledge foundation"
-    )
-    assert "not-recorded" in setup, (
-        "the served setup skill's instructions name no knowledge state, so it cannot report a "
-        "repository whose foundation is absent without reporting it ready"
-    )
-
-    onboarding = body_of(served_body("c-03-repo-bootstrap"))
-    assert PROCEDURE_SKILL in onboarding, (
-        "the served onboarding skill's handoff never names the knowledge-foundation procedure, so "
-        "onboarding output reads as the repository's whole foundation"
     )

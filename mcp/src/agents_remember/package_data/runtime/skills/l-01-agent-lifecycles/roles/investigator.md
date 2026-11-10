@@ -27,6 +27,8 @@ Read the supplied rendered task documents and canonical JavaScript Object Notati
 
 Before investigating repository code, read [knowledge use]({{detail:reference/knowledge/use.md}}#investigator-distinguish-claims-observations-and-hypotheses) for the attributed records, related code and evidence to inspect.
 
+Before researching a repository for its first or resumed knowledge foundation, read [repository research](../reference/repository-research.md) for the source inventory the developer reviews, the bounded research and the evidence rules. Return the research report's path to the Architect for the foundation task's document, so the Curator finds it.
+
 Before reviewing an instruction shortfall named by the concern, read [instruction-shortfall review]({{detail:reference/instruction-shortfall-review.md}}) for its sources, case counts and report evidence.
 
 Distinguish observed facts from a hypothesis about the root cause, and state your confidence. For a regression, compare dates and builds and find the cause before proposing visual changes.

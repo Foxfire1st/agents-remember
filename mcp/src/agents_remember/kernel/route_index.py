@@ -232,8 +232,8 @@ def _checked_survey(
     onboarding_root = onboarding_root.resolve()
     if not code_root.is_dir():
         raise FileNotFoundError(f"code repository root does not exist: {code_root}")
-    if not onboarding_root.is_dir():
-        raise FileNotFoundError(f"onboarding root does not exist: {onboarding_root}")
+    if onboarding_root.exists() and not onboarding_root.is_dir():
+        raise NotADirectoryError(f"onboarding root is not a directory: {onboarding_root}")
 
     return _survey_routes(code_root, onboarding_root, repository, storage)
 

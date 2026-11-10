@@ -24,8 +24,8 @@ class MissingMemoryError(AgentsRememberError):
             "Agents Remember memory is missing for "
             f"{code_repository_name!r}. Checked external memory at {external_memory.as_posix()} "
             f"using coordination root {coordination_root.as_posix()}. "
-            "Memory setup is not a message's job to prescribe: the c-00-initialize-memory-repo "
-            "skill owns creating or repairing this root, and the c-03-repo-bootstrap skill owns "
+            "Memory setup is not a message's job to prescribe: the memory initialization guide "
+            "(docs/guides/onboard-existing-repo.md) owns creating or repairing this root; repository "
             "generating onboarding content under it."
         )
 

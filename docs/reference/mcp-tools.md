@@ -10,7 +10,7 @@ were removed (MIK-R112) and are not answered by any text on this page.
 The tables below name every registered public tool. Behavior detail lives in the linked skill and reference pages.
 
 **Skills vs tools.** Many skills wrap one or more of these tools and add the
-procedure, gates, and ordering around them: the `c-00-initialize-memory-repo` skill drives the `memory_init` MCP tool; the [curation operation](../../skills/l-01-agent-lifecycles/operations/curation.md)
+procedure, gates, and ordering around them: the memory initialization guide (`docs/guides/onboard-existing-repo.md`) drives the `memory_init` MCP tool; the [curation operation](../../skills/l-01-agent-lifecycles/operations/curation.md)
 uses drift reporting (`context_packet` / `memory_quality_check`), and the [authorized lifecycle operation](../../skills/l-01-agent-lifecycles/operations/closeout.md) coordinates the `worktree_*`
 and `*_closeout_*` MCP tools. When the docs say "run a core skill,"
 the agent runs the skill, which calls the matching tool with the right
@@ -108,7 +108,7 @@ assumed default folder is not evidence that no message was sent.
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `memory_init` | Initialize (or repair) a repository's memory root. | `repo_id`, `dry_run=false`, `initialize_git=true` |
+| `memory_init` | Initialize (or repair) a repository's memory root. Its `knowledge` block reports `not-recorded` (no authored records), `recorded` (records present, with the exact identity) or `unusable` (a partial index, or `legacy-format` for an unconverted tree, with its code, detail and next action). The `datasetPath` names the derived index; its existence does not prove an authored foundation. A `legacy-format` answer names the conversion route; never create the layout marker by hand. | `repo_id`, `dry_run=false`, `initialize_git=true`, `initial_branch`, `mode` |
 | `memory_quality_check` | Closeout memory-quality checks; the full logged result includes `knowledgeWorklist` and exact-tree `knowledgeGate` blocks for converted leaves. A full contract-scoped call atomically replaces `<worktree enclosure>/reports/curator-memory-quality.md`, combining quality findings, current-addition coverage, route-index preview, drift candidates and report-only evidence. The persisted change-to-knowledge worklist is a separate artifact. | `request={"mode":"sync", "repo_id":..., "checks":..., "detail_limit":50, "contract_path":...}`; use `mode:"start"` for async admission and poll only with `mode:"poll"`, `repo_id`, `run_id` |
 | `citation_fix` | Regenerate anchored citation ranges in an admitted memory scope; preview synchronously or in the shared background run registry. Ambiguous anchors, renames and deletions remain curator work. | `repo_id`, `contract_path=None`, `document=None` or `documents=None`, `dry_run=false`, `mode="sync"`; preview with `mode="start", dry_run=true`, then `mode="poll", run_id=...` with the same repository/contract and no selectors |
 | `citation_note_revision` | Revise one converted sidecar reference's note in a leaf memory worktree, preserving targets, anchors and other references. Refuse a stale sidecar digest, missing key or empty note. | `repo_id`, `contract_path`, `card`, reference number `reference`, `note`, `base_digest`, `dry_run=false` |

@@ -171,6 +171,16 @@ and 3 when a configured host is down.
 `~/.config/agents-remember/agents-remember-settings.json` (under `XDG_CONFIG_HOME`
 when set), independently of the working directory. An explicit path overrides discovery.
 
+Start from the installation that is actually registered as the tool server, not from a bare
+command found on `PATH`. A `uvx` registration uses
+`uvx --from "agents-remember-mcp==<served-version>" agents-remember dashboard --daemon --config "<absolute active MCP settings file>"`;
+a local-wheel registration uses that exact wheel after `--from`; a uv tool install uses the
+installed command; a source registration uses its registered interpreter and environment with
+`-m agents_remember.cli`. Replace both values in the reported command. The one start ensures the
+installed host and dashboard, and it never installs or upgrades. `dashboard --status` reports both
+with a five-second host query limit: exit 0 when both are up or the host is unconfigured, exit 1
+when the dashboard is down, and exit 3 when a configured host is down.
+
 For a dashboard that survives closing the terminal, use daemon mode:
 
 ```text
@@ -312,8 +322,8 @@ pushed commit range.
 
 The installed runtime lives in `ar-coordination/` — by default `<workspace>/ar-coordination/`,
 inside the workspace (never your home directory) — not in the source checkout. The one Bootstrap
-call creates that scaffold when the configured root does not exist yet, and the
-`c-13-install-and-onboard` skill shows every other install path as a workspace-first
+call creates that scaffold when the configured root does not exist yet, and
+[Getting Started](docs/getting-started.md) shows every other install path as a workspace-first
 default you can accept or override:
 
 ```text
@@ -340,7 +350,7 @@ The 3.0 arc: the working session itself is now observable and steerable — a sy
 
 ## Stability
 
-Following semantic versioning from `1.0.0`, these public contracts will not change without a **major** version bump: **skill IDs** (e.g. the `l-01-agent-lifecycles` and `c-10-adopt-memory-baseline` skills), **MCP tool names and their inputs/outputs**, the **`ar-coordination/` and `memory-repos/ar-<repo>/` layout**, and the **settings schema**. Internal modules, provider internals, and prompt wording are not part of this promise and may change in minor releases.
+Following semantic versioning from `1.0.0`, these public contracts will not change without a **major** version bump: **skill IDs** (e.g. the `l-01-agent-lifecycles` skill), **MCP tool names and their inputs/outputs**, the **`ar-coordination/` and `memory-repos/ar-<repo>/` layout**, and the **settings schema**. Internal modules, provider internals, and prompt wording are not part of this promise and may change in minor releases.
 
 ## Contributing
 

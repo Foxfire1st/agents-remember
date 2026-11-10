@@ -206,7 +206,7 @@ def _missing_memory_repo_state(contract: WorktreeContract, args: WorktreeArgs) -
         return _disabled_memory_choice(contract)
     return {
         "state": "blocked",
-        "reason": "external memory repo is missing; run c-00-initialize-memory-repo before starting an external-memory worktree",
+        "reason": "external memory repo is missing; follow docs/guides/onboard-existing-repo.md before starting an external-memory worktree",
         "choices": ["initialize-memory-repo"],
     }
 

@@ -191,7 +191,7 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
         ),
         "mcp/src/agents_remember/kernel/primitives/fresh_host.py": (
             1,
-            "writes the `paseoRuntime` block of a host that has never been provisioned (c-13 step 3)",
+            "writes the `paseoRuntime` block of a host that has never been provisioned (the installed setup procedure's step 3)",
         ),
         "mcp/src/agents_remember/kernel/primitives/paseo_runtime_settings.py": (
             6,

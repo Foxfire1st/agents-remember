@@ -36,6 +36,7 @@ from agents_remember.memory_quality.knowledge_validator.validator import LeafCom
 from agents_remember.models.knowledge_files.census import route_slug
 from knowledge_validator_test_support import (
     CODE_PATHS,
+    DIRECT_LANDING_CARD,
     DIRECT_LANDING_SIDECAR,
     FAMILY,
     INTEGRATE_CARD,
@@ -558,8 +559,13 @@ def test_a_carried_sidecar_without_markdown_reports_while_a_new_one_refuses() ->
     files = fixture_tree_files()
     del files[INTEGRATE_CARD]
     new = _validate(files)
-    assert not new.ok, new.render()
-    assert "R22.3-sidecar-without-markdown" in _rules(new), new.render()
+    assert "R22.3-sidecar-without-markdown" not in _rules(new, refusing=False), new.render()
+
+    referencing = fixture_tree_files()
+    del referencing[DIRECT_LANDING_CARD]
+    refused = _validate(referencing)
+    assert not refused.ok, refused.render()
+    assert "R22.3-sidecar-without-markdown" in _rules(refused), refused.render()
 
 
 def test_a_carried_unresolved_target_reports_while_a_new_one_refuses() -> None:

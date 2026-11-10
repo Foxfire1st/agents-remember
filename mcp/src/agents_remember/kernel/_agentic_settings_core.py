@@ -493,7 +493,7 @@ def default_agentic_settings_seed() -> dict[str, Any]:
     """Reference representation of built-in agentic defaults for inspection and fixtures.
 
     No installer or setup writer consumes this helper; absent knobs use the
-    dataclass/parser defaults. The c-13 interview writes chosen preferences. No spawn harness preference is seeded --
+    dataclass/parser defaults. The setup interview writes chosen preferences. No spawn harness preference is seeded --
     the spawn seam stays detection-gated until a preference is configured.
     """
     return {

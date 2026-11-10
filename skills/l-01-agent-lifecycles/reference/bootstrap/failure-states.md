@@ -24,7 +24,7 @@ Adoption commits the content it finds. Uncommitted work under `onboarding/`, `do
 
 Observation: `server_info` reports no `coordinationRoot`, or `context_packet` refuses for the named repository.
 
-The coordinator runtime scaffold is missing or the repository is not configured. For the recovery procedure, read and run [Install and onboard](../../../c-13-install-and-onboard/SKILL.md); if the scaffold is absent, `runtime_install` creates it. Do not build a coordination root by hand.
+The coordinator runtime scaffold is missing or the repository is not configured. For the recovery procedure, read the install and onboarding guide (`docs/getting-started.md` and `docs/install/README.md`) in the source repository; if the scaffold is absent, `runtime_install` creates it. Do not build a coordination root by hand.
 
 ## Memory root is not a Git repository
 
