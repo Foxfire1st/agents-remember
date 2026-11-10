@@ -17,6 +17,8 @@ Implementation does not expand scope or edit task status, the contract, memory o
 
 Before each freeze, pass the coding guidelines' handover checks on a clean copy of the final candidate. Name each check, the copy's tree and its result in the freeze report. Repair failures before freezing.
 
+Choose a freeze's focused tests by searching the repository's tracked test files for each touched path or bare name and each touched rule, tool or record identifier. Add tests using a matching test-support file, the knowledge-lookup proofs, and yours. Record names and files in the checks and run them; repairs follow the same rule.
+
 These fast deterministic checks are distinct from full code-quality operations, which require the developer's explicit request.
 
 ### Make the measurement handover

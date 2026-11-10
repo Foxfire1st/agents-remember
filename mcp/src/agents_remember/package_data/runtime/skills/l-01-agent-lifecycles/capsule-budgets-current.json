@@ -12,7 +12,7 @@
   "acceptedGrowthSha256": "290cc7660b079836d72cb47cc428380d719a1b5735bdb2beae708242a55105f1",
   "acceptedSourceTableSha256": "569cf499db1aff4fee718ab08477830f7c89e2000e4600429926111018780b10",
   "predecessorD694HelperSha256": "67f0a0af5fcf232ce76336cfed0c5f9a8c185eca3f258dde09ab3f246e5a4b8d",
-  "currentDigestMapSha256": "6c0704944d9d957412fd657e9173cf6045455c8672ba5cffe091b5fe828a3a80",
+  "currentDigestMapSha256": "c7df5fbe07b582204d95b5b73fd24bdb5ebc8605900c0b019ae7ec2c401a30a3",
   "currentRenewal": {
    "authority": "D696 standing remaining-repair growth; Manager081129 instruction-only >100 notice",
    "repair": "Explicit tool-server qualifier in existing closeout paragraph; no authority or duty change",
@@ -5152,7 +5152,7 @@
    "templates/turn-report.md": 1708,
    "reference/knowledge/commands.md": 2327,
    "reference/tasks/document-authoring.md": 591,
-   "reference/review-baseline.md": 265,
+   "reference/review-baseline.md": 268,
    "reference/coordination/shared/requirement-design.md": 528,
    "reference/coordination/architect/curator-measurement.md": 424,
    "reference/coordination/architect/developer-decisions.md": 223,
@@ -5200,13 +5200,13 @@
    "manager/authorized-closeout": 2801,
    "manager/recovery": 2726,
    "worker/orientation": 3102,
-   "worker/implementation": 3119,
+   "worker/implementation": 3173,
    "worker/recovery": 2434,
    "curator/orientation": 3801,
    "curator/curation": 4294,
    "curator/recovery": 3109,
    "reviewer/orientation": 3777,
-   "reviewer/review": 3956,
+   "reviewer/review": 4019,
    "reviewer/recovery": 3109,
    "investigator/orientation": 2079,
    "investigator/recovery": 1447,
@@ -5233,7 +5233,7 @@
    "templates/turn-report.md": 1708,
    "reference/knowledge/commands.md": 2327,
    "reference/tasks/document-authoring.md": 591,
-   "reference/review-baseline.md": 265,
+   "reference/review-baseline.md": 268,
    "reference/coordination/shared/requirement-design.md": 528,
    "reference/coordination/architect/curator-measurement.md": 424,
    "reference/coordination/architect/developer-decisions.md": 223,
@@ -5348,7 +5348,7 @@
   },
   "skills/l-01-agent-lifecycles/core/digest-map.json": {
    "size_words": 17066,
-   "sha256": "6c0704944d9d957412fd657e9173cf6045455c8672ba5cffe091b5fe828a3a80",
+   "sha256": "c7df5fbe07b582204d95b5b73fd24bdb5ebc8605900c0b019ae7ec2c401a30a3",
    "kind": "changed"
   },
   "skills/l-01-agent-lifecycles/core/every-role.md": {
@@ -5422,8 +5422,8 @@
    "kind": "changed"
   },
   "skills/l-01-agent-lifecycles/operations/implementation.md": {
-   "size_words": 1030,
-   "sha256": "a4ab1088ea6a45a3c900a15960d864e2c59386af7c01f1f6dc77d16b2cadb596",
+   "size_words": 1084,
+   "sha256": "94c3d3c4628a450586a9522c436ee1c1f1e4478ee9b1e6af0feb8cb73582caa8",
    "kind": "current"
   },
   "skills/l-01-agent-lifecycles/operations/orientation.md": {
@@ -5442,8 +5442,8 @@
    "kind": "current"
   },
   "skills/l-01-agent-lifecycles/operations/review.md": {
-   "size_words": 1666,
-   "sha256": "2cc78e8e3916f399e3636ea5bafd4c556976890b7b00303149979e7f28fc1bf8",
+   "size_words": 1729,
+   "sha256": "19b9d4df6cc34036f6eec72c7d6c31bcec5a0e88015077761b1019ced54f21be",
    "kind": "current"
   },
   "skills/l-01-agent-lifecycles/reference/bootstrap/failure-states.md": {
@@ -5607,8 +5607,8 @@
    "kind": "current"
   },
   "skills/l-01-agent-lifecycles/reference/review-baseline.md": {
-   "size_words": 265,
-   "sha256": "6d9752ebd3539594e041c77f71c3012ad76d3cb60887044b08d306c964bce0a2",
+   "size_words": 268,
+   "sha256": "c75e23d9ebfdae17af6e3210d7312090e71437a0c5181eaa27beba919363c4eb",
    "kind": "current"
   },
   "skills/l-01-agent-lifecycles/reference/sandbox-actors.md": {
@@ -5776,11 +5776,11 @@
   "operations/closeout.md": "sha256:c2f5de0efb06134f6edc9ba655863667b983906e7024a9231cdf99fba3c464e5",
   "operations/coordination.md": "sha256:b6ce2f36eff1ebf1c013d6b26ab0675d74c6ab88c90a547612ac875242064418",
   "operations/curation.md": "sha256:de311c01a980b8e41ce991849b2a94fce35faf2d5609de281d6812d4918fa76b",
-  "operations/implementation.md": "sha256:a4ab1088ea6a45a3c900a15960d864e2c59386af7c01f1f6dc77d16b2cadb596",
+  "operations/implementation.md": "sha256:94c3d3c4628a450586a9522c436ee1c1f1e4478ee9b1e6af0feb8cb73582caa8",
   "operations/orientation.md": "sha256:3120f8aea8dbc2fafb10fd9722e54e4e58c03f87dbe630a343e44bdb87f5cd30",
   "operations/planning.md": "sha256:3ff5705f68745036538ab70641c1bb1de319e773239f7ffaaa5c3546820aa957",
   "operations/recovery.md": "sha256:920faa49cc2de8111c07d8844827f9592a57e63d977d9c7830c17f80dfe29f24",
-  "operations/review.md": "sha256:2cc78e8e3916f399e3636ea5bafd4c556976890b7b00303149979e7f28fc1bf8",
+  "operations/review.md": "sha256:19b9d4df6cc34036f6eec72c7d6c31bcec5a0e88015077761b1019ced54f21be",
   "reference/bootstrap/failure-states.md": "sha256:6e78e0368bea8f3894fc4be894fda8ae9fb5e94955e967dac963f1c0b5ee89f4",
   "reference/bootstrap/foundation-state.md": "sha256:e8273f95fb816c142bfa5711a9887fe639fc0e5fa4f7eb4da685f1a645e5b3d6",
   "reference/coordination/architect/claim-verification.md": "sha256:9979acc5bbee3aa8aa748115b3f66a23901dfca0f34be5b07f882ad9c584e07b",
@@ -5813,7 +5813,7 @@
   "reference/knowledge/use.md": "sha256:a2f200e015552f4154eb20cacac572f5bf482aeecaef79037567a5cac8ba7c21",
   "reference/message-handover.md": "sha256:5c1f0ccf7f823e73345cfc96fdd37088e28dea92e00c7dcfc62cdec065d64ce7",
   "reference/refused-write.md": "sha256:83d69507881a091ffbaaa473a3deb5e9b87c86593df19ce16067dbd0bc9e7fb0",
-  "reference/review-baseline.md": "sha256:6d9752ebd3539594e041c77f71c3012ad76d3cb60887044b08d306c964bce0a2",
+  "reference/review-baseline.md": "sha256:c75e23d9ebfdae17af6e3210d7312090e71437a0c5181eaa27beba919363c4eb",
   "reference/sandbox-actors.md": "sha256:48bcbdc6fac65899c7e67d5e4b78dde1aeddd844fd8174beb559a3fde5cc7a36",
   "reference/tasks/document-authoring.md": "sha256:5c66644a20d1b02c9303f60b6c152374e26e3cbbe5bc1333f8694bfdc6eec54f",
   "reference/writing/technical-english-profile.md": "sha256:e381e9b560fa509b0cfb55565e80991a857a68ec657ee42e22fe3f56df5fe788",

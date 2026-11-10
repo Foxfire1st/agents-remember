@@ -31,4 +31,4 @@ An empty first-pass issue list is a valid terminating baseline.
 
 ## Select focused tests
 
-Choose focused tests across every changed surface and relevant gate. For full-suite authority, follow [Inspect and verify the candidate](../roles/reviewer.md#inspect-and-verify-the-candidate).
+Select focused tests by [the review-stage rule](../operations/review.md#select-focused-tests), which also names the fix-verification case. For full-suite authority, follow [Inspect and verify the candidate](../roles/reviewer.md#inspect-and-verify-the-candidate).
