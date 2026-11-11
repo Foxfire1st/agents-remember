@@ -34,6 +34,7 @@ describe('nothing twice (rule 8)', () => {
           completed: 0,
           aborted: 0,
           works: 0,
+          waiting: 0,
           paused: 0,
           unknown: 0,
         },

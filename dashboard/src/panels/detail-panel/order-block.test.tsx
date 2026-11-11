@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DetailPanel } from './DetailPanel';
 import { GRAPH_REST_MS } from '../sprint-graph/SprintGraphView';
-import { formatLimitTime } from './pageParts';
+import { formatLimitTime } from './limitTime';
 import type { ProviderLimit, TaskExecutionNodeView } from '../../types/projection';
 import { cells, seedTaskEntries, taskEntry, taskSummary, taskReference } from './test-utils';
 
@@ -110,7 +110,7 @@ function seedSprint() {
       activity: 'works',
       reference: taskReference(`${REPO}/text/task.json`),
       children: [taskReferenceKey(taskReference(`${REPO}/text/01_one.json`)), taskReferenceKey(taskReference(`${REPO}/text/02_two.json`))],
-      counts: { planned: 0, started: 1, completed: 1, aborted: 0, works: 1, paused: 0, unknown: 0 },
+      counts: { planned: 0, started: 1, completed: 1, aborted: 0, works: 1, waiting: 0, paused: 0, unknown: 0 },
       id: 'TEXT',
       title: 'Text helpers',
       summary: taskSummary({
@@ -357,7 +357,7 @@ it('draws a master’s tasks after Now with ready-only next tasks and the shared
       title: 'Owner',
       children: children.map((item) => item.key),
       summary: taskSummary({ kind: 'master', form: 'master', executionGraphView: { nodes } }),
-      counts: { started: 1, planned: 2, completed: 1, aborted: 0, works: 0, paused: 0, unknown: 1 },
+      counts: { started: 1, planned: 2, completed: 1, aborted: 0, works: 0, waiting: 0, paused: 0, unknown: 1 },
     }),
     ...children,
   ]);

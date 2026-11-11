@@ -39,11 +39,16 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "The agent begins its assignment at once.",
         "Keep the returned agent ID, report path, and handover artifact path.",
         "You may start Investigator, Orchestrator, Manager, Worker, Reviewer and Curator.",
-        "Before starting a role and delivering its first intake, read [Start one canonical role "
-        "assignment](../operations/coordination.md#start-one-canonical-role-assignment) for the "
-        "permitted starters and [Start leaf stages and deliver the first "
-        "intake](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake) "
-        "for stage timing and intake fields.",
+        (
+            "Before starting a role and delivering its first intake, read [Start "
+            "one canonical role "
+            "assignment](../operations/coordination.md#start-one-canonical-role-assignment) "
+            "for the permitted starters of `role_start` and [Start leaf stages and "
+            "deliver the first "
+            "intake](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake) "
+            "for stage timing and the intake fields of the first `role_message` on "
+            "`agents-remember-task`."
+        ),
         "After review, under developer-chosen direct coordination "
         "send a repair for the specific findings to the same Worker "
         "with `role_message` on `agents-remember-task` instead of "
@@ -123,11 +128,14 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "investigation that belongs to no leaf to an Investigator.",
         "You may author requirements, tasks, plans, and rulings. Do not write onboarding.",
         "Flat mode here means only the developer-chosen direct-coordination exception.",
-        "When no Manager or Orchestrator owns closeout, you may "
-        "coordinate the existing paired closeout only under the "
-        "already-delegated authority of [Authorized "
-        "Closeout](../operations/closeout.md), after independent "
-        "review and required curation evidence exist.",
+        (
+            "When no Manager or Orchestrator owns closeout, you may coordinate the "
+            "existing paired closeout (`worktree_closeout_preview` and "
+            "`worktree_closeout_apply` on `agents-remember-task`) only under the "
+            "already-delegated authority of [Authorized "
+            "Closeout](../operations/closeout.md), after independent review and "
+            "required curation evidence exist."
+        ),
         "In that case, call the paired closeout yourself and start no Manager for that step alone.",
         "It grants no other execution. Human-pinned approvals "
         "remain human; never substitute raw Git or self-approval.",
@@ -157,7 +165,17 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "using a selection under your own sprint.",
         "Those Managers coordinate their distinct Workers, Reviewers, and Curators.",
         "You may start Manager, Worker, Reviewer, Curator, and Investigator.",
-        "Before starting or messaging a role, read [role assignments](../operations/coordination.md#start-one-canonical-role-assignment) for selection and start rules, [the first intake](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake) for stage timing and intake fields, and [message delivery](../operations/coordination.md#address-and-deliver-a-message) for addresses, seats and delivery state.",
+        (
+            "Before starting or messaging a role, read [role "
+            "assignments](../operations/coordination.md#start-one-canonical-role-assignment) "
+            "for the selection and start rules of `role_start` on "
+            "`agents-remember-task`, [the first "
+            "intake](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake) "
+            "for stage timing and intake fields, and [message "
+            "delivery](../operations/coordination.md#address-and-deliver-a-message) "
+            "for the addresses, seats and delivery state of `role_message` on "
+            "`agents-remember-task`."
+        ),
         "Your tool server's binding names you as the sender.",
         "Address each recipient explicitly by agent ID or by "
         "role and task references, and keep the returned agent "
@@ -472,14 +490,16 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "A harness without helpers can perform the same work.",
     ],
     "operations/curation.md": [
-        "Before responding to a non-work reply, an empty or "
-        "doubled-seat refusal, an unreachable-Manager notice, "
-        "or failed delivery of a required Manager notice, read "
-        "[Report a refused handover](implementation.md#report-a-refused-handover) "
-        "for the seat/problem report, pending state, independent "
-        "continuation and notice retry. It transfers no Worker "
-        "or transaction authority. The permitted Manager notice "
-        "occasions below remain unchanged.",
+        (
+            "Before responding to a non-work reply, an empty or doubled-seat "
+            "refusal, an unreachable-Manager notice, or failed delivery of a "
+            "required Manager notice, read [Report a refused "
+            "handover](implementation.md#report-a-refused-handover) for the "
+            "seat/problem report, pending state, independent continuation and the "
+            "notice retry through `role_message` on `agents-remember-task`. It "
+            "transfers no Worker or transaction authority. The permitted Manager "
+            "notice occasions below remain unchanged."
+        ),
         "Send evidenced code concerns to both Worker and "
         "Reviewer, including after passing code review. Show "
         "the requirement or report mismatch.",

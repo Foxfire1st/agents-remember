@@ -71,13 +71,18 @@ def parse_landing_settings(
             # Markdown settings predate the landing setting and carry no key for it; a repository
             # still on that form lands locally until it moves to JSON settings.
             continue
-        try:
-            data = json.loads(observed_text(candidate))
-        except json.JSONDecodeError as error:
-            raise ValueError(f"invalid JSON settings in {candidate}: {error}") from error
-        root = require_mapping(data, "settings.json root")
-        return parse_json_landing_settings(root)
+        return parse_landing_settings_text(observed_text(candidate), str(candidate))
     return LandingSettings()
+
+
+def parse_landing_settings_text(text: str, where: str) -> LandingSettings:
+    """The landing settings one JSON settings text holds; ``where`` names it in a refusal."""
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"invalid JSON settings in {where}: {error}") from error
+    return parse_json_landing_settings(require_mapping(data, "settings.json root"))
 
 
 def parse_coordination_settings(

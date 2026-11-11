@@ -40,7 +40,7 @@ from agents_remember.observer.acp_providers import (
 PASEO_HOME = "paseo-home"
 DOCUMENT = {
     "schema": ACP_PROVIDERS_SCHEMA,
-    "paseoVersion": "0.12.0",
+    "paseoVersion": "0.15.4",
     "readAt": "2026-10-28T10:00:00+01:00",
     "files": ["/opt/paseo/node_modules/@getpaseo/server/dist/provider-registry.js"],
     "dropouts": {},
@@ -272,7 +272,7 @@ class ReadAcpProvidersTests(unittest.TestCase):
 
         self.assertIsNotNone(document)
         self.assertEqual(document.schema_, ACP_PROVIDERS_SCHEMA)
-        self.assertEqual(document.paseoVersion, "0.12.0")
+        self.assertEqual(document.paseoVersion, "0.15.4")
         self.assertTrue(document.providers["hermes"].acp)
         self.assertEqual(document.providers["hermes"].client_class, "GenericACPAgentClient")
         self.assertEqual(document.providers["hermes"].reason, "extends-acp")

@@ -18,17 +18,19 @@ Read the selected requirement and leaf task only. Open the rendered task documen
 
 These fields are file locations, not tool-server read calls. On `agents-remember-task`, `task_doc` supports document authoring and linkage-report artifacts. Its `linkage_report` leaves task documents unchanged; `dry_run` writes neither documents nor artifacts. Both `context_packet` and `read_ar_files` use `task_context` with the canonical task reference and enclosure contract.
 
-Before editing, skipping or previewing task-document fields, read [task document authoring]({{detail:reference/tasks/document-authoring.md}}) for prose conventions and example deferral.
+Before editing, skipping or previewing task-document fields, read [task document authoring]({{detail:reference/tasks/document-authoring.md}}) for the prose conventions and example deferral of `task_doc` on `agents-remember-task`.
 
-Verify that the code and memory roots match the handover. Edit only the code worktree and use memory as read-only context. Follow the repository's actual coding and test instructions when the brief supplies them.
+Verify that the code and memory roots match the handover. Edit only the code worktree and use memory as read-only context.
 
 Build each worktree's environment as `system/tools.md` says. Run every candidate command in that environment. Report a command the tool notes lack, and record the interpreter each run used.
 
 If a task fact seems absent, read the named canonical task and requirement using the exact supplied read arguments before reporting it missing. If a required binding remains absent or conflicts, report its exact source and field. Do not infer another task or workspace.
 
-A parent agent is optional: a Worker started from the dashboard has none and needs none. Before asking a question, follow [Ask for a developer decision](../operations/orientation.md#ask-for-a-developer-decision) for the reporting recipient and parentless route: send questions requiring the developer's decision to your parent, or ask in your own chat when you have no parent.
+A parent agent is optional: a Worker started from the dashboard has none and needs none. Before asking a question, follow [Ask for a developer decision](../operations/orientation.md#ask-for-a-developer-decision) for the reporting recipient and parentless route: send questions requiring the developer's decision to your parent with `role_message` on `agents-remember-task`, or ask in your own chat when you have no parent.
 
-Before editing source, read [knowledge use]({{detail:reference/knowledge/use.md}}#worker-read-before-editing-and-after-a-test-fails) for attributed records, related code and proof evidence.
+Before editing source, call `knowledge_read` on `agents-remember-task` with `view="source_context"` for each file you will edit; read [knowledge use]({{detail:reference/knowledge/use.md}}#worker-read-before-editing-and-after-a-test-fails) to interpret the result: attributed records, related code and proof evidence.
+
+For code changes, read `system/coding-guidelines.md` under `workspace.memoryRoot` in full, where it exists, before the first source edit, and follow it for every line of source code, tests and product messages. When code work goes to a helper, tell it to do the same before its first edit.
 
 For user-interface work, read `system/design-guidelines.md` under `workspace.memoryRoot`, where it exists, before the first interface edit and follow it. Write instruction texts (skills, role files, capsules or templates) according to `system/skill-writing-guidelines.md` under `workspace.memoryRoot` when present. The Worker does not edit that guideline.
 
@@ -40,7 +42,7 @@ At intake and at each freeze, map every numbered evidence item to its report fil
 
 ## Use knowledge commands
 
-Before using a knowledge command or interpreting its result, read [knowledge commands]({{detail:reference/knowledge/commands.md}}) for command effects and result meanings.
+Before using a knowledge command or interpreting its result, read [knowledge commands]({{detail:reference/knowledge/commands.md}}) for the effects and result meanings of `knowledge_read`, `read_ar_files` and `context_packet` on `agents-remember-task` and of the other commands.
 
 ## Prepare a sandbox harness
 
@@ -79,9 +81,9 @@ Before you add an optional walkthrough to your freeze report, read [visual-expla
 <!-- ar:gives freeze-handoff to reviewer: freeze-report, candidate-identity, attempt-records -->
 <!-- ar:gives producer-list to curator: list-file, freeze-identity, handoff-check-result -->
 
-Before handing over a frozen candidate, follow [Hand over the frozen candidate](../operations/implementation.md#hand-over-the-frozen-candidate) for the Manager stage-start notice, direct Reviewer handover and code-`PASS` Curator handover. Preserve the producer data verbatim for that exact freeze.
+Before handing over a frozen candidate, follow [Hand over the frozen candidate](../operations/implementation.md#hand-over-the-frozen-candidate) for the Manager stage-start notice, direct Reviewer handover and code-`PASS` Curator handover, each sent with `role_message` on `agents-remember-task`. Preserve the producer data verbatim for that exact freeze.
 
-Before a command-line run that decides or writes, read [serving-build CLI binding]({{detail:reference/knowledge/serving-build.md}}) for the admitted launch interpreter, package selection and stamp comparison.
+Before a command-line run that decides or writes, read [serving-build CLI binding]({{detail:reference/knowledge/serving-build.md}}) for the admitted launch interpreter, package selection and stamp comparison with `server_info` on `agents-remember-task`.
 
 Before producing the Curator hand-off list, use the [producer-list shape](../templates/curator-handoff-list.md#shape) for its fields. Before sending the list, run `handoff-check` against that freeze with the serving build's interpreter, identified through `server_info` on `agents-remember-task`. Name the result in the message.
 
@@ -104,7 +106,7 @@ A recorded weakness is not a finding and blocks nothing. Changing code creates n
 
 ### Send a handover
 
-Before sending a handover, read [file-carrying messages]({{detail:reference/message-handover.md}}#send-a-message-that-names-the-files) for message payloads and consumption evidence.
+Before sending a handover, read [file-carrying messages]({{detail:reference/message-handover.md}}#send-a-message-that-names-the-files) for the payloads of `role_message` on `agents-remember-task` and consumption evidence.
 
 ### Address messages and route authority questions
 
@@ -124,11 +126,11 @@ A Worker starts no role. Starting an agent briefs it and makes the starter its p
 
 Do not expand requirements, rewrite packets, change task acceptance or repair onboarding. Before resuming after context compaction, read [Restore the saved assignment](../operations/recovery.md#restore-the-saved-assignment) for the same task, saved report and completed-action check. Uncertainty does not authorize duplicate work.
 
-When the master line moves, run the supported sync of your own leaf yourself, following [Synchronize the leaf](../operations/implementation.md#synchronize-the-leaf) for sync choices, focused reruns and the Manager’s reserved steps. Ask the Manager only for a step the sync operation reserves to it, such as staging a memory-conflict resolution. Take none of its closeout, integration, status or acceptance writes.
+When the master line moves, run the supported sync of your own leaf yourself, following [Synchronize the leaf](../operations/implementation.md#synchronize-the-leaf) for the choices of `worktree_sync` on `agents-remember-task`, focused reruns and the Manager’s reserved steps. Ask the Manager only for a step the sync operation reserves to it, such as staging a memory-conflict resolution. Take none of its closeout, integration, status or acceptance writes.
 
 ## Repair findings and failed checks
 
-Before diagnosing a failing test, read [knowledge use]({{detail:reference/knowledge/use.md}}#worker-read-before-editing-and-after-a-test-fails) for recorded proof links and guarantee diagnosis.
+Before diagnosing a failing test, call `knowledge_read` on `agents-remember-task` with `view="source_context"` for the test file; read [knowledge use]({{detail:reference/knowledge/use.md}}#worker-read-before-editing-and-after-a-test-fails) for recorded proof links and guarantee diagnosis.
 
 Before repairing a sealed finding in this task's own files, follow [Repair a sealed own-file finding](../operations/implementation.md#repair-a-sealed-own-file-finding) for direct repair authority, checks, freeze and per-finding evidence.
 

@@ -294,6 +294,8 @@ leaves every other key of the daemon's `config.json` alone:
 | --- | --- | --- |
 | `daemon.listen` | `listen` | at start |
 | `daemon.relay.enabled` | `false` | live |
+| `daemon.mcp.injectIntoAgents` | `false` | live |
+| `agents.idleRuntimeCleanup` | `false` | live |
 | `features.webUi.enabled` | `true` | at start |
 | `features.dictation.enabled` | `false` | at start |
 | `features.voiceMode.enabled` | `false` | at start |
@@ -301,10 +303,13 @@ leaves every other key of the daemon's `config.json` alone:
 | `agents.providers` | `providers` | live (written into the file, then reloaded) |
 
 Dictation and voice mode are switched off before the first start, so no speech
-model is downloaded. `daemon.action` in the report is `started` (the daemon was
-not running), `restarted` (it ran another version, or a setting applied only at
-start changed; `daemon.reasons` says which), `reloaded` (only live settings, the
-embed list or the plugin changed) or `untouched`. A restart closes the sessions
+model is downloaded. Paseo's own agent tools are switched off for every seat. Idle
+runtime cleanup is switched off: from Paseo 0.14 the host otherwise closes an agent
+that has been idle for 60 minutes, and Agents Remember reads a closed seat as ended.
+`daemon.action` in the report is `started` (the daemon was not running),
+`restarted` (it ran another version, or a setting applied only at start changed;
+`daemon.reasons` says which), `reloaded` (only live settings, the embed list or
+the plugin changed) or `untouched`. A restart closes the sessions
 of running agents; they stay resumable. A change of only the host part of
 `listen` is such a restart when the home's own daemon is what holds the new
 address (the same port, and a wildcard host or two host names for one address):

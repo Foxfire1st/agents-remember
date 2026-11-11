@@ -19,7 +19,6 @@ import {
   declaresSubagentWait,
   isPluginWakeMessage,
   noteAgentArchived,
-  noteTurnEnded,
   noteTurnStarted,
   type HostAgentState,
   type TurnEndedAgent,
@@ -27,6 +26,8 @@ import {
   type TurnEndedSender,
   type TurnEndedTracker,
 } from "./turn_ended.ts";
+import { HELPER_WAKE_SENTENCE } from "./background_wait.ts";
+import { endSeatTurn, fakeClock, hostState, makeSender, type FakeClock, type SeatEnd, type SentMessage } from "./turn_test_fakes.ts";
 
 const NOW = "2026-10-28T09:00:00.000Z";
 
@@ -62,55 +63,6 @@ const RECORDS: Record<string, TurnEndedFacts> = {
 };
 const AGENT: TurnEndedAgent = { id: "seat", parentAgentId: "parent", provider: ACP };
 
-interface SentMessage {
-  agentId: string;
-  text: string;
-}
-
-function makeSender(): TurnEndedSender & { sent: SentMessage[] } {
-  const sent: SentMessage[] = [];
-  return {
-    sent,
-    sendMessage(agentId: string, text: string): Promise<void> {
-      sent.push({ agentId, text });
-      return Promise.resolve();
-    },
-  };
-}
-
-interface FakeTimer {
-  callback: () => void;
-  delayMs: number;
-  cleared: boolean;
-}
-
-/** A clock and timer set the decision uses, so a test can end a wait by hand. */
-function fakeClock() {
-  let current = new Date(NOW);
-  const timers: FakeTimer[] = [];
-  return {
-    timers,
-    now: () => current,
-    setTimeout: (callback: () => void, delayMs: number): unknown => {
-      const timer: FakeTimer = { callback, delayMs, cleared: false };
-      timers.push(timer);
-      return timer;
-    },
-    clearTimeout: (handle: unknown): void => {
-      (handle as FakeTimer).cleared = true;
-    },
-    async fire(): Promise<void> {
-      for (const timer of timers.splice(0)) if (!timer.cleared) timer.callback();
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    },
-    pending(): FakeTimer[] {
-      return timers.filter((timer) => !timer.cleared);
-    },
-  };
-}
-
-type Clock = ReturnType<typeof fakeClock>;
-
 /** A tracker whose providers are ACP only where a case says so, and which keeps its rows. */
 function acpTracker(
   rows: { kind: string; reason: string; count: number }[] = [],
@@ -130,30 +82,14 @@ function acpTracker(
   );
 }
 
-/** The host's state for the seat, as a send reads it. */
-function hostState(overrides: Partial<HostAgentState> & { readonly id: string }): HostAgentState {
-  return { parentAgentId: null, inTurn: false, permissionWait: false, archived: false, ...overrides };
-}
-
 function runSeat(
   tracker: TurnEndedTracker,
   sender: TurnEndedSender,
-  clock: Clock,
+  clock: FakeClock,
   timeline: readonly unknown[] = [],
-  extra: {
-    readonly outcome?: string;
-    readonly agent?: TurnEndedAgent;
-    readonly records?: Record<string, TurnEndedFacts>;
-    readonly readHost?: () => Promise<readonly HostAgentState[] | null>;
-  } = {},
-): ReturnType<typeof noteTurnEnded> {
-  return noteTurnEnded(extra.agent ?? AGENT, timeline, extra.records ?? RECORDS, tracker, sender, {
-    outcome: extra.outcome ?? "completed",
-    now: clock.now,
-    setTimeout: clock.setTimeout,
-    clearTimeout: clock.clearTimeout,
-    readHost: extra.readHost ?? (async () => [hostState({ id: "seat" }), hostState({ id: "parent" })]),
-  });
+  extra: Omit<Partial<SeatEnd>, "timeline"> = {},
+): ReturnType<typeof endSeatTurn> {
+  return endSeatTurn(tracker, sender, clock, { ...extra, agent: extra.agent ?? AGENT, records: extra.records ?? RECORDS, timeline });
 }
 
 /** The declaration as a seat writes it, with its progress report below the line. */
@@ -173,7 +109,7 @@ function seatWakes(sent: SentMessage[]): SentMessage[] {
 }
 
 test("a declared ACP seat that stays idle is asked for progress at three minutes and not before", async () => {
-  const clock = fakeClock();
+  const clock = fakeClock(NOW);
   const sender = makeSender();
   const tracker = acpTracker();
 
@@ -200,7 +136,7 @@ test("a declared ACP seat that stays idle is asked for progress at three minutes
 });
 
 test("a seat that answers every check and declares again is asked again, never sent the no-hand-off message", async () => {
-  const clock = fakeClock();
+  const clock = fakeClock(NOW);
   const sender = makeSender();
   const tracker = acpTracker();
   await runSeat(tracker, sender, clock, declaredTimeline());
@@ -221,7 +157,7 @@ test("a seat that answers every check and declares again is asked again, never s
 });
 
 test("a check that falls due in a running turn waits for the turn, and a declaring end arms a fresh one", async () => {
-  const clock = fakeClock();
+  const clock = fakeClock(NOW);
   const sender = makeSender();
   const rows: { kind: string; reason: string; count: number }[] = [];
   const tracker = acpTracker(rows);
@@ -246,7 +182,7 @@ test("a check that falls due in a running turn waits for the turn, and a declari
 });
 
 test("a check due while the host still shows the seat in a turn is skipped and not sent", async () => {
-  const clock = fakeClock();
+  const clock = fakeClock(NOW);
   const sender = makeSender();
   const tracker = acpTracker();
   await runSeat(tracker, sender, clock, declaredTimeline());
@@ -262,7 +198,7 @@ test("a check due while the host still shows the seat in a turn is skipped and n
 });
 
 test("a limited declared seat gets the check's text with the reset sentence, not the no-hand-off message", async () => {
-  const clock = fakeClock();
+  const clock = fakeClock(NOW);
   const sender = makeSender();
   const until = "2026-10-28T09:30:00.000Z";
   let limited = true;
@@ -289,7 +225,7 @@ test("a check due in a permission wait, or with an unreadable host state, is re-
     async () => [hostState({ id: "seat", permissionWait: true })],
     async () => null,
   ]) {
-    const clock = fakeClock();
+    const clock = fakeClock(NOW);
     const sender = makeSender();
     const rows: { kind: string; reason: string; count: number }[] = [];
     const tracker = acpTracker(rows);
@@ -307,7 +243,7 @@ test("a check due in a permission wait, or with an unreadable host state, is re-
 });
 
 test("a turn opened by the check does not reset the run, and a declared end neither counts nor resets it", async () => {
-  const clock = fakeClock();
+  const clock = fakeClock(NOW);
   const sender = makeSender();
   const rows: { kind: string; reason: string; count: number }[] = [];
   const tracker = acpTracker(rows);
@@ -338,7 +274,7 @@ test("a turn opened by the check does not reset the run, and a declared end neit
 });
 
 test("a declared end without a hand-off gives the parent nothing", async () => {
-  const clock = fakeClock();
+  const clock = fakeClock(NOW);
   const sender = makeSender();
   const tracker = acpTracker();
   await runSeat(tracker, sender, clock, declaredTimeline());
@@ -352,7 +288,7 @@ test("a declared end without a hand-off gives the parent nothing", async () => {
 });
 
 test("a turn that writes a step and declares is still a wait, and a sibling hand-off reaches the parent", async () => {
-  const clock = fakeClock();
+  const clock = fakeClock(NOW);
   const sender = makeSender();
   const rows: { kind: string; reason: string; count: number }[] = [];
   const tracker = acpTracker(rows);
@@ -388,7 +324,7 @@ test("a turn that writes a step and declares is still a wait, and a sibling hand
 });
 
 test("a declared Worker that answers a check with no signal gets the ACP seat message, and it names the declaration", async () => {
-  const clock = fakeClock();
+  const clock = fakeClock(NOW);
   const sender = makeSender();
   const tracker = acpTracker();
   await runSeat(tracker, sender, clock, declaredTimeline());
@@ -407,7 +343,7 @@ test("a declared Worker that answers a check with no signal gets the ACP seat me
 });
 
 test("an ACP Worker that called delegate_task and ended with no signal gets the ACP message and no check", async () => {
-  const clock = fakeClock();
+  const clock = fakeClock(NOW);
   const sender = makeSender();
   const tracker = acpTracker();
   const timeline = [
@@ -426,7 +362,7 @@ test("an ACP Worker that called delegate_task and ended with no signal gets the 
 });
 
 test("an Investigator's declaration gets checks, and its silent end keeps today's parent line", async () => {
-  const clock = fakeClock();
+  const clock = fakeClock(NOW);
   const sender = makeSender();
   const tracker = acpTracker();
   const investigator: TurnEndedAgent = { id: "investigator", parentAgentId: "parent", provider: ACP };
@@ -481,20 +417,32 @@ test("the keyword is read at the start of any line behind the markers, and never
   );
 });
 
-test("a non-ACP seat's keyword gets nothing from this packet and today's message text", async () => {
-  const clock = fakeClock();
+test("a non-ACP seat's helper declaration is a declared wait too, and its silent end keeps today's message text", async () => {
+  const clock = fakeClock(NOW);
   const sender = makeSender();
   const tracker = acpTracker();
   const codex: TurnEndedAgent = { id: "seat", parentAgentId: "parent", provider: CODEX };
+  // Every seat may declare the helper wait: a Codex or Claude seat waits on its own helpers too.
   const outcome = await runSeat(tracker, sender, clock, declaredTimeline(), { agent: codex });
-  assert.equal(outcome.kind, "waiting", "the end is judged as a silent end");
-  assert.equal(clock.pending()[0].delayMs, 60_000);
+  assert.equal(outcome.kind, "declared");
+  assert.equal(clock.pending()[0].delayMs, SUBAGENT_WAIT_CHECK_MS);
+  await clock.fire();
+  assert.equal(checkMessages(sender.sent).length, 1, "the check goes out as for an ACP seat");
+
+  // An end with no declaration is a silent end, and the message keeps the non-ACP text.
+  noteTurnStarted(codex, tracker, clock.now);
+  const silent = await runSeat(tracker, sender, clock, [
+    { type: "user_message", text: checkMessages(sender.sent)[0].text },
+    { type: "assistant_message", text: "H1 done" },
+  ], { agent: codex });
+  assert.equal(silent.kind, "waiting");
+  assert.equal(clock.pending().at(-1)?.delayMs, 60_000);
   await clock.fire();
   const wakes = seatWakes(sender.sent);
   assert.equal(wakes.length, 1);
   assert.ok(wakes[0].text.includes("Go on with your stage in this turn, or send what blocks you to your parent with role_message."));
-  assert.ok(!wakes[0].text.includes(ACP_SEAT_WAKE_SENTENCE), "today's text is unchanged");
-  assert.equal(checkMessages(sender.sent).length, 0, "no check for a seat off ACP");
+  assert.ok(!wakes[0].text.includes(ACP_SEAT_WAKE_SENTENCE), "the ACP sentence stays ACP-only");
+  assert.ok(wakes[0].text.includes(HELPER_WAKE_SENTENCE), "the Codex seat is told about the helper declaration");
 });
 
 test("the plugin recognises its own check as its own message, and an external message is not", () => {
@@ -508,7 +456,7 @@ test("the plugin recognises its own check as its own message, and an external me
 });
 
 test("an archived seat's declared wait ends with it", async () => {
-  const clock = fakeClock();
+  const clock = fakeClock(NOW);
   const sender = makeSender();
   const rows: { kind: string; reason: string; count: number }[] = [];
   const tracker = acpTracker(rows);
@@ -521,7 +469,7 @@ test("an archived seat's declared wait ends with it", async () => {
 });
 
 test("a limited check shed by the deferred fleet writes one rule-7 row and arms nothing", async () => {
-  const clock = fakeClock();
+  const clock = fakeClock(NOW);
   const sender = makeSender();
   const rows: { kind: string; reason: string; count: number }[] = [];
   const until = "2026-10-28T09:30:00.000Z";
@@ -542,7 +490,7 @@ test("a limited check shed by the deferred fleet writes one rule-7 row and arms 
 });
 
 test("a declaring end on a seat the host reports archived ends the earlier wait and arms nothing", async () => {
-  const clock = fakeClock();
+  const clock = fakeClock(NOW);
   const sender = makeSender();
   const rows: { kind: string; reason: string; count: number }[] = [];
   const tracker = acpTracker(rows);

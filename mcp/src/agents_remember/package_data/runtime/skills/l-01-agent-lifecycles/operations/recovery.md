@@ -14,7 +14,7 @@ For task-bound work, also recover the exact saved request identifier, recipient 
 <!-- ar:roles architect,orchestrator,manager -->
 ## Reconcile an uncertain start or message
 
-An interrupted or uncertain start or message does not authorize a new owner. Before reconciling that start, read [Start one canonical role assignment](coordination.md#start-one-canonical-role-assignment) for the same-request-identifier procedure.
+An interrupted or uncertain start or message does not authorize a new owner. Before reconciling that start, read [Start one canonical role assignment](coordination.md#start-one-canonical-role-assignment) for the same-request-identifier procedure of `role_start` on `agents-remember-task`.
 
 If message delivery is unknown, ask about it with a new `role_message` on `agents-remember-task` to the same agent. Do not replace that agent. If the outcome stays unknown, preserve it as unknown and report the identifiers.
 

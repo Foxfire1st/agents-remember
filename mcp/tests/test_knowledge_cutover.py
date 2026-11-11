@@ -34,7 +34,7 @@ from agents_remember.cli.knowledge_write_route import unconverted_write_refusal
 from agents_remember.memory.conversion.base import GitBaseConverter
 from agents_remember.memory_quality.knowledge_validator.commit_route import GitKnowledgeValidation
 from agents_remember.models.knowledge_files.shapes import HandoffOrigin
-from agents_remember.worktrees import cutover_lock, sync_transaction
+from agents_remember.worktrees import cutover_lock, sync_transaction, sync_transaction_cutover
 from agents_remember.worktrees import direct_landing as route
 from agents_remember.worktrees.cutover_lock import CUTOVER_LOCK_CODE, converted_memory_location
 from agents_remember.worktrees.integration.integration_ref_transaction import (
@@ -353,9 +353,11 @@ def test_the_converting_candidate_is_gated_never_locked(tmp_path: Path, ports: N
         sourceCommit=git(world.memory, "rev-parse", "main"),
         workBranch="leaf",
     )
-    assert sync_transaction._cutover_locked(cast(Any, crossing), {}) is None  # a crossing sync
+    assert (
+        sync_transaction_cutover.cutover_locked(cast(Any, crossing), {}) is None
+    )  # a crossing sync
     skipped = SimpleNamespace(plan="skip")
-    assert sync_transaction._cutover_locked(cast(Any, skipped), {}) is None  # code only
+    assert sync_transaction_cutover.cutover_locked(cast(Any, skipped), {}) is None  # code only
 
     # Review R1, F3: the leaf's own converted commit lands on its unconverted line (X04, X05), and a
     # repository-level run on a converted checkout is never locked (X07). MIK-R52 rule 3 judges

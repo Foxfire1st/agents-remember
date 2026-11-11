@@ -544,9 +544,11 @@ test("contributed parent-wake handlers keep permission and turn gates and send w
   writeFileSync(join(home, "agents-remember", "role-agents.json"), JSON.stringify({ agents: RECORDS }));
   type Handler = (event: unknown, context: unknown) => void;
   const handlers = new Map<string, Handler>();
-  const server = { on(name: string, handler: Handler) { handlers.set(name, handler); return () => {}; } } as unknown as Pick<PluginLifecycleRegistration, "on">;
+  const server = { addHook(name: string, handler: Handler) { handlers.set(name, handler); return () => {}; } } as unknown as Pick<PluginLifecycleRegistration, "addHook">;
   const sent: unknown[] = [];
-  const context = { paseo: { agents: { ref(id: string) { return { async send(text: string, options: unknown) { sent.push([id, text, options]); } }; } } } };
+  // Each ended turn reads as a readable, empty timeline.
+  const timeline = { async refetch() { return { entries: [] }; } };
+  const context = { paseo: { agents: { ref(id: string) { return { timeline, async send(text: string, options: unknown) { sent.push([id, text, options]); } }; } } } };
   const note = async (kind: string, id: string, parentAgentId: string | null = null) => {
     const handler = handlers.get(kind);
     assert.ok(handler, kind);
@@ -555,18 +557,18 @@ test("contributed parent-wake handlers keep permission and turn gates and send w
   };
   try {
     registerParentWakeEvents(server);
-    assert.deepEqual([...handlers.keys()], ["agent.turn_started", "agent.turn_ended", "agent.permission_requested", "agent.permission_resolved", "agent.archived", "agent.closed"]);
-    await note("agent.turn_started", "parent");
-    await note("agent.turn_started", "child", "parent");
-    await note("agent.turn_ended", "child", "parent");
+    assert.deepEqual([...handlers.keys()], ["agent.turn.before", "agent.turn.after", "agent.permission.before", "agent.permission.after", "agent.archive.after", "agent.close.after"]);
+    await note("agent.turn.before", "parent");
+    await note("agent.turn.before", "child", "parent");
+    await note("agent.turn.after", "child", "parent");
     assert.deepEqual(sent, []);
-    await note("agent.permission_requested", "parent");
-    await note("agent.turn_ended", "parent");
+    await note("agent.permission.before", "parent");
+    await note("agent.turn.after", "parent");
     assert.deepEqual(sent, []);
-    await note("agent.permission_resolved", "parent");
+    await note("agent.permission.after", "parent");
     assert.deepEqual(sent, [["parent", composeTurnEndedLine("child", CHILD, { kind: "empty" }), { activeTurnBehavior: "steer" }]]);
-    await note("agent.turn_started", "child", "parent");
-    await note("agent.turn_ended", "child", "parent");
+    await note("agent.turn.before", "child", "parent");
+    await note("agent.turn.after", "child", "parent");
     assert.equal(sent.length, 2);
     assert.deepEqual((sent[1] as unknown[])[2], { activeTurnBehavior: "steer" });
   } finally {
@@ -1578,11 +1580,11 @@ test("contributed handlers keep a completed silent end quiet until the seat can 
   type Handler = (event: unknown, context: unknown) => void;
   const handlers = new Map<string, Handler>();
   const server = {
-    on(name: string, handler: Handler) {
+    addHook(name: string, handler: Handler) {
       handlers.set(name, handler);
       return () => {};
     },
-  } as unknown as Pick<PluginLifecycleRegistration, "on">;
+  } as unknown as Pick<PluginLifecycleRegistration, "addHook">;
   const sent: unknown[] = [];
   const context = {
     paseo: {
@@ -1608,12 +1610,12 @@ test("contributed handlers keep a completed silent end quiet until the seat can 
   try {
     registerParentWakeEvents(server, { home });
     assert.deepEqual([...handlers.keys()], [
-      "agent.turn_started",
-      "agent.turn_ended",
-      "agent.permission_requested",
-      "agent.permission_resolved",
-      "agent.archived",
-      "agent.closed",
+      "agent.turn.before",
+      "agent.turn.after",
+      "agent.permission.before",
+      "agent.permission.after",
+      "agent.archive.after",
+      "agent.close.after",
     ]);
     const deliver = (kind: string, id: string, parent: string | null, extra: Record<string, unknown> = {}) => {
       handlers.get(kind)?.(
@@ -1621,12 +1623,12 @@ test("contributed handlers keep a completed silent end quiet until the seat can 
         context,
       );
     };
-    deliver("agent.turn_started", "seat", "parent");
-    deliver("agent.turn_ended", "seat", "parent");
+    deliver("agent.turn.before", "seat", "parent");
+    deliver("agent.turn.after", "seat", "parent");
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(sent.length, 0, "nothing goes out inside the wait");
     // A turn of the seat beginning inside the wait cancels it and writes the row.
-    deliver("agent.turn_started", "seat", "parent");
+    deliver("agent.turn.before", "seat", "parent");
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(sent.length, 0, "the cancelled wait sends nothing");
     const rows = readFileSync(turnEndLogPath(home), "utf8")
@@ -1733,7 +1735,7 @@ test("a hand-off before a message steered into the same turn still counts", asyn
     { type: "assistant_message", text: "two" },
   ];
   const sliced = turnSlice(timeline, { length: 1, key: "assistant_message:one" });
-  assert.equal(sliced.rows.length, 3, "the steered message does not split the turn");
+  assert.equal(sliced.rows?.length, 3, "the steered message does not split the turn");
   assert.equal(turnHasHandoff(sliced.rows), true, "the hand-off before the steer counts");
   const outcome = await runSeat(tracker, sender, clock, timeline);
   assert.equal(outcome.kind, "sent", "the parent keeps the line for the sibling hand-off");
@@ -1894,7 +1896,7 @@ test("a timeline replaced between two ends falls back to the last user_message",
     { type: "assistant_message", text: "two" },
   ];
   const sliced = turnSlice(replaced, { length: 1, key: "assistant_message:one" });
-  assert.equal(sliced.rows.length, 3, "the whole new turn, from its last user_message");
+  assert.equal(sliced.rows?.length, 3, "the whole new turn, from its last user_message");
   assert.equal(turnHasHandoff(sliced.rows), true, "the hand-off after the rewind counts");
   const outcome = await runSeat(tracker, sender, clock, replaced);
   assert.equal(outcome.kind, "sent", "the parent keeps its line for the sibling hand-off");
@@ -2139,11 +2141,11 @@ test("L181-C1-F06: the host read stops at its page cap instead of walking the fl
   writeFileSync(join(home, "agents-remember", "role-agents.json"), JSON.stringify({ agents: { seat: SEAT } }));
   const handlers = new Map<string, (event: unknown, context: unknown) => void>();
   const server = {
-    on(name: string, handler: (event: unknown, context: unknown) => void) {
+    addHook(name: string, handler: (event: unknown, context: unknown) => void) {
       handlers.set(name, handler);
       return () => {};
     },
-  } as unknown as Pick<PluginLifecycleRegistration, "on">;
+  } as unknown as Pick<PluginLifecycleRegistration, "addHook">;
   let listCalls = 0;
   let sends = 0;
   const context = {
@@ -2162,7 +2164,7 @@ test("L181-C1-F06: the host read stops at its page cap instead of walking the fl
   };
   try {
     registerParentWakeEvents(server, { home });
-    handlers.get("agent.turn_ended")?.(
+    handlers.get("agent.turn.after")?.(
       { agent: { id: "seat", parentAgentId: "parent" }, timeline: [], outcome: { kind: "completed" }, turnId: null },
       context,
     );
@@ -2198,7 +2200,7 @@ test("L181-C1-F09: an intact boundary with nothing appended scopes to the empty 
   assert.ok(mark !== undefined);
   assert.equal(mark!.length, 1);
   const sliced = turnSlice(handed, mark);
-  assert.equal(sliced.rows.length, 0, "the intact boundary scopes to an empty suffix");
+  assert.equal(sliced.rows?.length, 0, "the intact boundary scopes to an empty suffix");
   // The next end sees the same timeline with nothing appended: no old hand-off.
   const second = await runSeat(tracker, sender, clock, handed);
   assert.equal(second.kind, "waiting", "the earlier turn's hand-off does not answer for it");

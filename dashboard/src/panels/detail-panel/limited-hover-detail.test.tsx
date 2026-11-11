@@ -7,7 +7,7 @@ import { expect, it, vi } from 'vitest';
 import type { ProviderLimit, TaskEntry, TaskExecutionNodeView } from '../../types/projection';
 import { taskReferenceKey } from '../../data/taskReference';
 import { seedTaskEntries, taskEntry, taskReference } from '../detail-panel/test-utils';
-import { formatLimitTime } from '../detail-panel/pageParts';
+import { formatLimitTime } from '../detail-panel/limitTime';
 import { OrderBlock } from './orderGraph';
 import { SprintGraphView } from '../sprint-graph/SprintGraphView';
 import { Topology } from '../Topology';

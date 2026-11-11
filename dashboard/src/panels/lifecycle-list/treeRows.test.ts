@@ -69,6 +69,7 @@ it('constructs no terminal child rows at two long-history sizes and preserves au
       completed: size,
       aborted: 0,
       works: 0,
+      waiting: 0,
       paused: 0,
       unknown: 0,
     };

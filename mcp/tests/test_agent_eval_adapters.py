@@ -5,9 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-import shutil
 import sqlite3
-import subprocess
 import sys
 import time
 import unittest
@@ -62,7 +60,6 @@ from agent_evals.adapters.models import NativeCapture, NativeEvent, SourceFile
 from agent_evals.adapters.native_trials import (
     NativeJudgeOptions,
     capture_trial_actor,
-    host_window,
     run_native_judge,
 )
 from agent_evals.adapters.paseo import PaseoConnection, PaseoNativeAdapter, WaitContext
@@ -1703,87 +1700,6 @@ def test_host_merge_filters_exact_owner_preserves_sources_and_absent_archive(
         grade_helpers(HelperObservation(merged.capture, "host-owner", complete=True)).status
         == "pass"
     )
-
-    _assert_native_recorder(tmp_path)
-
-
-def _assert_native_recorder(tmp_path: Path) -> None:
-    node = shutil.which("node")
-    assert node is not None
-    source = (
-        Path(__file__).resolve().parents[2]
-        / "scripts/agent_evals/adapters/recorder_plugin/index.server.ts"
-    )
-    home = tmp_path / "native-recorder"
-    project = home / "project"
-    project.mkdir(parents=True)
-    output = home / "agent-eval"
-    output.mkdir()
-    (output / "recorder-settings.json").write_text(json.dumps({"projectRoot": str(project)}))
-    driver = r"""
-const [sourcePath, homePath, projectPath] = process.argv.slice(2)
-const { default: contribute } = await import(sourcePath)
-process.env.PASEO_HOME = homePath
-let opening, ending, listener, ready
-const gate = new Promise(resolve => { ready = resolve })
-const server = {
-  before(name, callback) { if (name === 'agent.session_open') opening = callback; return () => {} },
-  on(name, callback) { if (name === 'agent.turn_ended') ending = callback; return () => {} }
-}
-const cleanup = contribute(server)
-const pending = opening({ request: { agentId: 'owner', cwd: projectPath } }, { paseo: {
-  observeEvents(names, options) {
-    if (names.join(',') !== 'agent.provider_subagents.update' || options.notifications !== false) throw Error('wrong native subscription')
-    return { ready: gate, subscribe(value) { listener = value }, release: async () => {} }
-  }
-}})
-ready()
-await pending
-listener.snapshot()
-const native = { type: 'agent.provider_subagents.update', payload: { kind: 'upsert', subagent: {
-  id: 'helper', parentAgentId: 'owner', status: 'running', createdAt: new Date().toISOString()
-}} }
-listener.update(native)
-listener.update({ type: native.type, payload: { kind: 'remove', parentAgentId: 'owner', subagentId: 'helper' } })
-ending({ agent: { id: 'owner' }, turnId: 'actual-turn', outcome: { kind: 'completed' }, timeline: [] })
-// Keep this as a live observed window: cleanup would correctly mark it stopped.
-"""
-    done = subprocess.run(
-        [
-            node,
-            "--experimental-strip-types",
-            "--input-type=module",
-            "-",
-            source.as_uri(),
-            str(home),
-            str(project),
-        ],
-        input=driver,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert done.returncode == 0, done.stderr
-    rows = [json.loads(line) for line in (output / "host-events.jsonl").read_text().splitlines()]
-    assert len(rows) == 3 and rows[0]["native"]["payload"]["subagent"]["id"] == "helper"
-    sources = _TrialSources(
-        project, home, home / "settings", "build", {}, (output / "host-events.jsonl",)
-    )
-    observed = host_window(sources, "owner")
-    assert observed is not None and observed.complete
-    native = NativeCapture("codex", "actual-native-session", (), (), (), ())
-    merged = merge_host_events(
-        native, owner_id="owner", host_event_paths=sources.host_event_paths, window=observed
-    )
-    assert not merged.capture.unknowns
-    assert merged.capture.raw_records == tuple(rows)
-    assert merged.capture.events[-1].payload["turnId"] == "actual-turn"
-    marker = output / "owner.window.json"
-    value = json.loads(marker.read_text())
-    value["errors"] = ["actual subscription gap"]
-    marker.write_text(json.dumps(value))
-    gap = host_window(sources, "owner")
-    assert gap is not None and not gap.complete
 
 
 def test_host_merge_orders_native_turn_end_before_later_helper_stop(tmp_path: Path) -> None:

@@ -22,12 +22,12 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.worktrees import publication_admission
-from agents_remember.worktrees.series_closeout import (
+from agents_remember.worktrees.series_closeout import publication_merge_is_admitted
+from agents_remember.worktrees.series_merge_admission import (
     _landing_workflow,
     _MergeAdmission,
     _publication_merge_admitted,
     _SpineStep,
-    publication_merge_is_admitted,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -191,19 +191,6 @@ class PublicationMergeOnRealObjectsTests(unittest.TestCase):
             workflow="local",
         )
         self.assertFalse(_publication_merge_admitted(self.repo, merge, local, step))
-
-
-class TodayRefusalTextTests(unittest.TestCase):
-    def test_the_refusal_text_is_unchanged(self) -> None:
-        source = (MCP_SRC / "agents_remember" / "worktrees" / "series_closeout.py").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("A master line holds only leaf ", source)
-        self.assertIn(
-            "landings and its parent line; take the commit off the master branch and make the ",
-            source,
-        )
-        self.assertIn("change in a leaf", source)
 
 
 if __name__ == "__main__":

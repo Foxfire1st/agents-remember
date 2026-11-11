@@ -8,7 +8,7 @@ import type {
   TaskExecutionGraphView,
   TaskExecutionNodeView,
 } from '../../types/projection';
-import { formatLimitTime } from '../detail-panel/pageParts';
+import { formatLimitTime } from '../detail-panel/limitTime';
 import { statusWord } from '../detail-panel/pageStyles';
 import { seedTaskEntries, taskEntry } from '../detail-panel/test-utils';
 import { SprintGraphView } from './SprintGraphView';

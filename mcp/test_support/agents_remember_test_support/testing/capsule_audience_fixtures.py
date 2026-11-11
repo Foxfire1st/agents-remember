@@ -20,7 +20,13 @@ ROLE_POINTER_ACTIONS = {
             "Before authoring a task document or requirement packet, read",
         ),
         ("reference/knowledge/commands.md", "Before planning repository work, read"),
-        ("reference/knowledge/use.md", "Before diagnosing, read"),
+        (
+            "reference/knowledge/use.md",
+            (
+                "Before diagnosing, call `knowledge_read` on "
+                "`agents-remember-task` for the files involved; read"
+            ),
+        ),
         (
             "reference/coordination/architect/models-and-settings.md",
             "Before selecting a seat model and its authorized settings, read",
@@ -129,7 +135,14 @@ ROLE_POINTER_ACTIONS = {
             "reference/tasks/document-authoring.md",
             "Before editing, skipping or previewing task-document fields, read",
         ),
-        ("reference/knowledge/use.md", "Before editing source, read"),
+        (
+            "reference/knowledge/use.md",
+            (
+                "Before editing source, call `knowledge_read` on "
+                '`agents-remember-task` with `view="source_context"` for each '
+                "file you will edit; read"
+            ),
+        ),
         (
             "reference/knowledge/commands.md",
             "Before using a knowledge command or interpreting its result, read",
@@ -149,10 +162,24 @@ ROLE_POINTER_ACTIONS = {
             "Before a command-line run that decides or writes, read",
         ),
         ("reference/message-handover.md", "Before sending a handover, read"),
-        ("reference/knowledge/use.md", "Before diagnosing a failing test, read"),
+        (
+            "reference/knowledge/use.md",
+            (
+                "Before diagnosing a failing test, call `knowledge_read` on "
+                '`agents-remember-task` with `view="source_context"` for the '
+                "test file; read"
+            ),
+        ),
     ],
     "curator": [
-        ("reference/knowledge/use.md", "Before checking code and memory, read"),
+        (
+            "reference/knowledge/use.md",
+            (
+                "Before checking code and memory, call `knowledge_read` on "
+                "`agents-remember-task` for the files or records you check; "
+                "read"
+            ),
+        ),
         ("reference/knowledge/use.md", "Before interpreting a knowledge read, read"),
         (
             "reference/curator/repository-foundation.md",
@@ -230,7 +257,13 @@ ROLE_POINTER_ACTIONS = {
         ("reference/sandbox-actors.md", "Before configuring or inspecting a sandbox harness, read"),
     ],
     "reviewer": [
-        ("reference/knowledge/use.md", "When inspecting changes, read"),
+        (
+            "reference/knowledge/use.md",
+            (
+                "When inspecting changes, call `knowledge_read` on "
+                "`agents-remember-task` for each changed file; read"
+            ),
+        ),
         ("reference/knowledge/commands.md", "Before a knowledge-system command or check, read"),
         ("reference/review-baseline.md", "Before preparing a baseline review, read"),
         ("reference/message-handover.md", "Before handing over work, read"),
@@ -241,7 +274,13 @@ ROLE_POINTER_ACTIONS = {
             "reference/knowledge/commands.md",
             "Before using a knowledge command or interpreting its result, read",
         ),
-        ("reference/knowledge/use.md", "Before investigating repository code, read"),
+        (
+            "reference/knowledge/use.md",
+            (
+                "Before investigating repository code, call `knowledge_read` "
+                "on `agents-remember-task` for the files involved; read"
+            ),
+        ),
         (
             "reference/instruction-shortfall-review.md",
             "Before reviewing an instruction shortfall named by the concern, read",

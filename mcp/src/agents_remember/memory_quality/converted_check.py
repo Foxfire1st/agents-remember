@@ -33,9 +33,10 @@ CONVERTED_BASE_RULE: Final = "R24.7-converted-base"
 #: The validator rule whose refusals classify anchors against the comparison
 #: base (L44-C1-09): withheld, never refused, when the base cannot be built.
 _BASE_DEPENDENT_RULE: Final = "R22.6-anchor-path"
-KnowledgeBasePort = Callable[[Path, KnowledgeTree], tuple[KnowledgeTree | None, str | None]]
-"""``(memory root, candidate) -> (K_B as the candidate is compared with it, or why it cannot be
-built)``. This layer cannot reach the converted-base cache; the application binds it."""
+KnowledgeBasePort = Callable[[Path, KnowledgeTree], tuple[tuple[KnowledgeTree, ...], str | None]]
+"""``(memory root, candidate) -> (K_B as the candidate is compared with it -- during a merge both
+parents, ``HEAD`` first -- or why it cannot be built)``. This layer cannot reach the converted-base
+cache; the application binds it."""
 # The checks that read the legacy card format; the names are the checks' own CHECK_NAME values.
 
 
@@ -61,7 +62,7 @@ def _comparison_bases(
     if base is None:
         return _committed_base(memory_root), None
     found, problem = base(memory_root, tree)
-    return ((found,) if found is not None and found.converted else ()), problem
+    return tuple(one for one in found if one.converted), problem
 
 
 def _unbuildable_base(problem: str) -> dict[str, Any]:

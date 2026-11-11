@@ -30,4 +30,4 @@ Mechanical facts must not make policy decisions implicitly. Code may report memb
 
 ### D-6 — Source-comment requirement identifiers
 
-Before reviewing source comments, read `system/coding-guidelines.md`, section Source Comment Scope, in the repository's memory, when present, and check the comments against it, including its bounded requirement-identifier exception.
+Code-seam criterion [CS-7](code-seam.md#cs-7--coding-guidelines-line-check) owns this check.

@@ -7,7 +7,7 @@ import { expect, it, vi } from 'vitest';
 
 import { taskEntrySelectionKey, taskReferenceKey } from '../../data/taskReference';
 import type { ProviderLimit, TaskEntry, TaskExecutionNodeView } from '../../types/projection';
-import { formatLimitTime } from './pageParts';
+import { formatLimitTime } from './limitTime';
 import { OrderBlock } from './orderGraph';
 import { Topology } from '../Topology';
 import { LifecycleList } from '../lifecycle-list/LifecycleList';

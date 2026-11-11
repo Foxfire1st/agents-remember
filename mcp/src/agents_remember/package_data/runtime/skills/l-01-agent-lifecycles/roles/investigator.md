@@ -21,11 +21,11 @@ When a parent starts you, its first `role_message` on `agents-remember-task` sup
 
 Investigate one concern of any kind: a provider or system problem, a code route, a stalled check, an operating procedure, a comparison, or a command's cost. Read the code, memory, task documents, reports and logs needed for that concern.
 
-Before using a knowledge command or interpreting its result, read [knowledge commands]({{detail:reference/knowledge/commands.md}}) for the command's effects and supplied bindings.
+Before using a knowledge command or interpreting its result, read [knowledge commands]({{detail:reference/knowledge/commands.md}}) for the effects and supplied bindings of `knowledge_read`, `knowledge_diff` and `read_ar_files` on `agents-remember-task` and of the other commands.
 
 Read the supplied rendered task documents and canonical JavaScript Object Notation (JSON) documents with your own file tools. The `task_doc` tool on `agents-remember-task` supports document authoring and linkage-report artifacts. Its `linkage_report` leaves task documents unchanged; `dry_run` writes neither documents nor artifacts.
 
-Before investigating repository code, read [knowledge use]({{detail:reference/knowledge/use.md}}#investigator-distinguish-claims-observations-and-hypotheses) for the attributed records, related code and evidence to inspect.
+Before investigating repository code, call `knowledge_read` on `agents-remember-task` for the files involved; read [knowledge use]({{detail:reference/knowledge/use.md}}#investigator-distinguish-claims-observations-and-hypotheses) for the attributed records, related code and evidence to inspect.
 
 Before researching a repository for its first or resumed knowledge foundation, read [repository research](../reference/repository-research.md) for the source inventory the developer reviews, the bounded research and the evidence rules. Return the research report's path to the Architect for the foundation task's document, so the Curator finds it.
 
@@ -59,9 +59,9 @@ Before proposing a requirement change to your parent, read [requirements and lim
 
 ## Messages and developer questions
 
-Before handing over work, read [message payloads and files]({{detail:reference/message-handover.md}}#send-a-message-that-names-the-files) for the file and payload contract.
+Before handing over work, read [message payloads and files]({{detail:reference/message-handover.md}}#send-a-message-that-names-the-files) for the file and payload contract of `role_message` on `agents-remember-task`.
 
-Before sending developer questions or handling relayed answers, read [developer-question routing](../operations/orientation.md#ask-for-a-developer-decision) for the question and answer procedure. Send developer questions to your parent; without one, ask in your own chat.
+Before sending developer questions or handling relayed answers, read [developer-question routing](../operations/orientation.md#ask-for-a-developer-decision) for the question and answer procedure. Send developer questions to your parent with `role_message` on `agents-remember-task`; without one, ask in your own chat.
 
 When a parent started you, tell it that the report is written and name its path. Send that notice with `role_message` on `agents-remember-task`, addressed to the parent's role with its task references. Without a parent, the developer reads the report in your own chat.
 

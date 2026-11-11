@@ -166,7 +166,8 @@ def _stall_items(
     Eligibility is the task entry's own truth: only a started task, only while the host
     observation is known (an unknown observation resolves nothing), and only while no bound
     agent works -- a permission wait and a running subagent both count as work, so neither
-    duplicates a stall row. An explicit pause suppresses the master the developer stopped and
+    duplicates a stall row. A task whose seat waits on a declared wait still to be checked is
+    ``waiting``, not ``paused``, so it is no candidate either. An explicit pause suppresses the master the developer stopped and
     every started child bound to it by the canonical parent chain, and nothing else.
 
     The 900 seconds are counted from the reader's own watch (L190-R1-F04), while the occurrence

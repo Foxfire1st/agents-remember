@@ -41,8 +41,8 @@
 //   usage-reports {agentIds: [string], leafAgentIds?: [string]} -> {serverId, reports}
 //            One usage read per agent, for the limit only (MIK-R190 rule 7). The client answers
 //            the pinned `{requestId, reports}` envelope. A leaf seat's entry older than 60 s is
-//            refreshed once with that entry's reportIds and no agent (0.12.0 refuses a call that
-//            names both); a shared report is refreshed at most once per batch, and an entry that
+//            refreshed once with that entry's reportIds and no agent (0.12.0 to 0.15.4 refuse a call
+//            that names both); a shared report is refreshed at most once per batch, and an entry that
 //            already reads error is never forced. One agent's failure is its own `error` and stops
 //            no other. Ids and labels only: an account's own fields never leave the host.
 //
@@ -689,8 +689,8 @@ async function usageEntriesFor(daemon, agentId, leaf, refreshed) {
     if (!Number.isFinite(fetchedAt) || Date.now() - fetchedAt <= USAGE_REFRESH_AGE_MS) continue
     refreshed.set(entry.id, entry)
     try {
-      // 0.12.0 refuses a call that names both selectors ("agentId and reportIds cannot be
-      // combined"): a forced read selects the report it refreshes, and no agent.
+      // 0.12.0 to 0.15.4 refuse a call that names both selectors ("agentId and reportIds cannot
+      // be combined"): a forced read selects the report it refreshes, and no agent.
       const forced = await daemon.listUsageReports({ forceRefresh: true, reportIds: [entry.id] })
       const fresh = usageReportsOf(forced).find((row) => row?.id === entry.id)
       if (fresh !== undefined) {

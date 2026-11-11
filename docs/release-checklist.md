@@ -33,6 +33,12 @@ GitHub Releases (there is no `CHANGELOG.md`); the canonical tag is `mcp-vX.Y.Z`.
 - [ ] Run python scripts/check-host-contract.py and the focused host-release
       contract tests. The check binds the installed host lock entry, manifest,
       plugin SDK, every locked integrity/resolution, and Node version/platform URL.
+- [ ] In a scratch copy of paseo_plugin/, install its development dependencies
+      with the product Node/npm and run its typecheck and test scripts against
+      the new plugin SDK; no gate runs them and the plugin keeps no lock.
+- [ ] Provision the new host from the candidate into a scratch prefix and home
+      on a free port, never the developer's installation, and check that the AR
+      plugin loads before the release is tagged.
 
 ## Install & first-run smoke
 

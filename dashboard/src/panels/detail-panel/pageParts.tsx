@@ -17,6 +17,8 @@ import { cx } from '../../../styled-system/css';
 import { Markdown } from '../../grammar/Markdown';
 import { StepDot } from './StepDot';
 import type { ProviderLimit, TaskEntry, TaskStepNode } from '../../types/projection';
+import { formatLimitTime } from './limitTime';
+import { waitLines, waitWhat } from './waitWords';
 import { fmtWait } from '../../data/selectors';
 import { useTaskStatusNow } from '../../data/taskStatusClock';
 import {
@@ -74,6 +76,9 @@ const STATUS_WORDS: Record<TaskStatusKey, [StatusTone, string]> = {
   planned: ['wait', 'planned'],
   started: ['wait', 'started'],
   works: ['work', 'works'],
+  // The server says started, nothing works and a seat waits on a declared wait whose check is
+  // still to come: the seat has not stopped, so the task is not shown as paused.
+  waiting: ['wait', 'waiting'],
   paused: ['wait', 'paused'],
   // The server says started, nothing works and a seat is limited: a paused task whose word
   // counts down. The limit is served; this module never decides that one exists.
@@ -106,38 +111,6 @@ export function statusTone(status: TaskStatusKey): StatusTone {
 
 export function statusLabel(status: TaskStatusKey): string {
   return STATUS_WORDS[status][1];
-}
-
-// The exact served instant, written with its date, its seconds, its fractional seconds and the
-// reader's time zone. Nothing here reads a provider limit for itself: the value is the server's
-// `until` / `resetsAt`, shown as served. Seconds are kept because the served moments are exact: two
-// resets a minute apart are two different instants, and a detail that showed the same time for both
-// would be a false one. Milliseconds are kept for the same reason at the scale the producer sends:
-// `.001000Z` and `.999000Z` are two instants inside one second (F28). A served value finer than a
-// millisecond is not thrown away either — it is written verbatim beside the localized time, so the
-// producer's own precision is never rounded off by this formatter.
-const LIMIT_TIME = new Intl.DateTimeFormat(undefined, {
-  day: 'numeric',
-  fractionalSecondDigits: 3,
-  hour: '2-digit',
-  hour12: false,
-  minute: '2-digit',
-  month: 'short',
-  second: '2-digit',
-  timeZoneName: 'short',
-  year: 'numeric',
-});
-
-// A fractional part longer than three digits: the part past the millisecond is the producer's own
-// remainder. Trailing zeros there are not a difference worth showing; anything else is.
-const SUB_MILLISECOND = /\.(\d{4,})(?=Z|[+-]\d{2}:?\d{2}$|$)/;
-
-export function formatLimitTime(iso: string): string {
-  const at = Date.parse(iso);
-  if (Number.isNaN(at)) return iso;
-  const shown = LIMIT_TIME.format(at);
-  const finer = SUB_MILLISECOND.exec(iso);
-  return finer !== null && /[1-9]/.test(finer[1].slice(3)) ? `${shown} (served ${iso})` : shown;
 }
 
 /** One line per limited seat: its role and agent, the provider, the window, the exact reset. */
@@ -265,6 +238,10 @@ function taskWordAt(
   left: number | undefined,
 ): { word: string; shown: TaskStatusKey; counting: boolean } {
   const status = taskStatusKey(task);
+  if (status === 'waiting') {
+    const what = waitWhat(task.waitingSeats);
+    return { word: what ? `${statusLabel(status)} for ${what}` : statusLabel(status), shown: status, counting: false };
+  }
   if (status !== 'limited') return { word: statusLabel(status), shown: status, counting: false };
   // A surface with no display clock cannot count down; it says the words alone.
   if (left === undefined) {
@@ -284,6 +261,7 @@ function wordTitle(
   left: number | undefined,
   word: string,
 ): string {
+  if (status === 'waiting' && task.waitingSeats?.length) return waitLines(task.waitingSeats).join('\n');
   if (status !== 'limited' || left === 0) return task.eventAt ?? word;
   return task.providerLimit ? limitHover(task.providerLimit) : statusLabel('limited');
 }

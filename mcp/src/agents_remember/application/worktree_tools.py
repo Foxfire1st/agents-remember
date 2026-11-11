@@ -360,6 +360,7 @@ def worktree_sync_tool(
     args = git_worktree_manager.WorktreeArgs(
         contract_path=configured.contract_path,
         memory_sync_choice=memory_sync_choice,
+        sync_source=resolution.source if resolution is not None else None,
         resolution_action=resolution.action if resolution is not None else None,
         dry_run=dry_run,
     )

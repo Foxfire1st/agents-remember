@@ -1,6 +1,6 @@
 """Native actor/provider identity from the exact fixture's Paseo stored agent.
 
-Paseo 0.12 AgentStorage.buildRecordPath/projectDirNameFromCwd and
+Paseo 0.12 to 0.15.4 AgentStorage.buildRecordPath/projectDirNameFromCwd and
 STORED_AGENT_SCHEMA.persistence.sessionId are the source contract. Public
 PaseoAgentHandle.runtimeInfo carries this same ID; AR's agent-get projection
 omits it. Read only this created actor's record, never an agent inventory.

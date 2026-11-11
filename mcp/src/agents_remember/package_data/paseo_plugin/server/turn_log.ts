@@ -105,3 +105,25 @@ function turnOverIfFull(path: string, incomingBytes: number, limitBytes: number)
   // A rename over the archive replaces it, so exactly one archive is kept.
   renameSync(path, join(dirname(path), TURN_END_LOG_ARCHIVE));
 }
+
+/** ISO time with the machine's offset, as the turn-end rows carry it. */
+export function isoWithOffset(date: Date): string {
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const hours = String(Math.floor(Math.abs(offsetMinutes) / 60)).padStart(2, "0");
+  const minutes = String(Math.abs(offsetMinutes) % 60).padStart(2, "0");
+  const local = new Date(date.getTime() + offsetMinutes * 60_000);
+  return `${local.toISOString().slice(0, -1)}${sign}${hours}:${minutes}`;
+}
+
+/** One turn-end row, for the file the architect counts. */
+export function turnEndRow(
+  kind: string,
+  facts: { readonly role: string; readonly task: string },
+  agentId: string,
+  ordinal: number,
+  reason: string,
+  at: string,
+): TurnEndLogRow {
+  return { at, agent: agentId, role: facts.role, task: facts.task, kind, count: ordinal, reason };
+}

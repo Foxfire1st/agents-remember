@@ -64,12 +64,42 @@ ANSWER_CLAUSES = (
 )
 
 ORIENTATION_REFERRALS = {
-    "orchestrator": "Before sending a developer question or handling a relayed answer, read [developer questions](../operations/orientation.md#ask-for-a-developer-decision) for the reporting route and [relayed answers](../operations/orientation.md#recognize-a-relayed-developer-answer) for attribution and quoted words.",
+    "orchestrator": (
+        "Before sending a developer question or handling a relayed answer, "
+        "read [developer questions](../operations/orientation.md#ask-for-a-developer-decision) "
+        "for the reporting route through `role_message` on "
+        "`agents-remember-task` and "
+        "[relayed answers](../operations/orientation.md#recognize-a-relayed-developer-answer) "
+        "for attribution and quoted words."
+    ),
     "manager": "Before sending a developer question or recognizing a relayed answer, read [developer questions](../operations/orientation.md#ask-for-a-developer-decision) for the reporting route and [relayed answers](../operations/orientation.md#recognize-a-relayed-developer-answer) for attribution and quoted words.",
-    "worker": "Before asking a question, follow [Ask for a developer decision](../operations/orientation.md#ask-for-a-developer-decision) for the reporting recipient and parentless route: send questions requiring the developer's decision to your parent, or ask in your own chat when you have no parent.",
-    "reviewer": "Before sending developer questions or handling relayed answers, read [developer-question routing](../operations/orientation.md#ask-for-a-developer-decision) for the question and answer procedure.",
-    "curator": "Before sending a developer question or handling a relayed answer, read [developer questions](../operations/orientation.md#ask-for-a-developer-decision) for the reporting route and [relayed answers](../operations/orientation.md#recognize-a-relayed-developer-answer) for attribution and quoted words.",
-    "investigator": "Before sending developer questions or handling relayed answers, read [developer-question routing](../operations/orientation.md#ask-for-a-developer-decision) for the question and answer procedure.",
+    "worker": (
+        "Before asking a question, follow "
+        "[Ask for a developer decision](../operations/orientation.md#ask-for-a-developer-decision) "
+        "for the reporting recipient and parentless route: send questions "
+        "requiring the developer's decision to your parent with `role_message` "
+        "on `agents-remember-task`, or ask in your own chat when you have no "
+        "parent."
+    ),
+    "reviewer": (
+        "Before sending developer questions or handling relayed answers, read "
+        "[developer-question routing](../operations/orientation.md#ask-for-a-developer-decision) "
+        "for the question and answer procedure through `role_message` on "
+        "`agents-remember-task`."
+    ),
+    "curator": (
+        "Before sending a developer question or handling a relayed answer, "
+        "read [developer questions](../operations/orientation.md#ask-for-a-developer-decision) "
+        "for the reporting route through `role_message` on "
+        "`agents-remember-task` and "
+        "[relayed answers](../operations/orientation.md#recognize-a-relayed-developer-answer) "
+        "for attribution and quoted words."
+    ),
+    "investigator": (
+        "Before sending developer questions or handling relayed answers, read "
+        "[developer-question routing](../operations/orientation.md#ask-for-a-developer-decision) "
+        "for the question and answer procedure."
+    ),
 }
 COORDINATION_REFERRALS = {
     "architect": "When `role_message` on `agents-remember-task` answers `held` because a child waits at a permission prompt, or its wait returns `permission-pending`, follow [Relay a child\N{RIGHT SINGLE QUOTATION MARK}s permission notice](../operations/coordination.md#relay-a-childs-permission-notice) for the upward route, child identity and supplied permission facts.",

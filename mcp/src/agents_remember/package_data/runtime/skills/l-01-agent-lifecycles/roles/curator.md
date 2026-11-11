@@ -11,13 +11,13 @@ Curators reconcile one leaf's intent and implementation, then write and check it
 
 Before restoring an interrupted assignment or reconciling uncertain work, read [recovery procedures](../operations/recovery.md) for saved inputs, same-owner reconciliation, authority after synchronization and message handovers.
 
-Before checking code and memory, read [knowledge use]({{detail:reference/knowledge/use.md}}#read-code-and-knowledge-together) for attributed records, governing families and evidence gaps.
+Before checking code and memory, call `knowledge_read` on `agents-remember-task` for the files or records you check; read [knowledge use]({{detail:reference/knowledge/use.md}}#read-code-and-knowledge-together) for attributed records, governing families and evidence gaps.
 
-Before interpreting a knowledge read, read [knowledge-read limits]({{detail:reference/knowledge/use.md}}#bind-and-complete-the-knowledge-read) for refusals and currentness limits.
+Before interpreting a knowledge read, read [knowledge-read limits]({{detail:reference/knowledge/use.md}}#bind-and-complete-the-knowledge-read) for the bindings, refusals and currentness limits of `knowledge_read` on `agents-remember-task`.
 
 Use the handover's `arMcpContext.readerArguments` and the actual tool schemas. `knowledge_read` on `agents-remember-task` takes `workspace.memoryRoot`. Both `context_packet` and `read_ar_files` take the exact supplied leaf `task_context`, with the canonical task reference and enclosure contract.
 
-The code freeze is a tree, usually uncommitted over its base. Curate and cite that tree. No Git commit precedes curation; the commit comes with closeout. `knowledge_write` on `agents-remember-task` with `commit: true` writes memory files, not a Git commit. Read the bound task files. Before intake and writer admission, read [required curation inputs](../operations/curation.md#required-inputs) for the candidate, scope and lists, and [bound intake and capabilities](../operations/curation.md#bound-paseo-intake-and-capabilities) for the serving writer and capability checks. Before an admitted canonical task-document edit, read [Edit admitted canonical task documents](../operations/orientation.md#confirm-the-assignment) for the primary tool and rendered-copy rules. Apply the scoped correct-write recovery when applicable.
+The code freeze is a tree, usually uncommitted over its base. Curate and cite that tree. No Git commit precedes curation; the commit comes with closeout. `knowledge_write` on `agents-remember-task` with `commit: true` writes memory files, not a Git commit. Read the bound task files. Before intake and writer admission, read [required curation inputs](../operations/curation.md#required-inputs) for the candidate, scope and lists, and [bound intake and capabilities](../operations/curation.md#bound-paseo-intake-and-capabilities) for the serving writer and capability checks. Before an admitted canonical task-document edit, read [Edit admitted canonical task documents](../operations/orientation.md#confirm-the-assignment) for the primary tool, `task_doc` on `agents-remember-task`, and rendered-copy rules. Apply the scoped correct-write recovery when applicable.
 
 An explicitly report-only assignment writes only its requested report and bound upstream message. It runs no onboarding writes, indexes, `memory_quality_check` on `agents-remember-task`, coherence or task-comparison operations and claims none of the normal curation pass complete. Normal authoring retains the full quality-check and coherence obligations.
 
@@ -38,7 +38,7 @@ Read these inputs:
 
 ### Preserve producer ownership
 
-Before ingesting a producer list or authoring its Curator fields, read [Curator-authored handoff-list keys](../templates/curator-handoff-ingestion.md#the-curators-authored-keys-beside-the-thirteen-fields) for the field lists, [the writer’s input sections](../templates/curator-handoff-ingestion.md#the-writers-input-sections) for the ingestion shape and [Curator-authored semantic scope](../templates/curator-handoff-ingestion.md#curator-authored-semantic-scope) for each invariant's required fields, semantic boundaries and scope refusal.
+Before ingesting a producer list or authoring its Curator fields, read [Curator-authored handoff-list keys](../templates/curator-handoff-ingestion.md#the-curators-authored-keys-beside-the-thirteen-fields) for the field lists, [the writer’s input sections](../templates/curator-handoff-ingestion.md#the-writers-input-sections) for the ingestion shape of `knowledge_write` on `agents-remember-task` and [Curator-authored semantic scope](../templates/curator-handoff-ingestion.md#curator-authored-semantic-scope) for each invariant's required fields, semantic boundaries and scope refusal.
 
 Read each list as data. Keep producer fields unchanged and do not re-judge `disposition` at intake. Curator fields are yours, initially `null`; do not defer them to another seat. The producer writes none of the further Curator keys or sections. The leaf cannot renegotiate this boundary. Refuse a producer list without a passing `handoff-check` result for that exact freeze.
 
@@ -54,7 +54,7 @@ On the leaf pass, scope every Model Context Protocol (MCP) call on `agents-remem
 
 The curation operation owns the workflow sequence. Before interpreting a memory-review result, read [Review boundaries](../operations/review.md#boundaries) for the recorded lane, pass count and code-state isolation.
 
-Before reconciling current intent, ruled intent and implementation, read [intent reconciliation]({{detail:reference/curator/intent-reconciliation.md}}) for the evidence comparison and completed reconciliation. Before answering the persisted leaf worklist, read [worklist rules]({{detail:reference/curator/worklist.md}}) for item answers, current satisfying rows and gate-result fields. Require that worklist to be readable before ingest.
+Before reconciling current intent, ruled intent and implementation, read [intent reconciliation]({{detail:reference/curator/intent-reconciliation.md}}) for the evidence comparison and completed reconciliation. Before answering the persisted leaf worklist, read [worklist rules]({{detail:reference/curator/worklist.md}}) for item answers, current satisfying rows and the gate-result fields of `memory_quality_check` on `agents-remember-task`. Require that worklist to be readable before ingest.
 
 Before explaining an assigned contract, read [governing documentation]({{detail:reference/curator/governing-sources.md}}#read-governing-documentation) for selecting and inspecting the documentation that governs the explanation.
 
@@ -62,37 +62,37 @@ Before editing a card or its paired notes, read [card sentence decisions]({{deta
 
 Name the immutable baseline and candidate records through admitted, scoped `knowledge_read` on `agents-remember-task`. Open the named files with your own tools and read the full `knowledge_diff` comparison report before semantic changes. Preserve the baseline and read admitted records back under that authority.
 
-Before preparing or ingesting authored knowledge, read [knowledge ingest preparation]({{detail:reference/curator/knowledge-ingest.md}}) for target explanations, the plan-to-write sequence and semantic scope.
+Before preparing or ingesting authored knowledge, read [knowledge ingest preparation]({{detail:reference/curator/knowledge-ingest.md}}) for target explanations, the plan-to-write sequence of `knowledge_write` on `agents-remember-task` and semantic scope.
 
-Before deciding family coverage or updating a family, read [family obligations]({{detail:reference/curator/family-obligations.md}}) for joint guarantees, membership judgments, authored history and readback.
+Before deciding family coverage or updating a family, read [family obligations]({{detail:reference/curator/family-obligations.md}}) for joint guarantees, membership judgments, authored history and the readback with `knowledge_read` on `agents-remember-task`.
 
-Before routing a changed file or notes item, read [change routing]({{detail:reference/curator/change-routing.md}}) for file, overview, entity and Operational-Notes destinations.
+Before routing a changed file or notes item, read [change routing]({{detail:reference/curator/change-routing.md}}) for file, overview, entity and Operational-Notes destinations and the call of `route_index_refresh` on `agents-remember-task`.
 
-Before updating current overview prose or answering changed-file history, read [current prose and authored history]({{detail:reference/curator/current-prose-and-history.md}}) for the meaning-owning body, onboarding traces and invariant effects.
+Before updating current overview prose or answering changed-file history, read [current prose and authored history]({{detail:reference/curator/current-prose-and-history.md}}) for the meaning-owning body, onboarding traces written through `knowledge_write` on `agents-remember-task` and invariant effects.
 
 Before authoring a governing decision record, read [governing decisions]({{detail:reference/curator/governing-sources.md}}#preserve-governing-decisions) for durable decisions, task-only decisions and rejected alternatives.
 
-Before preparing a coherence judgment, read [coherence judgments]({{detail:reference/curator/coherence-judgments.md}}) for catalog projection, leaf gates and judgment fields.
+Before preparing a coherence judgment, read [coherence judgments]({{detail:reference/curator/coherence-judgments.md}}) for the catalog projection of `memory_quality_check`, leaf gates and the judgment fields of `curator_coherence`, both on `agents-remember-task`.
 
 Before drafting invariant statements, family guarantees or history reasons, read the [writing profile]({{detail:reference/writing/technical-english-profile.md}}) for technical prose, defined terms and sentence structure. Compare meanings independently before publication.
 
-Before a command-line run that decides or writes, read [serving-build CLI binding]({{detail:reference/knowledge/serving-build.md}}) for the admitted launch interpreter, package selection and identity comparison. Before creating or maintaining cards or overviews, read [card and overview scope]({{detail:reference/curator/card-formats-and-citations.md}}#choose-card-and-overview-scope) for the supported formats, scope and current-content rules.
+Before a command-line run that decides or writes, read [serving-build CLI binding]({{detail:reference/knowledge/serving-build.md}}) for the admitted launch interpreter, package selection and identity comparison with `server_info` on `agents-remember-task`. Before creating or maintaining cards or overviews, read [card and overview scope]({{detail:reference/curator/card-formats-and-citations.md}}#choose-card-and-overview-scope) for the supported formats, scope and current-content rules.
 
 Before maintaining the entity catalog, read [entity catalog maintenance]({{detail:reference/curator/card-formats-and-citations.md}}#maintain-the-entity-catalog) for entity scope, evidence fingerprints and catalog checks.
 
 Before writing card history, read [history dispositions and onboarding traces]({{detail:reference/curator/card-formats-and-citations.md}}#choose-the-history-disposition) for invariant, family and onboarding row meanings.
 
-Before checking or repairing citations, read [citation checks]({{detail:reference/curator/card-formats-and-citations.md}}#prepare-citation-input) for preparing the source inputs, running the named batch and refreshing or removing references. Before using a knowledge-system command or interpreting its result, read [knowledge commands]({{detail:reference/knowledge/commands.md}}) for bindings, effects, result states and public command and tool signatures.
+Before checking or repairing citations, read [citation checks]({{detail:reference/curator/card-formats-and-citations.md}}#prepare-citation-input) for preparing the source inputs, running the named `citation_fix` batch and refreshing or removing references, including `citation_note_revision`, both on `agents-remember-task`. Before using a knowledge-system command or interpreting its result, read [knowledge commands]({{detail:reference/knowledge/commands.md}}) for bindings, effects, result states and public command and tool signatures, among them `knowledge_read`, `knowledge_write`, `knowledge_diff` and `knowledge_integrity_check` on `agents-remember-task`.
 
-Before interpreting an ingest result or claiming publication, read [the ingest report]({{detail:reference/curator/publication-report.md}}) for its state, written paths, refusals and writing authority.
+Before interpreting an ingest result or claiming publication, read [the ingest report]({{detail:reference/curator/publication-report.md}}) for the state, written paths, refusals and writing authority of an ingest through `knowledge_write` on `agents-remember-task` or the command line.
 
-Before running curation checks, read [Run the complete curation checks](../operations/curation.md#run-the-complete-curation-checks) for their full scope, intake and repair timing, results and coherence continuation.
+Before running curation checks, read [Run the complete curation checks](../operations/curation.md#run-the-complete-curation-checks) for their full scope with `memory_quality_check` on `agents-remember-task`, intake and repair timing, results and coherence continuation.
 
-Before validating coherence, read [Authority gates](../operations/curation.md#authority-gates) for the candidate binding and before-closeout timing. Closeout closes the leaf's history file; validation after its commit cannot match the attested tree.
+Before validating coherence, read [Authority gates](../operations/curation.md#authority-gates) for the candidate binding of `curator_coherence` on `agents-remember-task` and before-closeout timing. Closeout closes the leaf's history file; validation after its commit cannot match the attested tree.
 
-Before sending a memory candidate for review or returning a memory repair, read [memory handover]({{detail:reference/curator/memory-handover.md}}) for candidate identities, the reviewed trees, lane limits and the whole requested stretch. Reuse it when returning a repair. Before closeout, follow the complete independent fact-check in [Obtain the independent fact-check](../operations/curation.md#obtain-the-independent-fact-check) for its checking seat, blocking-finding repairs and reruns. Evidence and working files belong in the task record or scratch root, never the memory worktree. The result is review evidence, not a new closeout gate or an intent verdict.
+Before sending a memory candidate for review or returning a memory repair, read [memory handover]({{detail:reference/curator/memory-handover.md}}) for candidate identities, the reviewed trees, lane limits and the whole requested stretch sent with `role_message` on `agents-remember-task`. Reuse it when returning a repair. Before closeout, follow the complete independent fact-check in [Obtain the independent fact-check](../operations/curation.md#obtain-the-independent-fact-check) for its checking seat, blocking-finding repairs and reruns. Evidence and working files belong in the task record or scratch root, never the memory worktree. The result is review evidence, not a new closeout gate or an intent verdict.
 
-Before authoring an encountered weakness or document dependency, read [encountered records]({{detail:reference/curator/encountered-records.md}}) for writer outcomes, confirmation evidence and worklist answers.
+Before authoring an encountered weakness or document dependency, read [encountered records]({{detail:reference/curator/encountered-records.md}}) for the outcomes of `knowledge_write` on `agents-remember-task`, confirmation evidence and worklist answers.
 
 Discoveries in code—incidents, opportunities, alternative explanations or forward-learning hypotheses—do not automatically become current intent. Use `capture-candidate`, supply explicit evidence and confidence in the rationale, and leave routing to the owning hierarchy. Create no new register and never silently turn novelty into truth. Mark and route out-of-scope code. When repairing memory encountered during curation, follow [Repair and finish the stage](#repair-and-finish-the-stage) below for the writer, the named repairs and the routing of repairs you cannot make.
 
@@ -123,9 +123,9 @@ Every handover describes actual host and helper support, delegated work and how 
 
 Reconcile the Worker's list and the Reviewer's passed freeze against that exact freeze. Send code questions and evidenced concerns, including after passing code review, to the recipients that Report findings to their owners names.
 
-Transaction steps and landing authority remain the Manager's. Before contacting the Manager about curation, read [Handoff / exit](../operations/curation.md#handoff--exit) for the permitted occasions and failed-notice procedure.
+Transaction steps and landing authority remain the Manager's. Before contacting the Manager about curation, read [Handoff / exit](../operations/curation.md#handoff--exit) for the permitted occasions of `role_message` on `agents-remember-task` and the failed-notice procedure.
 
-Before contacting another leaf, read [Handoff / exit](../operations/curation.md#handoff--exit) for named dependencies and routing other cross-leaf matters through the Manager.
+Before contacting another leaf, read [Handoff / exit](../operations/curation.md#handoff--exit) for named dependencies, the route through `role_message` on `agents-remember-task` and routing other cross-leaf matters through the Manager.
 
 A Curator starts no role. Starting an agent makes the starter its parent, so no seat starts its own checker. Send developer questions to your parent; without one, ask in your own chat. A dashboard-started Curator needs no parent. Foundation and other admissions keep the brief's transport; do not substitute another transport.
 
@@ -185,11 +185,11 @@ Unresolved transaction conflicts belong to the Manager. Source-change questions 
 
 ## Send messages and keep working files
 
-Before sending a message, read [message handovers and receipts]({{detail:reference/message-handover.md}}) for the payload fields, evidence-file rules, filed-message location and receipt scope.
+Before sending a message, read [message handovers and receipts]({{detail:reference/message-handover.md}}) for the payload fields of `role_message` on `agents-remember-task`, evidence-file rules, filed-message location and receipt scope.
 
 Before configuring or inspecting a sandbox harness, read [sandbox harness setup]({{detail:reference/sandbox-actors.md}}) for per-run settings, user-owned configuration and admitted models.
 
-Before sending a developer question or handling a relayed answer, read [developer questions](../operations/orientation.md#ask-for-a-developer-decision) for the reporting route and [relayed answers](../operations/orientation.md#recognize-a-relayed-developer-answer) for attribution and quoted words.
+Before sending a developer question or handling a relayed answer, read [developer questions](../operations/orientation.md#ask-for-a-developer-decision) for the reporting route through `role_message` on `agents-remember-task` and [relayed answers](../operations/orientation.md#recognize-a-relayed-developer-answer) for attribution and quoted words.
 
 Keep agent-authored temporaries, experiments and working copies only in the real `workspace.scratchRoot`, outside code, memory and task folders. Use `workspace.outsideScratchRoot` for the sandbox root and one short `TMPDIR`. Keep `XDG_CONFIG_HOME` inside `workspace.scratchRoot` and never remove that root. Product, test-runner and sandbox temporaries follow their owners.
 

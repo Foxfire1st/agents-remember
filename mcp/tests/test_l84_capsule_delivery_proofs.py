@@ -78,12 +78,42 @@ from test_worktree_sync_knowledge_merge import (
 
 KNOWLEDGE_SOURCE = "reference/knowledge/use.md"
 KNOWLEDGE_STEPS = {
-    "architect": ("Before diagnosing, read",),
-    "investigator": ("Before investigating repository code, read",),
-    "worker": ("Before editing source, read", "Before diagnosing a failing test, read"),
-    "reviewer": ("When inspecting changes, read",),
+    "architect": (
+        (
+            "Before diagnosing, call `knowledge_read` on "
+            "`agents-remember-task` for the files involved; read"
+        ),
+    ),
+    "investigator": (
+        (
+            "Before investigating repository code, call `knowledge_read` "
+            "on `agents-remember-task` for the files involved; read"
+        ),
+    ),
+    "worker": (
+        (
+            "Before editing source, call `knowledge_read` on "
+            '`agents-remember-task` with `view="source_context"` for each '
+            "file you will edit; read"
+        ),
+        (
+            "Before diagnosing a failing test, call `knowledge_read` on "
+            '`agents-remember-task` with `view="source_context"` for the '
+            "test file; read"
+        ),
+    ),
+    "reviewer": (
+        (
+            "When inspecting changes, call `knowledge_read` on "
+            "`agents-remember-task` for each changed file; read"
+        ),
+    ),
     "curator": (
-        "Before checking code and memory, read",
+        (
+            "Before checking code and memory, call `knowledge_read` on "
+            "`agents-remember-task` for the files or records you check; "
+            "read"
+        ),
         "Before interpreting a knowledge read, read",
     ),
 }

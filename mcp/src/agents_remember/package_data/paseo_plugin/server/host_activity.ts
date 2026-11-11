@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { PluginHandlerContext, PluginLifecycleRegistration } from "@getpaseo/plugin/server";
+import type { PluginHandlerContext, PluginHookEvents, PluginLifecycleRegistration } from "@getpaseo/plugin/server";
+import { declaredWaitSignature, type PublishedDeclaredWait } from "./background_wait.ts";
 import { readRoleAgents } from "./role_agents.ts";
 import type { SubagentTracker } from "./subagents.ts";
 import type { TurnEndedFacts } from "./turn_ended.ts";
@@ -18,8 +19,11 @@ export type HostActivityState = "in-turn" | "permission" | "idle" | "ended";
  * PERMISSION_PROMPTS_LIMIT. An agent the host reports waiting on a prompt it did
  * not name keeps `state: 'permission'` with no ids: its identity set is
  * incomplete, so the publication itself is incomplete and the consumer retains
- * the last identity it read. The product's model admits exactly these five keys
- * and still forbids every other.
+ * the last identity it read. `declaredWait` is the seat's open declared wait —
+ * helpers, a background process or both — absent when none is open or the agent
+ * ended; like the subagent fields it never moves `eventAt` or `state`, which stay
+ * the host's. The product's model admits exactly these six keys and still forbids
+ * every other.
  */
 export interface PublishedAgentActivity {
   state: HostActivityState;
@@ -27,6 +31,7 @@ export interface PublishedAgentActivity {
   runningSubagents?: number;
   subagentsSince?: string;
   permissionPrompts?: string[];
+  declaredWait?: PublishedDeclaredWait;
 }
 
 /**
@@ -159,6 +164,8 @@ export class HostActivityPublisher {
   private readonly write: (publication: HostActivityPublication) => void;
   private readonly now: () => string;
   private readonly subagents: SubagentTracker | undefined;
+  /** Each seat's open declared wait, as the turn-end decision last handed it over. */
+  private readonly waits = new Map<string, PublishedDeclaredWait>();
 
   constructor(
     records: () => Readonly<Record<string, TurnEndedFacts>>,
@@ -172,6 +179,19 @@ export class HostActivityPublisher {
     this.now = now;
     this.currentBootId = bootId;
     this.subagents = subagents;
+    this.publish();
+  }
+
+  /**
+   * A seat's declared wait opened, changed or ended (`null`). The publication is
+   * written only when what it would carry changed, and the wait never moves the
+   * agent's `state` or `eventAt`: the host's idle state stays the host's.
+   */
+  noteDeclaredWait(agentId: string, wait: PublishedDeclaredWait | null): void {
+    const before = declaredWaitSignature(this.waits.get(agentId));
+    if (wait === null) this.waits.delete(agentId);
+    else this.waits.set(agentId, wait);
+    if (declaredWaitSignature(wait ?? undefined) === before) return;
     this.publish();
   }
 
@@ -471,6 +491,7 @@ export class HostActivityPublisher {
   private publish(records = this.records()): void {
     this.subagents?.prune(records);
     const published: Record<string, PublishedAgentActivity> = {};
+    for (const id of this.waits.keys()) if (!Object.hasOwn(records, id)) this.waits.delete(id);
     for (const [id, facts] of this.agents) {
       if (!Object.hasOwn(records, id)) {
         this.agents.delete(id);
@@ -484,6 +505,7 @@ export class HostActivityPublisher {
       // `permissions.size` alone still decides the state. A prompt the host did not
       // name contributes no id: the publication is incomplete instead.
       const prompts = [...facts.permissions].sort().slice(0, PERMISSION_PROMPTS_LIMIT);
+      const wait = state === "ended" ? undefined : this.waits.get(id);
       published[id] = {
         state,
         ...(eventAt ? { eventAt } : {}),
@@ -492,6 +514,7 @@ export class HostActivityPublisher {
         ...(counts !== undefined && counts.count > 0 && counts.since !== undefined
           ? { subagentsSince: counts.since }
           : {}),
+        ...(wait === undefined ? {} : { declaredWait: wait }),
       };
     }
     this.writtenSubagents = this.subagentSignature();
@@ -560,18 +583,29 @@ export function createHostActivityPublisher(
   );
 }
 
+/**
+ * The Paseo 0.15 hook each publication event is heard on (`server.addHook`); the
+ * legacy `server.on` names, kept here as the publication's own event names, stop
+ * working after 2027-04-30.
+ */
+export const HOST_ACTIVITY_HOOKS = [
+  ["agent.turn.before", "agent.turn_started"],
+  ["agent.turn.after", "agent.turn_ended"],
+  ["agent.permission.before", "agent.permission_requested"],
+  ["agent.permission.after", "agent.permission_resolved"],
+  ["agent.archive.after", "agent.archived"],
+  ["agent.create.after", "agent.created"],
+  ["agent.close.after", "agent.closed"],
+] as const satisfies ReadonlyArray<readonly [keyof PluginHookEvents, HostActivityEvent]>;
+
 /** Kept separate from parent-wake handlers: each catches its own write error. */
 export function registerHostActivityEvents(
-  server: Pick<PluginLifecycleRegistration, "on">,
+  server: Pick<PluginLifecycleRegistration, "addHook">,
   publisher: HostActivityPublisher,
   subagents?: SubagentTracker,
 ): void {
-  const events: HostActivityEvent[] = [
-    "agent.turn_started", "agent.turn_ended", "agent.permission_requested",
-    "agent.permission_resolved", "agent.archived", "agent.created", "agent.closed",
-  ];
-  for (const kind of events) {
-    server.on(kind, event => {
+  for (const [hook, kind] of HOST_ACTIVITY_HOOKS) {
+    server.addHook(hook, async (event: PluginHookEvents[typeof hook]) => {
       try {
         const requestId = "requestId" in event ? event.requestId : "request" in event ? event.request.id : undefined;
         const eventAt = "archivedAt" in event ? event.archivedAt : undefined;

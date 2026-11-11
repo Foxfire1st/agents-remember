@@ -680,9 +680,13 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
                     "Before writing the report, follow [Implementation outputs]"
                     "(../operations/implementation.md#outputs) "
                     "for report contents, checks and the freeze procedure.",
-                    "Before handing over a frozen candidate, follow [Hand over the frozen candidate]"
-                    "(../operations/implementation.md#hand-over-the-frozen-candidate) for the Manager "
-                    "stage-start notice, direct Reviewer handover and code-`PASS` Curator handover.",
+                    (
+                        "Before handing over a frozen candidate, follow [Hand over the frozen "
+                        "candidate](../operations/implementation.md#hand-over-the-frozen-candidate) "
+                        "for the Manager stage-start notice, direct Reviewer handover and "
+                        "code-`PASS` Curator handover, each sent with `role_message` on "
+                        "`agents-remember-task`."
+                    ),
                 ),
             ),
             (

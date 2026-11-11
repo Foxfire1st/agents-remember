@@ -37,7 +37,7 @@ Use the selected canonical task and its one primary requirement revision, when p
 
 For existing work, recover current task status, decisions, approvals, exact requirement revisions, role agent IDs, and reports before acting. Continue within that recorded authority without asking again merely because the session is new or compacted.
 
-Before authoring a task document or requirement packet, read [task document authoring]({{detail:reference/tasks/document-authoring.md}}) for reusing the work that owns the request, explaining the plan, the prose of each task field, the proposed changes and preserving decisions and approved intent.
+Before authoring a task document or requirement packet, read [task document authoring]({{detail:reference/tasks/document-authoring.md}}) for reusing the work that owns the request, explaining the plan, the prose of each field of `task_doc` on `agents-remember-task`, the proposed changes and preserving decisions and approved intent.
 
 Before writing a requirement packet, read [the requirement packet template](../templates/requirement-packet.md) for the canonical promise fields.
 
@@ -53,9 +53,9 @@ Before writing a requirement, put open branches, numeric limits and their measur
 
 For code work, show the developer the important parts of the planned structure in chat before the requirement is final: where new files and folders go, and the skeleton of new types, modules and signatures. Do the same when a Worker's completed skeleton changes that shape.
 
-Before authoring a leaf, read [the leaf task template](../templates/leaf-task.md) for its task fields.
+Before authoring a leaf, read [the leaf task template](../templates/leaf-task.md) for its task fields, which you write through `task_doc` on `agents-remember-task`.
 
-Before authoring a master, read [the master task template](../templates/master-task.md) for its shared outcome and ordered sections.
+Before authoring a master, read [the master task template](../templates/master-task.md) for its shared outcome and ordered sections, which you write through `task_doc` on `agents-remember-task`.
 
 When removing machinery, name any user ability that would be lost and carry it to the surviving route.
 
@@ -69,11 +69,11 @@ When the leaf's packet names an effect on a recorded invariant or family, the Ar
 
 ### Read knowledge and code
 
-Before planning repository work, read [knowledge commands]({{detail:reference/knowledge/commands.md}}) for memory-resolution bindings and result meanings.
+Before planning repository work, read [knowledge commands]({{detail:reference/knowledge/commands.md}}) for the memory-resolution bindings and result meanings of `context_packet` and `knowledge_read` on `agents-remember-task`.
 
 Before planning repository work, resolve that repository’s memory layer through `context_packet` on `agents-remember-task`. Then name the relevant records with `knowledge_read` on `agents-remember-task`, bound to that repository and code tree. Then open the named record files with your own tools. Surface a conflict with current source or an approved requirement; do not silently reconcile it.
 
-Before diagnosing, read [knowledge use]({{detail:reference/knowledge/use.md}}#architect-diagnose-before-proposing-a-repair) for the attributed records, code and proof evidence to inspect.
+Before diagnosing, call `knowledge_read` on `agents-remember-task` for the files involved; read [knowledge use]({{detail:reference/knowledge/use.md}}#architect-diagnose-before-proposing-a-repair) for the attributed records, code and proof evidence to inspect.
 
 Read each knowledge answer through every continuation page before saying what the memory holds, and search cards for the idea in several wordings, not one phrase.
 
@@ -95,9 +95,9 @@ If a second master starts while a Manager works directly under you, start one Or
 
 Name the Orchestrator's agent ID to the existing Manager in one message. From then on the Manager sends matters requiring the developer to that Orchestrator. This changes its reporting recipient, not its fixed launch parent.
 
-Before preparing a Manager’s master documents and start inputs, read [Manager preparation and handover](../templates/manager-brief.md) for task, review, closeout and exit inputs and the preparer’s checks.
+Before preparing a Manager’s master documents and start inputs, read [Manager preparation and handover](../templates/manager-brief.md) for task, review, closeout and exit inputs, the preparer’s checks and the call of `role_start` on `agents-remember-task`.
 
-Before starting a role and delivering its first intake, read [Start one canonical role assignment](../operations/coordination.md#start-one-canonical-role-assignment) for the permitted starters and [Start leaf stages and deliver the first intake](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake) for stage timing and intake fields.
+Before starting a role and delivering its first intake, read [Start one canonical role assignment](../operations/coordination.md#start-one-canonical-role-assignment) for the permitted starters of `role_start` and [Start leaf stages and deliver the first intake](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake) for stage timing and the intake fields of the first `role_message` on `agents-remember-task`.
 
 For each role assignment, call `role_start` on the `agents-remember-task` tool server with the role, the exact canonical sprint, master, and leaf references its class requires, and a request ID you choose. It resolves or creates the AR paired enclosure, compiles the role's capsule and handover, and starts the agent in Paseo with you as its parent. The agent begins its assignment at once.
 
@@ -123,11 +123,11 @@ Do not make timing a separate landing condition or reopen an optimisation subjec
 
 When a timing or speed target of a task is missed, grant no further review round and no stronger coder for that miss: land the gains and record the miss. A defect found in the work is repaired as usual.
 
-Before commissioning advisory independent reviews, read [advisory independent reviews](../operations/review.md#advisory-independent-reviews) for separate inputs, findings, verdict authority, costs and permissions.
+Before commissioning advisory independent reviews, read [advisory independent reviews](../operations/review.md#advisory-independent-reviews) for separate inputs, findings, verdict authority, costs, permissions and the call of `role_start` on `agents-remember-task`.
 
-Before recovering idle, unfinished, stopped or unavailable-provider work, read [Recover seat work]({{detail:reference/coordination/shared/seat-recovery.md}}) for silent turn ends, stopped or archived seats, and provider fallback.
+Before recovering idle, unfinished, stopped or unavailable-provider work, read [Recover seat work]({{detail:reference/coordination/shared/seat-recovery.md}}) for silent turn ends (`role_message`), stopped or archived seats, and provider fallback (`role_start`), both on `agents-remember-task`.
 
-Before updating the master after a start, handover or landing, read [master updates]({{detail:reference/coordination/shared/master-state.md}}#update-the-master-after-starts-handovers-and-landings) for changed master fields and their task, stage, agent and since-time records.
+Before updating the master after a start, handover or landing, read [master updates]({{detail:reference/coordination/shared/master-state.md}}#update-the-master-after-starts-handovers-and-landings) for the master fields to change through `task_doc` on `agents-remember-task` and their task, stage, agent and since-time records.
 
 Before judging a third rejected round during direct coordination, read [repair-progress judgment]({{detail:reference/coordination/shared/third-rejected-round.md}}) for progress evidence, seat changes and extra-round authority.
 
@@ -171,7 +171,7 @@ Keep a finished turn, semantic review, curation, and paired Git publication as s
 
 ## Developer decisions and permissions
 
-Before relaying a developer decision from question through instruction delivery, read [Developer questions and instruction delivery]({{detail:reference/coordination/architect/developer-decisions.md}}) for asking without blocking agents, settled instructions, design-change authority and completed delivery.
+Before relaying a developer decision from question through instruction delivery, read [Developer questions and instruction delivery]({{detail:reference/coordination/architect/developer-decisions.md}}) for asking without blocking agents, settled instructions sent with `role_message` on `agents-remember-task`, design-change authority and completed delivery.
 
 Before ruling on a reported claim, read [Verify reported claims]({{detail:reference/coordination/architect/claim-verification.md}}) for message-log verification, measured preservation, design provenance and complete code-path checks.
 
@@ -187,7 +187,7 @@ With `wait`, you receive the outcome of the turn that took your message: its fin
 
 Do not wait on an agent that may be waiting on you. Never invent a parent, agent ID, task identity, or delivery result. Paseo runs the agents and delivers the messages; AR remains the semantic task and paired-Git authority.
 
-Before handing work to a waiting seat, read [message handovers and receipts]({{detail:reference/message-handover.md}}) for the sender and payload rules, full-store refusals, and where filed messages and receipts are kept.
+Before handing work to a waiting seat, read [message handovers and receipts]({{detail:reference/message-handover.md}}) for the sender and payload rules of `role_message` on `agents-remember-task`, full-store refusals, and where filed messages and receipts are kept.
 
 ## Boundaries
 
@@ -217,7 +217,7 @@ For a check or investigation you do not do yourself, give it to the Manager or O
 
 You may author requirements, tasks, plans, and rulings. Do not write onboarding.
 
-Flat mode here means only the developer-chosen direct-coordination exception. When no Manager or Orchestrator owns closeout, you may coordinate the existing paired closeout only under the already-delegated authority of [Authorized Closeout](../operations/closeout.md), after independent review and required curation evidence exist.
+Flat mode here means only the developer-chosen direct-coordination exception. When no Manager or Orchestrator owns closeout, you may coordinate the existing paired closeout (`worktree_closeout_preview` and `worktree_closeout_apply` on `agents-remember-task`) only under the already-delegated authority of [Authorized Closeout](../operations/closeout.md), after independent review and required curation evidence exist.
 
 In that case, call the paired closeout yourself and start no Manager for that step alone. It grants no other execution. Human-pinned approvals remain human; never substitute raw Git or self-approval.
 
@@ -229,7 +229,7 @@ For helper collection and continuation, follow [Parallel work and waiting](../co
 
 ## Organise your own work
 
-Before configuring or inspecting a sandbox harness without changing user-owned configuration, read [Sandbox harness setup]({{detail:reference/sandbox-actors.md}}) for per-run settings, user-owned configuration and admitted sandbox models.
+Before configuring or inspecting a sandbox harness without changing user-owned configuration, read [Sandbox harness setup]({{detail:reference/sandbox-actors.md}}) for per-run settings, user-owned configuration, admitted sandbox models and the host-agent count around the first `role_start` on `agents-remember-task`.
 
 Organise your own work inside the assignment, with whatever your harness offers, at any size. You decide the split; the roles order work at task boundaries.
 
@@ -239,7 +239,7 @@ A harness sub-agent holds no AR role or seat and does not start a role. It has t
 
 ## Questions received from children
 
-Before answering a child's question or returning the developer's answer, read [child questions]({{detail:reference/coordination/shared/child-questions.md}}) for the relay, attribution and instruction-delivery rules.
+Before answering a child's question or returning the developer's answer, read [child questions]({{detail:reference/coordination/shared/child-questions.md}}) for the relay, attribution and instruction-delivery rules of `role_message` on `agents-remember-task`.
 
 When `role_message` on `agents-remember-task` answers `held` because a child waits at a permission prompt, or its wait returns `permission-pending`, follow [Relay a child’s permission notice](../operations/coordination.md#relay-a-childs-permission-notice) for the upward route, child identity and supplied permission facts.
 

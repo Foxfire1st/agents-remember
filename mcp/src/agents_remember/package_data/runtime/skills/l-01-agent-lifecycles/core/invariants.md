@@ -94,4 +94,4 @@ Instructions and requirements point to the repository's own guideline files and 
 
 Run Git commands only against the resolved code repository root or memory root, and only when that root is a Git repository. Never run Git against the coordination root as a whole.
 
-Architect, Orchestrator, Manager, Worker, Curator, Reviewer, Investigator, Bootstrap: Before relying on storage or path eligibility, cross-repository allowances, or serving-build metadata, read [settings authority](../reference/knowledge/use.md#read-the-source-that-owns-a-setting) for the sources that govern those facts.
+Architect, Orchestrator, Manager, Worker, Curator, Reviewer, Investigator, Bootstrap: Before relying on storage or path eligibility, cross-repository allowances, or serving-build metadata, read [settings authority](../reference/knowledge/use.md#read-the-source-that-owns-a-setting) for `server_info` and the other sources that govern those facts.

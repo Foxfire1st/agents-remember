@@ -435,6 +435,7 @@ class ProjectionInputState:
                 for enclosure in self._enclosures
             ],
             self._host_activity,
+            pass_.now,
         )
         self._task_entries = entries
         self._native_attention = self._native_attention_reader.read(

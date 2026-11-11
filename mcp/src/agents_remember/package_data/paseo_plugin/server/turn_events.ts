@@ -16,8 +16,11 @@
  * `host-activity.json`, whose readers forbid extra keys. A write that fails is
  * named in `turn-ends.error.json`. A cleanup clears every pending wait, so a
  * reload starts afresh (rule 8).
+ *
+ * The handlers are registered under Paseo 0.15's hook names through
+ * `server.addHook`; the legacy `server.on` names stop working after 2027-04-30.
  */
-import type { PluginLifecycleRegistration } from "@getpaseo/plugin/server";
+import type { PluginHookContext, PluginLifecycleRegistration } from "@getpaseo/plugin/server";
 import { limitedUntil, readProviderLimits } from "./provider_limits.ts";
 import { readRoleAgents } from "./role_agents.ts";
 import type { SubagentTracker } from "./subagents.ts";
@@ -33,6 +36,7 @@ import {
   noteTurnStarted,
   type HostAgentState,
   type TurnEndedSignals,
+  type TurnRows,
 } from "./turn_ended.ts";
 
 /**
@@ -63,11 +67,13 @@ export interface ParentWakeOptions {
   readonly log?: (row: TurnEndLogRow) => void;
   /** MIK-R216 rule 1: the host's ACP verdict for a provider id. */
   readonly acpProvider?: (providerId: string) => boolean;
+  /** A seat's open declared wait, handed to the host-activity record as it changes. */
+  readonly declaredWait?: TurnEndedSignals["declaredWait"];
 }
 
 /** The host's agents, as rule 3 and rule 4's send read them. */
 async function readHostState(
-  paseo: { agents: { list: (args: unknown) => Promise<unknown> } },
+  paseo: { readonly agents: { list(options: unknown): Promise<unknown> } },
 ): Promise<readonly HostAgentState[] | null> {
   try {
     const states: HostAgentState[] = [];
@@ -126,8 +132,46 @@ async function readHostState(
   }
 }
 
+/** The host's timeline handle of one agent, as the plugin SDK types it. */
+type AgentTimeline = ReturnType<PluginHookContext["paseo"]["agents"]["ref"]>["timeline"];
+
+/** The part of the host API a turn end reads its timeline through. */
+interface TimelineReader {
+  readonly agents: { ref(id: string): { readonly timeline: Pick<AgentTimeline, "refetch"> } };
+}
+
+/**
+ * The ended turn's timeline. From Paseo 0.13 the `agent.turn.after` hook carries an
+ * empty `timeline`, and the host says to read history through the API instead. The
+ * whole timeline the host holds is read through `agents.ref(id).timeline.refetch`
+ * (served since 0.12; `limit: 0` is Paseo's "every row"), which yields the same
+ * projected rows the 0.12 hook carried, so the decision in `turn_ended.ts` reads
+ * what it read on 0.12. The reply keeps each row's turn id beside the row, not in
+ * it; it is put back on the row, because the decision scopes the ended turn's rows
+ * by it.
+ *
+ * A read that fails gives `null`, which the decision reads as an unreadable turn:
+ * the line says its last line is unreadable, and nothing in it counts as a
+ * hand-off or a declaration. The hook's own list is no fallback, since on 0.15 it
+ * is always empty and would pass a failed read off as a turn without text.
+ */
+export async function readTurnTimeline(paseo: TimelineReader, agentId: string): Promise<TurnRows> {
+  try {
+    const page = await paseo.agents.ref(agentId).timeline.refetch({ direction: "tail", limit: 0 });
+    if (!Array.isArray(page?.entries)) throw new Error("the timeline reply holds no entries");
+    return page.entries.flatMap((entry) => {
+      if (entry?.item == null) return [];
+      const turnId = entry.turnId;
+      return [typeof turnId === "string" && turnId !== "" ? { ...entry.item, turnId } : entry.item];
+    });
+  } catch (error) {
+    console.error(`agents-remember turn end: the timeline of agent ${agentId} could not be read`, error);
+    return null;
+  }
+}
+
 export function registerParentWakeEvents(
-  server: Pick<PluginLifecycleRegistration, "on">,
+  server: Pick<PluginLifecycleRegistration, "addHook">,
   options: ParentWakeOptions = {},
 ): () => void {
   const home = options.home ?? process.env.PASEO_HOME;
@@ -152,6 +196,7 @@ export function registerParentWakeEvents(
     roleRecord: () => readRoleAgents(home),
     // MIK-R216 rule 1: the ACP verdict the plugin wrote at its start.
     ...(options.acpProvider === undefined ? {} : { acpProvider: options.acpProvider }),
+    ...(options.declaredWait === undefined ? {} : { declaredWait: options.declaredWait }),
   };
   const turns = createTurnEndedTracker(
     TURN_ENDED_STEERING_PROVIDERS,
@@ -159,20 +204,21 @@ export function registerParentWakeEvents(
     signals,
   );
 
-  server.on("agent.turn_started", (event) => {
+  server.addHook("agent.turn.before", async (event) => {
     noteTurnStarted(
       { id: event.agent.id, parentAgentId: event.agent.parentAgentId, provider: event.agent.provider },
       turns,
     );
   });
 
-  server.on("agent.turn_ended", (event, context) => {
+  server.addHook("agent.turn.after", async (event, context) => {
     void (async () => {
       try {
+        const timeline = await readTurnTimeline(context.paseo, event.agent.id);
         const records = readRoleAgents(process.env.PASEO_HOME);
         const outcome = await noteTurnEnded(
           { id: event.agent.id, parentAgentId: event.agent.parentAgentId, provider: event.agent.provider },
-          event.timeline,
+          timeline,
           records,
           turns,
           { sendMessage: (id, text) => context.paseo.agents.ref(id).send(text, { activeTurnBehavior: "steer" }) },
@@ -183,7 +229,7 @@ export function registerParentWakeEvents(
             turnId: event.turnId,
             outcome: event.outcome?.kind,
             // Rule 3/4: the host's own state at this end and at the send.
-            readHost: () => readHostState(context.paseo as unknown as { agents: { list: (args: unknown) => Promise<unknown> } }),
+            readHost: () => readHostState(context.paseo),
           },
         );
         // MIK-R172 rule 5: an agent the agent list does not hold is named in
@@ -195,11 +241,11 @@ export function registerParentWakeEvents(
     })();
   });
 
-  server.on("agent.permission_requested", (event) => {
+  server.addHook("agent.permission.before", async (event) => {
     notePermissionRequested(event.agent.id, turns);
   });
 
-  server.on("agent.permission_resolved", (event, context) => {
+  server.addHook("agent.permission.after", async (event, context) => {
     void (async () => {
       try {
         await notePermissionResolved(
@@ -215,14 +261,14 @@ export function registerParentWakeEvents(
     })();
   });
 
-  server.on("agent.archived", (event) => {
+  server.addHook("agent.archive.after", async (event) => {
     noteAgentArchived(event.agent.id, turns);
   });
 
   // L184-R1-F09: close is the other terminal lifecycle path, and it is the one the
   // wake tracker did not hear. It is treated as archive, as the host's own listing
   // does (`status === "closed"` is archived), so no deferred resume survives it.
-  server.on("agent.closed", (event) => {
+  server.addHook("agent.close.after", async (event) => {
     noteAgentArchived(event.agent.id, turns);
   });
 

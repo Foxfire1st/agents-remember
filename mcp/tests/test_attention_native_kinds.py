@@ -566,3 +566,15 @@ def _take(fixtures: dict, *names: str) -> dict:
     """The fixtures one case declares, so a group can supply its whole set."""
 
     return {name: fixtures[name] for name in names}
+
+
+# --- E. a declared wait is not a stall ----------------------------------------
+
+
+def test_a_waiting_task_does_not_stall_whatever_its_clock() -> None:
+    task = _task(activity=None, event_at=_ago(STALL_SECONDS * 2)).model_copy(
+        update={"activity": "waiting"}
+    )
+    facts = NativeAttentionFacts(stall_clocks={LEAF_KEY: _ago(STALL_SECONDS * 2)})
+
+    assert _queue(facts, [task]) == []

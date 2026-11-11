@@ -53,7 +53,7 @@ from agents_remember.observer.native_attention import (
     PermissionWait,
     task_lineage,
 )
-from agents_remember.observer.task_entries import TaskEntries, agent_works
+from agents_remember.observer.task_entries import TaskEntries, agent_waits, agent_works
 from agents_remember.worktrees.terminal_notice_recovery import verify_pending_notice
 from pydantic import ValidationError
 
@@ -446,7 +446,8 @@ class NativeAttentionInput:
 
         The interval is broken -- and starts again from this observation -- when the station
         that owns it changes: an unknown host observation, a different native boot, bound work
-        appearing on the task, or an explicit pause anywhere on its lineage. Only an interval
+        appearing on the task, a bound seat's declared wait whose check is still to come, or an
+        explicit pause anywhere on its lineage. Only an interval
         this reader itself watched, end to end, can reach the settled deadline.
         """
 
@@ -459,7 +460,8 @@ class NativeAttentionInput:
             self._stall_boot = host.boot_id
         working: dict[str, bool] = {}
         for seat in host.agents:
-            working[seat.task_key] = working.get(seat.task_key, False) or agent_works(seat.activity)
+            busy = agent_works(seat.activity) or agent_waits(seat.activity, now)
+            working[seat.task_key] = working.get(seat.task_key, False) or busy
         # The canonical relation, not the authored one: a listed child that names no master is
         # bound to the master whose listing holds it, and a pause on that master must break the
         # child's interval exactly as it hides the child's row (L190-R1-F04).

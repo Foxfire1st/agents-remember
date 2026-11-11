@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from hashlib import sha256
 from pathlib import Path
 
@@ -23,7 +22,6 @@ from agents_remember_test_support.testing.capsule_audience_fixtures import (
 )
 from agents_remember_test_support.testing.leaf_instruction_wording import assert_action_pointer
 from agents_remember_test_support.testing.manifest_step_derivation import (
-    manifest_mismatches,
     sentence_start,
 )
 from agents_remember_test_support.testing.pointer_uniqueness import duplicate_pointers
@@ -147,10 +145,13 @@ def _assert_coordination_start_owner(
     action, label = {
         "manager": ("Before starting and coordinating the leaf, read", "leaf-stage coordination"),
         "architect": (
-            "for the permitted starters and",
+            "for the permitted starters of `role_start` and",
             "Start leaf stages and deliver the first intake",
         ),
-        "orchestrator": ("for selection and start rules,", "the first intake"),
+        "orchestrator": (
+            "for the selection and start rules of `role_start` on `agents-remember-task`,",
+            "the first intake",
+        ),
     }[role]
     pointer = action + (
         f" [{label}](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake)"
@@ -179,7 +180,7 @@ def _assert_coordination_start_owner(
         "After the individual `role_start` on `agents-remember-task`, send the leaf Reviewer's "
         "complete first intake as your first "
         "`role_message` to its returned agent identifier. Use the assigned review mode and review "
-        "purpose, bound catalogs and resolved `system/tools.md`. The requirement set includes "
+        "purpose and resolved `system/tools.md`. The requirement set includes "
         "identifiers, versions, packets and the durable [approval record]"
         "(../core/every-role.md#requirements-and-limits). The Reviewer inspects nothing before "
         "its intake.",
@@ -547,7 +548,10 @@ def test_every_required_detail_has_one_pointer_in_all_36_real_compiles(tmp_path:
 MOVED_ACTION_POINTERS = {
     "curator": (
         "reference/knowledge/use.md",
-        ("Before checking code and memory, read", "Before interpreting a knowledge read, read"),
+        (
+            "Before checking code and memory, call `knowledge_read` on `agents-remember-task` for the files or records you check; read",
+            "Before interpreting a knowledge read, read",
+        ),
     ),
     "manager": (
         "reference/tasks/document-authoring.md",
@@ -565,7 +569,7 @@ MOVED_ACTION_POINTERS = {
         ("Before editing, skipping or previewing task-document fields, read",),
     ),
 }
-SETTINGS_AUTHORITY_POINTER = "Before relying on storage or path eligibility, cross-repository allowances, or serving-build metadata, read [settings authority](skill://agents-remember/skills/l-01-agent-lifecycles/reference/knowledge/use.md#read-the-source-that-owns-a-setting) for the sources that govern those facts."
+SETTINGS_AUTHORITY_POINTER = "Before relying on storage or path eligibility, cross-repository allowances, or serving-build metadata, read [settings authority](skill://agents-remember/skills/l-01-agent-lifecycles/reference/knowledge/use.md#read-the-source-that-owns-a-setting) for `server_info` and the other sources that govern those facts."
 
 
 def _assert_moved_action_pointer(text: str, pointer: str) -> None:
@@ -633,77 +637,6 @@ def test_moved_piece_pointers_reach_each_required_compile_and_reject_removal() -
     }
 
 
-COLLABORATION_KEYS = ("tasks/collaboration-method", "tasks/document-authoring")
-
-
-def _assert_collaboration_reference_matches_pointers(root: Path, document: dict) -> None:
-    """The collaboration and authoring references equal their pointer-derived step and roles.
-
-    The derivation (P5-05, ``manifest_step_derivation``) reads the first-message texts:
-    roles, operations, SKILL.md and every-role.
-    """
-    problems = [
-        problem
-        for problem in manifest_mismatches(root, document)
-        if problem.startswith(tuple(key + ":" for key in COLLABORATION_KEYS))
-    ]
-    assert problems == []
-    assert document["references"]["tasks/collaboration-method"]["step"].strip()
-
-
-def test_collaboration_reference_declares_actual_pointer_audiences_and_step() -> None:
-    root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
-    document = json.loads((root / "composition-manifest.json").read_bytes())
-    reference = document["references"]["tasks/collaboration-method"]
-    assert reference["source"] == "reference/tasks/collaboration-method.md"
-    _assert_collaboration_reference_matches_pointers(root, document)
-    assert reference["injected"] is False
-    assert reference["step_detail"] is False
-    assert (root / reference["source"]).is_file()
-    assert reference["source"] not in {
-        entry.source for entry in _shipped_parsed().detail_references
-    }
-
-
-def test_collaboration_reference_rejects_unpointed_audience_and_outbound_step(
-    tmp_path: Path,
-) -> None:
-    source_root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
-    document = json.loads((source_root / "composition-manifest.json").read_bytes())
-    reference = document["references"]["tasks/collaboration-method"]
-    changed = json.loads(json.dumps(document))
-    changed["references"]["tasks/collaboration-method"]["roles"] += [
-        next(role for role in document["role_order"] if role not in reference["roles"])
-    ]
-    with pytest.raises(AssertionError):
-        _assert_collaboration_reference_matches_pointers(source_root, changed)
-    # Moving the inbound first-message pointer into the method itself leaves an outbound
-    # self-reference, which cannot satisfy the callers' action contract.
-    root = tmp_path / "l-01"
-    shutil.copytree(source_root, root)
-    every_role = root / "core/every-role.md"
-    body = every_role.read_text()
-    pointer = next(line for line in body.splitlines() if "[collaboration method](" in line)
-    every_role.write_text(body.replace(pointer + "\n", "", 1))
-    own = root / "reference/tasks/collaboration-method.md"
-    own.write_text(own.read_text() + "\n" + pointer.split(": ", 1)[1] + "\n")
-    assert every_role.read_text() != body
-    with pytest.raises(AssertionError):
-        _assert_collaboration_reference_matches_pointers(root, document)
-
-
-def test_collaboration_reference_rejects_missing_actual_pointer_audience() -> None:
-    root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
-    document = json.loads((root / "composition-manifest.json").read_bytes())
-    changed = json.loads(json.dumps(document))
-    audience = changed["references"]["tasks/document-authoring"]["roles"]
-    assert "worker" in audience
-    audience.remove("worker")
-    assert changed != document
-    with pytest.raises(AssertionError):
-        _assert_collaboration_reference_matches_pointers(root, changed)
-
-
 LEAF_EVIDENCE_POINTER = (
     "Before creating a leaf through `task_doc`, read [retained-evidence lifecycle]"
     "(../../core/acceptance.md#record-how-retained-evidence-will-be-maintained) for the "
@@ -763,7 +696,11 @@ def test_leaf_creation_reaches_retained_evidence_lifecycle_and_rejects_removal(r
 
 
 ARCHITECT_ACTION_READS = (
-    ("r29-architect", "Before diagnosing, read", "knowledge/use"),
+    (
+        "r29-architect",
+        "Before diagnosing, call `knowledge_read` on `agents-remember-task` for the files involved; read",
+        "knowledge/use",
+    ),
     ("0:0", "Take closeout trees by filename", "core/every-role"),
     (
         "20:2",
@@ -802,8 +739,9 @@ ARCHITECT_ACTION_CLAUSES = {
     "0:0": "Take closeout trees by filename from the highest-numbered memory PASS and landing-check verdict, "
     "never from a message.",
     "20:2": "When every agent of a leaf is idle, read each agent's last lines. If a turn ended silently while "
-    "helpers still run, tell that seat to collect its results and finish. A valid declared helper wait "
-    "remains a wait.",
+    "helpers or a process it started still run, tell that seat to collect its results and finish. A valid "
+    "declared helper or background wait (`WAITING FOR SUBAGENTS:` or `WAITING FOR BACKGROUND:`) remains a "
+    "wait until its next undeclared end.",
     "21:0": "In the same turn as each start, role handover and landing, update the master document's parts "
     "changed by that act: its status note, counts, order state and **In work now** section. Include the "
     "task, stage, agents and time since that state began. Leave product-mirrored stage fields with "

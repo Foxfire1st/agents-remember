@@ -11,7 +11,9 @@ this leaf (a meaning change increments it once, MIK-R07 rule 2), and an entry's 
 leaf (a history row's ``before``). When ``HEAD`` is unconverted and the candidate is converted, the
 base is ``HEAD``'s conversion (MIK-R24 rule 7, :mod:`.base_side`), the one the worklist and the gate
 read. The exact K_B resolver of MIK-R07 rule 0 belongs to the gate (MIK-R08, MIK-R09); a memory root
-that is not a Git work tree has no base, and then every record and entry is new to this leaf.
+that is not a Git work tree has no base, and then every record and entry is new to this leaf. During
+a merge the produced tree is validated against both parents, ``HEAD`` and ``MERGE_HEAD``; revisions
+and ``before`` anchors still come from ``HEAD`` alone.
 """
 
 from __future__ import annotations
@@ -193,6 +195,9 @@ class MemoryState:
     minted: set[str] = field(default_factory=set)
     base_problem: str | None = None
     """Why the converted base could not be built; the writer refuses with it."""
+    validation_bases: tuple[KnowledgeTree, ...] = ()
+    """The converted bases the produced tree is validated against: ``HEAD``, and ``MERGE_HEAD``
+    during a merge (:attr:`.base_side.BaseSides.validation_bases`)."""
     _base_records: dict[str, str] | None = None
     _base_anchors: dict[str, dict[str, Any]] | None = None
 
@@ -211,6 +216,7 @@ class MemoryState:
             base=sides.base,
             records=_record_paths(files),
             base_problem=sides.problem,
+            validation_bases=sides.validation_bases,
         )
         for path, document in _file_sidecars(files):
             state.sidecar_paths.append(path)

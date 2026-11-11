@@ -1,4 +1,4 @@
-"""MIK-R190 rule 7: the bridge reads Paseo 0.12.0's usage reports as the SDK answers them.
+"""The bridge reads Paseo's usage reports as the pinned SDK answers them.
 
 The real pinned client answers ``listUsageReports`` with a ``{requestId, reports}``
 envelope, and it refuses a call that selects both by ``agentId`` and by ``reportIds``
@@ -69,7 +69,7 @@ export class DaemonClient {
   async close() { this.state = { status: 'disposed' } }
   getConnectionState() { return this.state }
   getLastServerInfoMessage() { return { serverId: scenario.serverId, version: this.config.appVersion } }
-  // The pinned 0.12.0 shape: {requestId, reports}, and the SDK's own selector refusal.
+  // The pinned shape (0.12.0 to 0.15.4): {requestId, reports}, and the SDK's own selector refusal.
   async listUsageReports(options = {}) {
     record({ via: 'listUsageReports', options })
     if (options.agentId !== undefined && options.reportIds !== undefined) {

@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
-import { formatLimitTime, taskStatusKey } from '../detail-panel/pageParts';
+import { formatLimitTime } from '../detail-panel/limitTime';
+import { taskStatusKey } from '../detail-panel/pageParts';
 import type { ProviderLimit } from '../../types/projection';
 import { progressFigure, rowHover, shortTaskId } from './rowState';
 import { hierarchy, task, taskMap } from './test-utils';
@@ -47,6 +48,7 @@ it('formats only served identity, counts and status', () => {
     completed: 2,
     aborted: 1,
     works: 0,
+    waiting: 0,
     paused: 0,
     unknown: 0,
   };

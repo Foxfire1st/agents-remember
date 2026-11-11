@@ -103,6 +103,7 @@ consumers = [
   "mcp/tests/test_agent_eval_judge_reads.py",
   "mcp/tests/test_agent_eval_opaque_dispatch.py",
   "mcp/tests/test_agent_eval_preflight.py",
+  "mcp/tests/test_agent_eval_recorder_plugin.py",
   "mcp/tests/test_agent_eval_regrade.py",
   "mcp/tests/test_agent_eval_result_identity.py",
   "mcp/tests/test_agent_eval_retained_verdicts.py",
@@ -130,6 +131,7 @@ consumers = [
   "mcp/tests/test_attention_dismissals_v2.py",
   "mcp/tests/test_attention_native_inputs.py",
   "mcp/tests/test_attention_native_kinds.py",
+  "mcp/tests/test_attention_native_wait_clock.py",
   "mcp/tests/test_attention_notice_publication.py",
   "mcp/tests/test_attention_notice_store.py",
   "mcp/tests/test_attention_quiescence.py",
@@ -208,6 +210,7 @@ consumers = [
   "mcp/tests/test_code_quality_check_scope.py",
   "mcp/tests/test_code_quality_targeted.py",
   "mcp/tests/test_cold_start.py",
+  "mcp/tests/test_collaboration_reference_pointers.py",
   "mcp/tests/test_compact_content.py",
   "mcp/tests/test_comparison_changeset.py",
   "mcp/tests/test_completed_direct_landing_disposition.py",
@@ -566,6 +569,7 @@ consumers = [
   "mcp/tests/test_provider_store_durability.py",
   "mcp/tests/test_providers_remove.py",
   "mcp/tests/test_publication_merge_admission.py",
+  "mcp/tests/test_publication_merge_shape.py",
   "mcp/tests/test_pytest_bootstrap_boundaries.py",
   "mcp/tests/test_python_runtime_contract.py",
   "mcp/tests/test_quality_diagnostics.py",
@@ -680,6 +684,7 @@ consumers = [
   "mcp/tests/test_role_capsule_compiler.py",
   "mcp/tests/test_role_capsule_contracts.py",
   "mcp/tests/test_role_capsule_manifest_edges.py",
+  "mcp/tests/test_role_capsule_moved_piece_reach.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_first_message.py",
   "mcp/tests/test_role_first_message_guards.py",
@@ -732,9 +737,12 @@ consumers = [
   "mcp/tests/test_sync_cancel_deletions.py",
   "mcp/tests/test_sync_dashboard.py",
   "mcp/tests/test_sync_parked_candidate.py",
+  "mcp/tests/test_sync_parked_omissions.py",
   "mcp/tests/test_sync_reapply_merge.py",
+  "mcp/tests/test_sync_repository_default.py",
   "mcp/tests/test_sync_runtime.py",
   "mcp/tests/test_sync_scripts.py",
+  "mcp/tests/test_sync_source_strategy.py",
   "mcp/tests/test_task_authoring_templates.py",
   "mcp/tests/test_task_decision_product_records.py",
   "mcp/tests/test_task_doc_alignment_sweep.py",
@@ -837,6 +845,7 @@ consumers = [
   "mcp/tests/test_writer_correction_publication.py",
   "mcp/tests/test_writer_corrections.py",
   "mcp/tests/test_writer_integrations.py",
+  "mcp/tests/test_writer_merge_bases.py",
   "mcp/tests/test_writer_question_publication.py",
   "mcp/tests/test_writer_refresh_restoration.py",
 ]
@@ -1149,6 +1158,7 @@ consumers = [
   "mcp/tests/test_closeout_projection_source_classification.py",
   "mcp/tests/test_closeout_queue.py",
   "mcp/tests/test_closeout_queue_abandoned_rows.py",
+  "mcp/tests/test_collaboration_reference_pointers.py",
   "mcp/tests/test_compact_content.py",
   "mcp/tests/test_completed_direct_landing_disposition.py",
   "mcp/tests/test_config.py",
@@ -1237,6 +1247,7 @@ consumers = [
   "mcp/tests/test_sprint_archive_phases.py",
   "mcp/tests/test_standalone_master_retirement.py",
   "mcp/tests/test_sync_parked_candidate.py",
+  "mcp/tests/test_sync_repository_default.py",
   "mcp/tests/test_task_doc_ordinary_l111.py",
   "mcp/tests/test_task_doc_structural_publication_l2.py",
   "mcp/tests/test_task_intent_review.py",
@@ -1414,6 +1425,7 @@ replacement_contract = "node:mcp/tests/test_agent_eval_adapters.py::test_actual_
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_adapters.py",
+  "mcp/tests/test_agent_eval_recorder_plugin.py",
 ]
 
 [[artifact]]
@@ -1523,6 +1535,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_accounting.py",
   "mcp/tests/test_agent_eval_adapters.py",
+  "mcp/tests/test_agent_eval_recorder_plugin.py",
 ]
 
 [[artifact]]
@@ -1541,6 +1554,7 @@ replacement_contract = "node:mcp/tests/test_agent_eval_adapters.py::test_real_he
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_adapters.py",
+  "mcp/tests/test_agent_eval_recorder_plugin.py",
 ]
 
 [[artifact]]
@@ -2410,6 +2424,7 @@ consumers = [
   "mcp/tests/test_agent_eval_judge_reads.py",
   "mcp/tests/test_agent_eval_opaque_dispatch.py",
   "mcp/tests/test_agent_eval_preflight.py",
+  "mcp/tests/test_agent_eval_recorder_plugin.py",
   "mcp/tests/test_agent_eval_regrade.py",
   "mcp/tests/test_agent_eval_result_identity.py",
   "mcp/tests/test_agent_eval_retained_verdicts.py",
@@ -2437,6 +2452,7 @@ consumers = [
   "mcp/tests/test_attention_dismissals_v2.py",
   "mcp/tests/test_attention_native_inputs.py",
   "mcp/tests/test_attention_native_kinds.py",
+  "mcp/tests/test_attention_native_wait_clock.py",
   "mcp/tests/test_attention_notice_publication.py",
   "mcp/tests/test_attention_notice_store.py",
   "mcp/tests/test_attention_quiescence.py",
@@ -2515,6 +2531,7 @@ consumers = [
   "mcp/tests/test_code_quality_check_scope.py",
   "mcp/tests/test_code_quality_targeted.py",
   "mcp/tests/test_cold_start.py",
+  "mcp/tests/test_collaboration_reference_pointers.py",
   "mcp/tests/test_compact_content.py",
   "mcp/tests/test_comparison_changeset.py",
   "mcp/tests/test_completed_direct_landing_disposition.py",
@@ -2873,6 +2890,7 @@ consumers = [
   "mcp/tests/test_provider_store_durability.py",
   "mcp/tests/test_providers_remove.py",
   "mcp/tests/test_publication_merge_admission.py",
+  "mcp/tests/test_publication_merge_shape.py",
   "mcp/tests/test_pytest_bootstrap_boundaries.py",
   "mcp/tests/test_python_runtime_contract.py",
   "mcp/tests/test_quality_diagnostics.py",
@@ -2987,6 +3005,7 @@ consumers = [
   "mcp/tests/test_role_capsule_compiler.py",
   "mcp/tests/test_role_capsule_contracts.py",
   "mcp/tests/test_role_capsule_manifest_edges.py",
+  "mcp/tests/test_role_capsule_moved_piece_reach.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_first_message.py",
   "mcp/tests/test_role_first_message_guards.py",
@@ -3039,9 +3058,12 @@ consumers = [
   "mcp/tests/test_sync_cancel_deletions.py",
   "mcp/tests/test_sync_dashboard.py",
   "mcp/tests/test_sync_parked_candidate.py",
+  "mcp/tests/test_sync_parked_omissions.py",
   "mcp/tests/test_sync_reapply_merge.py",
+  "mcp/tests/test_sync_repository_default.py",
   "mcp/tests/test_sync_runtime.py",
   "mcp/tests/test_sync_scripts.py",
+  "mcp/tests/test_sync_source_strategy.py",
   "mcp/tests/test_task_authoring_templates.py",
   "mcp/tests/test_task_decision_product_records.py",
   "mcp/tests/test_task_doc_alignment_sweep.py",
@@ -3144,6 +3166,7 @@ consumers = [
   "mcp/tests/test_writer_correction_publication.py",
   "mcp/tests/test_writer_corrections.py",
   "mcp/tests/test_writer_integrations.py",
+  "mcp/tests/test_writer_merge_bases.py",
   "mcp/tests/test_writer_question_publication.py",
   "mcp/tests/test_writer_refresh_restoration.py",
 ]
@@ -3406,6 +3429,7 @@ consumers = [
   "mcp/tests/test_agent_eval_text_delivery.py",
   "mcp/tests/test_citation_fix_documents.py",
   "mcp/tests/test_citation_preview_runs.py",
+  "mcp/tests/test_collaboration_reference_pointers.py",
   "mcp/tests/test_conversion_cost_scans.py",
   "mcp/tests/test_converted_onboarding_drift_leaf_route.py",
   "mcp/tests/test_curator_card_layouts.py",
@@ -3423,7 +3447,9 @@ consumers = [
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
   "mcp/tests/test_sync_parked_candidate.py",
+  "mcp/tests/test_sync_parked_omissions.py",
   "mcp/tests/test_worktree_sync_knowledge_merge.py",
+  "mcp/tests/test_writer_merge_bases.py",
 ]
 
 [[artifact]]
@@ -3795,6 +3821,7 @@ consumers = [
   "mcp/tests/test_attention_notice_publication.py",
   "mcp/tests/test_cleanup_completed_contract_remains.py",
   "mcp/tests/test_cleanup_repeated_archive_ready.py",
+  "mcp/tests/test_collaboration_reference_pointers.py",
   "mcp/tests/test_curator_instruction_wording.py",
   "mcp/tests/test_enclosure_adoption.py",
   "mcp/tests/test_enclosure_adoption_in_place.py",
@@ -3867,6 +3894,7 @@ replacement_contract = "contract:paseo-launch-given-to-agent-cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_text_delivery.py",
+  "mcp/tests/test_collaboration_reference_pointers.py",
   "mcp/tests/test_curator_instruction_wording.py",
   "mcp/tests/test_developer_messages.py",
   "mcp/tests/test_held_queue.py",
@@ -3918,6 +3946,7 @@ replacement_contract = "contract:paseo-role-tool-fixture-cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_text_delivery.py",
+  "mcp/tests/test_collaboration_reference_pointers.py",
   "mcp/tests/test_curator_instruction_wording.py",
   "mcp/tests/test_developer_messages.py",
   "mcp/tests/test_held_queue.py",
@@ -3955,6 +3984,8 @@ consumers = [
   "mcp/tests/test_attention_discovery.py",
   "mcp/tests/test_attention_dismissals_v2.py",
   "mcp/tests/test_attention_native_inputs.py",
+  "mcp/tests/test_attention_native_wait_clock.py",
+  "mcp/tests/test_collaboration_reference_pointers.py",
   "mcp/tests/test_curator_instruction_wording.py",
   "mcp/tests/test_dashboard_host.py",
   "mcp/tests/test_developer_messages.py",
@@ -4288,6 +4319,7 @@ replacement_contract = "node:mcp/tests/test_role_first_message.py::FirstMessageM
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_eval_text_delivery.py",
+  "mcp/tests/test_collaboration_reference_pointers.py",
   "mcp/tests/test_curator_instruction_wording.py",
   "mcp/tests/test_l84_capsule_delivery_proofs.py",
   "mcp/tests/test_l84_reviewer_criterion_delivery.py",
@@ -4736,6 +4768,7 @@ consumers = [
   "mcp/tests/test_closeout_live_gate.py",
   "mcp/tests/test_closeout_projection_source_classification.py",
   "mcp/tests/test_closeout_queue.py",
+  "mcp/tests/test_collaboration_reference_pointers.py",
   "mcp/tests/test_converted_carryover.py",
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_curator_instruction_wording.py",
@@ -4767,6 +4800,8 @@ consumers = [
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
   "mcp/tests/test_sync_parked_candidate.py",
+  "mcp/tests/test_sync_parked_omissions.py",
+  "mcp/tests/test_sync_repository_default.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_tool_answer_rows_packaging.py",
@@ -4780,6 +4815,7 @@ consumers = [
   "mcp/tests/test_writer_correction_links.py",
   "mcp/tests/test_writer_correction_publication.py",
   "mcp/tests/test_writer_corrections.py",
+  "mcp/tests/test_writer_merge_bases.py",
   "mcp/tests/test_writer_refresh_restoration.py",
 ]
 

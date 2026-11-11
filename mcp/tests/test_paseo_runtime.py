@@ -100,6 +100,7 @@ class PaseoRuntimeTests(unittest.TestCase):
                 "daemon.listen": ("127.0.0.1:6831", "start"),
                 "daemon.relay.enabled": (False, "live"),
                 "daemon.mcp.injectIntoAgents": (False, "live"),
+                "agents.idleRuntimeCleanup": (False, "live"),
                 "features.webUi.enabled": (True, "start"),
                 "features.dictation.enabled": (False, "start"),
                 "features.voiceMode.enabled": (False, "start"),
@@ -144,7 +145,7 @@ class PaseoRuntimeTests(unittest.TestCase):
         self.assertEqual(
             [(change["step"], change["action"]) for change in report["changes"]],
             [("install", "installed")]
-            + [("config", "set")] * 8
+            + [("config", "set")] * 9
             + [("embed", "written"), ("plugin", "copied"), ("daemon", "started")]
             + [("plugin", "installed")],
         )
@@ -525,6 +526,7 @@ class PaseoRuntimeTests(unittest.TestCase):
                     "live": {
                         "daemon.relay.enabled": False,
                         "daemon.mcp.injectIntoAgents": False,
+                        "agents.idleRuntimeCleanup": False,
                         "pluginsEnabled": True,
                         "agents.providers": target["providers"],
                     },

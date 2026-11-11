@@ -6,7 +6,9 @@ line that has crossed -- the base is ``HEAD``'s conversion, exactly as the gate,
 writer see it: :func:`~agents_remember.application.knowledge_writer.base_side.writer_bases`, read
 through the same cache under the same key (the memory commit, the version, and K_B's own
 ``Code-Commit`` or the leaf's code base B). A carried reference to a file the candidate deleted or
-moved is then reported, not refused as a newly written anchor.
+moved is then reported, not refused as a newly written anchor. During a merge the bases are the
+writer's two, ``HEAD`` and ``MERGE_HEAD``, so the check never refuses what the writer was allowed
+to write.
 """
 
 from __future__ import annotations
@@ -53,9 +55,9 @@ __all__ = [
 def _port(code: BaseCode) -> KnowledgeBasePort:
     def base(
         memory_root: Path, candidate: KnowledgeTree
-    ) -> tuple[KnowledgeTree | None, str | None]:
+    ) -> tuple[tuple[KnowledgeTree, ...], str | None]:
         sides = writer_bases(memory_root, candidate, code)
-        return sides.base, sides.problem
+        return sides.validation_bases, sides.problem
 
     return base
 

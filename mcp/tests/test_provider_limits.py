@@ -179,11 +179,11 @@ def test_last_successful_that_is_not_exhausted_clears_the_fact() -> None:
     assert writer.judge_read([carried], NOW) == {"claude-max": None}
 
 
-# ── rule 7 / 0.12.0's nested lastSuccessful (L184-R1-F02) ─────────────────────
+# ── Paseo's nested lastSuccessful, judged with its own fetch time ─────────────
 
 
 def test_the_host_valid_nested_last_successful_is_judged_with_its_own_fetch_time() -> None:
-    """0.12.0 carries ``{fetchedAt, report}``; a flattened report is not the host's shape."""
+    """Paseo (0.12.0 to 0.15.4) carries ``{fetchedAt, report}``; a flattened report is not the host's shape."""
 
     fetched = NOW - timedelta(minutes=5)
     carried = {

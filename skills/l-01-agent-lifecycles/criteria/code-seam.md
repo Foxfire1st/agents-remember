@@ -55,6 +55,10 @@ No event, message or row outranks system health. A recurring notification condit
 
 A green complexity-and-coverage diagnostic (CRAP) result is not delivery acceptance. Stability, bounded resources and reclamation become a gate once a reusable repository-wide scaling-test helper exists. The reusable quiescence check is the multi-cycle simulation with zero external input.
 
+### CS-7 — Coding-guidelines line check
+
+Before reviewing the change, read `system/coding-guidelines.md` under `workspace.memoryRoot`, where present. Check every line the change adds or alters in source code, tests and product messages against it. Check in particular its Source Comment Scope, with the bounded `L<leaf>-R<n>` / `L<leaf>-S<n>` requirement-identifier exception. A line that breaks it is a finding.
+
 ## Candidate criteria
 
 Run these under the baseline's exploratory work. Apply the promotion rules above and retain each candidate's stated catch count.

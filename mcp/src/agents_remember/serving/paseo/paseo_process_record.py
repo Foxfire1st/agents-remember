@@ -1,7 +1,7 @@
 """Prove that the home's process record names this home's Paseo supervisor.
 
 ``<home>/paseo.pid`` records the supervisor's process id. Paseo's own ``daemon stop`` sends
-SIGTERM to whatever live process that id names (``stopDaemonInstance`` in Paseo 0.11.1
+SIGTERM to whatever live process that id names (``stopDaemonInstance`` in Paseo 0.11.1 to 0.15.4
 prefers matching boot identity first: a lock written during another boot is abandoned,
 and only without boot ids on both sides does it fall back to checking that the id is
 alive and the record is not older than this boot; on platforms without a readable boot
@@ -28,7 +28,7 @@ from agents_remember.kernel.primitives.host_environment import carried_session_v
 from agents_remember.serving.paseo.paseo_harness_homes import home_variable_names
 
 PROCESS_RECORD = "paseo.pid"
-# ``process.title`` of Paseo's supervisor entry point (0.10 and 0.11).
+# ``process.title`` of Paseo's supervisor entry point (0.10 to 0.15.4).
 SUPERVISOR_TITLE = "Paseo Supervisor"
 
 

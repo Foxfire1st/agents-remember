@@ -17,6 +17,14 @@ at the code tree's ``HEAD`` when it names none.
 On a converted ``HEAD`` nothing changes: it is the base as it was. A conversion that cannot be built,
 or a ``HEAD`` whose tree Git cannot read, is a named problem; the writer then refuses rather than
 compare against nothing.
+
+**During a merge** (``MERGE_HEAD`` resolves in the memory repository) the incoming parent is a
+second validation base, converted by the same rule through the same cache, so an anchor the
+incoming side carries is judged as carried, exactly as the merge commit's own validation judges it
+against both parents. Revisions and ``before`` anchors still come from ``HEAD`` alone. An incoming
+parent Git cannot read, or whose conversion cannot be built, is a named problem like ``HEAD``'s:
+that base is never silently omitted or replaced by an empty tree. Outside a merge nothing changes.
+The memory-quality check reads its bases through :func:`writer_bases` too, so it sees the same two.
 """
 
 from __future__ import annotations
@@ -44,10 +52,20 @@ __all__ = ["BaseCode", "BaseSides", "writer_bases"]
 
 @dataclass(frozen=True)
 class BaseSides:
-    """``HEAD``, converted when the candidate needs it, or why its conversion could not be built."""
+    """``HEAD``, converted when the candidate needs it, and during a merge the incoming parent
+    ``MERGE_HEAD`` converted by the same rule; or why one of them could not be read or built."""
 
     base: KnowledgeTree | None
     problem: str | None = None
+    incoming: KnowledgeTree | None = None
+
+    @property
+    def validation_bases(self) -> tuple[KnowledgeTree, ...]:
+        """The converted sides a tree is validated against: ``HEAD``, then ``MERGE_HEAD``."""
+
+        return tuple(
+            side for side in (self.base, self.incoming) if side is not None and side.converted
+        )
 
 
 @dataclass(frozen=True)
@@ -75,15 +93,26 @@ def _commit(root: Path, treeish: str) -> str | None:
 
 
 class _BaseUnreadable(ValueError):
-    """``HEAD`` resolves, but Git cannot read its tree."""
+    """The side resolves, but Git cannot read it as a commit tree."""
 
 
-def _side(root: Path, label: str, candidate: KnowledgeTree, code: BaseCode) -> KnowledgeTree | None:
+def _merge_head(root: Path) -> str | None:
+    """The object ``MERGE_HEAD`` names while the memory repository is in a merge, else ``None``."""
+
+    result = run_git(
+        root,
+        ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"],
+        GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+    )
+    name = result.stdout.strip()
+    return name if result.returncode == 0 and name else None
+
+
+def _side(
+    root: Path, label: str, commit: str, candidate: KnowledgeTree, code: BaseCode
+) -> KnowledgeTree:
     """``label``'s tree; its conversion when it is unconverted and the candidate is converted."""
 
-    commit = _commit(root, label)
-    if commit is None:
-        return None  # an unborn branch: there is no base, and every record is new
     try:
         tree = knowledge_tree_from_git(root, commit, label=f"{root.name}@{label}")
     except (
@@ -113,22 +142,64 @@ def _side(root: Path, label: str, candidate: KnowledgeTree, code: BaseCode) -> K
     return KnowledgeTree(label=f"converted base {label} {commit[:12]}", files=files)
 
 
-def writer_bases(root: Path, candidate: KnowledgeTree, code: BaseCode) -> BaseSides:
-    """The writer's base for the memory worktree ``root`` (none when it is not a Git work tree)."""
+_BASE_ERRORS = (ValueError, KeyError, OSError, subprocess.SubprocessError)
 
-    if not (root / ".git").exists():
-        return BaseSides(None)
+
+def _head(root: Path, candidate: KnowledgeTree, code: BaseCode) -> BaseSides:
     try:
-        return BaseSides(_side(root, "HEAD", candidate, code))
+        commit = _commit(root, "HEAD")
+        if commit is None:
+            return BaseSides(None)  # an unborn branch: there is no base, and every record is new
+        return BaseSides(_side(root, "HEAD", commit, candidate, code))
     except _BaseUnreadable as error:
         return BaseSides(
             None,
             "the base of this operation, the memory worktree's HEAD, cannot be read, so it has "
             f"nothing to compare against: {error}",
         )
-    except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
+    except _BASE_ERRORS as error:
         return BaseSides(
             None,
             "the converted base (MIK-R24 rule 7) of the memory worktree's HEAD cannot be built, "
             f"so this operation has nothing to compare against: {error}",
         )
+
+
+def _with_incoming(
+    root: Path, head: BaseSides, candidate: KnowledgeTree, code: BaseCode
+) -> BaseSides:
+    """``head``, with the incoming parent ``MERGE_HEAD`` beside it while a merge is in progress."""
+
+    try:
+        name = _merge_head(root)
+        if name is None:
+            return head  # outside a merge: the one base, exactly as before
+        commit = _commit(root, "MERGE_HEAD")
+        if commit is None:
+            raise _BaseUnreadable(f"MERGE_HEAD ({name[:12]}) names no commit Git can read")
+        return BaseSides(head.base, incoming=_side(root, "MERGE_HEAD", commit, candidate, code))
+    except _BaseUnreadable as error:
+        return BaseSides(
+            None,
+            "the incoming merge parent of this operation, the memory worktree's MERGE_HEAD, "
+            f"cannot be read, so it cannot be validated against both merge parents: {error}. "
+            "Conclude the merge or abort it (git merge --abort) in the memory worktree, then retry",
+        )
+    except _BASE_ERRORS as error:
+        return BaseSides(
+            None,
+            "the converted base of the memory worktree's MERGE_HEAD, the text-format side a "
+            "converted tree is compared with, cannot be built, so this operation cannot be "
+            f"validated against both merge parents: {error}. Conclude the merge or abort it "
+            "(git merge --abort) in the memory worktree, then retry",
+        )
+
+
+def writer_bases(root: Path, candidate: KnowledgeTree, code: BaseCode) -> BaseSides:
+    """The writer's bases for the memory worktree ``root`` (none when it is not a Git work tree):
+    ``HEAD``, and during a merge the incoming parent ``MERGE_HEAD`` beside it."""
+
+    if not (root / ".git").exists():
+        return BaseSides(None)
+    head = _head(root, candidate, code)
+    return head if head.problem is not None else _with_incoming(root, head, candidate, code)

@@ -35,6 +35,7 @@ export function taskTree(parent: TaskEntry, children: TaskEntry[]): TaskEntry[] 
     completed: 0,
     aborted: 0,
     works: 0,
+    waiting: 0,
     paused: 0,
     unknown: 0,
   };
@@ -65,7 +66,7 @@ export function seedSeries(
     title: 'My Series',
     stage: 'started',
     children: [taskReferenceKey(SERIES_SLICE_REF), taskReferenceKey(OTHER_MASTER_REF)],
-    counts: { planned: 0, started: 2, completed: 0, aborted: 0, works: 1, paused: 0, unknown: 1 },
+    counts: { planned: 0, started: 2, completed: 0, aborted: 0, works: 1, waiting: 0, paused: 0, unknown: 1 },
     summary: taskSummary({
       form: 'master',
       kind: 'master',
@@ -153,7 +154,7 @@ export function seedSeriesOrdering() {
     id: 'series',
     title: 'Ordered Series',
     children: [earlier.key, later.key],
-    counts: { planned: 1, started: 1, completed: 0, aborted: 0, works: 0, paused: 0, unknown: 1 },
+    counts: { planned: 1, started: 1, completed: 0, aborted: 0, works: 0, waiting: 0, paused: 0, unknown: 1 },
     summary: taskSummary({ form: 'master', kind: 'master', type: '', objective: '' }),
   });
   seedTaskEntries([master, earlier, later]);

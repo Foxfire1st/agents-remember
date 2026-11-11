@@ -14,11 +14,11 @@ import {
   StatusWord,
   TaskStatusClock,
   TaskStatusWord,
-  formatLimitTime,
   statusTitle,
   taskStatusKey,
   underlyingStatusKey,
 } from '../detail-panel/pageParts';
+import { formatLimitTime } from '../detail-panel/limitTime';
 import { LifecycleList } from './LifecycleList';
 import { installListCleanup, rowOf, seed, task } from './test-utils';
 
@@ -118,6 +118,7 @@ it('keeps the grouping, the counts and the header saying paused underneath the w
       completed: 0,
       aborted: 0,
       works: 0,
+      waiting: 0,
       paused: 1,
       unknown: 0,
     };

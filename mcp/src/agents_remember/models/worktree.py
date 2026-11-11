@@ -85,6 +85,8 @@ SourceLineageSide = Literal["code", "memory"]
 # files and staged, so there is no action that carries a decided input.
 SyncResolutionAction = Literal["continue", "cancel"]
 MemorySyncChoice = Literal["merge-memory", "skip-memory"]
+# The one selectable sync source besides the contract's own source line.
+SyncSource = Literal["repository-default"]
 SyncSide = Literal["code", "memory"]
 SyncPhase = Literal[
     "running-code",
@@ -160,9 +162,14 @@ class SyncOperationProjection(StrictResponseModel):
 
 
 class SyncResolutionInput(StrictResponseModel):
-    """One resolution call's input: the action the agent chose for a retained conflict."""
+    """One sync call's choices: the action for a retained conflict and the line it pulls.
+
+    ``source`` is ``None`` for the contract's own source line, or ``"repository-default"``
+    for each repository's default branch, which keeps the contract's base pair.
+    """
 
     action: SyncResolutionAction | None = None
+    source: SyncSource | None = None
 
 
 class SyncResolutionProjection(StrictResponseModel):
@@ -186,6 +193,30 @@ class SyncResolutionProjection(StrictResponseModel):
     files: list[str] = Field(default_factory=list)
     wipRestore: bool = False
     crossing: dict[str, object] | None = None
+
+
+class SyncSourceProjection(StrictResponseModel):
+    """The branch one side of a repository-default sync resolved, and its tip."""
+
+    branch: str
+    commit: str
+
+
+class SyncOmissionsProjection(StrictResponseModel):
+    """Parked authoring a resolution dropped: totals, per-class counts and the report's path.
+
+    A continue that measured the resolved tree carries every total. A resumed resolution
+    carries only what the journal kept from that measurement -- the side, the report and the
+    count still outstanding -- and leaves the other totals unset.
+    """
+
+    side: SyncSide
+    report: str
+    parkedPaths: int | None = None
+    omittedPaths: int | None = None
+    omittedItems: int
+    omittedByKind: dict[str, int] | None = None
+    reconciledItems: int | None = None
 
 
 class AtomicSeriesActivationFact(StrictResponseModel):
@@ -447,8 +478,12 @@ class WorktreeSyncResponse(WorktreeCommandResponse):
     nextArgs: dict[str, object] | None = None
     cancelArgs: dict[str, object] | None = None
     evidencePath: str | None = None
-    invalidField: Literal["memory_sync_choice", "resolution_action"] | None = None
+    invalidField: Literal["memory_sync_choice", "sync_source", "resolution_action"] | None = None
     manualRepair: dict[str, object] | None = None
+    # The chosen sync source and, on a preview, the resolved branches and tips.
+    syncSource: SyncSource | None = None
+    sources: dict[SyncSide, SyncSourceProjection] | None = None
+    omissions: SyncOmissionsProjection | None = None
 
 
 class _WorktreeCloseoutResponse(WorktreeCommandResponse):

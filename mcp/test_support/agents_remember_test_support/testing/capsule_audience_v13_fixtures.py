@@ -53,14 +53,14 @@ V13_PRE_SHORT_STAGE_SHA256 = {
 
 V13_OPERATION_SHA256 = {
     "orientation": "3120f8aea8dbc2fafb10fd9722e54e4e58c03f87dbe630a343e44bdb87f5cd30",
-    "planning": "3ff5705f68745036538ab70641c1bb1de319e773239f7ffaaa5c3546820aa957",
-    "implementation": "94c3d3c4628a450586a9522c436ee1c1f1e4478ee9b1e6af0feb8cb73582caa8",
-    "review": "19b9d4df6cc34036f6eec72c7d6c31bcec5a0e88015077761b1019ced54f21be",
-    "curation": "de311c01a980b8e41ce991849b2a94fce35faf2d5609de281d6812d4918fa76b",
-    "coordination": "b6ce2f36eff1ebf1c013d6b26ab0675d74c6ab88c90a547612ac875242064418",
+    "planning": "44ad84e9bca975aef237b6215e8a53f8cb279aee861e73f76cbe5d1b864d330b",
+    "implementation": "47244c585ee85f98726122e926fdb820910baf2a3f0c1fc7486e89f298e37ad5",
+    "review": "a580b2fb62f8f2464c9597d0b9f6490722c937a2716065c876c9d085bfb9f5a2",
+    "curation": "1857e1beb8ca9269588a3c811ad6b395f112edd2e0ddc81dc5bbb03b504b5a3a",
+    "coordination": "b6cb58b5b29d70ba2cd7cc2d1e57338ce572548f8f27dd51f914bb62ef55cb01",
     "authorized-closeout": "c2f5de0efb06134f6edc9ba655863667b983906e7024a9231cdf99fba3c464e5",
-    "recovery": "920faa49cc2de8111c07d8844827f9592a57e63d977d9c7830c17f80dfe29f24",
-    "bootstrap": "1a9a92eef605905e95d0727f1efc72821ab490886da1d750190546ffc515b0da",
+    "recovery": "5740777d773a2c8733d5696ac52af01718a1d40813d85b6e0a0c46d904d74429",
+    "bootstrap": "c988052b9a104b4206086b55f10178c308a38eebe091cac422d7b5976a73b96f",
 }
 
 V13_STAGE_SHA256 = {
@@ -72,30 +72,30 @@ V13_STAGE_SHA256 = {
     "orientation/reviewer": "882dd8d60faebb788285396e31854b8be006eb852d9fa0c9c5b08f2fd9a48708",
     "orientation/investigator": "8859b38155055803de969edafb6271a4a317e99ccccce8662c74754bc08c773c",
     "orientation/bootstrap": "85495ca8b48fa4b642527224613f29321209acacd8249de265f789422aadee85",
-    "planning/architect": "305b9f0e82e74925233e5081055bb8b0b811c2fb82dfea80d0a10a2899c40aca",
+    "planning/architect": "446b1d4131dc189e017f644f83ce58f8027124a3afc1b25201279fa26df5ca8a",
     "planning/orchestrator": "941fada5456e8e3c2aca84506c8373a5c5cf5d478082c17a6686a621ec0708ba",
-    "implementation/worker": "e1499007ec82ca03998ee94761e5e520222cfe2b657299a499900c7d7b1fb953",
-    "review/reviewer": "d11455df6d395d9d4ac300ff111275bf03373dea8e8c6274a319c3ce1eacaae8",
-    "review/manager": "885f58610dbd0539c9af530bb3882949e24a426b262559282328c6779ee4a033",
-    "review/orchestrator": "885f58610dbd0539c9af530bb3882949e24a426b262559282328c6779ee4a033",
-    "review/architect": "ee73475cf9a1c5b8985776dce685e35e745f18588f3db6869c80fe3ff4f34046",
-    "curation/curator": "95a3eeb8804abd86145063e0ada839f14eabc641ab95c2b7a52299791b6bf605",
+    "implementation/worker": "7802e28d450473d928a6d4992846e4ec30abd0c41e16f553de35c0da539d4007",
+    "review/reviewer": "59974d4b1c70910c50322296c5d1056b530b44c84af91860111ca666486bea7b",
+    "review/manager": "7406101fb7e929bd1309a6360d7f0607067153f60493a3a4ff91e64a5b84bd0a",
+    "review/orchestrator": "7406101fb7e929bd1309a6360d7f0607067153f60493a3a4ff91e64a5b84bd0a",
+    "review/architect": "feae147f879b1bf752d6c00aa762a8c93713314ad276df70b94b24c8e01db688",
+    "curation/curator": "76b77127259d5fd940ef0db0250b28d76211a6dc478a9ceb13e49d3347ed8436",
     "curation/manager": "4311e44f0879b06b19bcef0161d91ac1627a7328256378b6a1b3e8a0a86fc7f0",
-    "coordination/architect": "8063c3e79c03780321eee73ff0657303d7fc6f1ba47008748becbe30067ab697",
-    "coordination/orchestrator": "fc3e4dd0613f4f36c0c33c2fbab30827498f8a965a63d7524856e9da72cc921b",
-    "coordination/manager": "5e1f0b7171c0d3b379657b8e1b8d070f3a7f9bc228245fa82d3de1e4b23a839f",
+    "coordination/architect": "af5a3a405d1824b0a3c4cb25f2cd663b58bc08ec5af791d08e185d2aa3347cd0",
+    "coordination/orchestrator": "ed597b3e86048ecaea162c84f40e80b0484f798d3044de664e2b7e2973888e9f",
+    "coordination/manager": "e3427712226376052ecbe26d1cc0ec7fe1ed3dcfc5465213434042ba77090bf3",
     "authorized-closeout/manager": "c2f5de0efb06134f6edc9ba655863667b983906e7024a9231cdf99fba3c464e5",
     "authorized-closeout/orchestrator": "c2f5de0efb06134f6edc9ba655863667b983906e7024a9231cdf99fba3c464e5",
     "authorized-closeout/architect": "c2f5de0efb06134f6edc9ba655863667b983906e7024a9231cdf99fba3c464e5",
-    "recovery/architect": "c4b441e7eb516fb14d798e83feb5cf7ab54e2eb32e45e9d6c234718d0e5e3c88",
-    "recovery/orchestrator": "c4b441e7eb516fb14d798e83feb5cf7ab54e2eb32e45e9d6c234718d0e5e3c88",
-    "recovery/manager": "c4b441e7eb516fb14d798e83feb5cf7ab54e2eb32e45e9d6c234718d0e5e3c88",
+    "recovery/architect": "7df8e998451311111f17b2c007b289e2078c7eb79143a195be662af478e8c004",
+    "recovery/orchestrator": "7df8e998451311111f17b2c007b289e2078c7eb79143a195be662af478e8c004",
+    "recovery/manager": "7df8e998451311111f17b2c007b289e2078c7eb79143a195be662af478e8c004",
     "recovery/worker": "48adf4af29a2dc921d985de149e258d86b7ae1d3b9c09d5cf92a189e5f7cbb48",
     "recovery/curator": "419829fd62dd6e1f46f69d9ac27a6f14d966b75ced64e73f4b3dd80f2326e315",
     "recovery/investigator": "48adf4af29a2dc921d985de149e258d86b7ae1d3b9c09d5cf92a189e5f7cbb48",
     "recovery/bootstrap": "c770ba6d2024ae702664e3340a30f1aaa7f153ae8b3f9e6fdcced923fcaea285",
     "recovery/reviewer": "48adf4af29a2dc921d985de149e258d86b7ae1d3b9c09d5cf92a189e5f7cbb48",
-    "bootstrap/bootstrap": "9472403bc5f34c79b904a4baf63569789990684a42e0d66b9e208135ca9d1c83",
+    "bootstrap/bootstrap": "0d3729cc4e46d3247e75c53aaef76ff3649b529f457b530cb5510950c1205efc",
 }
 
 V13_PATH_INVERSE = {
@@ -1014,8 +1014,76 @@ V13_SHORT_RULE_INVERSE = {
 }
 
 
+# The tool-name rule names the AR tool in six operation pointers. Those exact spans are
+# restored first, so every pin below this layer still authenticates the bytes it was taken from.
+TOOL_NAME_INVERSE = (
+    (
+        "independent continuation and the notice retry through `role_message` on "
+        "`agents-remember-task`.",
+        "independent continuation and notice retry.",
+    ),
+    (
+        "for its seat/problem report and the retry procedure through `role_message` on "
+        "`agents-remember-task`.",
+        "for its seat/problem report and retry procedure.",
+    ),
+    (
+        "for the primary tool, `task_doc` on `agents-remember-task`, and rendered-copy rules.",
+        "for the primary tool and rendered-copy rules.",
+    ),
+    (
+        "for the Reviewer's begin and result records through `task_doc` on `agents-remember-task`.",
+        "for the Reviewer's begin and result records.",
+    ),
+    (
+        "for the same-request-identifier procedure of `role_start` on `agents-remember-task`.",
+        "for the same-request-identifier procedure.",
+    ),
+    (
+        "before interpreting it: it names the states that `memory_init`, "
+        "`memory_baseline_status`, `user_settings_init`, `server_info`, `context_packet` and "
+        "`runtime_install` on `agents-remember-task` return.",
+        "before interpreting it.",
+    ),
+)
+
+
+# The review intake names no catalogs: the Reviewer binds them from its own table. These exact
+# spans are restored first, so every pin below this layer still authenticates its bytes.
+CATALOG_DROP_INVERSE = (
+    (
+        "exact requirement set and resolved tools.",
+        "exact requirement set, catalogs and resolved tools.",
+    ),
+    (
+        "Use the assigned review mode and review purpose and resolved `system/tools.md`.",
+        "Use the assigned review mode and review purpose, bound catalogs and resolved `system/tools.md`.",
+    ),
+    (
+        "the durable [approval record](../core/every-role.md#requirements-and-limits), and resolved "
+        "`system/tools.md`.",
+        "the durable [approval record](../core/every-role.md#requirements-and-limits), bound "
+        "catalogs, and resolved `system/tools.md`.",
+    ),
+)
+#: The intake markers drop the same field wherever they stand.
+CATALOG_DROP_MARKER = (
+    "requirement-set, tools-file -->",
+    "requirement-set, catalogs, tools-file -->",
+)
+CATALOG_DROP_MARKER_WITH_CANDIDATE = (
+    "attempt-records, tools-file -->",
+    "attempt-records, catalogs, tools-file -->",
+)
+
+
 def inverse_v13_short_rules(text: str, key: str) -> str:
     """Restore only the exact admitted 543/546 spans, independently of path movement."""
+    for current, previous in TOOL_NAME_INVERSE + CATALOG_DROP_INVERSE:
+        assert text.count(current) <= 1, key
+        text = text.replace(current, previous, 1)
+    for current, previous in (CATALOG_DROP_MARKER, CATALOG_DROP_MARKER_WITH_CANDIDATE):
+        text = text.replace(current, previous)
     for current, previous in V13_SHORT_RULE_INVERSE[key]:
         assert text.count(current) == 1, key
         text = text.replace(current, previous, 1)

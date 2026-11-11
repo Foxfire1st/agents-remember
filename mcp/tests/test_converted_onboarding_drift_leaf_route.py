@@ -469,7 +469,7 @@ def test_unbuildable_base_withholds_new_carried_refusals(tmp_path: Path) -> None
     )
 
     def _failed_base(_root: Path, _candidate: Any) -> tuple[Any, str | None]:
-        return None, "the base cache is unreachable"
+        return (), "the base cache is unreachable"
 
     refused = _summarize(
         code_repository_root=code, context=_context(memory, tmp_path), base=_failed_base

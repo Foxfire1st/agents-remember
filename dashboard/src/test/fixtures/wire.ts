@@ -134,7 +134,7 @@ const BASE_TASK_ENTRY: TaskEntry = {
   stepsDone: SERVED_TASK_ENTRY.stepsDone,
   stepsTotal: SERVED_TASK_ENTRY.stepsTotal,
   children: [],
-  counts: { planned: 0, started: 0, completed: 0, aborted: 0, works: 0, paused: 0, unknown: 0 },
+  counts: { planned: 0, started: 0, completed: 0, aborted: 0, works: 0, waiting: 0, paused: 0, unknown: 0 },
   worktrees: [],
 };
 
@@ -259,6 +259,7 @@ export function projection<O extends Partial<WorkspaceProjection> = NoOverrides>
       completed: 0,
       aborted: 0,
       works: 0,
+      waiting: 0,
       paused: 0,
       unknown: 0,
     },

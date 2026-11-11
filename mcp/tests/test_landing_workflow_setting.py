@@ -32,7 +32,7 @@ from agents_remember.kernel.coordination_context.settings import (
     parse_landing_settings,
 )
 from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
-from agents_remember.worktrees.series_closeout import _landing_workflow
+from agents_remember.worktrees.series_merge_admission import _landing_workflow
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 

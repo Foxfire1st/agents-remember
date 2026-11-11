@@ -24,7 +24,7 @@ function needEntries() {
     summary: taskSummary({ kind: 'master', form: 'master' }),
     reference: { repository: 'repo', path: 'master/task.json' },
     activity: 'works',
-    counts: { planned: 1, started: 2, completed: 1, aborted: 1, works: 1, paused: 1, unknown: 0 },
+    counts: { planned: 1, started: 2, completed: 1, aborted: 1, works: 1, waiting: 0, paused: 1, unknown: 0 },
   });
   const children = [
     task('NEED-L1', { title: 'First waits', stage: 'planned', activity: undefined }),
@@ -306,6 +306,7 @@ it('names terminal disclosure state accessibly, excludes aborted tasks from prog
     completed: 1,
     aborted: 1,
     works: 1,
+    waiting: 0,
     paused: 1,
     unknown: 0,
   };
@@ -361,6 +362,7 @@ it('shows the served child activity counts in a master row', () => {
     completed: 2,
     aborted: 1,
     works: 6,
+    waiting: 0,
     paused: 2,
     unknown: 0,
   };

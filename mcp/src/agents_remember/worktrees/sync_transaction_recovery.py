@@ -8,12 +8,16 @@ from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.models.worktree import SyncSide
-from agents_remember.worktrees.knowledge_crossing import crossing_summary
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.git import branch_commit, head_commit, is_ancestor
-from agents_remember.worktrees.modules.guidance import contract_next_args, recovery_guidance
+from agents_remember.worktrees.modules.git import head_commit, is_ancestor
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.services import WorktreeServicesUnboundError, worktree_services
+from agents_remember.worktrees.sync_source_strategy import (
+    source_strategy,
+    sync_log_entry,
+    target_code_base,
+    target_memory_base,
+)
 from agents_remember.worktrees.sync_transaction_authority import (
     authority_refs_exist,
     command_result,
@@ -26,11 +30,10 @@ from agents_remember.worktrees.sync_transaction_authority import (
     require_parked_wip_settled,
     restore_cancelled_wip,
     side_locations,
-    side_payload,
     sync_contract_kind,
-    target_memory_base,
     update_record,
 )
+from agents_remember.worktrees.sync_transaction_completion import completed_sync_result
 from agents_remember.worktrees.sync_transaction_git import (
     CancelSaveError,
     CancelTreeAssessment,
@@ -53,6 +56,10 @@ from agents_remember.worktrees.sync_transaction_git import (
     side_branch_head,
 )
 from agents_remember.worktrees.sync_transaction_parking import _adopt_orphaned_park
+from agents_remember.worktrees.sync_transaction_sources import (
+    delete_default_source_refs,
+    recovered_source_strategy,
+)
 from agents_remember.worktrees.sync_transaction_state import (
     SyncJournalReadError,
     SyncOperationRecord,
@@ -78,30 +85,12 @@ def finalize_sync(
     require_finalizable_contract(current, record)
     _require_completed_branches(record)
     require_parked_wip_settled(record)
-    memory_to = target_memory_base(record)
-    if (
-        current.code_base_commit != record.code.sourceCommit
-        or current.memory_base_commit != memory_to
-    ):
-        entry = {
-            "at": operation_stamp(),
-            "codeBaseFrom": record.codeBaseFrom,
-            "codeBaseTo": record.code.sourceCommit,
-            "memoryBaseFrom": record.memoryBaseFrom,
-            "memoryBaseTo": memory_to,
-            "code": record.code.plan,
-            "memory": record.memory.plan if record.memory is not None else "no-external-memory",
-            # MIK-R52 rule 4: the heads this sync produced, so the landing chain proof admits
-            # exactly the merges the sync made. An entry written before this leaf has no head
-            # keys and admits its merge as the proof did before.
-            "codeHeadTo": record.code.resultHead,
-            "memoryHeadTo": record.memory.resultHead if record.memory is not None else "",
-        }
+    if not source_strategy(record.syncSource).finalized(current, record):
         current = replace(
             current,
-            code_base_commit=record.code.sourceCommit,
-            memory_base_commit=memory_to,
-            sync_log=(*current.sync_log, entry),
+            code_base_commit=target_code_base(record),
+            memory_base_commit=target_memory_base(record),
+            sync_log=(*current.sync_log, {"at": operation_stamp(), **sync_log_entry(record)}),
         )
         write_contract(current.contract_path, current)
     # Publish the terminal transaction before deleting its recovery authority. A crash at
@@ -110,31 +99,7 @@ def finalize_sync(
     _retire_restored_stashes(record)
     remove_temporary_worktrees(record)
     delete_authority(record)
-    result = completed_sync_result(current, record, fetch)
-    _name_memory_repair_debt(result, record)
-    return with_recomputed_worklist(result, current)
-
-
-def _name_memory_repair_debt(result: WorktreeCommandResult, record: SyncOperationRecord) -> None:
-    """Name the debt a sync merge reported instead of refusing (MIK-R198 rule 7).
-
-    A sync validates with two bases and publishes no leaf, so a stale reference anchor is reported
-    rather than refused: the merged state can be created from two valid sides and is repaired after
-    the merge exists. The debt is the route's answer, so it is named here -- rule IDs and the rule
-    statement -- and a later publication of the line refuses until the Curator repairs it.
-    """
-
-    if record.memory is None or not record.memory.repairDebt:
-        return
-    result.payload["memoryRepairDebt"] = {
-        "side": "memory",
-        "rules": list(record.memory.repairDebt),
-        "statement": (
-            "the merged memory reports these refusing rules instead of refusing: repair them before "
-            "this line publishes again (MIK-R198 rule 7)"
-        ),
-        "resultHead": record.memory.resultHead,
-    }
+    return with_recomputed_worklist(completed_sync_result(current, record, fetch), current)
 
 
 def with_recomputed_worklist(
@@ -169,96 +134,6 @@ def recompute_knowledge_worklist(contract: WorktreeContract) -> dict[str, object
         return None
     except Exception:  # a worklist failure never fails a completed sync (MIK-R08 rule 8)
         return None
-
-
-def successful_crossings(record: SyncOperationRecord) -> list[dict[str, object]]:
-    """The journaled crossing summaries of a completed sync's sides, in side order.
-
-    The same :func:`crossing_summary` view the resolution response carries, so a
-    successful sync reports its report identity and alignment counts too
-    (MIK-R66 rules 7-9). Sides with no journaled report contribute nothing.
-    """
-
-    summaries: list[dict[str, object]] = []
-    for side in (record.code, record.memory):
-        if side is not None and side.crossingReport:
-            summaries.append(crossing_summary(side.crossingReport))
-    return summaries
-
-
-def completed_sync_result(
-    contract: WorktreeContract,
-    record: SyncOperationRecord,
-    fetch: dict[str, object],
-) -> WorktreeCommandResult:
-    """Reconstruct the exact successful-pass result, including moved-again state."""
-
-    current = reload_contract(contract)
-    memory_to = target_memory_base(record)
-    if (
-        current.code_base_commit != record.code.sourceCommit
-        or current.memory_base_commit != memory_to
-    ):
-        raise SyncGitProofError(
-            "completed sync journal does not match the contract's finalized base pair"
-        )
-    latest_code = branch_commit(current.code_repo_path, current.code_source_branch)
-    latest_memory = (
-        branch_commit(current.memory_repo_path, current.memory_source_branch)
-        if current.memory_mode == "external" and current.memory_repo_path is not None
-        else ""
-    )
-    moved_again = latest_code != record.code.sourceCommit or (
-        record.memory is not None and latest_memory != record.memory.sourceCommit
-    )
-    memory_skipped = record.memory is not None and record.memory.plan == "skip"
-    state = (
-        "sync-pass-completed-memory-skipped"
-        if memory_skipped
-        else "sync-pass-completed-source-moved-again"
-        if moved_again
-        else "synced"
-    )
-    crossings = successful_crossings(record)
-    result = WorktreeCommandResult(
-        0,
-        {
-            "state": state,
-            "summary": (
-                "The code sync pass completed, but memory was explicitly skipped and the "
-                "recorded pair is not current. Run merge-memory before paired activation."
-                if memory_skipped
-                else "The admitted sync pass completed, but the source moved again; run the "
-                "next contract-addressed sync before resuming work."
-                if moved_again
-                else "The worktree base pair now matches the admitted official line."
-            ),
-            "code": side_payload(record.code),
-            "memory": side_payload(record.memory),
-            "codeBaseCommit": record.code.sourceCommit,
-            "memoryBaseCommit": memory_to,
-            "fetch": fetch,
-            **(
-                {"crossing": crossings[0] if len(crossings) == 1 else crossings}
-                if crossings
-                else {}
-            ),
-            **(
-                recovery_guidance(
-                    "sync_source_lineage",
-                    tool="worktree_sync",
-                    args=contract_next_args(current, dry_run=True),
-                )
-                if moved_again or memory_skipped
-                else {}
-            ),
-        },
-    )
-    # One place for every completed-sync answer, replayed or live: the journal is the record of what
-    # the merge reported, so a replay names the same debt the original answer did instead of dropping
-    # the field (MIK-R198 rule 7).
-    _name_memory_repair_debt(result, record)
-    return result
 
 
 def cancel_sync(
@@ -346,34 +221,13 @@ def _cancelled_contract(
     A kill after write_contract but before the completed journal leaves this
     exact tail. Prove its pair and journaled heads before any cancel mutation;
     removing it is repeatable even if the cancel dies before its terminal write.
+    The source strategy says what the finalization moved and how its ownership is proven.
     """
-    if (contract.code_base_commit, contract.memory_base_commit) == (
-        record.codeBaseFrom,
-        record.memoryBaseFrom,
-    ):
+    strategy = source_strategy(record.syncSource)
+    if strategy.finalization_absent(contract, record):
         return contract
     require_finalizable_contract(contract, record)
-    expected = {
-        "codeBaseFrom": record.codeBaseFrom,
-        "codeBaseTo": record.code.sourceCommit,
-        "memoryBaseFrom": record.memoryBaseFrom,
-        "memoryBaseTo": target_memory_base(record),
-        "codeHeadTo": record.code.resultHead,
-        "memoryHeadTo": record.memory.resultHead if record.memory is not None else "",
-    }
-    pair = (record.code.sourceCommit, target_memory_base(record))
-    if (
-        (contract.code_base_commit, contract.memory_base_commit) != pair
-        or not contract.sync_log
-        or any(contract.sync_log[-1].get(key) != value for key, value in expected.items())
-    ):
-        raise SyncGitProofError("contract finalization is not owned by this sync generation")
-    return replace(
-        contract,
-        code_base_commit=record.codeBaseFrom,
-        memory_base_commit=record.memoryBaseFrom,
-        sync_log=contract.sync_log[:-1],
-    )
+    return strategy.without_finalization(contract, record)
 
 
 def _assessments_saving_later_work(
@@ -656,6 +510,8 @@ def manual_repair_result(
     summary: str,
     record: SyncOperationRecord,
     fetch: dict[str, object],
+    *,
+    omissions: dict[str, object] | None = None,
 ) -> WorktreeCommandResult:
     return command_result(
         2,
@@ -664,6 +520,7 @@ def manual_repair_result(
         fetch,
         phase=record.phase,
         cancelArgs=_cancel_args_for_path(record.contractPath),
+        **({"omissions": omissions} if omissions is not None else {}),
         **(
             {
                 "validationRefusal": record.validationRefusal.model_dump(mode="json"),
@@ -721,6 +578,7 @@ def _recover_from_refs(
             contractKind=sync_contract_kind(contract),
             codeBaseFrom=code.baseCommit,
             memoryBaseFrom=memory.baseCommit if memory is not None else contract.memory_base_commit,
+            **recovered_source_strategy(contract, code).record_fields(contract),
             phase="cancelling",
             memorySyncChoice="merge-memory" if memory is not None else None,
             code=code,
@@ -770,6 +628,7 @@ def _recover_complete_sides_around_partial_authority(
         for side in complete:
             rollback_side(side)
             remove_temporary_worktree(side)
+            delete_default_source_refs(side, contract.contract_path)
             delete_pinned_ref(Path(side.repository), side.sourceBackupRef, side.sourceCommit)
             delete_pinned_ref(Path(side.repository), side.backupRef, side.preSyncHead)
             delete_pinned_ref(Path(side.repository), side.baseBackupRef, side.baseCommit)

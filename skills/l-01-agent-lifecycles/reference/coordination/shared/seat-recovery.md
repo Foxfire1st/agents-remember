@@ -4,7 +4,7 @@ This file gives managers, Architects and Orchestrators acting within their assig
 
 ## Recover an idle or unfinished seat
 
-When every agent of a leaf is idle, read each agent's last lines. If a turn ended silently while helpers still run, tell that seat to collect its results and finish. A valid declared helper wait remains a wait.
+When every agent of a leaf is idle, read each agent's last lines. If a turn ended silently while helpers or a process it started still run, tell that seat to collect its results and finish. A valid declared helper or background wait (`WAITING FOR SUBAGENTS:` or `WAITING FOR BACKGROUND:`) remains a wait until its next undeclared end.
 
 ## Preserve stopped seats and replacement work
 

@@ -1,5 +1,5 @@
 {
   "id": "ar-eval-recorder",
   "description": "Fixture-only native host event capture for Curator evaluations.",
-  "requirements": { "paseo": ">=0.12.0" }
+  "requirements": { "paseo": ">=0.15.0" }
 }

@@ -196,10 +196,9 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
     if links is None:
         marker.pop("dependent_links")
     files[LAYOUT_MARKER_PATH] = canonical_text(marker).encode("utf-8")
-    bases = (state.base,) if state.base is not None and state.base.converted else ()
     validation = validate_tree(
         KnowledgeTree(label=f"{request.owner.id} candidate", files=files),
-        bases=bases,
+        bases=state.validation_bases,
         code=CodePathSet(
             label=f"code candidate {snapshot.tree}",
             paths=frozenset(snapshot.blobs),

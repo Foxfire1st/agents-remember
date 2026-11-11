@@ -19,7 +19,7 @@ from agents_remember.memory_quality.knowledge_validator.commit_route import (
     GitKnowledgeValidation,
 )
 from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
-from agents_remember.worktrees.series_closeout import (
+from agents_remember.worktrees.series_merge_admission import (
     _MergeAdmission,
     _require_admitted_step,
     _SpineStep,

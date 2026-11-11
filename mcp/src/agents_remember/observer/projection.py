@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import SourceLineageProjection
+from agents_remember.observer.host_activity import WaitingSeat
 from agents_remember.observer.provider_limits import ProviderLimit
 
 from . import projection_task_documents as task_documents
@@ -461,11 +462,14 @@ class TaskState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     stage: Literal["planned", "started", "aborted", "completed"]
-    activity: Literal["works", "paused", "unknown"] | None = None
+    activity: Literal["works", "waiting", "paused", "unknown"] | None = None
     eventAt: str | None = None
     # MIK-R190 rule 13: present only when the task is started, nothing of it works
     # and one of its seats is limited; the dashboard shows it instead of `paused`.
     providerLimit: ProviderLimit | None = None
+    # Present only when the task is started, nothing of it works and a seat's declared
+    # wait has its check still to come: `activity` is then `waiting`, not `paused`.
+    waitingSeats: list[WaitingSeat] | None = None
 
 
 class TaskCounts(BaseModel):
@@ -476,6 +480,7 @@ class TaskCounts(BaseModel):
     aborted: int = 0
     completed: int = 0
     works: int = 0
+    waiting: int = 0
     paused: int = 0
     unknown: int = 0
 

@@ -1,6 +1,9 @@
-// Native @getpaseo/plugin/server 0.12.0 lifecycle + PaseoApi.observeEvents.
+// Native @getpaseo/plugin/server 0.15.4 lifecycle (`server.addHook`) + PaseoApi.observeEvents.
 // No roles, prompts, approvals, agent state changes or subscription snapshots
 // invented as helper events. Every recorded native object is retained unchanged.
+// From Paseo 0.13 the turn-end hook carries an empty `timeline`; the recorder
+// reads the agent's held timeline through `agents.ref(id).timeline.refetch` and
+// records its items in the hook's place, each with the turn id of its row.
 import {
   appendFileSync,
   mkdirSync,
@@ -10,6 +13,7 @@ import {
 import path from "node:path";
 import type {
   PluginHandlerContext,
+  PluginHookContext,
   PluginServerContext,
   PluginSessionOpenRequest,
 } from "@getpaseo/plugin/server";
@@ -128,19 +132,35 @@ class NativeRecorder {
   }
 }
 
+/** The held timeline's items, each with the turn id its row carries. */
+async function turnTimeline(
+  context: PluginHookContext,
+  agentId: string,
+): Promise<unknown[]> {
+  const page = await context.paseo.agents
+    .ref(agentId)
+    .timeline.refetch({ direction: "tail", limit: 0 });
+  return page.entries.map((entry) => ({
+    ...entry.item,
+    ...(entry.turnId ? { turnId: entry.turnId } : {}),
+  }));
+}
+
 export default function contribute(server: PluginServerContext) {
   const home = process.env.PASEO_HOME;
   if (!home)
     throw new Error("eval recorder needs the explicitly configured PASEO_HOME");
   const recorder = new NativeRecorder(home);
-  const releaseOpen = server.before(
-    "agent.session_open",
+  const releaseOpen = server.addHook(
+    "agent.open.before",
     async ({ request }, context) => {
       await recorder.open(request, context.paseo);
     },
   );
-  const releaseEnd = server.on("agent.turn_ended", (event) => {
-    recorder.record({ type: "agent.turn_ended", ...event }, event.agent.id);
+  const releaseEnd = server.addHook("agent.turn.after", async (event, context) => {
+    const timeline = await turnTimeline(context, event.agent.id);
+    const native = { type: "agent.turn_ended", ...event, timeline };
+    recorder.record(native, event.agent.id);
   });
   return async () => {
     releaseOpen();

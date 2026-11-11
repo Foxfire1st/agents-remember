@@ -2461,6 +2461,11 @@
           "title": "Unknown",
           "type": "integer"
         },
+        "waiting": {
+          "default": 0,
+          "title": "Waiting",
+          "type": "integer"
+        },
         "works": {
           "default": 0,
           "title": "Works",
@@ -2643,6 +2648,7 @@
             {
               "enum": [
                 "works",
+                "waiting",
                 "paused",
                 "unknown"
               ],
@@ -2780,6 +2786,21 @@
         "title": {
           "title": "Title",
           "type": "string"
+        },
+        "waitingSeats": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/WaitingSeat"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Waitingseats"
         },
         "worktrees": {
           "items": {
@@ -3886,6 +3907,76 @@
         "label"
       ],
       "title": "ToolReportNode",
+      "type": "object"
+    },
+    "WaitingSeat": {
+      "additionalProperties": false,
+      "description": "One seat of a task shown as waiting: its declared wait, with the seat it belongs to.",
+      "properties": {
+        "agentId": {
+          "title": "Agentid",
+          "type": "string"
+        },
+        "checkDueAt": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checkdueat"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "since": {
+          "format": "date-time",
+          "title": "Since",
+          "type": "string"
+        },
+        "waitsFor": {
+          "items": {
+            "enum": [
+              "subagent",
+              "background"
+            ],
+            "type": "string"
+          },
+          "title": "Waitsfor",
+          "type": "array"
+        }
+      },
+      "required": [
+        "agentId",
+        "waitsFor",
+        "since"
+      ],
+      "title": "WaitingSeat",
       "type": "object"
     }
   },

@@ -30,6 +30,7 @@ import {
   useTaskStatusInstant,
   type TaskStatusReading,
 } from '../detail-panel/pageParts';
+import { activityPhrase } from '../detail-panel/activityPhrase';
 import { dim } from '../detail-panel/pageStyles';
 import { TaskGroupDisclosure } from '../TaskGroupDisclosure';
 import { useCollapsedTaskGroups } from '../useCollapsedTaskGroups';
@@ -571,7 +572,7 @@ function RowFigure({ entry, form, hover }: { entry: TaskEntry; form: string; hov
       ) : null}
       {form === 'task' || hostUnknown ? null : (
         <span data-testid="child-activity">
-          {entry.counts.works} works · {entry.counts.paused} paused ·{' '}
+          {activityPhrase(entry.counts)} ·{' '}
         </span>
       )}
       {figure ? <span title={hover}>{figure}</span> : null}
@@ -656,7 +657,7 @@ function groupedEntries(tasks: Record<string, TaskEntry>, pivot: Pivot): Map<str
   return byKey;
 }
 
-const PHASE_ORDER = ['works', 'paused', 'unknown', 'started', 'planned', 'completed', 'aborted'];
+const PHASE_ORDER = ['works', 'waiting', 'paused', 'unknown', 'started', 'planned', 'completed', 'aborted'];
 
 function groupRows(
   tasks: Record<string, TaskEntry>,
