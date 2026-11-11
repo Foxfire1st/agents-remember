@@ -625,11 +625,19 @@ CURATION_POLICY_STATEMENTS: dict[str, tuple[str, ...]] = {
         "If coherence is then missing or stale, complete the authority gates below before closeout.",
     ),
     "skills/l-01-agent-lifecycles/roles/curator.md": (
-        "Before running curation checks, read [Run the complete curation checks]"
-        "(../operations/curation.md#run-the-complete-curation-checks) for their full scope, "
-        "intake and repair timing, results and coherence continuation.",
-        "Before validating coherence, read [Authority gates]"
-        "(../operations/curation.md#authority-gates) for the candidate binding and before-closeout timing.",
+        (
+            "Before running curation checks, read [Run the complete curation "
+            "checks](../operations/curation.md#run-the-complete-curation-checks) "
+            "for their full scope with `memory_quality_check` on "
+            "`agents-remember-task`, intake and repair timing, results and "
+            "coherence continuation."
+        ),
+        (
+            "Before validating coherence, read [Authority "
+            "gates](../operations/curation.md#authority-gates) for the candidate "
+            "binding of `curator_coherence` on `agents-remember-task` and "
+            "before-closeout timing."
+        ),
     ),
 }
 

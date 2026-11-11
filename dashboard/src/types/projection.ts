@@ -453,6 +453,7 @@ export interface TaskCounts {
   planned: number;
   started: number;
   unknown: number;
+  waiting: number;
   works: number;
 }
 
@@ -491,7 +492,7 @@ export interface TaskDocumentRef {
 }
 
 export interface TaskEntry {
-  activity?: "works" | "paused" | "unknown";
+  activity?: "works" | "waiting" | "paused" | "unknown";
   children: string[];
   counts: TaskCounts;
   disagreements?: TaskListDisagreement[];
@@ -507,6 +508,7 @@ export interface TaskEntry {
   stepsTotal: number;
   summary?: TaskSummary;
   title: string;
+  waitingSeats?: WaitingSeat[];
   worktrees: EnclosureNode[];
 }
 
@@ -682,6 +684,17 @@ export interface ToolReportNode {
   label: string;
   path: string;
   tool: string;
+}
+
+export interface WaitingSeat {
+  agentId: string;
+  /** JSON Schema refinements: {"format":"date-time"} */
+  checkDueAt?: string;
+  detail?: string;
+  role?: string;
+  /** JSON Schema refinements: {"format":"date-time"} */
+  since: string;
+  waitsFor: ("subagent" | "background")[];
 }
 
 export interface WatcherHealth {

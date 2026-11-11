@@ -14,6 +14,44 @@ from agents_remember.observer.provider_limits import ProviderLimits
 HOST_ACTIVITY_FILE = "host-activity.json"
 
 
+class DeclaredWait(BaseModel):
+    """A seat's open declared wait, as the plugin publishes it beside the host's own state.
+
+    A seat that ends its turn with ``WAITING FOR SUBAGENTS:`` or ``WAITING FOR BACKGROUND:``
+    waits for its helpers or for a process it started. The host still reports it idle, so
+    the plugin publishes what it waits for, since when the wait has been open, the plugin's
+    next check while one is armed, and the background declaration's own words. The wait never
+    moves ``state`` or ``eventAt``.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    waitsFor: tuple[Literal["subagent", "background"], ...] = Field(min_length=1)
+    since: datetime
+    checkDueAt: datetime | None = None
+    detail: str | None = Field(default=None, max_length=300)
+
+    @field_validator("since", "checkDueAt")
+    @classmethod
+    def _aware_time(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("declared wait time must carry its timezone")
+        return value
+
+
+class WaitingSeat(BaseModel):
+    """One seat of a task shown as waiting: its declared wait, with the seat it belongs to."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    agentId: str
+    role: str | None = None
+    waitsFor: tuple[Literal["subagent", "background"], ...]
+    since: datetime
+    checkDueAt: datetime | None = None
+    detail: str | None = None
+
+
 class PublishedAgentActivity(BaseModel):
     """One agent as the plugin publishes it.
 
@@ -27,6 +65,9 @@ class PublishedAgentActivity(BaseModel):
     plugin publishes the ids of the native prompts that are still unanswered, absent when none
     are, so the attention queue can keep one row per outstanding prompt and end exactly the
     occurrence that was answered. The prompt's arguments are never published.
+
+    ``declaredWait`` is the seat's open declared wait (``DeclaredWait``), absent when none is
+    open; it lets AR's surfaces show a waiting seat as waiting while the host says idle.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -36,6 +77,7 @@ class PublishedAgentActivity(BaseModel):
     runningSubagents: int | None = Field(default=None, ge=0)
     subagentsSince: datetime | None = None
     permissionPrompts: tuple[str, ...] = ()
+    declaredWait: DeclaredWait | None = None
 
     @field_validator("eventAt", "subagentsSince")
     @classmethod

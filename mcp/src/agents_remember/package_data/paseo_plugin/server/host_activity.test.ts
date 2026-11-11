@@ -122,8 +122,8 @@ test("failed reconciliation cannot make an old boot usable, and records bound re
 test("all seven installed hook registrations publish with the SDK agent id", () => {
   const h = harness();
   const names: string[] = [];
-  registerHostActivityEvents({ on(name) { names.push(name); return () => {}; } }, h.publisher);
-  assert.deepEqual(names, ["agent.turn_started", "agent.turn_ended", "agent.permission_requested", "agent.permission_resolved", "agent.archived", "agent.created", "agent.closed"]);
+  registerHostActivityEvents({ addHook(name) { names.push(name); return () => {}; } }, h.publisher);
+  assert.deepEqual(names, ["agent.turn.before", "agent.turn.after", "agent.permission.before", "agent.permission.after", "agent.archive.after", "agent.create.after", "agent.close.after"]);
 });
 
 test("the writer replaces one file and leaves no transition history", () => {

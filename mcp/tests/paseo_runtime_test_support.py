@@ -47,6 +47,7 @@ START_ONLY = ("daemon.listen", "features.webUi", "features.dictation", "features
 LIVE = (
     "daemon.relay.enabled",
     "daemon.mcp.injectIntoAgents",
+    "agents.idleRuntimeCleanup",
     "pluginsEnabled",
     "agents.providers",
 )

@@ -278,7 +278,8 @@ const VOCABULARIES: Record<
   'projection.buildCurrentness.mode': ['installed', 'checkout'],
   'projection.buildCurrentness.state': ['current', 'stale', 'unknown'],
   'projection.tasks[].stage': ['planned', 'started', 'aborted', 'completed'],
-  'projection.tasks[].activity': ['works', 'paused', 'unknown'],
+  'projection.tasks[].activity': ['works', 'waiting', 'paused', 'unknown'],
+  'projection.tasks[].waitingSeats[].waitsFor[]': ['subagent', 'background'],
   'projection.tasks[].disagreements[].kind': [
     'names-another-master',
     'not-listed',

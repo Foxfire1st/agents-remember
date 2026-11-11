@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { taskEntrySelectionKey } from '../data/taskReference';
-import { formatLimitTime } from '../panels/detail-panel/pageParts';
+import { formatLimitTime } from '../panels/detail-panel/limitTime';
 import { taskEntry } from '../test/fixtures/wire';
 import type { EnclosureNode, ProviderLimit } from '../types/projection';
 import { activeTopologyInputs, buildTopology } from './model';

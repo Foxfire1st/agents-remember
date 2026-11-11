@@ -5,7 +5,7 @@ import { act, render } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { dashboardStore } from '../../data/store';
-import { formatLimitTime } from '../detail-panel/pageParts';
+import { formatLimitTime } from '../detail-panel/limitTime';
 import type { ProviderLimit, TaskEntry } from '../../types/projection';
 import { LifecycleList } from './LifecycleList';
 import { installListCleanup, rowOf, seed, task } from './test-utils';

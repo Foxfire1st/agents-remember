@@ -1903,13 +1903,28 @@
     "aborted": 0,
     "completed": 0,
     "works": 1,
-    "paused": 1,
+    "waiting": 1,
+    "paused": 0,
     "unknown": 0
   },
   "tasks": [
     {
       "stage": "started",
-      "activity": "paused",
+      "activity": "waiting",
+      "eventAt": "2026-06-14T09:00:00+00:00",
+      "waitingSeats": [
+        {
+          "agentId": "0f0c1d2e-0000-4000-8000-0000000000aa",
+          "role": "manager",
+          "waitsFor": [
+            "subagent",
+            "background"
+          ],
+          "since": "2026-06-14T09:00:00Z",
+          "checkDueAt": "2026-06-14T09:03:00Z",
+          "detail": "sim replay, pid 4242, log /var/tmp/sim/replay.log, ends about 09:20"
+        }
+      ],
       "reference": {
         "repository": "agents-remember",
         "path": "sim/task.json"
@@ -1998,6 +2013,7 @@
         "aborted": 0,
         "completed": 0,
         "works": 1,
+        "waiting": 0,
         "paused": 0,
         "unknown": 0
       },
@@ -2408,6 +2424,7 @@
         "aborted": 0,
         "completed": 0,
         "works": 0,
+        "waiting": 0,
         "paused": 0,
         "unknown": 0
       },
@@ -2605,6 +2622,7 @@
         "aborted": 0,
         "completed": 0,
         "works": 0,
+        "waiting": 0,
         "paused": 0,
         "unknown": 0
       },
@@ -2656,6 +2674,7 @@
         "aborted": 0,
         "completed": 0,
         "works": 0,
+        "waiting": 0,
         "paused": 0,
         "unknown": 0
       },
@@ -2707,6 +2726,7 @@
         "aborted": 0,
         "completed": 0,
         "works": 0,
+        "waiting": 0,
         "paused": 0,
         "unknown": 0
       },

@@ -6,20 +6,25 @@ closeout proof has to admit that merge without admitting a contributor's merge, 
 that carries content of its own.
 
 This module holds that policy as a predicate over facts the caller has already read, plus the one
-reader that turns a merge commit into those facts. It sits beside ``series_closeout`` rather than
-inside it so the chain proof keeps its size while the rule stays legible on its own; the proof
-imports these names and keeps its public seam.
+reader that turns a merge commit into those facts. It sits beside the chain proof rather than
+inside it so the proof keeps its size while the rule stays legible on its own: the proof's merge
+admission (``series_merge_admission``) imports these names, and ``series_closeout`` keeps its public
+seam.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agents_remember.kernel.coordination_context.models import (
     LANDING_WORKFLOW_LOCAL,
     LANDING_WORKFLOW_PULL_REQUEST,
 )
-from agents_remember.kernel.coordination_context.settings import parse_landing_settings
+from agents_remember.kernel.coordination_context.settings import (
+    parse_landing_settings,
+    parse_landing_settings_text,
+)
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.worktrees.integration.lifecycle.lifecycle_enclosure_terminal import (
     terminal_cleanup_contract_authority,
@@ -28,7 +33,10 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
     inspect_lifecycle_operation_locator,
     located_lifecycle_operation_store,
 )
-from agents_remember.worktrees.modules.git import require_git
+from agents_remember.worktrees.modules.git import branch_commit, commit_text_or_none, require_git
+
+if TYPE_CHECKING:
+    from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 __all__ = [
     "LANDING_WORKFLOW_LOCAL",
@@ -47,19 +55,45 @@ class PublicationMergeUnreadable(RuntimeError):
     """A merge that cannot be read is refused as an input, never admitted or condemned."""
 
 
-def landing_workflow(contract: object) -> str:
+_SETTINGS_PATH = "system/settings.json"
+
+
+def landing_workflow(contract: WorktreeContract) -> str:
     """The landing workflow this series lands under (MIK-R202@v2 rule 13).
 
     The one value governs the repository's code and memory pair, so it is read once from the pair's
-    memory settings. A series whose memory worktree is unknown, absent or still on markdown settings
+    memory settings. A series whose memory side is unknown, absent or still on markdown settings
     lands locally: a missing key means ``local``, and this proof must never invent a workflow.
+
+    A series contract has no memory worktree of its own; its memory line is the memory work branch,
+    so the settings are read from that branch's tip as a Git object, with no checkout.
     """
 
-    worktree = getattr(contract, "memory_worktree", None)
-    if worktree is None:
+    worktree = contract.memory_worktree
+    if worktree is not None:
+        return parse_landing_settings(Path(worktree) / _SETTINGS_PATH).workflow
+    return _branch_landing_workflow(contract)
+
+
+def _branch_landing_workflow(contract: WorktreeContract) -> str:
+    """The setting at the memory work branch tip; a branch or file that is not there means local.
+
+    An unresolved branch is left to the chain proof, which refuses it in its own words; an invalid
+    file is refused at the parse exactly as the worktree read refuses it.
+    """
+
+    repository = contract.memory_repo_path
+    branch = contract.memory_work_branch
+    if repository is None or not branch:
         return LANDING_WORKFLOW_LOCAL
-    settings_path = Path(worktree) / "system" / "settings.json"
-    return parse_landing_settings(settings_path).workflow
+    try:
+        tip = branch_commit(Path(repository), branch)
+    except RuntimeError:
+        return LANDING_WORKFLOW_LOCAL
+    text = commit_text_or_none(Path(repository), tip, _SETTINGS_PATH)
+    if text is None:
+        return LANDING_WORKFLOW_LOCAL
+    return parse_landing_settings_text(text, f"{_SETTINGS_PATH} at {branch} ({tip})").workflow
 
 
 def publication_merge_is_admitted(

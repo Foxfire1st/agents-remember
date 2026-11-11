@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 
 import { clockTime } from './trayModel';
 import { fmtWait } from '../data/selectors';
-import { formatLimitTime } from '../panels/detail-panel/pageParts';
+import { formatLimitTime } from '../panels/detail-panel/limitTime';
 import { useChatNames, type ChatName } from './traySeats';
 import type { TraySendOutcome, TrayTargetResult } from './trayStore';
 import * as look from './trayStyles';

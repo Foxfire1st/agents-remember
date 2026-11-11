@@ -44,7 +44,7 @@ Two cases remain separate from ordinary delivery:
 
 Complete this start and first-intake procedure before the seat's first inspection.
 
-The complete intake contains the mode, canonical task and purpose, seam, exact requirement set, catalogs and resolved tools. Candidate identity and attempt records arrive with the Worker's freeze, or in the integration/master-exit intake as that procedure specifies.
+The complete intake contains the mode, canonical task and purpose, seam, exact requirement set and resolved tools. Candidate identity and attempt records arrive with the Worker's freeze, or in the integration/master-exit intake as that procedure specifies.
 
 The Worker, Reviewer and Curator run the repair loop directly through `role_message` on `agents-remember-task`: Worker freeze to Reviewer; verdict and sealed findings to Worker; passed freeze and producer lists to Curator; memory change and verdict between Curator and Reviewer.
 
@@ -61,22 +61,22 @@ Every handover keeps the paired code, memory and report paths and exact task ref
 
 Before landing leaves whose reviews passed, follow [Parallel work and waiting](../core/every-role.md#parallel-work-and-waiting) for serial landing order. Each leaf synchronizes once to the landing before it. A Manager starts every leaf whose prerequisites have landed. Dependencies and landing authority determine sequencing.
 
-Before opening or recording an ordinary code review round, read [Record code review rounds](review.md#record-code-review-rounds) for the Reviewer's begin and result records.
+Before opening or recording an ordinary code review round, read [Record code review rounds](review.md#record-code-review-rounds) for the Reviewer's begin and result records through `task_doc` on `agents-remember-task`.
 
 Before coordinating a memory review, read [Review boundaries](review.md#boundaries) for the separate reports, pass count, code-state isolation and extra-pass approval.
 
 The Manager records the Architect's or developer's approval for an extra round or memory pass and accepts verdicts for the gate. Keep sealed findings and operation refusals unchanged.
 
 <!-- ar:roles manager -->
-<!-- ar:gives leaf-review-intake to reviewer: mode, task-and-purpose, seam, requirement-set, catalogs, tools-file -->
-<!-- ar:gives review-intake to reviewer: mode, task-and-purpose, seam, requirement-set, candidate-identity, attempt-records, catalogs, tools-file -->
+<!-- ar:gives leaf-review-intake to reviewer: mode, task-and-purpose, seam, requirement-set, tools-file -->
+<!-- ar:gives review-intake to reviewer: mode, task-and-purpose, seam, requirement-set, candidate-identity, attempt-records, tools-file -->
 ## Deliver the Manager's first Reviewer intake
 
 The Manager receives the Worker's freeze notice to start the Reviewer, the Reviewer's code-`PASS` notice to start the Curator, and only the other occasions listed in [Manager leaf notices](../roles/manager.md#handle-leaf-notices-and-maintain-records), which names the authority and recovery occasions.
 
 For a pending handover, give the sender the occasion to retry; relay no contents and ask no developer confirmation of that occasion. Read reports and task records for routine state. Record which seat holds the next step and since when. A start refused with `intent-review-open` waits for the Architect's `go`; never retry it.
 
-After the individual `role_start` on `agents-remember-task`, send the leaf Reviewer's complete first intake as your first `role_message` to its returned agent identifier. Use the assigned review mode and review purpose, bound catalogs and resolved `system/tools.md`. The requirement set includes identifiers, versions, packets and the durable [approval record](../core/every-role.md#requirements-and-limits). The Reviewer inspects nothing before its intake.
+After the individual `role_start` on `agents-remember-task`, send the leaf Reviewer's complete first intake as your first `role_message` to its returned agent identifier. Use the assigned review mode and review purpose and resolved `system/tools.md`. The requirement set includes identifiers, versions, packets and the durable [approval record](../core/every-role.md#requirements-and-limits). The Reviewer inspects nothing before its intake.
 
 For integration or master-exit, start the Reviewer on the acceptance and delivery-proof leaf named by the master task data, with its sprint and master. If no such leaf is named, ask the Architect. Send the same intake, adding candidate identity and attempt records, as your first `role_message` on `agents-remember-task` to the returned agent identifier.
 <!-- ar:roles all -->

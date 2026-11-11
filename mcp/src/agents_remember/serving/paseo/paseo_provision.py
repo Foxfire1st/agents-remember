@@ -91,7 +91,7 @@ from agents_remember.serving.paseo.paseo_settings import (
 
 INSTALL_TIMEOUT_SECONDS = 900.0
 START_TIMEOUT_SECONDS = 120
-# How Paseo 0.11 names a configuration file its schema refuses.
+# How Paseo (0.11 to 0.15.4) names a configuration file its schema refuses.
 _INVALID_CONFIGURATION = "Invalid config"
 INSTALL_ENTRIES = ("node_modules", "package.json", "package-lock.json")
 _WILDCARD_HOSTS = frozenset({"0.0.0.0", "::"})

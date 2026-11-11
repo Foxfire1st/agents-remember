@@ -60,7 +60,7 @@ Architect, Orchestrator, Manager: After receiving a report, check whether its se
 
 Collect your helpers' results and continue the work. Use the helper-wait procedure declared by your launch; otherwise preserve the harness's native collection of results within the turn. If your harness offers helpers (sub-agents), they run on your own seat's model unless the developer names another.
 
-When your launch declares the Agent Client Protocol (ACP) helper wait, end a waiting turn with `WAITING FOR SUBAGENTS:` and each helper's progress, in your own chat. When the host wakes you, collect finished work, then declare another wait or continue. During this wait, send no progress messages to your parent and create no second way to wake yourself.
+On any harness, end a turn that waits for your helpers with `WAITING FOR SUBAGENTS:` and each helper's progress, and a turn that waits for a process you started with `WAITING FOR BACKGROUND:` and, for each process, what it is, its process id or log file and when it should end; `check in <N> minutes` (1 to 30, default 3) sets the host's check. When the host or your harness wakes you, collect finished work in your own chat, then declare another wait or continue. During either wait, send your parent no progress message with `role_message` on `agents-remember-task` and create no second way to wake yourself.
 
 Architect, Orchestrator, Manager, Worker, Curator, Reviewer, Investigator: A held receipt means queued eventual delivery, possibly many turns later. Never resend it. Count a handover as taken only when the recipient's reply, report or intake names the exact object and shows the requested work or its start. Open every supplied recipient artifact before you call one absent. Withdraw a superseded held message with `withdraw_held_message_id`. A receiver does not poll.
 
@@ -80,6 +80,8 @@ Architect, Orchestrator: Planning and design create no branch, worktree or commi
 
 Architect, Orchestrator, Manager, Worker, Bootstrap: Make code changes under an approved task, including small changes; author that task rather than building directly from chat. Before making the change, read [task document authoring](skill://agents-remember/skills/l-01-agent-lifecycles/reference/tasks/document-authoring.md) for reusing the owning work, explaining the plan, field prose, proposed changes and preserving decisions.
 
+Architect, Orchestrator, Manager, Worker: author that task through `task_doc` on `agents-remember-task`.
+
 Architect: Before laying out the tasks, obtain developer approval for versioned requirement packets on the canonical template, with the required diagrams. When intent changes, revise the packets and brief the affected leaves again.
 
 Architect, Orchestrator, Manager, Worker: Before you start a seat on a leaf, name its primary requirement, its version and packet, and the manifest record that approves that version. List dependency and preservation requirements separately, as context. The approval record is the requirement manifest's entry with its `state` set to `approved`, its `approval` and `sha256` content hash, together with the manifest's hash for the whole requirement corpus.
@@ -92,7 +94,7 @@ Architect, Orchestrator, Manager, Bootstrap: Before scoping work with the develo
 
 Read the resolved memory-layer instructions for tools, coding, instruction writing and publication. Before writing instruction texts, follow `system/skill-writing-guidelines.md` when present. Do not invent commands.
 
-Architect, Orchestrator, Manager, Worker, Curator, Reviewer, Investigator, Bootstrap: Before relying on storage or path eligibility, cross-repository allowances, or serving-build metadata, read [settings authority](skill://agents-remember/skills/l-01-agent-lifecycles/reference/knowledge/use.md#read-the-source-that-owns-a-setting) for the sources that govern those facts.
+Architect, Orchestrator, Manager, Worker, Curator, Reviewer, Investigator, Bootstrap: Before relying on storage or path eligibility, cross-repository allowances, or serving-build metadata, read [settings authority](skill://agents-remember/skills/l-01-agent-lifecycles/reference/knowledge/use.md#read-the-source-that-owns-a-setting) for `server_info` and the other sources that govern those facts.
 
 Run Git commands only against the resolved code repository root or memory root, and only when that root is a Git repository. Never run Git against the coordination root as a whole.
 

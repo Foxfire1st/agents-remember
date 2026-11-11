@@ -125,7 +125,7 @@ For an Agents Remember leaf, send the memory candidate directly to the Reviewer 
 
 Before writing the handover output, read [Produce the handover](../roles/curator.md#produce-the-handover) for its required records and evidence. The coherence record and projection are durable; the transcript is not. Write the record before turn end. Terminal or finalizer evidence proves only turn end. Declare manual recovery and claim no tool-generated certification or acceptance for it.
 
-Before responding to a non-work reply, an empty or doubled-seat refusal, an unreachable-Manager notice, or failed delivery of a required Manager notice, read [Report a refused handover](implementation.md#report-a-refused-handover) for the seat/problem report, pending state, independent continuation and notice retry. It transfers no Worker or transaction authority. The permitted Manager notice occasions below remain unchanged.
+Before responding to a non-work reply, an empty or doubled-seat refusal, an unreachable-Manager notice, or failed delivery of a required Manager notice, read [Report a refused handover](implementation.md#report-a-refused-handover) for the seat/problem report, pending state, independent continuation and the notice retry through `role_message` on `agents-remember-task`. It transfers no Worker or transaction authority. The permitted Manager notice occasions below remain unchanged.
 
 <!-- ar:roles all -->
 The Manager receives Curator messages only for delivery or seat problems, ownership or authority, a pass beyond the settings limit, a code finding disputed with the Reviewer, or a sync step reserved to the Manager. It reads ordinary state from reports and relays no handover contents.

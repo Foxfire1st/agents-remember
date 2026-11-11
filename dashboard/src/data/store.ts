@@ -320,7 +320,7 @@ const emptyWorkspace = (): WorkspaceState => ({
   changeSets: new ConditionalReads(256),
   changeSetFiles: new ConditionalReads(64, 16 * 1024 * 1024),
   intentSummaries: new ConditionalReads(128),
-  taskCounts: { planned: 0, started: 0, aborted: 0, completed: 0, works: 0, paused: 0, unknown: 0 },
+  taskCounts: { planned: 0, started: 0, aborted: 0, completed: 0, works: 0, waiting: 0, paused: 0, unknown: 0 },
   enclosures: {},
   activeWorktreeGroups: [],
   closeoutQueues: [],

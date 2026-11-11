@@ -5,6 +5,7 @@ import { useDashboard } from '../../data/store';
 import { taskEntrySelectionKey,taskReferenceKey } from '../../data/taskReference';
 import { Markdown } from '../../grammar/Markdown';
 import type { TaskEntry,TaskSummary } from '../../types/projection';
+import { activityPhrase } from './activityPhrase';
 import { CompletedTaskList } from './CompletedTaskList';
 import { ListDisagreements } from './listDisagreements';
 import { completedEntries } from './completedTasksModel';
@@ -148,7 +149,7 @@ function MasterNowCells({ entry, position }: { entry: TaskEntry; position: numbe
       <span className={cell({ at: 'mid' })}>
         {hostUnknown
           ? ''
-          : `${entry.counts.works} works · ${entry.counts.paused} paused `}
+          : `${activityPhrase(entry.counts)} `}
         <TaskStatusWord task={entry} testid={`task-row-status-${position}`} />
       </span>
     </>

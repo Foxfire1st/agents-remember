@@ -73,7 +73,7 @@ def project_workspace(
     # L190-R1-F04: one canonical join per pass. The input reader builds it so the stall clock and
     # these rows share one relation; a caller that supplies none still gets the join here.
     tasks = given.task_entries or build_task_entries(
-        given.task_sources, enriched, given.host_activity
+        given.task_sources, enriched, given.host_activity, now
     )
     analytics = build_analytics(
         given,

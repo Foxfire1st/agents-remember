@@ -416,7 +416,14 @@ class InstructionFileWordingTests(unittest.TestCase):
 
     def test_direct_closeout_keeps_the_architect_and_its_existing_gates(self) -> None:
         architect = role_text("architect")
-        kept = "When no Manager or Orchestrator owns closeout, you may coordinate the existing paired closeout only under the already-delegated authority of [Authorized Closeout](../operations/closeout.md), after independent review and required curation evidence exist."
+        kept = (
+            "When no Manager or Orchestrator owns closeout, you may coordinate the "
+            "existing paired closeout (`worktree_closeout_preview` and "
+            "`worktree_closeout_apply` on `agents-remember-task`) only under the "
+            "already-delegated authority of [Authorized "
+            "Closeout](../operations/closeout.md), after independent review and "
+            "required curation evidence exist."
+        )
         self.assertIn(kept, architect)
         self.assertIn(
             "Flat mode here means only the developer-chosen direct-coordination exception.",
@@ -814,7 +821,12 @@ class InstructionFileWordingTests(unittest.TestCase):
         assert_message_handover_delivery(ROLES)
         architect = " ".join(role_text("architect").split())
         for sentence in (
-            "Before handing work to a waiting seat, read [message handovers and receipts]({{detail:reference/message-handover.md}}) for the sender and payload rules, full-store refusals, and where filed messages and receipts are kept.",
+            (
+                "Before handing work to a waiting seat, read [message handovers and "
+                "receipts]({{detail:reference/message-handover.md}}) for the sender "
+                "and payload rules of `role_message` on `agents-remember-task`, "
+                "full-store refusals, and where filed messages and receipts are kept."
+            ),
             "its final text, a failed or cancelled turn, a pending permission, or a timeout. An `accepted` result without text means that the reply must be read later.",
             "Do not wait on an agent that may be waiting on you.",
         ):
@@ -868,7 +880,13 @@ class InstructionFileWordingTests(unittest.TestCase):
                 # Rule 11: a precedent is settled where it falls.
                 "Settle a matter covered by an earlier ruling of the same kind and name that ruling in your record. Send only an uncovered question upward.",
                 # Rule 9: the Manager decides from the closeout preview, not a new round.
-                "Before deciding closeout after a leaf sync, read [Synchronize the leaf](../operations/implementation.md#synchronize-the-leaf) for the Worker's focused rerun, your closeout preview, the no-new-freeze condition and the same-Reviewer repair path.",
+                (
+                    "Before deciding closeout after a leaf sync, read [Synchronize the "
+                    "leaf](../operations/implementation.md#synchronize-the-leaf) for the "
+                    "Worker's focused rerun, your `worktree_closeout_preview` on "
+                    "`agents-remember-task`, the no-new-freeze condition and the "
+                    "same-Reviewer repair path."
+                ),
                 # Rule 12: the Manager gives no go-ahead for a repair.
                 "needs no plan, account or go-ahead from you",
             ],

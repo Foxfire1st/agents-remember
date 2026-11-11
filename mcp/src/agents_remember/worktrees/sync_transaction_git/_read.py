@@ -277,6 +277,12 @@ def _parked_path_content(side: SyncSideRecord, path: str) -> tuple[str | None, b
     return None, None
 
 
+def revision_content(repository: Path, revision: str, path: str) -> bytes | None:
+    """The exact blob bytes one revision holds for one path, or ``None`` when absent."""
+
+    return _spec_content(repository, (f"{revision}:{path}",))
+
+
 def _spec_content(repository: Path, specs: tuple[str, ...]) -> bytes | None:
     """The exact blob bytes of the first resolvable spec, or ``None`` when absent."""
 

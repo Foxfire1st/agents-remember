@@ -38,14 +38,14 @@ function operationsTree() {
     summary: taskSummary({ kind: 'master', form: 'master' }),
     reference: { repository: 'repo', path: 'master/task.json' },
     children: [stalled.key, landed.key],
-    counts: { planned: 0, started: 1, completed: 1, aborted: 0, works: 1, paused: 0, unknown: 0 },
+    counts: { planned: 0, started: 1, completed: 1, aborted: 0, works: 1, waiting: 0, paused: 0, unknown: 0 },
   });
   const sprint = task('S', {
     title: 'Sprint',
     summary: taskSummary({ kind: 'master', form: 'sprint' }),
     reference: { repository: 'repo', path: 'sprint/task.json' },
     children: [master.key],
-    counts: { planned: 0, started: 1, completed: 1, aborted: 0, works: 1, paused: 0, unknown: 0 },
+    counts: { planned: 0, started: 1, completed: 1, aborted: 0, works: 1, waiting: 0, paused: 0, unknown: 0 },
   });
   master.parent = sprint.key;
   stalled.parent = master.key;

@@ -27,11 +27,13 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import branch_commit, is_ancestor
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.sync_source_refresh import fetch_source_upstreams
+from agents_remember.worktrees.sync_source_strategy import source_strategy
 from agents_remember.worktrees.sync_transaction import (
     sync_contract_under_authority,
     sync_input_refusal,
 )
-from agents_remember.worktrees.sync_transaction_authority import command_result, source_pair
+from agents_remember.worktrees.sync_transaction_authority import command_result
+from agents_remember.worktrees.sync_transaction_sources import source_pair
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
@@ -250,9 +252,11 @@ def _legacy_series_memory_refusal(
     """Judge the series memory sides before the reconciling selection is published (MIK-R46 rule 1).
 
     The refusal precedes every durable write of the envelope. The judgment mirrors
-    the transaction's exact preflight (:func:`sync_transaction._sync_side_outcome`)
+    the transaction's exact preflight (:func:`sync_transaction_cutover.sync_side_outcome`)
     on the same branch tips a series plans from, so this check can only refuse what
-    the transaction would refuse, and admits what it admits:
+    the transaction would refuse, and admits what it admits. A repository-default
+    sync plans from the memory repository's default branch, so that is the source
+    judged here; the contract's own source line is not what that sync takes:
     - already current (equal tips, or the source an ancestor of the work tip):
       proceed, as today;
     - all unconverted sides (fast-forward pair or merge triple): refuse with the
@@ -274,8 +278,8 @@ def _legacy_series_memory_refusal(
         return None
     repository = contract.memory_repo_path
     work_branch = contract.memory_work_branch
-    source_branch = contract.memory_source_branch
     try:
+        source_branch = source_strategy(args.sync_source).source_branch(contract, "memory")
         work_tip = branch_commit(repository, work_branch)
         source_tip = branch_commit(repository, source_branch)
     except Exception:
@@ -423,6 +427,8 @@ def _admission_refusal(request: _AdmissionRefusalRequest) -> WorktreeCommandResu
         retry_args["memory_sync_choice"] = args.memory_sync_choice
     if args is not None and args.resolution_action is not None:
         retry_args["resolution_action"] = args.resolution_action
+    if args is not None:
+        retry_args.update(source_strategy(args.sync_source).request_args())
     observation = getattr(request.error, "observation", None)
     if observation is None:
         try:

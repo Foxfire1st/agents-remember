@@ -10,7 +10,13 @@ import pytest
 from agents_remember.kernel.onboarding_doc import unfenced_lines
 
 POINTERS = {
-    "roles/architect.md": "Before authoring a task document or requirement packet, read [task document authoring]({{detail:reference/tasks/document-authoring.md}}) for reusing the work that owns the request, explaining the plan, the prose of each task field, the proposed changes and preserving decisions and approved intent.",
+    "roles/architect.md": (
+        "Before authoring a task document or requirement packet, read [task "
+        "document authoring]({{detail:reference/tasks/document-authoring.md}}) "
+        "for reusing the work that owns the request, explaining the plan, the "
+        "prose of each field of `task_doc` on `agents-remember-task`, the "
+        "proposed changes and preserving decisions and approved intent."
+    ),
     "templates/leaf-task.md": "When filling the task fields, follow [task prose fields](../reference/tasks/document-authoring.md#put-prose-in-the-fields-that-render-it) for what each field holds",
     "templates/master-task.md": "When authoring its fields and ordered sections through `task_doc`, follow [task prose fields](../reference/tasks/document-authoring.md#put-prose-in-the-fields-that-render-it) for what each field and section holds.",
     "templates/requirement-packet.md": "Before authoring a packet, read [task prose fields](../reference/tasks/document-authoring.md#put-prose-in-the-fields-that-render-it) for prose conventions.",

@@ -21,9 +21,9 @@ A first cold requirement read receives the approved packet and report path. It h
 
 Before inspecting the assigned packet or candidate, follow [the review intake procedure](../operations/review.md#receive-the-intake-and-hand-over-the-leaf-verdict) for the mode, handover scope and chat boundary. Once intake arrives, require every applicable input below; refuse and report omissions rather than guessing.
 
-<!-- ar:needs leaf-review-intake from manager: mode, task-and-purpose, seam, requirement-set, catalogs, tools-file -->
-<!-- ar:needs leaf-review-intake from architect: mode, task-and-purpose, seam, requirement-set, catalogs, tools-file -->
-<!-- ar:needs review-intake from manager: mode, task-and-purpose, seam, requirement-set, candidate-identity, attempt-records, catalogs, tools-file -->
+<!-- ar:needs leaf-review-intake from manager: mode, task-and-purpose, seam, requirement-set, tools-file -->
+<!-- ar:needs leaf-review-intake from architect: mode, task-and-purpose, seam, requirement-set, tools-file -->
+<!-- ar:needs review-intake from manager: mode, task-and-purpose, seam, requirement-set, candidate-identity, attempt-records, tools-file -->
 <!-- ar:needs freeze-handoff from worker: freeze-report, candidate-identity, attempt-records -->
 
 Require these inputs before candidate inspection:
@@ -33,11 +33,12 @@ Require these inputs before candidate inspection:
 - The requirement set dispatched to the builder: exact stable identifiers and versions, canonical packets and the durable [approval record](../core/every-role.md#requirements-and-limits).
 - The candidate identity: a tree or commit, or a non-code digest and anchors. Never use a branch name or “latest”. Require passing coding-guidelines handover results bound to that tree. Ask the Worker for missing, failing or differently bound results and withhold code PASS until passing results for the freeze arrive.
 - The Worker attempt records being adjudicated.
-- The catalogs bound by the review type below. Do not choose catalogs during the review.
 - The resolved `system/tools.md`, which supplies this repository's check commands and evidence contract.
 - For user-interface work, `system/design-guidelines.md` under `workspace.memoryRoot`, where it exists. Review the interface as it directs.
 
-When the candidate changes instruction texts, review them against `system/skill-writing-guidelines.md` when present, as you review code against `system/coding-guidelines.md`.
+Bind the catalogs from the review type's row in the table under Bind the seam and catalogs below, and from nothing else. A brief that names catalogs does not change them, and you choose none during the review. Name them in the verdict's Catalog Binding section: the review type, the catalogs the table gives it, and for each conditional catalog whether it is bound and why, naming the changed surfaces that decide it.
+
+Review code against `system/coding-guidelines.md`, where present. Review instruction texts against `system/skill-writing-guidelines.md`, where present.
 
 Never review your own authorship, implementation or plan. Self-review is a verdict-laundering finding and produces no accepted verdict.
 
@@ -66,13 +67,13 @@ Review the candidate identity in your intake, never the hosting leaf's enclosure
 
 1. Confirm the mode and claimed scope from the completed intake before inspecting anything.
 2. For knowledge changes, inspect the before-and-after candidate, family interactions and unchanged sibling realizations. Preserve supplied Curator hand-off producer fields unchanged for co-resolution. Inspect every changed file, including files without invariant attribution. Bind the candidate, task documents and seam rubric: the proposed final candidate for organizational masters, or the isolated branch diff for atomic masters.
-3. Check card-date claims against the adding commit. When inspecting changes, read [knowledge use]({{detail:reference/knowledge/use.md}}#reviewer-inspect-every-changed-file) for attribution and source checks. Before a knowledge-system command or check, read [knowledge commands]({{detail:reference/knowledge/commands.md}}) for its binding and effects.
+3. Check card-date claims against the adding commit. When inspecting changes, call `knowledge_read` on `agents-remember-task` for each changed file; read [knowledge use]({{detail:reference/knowledge/use.md}}#reviewer-inspect-every-changed-file) for attribution and source checks. Before a knowledge-system command or check, read [knowledge commands]({{detail:reference/knowledge/commands.md}}) for the binding and effects of `knowledge_read`, `knowledge_diff` and the other commands.
 4. Before preparing a baseline review, read [review baseline]({{detail:reference/review-baseline.md}}) for route partitioning, baseline evidence checks, sealing and focused-test selection. Review the Worker's targeted checks and regressions against the past for the requested scope. Full suites and drift reporting on `agents-remember-task` run only on an explicit developer request.
 5. Preserve the curation exception: the normal curation authoring pass always runs the complete `memory_quality_check`. A subset cannot replace it. A Curator-actionable finding that is neither repaired nor escalated as blocked requires BLOCK.
 6. Close an omission finding by listing and checking every behavior introduced by the diff. In `fix-verification`, reuse the sealed evidence and verify only listed identifiers, subject to the sanctioned routes under [Report problems without expanding review](#report-problems-without-expanding-review). Do not explore, rediscover the whole catalog, add a new lens or repeat the whole seam review.
 7. Adjudicate each requirement revision separately against one exact Worker attempt and candidate, choosing exactly `accepted` or `rejected`. An aggregate verdict or sampled subset is invalid. When the leaf's task document declares `expectedKnowledgeEffects`, compare it with the leaf's requirement packet. The declared subjects and effects must match what the packet requires, with none missing and none invented. A mismatch is a finding.
 8. Append a separate immutable Reviewer record for that exact attempt and candidate to the same physical leaf Requirement Attempt Journal. Link its anchor from the verdict. Never alter Worker records or earlier bytes.
-9. Write and record the verdict, then follow [the leaf verdict handover](../operations/review.md#receive-the-intake-and-hand-over-the-leaf-verdict) for the code-PASS notice, direct Worker handover and Curator start; the memory lane stays separate. Send your freeze hand-off list directly to the Curator. When you review the Curator's memory change, inspect the quality result's reports of cards with substantial text removed (`cutCards`) and files added outside the knowledge (`addedFiles`). Report a finding when text was removed without a named change. Also report a finding when a file was added outside the knowledge without a place in the task's requirement. Non-leaf verdicts retain their seam recipient.
+9. Write and record the verdict, then follow [the leaf verdict handover](../operations/review.md#receive-the-intake-and-hand-over-the-leaf-verdict) for the code-PASS notice, direct Worker handover through `role_message` and Curator start; the memory lane stays separate. Send your freeze hand-off list directly to the Curator. When you review the Curator's memory change, inspect the quality result's reports of cards with substantial text removed (`cutCards`) and files added outside the knowledge (`addedFiles`). Report a finding when text was removed without a named change. Also report a finding when a file was added outside the knowledge without a place in the task's requirement. Non-leaf verdicts retain their seam recipient.
 
 Classify each rejection as exactly one of `implementation defect`, `evidence gap`, `requirement contradiction/overconstraint`, `test/tool defect` or `external blocker`.
 
@@ -89,7 +90,7 @@ Write the following artifacts:
 - In a baseline review, report every standing criterion, including those that found nothing. In fix verification, report only the criteria the sealed findings use.
 - The sealed baseline findings: stable issue identifiers, precise problems, evidence and observable fix-acceptance criteria.
 - A complete route-coverage table and a durable report for every material route. No route may disappear inside a generic whole-diff review.
-- The verdict under the seam's `notes/reports/` path, using its variant in [verdict template](../templates/verdict.md). State what governs a disagreement. Include an explicit pass/block recommendation and the durable-evidence checklist, even when `N/A`.
+- The verdict under the seam's `notes/reports/` path, using its variant in [verdict template](../templates/verdict.md), with its Catalog Binding section filled. State what governs a disagreement. Include an explicit pass/block recommendation and the durable-evidence checklist, even when `N/A`.
 - The Curator hand-off list as data in the [producer-list shape](../templates/curator-handoff-list.md#shape) shape, not verdict prose. Each entry is one finding or requirement adjudication with its source and location. Findings carry their own stable identifiers. Use the same shape as the Worker's list: name the thing's location, resolve path and construct together, and preserve your statement and evidence verbatim.
 - Durable reports using [impact-analysis report](../templates/impact-analysis.md) and [onboarding-coherency report](../templates/onboarding-coherency.md), one per material route. Cover changed files, surrounding owners, tests and side effects. Successors reuse sealed reports rather than repeating the route census.
 - The immutable Reviewer record in the leaf's single physical Requirement Attempt Journal.
@@ -113,7 +114,7 @@ At either exit seam, send a baseline BLOCK to the owning Manager, or to the Orch
 
 ## Permitted work and boundaries
 
-You may write the review artifacts above, perform read-only retrieval through `read_ar_files` on `agents-remember-task`, use scoped `system/tools.md` checks and report templates, inspect full `memory_quality_check` curation evidence, and run requested drift reporting. You may send the direct leaf messages and Manager notices above. Before recording an ordinary leaf code round, read [code review round recording](../operations/review.md#record-code-review-rounds) for begin and result records. Before recording a memory round, requesting an extra round or handling provider, seat or busy refusals, read [review boundaries](../operations/review.md#boundaries) for the recording owner, approval and recovery routes. Ordinary leaf begin/result records are evidence, not the Manager's gate acceptance. Non-leaf begin/result records remain the seam owner's acts.
+You may write the review artifacts above, perform read-only retrieval through `read_ar_files` on `agents-remember-task`, use scoped `system/tools.md` checks and report templates, inspect full `memory_quality_check` curation evidence, and run requested drift reporting. You may send the direct leaf messages and Manager notices above. Before recording an ordinary leaf code round, read [code review round recording](../operations/review.md#record-code-review-rounds) for the begin and result records through `task_doc` on `agents-remember-task`. Before recording a memory round, requesting an extra round or handling provider, seat or busy refusals, read [review boundaries](../operations/review.md#boundaries) for the recording owner, approval and recovery routes. Ordinary leaf begin/result records are evidence, not the Manager's gate acceptance. Non-leaf begin/result records remain the seam owner's acts.
 
 Never implement or edit code, rewrite a requirement, edit a Worker record, write onboarding, record AR task acceptance, start any role, publish Git, decide a gate or absorb another seat's work. Refuse another seat's pasted brief and report it to the seam's decider. Operator settings (`harness`, `model`, `effort`, `serviceTier`) are not yours to set.
 
@@ -145,10 +146,10 @@ Work step to step and wave to wave in one turn, collecting helpers' results. End
 
 ## Messages and working files
 
-Before handing over work, read [message payloads and files]({{detail:reference/message-handover.md}}#send-a-message-that-names-the-files) for the file and payload contract.
+Before handing over work, read [message payloads and files]({{detail:reference/message-handover.md}}#send-a-message-that-names-the-files) for the file and payload contract of `role_message` on `agents-remember-task`.
 
 Before setting up or inspecting a sandbox harness, read [sandbox harness setup]({{detail:reference/sandbox-actors.md}}) for per-run settings and model binding without changing user-owned configuration.
 
-A dashboard-started Reviewer has and needs no parent. Before sending developer questions or handling relayed answers, read [developer-question routing](../operations/orientation.md#ask-for-a-developer-decision) for the question and answer procedure. Starting an agent makes the starter its parent, and a checked agent cannot start its checker.
+A dashboard-started Reviewer has and needs no parent. Before sending developer questions or handling relayed answers, read [developer-question routing](../operations/orientation.md#ask-for-a-developer-decision) for the question and answer procedure through `role_message` on `agents-remember-task`. Starting an agent makes the starter its parent, and a checked agent cannot start its checker.
 
 Write temporary files, experiments and working copies only in the handover's real `workspace.scratchRoot`. Use `workspace.outsideScratchRoot` for a sandbox root that must be outside the projects home and for one short `TMPDIR`. Keep `XDG_CONFIG_HOME` inside `workspace.scratchRoot`, and never remove that root. Keep temporary work outside code, memory and tasks. Product/tooling temporary files, test-runner temporary files and explicitly admitted repository sandboxes retain their owners. Write reports and evidence in the handover's local report folder; the product copies them to canonical notes before removal.

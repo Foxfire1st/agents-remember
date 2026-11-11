@@ -125,7 +125,7 @@ function fakeHost() {
   const hooks = new Map<string, Hook[]>();
   const rpcs = new Map<string, Rpc>();
   const server = {
-    on(name: string, handler: Hook) {
+    addHook(name: string, handler: Hook) {
       const kept = hooks.get(name) ?? [];
       kept.push(handler);
       hooks.set(name, kept);
@@ -152,7 +152,7 @@ function fakeHost() {
       const handlers = hooks.get(kind);
       assert.ok(handlers !== undefined && handlers.length > 0, `no handler for ${kind}`);
       const event =
-        kind === "agent.turn_started"
+        kind === "agent.turn.before"
           ? {
               agent: { id: WORKER, workspaceId: null, parentAgentId: null, provider: "hermes", cwd: "/tmp", title: null },
               turnId: null,
@@ -231,10 +231,10 @@ test("L184-R1-F11: the one subscription is taken at the first usable hook or RPC
       const paseo = fakePaseo();
       try {
         assert.equal(paseo.observes(), 0, "contribution itself holds no host API");
-        await host.fire("agent.turn_started", paseo.paseo);
+        await host.fire("agent.turn.before", paseo.paseo);
         assert.equal(paseo.observes(), 1, "the first usable hook takes the one subscription");
         assert.equal(paseo.state.handles[0].observers.length, 1, "with one observer");
-        await host.fire("agent.turn_started", paseo.paseo);
+        await host.fire("agent.turn.before", paseo.paseo);
         assert.equal(paseo.observes(), 1, "a later hook attaches nothing again");
         assert.equal(paseo.state.handles[0].observers.length, 1, "and subscribes no second observer");
       } finally {
@@ -248,11 +248,11 @@ test("L184-R1-F11: the one subscription is taken at the first usable hook or RPC
     // L184-R1-F11: a boot with no dashboard never calls the snapshot RPC, so the
     // first usable hook must be any of them, not only a turn's.
     for (const kind of [
-      "agent.created",
-      "agent.permission_requested",
-      "agent.permission_resolved",
-      "agent.archived",
-      "agent.closed",
+      "agent.create.after",
+      "agent.permission.before",
+      "agent.permission.after",
+      "agent.archive.after",
+      "agent.close.after",
     ]) {
       await withHome(async () => {
         const host = fakeHost();
@@ -262,7 +262,7 @@ test("L184-R1-F11: the one subscription is taken at the first usable hook or RPC
           await host.fire(kind, paseo.paseo);
           assert.equal(paseo.observes(), 1, `${kind} takes the one subscription`);
           assert.equal(paseo.state.handles[0].observers.length, 1, `${kind}: with one observer`);
-          await host.fire("agent.created", paseo.paseo);
+          await host.fire("agent.create.after", paseo.paseo);
           assert.equal(paseo.observes(), 1, `${kind}: a later hook attaches nothing again`);
           assert.equal(paseo.state.handles[0].observers.length, 1, `${kind}: and subscribes no second observer`);
         } finally {
@@ -283,7 +283,7 @@ test("L184-R1-F11: the one subscription is taken at the first usable hook or RPC
         assert.equal(paseo.observes(), 1, "the snapshot RPC takes the one subscription");
         assert.equal(paseo.state.handles[0].observers.length, 1);
         assert.equal(publication(home).complete, true, "the boot the RPC read is complete");
-        await host.fire("agent.turn_started", paseo.paseo);
+        await host.fire("agent.turn.before", paseo.paseo);
         assert.equal(paseo.observes(), 1, "the hook finds it already attached");
       } finally {
         cleanup();
@@ -299,11 +299,11 @@ test("L184-R1-F11: the one subscription is taken at the first usable hook or RPC
       const failed = fakePaseo({ ready: "fails" });
       const good = fakePaseo();
       try {
-        await host.fire("agent.turn_started", failed.paseo);
+        await host.fire("agent.turn.before", failed.paseo);
         await tick();
         assert.equal(failed.observes(), 1, "the hook tried the host's subscription");
         assert.equal(failed.releases(), 1, "and let the failed handle go");
-        await host.fire("agent.turn_started", good.paseo);
+        await host.fire("agent.turn.before", good.paseo);
         assert.equal(good.observes(), 1, "the next hook takes a fresh subscription");
         assert.equal(good.state.handles[0].observers.length, 1, "which is a working one");
       } finally {

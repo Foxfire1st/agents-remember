@@ -456,13 +456,13 @@ def test_d301_curator_keeps_whole_handover_and_step_limits_in_capsule() -> None:
         text,
         scope_location,
         # The scope link follows the field-list and input-section links in curator.md:41.
-        "the ingestion shape and",
+        "the ingestion shape of `knowledge_write` on `agents-remember-task` and",
     )
     with pytest.raises(AssertionError):
         _assert_bound_action(
             text.replace(scope_location, "", 1),
             scope_location,
-            "the ingestion shape and",
+            "the ingestion shape of `knowledge_write` on `agents-remember-task` and",
         )
     scope = (
         (root / "templates/curator-handoff-ingestion.md")

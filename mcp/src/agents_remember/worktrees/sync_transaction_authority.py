@@ -15,6 +15,11 @@ from agents_remember.worktrees.modules.git import (
     require_git,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.sync_source_strategy import (
+    source_strategy,
+    target_code_base,
+    target_memory_base,
+)
 from agents_remember.worktrees.sync_transaction_git import (
     MAX_NAMED_SYNC_PATHS,
     SyncGitProofError,
@@ -36,6 +41,10 @@ from agents_remember.worktrees.sync_transaction_git import (
     side_branch_head,
     stash_entry_live,
     verify_crashed_reapply,
+)
+from agents_remember.worktrees.sync_transaction_sources import (
+    default_source_refs,
+    recovered_default_branch,
 )
 from agents_remember.worktrees.sync_transaction_state import (
     VALIDATION_REFUSAL_INLINE_LIMIT,
@@ -61,8 +70,10 @@ def side_record(
     contract: WorktreeContract,
     side_name: SyncSide,
     source_commit: str,
+    source_branch: str | None = None,
 ) -> SyncSideRecord:
-    repository, worktree, source_branch, work_branch = side_locations(contract, side_name)
+    repository, worktree, contract_source, work_branch = side_locations(contract, side_name)
+    source_branch = source_branch or contract_source
     pre_head = (
         branch_commit(repository, work_branch)
         if contract.kind == "series"
@@ -128,34 +139,30 @@ def sync_contract_kind(contract: WorktreeContract) -> Literal["leaf", "series"]:
     return cast(Literal["leaf", "series"], contract.kind)
 
 
-def source_pair(contract: WorktreeContract) -> tuple[str, str, bool]:
-    code_tip = branch_commit(contract.code_repo_path, contract.code_source_branch)
-    external = contract.memory_mode == "external" and contract.memory_repo_path is not None
-    memory_tip = (
-        branch_commit(contract.memory_repo_path, contract.memory_source_branch)
-        if external and contract.memory_repo_path is not None
-        else ""
-    )
-    return code_tip, memory_tip, external
-
-
 def pin_authority(record: SyncOperationRecord) -> None:
+    strategy = source_strategy(record.syncSource)
     for side in participating_sides(record):
         repository = Path(side.repository)
         create_pinned_ref(repository, side.baseBackupRef, side.baseCommit)
         create_pinned_ref(repository, side.backupRef, side.preSyncHead)
         create_pinned_ref(repository, side.sourceBackupRef, side.sourceCommit)
+        default_ref = strategy.pinned_ref(record, side)
+        if default_ref is not None:
+            create_pinned_ref(repository, default_ref, side.sourceCommit)
 
 
 def require_pinned_authority(
     record: SyncOperationRecord, *, allow_expected_missing: bool = False
 ) -> None:
+    strategy = source_strategy(record.syncSource)
     for side in participating_sides(record):
         repository = Path(side.repository)
+        default_ref = strategy.pinned_ref(record, side)
         for ref, expected, label in (
             (side.baseBackupRef, side.baseCommit, "recorded-base"),
             (side.backupRef, side.preSyncHead, "pre-sync"),
             (side.sourceBackupRef, side.sourceCommit, "source"),
+            *(((default_ref, side.sourceCommit, "default-source"),) if default_ref else ()),
         ):
             current = read_ref(repository, ref)
             if current is None and allow_expected_missing:
@@ -165,8 +172,12 @@ def require_pinned_authority(
 
 
 def delete_authority(record: SyncOperationRecord) -> None:
+    strategy = source_strategy(record.syncSource)
     for side in reversed(participating_sides(record)):
         repository = Path(side.repository)
+        default_ref = strategy.pinned_ref(record, side)
+        if default_ref is not None:
+            delete_pinned_ref(repository, default_ref, side.sourceCommit)
         delete_pinned_ref(repository, side.sourceBackupRef, side.sourceCommit)
         delete_pinned_ref(repository, side.backupRef, side.preSyncHead)
         delete_pinned_ref(repository, side.baseBackupRef, side.baseCommit)
@@ -182,6 +193,8 @@ def authority_refs_exist(contract: WorktreeContract) -> bool:
         backup, source = sync_side_refs(contract.contract_path, side_name)
         base = sync_side_base_ref(contract.contract_path, side_name)
         if any(read_ref(repository, ref) is not None for ref in (base, backup, source)):
+            return True
+        if default_source_refs(repository, contract.contract_path, side_name):
             return True
     return False
 
@@ -199,11 +212,12 @@ def complete_side_from_refs(
         return None
     if pre_head is None or source_head is None or base_commit is None:
         raise SyncGitProofError(f"{side_name} sync recovery refs are incomplete")
+    pinned = recovered_default_branch(repository, contract.contract_path, side_name, source_head)
     return SyncSideRecord(
         side=side_name,
         repository=repository.resolve().as_posix(),
         worktree=worktree.resolve(strict=False).as_posix(),
-        sourceBranch=source_branch,
+        sourceBranch=pinned or source_branch,
         workBranch=work_branch,
         sourceCommit=source_head,
         preSyncHead=pre_head,
@@ -225,13 +239,15 @@ def remove_temporary_worktrees(record: SyncOperationRecord) -> None:
 
 
 def require_record_contract(contract: WorktreeContract, record: SyncOperationRecord) -> None:
+    """Compare the journal with the contract and the recorded choice only; nothing live."""
+
     if contract.contract_path.resolve() != Path(record.contractPath).resolve():
         raise SyncGitProofError("sync journal contract path changed")
     if contract.task_id != record.taskId or contract.kind != record.contractKind:
         raise SyncGitProofError("sync journal task identity changed")
-    _require_side_contract(contract, record.code)
+    _require_side_contract(contract, record, record.code)
     if record.memory is not None:
-        _require_side_contract(contract, record.memory)
+        _require_side_contract(contract, record, record.memory)
     # A partial-admission recovery may legitimately have only the code ref pair.
     elif (
         contract.memory_mode == "external"
@@ -241,8 +257,12 @@ def require_record_contract(contract: WorktreeContract, record: SyncOperationRec
         raise SyncGitProofError("active external-memory sync lost its memory authority")
 
 
-def _require_side_contract(contract: WorktreeContract, side: SyncSideRecord) -> None:
-    repository, worktree, source_branch, work_branch = side_locations(contract, side.side)
+def _require_side_contract(
+    contract: WorktreeContract, record: SyncOperationRecord, side: SyncSideRecord
+) -> None:
+    repository, worktree, contract_branch, work_branch = side_locations(contract, side.side)
+    strategy = source_strategy(record.syncSource)
+    source_branch = strategy.journal_source_branch(record, side, contract_branch)
     expected = (
         repository.resolve().as_posix(),
         worktree.resolve(strict=False).as_posix(),
@@ -256,7 +276,7 @@ def _require_side_contract(contract: WorktreeContract, side: SyncSideRecord) -> 
 
 def require_finalizable_contract(contract: WorktreeContract, record: SyncOperationRecord) -> None:
     require_record_contract(contract, record)
-    if contract.code_base_commit not in {record.codeBaseFrom, record.code.sourceCommit}:
+    if contract.code_base_commit not in {record.codeBaseFrom, target_code_base(record)}:
         raise SyncGitProofError("contract code base changed outside the sync transaction")
     memory_to = target_memory_base(record)
     if contract.memory_base_commit not in {record.memoryBaseFrom, memory_to}:
@@ -271,12 +291,6 @@ def require_contract_bases_unchanged(
         or contract.memory_base_commit != record.memoryBaseFrom
     ):
         raise SyncGitProofError("sync cancellation refuses after contract base finalization")
-
-
-def target_memory_base(record: SyncOperationRecord) -> str:
-    if record.memory is not None and record.memory.plan != "skip":
-        return record.memory.sourceCommit
-    return record.memoryBaseFrom
 
 
 def reload_contract(contract: WorktreeContract) -> WorktreeContract:
@@ -704,7 +718,14 @@ def settle_resolved_parked_wip(
             f"{', '.join(conflicts[:30])}"
         )
     discard_memory_cache_changes(side)
-    updated = side.model_copy(update={"wipState": "restored", "conflictFiles": ()})
+    updated = side.model_copy(
+        update={
+            "wipState": "restored",
+            "conflictFiles": (),
+            "omissionReport": "",
+            "omittedItems": 0,
+        }
+    )
     return update_record(store, record, phase=record.phase, side=updated, side_name=side_name)
 
 

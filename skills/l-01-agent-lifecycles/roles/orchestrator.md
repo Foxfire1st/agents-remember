@@ -19,19 +19,19 @@ Change documents through `task_doc` on `agents-remember-task` first. Edits to re
 
 ## Coordinate role agents
 
-Before preparing a Manager’s master documents and start inputs, read [Manager preparation and handover](../templates/manager-brief.md) for task, review, closeout and exit inputs and the preparer’s checks.
+Before preparing a Manager’s master documents and start inputs, read [Manager preparation and handover](../templates/manager-brief.md) for task, review, closeout and exit inputs, the preparer’s checks and the call of `role_start` on `agents-remember-task`.
 
 For the accepted objective, reuse each existing Manager named in the Architect's handover. Start one Manager for each other master with `role_start` on the `agents-remember-task` tool server, using a selection under your own sprint. Those Managers coordinate their distinct Workers, Reviewers, and Curators.
 
-You may start Manager, Worker, Reviewer, Curator, and Investigator. Before starting or messaging a role, read [role assignments](../operations/coordination.md#start-one-canonical-role-assignment) for selection and start rules, [the first intake](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake) for stage timing and intake fields, and [message delivery](../operations/coordination.md#address-and-deliver-a-message) for addresses, seats and delivery state. Your tool server's binding names you as the sender. Address each recipient explicitly by agent ID or by role and task references, and keep the returned agent IDs; do not act as an invisible proxy.
+You may start Manager, Worker, Reviewer, Curator, and Investigator. Before starting or messaging a role, read [role assignments](../operations/coordination.md#start-one-canonical-role-assignment) for the selection and start rules of `role_start` on `agents-remember-task`, [the first intake](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake) for stage timing and intake fields, and [message delivery](../operations/coordination.md#address-and-deliver-a-message) for the addresses, seats and delivery state of `role_message` on `agents-remember-task`. Your tool server's binding names you as the sender. Address each recipient explicitly by agent ID or by role and task references, and keep the returned agent IDs; do not act as an invisible proxy.
 
-Before recovering idle, unfinished, stopped or unavailable-provider work, read [Recover seat work]({{detail:reference/coordination/shared/seat-recovery.md}}) for silent turn ends, stopped or archived seats, and provider fallback.
+Before recovering idle, unfinished, stopped or unavailable-provider work, read [Recover seat work]({{detail:reference/coordination/shared/seat-recovery.md}}) for silent turn ends (`role_message`), stopped or archived seats, and provider fallback (`role_start`), both on `agents-remember-task`.
 
-Before updating the master after a start, handover or landing, read [master updates]({{detail:reference/coordination/shared/master-state.md}}#update-the-master-after-starts-handovers-and-landings) for changed master fields and their task, stage, agent and since-time records.
+Before updating the master after a start, handover or landing, read [master updates]({{detail:reference/coordination/shared/master-state.md}}#update-the-master-after-starts-handovers-and-landings) for the master fields to change through `task_doc` on `agents-remember-task` and their task, stage, agent and since-time records.
 
 The Manager retains its leaf finding-trail judgment.
 
-Keep each work item tied to its canonical AR task and primary requirement; a start is not completion. Handle the order of the day, operational problems, checks before and after a landing, and paired closeout within delegated authority. Before coordinating paired closeout, read [authorized closeout](../operations/closeout.md) for owner authority, exact accepted inputs, publication gates, refusal repair and result verification.
+Keep each work item tied to its canonical AR task and primary requirement; a start is not completion. Handle the order of the day, operational problems, checks before and after a landing, and paired closeout within delegated authority. Before coordinating paired closeout, read [authorized closeout](../operations/closeout.md) for owner authority, exact accepted inputs, the publication gates of `worktree_closeout_preview` and `worktree_closeout_apply` on `agents-remember-task`, refusal repair and result verification.
 
 An Orchestrator started from the dashboard has no parent and needs none. Put developer decisions in your own chat; do not invent a parent.
 
@@ -82,7 +82,7 @@ Only the Orchestrator has the whole view to judge this. Managers and Workers do 
 
 A mark that a test file fails at collection or does not import is a regression of a landed leaf, not a mark: route its repair at once.
 
-Before using a knowledge command or acting on its result, read [knowledge commands]({{detail:reference/knowledge/commands.md}}) for the command, binding and result rules.
+Before using a knowledge command or acting on its result, read [knowledge commands]({{detail:reference/knowledge/commands.md}}) for the command, binding and result rules of `knowledge_read` and `context_packet` on `agents-remember-task` and of the other commands.
 
 A gate refusal on a master's landing means the exact candidate has unresolved knowledge findings. The owning Manager sends them to the Curator for repair; no role bypasses the gate.
 
@@ -108,7 +108,7 @@ Your report names or records:
 
 ## Messages
 
-Before handing work to a waiting seat, read [message handovers and receipts]({{detail:reference/message-handover.md}}) for the sender and payload rules, full-store refusals, and where filed messages and receipts are kept.
+Before handing work to a waiting seat, read [message handovers and receipts]({{detail:reference/message-handover.md}}) for the sender and payload rules of `role_message` on `agents-remember-task`, full-store refusals, and where filed messages and receipts are kept.
 
 ## Continue the assigned work
 
@@ -116,7 +116,7 @@ For helper collection and continuation, follow [Parallel work and waiting](../co
 
 ## Organise your own work
 
-Before configuring or inspecting a sandbox harness without changing user-owned configuration, read [Sandbox harness setup]({{detail:reference/sandbox-actors.md}}) for per-run settings, user-owned configuration and admitted sandbox models.
+Before configuring or inspecting a sandbox harness without changing user-owned configuration, read [Sandbox harness setup]({{detail:reference/sandbox-actors.md}}) for per-run settings, user-owned configuration, admitted sandbox models and the host-agent count around the first `role_start` on `agents-remember-task`.
 
 Organise your own work inside the assignment, with whatever your harness offers, at any size. You decide the split; the roles order work at task boundaries. Check your helpers' work, report which parts they did, and hand it over under your own name.
 
@@ -128,10 +128,10 @@ Write reports and evidence in the handover's local report folder; the product co
 
 ## Developer questions and answers
 
-Before sending a developer question or handling a relayed answer, read [developer questions](../operations/orientation.md#ask-for-a-developer-decision) for the reporting route and [relayed answers](../operations/orientation.md#recognize-a-relayed-developer-answer) for attribution and quoted words.
+Before sending a developer question or handling a relayed answer, read [developer questions](../operations/orientation.md#ask-for-a-developer-decision) for the reporting route through `role_message` on `agents-remember-task` and [relayed answers](../operations/orientation.md#recognize-a-relayed-developer-answer) for attribution and quoted words.
 
 ## Questions received from children
 
-Before handling a child's question or the developer's answer to it, read [child questions]({{detail:reference/coordination/shared/child-questions.md}}) for the relay and answer rules.
+Before handling a child's question or the developer's answer to it, read [child questions]({{detail:reference/coordination/shared/child-questions.md}}) for the relay and answer rules of `role_message` on `agents-remember-task`.
 
 When `role_message` on `agents-remember-task` answers `held` because a child waits at a permission prompt, or its wait returns `permission-pending`, follow [Relay a child’s permission notice](../operations/coordination.md#relay-a-childs-permission-notice) for the upward route, child identity and supplied permission facts.

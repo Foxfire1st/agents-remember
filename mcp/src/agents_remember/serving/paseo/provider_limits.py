@@ -7,8 +7,8 @@ report id in the product's own file beside ``role-agents.json``, which every
 reader in rules 9 to 13 reads.
 
 The judgment is deliberately conservative. A fact is set only by a successful
-report, and an ``unavailable`` read never clears one. The one exception is 0.12.0's
-``lastSuccessful``: an ``error`` entry can carry the newest available report of
+report, and an ``unavailable`` read never clears one. The one exception is Paseo's
+``lastSuccessful`` (0.12.0 to 0.15.4): an ``error`` entry can carry the newest available report of
 that login, and that report is judged as itself (rule 7).
 """
 
@@ -176,7 +176,7 @@ def judge_read(entries: object, now: datetime) -> dict[str, ProviderLimitReport 
     A value of ``None`` means the report answered that it is not exhausted, so a
     stored fact for it is dropped (rule 8). An entry that says nothing about a
     report — ``unavailable``, or an ``error`` without ``lastSuccessful`` — is absent
-    from the answer and leaves what is stored alone. 0.12.0's ``lastSuccessful`` is
+    from the answer and leaves what is stored alone. Paseo's ``lastSuccessful`` is
     the nested ``{fetchedAt, report}`` object the pinned protocol declares: its
     ``report`` is judged as itself, and its own ``fetchedAt`` is the observation.
     """

@@ -13,10 +13,10 @@ import {
 } from "./acp_providers.ts";
 
 /**
- * The synthetic Paseo 0.12.0 tree rule 1 reads: a stand-in for the shapes of the
+ * The synthetic Paseo 0.15.4 tree the ACP discovery reads: a stand-in for the shapes of the
  * installed `@getpaseo` packages, written for these tests, not copied source.
  */
-const FIXTURE = fileURLToPath(new URL("./fixtures/paseo-0-12", import.meta.url));
+const FIXTURE = fileURLToPath(new URL("./fixtures/paseo-0-15", import.meta.url));
 /** The plugin's own process path: `argv1` inside the fixture installation. */
 const FIXTURE_ARGV1 = join(
   FIXTURE,
@@ -30,6 +30,19 @@ const FIXTURE_ARGV1 = join(
 );
 /** The installation this machine runs, when it has one. */
 const INSTALLED = join(homedir(), ".local/share/agents-remember/paseo/prefix/node_modules/@getpaseo");
+/** The Paseo version this build pins (`paseo_host/contract.json`). */
+const PINNED = (
+  JSON.parse(readFileSync(new URL("../../paseo_host/contract.json", import.meta.url), "utf8")) as { version: string }
+).version;
+/** The installed server's version, or null when there is none to read. */
+function installedVersion(): string | null {
+  try {
+    return (JSON.parse(readFileSync(join(INSTALLED, "server", "package.json"), "utf8")) as { version: string }).version;
+  } catch {
+    return null;
+  }
+}
+const INSTALLED_VERSION = installedVersion();
 const READ_AT = new Date("2026-10-28T10:00:00.000Z");
 
 /** One `PASEO_HOME` for one case, with the host configuration rule 1 reads. */
@@ -168,7 +181,7 @@ test("the written file holds the schema, the Paseo version, the files read and e
 
     assert.deepEqual(document, JSON.parse(JSON.stringify(acp.document)));
     assert.equal(document.schema, ACP_PROVIDERS_SCHEMA);
-    assert.equal(document.paseoVersion, "0.12.0");
+    assert.equal(document.paseoVersion, "0.15.4");
     assert.equal(document.readAt, READ_AT.toISOString());
     const agent = join(FIXTURE, "@getpaseo", "server", "dist", "server", "server", "agent");
     for (const file of [
@@ -244,11 +257,18 @@ test("a Paseo installation that cannot be read still writes the file, with every
 
 test(
   "against the installed Paseo, hermes, copilot and cursor are ACP and the helper-reporting providers are not",
-  { skip: existsSync(INSTALLED) ? false : `no installed Paseo at ${INSTALLED}` },
+  {
+    skip: !existsSync(INSTALLED)
+      ? `no installed Paseo at ${INSTALLED}`
+      : INSTALLED_VERSION !== PINNED
+        ? `the installed Paseo at ${INSTALLED} is ${INSTALLED_VERSION}, not the pinned ${PINNED}`
+        : false,
+  },
   () => {
     // MIK-R216 rule 1 read against this machine's own installation, with the host's
-    // `hermes` entry and a `cursor` entry that extends `acp`. Absent Paseo is a skip,
-    // never a failure: the packet does not require the installation.
+    // `hermes` entry and a `cursor` entry that extends `acp`. Absent Paseo, or one
+    // that is not the pinned version, is a skip, never a failure: the packet does not
+    // require the installation.
     const argv1 = join(INSTALLED, "server", "dist", "server", "server", "plugins", "plugin-process.js");
     withHome(
       {
@@ -258,7 +278,7 @@ test(
       home => {
         const acp = acpProviders(home, argv1);
 
-        assert.equal(acp.document.paseoVersion, "0.12.0");
+        assert.equal(acp.document.paseoVersion, PINNED);
         for (const id of ["hermes", "copilot", "cursor"]) assert.equal(acp.isAcp(id), true, id);
         for (const id of ["claude", "codex", "opencode", "pi", "omp"]) assert.equal(acp.isAcp(id), false, id);
         assert.deepEqual(published(home).providers["hermes"], {

@@ -32,7 +32,7 @@ describe('one served task entry across row, page and counts', () => {
     });
     const master = taskEntry({
       reference: masterRef, children: [child.key], summary: masterSummary,
-      counts: { planned: 1, started: 0, completed: 0, aborted: 0, works: 0, paused: 0, unknown: 0 },
+      counts: { planned: 1, started: 0, completed: 0, aborted: 0, works: 0, waiting: 0, paused: 0, unknown: 0 },
     });
     dashboardStore.getState().applySnapshot(projection({ tasks: [master, child] }));
     const fetch = vi.fn();
@@ -72,6 +72,7 @@ describe('one served task entry across row, page and counts', () => {
       completed: 0,
       aborted: 0,
       works: 0,
+      waiting: 0,
       paused: 0,
       unknown: 0,
     };
@@ -130,6 +131,7 @@ describe('one served task entry across row, page and counts', () => {
       completed: 0,
       aborted: 0,
       works: 0,
+      waiting: 0,
       paused: 1,
       unknown: 0,
     };
@@ -168,6 +170,7 @@ describe('one served task entry across row, page and counts', () => {
       completed: 109,
       aborted: 0,
       works: 0,
+      waiting: 0,
       paused: 0,
       unknown: 0,
     };

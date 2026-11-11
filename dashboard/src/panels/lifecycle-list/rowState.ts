@@ -5,6 +5,7 @@ import {
   taskStatusReading,
   type TaskStatusKey,
 } from '../detail-panel/pageParts';
+import { waitLines } from '../detail-panel/waitWords';
 import { docProgress } from './docProgress';
 
 /** Own work precedes waiting work; authored order breaks ties in each band. */
@@ -55,6 +56,11 @@ function limitHoverLines(entry: TaskEntry, status: TaskStatusKey): string[] {
   return limitLines(entry.providerLimit);
 }
 
+/** A waiting row names each seat's declared wait: what for, since when, and the check due. */
+function waitHoverLines(entry: TaskEntry, status: TaskStatusKey): string[] {
+  return status === 'waiting' ? waitLines(entry.waitingSeats) : [];
+}
+
 /** The row's hover at the display instant the row's word and mark read (MIK-R190 rule 13).
  *
  * Without an instant a clockless caller still names the served seats; with one, a window the
@@ -77,6 +83,7 @@ export function rowHover(entry: TaskEntry, now?: number | null): string {
     `State: ${statusLabel(reading.shown)}`,
     // MIK-R190 rule 13: a limited row says who waits beside the state it already stated.
     ...limitHoverLines(entry, reading.shown),
+    ...waitHoverLines(entry, reading.shown),
     `Stage: ${entry.stage}`,
     entry.reference ? `Repo: ${entry.reference.repository}` : '',
     entry.summary?.currentStep ? `Current step: ${entry.summary.currentStep}` : '',

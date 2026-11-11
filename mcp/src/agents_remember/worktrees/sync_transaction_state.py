@@ -123,6 +123,10 @@ class SyncSideRecord(BaseModel):
         if isinstance(data, dict):
             if not self.crossingReport:
                 data.pop("crossingReport", None)
+            if not self.omissionReport:
+                data.pop("omissionReport", None)
+            if not self.omittedItems:
+                data.pop("omittedItems", None)
             for key in _RETIRED_SIDE_KEYS:
                 if not getattr(self, key, None):
                     data.pop(key, None)
@@ -134,6 +138,11 @@ class SyncSideRecord(BaseModel):
     wipStash: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     wipPaths: tuple[str, ...] = ()
     wipPathCount: int = Field(default=0, ge=0)
+    # A continue that found parked authoring the resolved tree lacks names its full report
+    # here: the answer, the next resolution guidance and the review advice read the same
+    # fact. A continue that settles the side clears both.
+    omissionReport: str = Field(default="", max_length=4096)
+    omittedItems: int = Field(default=0, ge=0)
 
 
 #: How many violations a journaled validator refusal keeps inline; the total is journaled
@@ -181,6 +190,13 @@ class SyncOperationRecord(BaseModel):
     memoryBaseFrom: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     phase: SyncPhase
     memorySyncChoice: MemorySyncChoice | None = None
+    # The sync source this generation was admitted with. "" is the contract's own
+    # source line; "repository-default" pulls each repository's default branch, whose resolved name
+    # and pinned tip each side records, and keeps the contract's base pair. The contract's own
+    # source branches at admission are kept so a resume can tell a retargeted contract.
+    syncSource: Literal["", "repository-default"] = ""
+    codeSourceFrom: str = Field(default="", max_length=4096)
+    memorySourceFrom: str = Field(default="", max_length=4096)
     code: SyncSideRecord
     memory: SyncSideRecord | None = None
     # A validator refusal is a journaled state (MIK-R61 rule 5): when the validator refuses
@@ -268,6 +284,12 @@ def sync_side_refs(contract_path: Path, side: SyncSide) -> tuple[str, str]:
 
 def sync_side_base_ref(contract_path: Path, side: SyncSide) -> str:
     return f"{sync_ref_prefix(contract_path)}/{side}/base"
+
+
+def sync_side_default_source_prefix(contract_path: Path, side: SyncSide) -> str:
+    """Where a default-source sync pins its resolved branch: the ref name carries the branch."""
+
+    return f"{sync_ref_prefix(contract_path)}/{side}/default-source/"
 
 
 def operation_stamp() -> str:

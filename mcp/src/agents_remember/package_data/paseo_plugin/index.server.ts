@@ -1,29 +1,21 @@
-import type { PluginHandlerContext, PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginHandlerContext, PluginHookContext, PluginServerContext } from "@getpaseo/plugin/server";
 import { createAcpProviderSet, type AcpProviderSet } from "./server/acp_providers";
 import { readEmbedList } from "./server/embed";
-import { createHostActivityPublisher, registerHostActivityEvents } from "./server/host_activity";
+import { HOST_ACTIVITY_HOOKS, createHostActivityPublisher, registerHostActivityEvents } from "./server/host_activity";
 import { readRoleAgents } from "./server/role_agents";
 import { SubagentSubscription, SubagentTracker } from "./server/subagents";
-import { isoWithOffset } from "./server/turn_ended";
 import { registerParentWakeEvents } from "./server/turn_events";
-import { createTurnEndLog } from "./server/turn_log";
+import { createTurnEndLog, isoWithOffset } from "./server/turn_log";
 import { arEmbedList, arHostActivitySnapshot, arHostActivitySubagents } from "./shared/rpc";
 
 /**
- * L184-R1-F11: every agent lifecycle hook the host runs hands the plugin the same
- * `PaseoApi`, so the first of them is a usable moment to take the one subscription.
+ * Every agent lifecycle hook the host runs hands the plugin the same `PaseoApi`, so
+ * the first of them is a usable moment to take the one subscription. They are the
+ * hooks the host-activity record listens on, so the two lists cannot drift apart.
  * A boot whose dashboard never asks for a snapshot is served by a create, a
  * permission, an archive or a close just as well as by a turn.
  */
-const ATTACH_HOOKS = [
-  "agent.created",
-  "agent.turn_started",
-  "agent.turn_ended",
-  "agent.permission_requested",
-  "agent.permission_resolved",
-  "agent.archived",
-  "agent.closed",
-] as const;
+const ATTACH_HOOKS = HOST_ACTIVITY_HOOKS.map(([hook]) => hook);
 
 // Installed and loaded by `agents-remember paseo provision` (PNT-R01). The daemon-side behaviour
 // arrives with PNT-R04. Reading the embed list at load proves the plugin can reach what provision
@@ -127,7 +119,7 @@ export default function contribute(server: PluginServerContext) {
   // attach is idempotent, so a boot that reaches several of them holds one.
   if (subscription !== undefined) {
     for (const kind of ATTACH_HOOKS) {
-      server.on(kind, (_event, context) => {
+      server.addHook(kind, async (_event: unknown, context: PluginHookContext | undefined) => {
         void attach(context?.paseo);
       });
     }
@@ -180,6 +172,15 @@ export default function contribute(server: PluginServerContext) {
     subagents,
     log: (row) => log.append(row),
     acpProvider: (providerId) => acp?.isAcp(providerId) === true,
+    // A seat's open declared wait reaches the host-activity record, so AR's
+    // surfaces show the seat as waiting while the host still reports it idle.
+    declaredWait: (agentId, wait) => {
+      try {
+        activity?.noteDeclaredWait(agentId, wait);
+      } catch (error) {
+        console.error("agents-remember declared-wait publication failed", error);
+      }
+    },
   });
 
   return () => {

@@ -337,7 +337,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                     ),
                     (
                         "roles/architect.md",
-                        "Flat mode here means only the developer-chosen direct-coordination exception. When no Manager or Orchestrator owns closeout, you may coordinate the existing paired closeout only under the already-delegated authority of [Authorized Closeout](../operations/closeout.md), after independent review and required curation evidence exist.",
+                        "Flat mode here means only the developer-chosen direct-coordination exception. When no Manager or Orchestrator owns closeout, you may coordinate the existing paired closeout (`worktree_closeout_preview` and `worktree_closeout_apply` on `agents-remember-task`) only under the already-delegated authority of [Authorized Closeout](../operations/closeout.md), after independent review and required curation evidence exist.",
                     ),
                     (
                         "roles/architect.md",
@@ -380,7 +380,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                     ),
                     (
                         "roles/orchestrator.md",
-                        "You may start Manager, Worker, Reviewer, Curator, and Investigator. Before starting or messaging a role, read [role assignments](../operations/coordination.md#start-one-canonical-role-assignment) for selection and start rules, [the first intake](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake) for stage timing and intake fields, and [message delivery](../operations/coordination.md#address-and-deliver-a-message) for addresses, seats and delivery state. Your tool server's binding names you as the sender. Address each recipient explicitly by agent ID or by role and task references, and keep the returned agent IDs; do not act as an invisible proxy.",
+                        "You may start Manager, Worker, Reviewer, Curator, and Investigator. Before starting or messaging a role, read [role assignments](../operations/coordination.md#start-one-canonical-role-assignment) for the selection and start rules of `role_start` on `agents-remember-task`, [the first intake](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake) for stage timing and intake fields, and [message delivery](../operations/coordination.md#address-and-deliver-a-message) for the addresses, seats and delivery state of `role_message` on `agents-remember-task`. Your tool server's binding names you as the sender. Address each recipient explicitly by agent ID or by role and task references, and keep the returned agent IDs; do not act as an invisible proxy.",
                     ),
                 ),
             ),
@@ -1019,7 +1019,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                 (
                     (
                         "operations/curation.md",
-                        "Before responding to a non-work reply, an empty or doubled-seat refusal, an unreachable-Manager notice, or failed delivery of a required Manager notice, read [Report a refused handover](implementation.md#report-a-refused-handover) for the seat/problem report, pending state, independent continuation and notice retry. It transfers no Worker or transaction authority. The permitted Manager notice occasions below remain unchanged.",
+                        "Before responding to a non-work reply, an empty or doubled-seat refusal, an unreachable-Manager notice, or failed delivery of a required Manager notice, read [Report a refused handover](implementation.md#report-a-refused-handover) for the seat/problem report, pending state, independent continuation and the notice retry through `role_message` on `agents-remember-task`. It transfers no Worker or transaction authority. The permitted Manager notice occasions below remain unchanged.",
                     ),
                 ),
             ),
@@ -1028,7 +1028,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                 (
                     (
                         "roles/curator.md",
-                        "Before sending a memory candidate for review or returning a memory repair, read [memory handover]({{detail:reference/curator/memory-handover.md}}) for candidate identities, the reviewed trees, lane limits and the whole requested stretch.",
+                        "Before sending a memory candidate for review or returning a memory repair, read [memory handover]({{detail:reference/curator/memory-handover.md}}) for candidate identities, the reviewed trees, lane limits and the whole requested stretch sent with `role_message` on `agents-remember-task`.",
                     ),
                     (
                         "reference/curator/memory-handover.md",

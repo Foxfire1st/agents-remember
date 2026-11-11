@@ -69,10 +69,12 @@ ROLE_OPERATION_ROUTES = {
             " for the mode, handover scope and chat boundary."
         ),
         (
-            "Before recording an ordinary leaf code round, read [code review round recording]"
-            "(../operations/review.md#record-code-review-rounds) for begin and result records. "
-            "Before recording a memory round, requesting an extra round or handling provider, seat "
-            "or busy refusals, read [review boundaries](../operations/review.md#boundaries) for the "
+            "Before recording an ordinary leaf code round, read [code review round "
+            "recording](../operations/review.md#record-code-review-rounds) for the "
+            "begin and result records through `task_doc` on "
+            "`agents-remember-task`. Before recording a memory round, requesting "
+            "an extra round or handling provider, seat or busy refusals, read "
+            "[review boundaries](../operations/review.md#boundaries) for the "
             "recording owner, approval and recovery routes."
         ),
     ),
@@ -268,16 +270,20 @@ def _worker_handover_surface(root: Path, source: str) -> str:
 
 # Full pointer sentences (P5-23: restored from fragments after the P5-15 content clauses).
 CURATION_REFUSED_HANDOVER_POINTER = (
-    "Before responding to a non-work reply, an empty or doubled-seat refusal, an "
-    "unreachable-Manager notice, or failed delivery of a required Manager notice, read "
-    "[Report a refused handover](implementation.md#report-a-refused-handover) for the "
-    "seat/problem report, pending state, independent continuation and notice retry."
+    "Before responding to a non-work reply, an empty or doubled-seat "
+    "refusal, an unreachable-Manager notice, or failed delivery of a "
+    "required Manager notice, read [Report a refused "
+    "handover](implementation.md#report-a-refused-handover) for the "
+    "seat/problem report, pending state, independent continuation and the "
+    "notice retry through `role_message` on `agents-remember-task`."
 )
 REFUSED_HANDOVER_POINTER = (
-    "Before responding to a non-work reply, empty or doubled-seat refusal, or an "
-    "unreachable-Manager notice, read [Repair defects and report a refused handover]"
-    "(implementation.md#repair-defects-and-report-a-refused-handover) for its seat/problem "
-    "report and retry procedure."
+    "Before responding to a non-work reply, empty or doubled-seat refusal, "
+    "or an unreachable-Manager notice, read [Repair defects and report a "
+    "refused "
+    "handover](implementation.md#repair-defects-and-report-a-refused-handover) "
+    "for its seat/problem report and the retry procedure through "
+    "`role_message` on `agents-remember-task`."
 )
 
 

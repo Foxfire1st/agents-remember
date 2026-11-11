@@ -7,7 +7,7 @@ The Worker uses this operation to implement the selected leaf's primary requirem
 
 Before reading the task inputs, follow [Establish the assignment](../roles/worker.md#establish-the-assignment) for the exact handover file locations and native file reads. The inputs are the selected requirement packet, rendered leaf task and code worktree for edits. The memory root is read-only context.
 
-Before editing a canonical task document or marking your own completed step, read [Confirm the assignment](orientation.md#confirm-the-assignment) for the primary tool and rendered-copy rules.
+Before editing a canonical task document or marking your own completed step, read [Confirm the assignment](orientation.md#confirm-the-assignment) for the primary tool, `task_doc` on `agents-remember-task`, and rendered-copy rules.
 
 Implementation does not expand scope or edit task status, the contract, memory or onboarding state.
 

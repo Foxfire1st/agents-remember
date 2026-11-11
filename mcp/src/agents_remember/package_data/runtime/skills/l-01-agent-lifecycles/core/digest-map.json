@@ -1931,7 +1931,7 @@
       230,
       238
      ],
-     "sha256": "0eaf74b18c9f09c30c394f21529c0f250cc80b0d560e08ca8bb9aabc4c1da1e9",
+     "sha256": "ebd81caaff93e9c9584ccd615b83ec828b95624f4545fd1f31e07602afe16523",
      "capsule": "architect/planning"
     },
     {
@@ -1940,7 +1940,7 @@
       117,
       127
      ],
-     "sha256": "ec0a6e722224afd516a468392bb63f445e0727f4b8d918950f6112d42f12c1ca",
+     "sha256": "f521cc000a979e43f3603580bc08393b6ded180c48babde1c0c6cd27cf5fad71",
      "capsule": "orchestrator/coordination"
     },
     {
@@ -1949,14 +1949,14 @@
       138,
       150
      ],
-     "sha256": "393ae012dc0782064a81b2f19f05526a14a6822c55573383eec32b10fe351a67",
+     "sha256": "8cc816e690eabc486d570db5f2e857a4cb1b52a23da44c674c4cc503b3f02f5a",
      "capsule": "manager/coordination"
     },
     {
      "path": "skills/l-01-agent-lifecycles/roles/worker.md",
      "lines": [
-      51,
-      57
+      53,
+      59
      ],
      "sha256": "a1e0aeca50048931f328115a431728c25b567ebfb9dacb40da08aded96725243",
      "capsule": "worker/implementation"
@@ -1973,8 +1973,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      136,
-      138
+      137,
+      139
      ],
      "sha256": "7ecfb6b075674ea48270b097ee73ed32dd2871cbe3457b80a7cac6fb19b05f97",
      "capsule": "reviewer/review"
@@ -2025,7 +2025,7 @@
       230,
       238
      ],
-     "sha256": "0eaf74b18c9f09c30c394f21529c0f250cc80b0d560e08ca8bb9aabc4c1da1e9",
+     "sha256": "ebd81caaff93e9c9584ccd615b83ec828b95624f4545fd1f31e07602afe16523",
      "capsule": "architect/planning"
     },
     {
@@ -2034,7 +2034,7 @@
       117,
       127
      ],
-     "sha256": "ec0a6e722224afd516a468392bb63f445e0727f4b8d918950f6112d42f12c1ca",
+     "sha256": "f521cc000a979e43f3603580bc08393b6ded180c48babde1c0c6cd27cf5fad71",
      "capsule": "orchestrator/coordination"
     },
     {
@@ -2043,14 +2043,14 @@
       138,
       150
      ],
-     "sha256": "393ae012dc0782064a81b2f19f05526a14a6822c55573383eec32b10fe351a67",
+     "sha256": "8cc816e690eabc486d570db5f2e857a4cb1b52a23da44c674c4cc503b3f02f5a",
      "capsule": "manager/coordination"
     },
     {
      "path": "skills/l-01-agent-lifecycles/roles/worker.md",
      "lines": [
-      51,
-      57
+      53,
+      59
      ],
      "sha256": "a1e0aeca50048931f328115a431728c25b567ebfb9dacb40da08aded96725243",
      "capsule": "worker/implementation"
@@ -2067,8 +2067,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      136,
-      138
+      137,
+      139
      ],
      "sha256": "7ecfb6b075674ea48270b097ee73ed32dd2871cbe3457b80a7cac6fb19b05f97",
      "capsule": "reviewer/review"
@@ -2279,7 +2279,7 @@
       129,
       137
      ],
-     "sha256": "e880b63b9595af51d27bdeca6707fb28d56e8bcc52ac419a694e680cbd1d6d57",
+     "sha256": "210c3b496b78bbee69975e446a4a33a3cf259de07e195c90317b635ca07e5317",
      "capsule": "orchestrator/coordination"
     },
     {
@@ -2288,14 +2288,14 @@
       95,
       119
      ],
-     "sha256": "ce1ed6a549b558ad965026ea1f99936857d56478a1d8a12a325fc28fd957c40f",
+     "sha256": "255a5315da1da8849f03e38c5513d317d788b132c897a5c5100f81145bc0f2ff",
      "capsule": "manager/coordination"
     },
     {
      "path": "skills/l-01-agent-lifecycles/roles/worker.md",
      "lines": [
-      111,
-      117
+      113,
+      119
      ],
      "sha256": "8042abd69a4d9aecebc897bcbcefab1c24db22ac71fb88eacdabda8325713714",
      "capsule": "worker/implementation"
@@ -2306,16 +2306,16 @@
       192,
       194
      ],
-     "sha256": "9eb6092e592b07cf391f7b2d85eb741cae1303e93f74568854eb98a2fd1d4056",
+     "sha256": "c5ae8139fada82c914f9f0b8bffed54dc78eecce7f98764c509cbff5fa39b040",
      "capsule": "curator/curation"
     },
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      152,
-      152
+      153,
+      153
      ],
-     "sha256": "9c109329203c61a39b2fcdf2d2ed196cd84be3b894cdd9a46ebf8487831b1bc7",
+     "sha256": "b7ddbfca5e2abbc38444321c2a0ab84c386de872adb9533a63803901f18ab4e5",
      "capsule": "reviewer/review"
     },
     {
@@ -2324,7 +2324,7 @@
       60,
       66
      ],
-     "sha256": "673eca8d38cfae1a2c61fd6f3bc225cdf1431ed7c4d6cb14dd373b071fad2ffb",
+     "sha256": "ba60da59cd4450a90ac49ce501cec2e446b8c1df6d32eb560019c391f05b101b",
      "capsule": "investigator/orientation"
     },
     {
@@ -2510,7 +2510,7 @@
       129,
       137
      ],
-     "sha256": "e880b63b9595af51d27bdeca6707fb28d56e8bcc52ac419a694e680cbd1d6d57",
+     "sha256": "210c3b496b78bbee69975e446a4a33a3cf259de07e195c90317b635ca07e5317",
      "capsule": "orchestrator/coordination"
     },
     {
@@ -2519,14 +2519,14 @@
       95,
       119
      ],
-     "sha256": "ce1ed6a549b558ad965026ea1f99936857d56478a1d8a12a325fc28fd957c40f",
+     "sha256": "255a5315da1da8849f03e38c5513d317d788b132c897a5c5100f81145bc0f2ff",
      "capsule": "manager/coordination"
     },
     {
      "path": "skills/l-01-agent-lifecycles/roles/worker.md",
      "lines": [
-      111,
-      117
+      113,
+      119
      ],
      "sha256": "8042abd69a4d9aecebc897bcbcefab1c24db22ac71fb88eacdabda8325713714",
      "capsule": "worker/implementation"
@@ -2537,16 +2537,16 @@
       192,
       194
      ],
-     "sha256": "9eb6092e592b07cf391f7b2d85eb741cae1303e93f74568854eb98a2fd1d4056",
+     "sha256": "c5ae8139fada82c914f9f0b8bffed54dc78eecce7f98764c509cbff5fa39b040",
      "capsule": "curator/curation"
     },
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      152,
-      152
+      153,
+      153
      ],
-     "sha256": "9c109329203c61a39b2fcdf2d2ed196cd84be3b894cdd9a46ebf8487831b1bc7",
+     "sha256": "b7ddbfca5e2abbc38444321c2a0ab84c386de872adb9533a63803901f18ab4e5",
      "capsule": "reviewer/review"
     },
     {
@@ -2555,7 +2555,7 @@
       60,
       66
      ],
-     "sha256": "673eca8d38cfae1a2c61fd6f3bc225cdf1431ed7c4d6cb14dd373b071fad2ffb",
+     "sha256": "ba60da59cd4450a90ac49ce501cec2e446b8c1df6d32eb560019c391f05b101b",
      "capsule": "investigator/orientation"
     },
     {
@@ -2625,7 +2625,7 @@
     100,
     100
    ],
-   "sha256": "3f41359a9e07497add8440bd2b22f761e1b81c0f4b94b0370fe6cb18b6d4920d",
+   "sha256": "0913980800c5707c218b23ba901de845ba986937b6933ced1c758b42c6817db3",
    "audience": [
     "architect",
     "investigator",
@@ -2688,7 +2688,7 @@
     106,
     106
    ],
-   "sha256": "0e0820b1605932aa5710cfdcea7c1d38fda0fd468b0c6911103ca53898f2c429",
+   "sha256": "1d0432683c3936509cb776025a0538473fce5d0cd10825fe3d8ef666a26ba1e1",
    "audience": [
     "architect",
     "bootstrap",
@@ -2790,7 +2790,7 @@
       206,
       224
      ],
-     "sha256": "18102dc59ba47556fb6c033675cf88b5cefb639c7f5fb42c738a8d15fb886c1c",
+     "sha256": "6f7fff82d19ff6def0101ffe264b111847a25479616ca8a6adceb82802e183f6",
      "capsule": "architect/planning"
     },
     {
@@ -2799,7 +2799,7 @@
       12,
       48
      ],
-     "sha256": "271edb34d1b611b5ecf1e5e63888e039ab17e6807bf1aa9a657981ad978dc33c",
+     "sha256": "24db8bf3d716fabe412b75a292225a8ed1ae072161999efc1c852011a11d2c4d",
      "capsule": "orchestrator/coordination"
     },
     {
@@ -2814,10 +2814,10 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/worker.md",
      "lines": [
-      121,
-      127
+      123,
+      129
      ],
-     "sha256": "5e8aad6a01414cee953140856ce701120e92a206a03879aa123f324098f8413b",
+     "sha256": "82a310d78dcdd51631be941f06d00db5e50a0876dfa2f91dd2756317d8601376",
      "capsule": "worker/implementation"
     },
     {
@@ -2832,10 +2832,10 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      114,
-      144
+      115,
+      145
      ],
-     "sha256": "c6513a9d179c77755bc24e0bbbf7c55a0c916e5bb5b74b54d6a2485603ed79b0",
+     "sha256": "da54fb839ed32e86154780cdcd0a744b687104fba510f6147a432c9ea5261363",
      "capsule": "reviewer/review"
     },
     {
@@ -3083,7 +3083,7 @@
       216,
       224
      ],
-     "sha256": "32ac9f04d605cd755a5afa41d727a08706862169570ddcc98ad25e199870fb39",
+     "sha256": "97e88b951f1100e55a47bce78c9b141be7e87fae50b7cf10761ef17608e4dd8d",
      "capsule": "architect/planning"
     },
     {
@@ -3107,10 +3107,10 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/worker.md",
      "lines": [
-      65,
-      88
+      67,
+      90
      ],
-     "sha256": "68fdc04a26da1287ea5e19ca866b9cdf653e1b08a1173bbaa5f9183aad38a754",
+     "sha256": "ff69952838f4cb7fb9bd16ea53293186483712d9651393f20ee9e73b0dd76489",
      "capsule": "worker/implementation"
     },
     {
@@ -3125,10 +3125,10 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      85,
-      96
+      86,
+      97
      ],
-     "sha256": "bbe04b59ce6dc0b9e605be964963c462d819570b2040d72fc00cc408c9d7eae1",
+     "sha256": "0d3e42e9a889e16e9e4c3664f815eeb254dd67d8dbd0345529ecf9e6de93b394",
      "capsule": "reviewer/review"
     },
     {
@@ -3282,7 +3282,7 @@
       216,
       224
      ],
-     "sha256": "32ac9f04d605cd755a5afa41d727a08706862169570ddcc98ad25e199870fb39",
+     "sha256": "97e88b951f1100e55a47bce78c9b141be7e87fae50b7cf10761ef17608e4dd8d",
      "capsule": "architect/planning"
     },
     {
@@ -3306,10 +3306,10 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/worker.md",
      "lines": [
-      65,
-      88
+      67,
+      90
      ],
-     "sha256": "68fdc04a26da1287ea5e19ca866b9cdf653e1b08a1173bbaa5f9183aad38a754",
+     "sha256": "ff69952838f4cb7fb9bd16ea53293186483712d9651393f20ee9e73b0dd76489",
      "capsule": "worker/implementation"
     },
     {
@@ -3324,10 +3324,10 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      85,
-      96
+      86,
+      97
      ],
-     "sha256": "bbe04b59ce6dc0b9e605be964963c462d819570b2040d72fc00cc408c9d7eae1",
+     "sha256": "0d3e42e9a889e16e9e4c3664f815eeb254dd67d8dbd0345529ecf9e6de93b394",
      "capsule": "reviewer/review"
     },
     {
@@ -3957,7 +3957,7 @@
     97,
     97
    ],
-   "sha256": "483bab6a0487e36de6ce971d8f20e977c1cb719f941b4630fd8410f1087cdc4a",
+   "sha256": "3ad0f1c76006a7f30dfb19f906c34ae7c8c5ab1a3e93534e183aa0a866a0bfeb",
    "audience": [
     "architect",
     "bootstrap",
@@ -4131,7 +4131,7 @@
       230,
       238
      ],
-     "sha256": "0eaf74b18c9f09c30c394f21529c0f250cc80b0d560e08ca8bb9aabc4c1da1e9",
+     "sha256": "ebd81caaff93e9c9584ccd615b83ec828b95624f4545fd1f31e07602afe16523",
      "capsule": "architect/planning"
     },
     {
@@ -4140,7 +4140,7 @@
       117,
       127
      ],
-     "sha256": "ec0a6e722224afd516a468392bb63f445e0727f4b8d918950f6112d42f12c1ca",
+     "sha256": "f521cc000a979e43f3603580bc08393b6ded180c48babde1c0c6cd27cf5fad71",
      "capsule": "orchestrator/coordination"
     },
     {
@@ -4149,14 +4149,14 @@
       138,
       150
      ],
-     "sha256": "393ae012dc0782064a81b2f19f05526a14a6822c55573383eec32b10fe351a67",
+     "sha256": "8cc816e690eabc486d570db5f2e857a4cb1b52a23da44c674c4cc503b3f02f5a",
      "capsule": "manager/coordination"
     },
     {
      "path": "skills/l-01-agent-lifecycles/roles/worker.md",
      "lines": [
-      51,
-      57
+      53,
+      59
      ],
      "sha256": "a1e0aeca50048931f328115a431728c25b567ebfb9dacb40da08aded96725243",
      "capsule": "worker/implementation"
@@ -4173,8 +4173,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      136,
-      138
+      137,
+      139
      ],
      "sha256": "7ecfb6b075674ea48270b097ee73ed32dd2871cbe3457b80a7cac6fb19b05f97",
      "capsule": "reviewer/review"
@@ -4229,7 +4229,7 @@
       24,
       68
      ],
-     "sha256": "baee31c880228cfa4dda74689ec691c8a5add46ac7d4b3f47987bb19fe9efaae",
+     "sha256": "90616016c4038f1aace48071d33feb0028bab27e050f4f2f3d69e62426e0b448",
      "capsule": "architect/planning"
     }
    ]
@@ -4325,7 +4325,7 @@
       70,
       80
      ],
-     "sha256": "020d4402b33a09c5223875a35b3f3749a5b269e89ef150946bf1b55444069ad2",
+     "sha256": "160fbd3731e00ce0ba9bd5f5af6ce1c71fd03dfe7f5739c10c8e620ba7a7c81f",
      "capsule": "architect/planning"
     }
    ]
@@ -4478,8 +4478,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      100,
-      102
+      101,
+      103
      ],
      "sha256": "2f4ddc94027c45e85c5c9c22e2f7077261c80b7603011f51ab3a6a6516a2a49e",
      "capsule": "reviewer/review"
@@ -4499,7 +4499,7 @@
       50,
       60
      ],
-     "sha256": "63a1615f3c88744357ccae32c686fe513829b571290e89c44f57c5e5c147de19",
+     "sha256": "37341f5283540000511611b54d3cffc07740f97fda65e90cee289f3485a9e965",
      "capsule": "manager/coordination"
     }
    ]
@@ -4615,9 +4615,9 @@
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
       29,
-      38
+      37
      ],
-     "sha256": "3449edeb331d25087c37cfc5760d98690f2cabea14aa01f0aa1da2be7d726742",
+     "sha256": "095bf43f69e84a3e12d7a83392c0d4236a41b3d3ca3402cfd7b3ab56ad236e41",
      "capsule": "reviewer/review"
     }
    ]
@@ -4649,10 +4649,10 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      67,
-      77
+      68,
+      78
      ],
-     "sha256": "d3e5133a2982108acbc3e15572b74cf4081c0d0b9cff8c05f57ec991709ab405",
+     "sha256": "3df1ccea5b134a896ad05f1cab6b70dc40346f61a7c51841e2cfa643ad3a1d85",
      "capsule": "reviewer/review"
     }
    ]
@@ -4685,10 +4685,10 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      67,
-      77
+      68,
+      78
      ],
-     "sha256": "d3e5133a2982108acbc3e15572b74cf4081c0d0b9cff8c05f57ec991709ab405",
+     "sha256": "3df1ccea5b134a896ad05f1cab6b70dc40346f61a7c51841e2cfa643ad3a1d85",
      "capsule": "reviewer/review"
     }
    ]
@@ -4712,8 +4712,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      42,
-      42
+      43,
+      43
      ],
      "sha256": "03fb0aec9937b6c7bf8f4781c592d1c2e3245549b6f89b9fdc8b8b92882ca7d9",
      "capsule": "reviewer/review"
@@ -4748,8 +4748,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      44,
-      54
+      45,
+      55
      ],
      "sha256": "62abef1bb1ef5e72b3452914aa77f6c9e2bc1f5634d85f5d4462e23c0addef77",
      "capsule": "reviewer/review"
@@ -4809,8 +4809,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      77,
-      79
+      78,
+      80
      ],
      "sha256": "5eb579f2638d8fd37ba1e4d1b6d0056b00ada01de677f4f2e4fc69fb48ac7297",
      "capsule": "reviewer/review"
@@ -4837,14 +4837,14 @@
       114,
       141
      ],
-     "sha256": "28c53796108cbdfd7614652bb51db9671a62f1cea3ece4b92c4649d5dc2f6015",
+     "sha256": "039bfc54bab9e1c493635e14e93bd01fc2afdca2c01d8ea940fa182c49dabbc8",
      "capsule": "reviewer/review"
     },
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      124,
-      124
+      125,
+      125
      ],
      "sha256": "cfd292133def62e845cd01ddfccbb1eb4468db12d86d95a613fd92a6d31ce258",
      "capsule": "reviewer/review"
@@ -4879,8 +4879,8 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      130,
-      132
+      131,
+      133
      ],
      "sha256": "22673d2d7a7ae9fd35786e6fceca576fc90e312a660f411e3ded3134d646f7ab",
      "capsule": "reviewer/review"
@@ -4915,10 +4915,10 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      116,
-      118
+      117,
+      119
      ],
-     "sha256": "f4f1d60ad7b21e22b4e4ccfb7a602a8147c7a32b433a4e2a1e27d164ee86c3f9",
+     "sha256": "3582a0acc2cf93bebefc39fb94977b546a084e8623aeb9f1f09ed1e66e2ee710",
      "capsule": "reviewer/review"
     }
    ]
@@ -4951,9 +4951,9 @@
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
       34,
-      42
+      43
      ],
-     "sha256": "9ebfa5675ac9cae7a63b71a9d789391f10c9e6891bd5ec3a7f69462a0fdf0958",
+     "sha256": "5a54b40f19f2e390ac00c7f5b00707607479f56d716813e18b8010ccad61daaa",
      "capsule": "reviewer/review"
     }
    ]
@@ -4979,14 +4979,14 @@
       114,
       141
      ],
-     "sha256": "28c53796108cbdfd7614652bb51db9671a62f1cea3ece4b92c4649d5dc2f6015",
+     "sha256": "039bfc54bab9e1c493635e14e93bd01fc2afdca2c01d8ea940fa182c49dabbc8",
      "capsule": "reviewer/review"
     },
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      124,
-      132
+      125,
+      133
      ],
      "sha256": "3dfd4e87946e60f5b9a08469448e7da5c3943ae9e3afab156cb351388d9a0fc5",
      "capsule": "reviewer/review"
@@ -5010,19 +5010,19 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      56,
-      81
+      57,
+      82
      ],
-     "sha256": "c782f2408b6562405ea98c4f43fab572895a5dee28d73c40af09046a46382cc9",
+     "sha256": "462136380c8677c39a0bf9d2cc13ce1b77ce5e9e252c9373f96a950e8c0dbdae",
      "capsule": "reviewer/review"
     },
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      56,
-      81
+      57,
+      82
      ],
-     "sha256": "c782f2408b6562405ea98c4f43fab572895a5dee28d73c40af09046a46382cc9",
+     "sha256": "462136380c8677c39a0bf9d2cc13ce1b77ce5e9e252c9373f96a950e8c0dbdae",
      "capsule": "reviewer/review"
     }
    ]
@@ -5265,10 +5265,10 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/worker.md",
      "lines": [
-      65,
-      88
+      67,
+      90
      ],
-     "sha256": "68fdc04a26da1287ea5e19ca866b9cdf653e1b08a1173bbaa5f9183aad38a754",
+     "sha256": "ff69952838f4cb7fb9bd16ea53293186483712d9651393f20ee9e73b0dd76489",
      "capsule": "worker/implementation"
     },
     {
@@ -5311,10 +5311,10 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      85,
-      96
+      86,
+      97
      ],
-     "sha256": "bbe04b59ce6dc0b9e605be964963c462d819570b2040d72fc00cc408c9d7eae1",
+     "sha256": "0d3e42e9a889e16e9e4c3664f815eeb254dd67d8dbd0345529ecf9e6de93b394",
      "capsule": "reviewer/review"
     }
    ]
@@ -5347,10 +5347,10 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      67,
-      77
+      68,
+      78
      ],
-     "sha256": "d3e5133a2982108acbc3e15572b74cf4081c0d0b9cff8c05f57ec991709ab405",
+     "sha256": "3df1ccea5b134a896ad05f1cab6b70dc40346f61a7c51841e2cfa643ad3a1d85",
      "capsule": "reviewer/review"
     }
    ]
@@ -5755,10 +5755,10 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      67,
-      77
+      68,
+      78
      ],
-     "sha256": "d3e5133a2982108acbc3e15572b74cf4081c0d0b9cff8c05f57ec991709ab405",
+     "sha256": "3df1ccea5b134a896ad05f1cab6b70dc40346f61a7c51841e2cfa643ad3a1d85",
      "capsule": "reviewer/review"
     }
    ]
@@ -5802,7 +5802,7 @@
       206,
       224
      ],
-     "sha256": "18102dc59ba47556fb6c033675cf88b5cefb639c7f5fb42c738a8d15fb886c1c",
+     "sha256": "6f7fff82d19ff6def0101ffe264b111847a25479616ca8a6adceb82802e183f6",
      "capsule": "architect/planning"
     },
     {
@@ -5811,7 +5811,7 @@
       12,
       48
      ],
-     "sha256": "271edb34d1b611b5ecf1e5e63888e039ab17e6807bf1aa9a657981ad978dc33c",
+     "sha256": "24db8bf3d716fabe412b75a292225a8ed1ae072161999efc1c852011a11d2c4d",
      "capsule": "orchestrator/coordination"
     },
     {
@@ -5826,10 +5826,10 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/worker.md",
      "lines": [
-      121,
-      127
+      123,
+      129
      ],
-     "sha256": "5e8aad6a01414cee953140856ce701120e92a206a03879aa123f324098f8413b",
+     "sha256": "82a310d78dcdd51631be941f06d00db5e50a0876dfa2f91dd2756317d8601376",
      "capsule": "worker/implementation"
     },
     {
@@ -5844,10 +5844,10 @@
     {
      "path": "skills/l-01-agent-lifecycles/roles/reviewer.md",
      "lines": [
-      114,
-      144
+      115,
+      145
      ],
-     "sha256": "c6513a9d179c77755bc24e0bbbf7c55a0c916e5bb5b74b54d6a2485603ed79b0",
+     "sha256": "da54fb839ed32e86154780cdcd0a744b687104fba510f6147a432c9ea5261363",
      "capsule": "reviewer/review"
     },
     {
@@ -6177,10 +6177,10 @@
  "removed": [],
  "digest": {
   "path": "core/every-role.md",
-  "sha256": "1b54ee0fa983cbdc19b9a6b6987cf2fec66321f4fc4dc5de580784ca8611fe87",
-  "sizeWords": 2266,
-  "maximumWords": 2266,
-  "ceilingAuthority": "D681; Manager20261106T110429Z sets the digest maximum to the table13 measured size of 1474 words; D656; Manager 20261104T104522Z raises the former 900-word inherited digest ceiling to literal 1000 for complete retained duties",
+  "sha256": "8c27af7759b59ab754b18b3d0f7bda1666656788eeaa70fa8a31618e738249ac",
+  "sizeWords": 2327,
+  "maximumWords": 2327,
+  "ceilingAuthority": "D681; Manager20261106T110429Z sets the digest maximum to the table13 measured size of 1474 words; D656; Manager 20261104T104522Z raises the former 900-word inherited digest ceiling to literal 1000 for complete retained duties; the always-on tool-name rule names `server_info` in the settings-authority pointer, adds a line naming `task_doc` for Architect, Orchestrator, Manager and Worker after the code-change line, and raises the maximum from 2266 to 2280; the background-wait and any-seat declarations on the wait line, with `role_message` named there, raise the maximum from 2280 to 2327",
   "places": [
    {
     "id": "place-01",
@@ -6932,7 +6932,7 @@
      61,
      63
     ],
-    "sha256": "7a1f78e92757f411ea535776ae00a1984aa91ff6762d82f238b814d29eb9e80c",
+    "sha256": "83b47a5bedcb271277e28d206c311a51a5232f98c6c50e1f61dddd07f221eaed",
     "units": [
      "AU10.3"
     ],
@@ -7166,9 +7166,9 @@
     "heading": "Requirements and limits",
     "lines": [
      81,
-     81
+     83
     ],
-    "sha256": "ea0134b2b6b8de4de9da1478feb5e6963542acb2e033b877579d52ee75a1f1ec",
+    "sha256": "c1d3da8bf1987ce48cd90a27ba432a9b77f05e9034774109f4ce027a267eb3a3",
     "units": [
      "IN5.5"
     ],
@@ -7188,6 +7188,21 @@
        "orchestrator",
        "worker"
       ]
+     },
+     {
+      "lines": [
+       83,
+       83
+      ],
+      "units": [
+       "IN5.5"
+      ],
+      "audience": [
+       "architect",
+       "manager",
+       "orchestrator",
+       "worker"
+      ]
      }
     ]
    },
@@ -7195,8 +7210,8 @@
     "id": "place-21",
     "heading": "Requirements and limits",
     "lines": [
-     83,
-     83
+     85,
+     85
     ],
     "sha256": "f645b31633d6cf64ca44780b9c5abb8fcd9a675d7260f14ed7b8912b2698a52c",
     "units": [
@@ -7206,8 +7221,8 @@
     "clauses": [
      {
       "lines": [
-       83,
-       83
+       85,
+       85
       ],
       "units": [
        "LO6.2",
@@ -7223,8 +7238,8 @@
     "id": "place-22",
     "heading": "Requirements and limits",
     "lines": [
-     85,
-     85
+     87,
+     87
     ],
     "sha256": "a093769d59606cf6bb7cfba669f2f6d8d971c733758b5a9655ec26df68e09413",
     "units": [
@@ -7233,8 +7248,8 @@
     "clauses": [
      {
       "lines": [
-       85,
-       85
+       87,
+       87
       ],
       "units": [
        "AC2.1"
@@ -7252,8 +7267,8 @@
     "id": "place-23",
     "heading": "Use the repository's instructions",
     "lines": [
-     89,
-     89
+     91,
+     91
     ],
     "sha256": "ff12aa752c7fc27263c58e8468909fec2a6f70b2e4794104c130a55e912d4f60",
     "units": [
@@ -7262,8 +7277,8 @@
     "clauses": [
      {
       "lines": [
-       89,
-       89
+       91,
+       91
       ],
       "units": [
        "AU11.1"
@@ -7285,8 +7300,8 @@
     "id": "place-24",
     "heading": "Use the repository's instructions",
     "lines": [
-     91,
-     91
+     93,
+     93
     ],
     "sha256": "7b7e20942522e21b2287c84623915eb7710d9e1e14a44251fa3ab3c635288f4c",
     "units": [
@@ -7295,8 +7310,8 @@
     "clauses": [
      {
       "lines": [
-       91,
-       91
+       93,
+       93
       ],
       "units": [
        "IN8.1"
@@ -7314,8 +7329,8 @@
     "id": "place-25",
     "heading": "Use the repository's instructions",
     "lines": [
-     93,
-     93
+     95,
+     95
     ],
     "sha256": "f31605d54e8f9c4692ea6f057450f4fab986344978103a82bd881822fe3949ca",
     "units": [
@@ -7324,8 +7339,8 @@
     "clauses": [
      {
       "lines": [
-       93,
-       93
+       95,
+       95
       ],
       "units": [
        "IN8.3"
@@ -7347,18 +7362,18 @@
     "id": "place-42",
     "heading": "Use the repository's instructions",
     "lines": [
-     95,
-     95
+     97,
+     97
     ],
-    "sha256": "4fa700bd8a78c1f7e1ded687ca2eae7b0a72b20a49cbc8eaabe580f9fca7d07b",
+    "sha256": "f66d39e74c5c258b858e091616e277210ac739997d05c22af5e56b67768c4dd6",
     "units": [
      "IN8.8"
     ],
     "clauses": [
      {
       "lines": [
-       95,
-       95
+       97,
+       97
       ],
       "units": [
        "IN8.8"
@@ -7380,8 +7395,8 @@
     "id": "place-40",
     "heading": "Use the repository's instructions",
     "lines": [
-     97,
-     97
+     99,
+     99
     ],
     "sha256": "6c8d936f3e6d4d670e418b90f45865f7fe9be3bc1329c56442d294056c76ac9c",
     "units": [
@@ -7390,8 +7405,8 @@
     "clauses": [
      {
       "lines": [
-       97,
-       97
+       99,
+       99
       ],
       "units": [
        "IN8.7"
@@ -7413,8 +7428,8 @@
     "id": "place-26",
     "heading": "Use the repository's instructions",
     "lines": [
-     99,
-     99
+     101,
+     101
     ],
     "sha256": "ff560dbe0ccafe3d57861fd23f10297cb581cf45e3b95e3c48c7b9ba861c875d",
     "units": [
@@ -7423,8 +7438,8 @@
     "clauses": [
      {
       "lines": [
-       99,
-       99
+       101,
+       101
       ],
       "units": [
        "IN8.5"
@@ -7446,8 +7461,8 @@
     "id": "place-27",
     "heading": "Use the repository's instructions",
     "lines": [
-     101,
-     101
+     103,
+     103
     ],
     "sha256": "1119f3827261cbcb30a287bbc7a468d2c9399c2aafb1deb3c3d3a24b5c8eb7b8",
     "units": [
@@ -7456,8 +7471,8 @@
     "clauses": [
      {
       "lines": [
-       101,
-       101
+       103,
+       103
       ],
       "units": [
        "IN8.6"
@@ -7479,8 +7494,8 @@
     "id": "place-28",
     "heading": "Evidence and handovers",
     "lines": [
-     105,
-     107
+     107,
+     109
     ],
     "sha256": "d7fd9a501f002ac869e97679bc122fd6b132849341d3674144e989cb231b9885",
     "units": [
@@ -7489,8 +7504,8 @@
     "clauses": [
      {
       "lines": [
-       105,
-       105
+       107,
+       107
       ],
       "units": [
        "IN1.2"
@@ -7508,8 +7523,8 @@
      },
      {
       "lines": [
-       107,
-       107
+       109,
+       109
       ],
       "units": [
        "IN1.2"
@@ -7531,8 +7546,8 @@
     "id": "place-45",
     "heading": "Evidence and handovers",
     "lines": [
-     109,
-     109
+     111,
+     111
     ],
     "sha256": "d1a6cbd39249bf1fd492bc7ef52e5b2a7935638b58f452466c323589a52e43c6",
     "units": [
@@ -7541,8 +7556,8 @@
     "clauses": [
      {
       "lines": [
-       109,
-       109
+       111,
+       111
       ],
       "units": [
        "IN1.3"
@@ -7564,8 +7579,8 @@
     "id": "place-46",
     "heading": "Evidence and handovers",
     "lines": [
-     111,
-     111
+     113,
+     113
     ],
     "sha256": "41c60c18df4d0f2046068df29eb3b8f897a085db8ce7ef435ee4c9579ce28263",
     "units": [
@@ -7574,8 +7589,8 @@
     "clauses": [
      {
       "lines": [
-       111,
-       111
+       113,
+       113
       ],
       "units": [
        "IN1.4"
@@ -7597,8 +7612,8 @@
     "id": "place-57",
     "heading": "Evidence and handovers",
     "lines": [
-     113,
-     113
+     115,
+     115
     ],
     "sha256": "ebf838cbb37afc2ea937487b803b24297df07b86b90125c2944712ebc05c13ee",
     "units": [
@@ -7607,8 +7622,8 @@
     "clauses": [
      {
       "lines": [
-       113,
-       113
+       115,
+       115
       ],
       "units": [
        "AU14.4"
@@ -7630,8 +7645,8 @@
     "id": "place-47",
     "heading": "Evidence and handovers",
     "lines": [
-     115,
-     115
+     117,
+     117
     ],
     "sha256": "2851f4f73c0bd4e98aceac6f854c02997d05d43d0e670a80cd945fe23714d706",
     "units": [
@@ -7640,8 +7655,8 @@
     "clauses": [
      {
       "lines": [
-       115,
-       115
+       117,
+       117
       ],
       "units": [
        "IN1.5"
@@ -7663,8 +7678,8 @@
     "id": "place-58",
     "heading": "Evidence and handovers",
     "lines": [
-     117,
-     117
+     119,
+     119
     ],
     "sha256": "a73fcc990bb99bda5eb18d884628ef34f56c32a00e146fdf4ede3c4bcabc39c0",
     "units": [
@@ -7673,8 +7688,8 @@
     "clauses": [
      {
       "lines": [
-       117,
-       117
+       119,
+       119
       ],
       "units": [
        "LO1.1"
@@ -7692,8 +7707,8 @@
     "id": "place-59",
     "heading": "Evidence and handovers",
     "lines": [
-     118,
-     118
+     120,
+     120
     ],
     "sha256": "f6205ba906432a594e11b5110a87c3db6e9be5efadfdf4d00043dadeaa71b8d5",
     "units": [
@@ -7702,8 +7717,8 @@
     "clauses": [
      {
       "lines": [
-       118,
-       118
+       120,
+       120
       ],
       "units": [
        "LO1.2"
@@ -7723,8 +7738,8 @@
     "id": "place-29",
     "heading": "Evidence and handovers",
     "lines": [
-     119,
-     119
+     121,
+     121
     ],
     "sha256": "a2502b90345834dbdb98331b7d58c283b8d7c1249af9da033ba0b46609dab9dc",
     "units": [
@@ -7733,8 +7748,8 @@
     "clauses": [
      {
       "lines": [
-       119,
-       119
+       121,
+       121
       ],
       "units": [
        "AU11.3"
@@ -7754,8 +7769,8 @@
     "id": "place-30",
     "heading": "Evidence and handovers",
     "lines": [
-     121,
-     123
+     123,
+     125
     ],
     "sha256": "45040450870ec95bf359f4e1ef2217fb34ca1fac16197fdb24dc0eac1771c6d8",
     "units": [
@@ -7764,8 +7779,8 @@
     "clauses": [
      {
       "lines": [
-       121,
-       121
+       123,
+       123
       ],
       "units": [
        "AU11.4"
@@ -7778,8 +7793,8 @@
      },
      {
       "lines": [
-       123,
-       123
+       125,
+       125
       ],
       "units": [
        "AU11.4"
@@ -7796,8 +7811,8 @@
     "id": "place-31",
     "heading": "Evidence and handovers",
     "lines": [
-     125,
-     129
+     127,
+     131
     ],
     "sha256": "3fccc8cb065fa4a01b32709b86ff1226418b54a346e18913d85e727c6847c8d6",
     "units": [
@@ -7807,26 +7822,12 @@
     "clauses": [
      {
       "lines": [
-       125,
-       125
-      ],
-      "units": [
-       "AC0.3",
-       "AC0.4"
-      ],
-      "audience": [
-       "architect",
-       "manager",
-       "orchestrator"
-      ]
-     },
-     {
-      "lines": [
        127,
        127
       ],
       "units": [
-       "AC0.3"
+       "AC0.3",
+       "AC0.4"
       ],
       "audience": [
        "architect",
@@ -7843,6 +7844,20 @@
        "AC0.3"
       ],
       "audience": [
+       "architect",
+       "manager",
+       "orchestrator"
+      ]
+     },
+     {
+      "lines": [
+       131,
+       131
+      ],
+      "units": [
+       "AC0.3"
+      ],
+      "audience": [
        "curator",
        "reviewer",
        "worker"
@@ -7854,8 +7869,8 @@
     "id": "place-32",
     "heading": "Evidence and handovers",
     "lines": [
-     131,
-     131
+     133,
+     133
     ],
     "sha256": "3d001bd657415b47a59f704be420aa19ceb3933a1629a2e18166d579ccc59f12",
     "units": [
@@ -7866,8 +7881,8 @@
     "clauses": [
      {
       "lines": [
-       131,
-       131
+       133,
+       133
       ],
       "units": [
        "AC0.1",
@@ -7891,8 +7906,8 @@
     "id": "place-33",
     "heading": "Evidence and handovers",
     "lines": [
-     133,
-     133
+     135,
+     135
     ],
     "sha256": "df670b13b3403a8035a44d5ebba9feb22b77cd21ba0ca985b5bd27faa960d9e3",
     "units": [
@@ -7908,8 +7923,8 @@
     "clauses": [
      {
       "lines": [
-       133,
-       133
+       135,
+       135
       ],
       "units": [
        "AC2.2",
@@ -7931,8 +7946,8 @@
     "id": "place-34",
     "heading": "Evidence and handovers",
     "lines": [
-     135,
-     135
+     137,
+     137
     ],
     "sha256": "1965491b1fe9d033b4812baa05f3eb1a4b72d2155be9132260f46ba8a892964e",
     "units": [
@@ -7941,8 +7956,8 @@
     "clauses": [
      {
       "lines": [
-       135,
-       135
+       137,
+       137
       ],
       "units": [
        "AC2.10"
@@ -7957,8 +7972,8 @@
     "id": "place-35",
     "heading": "Evidence and handovers",
     "lines": [
-     137,
-     137
+     139,
+     139
     ],
     "sha256": "5553b3eb3180cb9d264d40ca9a27a023558b7fe445c39da2bbad32a352cdd2b9",
     "units": [
@@ -7971,8 +7986,8 @@
     "clauses": [
      {
       "lines": [
-       137,
-       137
+       139,
+       139
       ],
       "units": [
        "AC5.1",
@@ -7992,8 +8007,8 @@
     "id": "place-49",
     "heading": "Evidence and handovers",
     "lines": [
-     139,
-     139
+     141,
+     141
     ],
     "sha256": "74424015e10669d74b0a615666fba22542d397d434c62d38f257a15f17acf2a5",
     "units": [
@@ -8002,8 +8017,8 @@
     "clauses": [
      {
       "lines": [
-       139,
-       139
+       141,
+       141
       ],
       "units": [
        "AC5.6"
@@ -8020,8 +8035,8 @@
     "id": "place-36",
     "heading": "Attempts and repair records",
     "lines": [
-     143,
-     143
+     145,
+     145
     ],
     "sha256": "c2243d724268cc64a454f55c688012d6a1c88bfcf5943588bf82e5e91850fd6a",
     "units": [
@@ -8031,8 +8046,8 @@
     "clauses": [
      {
       "lines": [
-       143,
-       143
+       145,
+       145
       ],
       "units": [
        "AC3.2",
@@ -8048,8 +8063,8 @@
     "id": "place-37",
     "heading": "Attempts and repair records",
     "lines": [
-     145,
-     145
+     147,
+     147
     ],
     "sha256": "c8606a4379c84808203536f821f9e6d670fcb95084027c414bfdfd6a5d500f3b",
     "units": [
@@ -8059,8 +8074,8 @@
     "clauses": [
      {
       "lines": [
-       145,
-       145
+       147,
+       147
       ],
       "units": [
        "AC3.4",
@@ -8076,8 +8091,8 @@
     "id": "place-38",
     "heading": "Attempts and repair records",
     "lines": [
-     147,
-     147
+     149,
+     149
     ],
     "sha256": "c6fde4e810b516df87e8c8b39a308f4e73cd4f8530499117b94b18ef1e183129",
     "units": [
@@ -8086,8 +8101,8 @@
     "clauses": [
      {
       "lines": [
-       147,
-       147
+       149,
+       149
       ],
       "units": [
        "AC3.7"
@@ -8103,8 +8118,8 @@
     "id": "place-39",
     "heading": "Attempts and repair records",
     "lines": [
-     149,
-     149
+     151,
+     151
     ],
     "sha256": "bf8dfc60b69aa5909a74841461698285a9100a56a2c5e7b25794976b739cae8b",
     "units": [
@@ -8113,8 +8128,8 @@
     "clauses": [
      {
       "lines": [
-       149,
-       149
+       151,
+       151
       ],
       "units": [
        "AC4.1"

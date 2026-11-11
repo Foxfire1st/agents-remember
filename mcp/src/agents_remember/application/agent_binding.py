@@ -34,7 +34,7 @@ OTHER_PRODUCT_TOOL_SERVER = "agents-remember"
 
 
 # What the role start hands the host for one launch so that the agent's harness does not load
-# the tools of the product's other server (MIK-R132). The pinned host (0.11.1) offers this for
+# the tools of the product's other server. The pinned host (0.15.4) offers this for
 # Claude alone: it reads ``providerOptions.disallowedTools`` of the create request
 # (``providers/claude/options.js``, ``providers/claude/agent.js``) and hands it to the harness
 # as ``--disallowedTools``. The rule names the server and carries no star: the harness compares

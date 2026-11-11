@@ -3,7 +3,7 @@
 // times to the reader (F28). A served value finer than a millisecond is kept as served.
 import { expect, it } from 'vitest';
 
-import { formatLimitTime } from './pageParts';
+import { formatLimitTime } from './limitTime';
 
 const EXACT =
   /^[A-Z][a-z]{2} \d{1,2}, \d{4}, \d{2}:\d{2}:\d{2}\.\d{3} (?:GMT[+-]\d{1,2}(?::\d{2})?|UTC)(?: \(served .+\))?$/;

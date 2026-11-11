@@ -26,7 +26,7 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.closeout_external import _frozen_recorded_closeout
 from agents_remember.worktrees.modules.git import require_ancestor
 from agents_remember.worktrees.modules.record_landing import _judged_recorded_code
-from agents_remember.worktrees.series_closeout import _chain_ancestry, _SpineStep
+from agents_remember.worktrees.series_merge_admission import _chain_ancestry, _SpineStep
 from agents_remember.worktrees.services import (
     LandingGateRequest,
     WorktreeServices,

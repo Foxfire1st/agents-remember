@@ -136,6 +136,6 @@ A repair round for a Curator finding counts under the settings limit. Beyond it,
 Send an unresolved disagreement or authority issue to the Manager.
 <!-- ar:roles all -->
 
-Before responding to a non-work reply, empty or doubled-seat refusal, or an unreachable-Manager notice, read [Repair defects and report a refused handover](implementation.md#repair-defects-and-report-a-refused-handover) for its seat/problem report and retry procedure.
+Before responding to a non-work reply, empty or doubled-seat refusal, or an unreachable-Manager notice, read [Repair defects and report a refused handover](implementation.md#repair-defects-and-report-a-refused-handover) for its seat/problem report and the retry procedure through `role_message` on `agents-remember-task`.
 
 Before acting on a denied or unanswered harness request, read [Honor harness permission decisions](orientation.md#honor-harness-permission-decisions) for the waiting, denial and non-bypass rules.

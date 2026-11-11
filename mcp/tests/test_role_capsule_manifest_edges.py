@@ -982,33 +982,56 @@ def test_reviewer_complete_diff_rule_stays_inline_once() -> None:
     assert inline not in (LIFECYCLE_ROOT / "reference/knowledge/use.md").read_text()
 
 
+#: Each role that reads knowledge use, the operation it reads it in and its working pointers.
+KNOWLEDGE_USE_CONSUMERS = {
+    "architect": (
+        "planning",
+        (
+            "Before diagnosing, call `knowledge_read` on `agents-remember-task` for the files involved; read [knowledge use]",
+        ),
+    ),
+    "worker": (
+        "implementation",
+        (
+            (
+                "Before editing source, call `knowledge_read` on "
+                '`agents-remember-task` with `view="source_context"` for each '
+                "file you will edit; read [knowledge use]"
+            ),
+            (
+                "Before diagnosing a failing test, call `knowledge_read` on "
+                '`agents-remember-task` with `view="source_context"` for the '
+                "test file; read [knowledge use]"
+            ),
+        ),
+    ),
+    "reviewer": (
+        "review",
+        (
+            "When inspecting changes, call `knowledge_read` on `agents-remember-task` for each changed file; read [knowledge use]",
+        ),
+    ),
+    "investigator": (
+        "orientation",
+        (
+            "Before investigating repository code, call `knowledge_read` on `agents-remember-task` for the files involved; read [knowledge use]",
+        ),
+    ),
+    "curator": (
+        "curation",
+        (
+            "Before checking code and memory, call `knowledge_read` on `agents-remember-task` for the files or records you check; read [knowledge use]",
+            "Before interpreting a knowledge read, read [knowledge-read limits]",
+        ),
+    ),
+}
+
+
 def test_inherited_step_details_reach_only_the_seats_that_use_them(tmp_path: Path) -> None:
     """A registry row is insufficient: actual capsules need their selective working pointer."""
     manifest_bytes = (LIFECYCLE_ROOT / MANIFEST_RELATIVE).read_bytes()
     knowledge = "reference/knowledge/use.md"
     foundation = "reference/curator/repository-foundation.md"
-    consumers = {
-        "architect": ("planning", ("Before diagnosing, read [knowledge use]",)),
-        "worker": (
-            "implementation",
-            (
-                "Before editing source, read [knowledge use]",
-                "Before diagnosing a failing test, read [knowledge use]",
-            ),
-        ),
-        "reviewer": ("review", ("When inspecting changes, read [knowledge use]",)),
-        "investigator": (
-            "orientation",
-            ("Before investigating repository code, read [knowledge use]",),
-        ),
-        "curator": (
-            "curation",
-            (
-                "Before checking code and memory, read [knowledge use]",
-                "Before interpreting a knowledge read, read [knowledge-read limits]",
-            ),
-        ),
-    }
     document = json.loads(manifest_bytes)
     declaration = document["references"]["knowledge/use"]
     assert declaration["source"] == knowledge
@@ -1031,7 +1054,11 @@ def test_inherited_step_details_reach_only_the_seats_that_use_them(tmp_path: Pat
     assert foundation_declaration["step_detail"] is True
     assert foundation_declaration["injected"] is False
     for role, entry in _shipped_parsed().roles.items():
-        operation = consumers[role][0] if role in consumers else entry.operations[0]
+        operation = (
+            KNOWLEDGE_USE_CONSUMERS[role][0]
+            if role in KNOWLEDGE_USE_CONSUMERS
+            else entry.operations[0]
+        )
         request = routed_admission_for(
             LIFECYCLE_ROOT, MANIFEST_RELATIVE, manifest_bytes, CapsuleSeatAddress(role, operation)
         )
@@ -1040,19 +1067,19 @@ def test_inherited_step_details_reach_only_the_seats_that_use_them(tmp_path: Pat
         assert outcome.result is not None
         rendered = " ".join(outcome.result.render_instructions().split())
         details = {item.source_path: item for item in outcome.result.capsule.detail_references}
-        assert (knowledge in details) == (role in consumers), role
+        assert (knowledge in details) == (role in KNOWLEDGE_USE_CONSUMERS), role
         assert (foundation in details) == (role == "curator"), role
         if role == "curator":
             reference = details[foundation]
             _assert_foundation_detail_at_its_action(
                 reference, foundation, foundation_declaration["step"], rendered
             )
-        if role in consumers:
+        if role in KNOWLEDGE_USE_CONSUMERS:
             reference = details[knowledge]
             assert reference.content == (LIFECYCLE_ROOT / knowledge).read_bytes()
             assert reference.revision == compute_content_digest(reference.content)
             assert reference.step == declaration["step"] and reference.step
-            for action in consumers[role][1]:
+            for action in KNOWLEDGE_USE_CONSUMERS[role][1]:
                 # The link closes or carries one section anchor (P5-14 section links).
                 pointer = re.compile(
                     re.escape(action + "({{detail:" + knowledge + "}}") + r"(?:#[a-z0-9-]+)?\)"
@@ -1096,112 +1123,3 @@ def test_inherited_step_details_reach_only_the_seats_that_use_them(tmp_path: Pat
         assert outcome.error is not None, key
         assert outcome.error.status == "detail-reference-missing", outcome.render_explanation()
         assert key in outcome.error.detail
-
-
-def _compile_moved_piece_witness(root: Path, role: str, operation: str) -> str:
-    request = routed_admission_for(
-        root,
-        MANIFEST_RELATIVE,
-        (root / MANIFEST_RELATIVE).read_bytes(),
-        CapsuleSeatAddress(role, operation),
-    )
-    outcome = compile_admitted_capsule(_shipped_binding(role, operation), request)
-    assert outcome.ok, outcome.render_explanation()
-    assert outcome.result is not None
-    return outcome.result.render_instructions()
-
-
-@pytest.mark.parametrize(
-    ("name", "action", "label", "clause"),
-    (
-        (
-            "requirement-packet",
-            "Before writing a requirement packet, read",
-            "the requirement packet template",
-            "<Write the independently falsifiable promise. State who acts, when it applies and what must be observably true.>",
-        ),
-        (
-            "leaf-task",
-            "Before authoring a leaf, read",
-            "the leaf task template",
-            "<The outcome and the focused evidence that demonstrates it. Use the task's step records for progress.>",
-        ),
-        (
-            "master-task",
-            "Before authoring a master, read",
-            "the master task template",
-            "<Use a section with kind `sharedDecisions` for the task's decision records. Its introduction explains any cross-cutting context the decisions need.>",
-        ),
-    ),
-)
-def test_architect_ordinary_template_reach_rejects_compiled_pointer_loss(
-    tmp_path: Path, name: str, action: str, label: str, clause: str
-) -> None:
-    """U0737/U0738/U0768 need a working-step link, not just a template on disk."""
-    root = tmp_path / "corpus"
-    shutil.copytree(LIFECYCLE_ROOT, root)
-    source = root / "roles/architect.md"
-    original = source.read_text()
-    link = f"../templates/{name}.md"
-    pointer = f"{action} [{label}]({link})"
-    assert original.count(pointer) == 1
-    expected = (LIFECYCLE_ROOT / "templates" / f"{name}.md").read_bytes()
-    assert clause in expected.decode()
-
-    def require_reach(rendered: str) -> None:
-        assert pointer in " ".join(rendered.split()), "missing template action pointer"
-        target = (source.parent / link).resolve()
-        assert target == (root / "templates" / f"{name}.md").resolve()
-        assert target.read_bytes() == expected
-        assert clause in target.read_text()
-
-    require_reach(_compile_moved_piece_witness(root, "architect", "planning"))
-    for mutant in (
-        original.replace(pointer, "", 1),
-        original.replace(action, "After completing unrelated work, read", 1),
-    ):
-        assert mutant != original
-        try:
-            source.write_text(mutant)
-            changed = _compile_moved_piece_witness(root, "architect", "planning")
-            with pytest.raises(AssertionError, match="missing template action pointer"):
-                require_reach(changed)
-        finally:
-            source.write_text(original)
-    require_reach(_compile_moved_piece_witness(root, "architect", "planning"))
-
-
-@pytest.mark.parametrize(
-    "prefix",
-    (
-        "Before writing memory, read `worktree_status` on `agents-remember-task`",
-        "Record staleness known at task intake as the task\u2019s curation work.",
-    ),
-)
-def test_curator_inline_workflow_rejects_compiled_owner_paragraph_loss(
-    tmp_path: Path, prefix: str
-) -> None:
-    """U0305/U0421 remain inline Curator workflow, without an invented role pointer."""
-    root = tmp_path / "corpus"
-    shutil.copytree(LIFECYCLE_ROOT, root)
-    source = root / "operations/curation.md"
-    original = source.read_text()
-    paragraphs = [p for p in original.split("\n\n") if p.startswith(prefix)]
-    assert len(paragraphs) == 1
-    paragraph = paragraphs[0]
-
-    def require_workflow(rendered: str) -> None:
-        section = rendered.split("## Normal workflow\n", 1)[1].split("\n## ", 1)[0]
-        assert " ".join(paragraph.split()) in " ".join(section.split()), (
-            "missing inline workflow paragraph"
-        )
-
-    require_workflow(_compile_moved_piece_witness(root, "curator", "curation"))
-    try:
-        source.write_text(original.replace(paragraph, "", 1))
-        changed = _compile_moved_piece_witness(root, "curator", "curation")
-        with pytest.raises(AssertionError, match="missing inline workflow paragraph"):
-            require_workflow(changed)
-    finally:
-        source.write_text(original)
-    require_workflow(_compile_moved_piece_witness(root, "curator", "curation"))

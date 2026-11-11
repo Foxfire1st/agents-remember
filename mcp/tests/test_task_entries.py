@@ -12,9 +12,16 @@ from agents_remember.observer.host_activity import (
     PublishedAgentActivity,
     TaskAgentActivity,
 )
-from agents_remember.observer.task_entries import build_task_entries, task_counts, task_state
+from agents_remember.observer.projection import TaskEntry
+from agents_remember.observer.task_entries import (
+    TaskWaitFacts,
+    build_task_entries,
+    task_counts,
+    task_state,
+)
 from agents_remember.serving.projections.snapshots_impl._task_documents import read_task_sources
 from agents_remember.tasks import TaskDocument, write_task_doc
+from pydantic import ValidationError
 
 NOW = datetime(2026, 10, 15, tzinfo=UTC)
 
@@ -453,3 +460,90 @@ def test_conflicting_membership_is_deterministic_reciprocal_and_reachable(
             "a": [("names-another-master", None)],
             "b": [("names-another-master", None)],
         }
+
+
+# --- a declared wait shows as waiting -----------------------------------------------------------
+
+
+def _waiting_seat(
+    check_due: datetime | None,
+    *,
+    state: str = "idle",
+    since: datetime = NOW - timedelta(minutes=2),
+) -> TaskAgentActivity:
+    """A seat whose turn ended with a declared wait the plugin published beside its idle state."""
+
+    wait: dict[str, object] = {
+        "waitsFor": ["background"],
+        "since": since,
+        "detail": "lanes, pid 42",
+    }
+    if check_due is not None:
+        wait["checkDueAt"] = check_due
+    activity = PublishedAgentActivity.model_validate(
+        {"state": state, "eventAt": since, "declaredWait": wait}
+    )
+    return TaskAgentActivity("repo/master/leaf.json", activity, agent_id="seat-1", role="worker")
+
+
+def _state_of(*seats: TaskAgentActivity, now: datetime = NOW):
+    return task_state(
+        "inProgress",
+        [seat.activity for seat in seats],
+        host_known=True,
+        waits=TaskWaitFacts(seats, now),
+    )
+
+
+def test_a_seat_whose_declared_wait_is_still_to_be_checked_shows_as_waiting() -> None:
+    since = NOW - timedelta(minutes=2)
+    state = _state_of(_waiting_seat(NOW + timedelta(minutes=1), since=since))
+    assert state.activity == "waiting"
+    assert state.eventAt == since.isoformat(), "since when it waits"
+    assert state.providerLimit is None
+    assert state.waitingSeats is not None
+    [seat] = state.waitingSeats
+    assert (seat.agentId, seat.role, seat.waitsFor, seat.detail) == (
+        "seat-1",
+        "worker",
+        ("background",),
+        "lanes, pid 42",
+    )
+    assert seat.checkDueAt == NOW + timedelta(minutes=1), "the check that is due"
+    assert state.model_dump(exclude_none=True)["waitingSeats"][0]["since"] == since
+
+
+def test_a_wait_past_its_check_no_wait_and_an_ended_seat_are_paused_and_work_wins() -> None:
+    assert _state_of(_waiting_seat(NOW - timedelta(minutes=2))).activity == "paused"
+    assert _state_of(_waiting_seat(None)).activity == "paused", "a wait with no check armed"
+    assert _state_of(_waiting_seat(NOW + timedelta(minutes=1), state="ended")).activity == "paused"
+    # Within the grace the plugin's own republication is awaited, not judged.
+    assert _state_of(_waiting_seat(NOW - timedelta(seconds=30))).activity == "waiting"
+    working = TaskAgentActivity(
+        "repo/master/leaf.json", PublishedAgentActivity(state="in-turn", eventAt=NOW), agent_id="b"
+    )
+    both = _state_of(_waiting_seat(NOW + timedelta(minutes=1)), working)
+    assert (both.activity, both.waitingSeats) == ("works", None)
+
+
+def test_waiting_is_counted_on_its_own() -> None:
+    state = _state_of(_waiting_seat(NOW + timedelta(minutes=1)))
+    entry = TaskEntry(**state.model_dump(), key="k", id="leaf-1", title="Leaf")
+    counts = task_counts([entry])
+    assert (counts.started, counts.waiting, counts.paused, counts.works) == (1, 1, 0, 0)
+
+
+def test_the_published_wait_is_validated_and_forbids_every_other_key() -> None:
+    good = {"waitsFor": ["subagent", "background"], "since": "2026-11-11T09:00:00Z"}
+    activity = PublishedAgentActivity.model_validate({"state": "idle", "declaredWait": good})
+    assert activity.declaredWait is not None
+    assert activity.declaredWait.checkDueAt is None
+    for bad in (
+        {**good, "since": "2026-11-11T09:00:00"},
+        {**good, "waitsFor": []},
+        {**good, "waitsFor": ["helpers"]},
+        {**good, "endsAt": "2026-11-11T09:20:00Z"},
+        {**good, "detail": "x" * 301},
+    ):
+        with pytest.raises(ValidationError):
+            PublishedAgentActivity.model_validate({"state": "idle", "declaredWait": bad})

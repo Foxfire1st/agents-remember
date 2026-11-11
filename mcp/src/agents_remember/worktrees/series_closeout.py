@@ -7,10 +7,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.kernel.coordination_context.models import (
-    LANDING_WORKFLOW_LOCAL,
-    LANDING_WORKFLOW_PULL_REQUEST,
-)
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import completion_blockers
 from agents_remember.tasks.document_refs import (
@@ -25,15 +21,8 @@ from agents_remember.worktrees.modules.git import (
     branch_commit,
     is_ancestor,
     repository_identity,
-    require_ancestor,
     require_git,
     worktree_dirty,
-)
-from agents_remember.worktrees.publication_admission import (
-    PublicationMergeUnreadable,
-    landing_workflow,
-    publication_merge_admitted,
-    publication_ranges,
 )
 from agents_remember.worktrees.publication_admission import (
     # Re-exported on purpose: this module's published seam keeps the rule reachable here.
@@ -43,6 +32,13 @@ from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
 from agents_remember.worktrees.queue.closeout_recovery import MemoryCloseoutOutcome
 from agents_remember.worktrees.scheduling_mode import effective_execution_nature
 from agents_remember.worktrees.series_leaf_contracts import exact_atomic_leaf_contracts
+from agents_remember.worktrees.series_merge_admission import (
+    _leaf_points,
+    _merge_admission,
+    _require_admitted_step,
+    _SpineStep,
+    _sync_entry_pairs,
+)
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
@@ -436,8 +432,8 @@ def _chain_joint_positions(
     """The joint pairs an empty landing may stand on (MIK-R61 rule 1).
 
     The chain's origin, every reconciled source position the chain's own syncs recorded
-    (the series contract's and every ordered leaf's, as the spine proof reads them), and
-    every ordered leaf's landing pair.
+    (the series contract's and every ordered leaf's, as the spine proof reads them, with a
+    repository-default sync's source pair), and every ordered leaf's landing pair.
     """
 
     external = series.memory_mode == "external"
@@ -451,8 +447,8 @@ def _chain_joint_positions(
         positions.add(pair(origin_code, origin_memory))
     for contract in (series, *ordered):
         for entry in contract.sync_log:
-            positions.add(pair(entry.get("codeBaseFrom", ""), entry.get("memoryBaseFrom", "")))
-            positions.add(pair(entry.get("codeBaseTo", ""), entry.get("memoryBaseTo", "")))
+            for code, memory in _sync_entry_pairs(entry):
+                positions.add(pair(code, memory))
     for leaf in ordered:
         positions.add(pair(leaf.integrated_code_commit, leaf.integrated_memory_content_commit))
     return {position for position in positions if position[0]}
@@ -839,372 +835,22 @@ def _spine_facts(
 ) -> tuple[list[str], list[str], str, Path, str]:
     """The landings, the leaf bases, the recorded base, the repository, and the ref name."""
 
+    landings, bases = _leaf_points(ordered, side=side)
     if side == "code":
         return (
-            [leaf.integrated_code_commit for leaf in ordered],
-            [leaf.code_base_commit for leaf in ordered],
+            landings,
+            bases,
             series.code_base_commit,
             series.code_repo_path,
             series.code_work_branch,
         )
     return (
-        [leaf.integrated_memory_content_commit for leaf in ordered],
-        [leaf.memory_base_commit for leaf in ordered],
+        landings,
+        bases,
         series.memory_base_commit,
         _memory_repository(series),
         series.memory_work_branch,
     )
-
-
-@dataclass(frozen=True)
-class _SpineStep:
-    """One step on a series spine: the side it is proved on, what lands after it, and the master."""
-
-    side: str
-    step: str
-    task_id: str
-
-
-@dataclass(frozen=True)
-class _MergeAdmission:
-    """Which merges one spine side admits (MIK-R52 rule 4).
-
-    ``heads`` are the sync-produced heads the sync log records on this side; ``leaf_ranges`` are
-    ``(leaf_id, base, integrated)`` per landed leaf, whose own history a merge may lie inside;
-    ``positions`` are every official position (the recorded base and each reconciled parent
-    position), which a merge from the parent line descends toward. ``legacy`` is true when some
-    sync log entry has no recorded head: an entry written before this leaf cannot name the merge
-    it produced, so a merge that is already an ancestor of a recorded landing or position stays
-    silent (it predates verifiable history and later judgments covered its content), while a merge
-    past every recorded point is still judged.
-    """
-
-    heads: tuple[str, ...]
-    leaf_ranges: tuple[tuple[str, str, str], ...]
-    positions: tuple[str, ...]
-    legacy: bool
-    authority_ranges: tuple[tuple[str, str, str], ...] = ()
-    workflow: str = LANDING_WORKFLOW_LOCAL
-    """The repository's landing workflow (MIK-R202@v2 rules 13 and 14).
-
-    ``local`` admits nothing new: this proof is exactly the one every master line had. ``pull-request``
-    adds one admission below -- the merge that published a leaf's landing -- and only that merge.
-    """
-
-
-def _merge_admission(
-    series: WorktreeContract,
-    ordered: list[WorktreeContract],
-    *,
-    side: str,
-) -> _MergeAdmission:
-    """The merge admission for one spine side, from the chain's own sync evidence."""
-
-    landings, bases, _recorded_base, _repository, _branch = _spine_facts(series, ordered, side=side)
-    positions = _landing_source_positions(series, ordered, side=side)
-    key = "codeHeadTo" if side == "code" else "memoryHeadTo"
-    heads: list[str] = []
-    legacy = False
-    for contract in (series, *ordered):
-        for entry in contract.sync_log:
-            head = entry.get(key, "")
-            if head:
-                heads.append(head)
-            else:
-                legacy = True
-    leaf_ranges = tuple(
-        (leaf.leaf_id, base, landing)
-        for leaf, base, landing in zip(ordered, bases, landings, strict=True)
-        if leaf.leaf_id and base and landing
-    )
-    return _MergeAdmission(
-        heads=tuple(heads),
-        leaf_ranges=leaf_ranges,
-        authority_ranges=publication_ranges(ordered, side),
-        positions=positions,
-        legacy=legacy,
-        workflow=_landing_workflow(series),
-    )
-
-
-def _landing_workflow(series: WorktreeContract) -> str:
-    """The landing workflow this series lands under (MIK-R202@v2 rule 13).
-
-    The value itself is read in ``publication_admission``; here it is converted into this proof's
-    own refusal so an unreadable or invalid setting is named rather than quietly becoming ``local``
-    (MIK-R202@v2 v2 seam, L194-V2-002). A missing key still means ``local``, and that decision is
-    the parser's, not this wrapper's.
-    """
-
-    try:
-        return landing_workflow(series)
-    except (OSError, ValueError) as error:
-        raise CloseoutQueueError(
-            "atomic-series-landing-workflow-invalid",
-            f"atomic series {getattr(series, 'code_branch', '?')} cannot read its landing workflow "
-            f"({error}); the landing is blocked until the repository's settings name one of "
-            f"{LANDING_WORKFLOW_LOCAL!r} or {LANDING_WORKFLOW_PULL_REQUEST!r}",
-        ) from error
-
-
-def _publication_merge_admitted(
-    repository: Path,
-    merge: str,
-    admission: _MergeAdmission,
-    step: _SpineStep,
-) -> bool:
-    """Ask the publication rule about one merge, refusing an unreadable input in this proof's words.
-
-    The rule and its git reading live in ``publication_admission`` (MIK-R202@v2 rule 14); this keeps
-    the chain proof's evaluation order and its refusal text exactly where they were.
-    """
-
-    try:
-        return publication_merge_admitted(
-            repository,
-            merge,
-            workflow=admission.workflow,
-            authority_ranges=admission.authority_ranges,
-        )
-    except PublicationMergeUnreadable as error:
-        raise CloseoutQueueError(
-            "atomic-series-leaf-chain-invalid",
-            f"atomic series {step.side} ref {error}; the landing is blocked until the trees can "
-            "be read",
-        ) from error
-
-
-def _chain_ancestry(
-    repository: Path, ancestor: str, descendant: str, *, step: _SpineStep, what: str
-) -> bool:
-    """Ancestry inside the landing chain proof: rc 1 is a legitimate non-ancestor.
-
-    Any other Git failure refuses as an unreadable input instead of passing as
-    non-membership (MIK-R52 F01): a failed read never silently admits or condemns.
-    """
-
-    try:
-        return require_ancestor(repository, ancestor, descendant, what=what)
-    except RuntimeError as error:
-        raise CloseoutQueueError(
-            "atomic-series-leaf-chain-invalid",
-            f"atomic series {step.side} ref cannot read its landing ancestry ({error}); "
-            "the landing is blocked until the trees can be read",
-        ) from error
-
-
-def _require_admitted_merges(
-    repository: Path,
-    earlier: str,
-    later: str,
-    admission: _MergeAdmission,
-    step: _SpineStep,
-) -> None:
-    """Refuse a merge on the line that no sync, leaf history or parent line admits (MIK-R52 rule 4).
-
-    The non-merge walk lists commits with ``--no-merges``, so a hand-made merge commit with
-    content of its own used to pass: both parents admitted, the merge itself skipped. Every merge
-    in the step is therefore listed too. A merge must be a head that a sync log entry records, lie
-    inside a landed leaf's own history, or come from the parent line. The refusal names each
-    foreign merge.
-    """
-
-    if earlier == later:
-        return
-    try:
-        listed = require_git(
-            repository, ["rev-list", "--merges", "--full-history", later, "--not", earlier]
-        )
-    except (RuntimeError, subprocess.SubprocessError) as error:
-        raise CloseoutQueueError(
-            "atomic-series-leaf-chain-invalid",
-            f"atomic series {step.side} ref cannot list its merges from {earlier} to {later} "
-            f"({type(error).__name__}: {error}); the landing is blocked until the trees can be "
-            "read",
-        ) from error
-    candidates = listed.split()
-    if admission.legacy:
-        # A merge already inside proven history predates verifiable sync heads and stays
-        # silent; a merge past every recorded landing and position is new history and is
-        # still judged. Without this bound a legacy line would admit a hand-made merge at
-        # its tip unexamined.
-        points = {position for position in admission.positions if position}
-        points.update(landing for _leaf_id, _base, landing in admission.leaf_ranges if landing)
-        candidates = [
-            merge
-            for merge in candidates
-            if not any(
-                _chain_ancestry(repository, merge, point, step=step, what=f"the merge {merge}")
-                for point in points
-            )
-        ]
-    foreign = [
-        merge
-        for merge in candidates
-        if merge not in admission.heads
-        and not _publication_merge_admitted(repository, merge, admission, step)
-        and not any(
-            _chain_ancestry(repository, base, merge, step=step, what=f"the merge {merge}")
-            and _chain_ancestry(repository, merge, integrated, step=step, what=f"the merge {merge}")
-            for _leaf_id, base, integrated in admission.leaf_ranges
-        )
-        and not any(
-            _chain_ancestry(repository, merge, position, step=step, what=f"the merge {merge}")
-            for position in admission.positions
-            if position
-        )
-    ]
-    if foreign:
-        raise CloseoutQueueError(
-            "atomic-series-leaf-chain-invalid",
-            f"master {step.task_id!r}: the series {step.side} line holds merges this proof "
-            f"admits nowhere at {step.step}: {', '.join(foreign)}. A master line holds only leaf "
-            "landings and its parent line; take the commit off the master branch and make the "
-            "change in a leaf",
-        )
-
-
-def _require_admitted_step(
-    repository: Path,
-    earlier: str,
-    later: str,
-    step: _SpineStep,
-    merge_admission: _MergeAdmission,
-) -> None:
-    """Refuse a step that adds history beyond the earlier landing and the official positions.
-
-    ``--no-merges`` is what makes a merge the reconciliation device rather than a loophole: a merge
-    introduces no commit of its own, so only genuinely new non-merge history is refused. The merge
-    commit itself is judged separately (:func:`_require_admitted_merges`, MIK-R52 rule 4), because
-    a hand-made merge with content of its own passes the non-merge walk while both its parents are
-    admitted.
-
-    The step's commits are ENUMERATED and each one is tested for membership in the recorded
-    positions. They are never subtracted from the revision walk: ``--not <a position>`` removes
-    every commit that position reaches, so a single recorded position descending from the step's own
-    endpoint removed the whole step and the check passed vacuously -- which is how a genuinely
-    foreign commit could be admitted. A position that reaches past the step can no longer erase it,
-    and the position still admits the step it actually records.
-
-    "Admits the step it actually records" is why a position INSIDE the step admits its own ancestry
-    too. The shape this rule names is one landing merged with an official position the contract
-    itself synced with, and when that merge is the step's own endpoint the whole step IS that
-    position's history: ``8dfc11b8`` on the 260915-KS master is exactly that merge -- its parents are
-    the previous landing ``7db50f8f`` and the synced position ``8dd62345``, and every commit the step
-    adds is reachable from ``8dd62345``. Admitting the position while refusing the line it introduced
-    refused the very shape the rule exists to allow. The admission stays bounded to the positions
-    this call was given: a position that merely descends FROM the step is not inside it, so it still
-    cannot vacate a commit the step genuinely introduced.
-    """
-
-    if earlier == later:
-        return
-    if not _chain_ancestry(
-        repository,
-        earlier,
-        later,
-        step=step,
-        what=f"the step from {earlier} to {later}",
-    ):
-        raise CloseoutQueueError(
-            "atomic-series-leaf-chain-invalid",
-            f"atomic series {step.side} ref does not carry {step.step} in the leaf landing order "
-            f"({earlier} is not an ancestor of {later}); repair that landing record in the "
-            "enclosure's series-contract.md or the ref, then retry closeout",
-        )
-    revision_args = [
-        "rev-list",
-        "--no-merges",
-        "--full-history",
-        later,
-        "--not",
-        earlier,
-    ]
-    if step.side == "memory":
-        revision_args.extend(["--", ".", ":(top,exclude)memory.md"])
-    admitted = set(merge_admission.positions)
-    official = _positions_inside_the_step(repository, earlier, later, admitted, step)
-    foreign = [
-        commit
-        for commit in require_git(repository, revision_args).split()
-        if commit not in admitted
-        and not _reached_by_an_official_position(repository, commit, official, step)
-    ]
-    if foreign:
-        raise CloseoutQueueError(
-            "atomic-series-leaf-chain-invalid",
-            f"atomic series {step.side} ref adds history beyond the exact leaf landing chain and the "
-            f"reconciled source line at {step.step}: {', '.join(foreign)}. Move those "
-            "commits off the master line (or land them through a leaf), or record the official "
-            "position they came from with worktree_sync, then retry closeout",
-        )
-    _require_admitted_merges(repository, earlier, later, merge_admission, step)
-
-
-def _positions_inside_the_step(
-    repository: Path,
-    earlier: str,
-    later: str,
-    positions: set[str],
-    step: _SpineStep,
-) -> tuple[str, ...]:
-    """The recorded positions INSIDE this step: strictly after its start, at or before its end.
-
-    A position past the step is deliberately excluded, and so is the start itself. Excluding the
-    start costs nothing -- the revision walk already removes everything the start reaches -- while
-    excluding a position past the step is what keeps the enumeration honest: such a position reaches
-    the whole step and would erase a commit the step genuinely introduced.
-    """
-
-    return tuple(
-        position
-        for position in sorted(positions)
-        if position != earlier
-        and _chain_ancestry(
-            repository, earlier, position, step=step, what=f"the position {position}"
-        )
-        and _chain_ancestry(repository, position, later, step=step, what=f"the position {position}")
-    )
-
-
-def _reached_by_an_official_position(
-    repository: Path,
-    commit: str,
-    official: tuple[str, ...],
-    step: _SpineStep,
-) -> bool:
-    """Whether a position inside this step reaches the commit, so the step is that position's line."""
-
-    return any(
-        _chain_ancestry(repository, commit, position, step=step, what=f"the commit {commit}")
-        for position in official
-    )
-
-
-def _landing_source_positions(
-    series: WorktreeContract,
-    ordered: list[WorktreeContract],
-    *,
-    side: str,
-) -> tuple[str, ...]:
-    """Every official position the chain's own syncs reconciled with, and the recorded base.
-
-    A sync is journaled on the contract it ran for, and that is not always the series contract: the
-    master's own reconciliation writes its entry here, while a leaf whose base had to be advanced
-    writes its entry on the leaf's contract -- which is the only place that position is recorded.
-    Reading the series contract alone therefore hid a leaf-level sync from this check and refused a
-    step to a base the leaf's own contract records as synced, so both are read here. The union is
-    still bounded by the chain's own evidence: every contract named here is one of the ordered
-    leaves this closeout already proved landed, so a position no contract ever synced with stays
-    inadmissible.
-    """
-
-    key = "codeBaseTo" if side == "code" else "memoryBaseTo"
-    base = series.code_base_commit if side == "code" else series.memory_base_commit
-    positions = {base}
-    for contract in (series, *ordered):
-        positions.update(entry.get(key, "") for entry in contract.sync_log)
-    return tuple(sorted(position for position in positions if position))
 
 
 def _require_atomic_leaf_landed(

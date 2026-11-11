@@ -16,6 +16,7 @@ from agents_remember.models.worktree import (
     MemorySyncChoice,
     SyncResolutionAction,
     SyncResolutionInput,
+    SyncSource,
 )
 
 from .lazy import tools
@@ -175,6 +176,7 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         memory_sync_choice: MemorySyncChoice | None = None,
         resolution_action: SyncResolutionAction | None = None,
         dry_run: bool = False,
+        sync_source: SyncSource | None = None,
     ) -> dict[str, Any]:
         """Pull the official line into a live worktree. Returns synced,
         already-current, would-sync, sync-active, sync-resolution-required,
@@ -182,14 +184,15 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         Tree changes mark the prior review pre-sync and offer a new review; sync movement
         never blocks. The product merges memory lines only here; raw git merge is a hand edit
         it cannot prevent. Every memory landing judges its tree; a fast-forward judges what
-        it adopts before moving any ref.
+        it adopts before moving any ref. sync_source="repository-default": default branch,
+        base pair kept.
 
         Reference: docs/reference/mcp-tools.md."""
         return tools.worktree_sync_payload(
             config,
             contract_path,
             memory_sync_choice=memory_sync_choice,
-            resolution=SyncResolutionInput(action=resolution_action),
+            resolution=SyncResolutionInput(action=resolution_action, source=sync_source),
             dry_run=dry_run,
         )
 

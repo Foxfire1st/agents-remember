@@ -51,12 +51,12 @@ from agents_remember.worktrees.knowledge_crossing import (
 )
 from agents_remember.worktrees.services import CrossingPlanView, bind_worktree_services
 from agents_remember.worktrees.services import worktree_services as bound_worktree_services
+from agents_remember.worktrees.sync_transaction_completion import successful_crossings
 from agents_remember.worktrees.sync_transaction_git import (
     SideMergeOutcome,
     _needs_crossing_report,
 )
 from agents_remember.worktrees.sync_transaction_git import _merge as sync_git_merge
-from agents_remember.worktrees.sync_transaction_recovery import successful_crossings
 from agents_remember.worktrees.sync_transaction_state import (
     SyncOperationRecord,
     SyncOperationStore,

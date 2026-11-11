@@ -21,9 +21,9 @@ Use the required workspace facts in [the operation's required inputs](../operati
 
 Explain the changes before the first question. Run every step through its owning surface. Before an effectful setup step, read [the verification requirements](../operations/bootstrap.md#evidence-and-result-verification) for preview and result readback. Ask and record the developer's decisions, and write the report.
 
-Before reading and reporting the knowledge foundation's state, read [knowledge-foundation states]({{detail:reference/bootstrap/foundation-state.md}}#read-the-state) for the state fields and report distinctions.
+Before reading and reporting the knowledge foundation's state, read [knowledge-foundation states]({{detail:reference/bootstrap/foundation-state.md}}#read-the-state) for the state fields of the `knowledge` block that `memory_init` on `agents-remember-task` returns and report distinctions.
 
-Before using a knowledge command or its result, read [knowledge commands]({{detail:reference/knowledge/commands.md}}) for its interface and effects.
+Before using a knowledge command or its result, read [knowledge commands]({{detail:reference/knowledge/commands.md}}) for the interface and effects of `memory_init`, `memory_baseline_status` and `read_ar_files` on `agents-remember-task` and of the other commands.
 
 ## Report
 
@@ -37,7 +37,7 @@ Produce no second completion post. A finding kept only in the conversation is a 
 
 Use these setup surfaces on `agents-remember-task`: `runtime_install`, `memory_init`, `memory_baseline_status`, `memory_baseline_adopt` and `user_settings_init`.
 
-Before initializing user settings or handling an existing settings file, follow [Write the initial user settings](../operations/bootstrap.md#4-write-the-initial-user-settings) for the one-write limit, preview, readback and preservation of existing choices.
+Before initializing user settings or handling an existing settings file, follow [Write the initial user settings](../operations/bootstrap.md#4-write-the-initial-user-settings) for the one-write limit of `user_settings_init` on `agents-remember-task`, preview, readback and preservation of existing choices.
 
 For read-only resolution and retrieval, use `context_packet`, `server_info` and `read_ar_files` on `agents-remember-task`. `context_packet` answers where the caller works and what needs action. Ask `read_ar_files` which cards govern a path, then read the named files with your own tools.
 

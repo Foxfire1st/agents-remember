@@ -113,6 +113,11 @@ LANDING_KEPT_KEYS: dict[str, frozenset[str]] = {
             "manualRepair",
             "codeBaseCommit",
             "memoryBaseCommit",
+            # The chosen sync source and the resolved branches and tips.
+            "syncSource",
+            "sources",
+            # Parked authoring a resolution dropped: totals, per-class counts and report path.
+            "omissions",
             "nextTool",
             "nextArgs",
             "nextOperation",

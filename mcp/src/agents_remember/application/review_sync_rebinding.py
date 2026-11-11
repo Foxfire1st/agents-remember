@@ -41,6 +41,7 @@ from agents_remember.models.knowledge.review_sync_rebinding import (
     tree_sync_verdict,
 )
 from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
+from agents_remember.models.worktree import SyncOmissionsProjection
 from agents_remember.observer.events import now_iso
 from agents_remember.worktrees.modules.future_code_candidate import capture_future_code_candidate
 from agents_remember.worktrees.modules.git import head_commit, worktree_candidate_tree
@@ -77,6 +78,11 @@ _CARRIED_NOTHING: dict[str, tuple[str, str]] = {
         "not-resolved",
         "the sync stopped with unmerged paths the knowledge adapter would not settle, so no pair was "
         "resolved to measure the review against",
+    ),
+    "sync-resolution-incomplete": (
+        "omissions-awaiting-reconciliation",
+        "the continue reported parked authoring the resolved tree does not hold, so the owner still "
+        "reconciles it and no pair was resolved to measure the review against",
     ),
     "sync-cancelled": (
         "cancelled",
@@ -260,6 +266,8 @@ def _nothing_to_bind_block(contract: WorktreeContract, payload: dict[str, Any]) 
         }
     if not resolved_pair_completed(payload):
         state = str(payload.get("state", ""))
+        if state == "sync-resolution-required":
+            return _resolution_required_block(payload)
         if payload.get("ok") or state not in _CARRYING_SYNC_STATES:
             reason = _CARRIED_NOTHING.get(state)
             if reason is not None:
@@ -274,6 +282,50 @@ def _nothing_to_bind_block(contract: WorktreeContract, payload: dict[str, Any]) 
         "state": selection.state,
         "selection_state": selection.state,
         "detail": selection.detail,
+        "covers_resolved_pair": False,
+    }
+
+
+def _resolution_required_block(payload: dict[str, Any]) -> dict[str, Any]:
+    """Name the resolution kind: a retained merge or a parked candidate reapply.
+
+    A resumed parked reapply whose last continue recorded an omission report carries the
+    omission block beside ``resolution``, at the payload's top level, as the sync answer does.
+    """
+
+    resolution = payload.get("resolution")
+    parked = isinstance(resolution, dict) and bool(resolution.get("wipRestore"))
+    omissions = payload.get("omissions")
+    if parked and isinstance(omissions, dict):
+        return _omissions_awaiting_block(SyncOmissionsProjection.model_validate(omissions))
+    if parked:
+        return {
+            "state": "parked-reapplication",
+            "detail": (
+                "the sync retained the parked closing-time candidate and its stash for the owner to "
+                "resolve, so no pair was resolved to measure the review against"
+            ),
+            "covers_resolved_pair": False,
+        }
+    return {
+        "state": "retained-merge",
+        "detail": (
+            "the sync stopped with unmerged paths in a retained merge of the official line, so no "
+            "pair was resolved to measure the review against"
+        ),
+        "covers_resolved_pair": False,
+    }
+
+
+def _omissions_awaiting_block(omissions: SyncOmissionsProjection) -> dict[str, Any]:
+    shaped = ", ".join(f"{kind} {count}" for kind, count in (omissions.omittedByKind or {}).items())
+    return {
+        "state": "omissions-awaiting-reconciliation",
+        "detail": (
+            f"the parked candidate was reapplied but {omissions.omittedItems} authored item(s) "
+            f"are absent from the resolved tree{f' ({shaped})' if shaped else ''}; reconcile "
+            f"them against {omissions.report}"
+        ),
         "covers_resolved_pair": False,
     }
 

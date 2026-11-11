@@ -23,7 +23,7 @@ from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecoveryCommits,
 )
-from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction
+from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction, SyncSource
 from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
 
 if TYPE_CHECKING:
@@ -55,6 +55,7 @@ class WorktreeArgs:
     memory_choice: str | None = None
     stale_base_choice: str | None = None
     memory_sync_choice: MemorySyncChoice | None = None
+    sync_source: SyncSource | None = None
     resolution_action: SyncResolutionAction | None = None
     custom_instruction: str | None = None
     lifecycle_id: str = ""

@@ -80,7 +80,7 @@ Read and report the knowledge foundation's state, then name the next step at the
 
 ## Identify an unfamiliar failure state
 
-When a step returns a state you cannot name, read [the failure states]({{detail:reference/bootstrap/failure-states.md}}) before interpreting it. An agent that cannot name the state is guessing.
+When a step returns a state you cannot name, read [the failure states]({{detail:reference/bootstrap/failure-states.md}}) before interpreting it: it names the states that `memory_init`, `memory_baseline_status`, `user_settings_init`, `server_info`, `context_packet` and `runtime_install` on `agents-remember-task` return. An agent that cannot name the state is guessing.
 
 ## Evidence and result verification
 

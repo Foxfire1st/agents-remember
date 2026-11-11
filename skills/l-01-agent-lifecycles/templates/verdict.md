@@ -34,6 +34,10 @@ This template shapes the artifact; it does not author rules. The sections below 
 9. Before adjudicating a requirement attempt, read [Independently judge the exact manifestation](../core/acceptance.md#independently-judge-the-exact-manifestation) for its acceptance boundary.
 10. Before appending the Reviewer record, read [Append the independent review record](../core/acceptance.md#append-the-independent-review-record) for record ownership and the five rejection classes. Use the block below and link the authoritative journal anchor.
 11. Before reporting successor dispositions, read [review Boundaries](../operations/review.md#boundaries) for the mode and sealed-finding rules. Preserve its admitted additions in the fields below.
+12. **Name the bound catalogs.** Fill the Catalog Binding section: the review type, the catalogs
+   the Reviewer's binding table gives for it, and for each conditional catalog whether its condition
+   holds for this change and why. The Criteria Catalog Results table then covers every bound catalog.
+   A verdict without the Catalog Binding section is incomplete.
 
 ## Additions to a sealed findings list
 
@@ -107,10 +111,16 @@ Failure class: `<one of the five classes defined by [Append the independent revi
 | ----------- | --------------------------- | ------- | ------------------------------------ |
 | <route>     | notes/reports/<route-report>.md | pass, pass-with-notes, or block | <paths/owners/tests> |
 
+## Catalog Binding (every verdict; the binding table in roles/reviewer.md)
+- review type: <the review type's row in "Bind the seam and catalogs">
+- catalogs the table gives: <every catalog that row binds unconditionally>
+- conditional catalogs: <catalog>: bound | not bound, <why, naming the changed surfaces that decide it> (for example "doctrine: bound, the change includes eight role files"; "onboarding-memory: not bound, no onboarding in the change") | none
+
 ## Criteria Catalog Results
 | Criterion (id · catalog) | Ran | Finding | Evidence |
 | ------------------------ | --- | ------- | -------- |
 | <CS-1 · code-seam>       | yes | none    | <what was refute-tested> |
+| <CS-7 · code-seam>       | yes | none    | <every added or altered line checked against `system/coding-guidelines.md`> |
 
 ## Durable-Evidence Promotion Hold Point
 | Artifact | Decision | Owner + consumers | Executable contract or expiry/removal | Lifecycle validator |
@@ -172,10 +182,16 @@ Before handing over the leaf verdict, read [Receive the intake and hand over the
 - evidence: <verdict and route evidence refs, all task-relative and digest-bound>
 - integration seam: <master-to-parent movement only>
 
+## Catalog Binding (every verdict; the binding table in roles/reviewer.md)
+- review type: <the review type's row in "Bind the seam and catalogs">
+- catalogs the table gives: <every catalog that row binds unconditionally>
+- conditional catalogs: <catalog>: bound | not bound, <why, naming the changed surfaces that decide it> (for example "doctrine: bound, the change includes eight role files"; "onboarding-memory: not bound, no onboarding in the change") | none
+
 ## Criteria Catalog Results
 | Criterion (id · catalog) | Ran | Finding | Evidence |
 | ------------------------ | --- | ------- | -------- |
 | <CS-1 · code-seam>       | yes | none    | <what was refute-tested> |
+| <CS-7 · code-seam>       | yes | none    | <every added or altered line checked against `system/coding-guidelines.md`> |
 
 ## Findings (ranked; each refute-tested)
 | # | Severity | Route | Finding | Evidence file/ref | Refutation attempted | Survives? |
@@ -237,10 +253,16 @@ The master owner records its review begin and result on the canonical master doc
 - master-side route overviews current: yes | <finding>
 - backing evidence file: <onboarding-coherency report path>
 
+## Catalog Binding (every verdict; the binding table in roles/reviewer.md)
+- review type: <the review type's row in "Bind the seam and catalogs">
+- catalogs the table gives: <every catalog that row binds unconditionally>
+- conditional catalogs: <catalog>: bound | not bound, <why, naming the changed surfaces that decide it> (for example "doctrine: bound, the change includes eight role files"; "onboarding-memory: not bound, no onboarding in the change") | none
+
 ## Criteria Catalog Results (baseline: every bound criterion; fix-verification: sealed-ID evidence only — see roles/reviewer.md)
 | Criterion (id · catalog) | Ran | Finding | Evidence |
 | ------------------------ | --- | ------------- | -------- |
 | <CS-1 · code-seam>       | yes | none | <what was walked/checked> |
+| <CS-7 · code-seam>       | yes | none | <every added or altered line checked against `system/coding-guidelines.md`> |
 - Proposed catalog amendments (baseline only): <surviving novel finding-class → catalog + evidence> | none
 
 ## Findings (ranked; each refute-tested)
@@ -306,10 +328,16 @@ reviewer does not.
 - carryover and ledger mapping coherent under the branch carry-over guide (`docs/guides/carryover-from-branch.md`) for the recorded landing line: yes | <finding>
 - backing evidence file: <onboarding-coherency report path>
 
+## Catalog Binding (every verdict; the binding table in roles/reviewer.md)
+- review type: <the review type's row in "Bind the seam and catalogs">
+- catalogs the table gives: <every catalog that row binds unconditionally>
+- conditional catalogs: <catalog>: bound | not bound, <why, naming the changed surfaces that decide it> (for example "doctrine: bound, the change includes eight role files"; "onboarding-memory: not bound, no onboarding in the change") | none
+
 ## Criteria Catalog Results (baseline: every bound criterion; fix-verification: sealed-ID evidence only — see roles/reviewer.md)
 | Criterion (id · catalog) | Ran | Finding | Evidence |
 | ------------------------ | --- | ------------- | -------- |
 | <CS-1 · code-seam>       | yes | none | <what was walked/checked> |
+| <CS-7 · code-seam>       | yes | none | <every added or altered line checked against `system/coding-guidelines.md`> |
 - Proposed catalog amendments (baseline only): <surviving novel finding-class → catalog + evidence> | none
 
 ## Findings (ranked; each refute-tested)
@@ -334,7 +362,7 @@ reviewer does not.
 
 A full-loop leaf review or a plan review submitted by the Architect uses the **master-exit variant's shape minus the gate machinery**. Drop the `gate evidence` header row and the Judge-Evidence Note: neither review attaches to a gate. Set `decider` to the leaf's owning seat for a leaf review, or to the Architect for a plan review. Scope it to the round's change set or **the reviewed plan**. For a leaf, use the direct Worker repair section instead of a Manager fix-leaf request.
 
-Keep everything else: recommendation, Criteria Catalog Results with the bound catalogs (for example, `plan-review` + `report-verification` for a plan review), ranked refute-tested findings and fix decomposition. The verdict is **evidence to the recipient, never a decision**. Keep the mandatory Requirement Adjudication section and one block per stable ID + version. The Architect accepts the plan review's adjudications.
+Keep everything else: recommendation, Catalog Binding, Criteria Catalog Results with the bound catalogs (for example, `plan-review` + `report-verification` for a plan review), ranked refute-tested findings and fix decomposition. The verdict is **evidence to the recipient, never a decision**. Keep the mandatory Requirement Adjudication section and one block per stable ID + version. The Architect accepts the plan review's adjudications.
 
 Before writing a delta-verification section, read [review boundaries](../operations/review.md#boundaries) for successor findings and the required retained history. Append a dated delta section to this same artifact. Record the preceding result, exact outstanding identifiers and their fixed/unfixed dispositions, and retain earlier accepted adjudications.
 

@@ -54,8 +54,8 @@ A packet adding a row kind, disposition, writer field or gate must explain in th
 
 ## Deliver a direct-coordination review intake
 
-<!-- ar:gives leaf-review-intake to reviewer: mode, task-and-purpose, seam, requirement-set, catalogs, tools-file -->
-Only under developer-chosen direct coordination, start a leaf Reviewer on the reviewed leaf with its sprint and master. Send its intake as your first `role_message` on `agents-remember-task` to the returned agent identifier. Include the review mode, canonical task and review purpose, seam, exact requirement set with identifiers, versions, packets and the durable [approval record](../core/every-role.md#requirements-and-limits), bound catalogs, and resolved `system/tools.md`.
+<!-- ar:gives leaf-review-intake to reviewer: mode, task-and-purpose, seam, requirement-set, tools-file -->
+Only under developer-chosen direct coordination, start a leaf Reviewer on the reviewed leaf with its sprint and master. Send its intake as your first `role_message` on `agents-remember-task` to the returned agent identifier. Include the review mode, canonical task and review purpose, seam, exact requirement set with identifiers, versions, packets and the durable [approval record](../core/every-role.md#requirements-and-limits), and resolved `system/tools.md`.
 
 Plan-review and super-exit have no startable Reviewer seat. Take either review to the developer yourself, with the sprint-level Reviewer idea.
 

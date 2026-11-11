@@ -167,7 +167,7 @@ def test_empty_missing_and_unbuildable_base_trees(tmp_path: Path) -> None:
     packet = _summarize(
         code_repository_root=code,
         context=_context(memory, tmp_path),
-        base=lambda _root, _candidate: (None, "the base cache is unreachable"),
+        base=lambda _root, _candidate: ((), "the base cache is unreachable"),
     )
     assert packet["violationCount"] == 1, packet
     (finding,) = packet["violationSample"]
@@ -205,7 +205,7 @@ def test_carried_anchor_is_refused_as_carried_stale_never_as_new(tmp_path: Path)
     assert plain["violationSample"][0]["rule"] == "R22.6-anchor-path", plain
 
     def _leaf_base(_root: Path, _candidate: Any) -> tuple[Any, str | None]:
-        return knowledge_tree_from_directory(base_dir), None
+        return (knowledge_tree_from_directory(base_dir),), None
 
     based = _summarize(
         code_repository_root=code, context=_context(memory, tmp_path), base=_leaf_base

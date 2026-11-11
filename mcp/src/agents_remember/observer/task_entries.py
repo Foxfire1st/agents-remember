@@ -6,7 +6,7 @@ import posixpath
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -14,6 +14,7 @@ from agents_remember.observer.host_activity import (
     HostActivitySnapshot,
     PublishedAgentActivity,
     TaskAgentActivity,
+    WaitingSeat,
 )
 from agents_remember.observer.projection import (
     EnclosureNode,
@@ -88,19 +89,30 @@ class TaskLimitFacts:
     now: datetime | None = None
 
 
+@dataclass(frozen=True)
+class TaskWaitFacts:
+    """The task's seats, and the instant their declared waits are judged at."""
+
+    seats: Iterable[TaskAgentActivity] = ()
+    now: datetime | None = None
+
+
 def task_state(
     status: str,
     agents: Iterable[PublishedAgentActivity],
     *,
     host_known: bool,
     limited: TaskLimitFacts | None = None,
+    waits: TaskWaitFacts | None = None,
 ) -> TaskState:
     """Terminal/planned stage wins; only a whole host observation can say paused.
 
     MIK-R190 rule 4: an agent works when it is in a turn (``in-turn`` or
     ``permission``) or when it has a running provider subagent and has not ended —
     which is what Paseo's own workspace list shows. Rule 13 adds the task's
-    provider limit beside it, from the one limited-fact file.
+    provider limit beside it, from the one limited-fact file. A task none of whose
+    agents works, but one of whose seats has a declared wait still to be checked,
+    is ``waiting`` rather than ``paused``: its seats name what they wait for.
     """
 
     stage = _STAGES[status]
@@ -110,13 +122,18 @@ def task_state(
         return TaskState(stage="started", activity="unknown")
     observed = list(agents)
     working = [agent for agent in observed if agent_works(agent)]
+    waiting = (
+        [] if working or waits is None else _waiting_seats(waits.seats, waits.now or now_utc())
+    )
     contributors = working or observed
     times = [event for event in (_event_of(agent) for agent in contributors) if event is not None]
+    if waiting:
+        times = [min(seat.since for seat in waiting)]
     event = max(times) if times else None
-    activity = "works" if working else "paused"
+    activity = "works" if working else "waiting" if waiting else "paused"
     provider = (
         task_provider_limit(limited.limits, limited.seats, limited.now or now_utc())
-        if not working and limited is not None
+        if not working and not waiting and limited is not None
         else None
     )
     return TaskState(
@@ -124,7 +141,50 @@ def task_state(
         activity=activity,
         eventAt=event.isoformat() if event is not None else None,
         providerLimit=provider,
+        waitingSeats=waiting or None,
     )
+
+
+# How long past its check a declared wait still counts: the plugin acts on the check at its
+# due time and then republishes, so a reader a moment behind it does not flip the seat.
+WAIT_CHECK_GRACE = timedelta(seconds=60)
+
+
+def agent_waits(agent: PublishedAgentActivity, now: datetime) -> bool:
+    """A seat that declared a wait and whose check is still to come waits; it has not stopped.
+
+    The one definition of "this agent is waiting": the task state and the stall clock read it.
+    The host still reports such a seat idle. Its wait counts only while the plugin's check is
+    armed and not past due: the check is the bound the plugin can see, since the end a seat
+    names for its process is its own words. A wait whose check went out, failed or was never
+    armed again counts no more, and the seat is judged as any idle seat.
+    """
+
+    wait = agent.declaredWait
+    if wait is None or wait.checkDueAt is None or agent.state == "ended":
+        return False
+    return now < wait.checkDueAt + WAIT_CHECK_GRACE
+
+
+def _waiting_seats(seats: Iterable[TaskAgentActivity], now: datetime) -> list[WaitingSeat]:
+    """The task's seats that wait, each with its declared wait, in seat order."""
+
+    waiting: list[WaitingSeat] = []
+    for seat in seats:
+        wait = seat.activity.declaredWait
+        if wait is None or not agent_waits(seat.activity, now):
+            continue
+        waiting.append(
+            WaitingSeat(
+                agentId=seat.agent_id,
+                role=seat.role,
+                waitsFor=wait.waitsFor,
+                since=wait.since,
+                checkDueAt=wait.checkDueAt,
+                detail=wait.detail,
+            )
+        )
+    return waiting
 
 
 def agent_works(agent: PublishedAgentActivity) -> bool:
@@ -166,16 +226,39 @@ def _limit_facts(
     return None if host.limits is None else TaskLimitFacts(host.limits, tuple(seats))
 
 
+@dataclass(frozen=True)
+class _SeatView:
+    """The host's seats grouped by task, judged at one instant for the whole build."""
+
+    host: HostActivitySnapshot
+    agents: dict[str, list[PublishedAgentActivity]]
+    seats: dict[str, list[TaskAgentActivity]]
+    now: datetime
+
+    def state(self, status: str, key: str) -> TaskState:
+        return task_state(
+            status,
+            self.agents[key],
+            host_known=self.host.known,
+            limited=_limit_facts(self.host, self.seats[key]),
+            waits=TaskWaitFacts(self.seats[key], self.now),
+        )
+
+
 def build_task_entries(
     sources: list[TaskDocumentSource],
     enclosures: list[EnclosureNode],
     host: HostActivitySnapshot,
+    now: datetime | None = None,
 ) -> TaskEntries:
+    # One instant for every task of this build, so two seats' waits are judged alike.
+    now = now or now_utc()
     agents: dict[str, list[PublishedAgentActivity]] = defaultdict(list)
     seats: dict[str, list[TaskAgentActivity]] = defaultdict(list)
     for agent in host.agents:
         agents[agent.task_key].append(agent.activity)
         seats[agent.task_key].append(agent)
+    view = _SeatView(host, agents, seats, now)
     by_key: dict[str, TaskEntry] = {}
     by_binding: dict[tuple[str, str, str], TaskEntry] = {}
     for source in sources:
@@ -195,12 +278,7 @@ def build_task_entries(
                 }
             )
         )
-        state = task_state(
-            doc.status,
-            agents[ref.key],
-            host_known=host.known,
-            limited=_limit_facts(host, seats[ref.key]),
-        )
+        state = view.state(doc.status, ref.key)
         entry = TaskEntry(
             **state.model_dump(),
             key=ref.key,
@@ -229,14 +307,12 @@ def build_task_entries(
             key = ref.key if ref is not None else f"{parent.key}#{row.id}"
             child = by_key.get(key)
             if child is None:
-                state = task_state(
-                    row.status,
-                    agents[key],
-                    host_known=host.known,
-                    limited=_limit_facts(host, seats[key]),
-                )
                 child = TaskEntry(
-                    **state.model_dump(), key=key, reference=ref, id=row.id, title=row.title
+                    **view.state(row.status, key).model_dump(),
+                    key=key,
+                    reference=ref,
+                    id=row.id,
+                    title=row.title,
                 )
                 by_key[key] = child
             _place_listed_child(parent, child, row, authored.get(key), membership)

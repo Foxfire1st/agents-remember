@@ -256,7 +256,7 @@ COORDINATION_ACTION_STEPS = (
         (
             "Before starting a role and delivering its first intake, read [Start one canonical role "
             "assignment](../operations/coordination.md#start-one-canonical-role-assignment) for the "
-            "permitted starters and [Start leaf stages and deliver the first "
+            "permitted starters of `role_start` and [Start leaf stages and deliver the first "
             "intake](../operations/coordination.md#start-leaf-stages-and-deliver-the-first-intake)",
         ),
     ),

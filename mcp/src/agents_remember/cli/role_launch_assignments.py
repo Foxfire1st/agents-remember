@@ -57,8 +57,9 @@ def bootstrap_assignment(report_path: str, *, started_by: Any | None) -> str:
     )
     return (
         "Bootstrap launch: set one repository up through the surfaces that own each step "
-        "and report what actually happened. Ask the developer which code repository they "
-        "mean, which branch is its memory's foundation, whether the memory repository is new "
+        "(runtime_install, memory_init, memory_baseline_status, memory_baseline_adopt and "
+        "user_settings_init) and report what actually happened. Ask the developer which code "
+        "repository they mean, which branch is its memory's foundation, whether the memory repository is new "
         "or existing, and whether providers should index now or be deferred; invent no "
         "repository, branch, task or identity, and create no task, worktree or role. "
         f"Write the setup report to {report_path} and name on its first line where it "

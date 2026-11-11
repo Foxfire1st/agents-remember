@@ -3,24 +3,25 @@
 from __future__ import annotations
 
 import logging
-import subprocess
 from pathlib import Path
 from typing import Literal
 
 from agents_remember.models.worktree import SyncSide
-from agents_remember.worktrees.cutover_lock import (
-    CUTOVER_LOCK_CODE,
-    legacy_format_refusal,
+from agents_remember.worktrees.integration.integration_branch_repository import (
+    BranchAuthorityUnavailable,
 )
-from agents_remember.worktrees.knowledge_crossing import CrossingSyncError, merge_base
 from agents_remember.worktrees.knowledge_validation import (
-    LayoutProbeError,
     PairedCode,
-    has_layout_marker,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.git import branch_commit
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.sync_omission_report import OmissionReportError, write_report
+from agents_remember.worktrees.sync_parked_omissions import journal_omissions, measure
+from agents_remember.worktrees.sync_source_strategy import (
+    SELECTABLE_SYNC_SOURCES,
+    SyncSourceStrategy,
+    source_strategy,
+)
 from agents_remember.worktrees.sync_transaction_authority import (
     authority_refs_exist,
     command_result,
@@ -32,10 +33,10 @@ from agents_remember.worktrees.sync_transaction_authority import (
     restore_parked_wip,
     settle_resolved_parked_wip,
     side_record,
-    source_pair,
     sync_contract_kind,
     update_record,
 )
+from agents_remember.worktrees.sync_transaction_cutover import cutover_locked
 from agents_remember.worktrees.sync_transaction_git import (
     SyncFastForwardValidationError,
     SyncGitProofError,
@@ -86,6 +87,10 @@ from agents_remember.worktrees.sync_transaction_results import (
     resolution_validation_preview,
     sync_preview,
     terminal_resolution_replay,
+)
+from agents_remember.worktrees.sync_transaction_sources import (
+    moved_source_sides,
+    resolve_sync_sources,
 )
 from agents_remember.worktrees.sync_transaction_state import (
     SyncJournalReadError,
@@ -222,6 +227,14 @@ def sync_input_refusal(
             fetch,
             invalidField="memory_sync_choice",
         )
+    if args.sync_source is not None and args.sync_source not in SELECTABLE_SYNC_SOURCES:
+        return command_result(
+            2,
+            "sync-input-invalid",
+            "sync_source must be omitted or exactly 'repository-default'.",
+            fetch,
+            invalidField="sync_source",
+        )
     if args.resolution_action not in {None, "continue", "cancel"}:
         return command_result(
             2,
@@ -268,16 +281,24 @@ def _admit_and_run(
     predecessor: SyncOperationRecord | None,
     fetch: dict[str, object],
 ) -> WorktreeCommandResult:
-    code_tip, memory_tip, external = source_pair(contract)
-    code = side_record(contract, "code", code_tip)
-    memory = side_record(contract, "memory", memory_tip) if external else None
-    _clear_entry_git_locks(contract, code, memory)
-    current = _already_current_result(
-        contract,
-        code,
-        memory,
-        fetch,
+    try:
+        selection = resolve_sync_sources(contract, args.sync_source)
+    except BranchAuthorityUnavailable as error:
+        return command_result(
+            2,
+            "sync-source-unavailable",
+            "The repository-default source cannot be resolved; nothing moved.",
+            fetch,
+            detail=str(error),
+        )
+    code = side_record(contract, "code", selection.code_tip, selection.code_branch)
+    memory = (
+        side_record(contract, "memory", selection.memory_tip, selection.memory_branch)
+        if selection.external
+        else None
     )
+    _clear_entry_git_locks(contract, code, memory)
+    current = _already_current_result(contract, code, memory, fetch, selection.strategy)
     if current is not None:
         return current
     if memory is not None and memory.plan == "merge" and args.memory_sync_choice is None:
@@ -299,119 +320,6 @@ def _admit_and_run(
     return _run_automatic(contract, store, record, fetch)
 
 
-def _sync_side_outcome(repository: Path, memory: SyncSideRecord) -> tuple[str, str]:
-    """How the preflight judges the sync's exact sides, with the judged sides named.
-
-    Returns the outcome (``admit``, ``legacy`` or ``out-of-format``) and the exact
-    judged sides as ``preSyncHead <sha>, sourceCommit <sha>`` plus
-    ``merge base <sha>`` for a merge, so refusals name what was judged.
-    ``admit``: already current or ``skip-memory`` never reach here; a fast-forward that takes a
-    converted source converts by taking it; a merge with a converted side is the crossing sync;
-    all converted sides run as today. ``legacy``: a fast-forward of two unconverted sides, or a
-    merge of three unconverted sides, refuses with the one ``legacy-format`` message.
-    ``out-of-format``: a fast-forward from an unconverted source onto a converted target refuses,
-    since the source would take the line out of the text format. Probes may raise
-    :class:`LayoutProbeError` or :class:`CrossingSyncError`, which refuse by name.
-    """
-
-    if memory.plan == "merge":
-        base = merge_base(repository, memory.preSyncHead, memory.sourceCommit)
-        sides = (
-            f"preSyncHead {memory.preSyncHead}, sourceCommit {memory.sourceCommit}, "
-            f"merge base {base}"
-        )
-        if any(
-            has_layout_marker(repository, side)
-            for side in (base, memory.preSyncHead, memory.sourceCommit)
-        ):
-            return "admit", sides  # the crossing sync, as today (MIK-R24 rule 8), or all converted
-        return "legacy", sides  # the plain Git merge of memory is gone
-    sides = f"preSyncHead {memory.preSyncHead}, sourceCommit {memory.sourceCommit}"
-    states = {
-        side: has_layout_marker(repository, side)
-        for side in (memory.preSyncHead, memory.sourceCommit)
-    }
-    if all(states.values()):
-        return "admit", sides
-    if not states[memory.preSyncHead] and states[memory.sourceCommit]:
-        return "admit", sides  # the line converts by taking the converted source
-    if states[memory.preSyncHead] and not states[memory.sourceCommit]:
-        return "out-of-format", sides
-    return "legacy", sides
-
-
-def _cutover_locked(
-    memory: SyncSideRecord | None, fetch: dict[str, object]
-) -> WorktreeCommandResult | None:
-    """MIK-R46 rule 3: judge the exact sides of the sync before anything moves.
-
-    The preflight probes ``preSyncHead``, ``sourceCommit`` and, for a merge, their merge base
-    (:func:`_sync_side_outcome`):
-
-    * already current, or ``skip-memory``: any sides, as today (no memory side moves);
-    * fast-forward, target unconverted and source converted: admitted, as today -- the line
-      converts by taking the converted source;
-    * fast-forward, both unconverted: refused, ``legacy-format``;
-    * fast-forward, target converted and source unconverted: refused -- the source would take
-      the line out of the text format;
-    * merge, base/own/incoming all unconverted: refused, ``legacy-format`` -- the plain Git
-      merge of memory is gone;
-    * merge, at least one unconverted and one converted: the crossing sync, as today;
-    * fast-forward or merge, all converted: as today.
-
-    A sync that was already in flight is continued or cancelled, as today. A probe Git cannot
-    answer refuses by name and is never read as converted or unconverted.
-    """
-
-    if memory is None or memory.plan in {"already-current", "skip"}:
-        return None
-    repository = Path(memory.repository)
-    line = f"{memory.workBranch} ({memory.worktree})"
-    try:
-        outcome, sides = _sync_side_outcome(repository, memory)
-    except (LayoutProbeError, CrossingSyncError) as error:
-        return command_result(
-            2,
-            f"sync-{CUTOVER_LOCK_CODE}",
-            "The memory sync is refused: it cannot tell whether a memory side holds the layout "
-            f"marker ({error}), and an unanswered probe is never read as converted or unconverted "
-            "memory",
-            fetch,
-        )
-    if outcome == "admit":
-        return None
-    if outcome == "out-of-format":
-        return command_result(
-            2,
-            f"sync-{CUTOVER_LOCK_CODE}",
-            "The memory sync is refused: its source is unconverted and would take a "
-            "converted line out of the text format.",
-            fetch,
-            detail=legacy_format_refusal(
-                repository,
-                operation="worktree_sync",
-                subject=(
-                    f"the memory sync of {line} ({sides}): its target holds converted memory "
-                    "(knowledge/layout.json) and its source does not, so a fast-forward "
-                    "would take the line out of the text format -- convert the source "
-                    "line first"
-                ),
-            ),
-        )
-    detail = legacy_format_refusal(
-        repository,
-        operation="worktree_sync",
-        subject=f"the memory sync of {line} ({sides})",
-    )
-    return command_result(
-        2,
-        f"sync-{CUTOVER_LOCK_CODE}",
-        "The memory sync is refused: its memory is unconverted and must cross the boundary first.",
-        fetch,
-        detail=detail,
-    )
-
-
 def _admit_participating_sides(
     contract: WorktreeContract,
     code: SyncSideRecord,
@@ -421,13 +329,11 @@ def _admit_participating_sides(
 ) -> tuple[SyncSideRecord, SyncSideRecord | None] | WorktreeCommandResult:
     """Refuse, preview, or park: everything that precedes the journaled admission."""
 
-    preflight = _cutover_locked(memory, fetch) or _preflight_participating_sides(
-        code, memory, fetch
-    )
+    preflight = cutover_locked(memory, fetch) or _preflight_participating_sides(code, memory, fetch)
     if preflight is not None:
         return preflight
     if args.dry_run:
-        return sync_preview(code, memory, fetch)
+        return sync_preview(code, memory, fetch, sync_source=args.sync_source)
     return _park_participating_wip(contract, code, memory, fetch)
 
 
@@ -547,17 +453,17 @@ def _already_current_result(
     code: SyncSideRecord,
     memory: SyncSideRecord | None,
     fetch: dict[str, object],
+    strategy: SyncSourceStrategy,
 ) -> WorktreeCommandResult | None:
     """Report a pair whose recorded base and work branches already carry the source.
 
     A memory branch that already descends from its source is current whatever its
     ``memory.md`` says: the ledger is derived state, its rebuild reports the rows it
     cannot resolve, and this surface does not keep a second copy of that judgement.
+    The source strategy says whether the recorded base pair must carry the sources.
     """
 
-    bases_current = code.sourceCommit == contract.code_base_commit and (
-        memory is None or memory.sourceCommit == contract.memory_base_commit
-    )
+    bases_current = strategy.bases_current(contract, code, memory)
     branches_current = code.plan == "already-current" and (
         memory is None or memory.plan == "already-current"
     )
@@ -589,6 +495,7 @@ def _new_sync_record(
         memoryBaseFrom=contract.memory_base_commit,
         phase="running-code",
         memorySyncChoice=args.memory_sync_choice,
+        **source_strategy(args.sync_source).record_fields(contract),
         code=code,
         memory=memory,
         createdAt=stamp,
@@ -659,14 +566,22 @@ def _resume_active(
             record,
             fetch,
         )
+    if args.sync_source is not None and args.sync_source != record.syncSource:
+        return manual_repair_result(
+            "sync-input-mismatch",
+            "sync_source cannot change after sync admission.",
+            record,
+            fetch,
+        )
     if args.dry_run:
-        return _active_preview(args, record, fetch)
+        return _active_preview(contract, args, record, fetch)
     if initial_admission:
         pin_authority(record)
     return _resume_live(contract, args, store, record, fetch)
 
 
 def _active_preview(
+    contract: WorktreeContract,
     args: WorktreeArgs,
     record: SyncOperationRecord,
     fetch: dict[str, object],
@@ -678,7 +593,7 @@ def _active_preview(
     if record.phase in {"code-resolution-required", "memory-resolution-required"}:
         side = _retained_side(record)
         if side.wipState == "restore-conflict":
-            return parked_wip_validation_preview(side, fetch)
+            return parked_wip_validation_preview(record, side, contract, fetch)
         return resolution_validation_preview(side, fetch)
     return manual_repair_result(
         "sync-resolution-not-required",
@@ -939,7 +854,7 @@ def _continue_resolution(
             record,
             fetch,
         )
-    moved = _moved_source_sides(record)
+    moved = source_strategy(record.syncSource).moved_default(record) or moved_source_sides(record)
     if moved is not None:
         return manual_repair_result(
             "sync-source-moved",
@@ -951,38 +866,6 @@ def _continue_resolution(
     if side.wipState == "restore-conflict":
         return _continue_parked_wip_restore(contract, store, record, fetch)
     return _finish_retained_merge(contract, store, record, fetch)
-
-
-def _moved_source_sides(record: SyncOperationRecord) -> str | None:
-    """Refuse a continue onto a tip the official line has left behind (MIK-R61 rule 12).
-
-    A sync journaled onto a tip the line left behind is ended with cancel, not continued
-    onto it: continuing would carry the stale tip, and a stale merge stops at the commit
-    check on findings later landings already repaired. A new sync onto the line's current
-    tip then starts as every sync does.
-    """
-
-    for side in (record.code, record.memory):
-        if side is None or side.plan in {"already-current", "skip"}:
-            continue
-        repository = Path(side.repository)
-        try:
-            tip = branch_commit(repository, side.sourceBranch)
-        except (RuntimeError, subprocess.SubprocessError, OSError) as error:
-            return (
-                f"The {side.side} source tip cannot be read ({error}); the retained "
-                "resolution cannot continue onto an unreadable line. Run worktree_sync "
-                "again once the line reads, or cancel it with resolution_action='cancel'."
-            )
-        if tip != side.sourceCommit:
-            return (
-                f"The {side.side} source line moved since this sync was admitted "
-                f"({side.sourceBranch} is at {tip}, the sync carries {side.sourceCommit}). "
-                "End this sync with worktree_sync and resolution_action='cancel', then "
-                "start a new sync onto the line's current tip; it is not continued onto "
-                "the tip the line left behind."
-            )
-    return None
 
 
 def _retained_side(record: SyncOperationRecord) -> SyncSideRecord:
@@ -1111,6 +994,36 @@ def _continue_parked_wip_restore(
     side_name: SyncSide = "code" if record.phase == "code-resolution-required" else "memory"
     side = record.code if side_name == "code" else record.memory
     assert side is not None
+    # The omission check runs only after the unmerged-path check: a worktree still holding
+    # conflict markers is an unfinished resolution, not a resolved tree missing parked
+    # authoring. The memory side's root memory.md cache is excluded from parked capture, so
+    # the cache is never counted as an omission either.
+    conflicts = content_conflicts(side)
+    if conflicts:
+        refreshed = side.model_copy(update={"conflictFiles": conflicts})
+        record = update_record(store, record, phase=record.phase, side=refreshed)
+        named = ", ".join(conflicts)
+        return manual_repair_result(
+            "sync-resolution-incomplete",
+            _incomplete_resolution_summary(
+                refreshed, f"The parked candidate still has unmerged paths: {named}."
+            ),
+            record,
+            fetch,
+        )
+    try:
+        omissions = write_report(measure(side, contract, record))
+    except OmissionReportError as error:
+        return manual_repair_result("sync-resolution-incomplete", str(error), record, fetch)
+    if omissions.omittedItems:
+        record = journal_omissions(store, record, side_name, side, omissions)
+        return manual_repair_result(
+            "sync-resolution-incomplete",
+            omissions.summary(side),
+            record,
+            fetch,
+            omissions=omissions.as_payload(),
+        )
     try:
         record = settle_resolved_parked_wip(store, record, side_name, side)
     except SyncGitProofError as error:
