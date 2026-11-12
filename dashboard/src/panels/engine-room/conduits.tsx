@@ -23,28 +23,14 @@ function isReplayLane(edge: EngineProcessEdge, strategy: string | undefined): bo
   return (edge.kind === "integration" || edge.kind === "integration-mem") && strategy === "replay";
 }
 
-function isCloneArc(edge: EngineProcessEdge): boolean {
-  return edge.kind === "cgc-seed" || edge.kind === "grepai-clone";
-}
-
-function conduitOpacity(edge: EngineProcessEdge, retiring: boolean, cloneArc: boolean): number {
-  return retiring
-    ? 0
-    : cloneArc
-      ? (edge.state === "running" ? 1 : 0)
-      : edge.state === "planned"
-        ? 0
-        : 1;
+function conduitOpacity(edge: EngineProcessEdge, retiring: boolean): number {
+  return retiring ? 0 : edge.state === "planned" ? 0 : 1;
 }
 
 function conduitTitle(edge: EngineProcessEdge, replay: boolean): string {
   return `${edge.label}${edge.detail ? ` — ${edge.detail}` : ""}${
     replay ? " — replay (rebased onto moved main)" : ""
   }`;
-}
-
-function conduitTransitionDelay(animate: boolean, cloneArc: boolean, opacity: number): number {
-  return animate && cloneArc && opacity === 0 ? 0.45 : 0;
 }
 
 function conduitDraw(edge: EngineProcessEdge): "on" | undefined {
@@ -83,15 +69,10 @@ export function Conduit({ edge, strategy, retiring = false, ghosted = false }: {
   // triangle, never "around parallel work". The replay fact is recorded as data-strategy (for a future text
   // chip / glyph in the panel) but the path itself stays straight.
   const isReplay = isReplayLane(edge, strategy);
-  // The provider-clone arrows sweep across the whole stage from the official engine to the worktree
-  // engine — CGC bows OVER the top, GrepAI UNDER the bottom (the "copies + rewrites index" / "clones
-  // vector DB" beat). Transient: shown only while running, gone at idle (see the opacity below).
-  const cloneArc = isCloneArc(edge);
-  const d = conduitPathD(edge) ?? `M${x1} ${y1} L ${x2} ${y2}`; // straight lane, or the clone BOW (shared helper)
+  const d = conduitPathD(edge) ?? `M${x1} ${y1} L ${x2} ${y2}`; // straight lane (shared helper)
   // At cleanup the worktree side de-materialises; fade every worktree conduit to 0 so the yellow
-  // connector lines retract with the enclosure instead of dangling to the disposed nodes (the official line
-  // keeps its own `officialWire` conduits, which are not in `node.edges`).
-  const opacity = conduitOpacity(edge, retiring, cloneArc);
+  // connector lines retract with the enclosure instead of dangling to the disposed nodes.
+  const opacity = conduitOpacity(edge, retiring);
   return (
     <motion.g
       data-testid="conduit"
@@ -99,15 +80,11 @@ export function Conduit({ edge, strategy, retiring = false, ghosted = false }: {
       data-state={edge.state}
       data-strategy={isReplay ? "replay" : undefined}
       data-ghosted={ghosted || undefined}
-      // a `planned` lane is hidden during the main-only B0; the transient clone arrows show ONLY while the
-      // clone is running (gone at idle); every other lane fades in as it activates. Motion eases the opacity
-      // (instant under !animate, where it mounts at the end-state).
-      // RETRACT VISIBILITY — clone arcs fade their GROUP to 0 when done; delay that fade so the GSAP
-      // tail-to-tip retract (0.45s) completes before the group turns transparent (mirrors spec's 0.32s
-      // opacity delay on .flow-g.off: retract runs first, then opacity clears).
+      // a `planned` lane is hidden during the main-only B0; every other lane fades in as it
+      // activates. Motion eases the opacity (instant under !animate, where it mounts at the end-state).
       initial={initialConduitOpacity(animate, opacity)}
       animate={{ opacity }}
-      transition={{ duration: animate ? 0.45 : 0, delay: conduitTransitionDelay(animate, cloneArc, opacity) }}
+      transition={{ duration: animate ? 0.45 : 0, delay: 0 }}
     >
       <path
         // A gated memory lane is GHOSTED (dim + desaturate) on the inner <path>, NOT the motion.g, so

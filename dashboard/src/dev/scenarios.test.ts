@@ -9,7 +9,9 @@ describe("scenario player model (5i)", () => {
 
   it("authors the build-up timeline (B0 worktree_start → B5 idle constellation)", () => {
     expect(buildUp).toBeTruthy();
-    expect(buildUp!.frames.length).toBe(6);
+    // Four beats, not six: the two provider beats (dim engines, then the seed/clone charge) left
+    // with the search providers, so the timeline is the official line → two checkouts → powered.
+    expect(buildUp!.frames.length).toBe(4);
     expect(buildUp!.frames[0].caption).toMatch(/worktree_start/i);
     expect(buildUp!.frames.at(-1)!.caption).toMatch(/idle constellation/i);
   });
@@ -48,14 +50,14 @@ describe("scenario player model (5i)", () => {
       frame.projection.analytics.engineProcesses.map((node) => node.health),
     );
     expect(healths).toContain("blocked");
-    // the recover must run the provider seed/clone beats (the cross-stage copy arrows) — not teleport to
-    // nominal. At least one frame drives a running cgc-seed / grepai-clone edge (matches the mockup M5/M6).
-    const hasCloneBeat = memoryBlock!.frames.some((frame) =>
-      frame.projection.analytics.engineProcesses.some((node) =>
-        node.edges.some((e) => (e.kind === "cgc-seed" || e.kind === "grepai-clone") && e.state === "running"),
-      ),
+    // The recover runs the ledger-map beat, not a teleport to nominal — and no frame carries the
+    // seed/clone conduits the providers took with them.
+    const kinds = memoryBlock!.frames.flatMap((frame) =>
+      frame.projection.analytics.engineProcesses.flatMap((node) => node.edges.map((edge) => edge.kind)),
     );
-    expect(hasCloneBeat).toBe(true);
+    expect(kinds).toContain("ledger-map");
+    expect(kinds).not.toContain("cgc-seed");
+    expect(kinds).not.toContain("grepai-clone");
     // one enclosure throughout — every frame drives the SAME worktree group (so the recover animates,
     // not remounts)
     const groups = new Set(
@@ -80,110 +82,17 @@ describe("scenario player model (5i)", () => {
     expect(blocked).toBeTruthy();
     expect(blocked!.codeSource.behindSource ?? 0).toBeGreaterThan(0);
     expect(blocked!.missingFacts.some((fact) => /contract not yet written/i.test(fact))).toBe(true);
-    // the recover runs the provider clone beats (copy-arrows), not a teleport to nominal
-    const hasClone = staleBase!.frames.some((frame) =>
-      frame.projection.analytics.engineProcesses.some((node) =>
-        node.edges.some((e) => (e.kind === "cgc-seed" || e.kind === "grepai-clone") && e.state === "running"),
-      ),
+    // the recover adds the code worktree (its own beat), not a teleport to nominal, and no frame
+    // carries a provider seed/clone conduit
+    const kinds = staleBase!.frames.flatMap((frame) =>
+      frame.projection.analytics.engineProcesses.flatMap((node) => node.edges.map((edge) => edge.kind)),
     );
-    expect(hasClone).toBe(true);
+    expect(kinds).toContain("worktree-add");
+    expect(kinds).not.toContain("cgc-seed");
+    expect(kinds).not.toContain("grepai-clone");
     // one enclosure throughout
     const groups = new Set(
       staleBase!.frames.flatMap((frame) =>
-        frame.projection.analytics.engineProcesses.map((node) => node.worktreeGroup),
-      ),
-    );
-    expect(groups.size).toBe(1);
-  });
-
-  it("authors the T9B seed-fault arc (charge → red fault → re-seed → nominal), one enclosure, never teleporting", () => {
-    const seedFault = SCENARIOS.find((scenario) => scenario.name === "seed-fault");
-    expect(seedFault).toBeTruthy();
-    const captions = seedFault!.frames.map((frame) => frame.caption).join(" | ");
-    expect(captions).toMatch(/fault/i);
-    expect(captions).toMatch(/retry|re-seed/i);
-    // the FAULT beat drives a failed health + a failed grepai-clone edge (the red flash) + the GrepAI memory
-    // engine down (the red flicker), with CGC (code) NOT down (unaffected).
-    const faultFrame = seedFault!.frames.find((frame) =>
-      frame.projection.analytics.engineProcesses.some((node) => node.health === "failed"),
-    );
-    expect(faultFrame).toBeTruthy();
-    const faultNode = faultFrame!.projection.analytics.engineProcesses.find((n) => n.health === "failed")!;
-    expect(faultNode.edges.some((e) => e.kind === "grepai-clone" && e.state === "failed")).toBe(true);
-    expect(faultNode.providers.find((p) => p.role === "memory")?.runtimeState).toBe("down");
-    expect(faultNode.providers.find((p) => p.role === "code")?.runtimeState).not.toBe("down");
-    // the recover re-seeds (grepai-clone running again) AFTER the fault — not a teleport.
-    const faultIdx = seedFault!.frames.indexOf(faultFrame!);
-    const reseed = seedFault!.frames.slice(faultIdx + 1).some((frame) =>
-      frame.projection.analytics.engineProcesses.some((node) =>
-        node.edges.some((e) => e.kind === "grepai-clone" && e.state === "running"),
-      ),
-    );
-    expect(reseed).toBe(true);
-    const groups = new Set(
-      seedFault!.frames.flatMap((frame) =>
-        frame.projection.analytics.engineProcesses.map((node) => node.worktreeGroup),
-      ),
-    );
-    expect(groups.size).toBe(1);
-  });
-
-  it("authors the T9C reindex-reroute arc (stale seed → reindex → nominal), one enclosure, soft (never blocked)", () => {
-    const reroute = SCENARIOS.find((scenario) => scenario.name === "reindex-reroute");
-    expect(reroute).toBeTruthy();
-    const captions = reroute!.frames.map((frame) => frame.caption).join(" | ");
-    expect(captions).toMatch(/reroute/i);
-    expect(captions).toMatch(/reindex/i);
-    // The reroute beat drives a `stale` cgc-seed edge — the reducer's OWN reroute state
-    // (_seed_edge_state) — plus a seedFallback (reindexing) engine. The amber flash polarity is
-    // derived from that state by the renderer; the edge carries no polarity field of its own.
-    const refusedFrame = reroute!.frames.find((frame) =>
-      frame.projection.analytics.engineProcesses.some((node) =>
-        node.edges.some((e) => e.kind === "cgc-seed" && e.state === "stale"),
-      ),
-    );
-    expect(refusedFrame).toBeTruthy();
-    const refusedNode = refusedFrame!.projection.analytics.engineProcesses.find((node) =>
-      node.edges.some((e) => e.kind === "cgc-seed" && e.state === "stale"),
-    )!;
-    expect(refusedNode.seedFallback).toBe(true);
-    // soft reroute: never a hard block on any frame
-    const healths = reroute!.frames.flatMap((frame) =>
-      frame.projection.analytics.engineProcesses.map((node) => node.health),
-    );
-    expect(healths).not.toContain("blocked");
-    // the reroute → reindex-settle recover is a PROP DIFF (same enclosure), not a remount. NB: T9C reuses the
-    // shared device-mgmt gallery fixtures (cgc-seed-refused → cgc-fallback) for the failure beats, with the
-    // boot-demo boot frames as the lead-in, so the prop-diff invariant is asserted on the reroute→settle pair.
-    const rIdx = reroute!.frames.indexOf(refusedFrame!);
-    const refusedGroup = refusedFrame!.projection.analytics.engineProcesses[0].worktreeGroup;
-    expect(reroute!.frames[rIdx + 1].projection.analytics.engineProcesses[0].worktreeGroup).toBe(refusedGroup);
-  });
-
-  it("authors the T7B provider-block arc (verify → pre-contract block → retry → clone), one enclosure throughout", () => {
-    const providerBlock = SCENARIOS.find((scenario) => scenario.name === "provider-block");
-    expect(providerBlock).toBeTruthy();
-    const captions = providerBlock!.frames.map((frame) => frame.caption).join(" | ");
-    expect(captions).toMatch(/provider plan/i);
-    expect(captions).toMatch(/block/i);
-    expect(captions).toMatch(/retry/i);
-    const blocked = providerBlock!.frames
-      .flatMap((frame) => frame.projection.analytics.engineProcesses)
-      .find((node) => node.health === "blocked");
-    expect(blocked).toBeTruthy();
-    expect(blocked!.setupState).toBe("blocked");
-    expect(blocked!.providers.length).toBe(0); // the engines never light at the block
-    expect(blocked!.missingFacts.some((fact) => /contract not yet written/i.test(fact))).toBe(true);
-    expect(blocked!.missingFacts.some((fact) => /provider (plan|setup|runtime)|setup config/i.test(fact))).toBe(true);
-    // the recover passes through the provider seed/clone beats (the copy-arrows), not a teleport
-    const hasClone = providerBlock!.frames.some((frame) =>
-      frame.projection.analytics.engineProcesses.some((node) =>
-        node.edges.some((e) => (e.kind === "cgc-seed" || e.kind === "grepai-clone") && e.state === "running"),
-      ),
-    );
-    expect(hasClone).toBe(true);
-    const groups = new Set(
-      providerBlock!.frames.flatMap((frame) =>
         frame.projection.analytics.engineProcesses.map((node) => node.worktreeGroup),
       ),
     );
@@ -205,13 +114,13 @@ describe("scenario player model (5i)", () => {
     expect(blocked!.edges.some((e) => e.kind === "worktree-add" && e.state === "blocked")).toBe(false);
     expect(blocked!.memorySource?.behindSource ?? 0).toBeGreaterThan(0);
     expect(blocked!.memoryWorktree?.exists).toBe(true);
-    // the recover is a ff/ref diff — NOT the clone/seed beats (T12B engines never go down)
-    const hasCloneBeat = liveSync!.frames.some((frame) =>
-      frame.projection.analytics.engineProcesses.some((node) =>
-        node.edges.some((e) => (e.kind === "cgc-seed" || e.kind === "grepai-clone") && e.state === "running"),
-      ),
+    // the recover is a ff/ref diff — the sync gate lifts and nothing else is added. No frame carries
+    // a provider seed/clone conduit, because the surface no longer composes them.
+    const kinds = liveSync!.frames.flatMap((frame) =>
+      frame.projection.analytics.engineProcesses.flatMap((node) => node.edges.map((edge) => edge.kind)),
     );
-    expect(hasCloneBeat).toBe(false);
+    expect(kinds).not.toContain("cgc-seed");
+    expect(kinds).not.toContain("grepai-clone");
     const last = liveSync!.frames.at(-1)!.projection.analytics.engineProcesses[0];
     expect(last.health).not.toBe("blocked");
     expect(last.memorySource?.behindSource ?? 0).toBe(0);
@@ -241,12 +150,11 @@ describe("scenario player model (5i)", () => {
     // TERMINAL — the scenario ENDS on the STOP (last frame is integration-blocked); no recover tail
     const last = conflict!.frames[conflict!.frames.length - 1];
     expect(last.projection.analytics.engineProcesses.some((node) => node.phase === "integration-blocked")).toBe(true);
-    const hasCloneTail = conflict!.frames.some((frame) =>
-      frame.projection.analytics.engineProcesses.some((node) =>
-        node.edges.some((e) => (e.kind === "cgc-seed" || e.kind === "grepai-clone") && e.state === "running"),
-      ),
+    const kinds = conflict!.frames.flatMap((frame) =>
+      frame.projection.analytics.engineProcesses.flatMap((node) => node.edges.map((edge) => edge.kind)),
     );
-    expect(hasCloneTail).toBe(false);
+    expect(kinds).not.toContain("cgc-seed");
+    expect(kinds).not.toContain("grepai-clone");
     // the CONFLICT flash RESOLVES INTO the steady STOP as a PROP DIFF (same boot-audio enclosure), not a
     // remount. The C0 idle lead-in reuses the boot-demo nominal fixture, so the prop-diff invariant is
     // asserted on the flash → STOP pair (the failure-arc frames), which share identity.
@@ -274,6 +182,39 @@ describe("scenario player model (5i)", () => {
   it("folds the old gallery states in as single-frame resting scenarios (no coverage lost)", () => {
     const resting = SCENARIOS.find((scenario) => scenario.name === "engine-cleanup-pending");
     expect(resting?.frames).toHaveLength(1);
+  });
+
+  it("authors no provider arc and no provider edge kind (the retired surface)", () => {
+    // The three provider arcs — the GrepAI seed fault, the CGC reindex reroute and the pre-contract
+    // provider-plan block — existed only to animate engines materialising and seed/clone conduits.
+    // Their names and their frames are gone, and no surviving scenario carries an edge kind the
+    // server no longer composes (only worktree-add, ledger-map, sync and the integration lanes).
+    for (const retired of ["seed-fault", "reindex-reroute", "provider-block"]) {
+      expect(SCENARIOS.some((scenario) => scenario.name === retired), retired).toBe(false);
+    }
+    const SERVED_EDGE_KINDS = new Set([
+      "worktree-add",
+      "ledger-map",
+      "sync",
+      "integration",
+      "integration-mem",
+    ]);
+    const seen = new Set(
+      SCENARIOS.flatMap((scenario) =>
+        scenario.frames.flatMap((frame) =>
+          frame.projection.analytics.engineProcesses.flatMap((node) =>
+            node.edges.map((edge) => edge.kind),
+          ),
+        ),
+      ),
+    );
+    expect(seen.size).toBeGreaterThan(0);
+    for (const kind of seen) {
+      expect(
+        SERVED_EDGE_KINDS.has(kind),
+        `fixture edge kind '${kind}' is not in the served EngineProcessEdge vocabulary`,
+      ).toBe(true);
+    }
   });
 
   // These fixtures are the only thing that ever "produced" an engine-process edge on this side of

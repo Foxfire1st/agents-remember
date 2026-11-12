@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from agents_remember.tasks.retired_rows import payload_is_sprint
 from agents_remember.worktrees.queue.closeout_queue_evidence import (
     register_scaffold_sections,
 )
@@ -52,4 +53,4 @@ def _validated_section_list(value: object) -> list[Mapping[str, Any]]:
 
 
 def _requires_register_scaffolding(data: Mapping[str, Any]) -> bool:
-    return data.get("kind") == "master" and bool(data.get("orchestrates"))
+    return payload_is_sprint(data)

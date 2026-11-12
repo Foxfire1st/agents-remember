@@ -1,0 +1,21 @@
+{
+ "afterRevision": "HEAD",
+ "afterTree": "eda216cceab5e4112994491fbdb3a8f7dd9fca86",
+ "beforeRevision": "HEAD~1",
+ "beforeTree": "030c53e9abc183dd9fb5f2974e4236a93ce1fd30",
+ "counts": {
+  "changedFiles": 1,
+  "history": 0,
+  "modified": 1,
+  "other": 1,
+  "records": 0,
+  "sources": 0
+ },
+ "decisionRecordCount": 0,
+ "decisionRecords": [],
+ "log": "/gen/logs/ar-tools-2000-01-01/231643877258-knowledge_diff-6d8ef3e0.json",
+ "memoryRoot": "/gen/tiny-mem",
+ "ok": true,
+ "report": "/gen/logs/ar-tools-2000-01-01/000000000000-knowledge-diff-00000000.json",
+ "state": "compared"
+}

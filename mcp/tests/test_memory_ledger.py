@@ -474,13 +474,13 @@ def test_projection_is_the_ledger_the_attributed_history_records(tmp_path: Path)
         assert find_mapping(parsed, code) == find_mapping(source.ledger, code)
 
 
-def test_projection_reads_the_trailer_and_never_the_live_table(tmp_path: Path) -> None:
-    """A hand edit to the table does not move the projection, because the trailers decide.
+def test_a_read_answers_from_the_trailers_and_never_from_the_table(tmp_path: Path) -> None:
+    """No attribution is ever invented from, or suppressed by, what a table in the file says.
 
-    ``memory.md`` is fed a row that would sit at the top of the table, under a header agreeing
-    with it, and the projection still reports the attributed rows without it: a reader that
-    answers from the file cannot pass this, which is what "no hand-edit path survives" means for
-    a reader.
+    Two inputs of one rule, and they were two cases until they were merged: a table row with no
+    trailer behind it must not enter the projection, and a table with rows whose trailers were never
+    written must not have them inherited from the table either. Historical tables stay migration
+    input; a runtime read emits only what the commit messages record.
     """
 
     world = _AttributedWorld(tmp_path)
@@ -495,10 +495,6 @@ def test_projection_reads_the_trailer_and_never_the_live_table(tmp_path: Path) -
     assert source.ledger.rows == world.rows
     assert find_mapping(source.ledger, "f" * 40) is None
 
-
-def test_unattributed_history_does_not_inherit_pairs_from_committed_tables(tmp_path: Path) -> None:
-    """Historical tables remain migration input; runtime reads emit no invented attribution."""
-
     empty = _init_repo(tmp_path / "unattributed")
     historical = LedgerRow("b" * 40, _content_commit(empty, "historical content"))
     latest = LedgerRow("d" * 40, _content_commit(empty, "latest content"))
@@ -508,11 +504,11 @@ def test_unattributed_history_does_not_inherit_pairs_from_committed_tables(tmp_p
     _commit(empty, "memory content with no trailer")
     head = _commit(empty, "the ledger commit that pinned it")
 
-    source = read_ledger_source(empty, head)
+    unattributed = read_ledger_source(empty, head)
 
-    assert source.ledger.rows == []
-    assert source.excluded_rows == ()
-    assert find_mapping(source.ledger, "b" * 40) is None
+    assert unattributed.ledger.rows == []
+    assert unattributed.excluded_rows == ()
+    assert find_mapping(unattributed.ledger, "b" * 40) is None
     assert attributed_commits(empty, tip=head) == [
         AttributedCommit(commit, None)
         for commit in require_git(empty, ["rev-list", "HEAD"]).split()

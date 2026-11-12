@@ -34,7 +34,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Root directory of the code repository to resolve.",
     )
     parser.add_argument(
-        "--topology", choices=("internal", "external"), help="Optional topology override."
+        "--topology",
+        metavar="external",
+        help="Optional topology override. `external` is the only supported topology.",
     )
     parser.add_argument(
         "--coordination-root", type=Path, help="Optional coordination root hint or override."

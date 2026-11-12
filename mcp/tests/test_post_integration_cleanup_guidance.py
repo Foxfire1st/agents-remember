@@ -16,29 +16,53 @@ from pathlib import Path
 from typing import get_args
 
 from agents_remember.models.worktree import NextOperation
+from agents_remember.worktrees.integration.closeout.curator_coherence import (
+    curator_coherence_paths,
+    current_curator_coherence_predecessor,
+)
 from agents_remember.worktrees.modules.guidance import carryover_done, lifecycle_guidance
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 from test_worktree_support import git, init_repo
 
 
 def _integrated_contract(root: Path) -> WorktreeContract:
+    """An integrated leaf with real landed code and memory commits.
+
+    External memory proves carryover by ancestry, so the fixture lands one
+    commit in each repo and records both as integrated: the position is the
+    moment before the terminal edge, with cleanup still pending.
+    """
+
     worktree_group = root / "worktrees" / "repo" / "leaf"
+    code_repo = root / "code"
+    memory_repo = root / "memory"
+    code_commit = init_repo(code_repo)
+    memory_commit = init_repo(memory_repo)
     return WorktreeContract(
         task_id="T",
         task_name="leaf",
         repo_name="repo",
         workflow_kind="light-task",
-        memory_mode="internal",
+        memory_mode="external",
         coordination_root=root,
         task_root=root / "tasks",
         contract_path=root / "tasks" / "series-contract.md",
         task_artifact=root / "tasks" / "task.md",
         worktree_group=worktree_group,
-        code_repo_path=root / "repo",
+        code_repo_path=code_repo,
         code_source_branch="main",
         code_work_branch="ar/leaf",
         code_base_commit="abc1234",
         code_worktree=worktree_group / "leaf",
+        code_commit=code_commit,
+        integrated_code_commit=code_commit,
+        memory_repo_path=memory_repo,
+        memory_source_branch="main",
+        memory_work_branch="ar/leaf",
+        memory_base_commit=memory_commit,
+        memory_content_commit=memory_commit,
+        integrated_memory_content_commit=memory_commit,
+        ledger_path=memory_repo / "memory.md",
         leaf_id="L1",
         closeout_status="completed",
         integration_status="completed",
@@ -84,23 +108,10 @@ def test_the_cleanup_decision_is_no_longer_in_the_next_operation_vocabulary() ->
 def test_external_completion_proves_landed_commits_without_reading_the_cache(
     tmp_path: Path,
 ) -> None:
-    code_repo = tmp_path / "code"
-    memory_repo = tmp_path / "memory"
-    code = init_repo(code_repo)
-    memory = init_repo(memory_repo)
+    contract = _integrated_contract(tmp_path)
+    assert contract.memory_repo_path is not None
+    memory_repo = contract.memory_repo_path
     cache = memory_repo / "memory.md"
-    contract = replace(
-        _integrated_contract(tmp_path),
-        memory_mode="external",
-        code_repo_path=code_repo,
-        code_commit=code,
-        integrated_code_commit=code,
-        memory_repo_path=memory_repo,
-        memory_source_branch="main",
-        memory_content_commit=memory,
-        integrated_memory_content_commit=memory,
-        ledger_path=cache,
-    )
     for contents in (None, "<<<<<<< broken cache\n", "a stale row with no accepted pair\n"):
         if contents is not None:
             cache.write_text(contents, encoding="utf-8")
@@ -146,3 +157,96 @@ def test_a_checkpointed_series_keeps_working_instead_of_being_told_to_integrate(
     assert guidance.get("nextArgs", {})["contract_path"] == contract.contract_path.as_posix()
     assert "checkpointed" in guidance["summary"]
     assert "cleanup is deliberately not pending" in guidance["summary"]
+
+
+def _external_memory_leaf(root: Path) -> WorktreeContract:
+    """A leaf whose coherence route applies: external memory, with a memory worktree."""
+
+    worktree_group = root / "worktrees" / "repo" / "leaf"
+    return WorktreeContract(
+        task_id="T",
+        task_name="leaf",
+        repo_name="repo",
+        workflow_kind="light-task",
+        memory_mode="external",
+        coordination_root=root,
+        task_root=root / "tasks" / "repo" / "leaf",
+        contract_path=root
+        / "tasks"
+        / "repo"
+        / "leaf"
+        / "enclosures"
+        / "leaf"
+        / "series-contract.md",
+        task_artifact=root / "tasks" / "repo" / "leaf" / "leaf.md",
+        worktree_group=worktree_group,
+        code_repo_path=root / "repo",
+        code_source_branch="main",
+        code_work_branch="ar/leaf",
+        code_base_commit="abc1234",
+        code_worktree=worktree_group / "leaf",
+        memory_repo_path=root / "memory",
+        memory_source_branch="main",
+        memory_work_branch="ar/leaf",
+        memory_base_commit="def5678",
+        memory_worktree=worktree_group / "memory-leaf",
+        leaf_id="leaf",
+        parent_contract_path=root / "tasks" / "series-contract.md",
+        closeout_status="completed",
+    )
+
+
+def test_published_coherence_remains_historical_and_closeout_points_to_integration(
+    tmp_path: Path,
+) -> None:
+    """Closeout's own writes change the candidate; its historical proof is preserved as recorded."""
+
+    contract = _external_memory_leaf(tmp_path)
+    paths = curator_coherence_paths(contract)
+    paths.canonical.parent.mkdir(parents=True, exist_ok=True)
+    paths.canonical.write_text(
+        '{"schemaVersion": "ar-curator-coherence-authority/v1"}\n', encoding="utf-8"
+    )
+    recorded = paths.canonical.read_bytes()
+    digest = current_curator_coherence_predecessor(contract)
+
+    guidance = lifecycle_guidance(contract)
+
+    assert guidance["phase"] == "integration-pending"
+    assert guidance.get("nextTool") == "worktree_integrate"
+    assert guidance["nextOperation"] == "request_integration_decision"
+    args = guidance.get("nextArgs", {})
+    assert args["contract_path"] == contract.contract_path.as_posix()
+    assert args["strategy"] == "ff-only" and args["dry_run"] is True
+    assert "action" not in args and "caller" not in args
+    assert digest[:12] in guidance["summary"]
+    assert "pre-closeout candidate" in guidance["summary"]
+    assert "does not validate the live tree" in guidance["summary"]
+    assert paths.canonical.read_bytes() == recorded
+
+
+def test_a_leaf_that_has_not_published_is_still_told_to_integrate(tmp_path: Path) -> None:
+    """The step is conditional on having published: an unpublished leaf is not sent to a refusal."""
+
+    contract = _external_memory_leaf(tmp_path)
+
+    guidance = lifecycle_guidance(contract)
+
+    assert guidance["phase"] == "integration-pending"
+    assert guidance.get("nextTool") == "worktree_integrate"
+    assert "curator_coherence" not in guidance["summary"]
+
+
+def test_a_series_contract_is_never_routed_to_the_coherence_route(tmp_path: Path) -> None:
+    """The coherence route is leaf-only by construction, and the hint must not invent a step for it."""
+
+    series = replace(
+        _integrated_contract(tmp_path),
+        kind="series",
+        integration_status="pending",
+        closeout_status="completed",
+    )
+
+    guidance = lifecycle_guidance(series)
+
+    assert guidance.get("nextTool") == "worktree_integrate"

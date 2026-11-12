@@ -30,16 +30,12 @@ from agents_remember.certification.repository_profiles.models import (
 )
 from agents_remember.errors import CertificationProfileError
 from agents_remember.models.certification.base import RailIdentity
-from agents_remember_test_support.code_quality import profile_rails, profile_selection
+from agents_remember_test_support.code_quality import profile_selection
 from repository_profile_test_support import (
     NODE_FIXTURE,
     RUST_FIXTURE,
     FixtureRepository,
     fixture_profile,
-)
-from source_selection_test_support import (
-    ambient_selection_fixture,
-    write_ambient_selection,
 )
 
 _CANDIDATE = CandidateIdentity(kind="content-digest", value="c" * 64)
@@ -300,39 +296,6 @@ def test_selector_result_refuses_unreasoned_output_and_targeted_full_expansion()
     payload["selectionDigest"] = repository_selection_result_digest(payload)
     with pytest.raises(ValueError, match="cannot broaden itself to full"):
         RepositorySelectionResult.model_validate(payload)
-
-
-def test_repository_profile_teardown_adapter_requires_a_passing_cleanup_checkpoint(
-    tmp_path: Path,
-) -> None:
-    selection = write_ambient_selection(tmp_path)
-    decision = ambient_selection_fixture()
-    summary = tmp_path / "summary.json"
-    common = {
-        "mode": decision.mode,
-        "candidate": {"tree": decision.sourceSelection.candidateTree},
-        "diffBase": decision.sourceSelection.baseCommit,
-        "selectedPaths": list(decision.selectedPaths),
-    }
-    summary.write_text(
-        json.dumps(
-            {
-                **common,
-                "schema": "ar-ambient-role-chat-e2e-summary/v1",
-                "status": "passed",
-                "runs": [
-                    {"run": index, "status": "passed", "report": f"run-{index}.json"}
-                    for index in (1, 2)
-                ],
-            }
-        )
-    )
-    for index in (1, 2):
-        (tmp_path / f"run-{index}.json").write_text(
-            json.dumps({**common, "run": index, "retry": False, "checkpoints": []})
-        )
-    with pytest.raises(RuntimeError, match="teardown checkpoint"):
-        profile_rails._verify_teardown(summary, tmp_path / "proof.json", selection)
 
 
 @pytest.mark.parametrize(

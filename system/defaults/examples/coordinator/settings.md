@@ -38,7 +38,7 @@ ar-coordination/
 
 ## Memory Repo Routing
 
-Agents should still invoke the `c-08-ar-coordination-context-resolver` skill for the target code repository. The `c-08-ar-coordination-context-resolver` skill resolves
+Agents should resolve the target code repository through the product (`context_packet`; see the [tool reference](skill://agents-remember/skills/l-01-agent-lifecycles/reference/knowledge/commands.md)). Product resolution identifies
 the active memory root and returns the memory layer's settings, tools, sources,
 onboarding, and ledger paths.
 
@@ -58,8 +58,7 @@ memory promotion rules.
 Use providers by retrieval substrate:
 
 - `semantic`: use when a concept is known but the route or file location is
-  unknown. GrepAI can serve this role over external memory repos and
-  repo-internal `ar-memory/` roots.
+  unknown. GrepAI can serve this role over the configured memory repos.
 - `relationship`: use when an anchor is known but relationships, callers,
   callees, dependencies, or impact paths are unknown. CodeGraphContext can serve
   this role across configured code repository roots.
@@ -88,7 +87,7 @@ workspace files.
 Semantic providers must keep generated config, index, logs, and state out of
 source repositories and durable memory roots. For GrepAI, configure one
 `grepai-memory` provider in workspace mode with explicit `{ projectId, path }`
-roots for both external memory repos and repo-internal memory roots. The
+roots for the configured memory repos. The
 managed default indexes those live roots in place and git-ignores GrepAI's
 per-root `.grepai/` working directory so generated GrepAI artifacts stay out of
 memory commits. The lifecycle manager writes GrepAI workspace config, logs,

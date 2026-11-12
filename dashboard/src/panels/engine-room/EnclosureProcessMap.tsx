@@ -2,7 +2,7 @@ import { motion } from "motion/react";
 import { useEffect, useRef } from "react";
 
 import { css } from "../../../styled-system/css";
-import type { EngineProcessNode, GateNode, LedgerNode, ProviderNode } from "../../types/projection";
+import type { EngineProcessNode, LedgerNode } from "../../types/projection";
 import { EnclosureCanvas } from "./EnclosureCanvas";
 import {
   abandonRecord,
@@ -64,10 +64,8 @@ function teardownKind(phase: EngineProcessNode["phase"]): "abandon" | "cleanup" 
   return phase === "cleanup-pending" ? "cleanup" : null;
 }
 
-export function EnclosureProcessMap({ node, gateNode, workspaceEngines = [], officialLedger }: {
+export function EnclosureProcessMap({ node, officialLedger }: {
   node: EngineProcessNode;
-  gateNode?: GateNode;
-  workspaceEngines?: ProviderNode[];
   officialLedger?: LedgerNode;
 }) {
   const animate = useShouldAnimate();
@@ -133,16 +131,12 @@ export function EnclosureProcessMap({ node, gateNode, workspaceEngines = [], off
           >
             <EnclosureCanvas
               node={node}
-              gateNode={gateNode}
-              workspaceEngines={workspaceEngines}
               officialLedger={officialLedger}
             />
           </motion.div>
         ) : (
           <EnclosureCanvas
             node={node}
-            gateNode={gateNode}
-            workspaceEngines={workspaceEngines}
             officialLedger={officialLedger}
           />
         )}

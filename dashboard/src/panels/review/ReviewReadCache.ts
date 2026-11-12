@@ -1,0 +1,140 @@
+// What the reviewer has already read for the comparison on screen, so returning to a subject costs no
+// request.
+//
+// WHAT IS KEPT, AND UNDER WHICH KEY
+//
+//   * A subject's whole review, under the read cycle's own question key (task context, record,
+//     subject). Paged questions are not kept: a roster walk is a continuation of the retained page and
+//     stays owned by the read cycle.
+//   * Only answers. A refusal or a failure is asked again, because it may describe a transient state
+//     rather than the immutable comparison.
+//
+// WHEN IT IS DROPPED
+//
+// Every kept review carries the comparison generation it was read under: the pair of code trees and,
+// when knowledge was compared, the pair of knowledge snapshots. An answer from another generation (a
+// refresh that reached a new candidate publication) empties the whole cache before it is kept, so a
+// subject the reader returns to is never one read against a comparison the surface has left. The
+// reader's refresh forgets the question it re-asks, so a refresh always reaches the server.
+//
+// BOUNDS. The store is capped and evicts the least recently used entry, and the cache belongs to
+// one mounted review surface: it is reclaimed with it. It is a working surface, never a record.
+
+import type { ReviewPayload } from '../../data/review';
+
+export const REVIEW_CACHE_LIMIT = 24;
+
+class BoundedStore<V> {
+  private readonly entries = new Map<string, V>();
+
+  constructor(private readonly limit: number) {}
+
+  get(key: string): V | undefined {
+    const value = this.entries.get(key);
+    if (value === undefined) return undefined;
+    // Reading refreshes recency: the entry moves to the end of the insertion order.
+    this.entries.delete(key);
+    this.entries.set(key, value);
+    return value;
+  }
+
+  set(key: string, value: V): void {
+    this.entries.delete(key);
+    this.entries.set(key, value);
+    while (this.entries.size > this.limit) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest === undefined) break;
+      this.entries.delete(oldest);
+    }
+  }
+
+  delete(key: string): void {
+    this.entries.delete(key);
+  }
+
+  clear(): void {
+    this.entries.clear();
+  }
+
+  get size(): number {
+    return this.entries.size;
+  }
+}
+
+export interface ComparisonGeneration {
+  trees: string;
+  snapshots?: string;
+}
+
+export function comparisonGenerationOf(payload: ReviewPayload): ComparisonGeneration {
+  const inventory = payload.source.inventory;
+  const comparison = payload.comparison;
+  return {
+    trees: `${inventory.before_code_tree_id ?? ''}:${inventory.after_code_tree_id ?? ''}`,
+    snapshots: comparison?.knowledge_compared
+      ? `${comparison.before_snapshot_digest ?? ''}:${comparison.after_snapshot_digest ?? ''}`
+      : undefined,
+  };
+}
+
+// Two generations are different comparisons when their code trees differ, or when both compared
+// knowledge and their snapshot pairs differ. A task-context answer compares no knowledge, so it says
+// nothing about the snapshot pair and cannot move it.
+export function sameGeneration(known: ComparisonGeneration, next: ComparisonGeneration): boolean {
+  if (known.trees !== next.trees) return false;
+  return known.snapshots === undefined || next.snapshots === undefined
+    ? true
+    : known.snapshots === next.snapshots;
+}
+
+export class ReviewReadCache {
+  inputEpoch = 0;
+  private readonly reviews = new BoundedStore<ReviewPayload>(REVIEW_CACHE_LIMIT);
+  // The generation every kept entry was read under; a different one empties the store.
+  private generation: ComparisonGeneration | null = null;
+
+  review(key: string): ReviewPayload | undefined {
+    return this.reviews.get(key);
+  }
+
+  // Called for every admitted answer, kept or not: a paged or refreshed answer that reached another
+  // generation must still drop what was read under the old one.
+  observe(payload: ReviewPayload): void {
+    const next = comparisonGenerationOf(payload);
+    const known = this.generation;
+    if (known !== null && !sameGeneration(known, next)) {
+      this.reviews.clear();
+      this.generation = next;
+      return;
+    }
+    this.generation = { trees: next.trees, snapshots: next.snapshots ?? known?.snapshots };
+  }
+
+  keepReview(key: string, payload: ReviewPayload): void {
+    this.observe(payload);
+    this.reviews.set(key, payload);
+  }
+
+  // Keep an answer that was read but never shown (its question was replaced while it was in flight),
+  // so the request was not issued for nothing. It may be older than what the surface shows now, so it
+  // never replaces the generation on screen: an answer from another generation is dropped. Kept, it
+  // is an answer like any other: the next answer from another generation empties it with the rest.
+  keepUnshown(key: string, payload: ReviewPayload): void {
+    const known = this.generation;
+    if (known !== null && !sameGeneration(known, comparisonGenerationOf(payload))) return;
+    this.keepReview(key, payload);
+  }
+
+  forgetReview(key: string): void {
+    this.reviews.delete(key);
+  }
+
+  invalidateReviews(): void {
+    this.inputEpoch += 1;
+    this.reviews.clear();
+  }
+
+  get sizes(): { reviews: number } {
+    return { reviews: this.reviews.size };
+  }
+}

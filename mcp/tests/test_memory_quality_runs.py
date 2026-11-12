@@ -9,10 +9,10 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 from unittest import mock
 
-from agents_remember.application import memory_scope
+from agents_remember.application import memory_scope, memory_tools
 from agents_remember.application.memory_quality import census, controller, runs
 from agents_remember.application.memory_scope import (
     MemoryScope,
@@ -22,11 +22,13 @@ from agents_remember.errors import MemoryCandidatePairError, MemoryCandidatePair
 from agents_remember.kernel.git_preparation import GitPreparationError
 from agents_remember.memory_quality.check import AVAILABLE_CHECKS
 from agents_remember.models.certification.references import CertificateObjectReference
+from agents_remember.models.core import ServingBuildPayload
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.lifecycles.preparation import build_prepared_closeout_output
+from agents_remember.models.memory import MemoryQualityCheckResponse
+from agents_remember.serving.build_info import process_serving_build
 from agents_remember.worktrees.integration.closeout.preparation import code_view
-from agents_remember.worktrees.modules import onboarding
-from agents_remember.worktrees.modules.onboarding_acceptance import OnboardingBodyGateEvidence
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 
 def _pair() -> MemoryCandidatePairIdentity:
@@ -123,7 +125,7 @@ class MemoryQualityRunRegistryTests(unittest.TestCase):
         self.addCleanup(runs._registry.clear)
 
     def _poll_until_settled(self, run_id: str) -> runs.QualityRunSnapshot:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + HANG_GUARD_SECONDS
         snapshot = None
         while time.monotonic() < deadline:
             snapshot = runs.poll_quality_run("repo", run_id)
@@ -264,109 +266,114 @@ class MemoryQualityControllerTests(unittest.TestCase):
         self.assertEqual(result["status"], "scope-refused")
         self.assertEqual(result["pairStatus"], "memory-candidate-pair-stale")
 
-    def test_refresh_attestations_share_sidecar_and_route_body_gates(self) -> None:
-        sidecar_plan = {
-            "required": [{"source_path": "changed.py", "onboarding_file": "/memory/changed.py.md"}],
-            "missing": [],
-            "unsupported": [],
-            "unonboarded": ["committed.py"],
-        }
-        sidecar_gate = {"stale": [], "untraced": [], "attested_no_impact": ["changed.py"]}
-        overview_plan = {"required": [], "missing_metadata": []}
-        overview_gate = {
-            "stale": [],
-            "untraced": [],
-            "attested_no_impact": ["."],
-            "stamped_without_body_review": [],
-        }
-        context = mock.Mock()
-        with (
-            mock.patch.object(
-                onboarding,
-                "validate_onboarding_refresh_plan_for_context",
-                return_value=sidecar_plan,
-            ) as validate_sidecars,
-            mock.patch.object(
-                onboarding,
-                "classify_sidecar_updates",
-                return_value=sidecar_gate,
-            ),
-            mock.patch.object(
-                onboarding,
-                "validate_route_overview_refresh_plan_for_context",
-                return_value=overview_plan,
-            ) as validate_overviews,
-            mock.patch.object(
-                onboarding,
-                "classify_route_overview_updates",
-                return_value=overview_gate,
-            ),
-        ):
-            result = onboarding.validate_memory_refresh_attestations(
-                context,
-                ["changed.py"],
-                working_paths=["changed.py"],
-                body_gate=OnboardingBodyGateEvidence(
-                    memory_tree=Path("/memory"),
-                    memory_verified_commit="a" * 40,
-                    accepted_no_impact=frozenset({"changed.py"}),
-                ),
-                route_body_gate=OnboardingBodyGateEvidence(
-                    memory_tree=Path("/memory"),
-                    memory_verified_commit="a" * 40,
-                    accepted_no_impact=frozenset({"."}),
-                ),
-            )
+    def test_a_dead_governing_overview_reaches_the_gated_repair_set(self) -> None:
+        """D3/D16's actual defect was the product's SILENCE, so the wiring is what gets pinned.
 
-        validate_sidecars.assert_called_once()
-        validate_overviews.assert_called_once()
+        A correct checker whose findings never reach `repair_findings` still produces a clean
+        `curatorActionableCount` — which is exactly how 41 dead declarations passed every gate.
+        This drives `_attach_curator_checklist` with a real onboarding tree holding one card whose
+        body link resolves to nothing, and asserts the finding arrives in the checklist the
+        curator's completion loop gates on.
+        """
+
+        with TemporaryDirectory() as temporary:
+            memory_root = Path(temporary)
+            onboarding_root = memory_root / "onboarding"
+            package = onboarding_root / "pkg" / "nested"
+            package.mkdir(parents=True)
+            (onboarding_root / "overview.md").write_text("# overview\n", encoding="utf-8")
+            (package / "dead.md").write_text(
+                "# dead\n\n"
+                "| Field | Value |\n| --- | --- |\n"
+                "| governingOverview | `../../overview.md` |\n\n"
+                "## Governing Overview\n\n"
+                "[Overview](../../../overview.md)\n\n"
+                "## Purpose\n\nSeeded dead link.\n",
+                encoding="utf-8",
+            )
+            pair = _pair()
+            scope = MemoryScope(
+                repo_id="canonical-repo",
+                identity=MemoryScopeIdentity(
+                    authority="leaf",
+                    authority_path=pair.contractPath,
+                    code_root=pair.codeRoot,
+                    onboarding_root=onboarding_root.as_posix(),
+                    pair_identity=pair,
+                ),
+                code_root=Path(pair.codeRoot),
+                onboarding_root=onboarding_root,
+                context=mock.Mock(),
+                curator_report_path=memory_root / "reports" / "curator-memory-quality.md",
+                contract=mock.Mock(),
+                pair_identity=pair,
+            )
+            execution = controller.MemoryQualityExecution(
+                config=mock.Mock(),
+                scope=scope,
+                checks=tuple(sorted(AVAILABLE_CHECKS)),
+                detail_limit=50,
+                publish_curator_report=True,
+            )
+            candidate_inputs = controller._CuratorCandidateInputs("a" * 40, "b" * 40)
+            census = SimpleNamespace(
+                scope=SimpleNamespace(pair_identity=pair, working_paths=(), committed_paths=()),
+                result=SimpleNamespace(rows=[], blockers=[]),
+            )
+            response: dict[str, object] = {"checks": {}}
+            with (
+                mock.patch.object(
+                    controller, "revalidate_memory_candidate_scope", return_value=scope
+                ),
+                mock.patch.object(
+                    controller, "_curator_candidate_inputs", return_value=candidate_inputs
+                ),
+                mock.patch.object(
+                    controller,
+                    "check_missing_onboarding",
+                    return_value={"missingCount": 0, "missing": []},
+                ),
+                mock.patch.object(
+                    controller,
+                    "build_route_indexes",
+                    return_value=mock.Mock(stale_indexes=[]),
+                ) as route_indexes,
+                mock.patch.object(controller, "split_commit_owned_findings", return_value=([], [])),
+                mock.patch.object(controller, "write_curator_checklist") as publish,
+                mock.patch.object(controller, "_attach_coherence_readiness"),
+                mock.patch.object(controller, "_catalog_checks", return_value={}),
+            ):
+                controller._attach_curator_checklist(
+                    execution,
+                    {"checks": {}},
+                    response,
+                    candidate_inputs=candidate_inputs,
+                    prepared=controller._PreparedInputs(
+                        census=cast(Any, census), route_indexes=route_indexes.return_value
+                    ),
+                )
+
+        published = publish.call_args.args[0]
+        codes = [
+            row["code"]
+            for row in published.repair_findings
+            if row["check"] == "integrity.governing_overview_resolution"
+        ]
+        self.assertEqual(codes, ["governing-overview-link-unresolved"])
         self.assertEqual(
-            result,
-            {
-                "attested_sidecars": ["changed.py"],
-                "attested_overviews": ["."],
-                "stamped_overviews": [],
-                "unonboarded_paths": ["committed.py"],
-            },
+            [
+                row["path"]
+                for row in published.repair_findings
+                if row["check"] == "integrity.governing_overview_resolution"
+            ],
+            ["pkg/nested/dead.md"],
+        )
+        self.assertEqual(
+            response["governingOverviewResolution"]["unresolvedLinkCount"],  # type: ignore[index]
+            1,
         )
 
-    def test_refresh_attestations_reports_both_body_gate_failures(self) -> None:
-        with (
-            mock.patch.object(
-                onboarding,
-                "validate_onboarding_refresh_plan_for_context",
-                side_effect=RuntimeError("stale sidecar"),
-            ) as validate_sidecars,
-            mock.patch.object(
-                onboarding,
-                "validate_route_overview_refresh_plan_for_context",
-                side_effect=RuntimeError("stale overview"),
-            ) as validate_overviews,
-            self.assertRaisesRegex(
-                RuntimeError,
-                "sidecar onboarding: stale sidecar; route overview: stale overview",
-            ),
-        ):
-            onboarding.validate_memory_refresh_attestations(mock.Mock(), ["changed.py"])
-
-        validate_sidecars.assert_called_once()
-        validate_overviews.assert_called_once()
-
     def test_curator_refresh_keeps_deleted_history_out_of_current_working_targets(self) -> None:
-        sidecar_plan = {
-            "required": [],
-            "missing": [],
-            "unsupported": [],
-            "unonboarded": ["deleted.py"],
-        }
-        overview_plan = {"required": [], "missing_metadata": []}
-        sidecar_gate = {"stale": [], "untraced": [], "attested_no_impact": []}
-        overview_gate = {
-            "stale": [],
-            "untraced": [],
-            "attested_no_impact": [],
-            "stamped_without_body_review": [],
-        }
         with TemporaryDirectory() as temporary:
             code_root = Path(temporary)
             (code_root / "current.py").write_text("VALUE = 1\n", encoding="utf-8")
@@ -374,34 +381,7 @@ class MemoryQualityControllerTests(unittest.TestCase):
             current_paths = controller._current_working_code_paths(
                 scope, ("deleted.py", "current.py")
             )
-            with (
-                mock.patch.object(
-                    onboarding,
-                    "validate_onboarding_refresh_plan_for_context",
-                    return_value=sidecar_plan,
-                ) as validate_sidecars,
-                mock.patch.object(
-                    onboarding, "classify_sidecar_updates", return_value=sidecar_gate
-                ),
-                mock.patch.object(
-                    onboarding,
-                    "validate_route_overview_refresh_plan_for_context",
-                    return_value=overview_plan,
-                ),
-                mock.patch.object(
-                    onboarding,
-                    "classify_route_overview_updates",
-                    return_value=overview_gate,
-                ),
-            ):
-                onboarding.validate_memory_refresh_attestations(
-                    mock.Mock(),
-                    ["deleted.py", "current.py"],
-                    working_paths=current_paths,
-                )
-
         self.assertEqual(current_paths, ["current.py"])
-        self.assertEqual(validate_sidecars.call_args.kwargs["working_paths"], ["current.py"])
 
     def test_selected_prepared_view_keeps_logical_pair_and_private_quality_root(self) -> None:
         contract, record, intent, _selected, output = _prepared_fixture()
@@ -513,6 +493,126 @@ class MemoryQualityControllerTests(unittest.TestCase):
         assert code_input is not None
         self.assertEqual(candidate.code_tree, current_tree)
         self.assertEqual(code_input.targetCodeTree, candidate.code_tree)
+
+
+class MeasuringBuildStampTests(unittest.TestCase):
+    """Every memory-quality and citation response names the build that measured (D-33).
+
+    D-33 measured that the MCP tool surface executes a FIXED serving build while the candidate
+    under measurement carries different code, and that the two are indistinguishable in the
+    output. For the items that change the measuring machinery itself, a tool-produced count can
+    therefore never show the fix. These cases make the ruler nameable in the response, so a
+    reader -- and the terminal report -- can say which build produced a count.
+    """
+
+    def test_every_memory_quality_entry_point_stamps_the_serving_build(self) -> None:
+        """All three modes carry the resolved stamp, not one of them.
+
+        Red if a wrapper is dropped, if a mode returns its body's payload unwrapped, or if the
+        stamp stops being the process's resolved identity: an unstamped envelope is exactly the
+        state D-33 recorded, where a count cannot be attributed to a ruler.
+        """
+
+        resolved = process_serving_build()
+        cases = (
+            ("run", controller.run_memory_quality_request, "run"),
+            ("start", controller.start_memory_quality_request, "start"),
+            ("poll", controller.poll_memory_quality_request, "poll"),
+        )
+        for label, entry, body_name in cases:
+            with self.subTest(mode=label):
+                with mock.patch.object(
+                    controller, f"_{body_name}_memory_quality_request", return_value={"ok": True}
+                ):
+                    response = entry(mock.Mock(), mock.Mock())
+                assert isinstance(response, dict)
+                stamp = ServingBuildPayload.model_validate(response["servingBuild"])
+                self.assertEqual(stamp.commit, resolved.commit)
+                self.assertEqual(stamp.sourceDigest, resolved.source_digest)
+                self.assertTrue(stamp.commit)
+
+    def test_the_stamp_is_declared_on_the_responses_that_carry_it(self) -> None:
+        """The controller still stamps its whole result (D-33 at that layer), while the
+        delivered memory-quality answer carries no ``servingBuild`` (MIK-R110 rule 1).
+
+        ``FlexibleToolResponse`` sets ``extra="allow"``, so an undeclared key would validate and
+        still be invisible in the tool's own schema. Red if the controller stops stamping its
+        result, or if the stamp leaks back into the shaped answer.
+        """
+
+        for model in (MemoryQualityCheckResponse,):
+            self.assertIn("servingBuild", model.model_fields)
+        stamp = controller._stamped({"ok": True})["servingBuild"]
+        self.assertEqual(
+            ServingBuildPayload.model_validate(stamp), process_serving_build().payload()
+        )
+
+    def test_the_citation_repair_response_answers_a_status_without_its_ruler(self) -> None:
+        """``citation_fix`` answers whether the step went well, with counts (MIK-R110 rules 1-2).
+
+        The repair engine's build stamp (D-33) no longer rides the tool's answer: the answer
+        holds the outcome, the document count and the rewritten/stale/unreadable/refused
+        counts, while the whole result with every list is in the log's detail file. Red if
+        the stamp returns to the answer, or if the status counts go missing.
+        """
+
+        scope = SimpleNamespace(
+            repo_id="repo",
+            onboarding_root=Path("/memory/onboarding"),
+            code_root=Path("/code"),
+        )
+        with (
+            mock.patch.object(memory_tools, "_leaf_memory_writer_scope", return_value=scope),
+            # MIK-R46 rule 8: this case's subject is the serving-build stamp, not the memory
+            # format, so it runs on converted memory.
+            mock.patch.object(
+                memory_tools.reference_state, "is_converted_memory", return_value=True
+            ),
+            mock.patch.object(memory_tools, "_converted_citation_fix", return_value={"ok": True}),
+        ):
+            response = memory_tools.citation_fix_tool(
+                mock.Mock(), repo_id="repo", contract_path="/contract"
+            )
+        self.assertNotIn("servingBuild", response)
+        self.assertEqual(
+            {key: response[key] for key in ("documentCount", "rewrittenCount", "staleCount")},
+            {"documentCount": 0, "rewrittenCount": 0, "staleCount": 0},
+        )
+
+
+class CloseoutOwnedProvenanceRoutingTests(unittest.TestCase):
+    """A closeout-owned row is REPORTED in the closeout-owned section, never dropped.
+
+    ``claim_reopen`` publishes the rows no curator edit can discharge in its own bucket instead of
+    the enforced set. The checklist is where that classification has to land -- in the section the
+    report already keeps for the closing stamp -- and this case is the wire between the two. Red if
+    the collection stops reading the bucket: the rows would then be in neither the repairable set
+    nor the closeout-owned section, which is the silence the disposition rules forbid.
+    """
+
+    ROW: ClassVar[dict[str, Any]] = {
+        "code": "citation_provenance_invalid",
+        "path": "a.md",
+        "closeoutOwned": True,
+    }
+
+    def checklist_sets(self, payload: dict) -> tuple[list[dict], list[dict]]:
+        with mock.patch.object(controller, "split_commit_owned_findings", return_value=([], [])):
+            return controller._checklist_finding_sets([], payload, Path("/memory/onboarding"))
+
+    def test_the_checklists_commit_owned_set_collects_the_checks_own_bucket(self) -> None:
+        payload = {
+            "checks": {
+                "style.citations.claim_reopen": {
+                    "findings": [],
+                    "closeoutOwnedFindings": [self.ROW],
+                },
+                "style.update_history.history_order": {"findings": []},
+            }
+        }
+        self.assertEqual(self.checklist_sets(payload), ([], [self.ROW]))
+        self.assertEqual(self.checklist_sets({}), ([], []))
+        self.assertEqual(self.checklist_sets({"checks": []}), ([], []))
 
 
 if __name__ == "__main__":  # pragma: no cover

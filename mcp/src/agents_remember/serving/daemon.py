@@ -2,11 +2,11 @@
 
 ``agents-remember dashboard --daemon`` and the MCP server's ``dashboard.autoStart``
 settings key funnel into one decision function, ``ensure()``: adopt a healthy
-daemon, spawn a missing one, restart on version/host/port mismatch (developer
+daemon, spawn a missing one, restart on source digest/version/host/port mismatch (developer
 decision: a stale dashboard is worse than a restart blip). State lives under
 ``<coordinationRoot>/logs/dashboard/``:
 
-- ``daemon.json`` — pid, host, port, version, configPath, logPath, startedAt —
+- ``daemon.json`` — pid, host, port, version, sourceDigest, configPath, logPath, startedAt —
   written atomically and immediately after spawn, so a dying supervisor never
   strands an unrecorded child;
 - ``dashboard.log`` — the child's stdio, rotated to ``.1`` per spawn (the child
@@ -21,10 +21,10 @@ import-light (stdlib + settings types only) so the MCP server can call
 the autostart worker runs in a daemon thread whose only output goes to stderr —
 over stdio transport, stdout IS the MCP protocol.
 
-Liveness is ``kill(pid, 0)`` plus a ``/proc/<pid>/cmdline`` marker probe: the
-recorded pid must still be an agents-remember dashboard, or reboots and pid
-reuse would resurrect foreign processes (a zombie's empty cmdline fails the
-probe too). On platforms without procfs the kill-probe alone decides.
+The build comes from the HTTP answer; the listening process comes from native socket
+ownership. A saved PID never authorizes a signal by itself. The live process must also
+still name the product dashboard in its command line: PID reuse and zombies cannot
+resurrect a foreign process through an old state file.
 """
 
 from __future__ import annotations
@@ -34,21 +34,31 @@ import fcntl
 import json
 import os
 import signal
-import socket
 import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_replace, atomic_write_text
 from agents_remember.kernel.primitives.runtime_config import (
+    ConfigError,
     McpRuntimeConfig,
 )
-from agents_remember.kernel.primitives.version import SERVER_VERSION
+from agents_remember.kernel.primitives.version import _resolve_server_version
+from agents_remember.models.build_currentness import BuildCurrentnessPayload
+from agents_remember.serving.build_currentness import inspect_build
+from agents_remember.serving.build_info import process_serving_build
 from agents_remember.serving.cadence import DEFAULT_PROJECTION_CADENCE, ProjectionCadence
+from agents_remember.serving.daemon_identity import (
+    DashboardIdentity,
+    observe_dashboard,
+    require_dashboard_root,
+)
+from agents_remember.serving.daemon_processes import pid_is_dashboard as _pid_is_dashboard
+from agents_remember.serving.paseo.paseo_start import ensure_host
 
 STATE_FILE_NAME = "daemon.json"
 LOG_FILE_NAME = "dashboard.log"
@@ -56,7 +66,6 @@ LOCK_FILE_NAME = "ensure.lock"
 
 _READY_TIMEOUT_SECONDS = 20.0
 _STOP_TIMEOUT_SECONDS = 10.0
-_CMDLINE_MARKERS = (b"agents_remember", b"agents-remember")
 
 # Spawned Popen handles, kept so a long-lived supervisor (the MCP server) reaps
 # a daemon child that exits instead of leaving a zombie holding its pid.
@@ -74,31 +83,42 @@ class DaemonState:
     config_path: str
     log_path: str
     started_at: str
+    source_digest: str | None = None
+    build_currentness: BuildCurrentnessPayload | None = None
+
+
+def _installed_digest() -> str | None:
+    return inspect_build(process_serving_build(), role="dashboard").installedDigest
 
 
 @dataclass(frozen=True)
 class DaemonEndpoint:
     """Which daemon this is: where it serves and which build it runs.
 
-    Adoption is exactly an equality check on these three (see :func:`_describe_mismatch`) -- a
-    daemon matching two of them is still the wrong daemon -- so they are compared, recorded and
+    Adoption compares the endpoint, version and Python source digest (see :func:`_describe_mismatch`).
+    A daemon matching only some of them is still the wrong daemon, so they are compared, recorded and
     passed as one value rather than three parallel arguments.
     """
 
     host: str
     port: int
-    version: str = SERVER_VERSION
+    version: str = field(default_factory=_resolve_server_version)
+    source_digest: str | None = field(default_factory=_installed_digest)
 
 
 @dataclass(frozen=True)
 class EnsureResult:
-    action: str  # adopted | started | restarted | failed | lock-held
+    action: str  # adopted | started | restarted | unknown | failed | lock-held
     state: DaemonState | None
     detail: str
 
 
 def daemon_dir(config: McpRuntimeConfig) -> Path:
-    return config.coordination_root / "logs" / "dashboard"
+    return daemon_state_directory(config.coordination_root)
+
+
+def daemon_state_directory(coordination_root: Path) -> Path:
+    return coordination_root / "logs" / "dashboard"
 
 
 def read_state(directory: Path) -> DaemonState | None:
@@ -119,6 +139,7 @@ def read_state(directory: Path) -> DaemonState | None:
             config_path=str(data["configPath"]),
             log_path=str(data["logPath"]),
             started_at=str(data["startedAt"]),
+            source_digest=data.get("sourceDigest"),
         )
     except (KeyError, TypeError, ValueError):
         return None
@@ -135,6 +156,7 @@ def write_state(directory: Path, state: DaemonState) -> None:
         "configPath": state.config_path,
         "logPath": state.log_path,
         "startedAt": state.started_at,
+        "sourceDigest": state.source_digest,
     }
     atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
 
@@ -143,19 +165,105 @@ def clear_state(directory: Path) -> None:
     (directory / STATE_FILE_NAME).unlink(missing_ok=True)
 
 
-def probe(directory: Path) -> tuple[DaemonState | None, bool]:
-    """The recorded state plus whether that pid is still OUR dashboard."""
-    state = read_state(directory)
-    if state is None:
-        return None, False
-    return state, _state_alive(state)
+def probe(
+    directory: Path, endpoint: DaemonEndpoint | None = None
+) -> tuple[DaemonState | None, bool]:
+    """Observe the port's real dashboard and repair a mismatched saved identity."""
+    saved = read_state(directory)
+    current = _observed_state(directory, saved, endpoint)
+    if current is None:
+        return saved, False
+    if saved is None or replace(current, build_currentness=None) != replace(
+        saved, build_currentness=None
+    ):
+        write_state(directory, current)
+    return current, _state_alive(current)
+
+
+def _observed_state(
+    directory: Path, saved: DaemonState | None, endpoint: DaemonEndpoint | None
+) -> DaemonState | None:
+    endpoints = []
+    if saved is not None:
+        endpoints.append((saved.host, saved.port))
+    if endpoint is not None and (endpoint.host, endpoint.port) not in endpoints:
+        endpoints.append((endpoint.host, endpoint.port))
+    unknown = None
+    for host, port in endpoints:
+        try:
+            observed = observe_dashboard(host, port)
+            if observed is None:
+                continue
+            require_dashboard_root(observed, directory.parent.parent)
+            return _observed_daemon(directory, saved, host, port, observed)
+        except ConfigError as error:
+            unknown = error
+    if unknown is not None:
+        raise unknown
+    return None
+
+
+def _observed_daemon(
+    directory: Path, saved: DaemonState | None, host: str, port: int, observed: DashboardIdentity
+) -> DaemonState:
+    build = observed.build
+    return DaemonState(
+        pid=observed.pid,
+        host=host,
+        port=port,
+        version=build.version if build is not None else "unknown",
+        source_digest=build.sourceDigest if build is not None else None,
+        config_path=observed.config_path or (saved.config_path if saved is not None else ""),
+        log_path=str(directory / LOG_FILE_NAME),
+        started_at=build.bootedAt if build is not None else "",
+        build_currentness=observed.currentness,
+    )
+
+
+def plan_running_dashboard(config: McpRuntimeConfig) -> EnsureResult | None:
+    """Read-only install preview: name the observed daemon and required build transition."""
+    directory = daemon_dir(config)
+    endpoint = DaemonEndpoint(host="127.0.0.1", port=config.dashboard.port)
+    try:
+        current = _observed_state(directory, read_state(directory), endpoint)
+    except ConfigError as error:
+        return EnsureResult("failed", read_state(directory), str(error))
+    if current is None:
+        return None
+    target = DaemonEndpoint(host=current.host, port=current.port)
+    if target.source_digest is None:
+        return EnsureResult(
+            "unknown",
+            current,
+            "The installed Python digest could not be computed; dashboard build currentness is unknown.",
+        )
+    if current.version == target.version and current.source_digest == target.source_digest:
+        return EnsureResult(
+            "would-adopt", current, f"current daemon pid {current.pid} on {_url(current)}"
+        )
+    return EnsureResult("would-restart", current, _describe_mismatch(current, target))
+
+
+def ensure_running_dashboard(config: McpRuntimeConfig) -> EnsureResult | None:
+    """Refresh a running dashboard after install; leave an absent one stopped."""
+    directory = daemon_dir(config)
+    endpoint = DaemonEndpoint(host="127.0.0.1", port=config.dashboard.port)
+    try:
+        current, alive = probe(directory, endpoint)
+        if not alive or current is None:
+            return None
+        return ensure(config, DaemonEndpoint(host=current.host, port=current.port))
+    except (OSError, ConfigError) as error:
+        return EnsureResult(
+            "failed",
+            read_state(directory),
+            f"dashboard restart failed: {error}; restart the dashboard",
+        )
 
 
 def _state_alive(state: DaemonState) -> bool:
     if not _pid_alive(state.pid):
         return False
-    if not Path("/proc").exists():  # no procfs (e.g. macOS): kill-probe decides
-        return True
     return _pid_is_dashboard(state.pid)
 
 
@@ -169,16 +277,6 @@ def _pid_alive(pid: int) -> bool:
     except PermissionError:
         return True
     return True
-
-
-def _pid_is_dashboard(pid: int) -> bool:
-    try:
-        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
-    except OSError:
-        return False
-    if b"dashboard" not in cmdline:
-        return False
-    return any(marker in cmdline for marker in _CMDLINE_MARKERS)
 
 
 def spawn(
@@ -214,7 +312,7 @@ def spawn(
     ]
     if cadence.heartbeat is not None:
         command += ["--heartbeat", str(cadence.heartbeat)]
-    command.append("--no-access-log")
+    command += ["--no-access-log", "--host-start-owner", str(os.getpid())]
     with log_path.open("ab") as log:
         process = subprocess.Popen(
             command,
@@ -233,6 +331,7 @@ def spawn(
         config_path=str(config.config_path),
         log_path=str(log_path),
         started_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        source_digest=endpoint.source_digest,
     )
     write_state(directory, state)
     return state
@@ -241,10 +340,13 @@ def spawn(
 def stop(directory: Path, *, timeout: float = _STOP_TIMEOUT_SECONDS) -> str:
     """TERM, bounded wait, KILL fallback; idempotent when nothing runs.
 
-    Returns ``not-running`` | ``stopped`` | ``killed``. The state file is
-    cleared in every branch — after stop, the record must not resurrect.
+    Unknown ownership preserves the record and authorizes no signal. Proven
+    stopped processes have their state cleared.
     """
-    state, alive = probe(directory)
+    try:
+        state, alive = probe(directory)
+    except ConfigError as error:
+        return f"identity-unknown: {error}"
     if state is None or not alive:
         clear_state(directory)
         return "not-running"
@@ -300,22 +402,57 @@ def _ensure_locked(
     cadence: ProjectionCadence,
 ) -> EnsureResult:
     host, port, version = endpoint.host, endpoint.port, endpoint.version
-    current, alive = probe(directory)
+    try:
+        current, alive = probe(directory, endpoint)
+    except ConfigError as error:
+        return EnsureResult("failed", read_state(directory), str(error))
     mismatch = ""
     if alive and current is not None:
-        if current.version == version and current.port == port and current.host == host:
+        if endpoint.source_digest is None:
+            return EnsureResult(
+                "unknown",
+                current,
+                "The installed Python digest could not be computed; dashboard build currentness is unknown.",
+            )
+        if (
+            current.version == version
+            and current.port == port
+            and current.host == host
+            and current.source_digest == endpoint.source_digest
+        ):
             return EnsureResult(
                 action="adopted",
                 state=current,
                 detail=f"healthy daemon pid {current.pid} on {_url(current)} (v{current.version})",
             )
-        mismatch = _describe_mismatch(current, host=host, port=port, version=version)
-        stop(directory)
+        mismatch = _describe_mismatch(current, endpoint)
+        stop_result = stop(directory)
+        if _state_alive(current):
+            write_state(directory, current)
+            return EnsureResult(
+                "failed",
+                current,
+                f"{mismatch}; restart failed ({stop_result}): stale daemon pid {current.pid} still serves {_url(current)}; restart the dashboard",
+            )
+    return _spawn_ready(config, endpoint, directory, cadence, mismatch)
+
+
+def _spawn_ready(
+    config: McpRuntimeConfig,
+    endpoint: DaemonEndpoint,
+    directory: Path,
+    cadence: ProjectionCadence,
+    mismatch: str,
+) -> EnsureResult:
     state = spawn(config, endpoint, cadence=cadence)
-    if not _wait_ready(state):
+    try:
+        ready = _wait_ready(state)
+    except ConfigError as error:
+        return EnsureResult("failed", state, str(error))
+    if not ready:
         if _pid_alive(state.pid):
             detail = (
-                f"spawned pid {state.pid} but {_url(state)} did not accept within "
+                f"spawned pid {state.pid} but {_url(state)} did not prove its dashboard identity within "
                 f"{_READY_TIMEOUT_SECONDS:.0f}s; it may still be starting — see {state.log_path}"
             )
         else:
@@ -326,12 +463,12 @@ def _ensure_locked(
         return EnsureResult(
             action="restarted",
             state=state,
-            detail=f"{mismatch}; now pid {state.pid} on {_url(state)} (v{version})",
+            detail=f"{mismatch}; now pid {state.pid} on {_url(state)} (v{endpoint.version})",
         )
     return EnsureResult(
         action="started",
         state=state,
-        detail=f"pid {state.pid} serving {_url(state)} (v{version}); log: {state.log_path}",
+        detail=f"pid {state.pid} serving {_url(state)} (v{endpoint.version}); log: {state.log_path}",
     )
 
 
@@ -362,11 +499,16 @@ def _autostart(config: McpRuntimeConfig) -> None:
     try:
         result = ensure(config, DaemonEndpoint(host="127.0.0.1", port=config.dashboard.port))
         print(f"dashboard autostart: {result.action}: {result.detail}", file=sys.stderr)
+        host = ensure_host(config)
+        print(host.line, file=sys.stderr)
+        if result.action in ("adopted", "unknown"):
+            record_host_outcome(config, host.line)
     except Exception as error:  # boot must survive any autostart failure
         print(f"dashboard autostart: failed: {error}", file=sys.stderr)
 
 
-def _describe_mismatch(current: DaemonState, *, host: str, port: int, version: str) -> str:
+def _describe_mismatch(current: DaemonState, endpoint: DaemonEndpoint) -> str:
+    host, port, version = endpoint.host, endpoint.port, endpoint.version
     reasons: list[str] = []
     if current.version != version:
         reasons.append(f"version {current.version} -> {version}")
@@ -374,21 +516,34 @@ def _describe_mismatch(current: DaemonState, *, host: str, port: int, version: s
         reasons.append(f"port {current.port} -> {port}")
     if current.host != host:
         reasons.append(f"host {current.host} -> {host}")
+    if current.source_digest != endpoint.source_digest:
+        reasons.append(f"source digest {current.source_digest} -> {endpoint.source_digest}")
     return f"restarting pid {current.pid} ({', '.join(reasons)})"
 
 
 def _wait_ready(state: DaemonState, *, timeout: float = _READY_TIMEOUT_SECONDS) -> bool:
-    """True once the child both stays alive and accepts TCP on its bind."""
-    connect_host = state.host if state.host not in ("0.0.0.0", "::") else "127.0.0.1"
+    """True once this child, rather than another listener, answers with its build."""
     deadline = time.monotonic() + timeout
+    unknown = None
     while time.monotonic() < deadline:
         if not _pid_alive(state.pid):
             return False
         try:
-            with socket.create_connection((connect_host, state.port), timeout=0.5):
-                return True
-        except OSError:
-            time.sleep(0.25)
+            observed = observe_dashboard(state.host, state.port)
+        except ConfigError as error:
+            unknown = error
+            observed = None
+        if (
+            observed is not None
+            and observed.build is not None
+            and observed.pid == state.pid
+            and observed.build.sourceDigest == state.source_digest
+            and observed.build.version == state.version
+        ):
+            return True
+        time.sleep(0.25)
+    if unknown is not None:
+        raise unknown
     return False
 
 
@@ -429,3 +584,19 @@ def _log_tail(log_path: Path, *, lines: int = 15) -> str:
 def _url(state: DaemonState) -> str:
     display_host = state.host if state.host not in ("0.0.0.0", "::") else "127.0.0.1"
     return f"http://{display_host}:{state.port}/"
+
+
+def record_host_outcome(config: McpRuntimeConfig, line: str) -> None:
+    """Bound the diagnostic log in place; an adopted dashboard keeps its open append handle."""
+    path = daemon_dir(config) / LOG_FILE_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("a+b") as log:
+            if log.seek(0, os.SEEK_END) > 1024 * 1024:
+                log.seek(-512 * 1024, os.SEEK_END)
+                tail = log.read(512 * 1024)
+                log.truncate(0)
+                log.write(tail)
+            log.write((line + "\n").encode("utf-8"))
+    except OSError as error:
+        print(f"host outcome log unavailable: {error}", file=sys.stderr)

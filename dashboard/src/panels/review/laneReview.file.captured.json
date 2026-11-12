@@ -1,0 +1,203 @@
+{
+ "code_sides": [
+  {
+   "side": "base",
+   "state": "available",
+   "tree": "ea500f4b0737b63cea087c9c561b8e704bbd7ae4"
+  },
+  {
+   "side": "candidate",
+   "state": "available",
+   "tree": "7e5ea079ee32e37ebab0fad49b38afd4d21497bc"
+  }
+ ],
+ "comparison": {
+  "code_base": {
+   "commit": "b54d1b0331f67454bcf245a7a338b04900181c3c",
+   "repository": "/tmp/mik-l32-real/code",
+   "tree": "ea500f4b0737b63cea087c9c561b8e704bbd7ae4"
+  },
+  "code_candidate": {
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L32/2",
+   "repository": "/tmp/mik-l32-real/code",
+   "tree": "7e5ea079ee32e37ebab0fad49b38afd4d21497bc"
+  },
+  "leaf_id": "260928-MIK-L32",
+  "memory_base": {
+   "commit": "8326a1b1166c681b0ac0319b6ce127870583764f",
+   "repository": "/tmp/mik-l32-real/memory",
+   "tree": "626ff151ece0df3f3c6f0bf990bf289861e1dfce"
+  },
+  "memory_candidate": {
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L32/2",
+   "repository": "/tmp/mik-l32-real/memory",
+   "tree": "222215cfa590dd1d4272a7bb1d3de368f9d1bc64"
+  },
+  "number": 2,
+  "recorded_at": "2026-09-30T09:46:45+00:00",
+  "schema": "ar-review-tree-comparison/v1",
+  "task_id": "260928_maintained-invariant-knowledge"
+ },
+ "entries": [],
+ "file_classification": {
+  "bucket": "attributed",
+  "content": "text",
+  "counts": {
+   "attribution_unknown": 0,
+   "hunks": 2,
+   "linked": 1,
+   "unexplained": 1
+  },
+  "hunks": [
+   {
+    "after": {
+     "count": 1,
+     "start": 418
+    },
+    "before": {
+     "count": 1,
+     "start": 418
+    },
+    "classification": "linked",
+    "links": [
+     {
+      "end_line": 435,
+      "families": [
+       {
+        "family": "FAM-XZ5BR65G",
+        "family_key": "b6bbe31f-6ff4-50cc-aa80-c1dc91809539",
+        "family_revision": 3,
+        "state": "member"
+       }
+      ],
+      "id": "RLZ-D2SEVSM9",
+      "invariant": "INV-9BH2BNCT",
+      "invariant_key": "f5a52e12-8ed9-518c-ae25-137eba6d50cc",
+      "invariant_revision": 2,
+      "invariant_revision_key": "7886b91d-aca1-538b-96a1-54ffc1004979",
+      "kind": "realization",
+      "side": "before",
+      "start_line": 410
+     },
+     {
+      "end_line": 435,
+      "families": [
+       {
+        "family": "FAM-XZ5BR65G",
+        "family_key": "b6bbe31f-6ff4-50cc-aa80-c1dc91809539",
+        "family_revision": 3,
+        "state": "member"
+       }
+      ],
+      "id": "RLZ-D2SEVSM9",
+      "invariant": "INV-9BH2BNCT",
+      "invariant_key": "f5a52e12-8ed9-518c-ae25-137eba6d50cc",
+      "invariant_revision": 2,
+      "invariant_revision_key": "7886b91d-aca1-538b-96a1-54ffc1004979",
+      "kind": "realization",
+      "side": "after",
+      "start_line": 410
+     }
+    ],
+    "unknown": []
+   },
+   {
+    "after": {
+     "count": 6,
+     "start": 572
+    },
+    "before": {
+     "count": 0,
+     "start": 571
+    },
+    "classification": "unexplained",
+    "links": [],
+    "unknown": []
+   }
+  ],
+  "mode_change": false,
+  "path": "mcp/src/agents_remember/application/review_comparison_retention.py",
+  "reason": "a recorded entry supplies a range at its recorded blob (on the before side RLZ-15WP0QCN, RLZ-A54M1HGQ, RLZ-D2SEVSM9; on the after side RLZ-15WP0QCN, RLZ-A54M1HGQ, RLZ-D2SEVSM9)",
+  "sides": [
+   {
+    "blob": "87c7c5dcefcbaf93baf68a0c8eec34ad2dd11703",
+    "entries": [
+     {
+      "end_line": 534,
+      "id": "RLZ-15WP0QCN",
+      "invariant": "INV-9BH2BNCT",
+      "kind": "realization",
+      "start_line": 478
+     },
+     {
+      "end_line": 275,
+      "id": "RLZ-A54M1HGQ",
+      "invariant": "INV-9BH2BNCT",
+      "kind": "realization",
+      "start_line": 223
+     },
+     {
+      "end_line": 435,
+      "id": "RLZ-D2SEVSM9",
+      "invariant": "INV-9BH2BNCT",
+      "kind": "realization",
+      "start_line": 410
+     }
+    ],
+    "knowledge": "available",
+    "path": "mcp/src/agents_remember/application/review_comparison_retention.py",
+    "side": "before"
+   },
+   {
+    "blob": "99f7742aa7822bbb2aa54c46ba72113e1f12c602",
+    "entries": [
+     {
+      "end_line": 534,
+      "id": "RLZ-15WP0QCN",
+      "invariant": "INV-9BH2BNCT",
+      "kind": "realization",
+      "start_line": 478
+     },
+     {
+      "end_line": 275,
+      "id": "RLZ-A54M1HGQ",
+      "invariant": "INV-9BH2BNCT",
+      "kind": "realization",
+      "start_line": 223
+     },
+     {
+      "end_line": 435,
+      "id": "RLZ-D2SEVSM9",
+      "invariant": "INV-9BH2BNCT",
+      "kind": "realization",
+      "start_line": 410
+     }
+    ],
+    "knowledge": "available",
+    "path": "mcp/src/agents_remember/application/review_comparison_retention.py",
+    "side": "after"
+   }
+  ],
+  "status": "modified"
+ },
+ "knowledge_sides": [
+  {
+   "index_state": "complete",
+   "problems": [],
+   "side": "before",
+   "state": "available",
+   "tree": "626ff151ece0df3f3c6f0bf990bf289861e1dfce"
+  },
+  {
+   "index_state": "complete",
+   "problems": [],
+   "side": "after",
+   "state": "available",
+   "tree": "222215cfa590dd1d4272a7bb1d3de368f9d1bc64"
+  }
+ ],
+ "leaf_id": "260928-MIK-L32",
+ "master": "260928_maintained-invariant-knowledge",
+ "repository_id": "agents-remember",
+ "state": "trees"
+}

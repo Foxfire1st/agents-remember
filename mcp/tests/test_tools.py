@@ -8,22 +8,17 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from unittest.mock import patch
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import ValidationError
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.application.provider_tools import (
-    GrepaiRepoScope,
-    GrepaiSearchQuery,
-    GrepaiTraceQuery,
-    ProviderQueryScope,
-)
 from agents_remember.kernel import memory_init as memory_init_module
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
@@ -33,20 +28,14 @@ from agents_remember.mcp import SERVER_VERSION
 from agents_remember.mcp.registration import TOOL_REGISTRARS
 from agents_remember.mcp.tools import (
     PUBLIC_TOOLS,
-    cgc_callees_payload,
-    cgc_callers_payload,
-    grepai_search_payload,
-    grepai_trace_payload,
     memory_init_payload,
-    ping_payload,
     server_info_payload,
 )
-from agents_remember.models.tools.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.models.lifecycles.curator_coherence import CuratorCoherenceRequest
+from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.serving.build_info import ServingBuild
 from test_config import settings_payload
-
-DRY_RUN_SCOPE = ProviderQueryScope(dry_run=True)
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -55,17 +44,6 @@ def write_json(path: Path, data: dict) -> None:
 
 
 class McpToolTests(unittest.TestCase):
-    def test_ping_payload(self) -> None:
-        payload = ping_payload()
-
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["server"], "agents-remember")
-        self.assertEqual(payload["version"], SERVER_VERSION)
-        self.assertEqual(payload["transport"], "stdio")
-        self.assertGreater(payload["tokens"], 0)
-        self.assertEqual(payload["tokenizer"], "tiktoken:o200k_base")
-        self.assertIs(payload["tokenCountExact"], True)
-
     def test_server_info_payload_reports_safe_config_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -87,20 +65,15 @@ class McpToolTests(unittest.TestCase):
             self.assertEqual(payload["server"], "agents-remember")
             self.assertEqual(payload["transport"], "stdio")
             self.assertEqual(payload["configPath"], path.resolve().as_posix())
-            self.assertEqual(
-                payload["harnessSkillRoot"],
-                (root / ".codex" / "skills").as_posix(),
-            )
+            # MIK-R196 rule 7: no installed-harness skill root is named by the running server.
+            self.assertNotIn("harnessSkillRoot", payload)
             self.assertEqual(payload["allowedRepoIds"], ["agents-remember"])
             self.assertEqual(
-                payload["allowedProviderIds"],
+                payload["unusedProviderKeys"],
                 ["codegraphcontext-code", "grepai-memory"],
             )
-            self.assertEqual(
-                payload["tools"],
-                list(PUBLIC_TOOLS),
-            )
-            self.assertEqual(payload["reservedTools"], [])
+            self.assertNotIn("tools", payload)
+            self.assertNotIn("reservedTools", payload)
             self.assertEqual(
                 payload["servingBuild"],
                 {
@@ -119,6 +92,10 @@ class McpToolTests(unittest.TestCase):
             path = root / "mcp-settings.json"
             write_json(path, settings_payload(root))
             config = load_config(path)
+            # The coordinator scaffold the memory root lives inside. `runtime_install`
+            # creates it in the real flow; `memory_init` refuses to invent one, so the
+            # fixture states it rather than relying on the refusal being lenient.
+            config.coordination_root.mkdir(parents=True, exist_ok=True)
             real_run_git = memory_init_module.run_git
 
             def fail_authority(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -126,18 +103,19 @@ class McpToolTests(unittest.TestCase):
                     "config",
                     "--local",
                     "agents-remember.defaultBranch",
-                    "main",
+                    "memory",
                 ]:
                     return subprocess.CompletedProcess(args, 1, "", "config locked")
                 return real_run_git(repo, args)
 
             with patch.object(memory_init_module, "run_git", side_effect=fail_authority):
-                failed = memory_init_payload(config, "agents-remember")
+                failed = memory_init_payload(config, "agents-remember", initial_branch="memory")
             self.assertFalse(failed["ok"])
             memory_root = Path(str(failed["memoryRoot"]))
             self.assertTrue((memory_root / ".git").exists())
+            self.assertEqual(failed["initialBranch"], "memory")
 
-            repaired = memory_init_payload(config, "agents-remember")
+            repaired = memory_init_payload(config, "agents-remember", initial_branch="memory")
 
             self.assertTrue(repaired["ok"])
             self.assertTrue(repaired["git"]["repairAttempted"])
@@ -148,49 +126,7 @@ class McpToolTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             ).stdout.strip()
-            self.assertEqual(configured, "main")
-
-    def test_typed_cgc_payloads_reject_invalid_inputs_before_provider_execution(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            path = root / "mcp-settings.json"
-            write_json(path, settings_payload(root))
-            config = load_config(path)
-
-            with self.assertRaisesRegex(ValueError, "not allowed"):
-                cgc_callers_payload(config, "other-repo", "resolve_context")
-            with self.assertRaisesRegex(ValueError, "function"):
-                cgc_callees_payload(config, "agents-remember", "")
-
-    def test_grepai_payloads_reject_invalid_scope_and_trace_inputs(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            initialize_context_fixture(root)
-            path = root / "mcp-settings.json"
-            write_json(path, settings_payload(root))
-            config = load_config(path)
-
-            with self.assertRaisesRegex(ValueError, "unknown repo_ids"):
-                grepai_search_payload(
-                    config,
-                    GrepaiSearchQuery(query="provider lifecycle"),
-                    repos=GrepaiRepoScope(repo_ids=["unknown-repo"]),
-                )
-            with self.assertRaisesRegex(ValueError, "repo_ids is required"):
-                grepai_search_payload(
-                    config,
-                    GrepaiSearchQuery(query="provider lifecycle"),
-                    repos=GrepaiRepoScope(all_repos=False),
-                )
-            with self.assertRaisesRegex(ValueError, "trace_action"):
-                grepai_trace_payload(
-                    config, GrepaiTraceQuery(trace_action="neighbors", symbol="resolve_context")
-                )
-            with self.assertRaisesRegex(ValueError, "depth"):
-                grepai_trace_payload(
-                    config,
-                    GrepaiTraceQuery(trace_action="callers", symbol="resolve_context", depth=2),
-                )
+            self.assertEqual(configured, "memory")
 
 
 REAL_MCP_CONFIG = os.environ.get("AGENTS_REMEMBER_REAL_MCP_CONFIG")
@@ -239,7 +175,7 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
         self.assertEqual(live, PUBLIC_TOOLS)
 
     def test_worktree_record_landing_has_a_response_model_that_validates(self) -> None:
-        self.assertEqual(set(PUBLIC_TOOL_RESPONSE_MODELS), set(PUBLIC_TOOLS))
+        self.assertEqual(set(TOOL_RESPONSE_MODELS), set(PUBLIC_TOOLS))
         # A name in the inventory but missing from the registry raises KeyError here, which the
         # surface comparison above cannot see on its own.
         envelope = finalize_tool_response(
@@ -310,6 +246,13 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
         stop's. The two are separate registered tools, not one verb with two names, and the
         pause's text has to say both things an agent needs: that it publishes nothing, and that
         the publication it must not reach for is named and separate.
+
+        The text also has to stay true about a master holding no selection. The pause used to
+        refuse one with ``atomic-series-activation-selection-missing`` and now reports it as
+        already stopped, so the removed refusal's own identifier is pinned out of the registered
+        description -- advertising a refusal the verb no longer performs describes a tool the
+        caller does not have. The release the description does still advertise is pinned in
+        beside it, so that absence cannot be satisfied by an emptied-out text.
         """
 
         server = FastMCP("pause-surface-probe")
@@ -327,6 +270,130 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
         self.assertIn("Publishes NOTHING", pause)
         self.assertIn("separate, explicitly requested PUBLICATION", pause)
         self.assertIn("worktree_checkpoint_landing", pause)
+        # No advertised refusal for the state the pause now answers, beside the release the
+        # pause does still perform.
+        self.assertNotIn("atomic-series-activation-selection-missing", pause)
+        self.assertNotIn("selection-missing", pause)
+        self.assertIn("releases the master's atomic-series activation selection", pause)
+
+
+PUBLISH_REQUIRED_FIELDS = (
+    "semantic_requirement_revision",
+    "delivery_attempt",
+    "expected_predecessor_digest",
+    "expected_code_candidate_tree",
+    "expected_memory_candidate_tree",
+    "expected_task_topology_fingerprint",
+    "expected_task_intent",
+    "expected_attestation_sha256",
+    "caller",
+)
+"""Every field `curator_coherence` refuses a `publish` without.
+
+`CuratorCoherenceRequest._action_has_one_input_shape` requires all nine to be non-null, and
+`worktrees/integration/closeout/curator_coherence_publication.py:227-229` asserts three of them
+again before it writes the record. The list is spelled here so the advertised text and the
+enforced validator are compared against one source rather than restated twice.
+"""
+
+
+class CuratorCoherencePublishContractTests(unittest.TestCase):
+    """The published description and the enforced validator must demand the same fields.
+
+    `260918-TSIP-L3` row `T50`: `publish` was refused twice on a real curator with *"publish
+    requires every identity, predecessor, and caller field"* while every field the registered
+    description named had been supplied. Two disagreements at once, pinned separately here
+    because either can regress alone:
+
+    * the **description** (`mcp/registration/tasks.py`) did not mark
+      `semantic_requirement_revision` or `delivery_attempt` as required at all, so a caller
+      reading the published contract had no way to learn that `publish` wants them; and
+    * the **refusal** named a class of fields and none of them, and pydantic reports a
+      model-level validator with `loc: ()` (measured), so the message was the caller's only
+      route to the missing field.
+
+    Both are the same class as `T43` (a description that advertises what the tool refuses) and
+    `D13` (a capability advertised through a surface that cannot serve it): a declared contract
+    that is not the enforced one.
+    """
+
+    def test_the_description_names_every_field_publish_requires(self) -> None:
+        server = FastMCP("curator-coherence-description-probe")
+        for register_tools in TOOL_REGISTRARS:
+            register_tools(server, _permissive_registration_config())
+        advertised = {
+            tool.name: " ".join((tool.description or "").split())
+            for tool in asyncio.run(server.list_tools())
+        }
+
+        description = advertised["curator_coherence"]
+        for field in PUBLISH_REQUIRED_FIELDS:
+            with self.subTest(field=field):
+                self.assertIn(field, description)
+
+        # The published JSON schema cannot carry this constraint, which is why the description is
+        # the load-bearing surface: the requirement is conditional on `action == "publish"`, and
+        # pydantic marks only `action` and `contract_path` required. Pinned so the repair cannot
+        # be "moved into the schema" by someone who assumes the schema can express it.
+        schema = CuratorCoherenceRequest.model_json_schema()
+        self.assertEqual(sorted(schema["required"]), ["action", "contract_path"])
+
+    def test_publish_refuses_by_naming_every_missing_field(self) -> None:
+        complete: dict[str, Any] = {
+            "semantic_requirement_revision": "tsip-l3@v1",
+            "delivery_attempt": "l3-attempt-1",
+            "expected_predecessor_digest": "0" * 64,
+            "expected_code_candidate_tree": "a" * 40,
+            "expected_memory_candidate_tree": "b" * 40,
+            "expected_task_topology_fingerprint": "c" * 64,
+            "expected_attestation_sha256": "d" * 64,
+            "expected_task_intent": {"schema": "task-intent/v1", "digest": "e" * 64},
+            "caller": {
+                "role": "curator",
+                "task_document_ref": {
+                    "repository": "agents-remember",
+                    "path": "tasks/agents-remember/master/leaf.json",
+                },
+            },
+        }
+
+        # Positive control: the field list above is the complete one, so an omission below is the
+        # only reason for a refusal. Without this arm a mistyped field name would make every
+        # assertion pass for a reason that has nothing to do with the repair.
+        accepted = CuratorCoherenceRequest(
+            action="publish", contract_path="/tmp/leaf.md", **complete
+        )
+        self.assertEqual(accepted.semantic_requirement_revision, "tsip-l3@v1")
+
+        for omitted in PUBLISH_REQUIRED_FIELDS:
+            with self.subTest(omitted=omitted):
+                supplied = {key: value for key, value in complete.items() if key != omitted}
+                with self.assertRaises(ValidationError) as raised:
+                    CuratorCoherenceRequest(
+                        action="publish", contract_path="/tmp/leaf.md", **supplied
+                    )
+                # `errors()[0]["msg"]`, never `str(error)`: the rendered error echoes
+                # `input_value`, and a substring check against the echo reports "named" for a
+                # message that names nothing -- the instrument fault this case exists to catch.
+                message = raised.exception.errors()[0]["msg"]
+                # The declared text, not a punctuation of it. This case asserted
+                # `f"missing: {omitted}"` from `0dd04d6a` (this master's L3, which wrote it against
+                # a product text that never carried that colon) until `260918-TSIP-L10` measured
+                # it: `publication_refusal` has emitted
+                # `"... field; missing " + ", ".join(missing)` since the commit that introduced it
+                # (`4264dcc9`, `260915-KS-R24`), and the sibling case in
+                # `test_curator_coherence_publication_discoverability.py` pins the same prefix with
+                # no colon. The old form was therefore red from the day it was written -- and
+                # invisible, because `mcp/tests/test_tools.py` is in the INTEGRATION lane and every
+                # leaf gate on this master runs `-m "not integration"`. The assertion is now the
+                # whole opening sentence plus the exact field, so it still cannot be satisfied by
+                # naming a different member, and it reads the contract the product actually
+                # declares.
+                self.assertIn(
+                    "publish requires every identity, predecessor, and caller field; "
+                    f"missing {omitted}",
+                    message,
+                )
 
 
 def _permissive_registration_config() -> McpRuntimeConfig:

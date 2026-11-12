@@ -1,0 +1,320 @@
+{
+  "scope": "Architect-approved two-leaf native current writer fixture, no legacy-body replay",
+  "actual_ids": {
+    "family": "FAM-RAKK5X",
+    "member": "INV-CK299Q"
+  },
+  "entry_ids": [
+    {
+      "selector_kind": "invariant",
+      "selector_id": "7f53faf9-0736-58e4-9954-c1cc4944509f",
+      "label": "INV-CK299Q",
+      "presence": "both"
+    },
+    {
+      "selector_kind": "family",
+      "selector_id": "b7a48020-154c-5256-8dd7-e7e1c2fcfdf4",
+      "label": "Probe",
+      "presence": "both"
+    }
+  ],
+  "leaf_ids": {
+    "A": "260928-MIK-L57-F04-A",
+    "B": "260928-MIK-L57-F04-B"
+  },
+  "contracts": {
+    "A": {
+      "path": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/coordination/tasks/agents-remember/260928-f04-native/enclosures/260928-mik-l57-f04-a/series-contract.md",
+      "code_base": "014e60408d8dd2de213b70a76e2bd702256ef2d7",
+      "memory_base": "548b8bb8eaeb117990b3e1014a2ff414ca01c973"
+    },
+    "B": {
+      "path": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/coordination/tasks/agents-remember/260928-f04-native/enclosures/260928-mik-l57-f04-b/series-contract.md",
+      "code_base": "81dfa98ca3a098cc76fbf56312bf5a7c73458de6",
+      "memory_base": "8b209c082043130efdf5487a0ac18dff2b85c6d6"
+    }
+  },
+  "fixture_setup": {
+    "retained_code_base": "f4075f8d57b8b090e6bde37e57d9c91e3c4aa27e",
+    "code_commit": "014e60408d8dd2de213b70a76e2bd702256ef2d7",
+    "reason": "Inherited DEC-F6BPRV links notes; provide a real notes directory in fixture code, not a validator exception."
+  },
+  "leaf_A_publication": {
+    "code_commit": "81dfa98ca3a098cc76fbf56312bf5a7c73458de6",
+    "memory_commit": "8b209c082043130efdf5487a0ac18dff2b85c6d6",
+    "history_files": []
+  },
+  "worldidentity": {
+    "code_base": "014e60408d8dd2de213b70a76e2bd702256ef2d7",
+    "memory_base": "548b8bb8eaeb117990b3e1014a2ff414ca01c973",
+    "code_base_tree": "9d401c48cfb9e8ee24a8e30fe284d7a41303c9d9",
+    "memory_base_tree": "19e6be4b5958347f91b4b444b372767bf0d1ab0c",
+    "memory_candidate_commit": "41424cd94a13475056231c4111a1e147d9ebf8fd",
+    "memory_candidate_tree": "505e7a194b6522fc8845e483eae9942520553bdb"
+  },
+  "writer_receipts": [
+    {
+      "leaf": "A",
+      "attempt": 1,
+      "argv": [
+        "knowledge-ingest",
+        "--contract",
+        "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/coordination/tasks/agents-remember/260928-f04-native/enclosures/260928-mik-l57-f04-a/series-contract.md",
+        "--list",
+        "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/coordination/tasks/agents-remember/260928-f04-native/leaf-A-attempt-1.json",
+        "--authorization-ref",
+        "architect-approved F04 native fixture leaf A attempt 1",
+        "--commit",
+        "--json"
+      ],
+      "file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/writer-A-attempt-1.json",
+      "sha256": "1bf0d3f80dec7d8fcc5a71565900a355ccc584f4291fbafc88bbf8a25c11a8a9",
+      "bytes": 127714,
+      "exit_code": 0,
+      "handoff": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/coordination/tasks/agents-remember/260928-f04-native/leaf-A-attempt-1.json",
+      "handoff_sha256": "f3add1dec451c02f1db6916b527c79c823001e0b32129e8396fdf569f37ed6a8"
+    },
+    {
+      "leaf": "B",
+      "attempt": 1,
+      "argv": [
+        "knowledge-ingest",
+        "--contract",
+        "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/coordination/tasks/agents-remember/260928-f04-native/enclosures/260928-mik-l57-f04-b/series-contract.md",
+        "--list",
+        "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/coordination/tasks/agents-remember/260928-f04-native/leaf-B-attempt-1.json",
+        "--authorization-ref",
+        "architect-approved F04 native fixture leaf B attempt 1",
+        "--commit",
+        "--json"
+      ],
+      "file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/writer-B-attempt-1.json",
+      "sha256": "4facdfed5648da8e426194ef69253ba2d77df49cbc76d2f80082cba4b656b88d",
+      "bytes": 127367,
+      "exit_code": 0,
+      "handoff": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/coordination/tasks/agents-remember/260928-f04-native/leaf-B-attempt-1.json",
+      "handoff_sha256": "eb9e9ad0fdec55173c56317e63e081722a8b94f982c22854f1a708d42c4644ea"
+    },
+    {
+      "leaf": "B",
+      "attempt": 2,
+      "argv": [
+        "knowledge-ingest",
+        "--contract",
+        "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/coordination/tasks/agents-remember/260928-f04-native/enclosures/260928-mik-l57-f04-b/series-contract.md",
+        "--list",
+        "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/coordination/tasks/agents-remember/260928-f04-native/leaf-B-attempt-2.json",
+        "--authorization-ref",
+        "architect-approved F04 native fixture leaf B attempt 2",
+        "--commit",
+        "--json"
+      ],
+      "file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/writer-B-attempt-2.json",
+      "sha256": "f05abfaea02be66398a4ba8a4d6da5f4228ec9d70287df41db988b15a1a27e2c",
+      "bytes": 127387,
+      "exit_code": 0,
+      "handoff": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/coordination/tasks/agents-remember/260928-f04-native/leaf-B-attempt-2.json",
+      "handoff_sha256": "90c0e24a56ff75122529580802adf4dd68079541306e27bffd0b3e723a54063b"
+    }
+  ],
+  "closeout_simulation": {
+    "scope": "Only closed=false to true on B attempt 1; not a writer judgment injection",
+    "path": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/world/memory/knowledge/history/260928-MIK-L57-F04-B.json",
+    "before_sha256": "56f9f6e4add3e385735e9c2139123c0a5a19b0ecc61ca6651dc5880ea198db81",
+    "after_sha256": "8caf1de5decc822220bf81ae3101877e143aa9cae29af6522473accece602071",
+    "diff": "diff --git a/knowledge/history/260928-MIK-L57-F04-B.json b/knowledge/history/260928-MIK-L57-F04-B.json\nindex c9942a9d0..7f22e1428 100644\n--- a/knowledge/history/260928-MIK-L57-F04-B.json\n+++ b/knowledge/history/260928-MIK-L57-F04-B.json\n@@ -1,5 +1,5 @@\n {\n-  \"closed\": false,\n+  \"closed\": true,\n   \"leaf\": \"260928-MIK-L57-F04-B\",\n   \"rows\": [\n     {"
+  },
+  "persisted_records": {
+    "FAM-RAKK5X": {
+      "path": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/world/memory/knowledge/families/FAM-RAKK5X-probe.json",
+      "origin": {
+        "handoff": {
+          "path": "leaf-A-attempt-1.json"
+        },
+        "handoffEntry": "l43f04-family",
+        "leaf": "260928-MIK-L57-F04-A",
+        "task": "260928-f04-native"
+      },
+      "A_publication_revision": 1,
+      "final_revision": 3,
+      "sha256": "32616f565d477d5d67b340690dffe3334f73f2263a1a7fdf33a4a4866c330be7"
+    },
+    "INV-CK299Q": {
+      "path": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/world/memory/knowledge/invariants/INV-CK299Q-each-accepted-probe-reading-remains-unchanged.json",
+      "origin": {
+        "handoff": {
+          "evidence": [
+            "Leaf A authors the retry-stability member for the native F04 fixture."
+          ],
+          "path": "leaf-A-attempt-1.json"
+        },
+        "handoffEntry": "l43f04-member",
+        "leaf": "260928-MIK-L57-F04-A",
+        "task": "260928-f04-native"
+      },
+      "A_publication_revision": 1,
+      "final_revision": 1,
+      "sha256": "e4873933056583e40b0cbefd8ed350056c31920b2a43200958e42991f370aafe"
+    }
+  },
+  "persisted_history_flags": [
+    {
+      "path": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/world/memory/knowledge/history/260928-MIK-L57-F04-B.json",
+      "sha256": "8caf1de5decc822220bf81ae3101877e143aa9cae29af6522473accece602071",
+      "attempt": 1,
+      "closed": true,
+      "row": {
+        "disposition": "changed",
+        "effect": "weaken",
+        "examined": [
+          {
+            "id": "INV-CK299Q",
+            "revision": 1
+          }
+        ],
+        "id": "ROW-YXKVEC",
+        "items": [],
+        "reason": "Drop the universal-acceptance obligation while preserving retry stability for readings that are accepted.",
+        "revision": 2,
+        "subject": "FAM-RAKK5X"
+      }
+    },
+    {
+      "path": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/world/memory/knowledge/history/260928-MIK-L57-F04-B-attempt-2.json",
+      "sha256": "de3ad18c86e53e2adb8b5da410f61f25a261d512339d10adc9a623f428fdd3e1",
+      "attempt": 2,
+      "closed": false,
+      "row": {
+        "disposition": "changed",
+        "effect": "clarify",
+        "examined": [
+          {
+            "id": "INV-CK299Q",
+            "revision": 1
+          }
+        ],
+        "id": "ROW-NVYMV1",
+        "items": [
+          "sha256:56005b773bd19cb1ceed0d31136e7ef75c5753f8533b27f24f5c17791cae9ab6"
+        ],
+        "reason": "Restate the same accepted-reading stability and optional rejection without adding or removing any obligation from attempt 1.",
+        "revision": 3,
+        "subject": "FAM-RAKK5X"
+      }
+    }
+  ],
+  "canonical_comparison_refs": {
+    "schema": "ar-review-tree-comparison/v1",
+    "task_id": "260928-f04-native",
+    "leaf_id": "260928-MIK-L57-F04-B",
+    "number": 1,
+    "code_base": {
+      "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/world/code",
+      "tree": "9d401c48cfb9e8ee24a8e30fe284d7a41303c9d9",
+      "commit": "81dfa98ca3a098cc76fbf56312bf5a7c73458de6"
+    },
+    "code_candidate": {
+      "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/world/code",
+      "tree": "9d401c48cfb9e8ee24a8e30fe284d7a41303c9d9",
+      "commit": "81dfa98ca3a098cc76fbf56312bf5a7c73458de6"
+    },
+    "memory_base": {
+      "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/world/memory",
+      "tree": "d206bc6d2fe617796d6aa841578347c8368496e6",
+      "commit": "8b209c082043130efdf5487a0ac18dff2b85c6d6"
+    },
+    "memory_candidate": {
+      "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/world/memory",
+      "tree": "505e7a194b6522fc8845e483eae9942520553bdb",
+      "commit": "41424cd94a13475056231c4111a1e147d9ebf8fd"
+    },
+    "recorded_at": "2026-10-15T23:29:55+00:00"
+  },
+  "publications": [
+    {
+      "destination": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/dashboard/src/panels/review/l57.f04-native.entries.captured.json",
+      "rawpath": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/raw/l57.f04-native.entries.captured.json",
+      "raw_bytes": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/raw/l57.f04-native.entries.captured.json",
+      "sha256": "cb261e852baa95ecbe13b83fc96a39820dc0b65dfaa10c529ed7c0eab3a8e9ea",
+      "bytes": 345776,
+      "status": 200,
+      "route": "/api/review/intent/entries",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928-f04-native",
+        "leaf": "260928-MIK-L57-F04-B"
+      },
+      "model_validation": "ReviewEntryListResult:PASS"
+    },
+    {
+      "destination": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/dashboard/src/panels/review/l57.f04-native.family.captured.json",
+      "rawpath": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/raw/l57.f04-native.family.captured.json",
+      "raw_bytes": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/raw/l57.f04-native.family.captured.json",
+      "sha256": "3acc5b241ad3a61afa201c691513e75b5c89560212a16b64bc0a65d65bc708cb",
+      "bytes": 23584,
+      "status": 200,
+      "route": "/api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928-f04-native",
+        "leaf": "260928-MIK-L57-F04-B",
+        "selectorKind": "family",
+        "selectorId": "b7a48020-154c-5256-8dd7-e7e1c2fcfdf4"
+      },
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "semantic_validation": "PASS: B weaken attempt 1 closed -> B clarify attempt 2 open, A-origin record and revision-1 examined member"
+    },
+    {
+      "destination": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/dashboard/src/panels/review/l57.f04-native.trees.captured.json",
+      "rawpath": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/raw/l57.f04-native.trees.captured.json",
+      "raw_bytes": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/raw/l57.f04-native.trees.captured.json",
+      "sha256": "9f9d6707d0bd75c80643d52a80185a945c0795f73dd7e97e12e9889e887e720d",
+      "bytes": 190324,
+      "status": 200,
+      "route": "/api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928-f04-native",
+        "leaf": "260928-MIK-L57-F04-B"
+      },
+      "model_validation": "ReviewTreesResult:PASS"
+    }
+  ],
+  "initial_refusal": {
+    "receipt": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/initial-refusal/writer-A-attempt-1.json",
+    "sha256": "16f5e369dbb242845ee9b533a99cb6ea38e60c529949f0406192649ebd63f911",
+    "blocking_violations": [
+      {
+        "field": "links.0.target",
+        "message": "record DEC-F6BPRV: link 0 target 'notes' names no directory in paired code tree code candidate 7a19e8025ec4dce73d3d94492c5d2ba63009af9b; restate or remove the link",
+        "path": "knowledge/decisions/DEC-F6BPRV-run-evidence-whole-without-harness-envelope.json",
+        "reportOnly": false,
+        "rule": "R22.6-link-target-path"
+      }
+    ],
+    "resolution": "Only scratch code setup adds actual notes directory to satisfy inherited link; no writer exception or memory repair."
+  },
+  "import_origins": {
+    "main": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/cli/__main__.py",
+    "serving_collaborators": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/cli/dashboard.py",
+    "worklist_for_sides": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/application/knowledge_worklist/leaf.py",
+    "register_review_routes": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/serving/review.py"
+  },
+  "verification": {
+    "status": "PASS",
+    "checked_at": "2026-10-15T23:36:43.862692+00:00",
+    "all_three_raw_hashes_models_statuses": true,
+    "all_writer_receipts_written_and_hashes": true,
+    "A_origin_revision1_B_revisions2and3": true,
+    "A_no_judgment_rows": true,
+    "B_closed_then_open": true,
+    "examined_member_revision1": true,
+    "canonical_refs_resolve": true,
+    "knowledge_indexes_complete": true,
+    "clones_clean": true,
+    "source_unchanged": true,
+    "old_goldens_unchanged": true,
+    "entries_count": 603
+  },
+  "source_bracket_manifest": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/f04-two-leaf-current/publication-needed.json"
+}

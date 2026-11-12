@@ -1,0 +1,42 @@
+{
+  "captured_at": "2026-09-30T19:15:33+00:00",
+  "producer": "260928-MIK-L33 worker, notes/reports/260928-MIK-L33-evidence/capture_real_bodies.py",
+  "command": "PYTHONPATH=<L33 worktree>/mcp/src <mcp venv python> capture_real_bodies.py <L33 worktree>/dashboard <this file>",
+  "route": "create_app(config, collaborators=serving_collaborators(config)) over fastapi TestClient",
+  "source_tree": "260928-mik-l33 worktree (base d3a22213ad3124603b0210afb7e3d049c5589b82, with this leaf's uncommitted changes)",
+  "scratch": "/tmp/mik-l33-real: --shared clones of the live code and memory repositories (setup_scratch.sh); memory 0b176f6b converted with the worktree's knowledge-convert and committed as scratch main 0c3a0f83 with Code-Commit 904e804b; leaf 260928-MIK-L33 (setup_leaf.py setup, then curate): the code worktree holds this leaf's own uncommitted change; the memory worktree holds SCRATCH-AUTHORED curator edits (INV-ZS9ZS878 revision 3->4, INV-2TQGXFAX joins FAM-R6R095RW, FAM-2HBJREC2's guarantee revised, RLZ-6VEXGB6W re-anchored, INV-2E8MG43K reworded without a revision bump) and, after curate, the changed files' entries re-recorded at the candidate blob",
+  "attempts": "one capture per body; each body is the first answer",
+  "fixtures": [
+    {
+      "file": "src/panels/review/triageReal.family.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "selectorKind": "family",
+        "selectorId": "b9f95278-5712-5867-aa87-6e225aed4d45"
+      },
+      "status": 200,
+      "seconds": 5.54,
+      "sha256": "4202557fa9234df0ce44abd992fff7cd2eb4487e35967d1bc4b018cb0f1c0d93",
+      "bytes": 182908
+    },
+    {
+      "file": "src/panels/review/triageReal.shared.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "selectorKind": "invariant",
+        "selectorId": "09b76b4c-9d5e-50a2-8a4d-de1485e8911c"
+      },
+      "status": 200,
+      "seconds": 4.35,
+      "sha256": "5b666a09799c1237475e45a75093744e72de90e209dc3f9a82e5a2329e221560",
+      "bytes": 241040
+    }
+  ],
+  "merge_round": "MIK-L33 merge round: re-captured over the merged tree (MIK-L34 landed at d3a22213) because each body's change facts now carry `membership_reasons` apart from `unknown_reasons`; the scratch scenario is unchanged from the review R2 round (code base 904e804b, the leaf's change as of that round)."
+}

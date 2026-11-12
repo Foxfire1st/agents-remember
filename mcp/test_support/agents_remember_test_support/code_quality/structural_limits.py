@@ -276,8 +276,8 @@ def declares_field(node: ast.ClassDef, method: ast.FunctionDef | ast.AsyncFuncti
     True for exactly one shape: a body-less ``@property`` inside a ``Protocol``. That shape
     is a record's field written the only way a COVARIANT protocol member can be written --
     ``status: str`` on a protocol is read-write and therefore invariant, so a row whose
-    ``status`` is a narrow ``Literal[...]`` would fail to match it. See
-    ``controlplane/seats.py``, which says so at length and is why this rule exists.
+    ``status`` is a narrow ``Literal[...]`` would fail to match it. That is why this rule
+    exists.
 
     The same record spelled as a dataclass or a pydantic model measures zero public methods,
     because its fields are annotations; 804 of this package's 1,010 classes are in exactly
@@ -286,10 +286,9 @@ def declares_field(node: ast.ClassDef, method: ast.FunctionDef | ast.AsyncFuncti
     class has taken a second job". A declaration has no jobs.
 
     Deliberately narrow, so it cannot become a hiding place. A protocol's ``def`` members
-    still count in full (``serving/harness_control_adapter.py``'s eleven-operation
-    ``HarnessProtocolAdapter`` is exactly the fat interface this cap should see); a property
-    with a real body still counts, on a protocol or anywhere else; and nothing outside a
-    ``Protocol`` is folded at all.
+    still count in full (a protocol of eleven operations is exactly the fat interface this
+    cap should see); a property with a real body still counts, on a protocol or anywhere
+    else; and nothing outside a ``Protocol`` is folded at all.
     """
     return (
         is_protocol(node)

@@ -1,163 +1,99 @@
-# Install For OpenClaw
+# Install for OpenClaw
 
-OpenClaw uses an agent workspace with workspace files and skill folders. MCP
-server definitions live in the OpenClaw config registry under `mcp.servers`.
+This page adds to the common install steps what holds for OpenClaw only: how you register the tool
+server, and that the host starts no role agent on OpenClaw. Every statement about OpenClaw itself
+follows its vendor's documentation and was not tried with an installed OpenClaw.
 
-Official references:
+## Install steps
 
-- [OpenClaw Agent Workspace](https://docs.openclaw.ai/concepts/agent-workspace)
-- [OpenClaw System Prompt](https://docs.openclaw.ai/concepts/system-prompt)
-- [OpenClaw MCP](https://docs.openclaw.ai/cli/mcp)
-- [OpenClaw Configuration Reference](https://docs.openclaw.ai/gateway/configuration-reference)
-- [OpenClaw Hooks](https://docs.openclaw.ai/automation/hooks)
-- [OpenClaw Gateway](https://docs.openclaw.ai/cli/gateway)
-- [OpenClaw Skills](https://openclawcn.com/en/docs/tools/skills/)
+These are the five install steps. [Getting started](../getting-started.md) tells them in full, and
+the page [Install](README.md) names them for every harness.
 
-## Root Starter Package
+1. **Install the package.** Install the published package `agents-remember-mcp` with uv.
+2. **Write the settings file.** Create `~/.config/agents-remember/agents-remember-settings.json`. It
+   names the workspace root, the coordination root and your code repositories.
+3. **Register the tool server in your harness.**
+   [Register the tool server in OpenClaw](#register-the-tool-server-in-openclaw) shows the file
+   and the form of the declaration.
+4. **Start the setup.** In a chat of OpenClaw, ask the agent to make this call:
+   `role_start(role="bootstrap", request_id="<a new UUID>")`.
+   [Role agents on this harness](#role-agents-on-this-harness) says what the call does from
+   OpenClaw.
+5. **Open the dashboard.** Open the address that the answer names, by default
+   `http://127.0.0.1:8765/`.
 
-The repository includes an OpenClaw starter package at `.openclaw/`. Copy that
-folder to your shared workspace root, then render the copied package. The
-`.openclaw/render-starter` script is a convenience: with a single `--repo` list
-such as `--repo my-app shared-lib`, it infers the workspace root from the copied
-`.openclaw/` folder, fills path and repository placeholders, validates that each
-requested repository exists, and leaves `.openclaw/openclaw.merge.json` ready to
-merge into `~/.openclaw/openclaw.json` before you restart the gateway or start
-OpenClaw. If you prefer not to run the renderer, make those same replacements by
-hand and verify that no placeholder tokens remain.
+## Register the tool server in OpenClaw
 
-The package contains:
-
-- `.openclaw/openclaw.merge.json` - safe merge template for
-  `~/.openclaw/openclaw.json`; it points `agents.defaults.workspace` at the
-  package workspace and registers the Agents Remember MCP server under
-  `mcp.servers`.
-- `.openclaw/mcp/agents-remember-settings.json` - Agents Remember MCP authority
-  settings.
-- `.openclaw/workspace/AGENTS.md` - OpenClaw workspace operating instruction.
-- `.openclaw/workspace/skills/` - Agents Remember skills in OpenClaw's
-  highest-precedence workspace skill root.
-
-If you already have an OpenClaw workspace, copy the contents of
-`.openclaw/workspace/` into that workspace instead of changing
-`agents.defaults.workspace`.
-
-After the restart, invoke:
-
-```text
-c-13-install-and-onboard
-```
-
-That skill runs or verifies `runtime_install()` and then handles memory,
-onboarding, and providers.
-
-## Workspace Instructions
-
-Put the Agents Remember instruction in the OpenClaw workspace `AGENTS.md`, pointing at the actual coordination runtime path OpenClaw can read:
-
-```markdown
-# Workspace Agent Instructions
-
-Read and follow `/path/to/ar-coordination/AGENTS.md` before working in any target project.
-Treat these rules as workspace instructions!
-
-@/path/to/ar-coordination/AGENTS.md
-```
-
-OpenClaw workspaces may contain other standing instruction files. Keep Agents Remember focused on repository memory and task workflow rules; do not put secrets in workspace docs.
-
-Do not overwrite a target repository's root `AGENTS.md` just to wire Agents
-Remember; root `AGENTS.md` is project-specific. The starter package uses the
-OpenClaw agent workspace file instead.
-
-OpenClaw has internal hooks and typed plugin hooks, but the documented
-file-based hook surface is for Gateway automation and lifecycle events, not a
-minimal project-local MCP starter. The starter package therefore uses the
-documented workspace `AGENTS.md` bootstrap file as the first-action authority.
-
-OpenClaw loads bootstrap files from the configured agent workspace. If the
-workspace path or bootstrap files change while the gateway is running, restart
-the gateway.
-
-## MCP
-
-OpenClaw stores third-party MCP server definitions under `mcp.servers` in
-`~/.openclaw/openclaw.json`. The starter package includes this merge template:
+Step 3 of the install steps is one entry in the configuration of OpenClaw. As documented by the
+vendor, OpenClaw keeps MCP servers under `mcp.servers` in `~/.openclaw/openclaw.json`. See
+[OpenClaw: MCP](https://docs.openclaw.ai/cli/mcp).
 
 ```json
 {
   "mcp": {
     "servers": {
       "agents-remember": {
-        "command": "uvx",
-        "args": [
-          "--refresh-package",
-          "agents-remember-mcp",
-          "agents-remember-mcp@latest",
-          "--config",
-          "<PATH/TO/YOUR/PROJECTS_FOLDER>/.openclaw/mcp/agents-remember-settings.json"
-        ]
+        "command": "agents-remember-mcp",
+        "args": ["--config", "/home/<you>/.config/agents-remember/agents-remember-settings.json"]
       }
     }
   }
 }
 ```
 
-After merging, use these OpenClaw commands to inspect the saved registry:
+`--config` takes an absolute path, so write your home folder in full instead of `~`.
 
-```bash
-openclaw mcp status --verbose
-openclaw mcp doctor
-```
+The registration is the only change to OpenClaw.
 
-`openclaw mcp probe agents-remember` opens a live connection and is useful when
-you want proof that the MCP server starts correctly.
+## Role agents on this harness
 
-## Runtime And Skills
+The host starts no role agent on OpenClaw: it has no [host provider](../concepts.md#host-provider)
+for OpenClaw. Use OpenClaw as the chat that calls the tools. The role agents run on a harness the
+host can start. Once the host runs, `agents-remember paseo status --config <settings file>` lists
+those harnesses under `providers`, with `available` and `error`: `available` says whether the host
+finds the harness ready to start, and `error` holds the host's message when that check failed.
 
-After the restart, the copied `c-13-install-and-onboard` skill runs or verifies:
+From a chat of OpenClaw, the call of step 4 is refused. That call, `role_start` with
+`role="bootstrap"`, starts the Bootstrap role agent on the harness of the chat that makes the call.
+Agents Remember compares the name that the calling harness sends as MCP client with the ids and
+the labels of the host providers. There is no host provider for OpenClaw, so the call from an
+OpenClaw chat finds none.
+
+A first call still prepares the coordination root and installs and starts the host. The call then
+starts no agent and is refused. The answer says "This host cannot be given the caller's own
+harness", lists the harnesses the host can run, and ends with "Name one with `agent` on this call,
+or install that harness's CLI and retry." Repeat the call and name one of the listed harnesses
+that is installed, for example:
 
 ```text
-runtime_install()
+role_start(role="bootstrap", agent="claude", request_id="<a new UUID>")
 ```
 
-OpenClaw loads bundled skills, managed/local skills under `~/.openclaw/skills`,
-and workspace skills under `<workspace>/skills`, with workspace skills taking
-precedence. The starter package uses `.openclaw/workspace/skills`.
+The refusal is read from the code of Agents Remember. The name that OpenClaw sends as MCP client
+was not read.
 
-Do not run `skills_install()` for first-run setup. The copied starter package
-already provides one flat folder per skill under
-`.openclaw/workspace/skills/`. `skills_install()` remains available for manual
-maintenance and non-package installs.
+## What this harness needs
 
-You can inspect OpenClaw skill visibility with:
+Agents Remember needs no setting for OpenClaw beyond the registration above, because the host
+starts no role agent on OpenClaw. One setting of OpenClaw itself is told here as its vendor
+documents it.
 
-```bash
-openclaw skills list
-openclaw skills check
-```
+- **A turn ends when its model stops streaming for longer than the idle limit of OpenClaw.**
+  - Setting: `models.providers.<provider-id>.timeoutSeconds` in `~/.openclaw/openclaw.json`, in
+    seconds, for one [model provider](../concepts.md#model-provider), the service whose models
+    OpenClaw calls. `agents.defaults.timeoutSeconds` sets the limit of a whole agent run instead.
+    `openclaw gateway restart` restarts the gateway, OpenClaw's WebSocket server that holds its
+    sessions, and so applies a change that OpenClaw does not apply while it runs. The vendor
+    documents the keys in the
+    [configuration reference](https://docs.openclaw.ai/gateway/configuration-reference) and the
+    command in [OpenClaw: gateway](https://docs.openclaw.ai/cli/gateway).
+  - Who: you. Agents Remember does not write the files of OpenClaw.
+  - Not verified: as documented by the vendor. This page holds no date and no version of OpenClaw
+    for it.
 
-## Long-running Turns
+## Related pages
 
-Deep reasoning and large onboarding waves usually fit inside OpenClaw's current
-agent runtime timeout. If a local or remote model stops streaming long enough to
-hit the provider idle watchdog, prefer a provider-scoped timeout:
-
-```json5
-{
-  models: {
-    providers: {
-      "<provider-id>": {
-        timeoutSeconds: 300
-      },
-    },
-  },
-}
-```
-
-Use `agents.defaults.timeoutSeconds` only when the entire embedded agent run
-needs a different runtime cap. Restart the gateway after config changes that do
-not hot-apply:
-
-```bash
-openclaw gateway restart
-```
+- [Install](README.md): the common steps and the other harnesses.
+- [Getting started](../getting-started.md): the install steps in full.
+- [The host](../host.md): what the host itself needs.
+- [Roles and role agents](../roles.md): how role agents start and exchange messages.

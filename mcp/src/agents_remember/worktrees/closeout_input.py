@@ -7,9 +7,6 @@ from dataclasses import dataclass
 from typing import Any, Literal, cast
 
 from agents_remember.errors import AgentsRememberError
-from agents_remember.memory_quality.future_code_candidate import (
-    capture_future_code_candidate,
-)
 from agents_remember.models.closeout.input import (
     CloseoutCommitLegName,
     CloseoutCorrectedCall,
@@ -23,6 +20,9 @@ from agents_remember.models.closeout.input import (
     EnabledCloseoutLeg,
     NotApplicableCloseoutLeg,
     ResolvedCloseoutPlan,
+)
+from agents_remember.worktrees.modules.future_code_candidate import (
+    capture_future_code_candidate,
 )
 from agents_remember.worktrees.modules.git import branch_commit, require_git
 from agents_remember.worktrees.route_review import code_candidate_tree

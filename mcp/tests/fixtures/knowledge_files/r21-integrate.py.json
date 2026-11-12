@@ -1,0 +1,21 @@
+{
+  "path": "mcp/src/agents_remember/worktrees/modules/integrate.py",
+  "realizes": [
+    {
+      "anchor": {
+        "blob": "03ef71d6dd2d2fe7b06e5dbc3d4d61931199855d",
+        "content": "sha256:627f52688994cee1118504fe98477ac2fdf9a4f363c0969953df0ad2e3fae2bc",
+        "locator": {
+          "kind": "symbol",
+          "name": "validate_integrate_memory_contract"
+        }
+      },
+      "id": "RLZ-4E1C9A",
+      "invariant": "INV-7K3F9Q",
+      "rationale": "Integration refuses a memory contract that would land code without its paired memory commit.",
+      "role": "primary-authority"
+    }
+  ],
+  "references": {},
+  "schema": "ar-onboarding-file/v1"
+}

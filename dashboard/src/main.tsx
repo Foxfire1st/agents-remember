@@ -5,11 +5,8 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import "./styles/tokens.css";
-// The scoped WebTUI skin: after index.css so the layer-order statement there
-// (reset, base, effects, webtui, tokens, recipes, utilities) governs where these rules land.
-import "./styles/webtui.css";
 
-// Determinism flag: `?effects=off` or the calm-cockpit toggle freezes CRT
+// Determinism flag: `?effects=off` or the calm-cockpit toggle freezes every
 // animation so screenshots and visual assertions are stable.
 const params = new URLSearchParams(window.location.search);
 if (params.get("effects") === "off" || window.localStorage.getItem("calm-cockpit") === "1") {

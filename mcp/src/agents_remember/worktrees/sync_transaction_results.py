@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from agents_remember.models.worktree import (
+    SyncOmissionsProjection,
+    SyncSource,
+    SyncSourceProjection,
+)
+from agents_remember.worktrees.knowledge_crossing import crossing_summary
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.guidance import contract_next_args, recovery_guidance
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.sync_omission_report import OmissionReportError
+from agents_remember.worktrees.sync_parked_omissions import measure
 from agents_remember.worktrees.sync_transaction_authority import command_result, side_payload
 from agents_remember.worktrees.sync_transaction_git import (
     SyncGitProofError,
@@ -14,6 +22,7 @@ from agents_remember.worktrees.sync_transaction_git import (
 from agents_remember.worktrees.sync_transaction_recovery import (
     completed_sync_result,
     manual_repair_result,
+    with_recomputed_worklist,
 )
 from agents_remember.worktrees.sync_transaction_state import (
     SyncOperationRecord,
@@ -52,7 +61,22 @@ def sync_preview(
     code: SyncSideRecord,
     memory: SyncSideRecord | None,
     fetch: dict[str, object],
+    *,
+    sync_source: SyncSource | None = None,
 ) -> WorktreeCommandResult:
+    sources: dict[str, object] = {}
+    if sync_source:
+        # A repository-default preview names the mode, both resolved sources and their tips.
+        sources = {
+            "syncSource": sync_source,
+            "sources": {
+                side.side: SyncSourceProjection(
+                    branch=side.sourceBranch, commit=side.sourceCommit
+                ).model_dump(mode="json")
+                for side in (code, memory)
+                if side is not None
+            },
+        }
     return WorktreeCommandResult(
         0,
         {
@@ -62,6 +86,7 @@ def sync_preview(
             "code": side_payload(code),
             "memory": side_payload(memory),
             "fetch": fetch,
+            **sources,
         },
     )
 
@@ -81,26 +106,42 @@ def resolution_required(
     }
     if parked:
         resolution["wipRestore"] = True
+    next_operation, next_args, summary = _resolution_guidance(record, side, parked)
+    if side.crossingReport:
+        crossing = crossing_summary(side.crossingReport)
+        resolution["crossing"] = crossing
+        kind = "a structural merge of knowledge files (MIK-R24 rule 8 step 3)"
+        if crossing.get("converted"):
+            kind = "a crossing sync (MIK-R24 rule 8)"
+        summary = (
+            f"{summary} This is {kind}: "
+            f"{crossing.get('conflictItems', '?')} conflicted item(s) are listed in "
+            f"{side.crossingReport}; every conflicted JSON item holds a 'crossing-conflict' "
+            "marker the knowledge validator refuses until it is resolved."
+        )
     return WorktreeCommandResult(
         2,
         {
             "state": "sync-resolution-required",
             "status": "agent-action-required",
             "resolutionOwner": "agent",
-            "summary": (
-                f"Resolve the parked {side.side} candidate reapply in its worktree, then "
-                "continue; the parked WIP stays in the stash until it is settled."
-                if parked
-                else f"Resolve and stage the retained {side.side} merge, then continue."
-            ),
+            "summary": summary,
             "resolution": resolution,
-            "nextOperation": "continue_sync_resolution",
+            **(
+                {
+                    "validationRefusal": record.validationRefusal.model_dump(mode="json"),
+                }
+                if record.validationRefusal is not None
+                else {}
+            ),
+            "nextOperation": next_operation,
             "nextTool": "worktree_sync",
-            "nextArgs": {
-                "contract_path": record.contractPath,
-                "resolution_action": "continue",
-                "dry_run": False,
-            },
+            "nextArgs": next_args,
+            **(
+                {"omissions": _journaled_omissions(side).model_dump(mode="json", exclude_none=True)}
+                if side.omissionReport
+                else {}
+            ),
             "cancelArgs": {
                 "contract_path": record.contractPath,
                 "resolution_action": "cancel",
@@ -111,31 +152,107 @@ def resolution_required(
     )
 
 
-def parked_wip_validation_preview(
+def _journaled_omissions(side: SyncSideRecord) -> SyncOmissionsProjection:
+    """The omission block a resumed resolution can still name: what the last continue journaled."""
+
+    return SyncOmissionsProjection(
+        side=side.side, report=side.omissionReport, omittedItems=side.omittedItems
+    )
+
+
+def _resolution_guidance(
+    record: SyncOperationRecord,
     side: SyncSideRecord,
+    parked: bool,
+) -> tuple[str, dict[str, object], str]:
+    """The next move, its exact arguments, and the sentence that says what to do.
+
+    A parked candidate reapply and a retained merge both end in the shipped continuation: the agent
+    resolves the files in the worktree, stages them, and continues. The parked sentence names the
+    stash as potentially the only saved copy of authoring the resolved tree lacks, and names the
+    recorded omission report when the last continue already found one.
+    """
+
+    continuation: dict[str, object] = {
+        "contract_path": record.contractPath,
+        "resolution_action": "continue",
+        "dry_run": False,
+    }
+    if parked:
+        if side.omissionReport:
+            return (
+                "reconcile_sync_omissions",
+                continuation,
+                f"The last continue no longer held {side.omittedItems} parked authored item(s): "
+                f"the full report is at {side.omissionReport}. Reconcile those paths in the "
+                "worktree, or record each item's replacement or merged fact in that file, then "
+                "continue. The parked WIP stays in its stash, potentially its only saved copy, "
+                "until a continue reports it resolved.",
+            )
+        return (
+            "continue_sync_resolution",
+            continuation,
+            f"Resolve the parked {side.side} candidate reapply in its worktree, then continue; the "
+            "parked WIP stays in the stash until it is settled, and the stash is potentially its "
+            "only saved copy.",
+        )
+    return (
+        "continue_sync_resolution",
+        continuation,
+        f"Resolve and stage the retained {side.side} merge, then continue.",
+    )
+
+
+def parked_wip_validation_preview(
+    record: SyncOperationRecord,
+    side: SyncSideRecord,
+    contract: WorktreeContract,
     fetch: dict[str, object],
 ) -> WorktreeCommandResult:
-    """Read-only preview of settling a parked-candidate reapply the agent resolved."""
+    """Read-only preview of settling a parked-candidate reapply the agent resolved.
+
+    The same inventory the continue would publish is measured here, so a preview reports the
+    omissions and the full report's path before any retirement; it writes no report. A report
+    the owner left unreadable refuses here exactly as the continue would.
+    """
 
     conflicts = content_conflicts(side)
-    ready = not conflicts
+    resolution: dict[str, object] = {
+        "side": side.side,
+        "owner": "agent",
+        "worktree": side.worktree,
+        "files": list(conflicts),
+        "wipRestore": True,
+    }
+    try:
+        omissions = measure(side, contract, record)
+    except OmissionReportError as error:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "sync-resolution-incomplete",
+                "summary": str(error),
+                "resolution": resolution,
+                "fetch": fetch,
+            },
+        )
+    ready = not conflicts and not omissions.omittedItems
+    if omissions.omittedItems:
+        summary = omissions.summary(side)
+    elif ready:
+        summary = (
+            "The parked candidate reapply is resolved; continuing retires its stash entry "
+            "and leaves the candidate uncommitted for closeout."
+        )
+    else:
+        summary = f"The parked {side.side} candidate reapply still has unmerged paths."
     return WorktreeCommandResult(
         0 if ready else 2,
         {
             "state": "would-settle-parked-wip" if ready else "sync-resolution-incomplete",
-            "summary": (
-                "The parked candidate reapply is resolved; continuing retires its stash entry "
-                "and leaves the candidate uncommitted for closeout."
-                if ready
-                else f"The parked {side.side} candidate reapply still has unmerged paths."
-            ),
-            "resolution": {
-                "side": side.side,
-                "owner": "agent",
-                "worktree": side.worktree,
-                "files": list(conflicts),
-                "wipRestore": True,
-            },
+            "summary": summary,
+            "resolution": resolution,
+            **({"omissions": omissions.as_payload()} if omissions.omittedItems else {}),
             "fetch": fetch,
         },
     )
@@ -153,16 +270,17 @@ def resolution_validation_preview(
     except SyncGitProofError as error:
         ready = False
         reason = str(error)
+    resolution: dict[str, object] = {
+        "side": side.side,
+        "owner": "agent",
+        "files": list(conflicts),
+    }
     return WorktreeCommandResult(
         0 if ready else 2,
         {
             "state": "would-continue-sync-resolution" if ready else "sync-resolution-incomplete",
             "summary": reason,
-            "resolution": {
-                "side": side.side,
-                "owner": "agent",
-                "files": list(conflicts),
-            },
+            "resolution": resolution,
             "fetch": fetch,
         },
     )
@@ -227,7 +345,7 @@ def terminal_resolution_replay(
             phase=record.phase,
         )
     if args.resolution_action == "continue":
-        return completed_sync_result(contract, record, fetch)
+        return with_recomputed_worklist(completed_sync_result(contract, record, fetch), contract)
     return command_result(
         2,
         "sync-already-completed",

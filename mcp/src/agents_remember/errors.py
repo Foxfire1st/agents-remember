@@ -95,22 +95,6 @@ class TaskIntentError(AgentsRememberError):
         super().__init__(detail)
 
 
-class SeatOccupancyError(AgentsRememberError):
-    """A canonical document-and-role seat has multiple claimants in one generation."""
-
-
-class StructuralDispatchError(AgentsRememberError):
-    """Durable dispatch evidence is ambiguous or contradicts the current seat."""
-
-
-class StructuralDispatchLockError(AgentsRememberError):
-    """The canonical-seat serializer could not establish cross-process exclusion."""
-
-
-class StructuralRoutingError(AgentsRememberError):
-    """A structural route is absent or ambiguous; routing must fail instead of guessing."""
-
-
 class AuthorityError(AgentsRememberError):
     """A path or repo argument violated the MCP authority settings.
 
@@ -118,6 +102,30 @@ class AuthorityError(AgentsRememberError):
     path that escapes the coordinator root. Centralizing this means every
     application entry point reports the same boundary violation the same way.
     """
+
+
+class ContractPlaceError(AgentsRememberError):
+    """A contract found at a canonical place names another path in its cell.
+
+    MIK-R83 rule 3: a contract is authority only where its own
+    ``series_contract_path`` cell names it. A copy placed beside its original,
+    or a contract moved without its cell, is refused when it is loaded from a
+    canonical place -- naming the file, both paths, and the two ways out -- so
+    no lookup silently obeys a copy. It is carried at this layer so every
+    caller that resolves a contract can pass the refusal through instead of
+    degrading it into "no contract".
+    """
+
+    status = "contract-place-mismatch"
+
+    def __init__(self, *, found_at: str, recorded: str) -> None:
+        self.found_at = found_at
+        self.recorded = recorded
+        super().__init__(
+            f"{self.status}: the contract {found_at} records series_contract_path "
+            f"{recorded}; a contract is used only where its own cell names it. "
+            f"Delete the copy, or correct the cell to {found_at}."
+        )
 
 
 class ConfiguredContractAuthorityError(AgentsRememberError):
@@ -171,6 +179,32 @@ class RouteIndexCensusError(AgentsRememberError):
 
 class FutureCodeCandidateError(AgentsRememberError):
     """A future-code candidate could not be captured or is no longer current."""
+
+    def __init__(self, status: str, detail: str) -> None:
+        self.status = status
+        super().__init__(detail)
+
+
+class CodeObjectRetentionError(AgentsRememberError):
+    """A comparison's retained code object could not be released.
+
+    Raised rather than returned because the caller is a deletion that has not happened yet: the
+    release owner itself has no result value that could carry both facts a caller needs -- which
+    ref, and which of the two objects.
+    """
+
+    def __init__(self, status: str, detail: str) -> None:
+        self.status = status
+        super().__init__(detail)
+
+
+class ComparisonReclamationError(AgentsRememberError):
+    """A durable comparison artifact could not be reclaimed as its own record describes it.
+
+    Raised rather than returned because the caller is a deletion: the caller must not proceed to
+    record a deletion, and a returned value would make "nothing was removed" easy to overlook at the
+    one place where removing the wrong bytes is irreversible.
+    """
 
     def __init__(self, status: str, detail: str) -> None:
         self.status = status
@@ -322,14 +356,8 @@ class CitationCacheError(AgentsRememberError):
     """A citation cache authority, capacity, or lifecycle lease was invalid."""
 
 
-class ConversationCompositionError(AgentsRememberError):
-    """The app-scoped conversation runtime composition contract was violated.
-
-    Raised when the one immutable runtime authority is retrieved before
-    installation, installed a second time, replaced by a foreign object, or
-    constructed without a required authority. These are composition bugs that
-    must fail at startup or request entry, never silently at first use.
-    """
+class SourceFileUnavailableError(AgentsRememberError):
+    """A cited source file cannot be read safely within the per-file bound."""
 
 
 class TokenizerVocabularyError(AgentsRememberError):
@@ -354,108 +382,315 @@ class GrammarUnavailableError(AgentsRememberError):
     """
 
 
-class HarnessControlError(AgentsRememberError):
-    """The hosted harness control contract or exact-session identity was violated."""
+class CapsuleDeliveryError(AgentsRememberError):
+    """A compiled capsule cannot be carried as the instruction value of a launch."""
 
 
-class HarnessControlClientError(HarnessControlError):
-    """The serving process lost an exact-session IPC request before or after its first byte.
+class CapsuleCompilationError(AgentsRememberError):
+    """A role capsule could not be compiled, or an admitted input refused to build.
 
-    ``may_have_sent`` is retry-safety evidence: callers may retry a pre-write failure, while a
-    post-write failure must remain ``unknown`` until the same request id is reconciled.
+    A compilation failure never produces a partially valid capsule: the caller
+    receives this typed refusal instead of content. ``status`` is a stable,
+    branchable code (``unknown-role``, ``missing-required-instruction``,
+    ``equal-authority-contradiction``, ...); ``detail`` names the exact defect for
+    an operator who does not know the internals; ``next_action`` names the owner
+    that has to change something. ``conflicts`` carries the structured
+    contradiction rows when the refusal is a stopped conflict.
     """
 
-    def __init__(self, detail: str, *, may_have_sent: bool) -> None:
+    def __init__(
+        self,
+        status: str,
+        detail: str,
+        *,
+        next_action: str = "",
+        conflicts: Sequence[Mapping[str, object]] = (),
+    ) -> None:
         super().__init__(detail)
-        self.may_have_sent = may_have_sent
+        self.status = status
+        self.detail = detail
+        self.next_action = next_action
+        self.conflicts = tuple(MappingProxyType(dict(row)) for row in conflicts)
+
+    def render(self) -> str:
+        """The one-line operator-facing projection of this refusal."""
+
+        if self.next_action:
+            return f"{self.status}: {self.detail} (remedy: {self.next_action})"
+        return f"{self.status}: {self.detail}"
+
+    def response_fields(self) -> dict[str, object]:
+        """The bounded refusal facts, without lower-layer diagnostics."""
+
+        fields: dict[str, object] = {"status": self.status, "detail": self.detail}
+        if self.next_action:
+            fields["nextAction"] = self.next_action
+        if self.conflicts:
+            fields["conflicts"] = [dict(row) for row in self.conflicts]
+        return fields
 
 
-class HarnessAdapterDisconnectedError(HarnessControlError):
-    """A protocol adapter disconnected before or after a prompt might have been sent."""
+class CapsuleManifestError(CapsuleCompilationError):
+    """The canonical composition manifest (or a declared source path) was invalid."""
+
+
+class CapsuleSourceError(CapsuleCompilationError):
+    """A canonical instruction source was absent, unreadable, or outside its root."""
+
+
+class TaskProjectionSourceError(AgentsRememberError):
+    """An admitted task/worktree binding could not be projected into task context.
+
+    A projection is either complete or refused: there is no partial projection and
+    no fallback to another branch, another task revision or a broader scope.
+    ``status`` is a stable, branchable code; the authoritative vocabulary is the
+    registry in
+    :mod:`agents_remember.application.task_projection.statuses`
+    (``PROJECTION_STATUSES``), which every raise site imports its code from, so a
+    second spelling or an unregistered code is a test failure rather than drift.
+    ``detail`` names the exact defect for an operator who does not know the
+    internals; ``next_action`` names the owner that has to change something. The
+    projection never repairs what it could not resolve, so the current task
+    document is untouched by any of these refusals.
+    """
+
+    def __init__(
+        self,
+        status: str,
+        detail: str,
+        *,
+        next_action: str = "",
+        owner_status: str = "",
+    ) -> None:
+        super().__init__(detail)
+        self.status = status
+        self.detail = detail
+        self.next_action = next_action
+        # The status the existing AR owner raised, when this refusal wraps one, so a
+        # caller can still branch on the owner's own vocabulary instead of matching prose.
+        self.owner_status = owner_status
+
+    def render(self) -> str:
+        """The one-line operator-facing projection of this refusal."""
+
+        if self.next_action:
+            return f"{self.status}: {self.detail} (remedy: {self.next_action})"
+        return f"{self.status}: {self.detail}"
+
+    def response_fields(self) -> dict[str, object]:
+        """The bounded refusal facts a transport may publish."""
+
+        fields: dict[str, object] = {"status": self.status, "detail": self.detail}
+        if self.next_action:
+            fields["nextAction"] = self.next_action
+        if self.owner_status:
+            fields["ownerStatus"] = self.owner_status
+        return fields
+
+
+class AtomicReplaceError(AgentsRememberError, OSError):
+    """A publish failed on **one named leg**, and the destination's state is reported with it.
+
+    ``kernel.atomic_write.atomic_replace`` does two things that can fail independently: the
+    rename that makes the new bytes reachable, and the directory flush that makes the *name*
+    durable. Both used to surface as one indistinguishable ``OSError``, so a caller could not
+    tell "the destination never changed" from "the destination already changed but the rename
+    is not durable" -- the second is a recoverable publication whose retry must not be
+    confused with the first, and a caller that retried the first as if it were the second, or
+    reported either as a plain replace failure, was describing a state it had not measured.
+
+    ``leg`` names the failure (``replace`` or ``directory-fsync``) and ``destinationState``
+    states what the destination holds at the moment of the raise: ``previous-bytes`` (the
+    rename did not happen), ``new-bytes`` (the rename completed and its name is not yet
+    durable) or ``source-absent`` (the rename completed and the source path was consumed).
+    It subclasses ``OSError`` as well as the domain family so an existing ``except OSError``
+    around a publish keeps observing the failure it always did.
+    """
+
+    def __init__(
+        self,
+        leg: str,
+        destination: str,
+        *,
+        destination_state: str,
+        detail: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(detail)
+        self.leg = leg
+        self.destination = destination
+        self.destination_state = destination_state
+        self.detail = detail
+        self.cause = cause
+
+    def response_fields(self) -> dict[str, object]:
+        """The bounded facts a caller branches on, with the destination's state named."""
+
+        return {
+            "leg": self.leg,
+            "destination": self.destination,
+            "destinationState": self.destination_state,
+        }
+
+
+class MemoryModeUnsupportedError(AgentsRememberError):
+    """A caller asked for a memory mode this product removed.
+
+    The refusal names the removed mode, the supported set and the route out, so an operator
+    who never saw the old vocabulary can still act. It deliberately carries the *artifact*
+    that records the removed mode when one exists -- a contract path, a settings path or a
+    memory root -- because existing state is reported, never silently migrated: the caller
+    must be able to point at the exact file or directory that still says ``internal``.
+
+    ``status`` is the stable, branchable code every surface publishes for this refusal; it is
+    one value rather than a per-surface spelling so a caller can match on it directly.
+    """
+
+    status = "memory-mode-unsupported"
 
     def __init__(
         self,
         detail: str,
         *,
-        may_have_sent: bool,
-        vendor_correlation_id: str | None = None,
+        requested: str,
+        supported: Sequence[str],
+        artifact: str | None = None,
+        remedies: Sequence[str] = (),
     ) -> None:
         super().__init__(detail)
-        self.may_have_sent = may_have_sent
-        self.vendor_correlation_id = vendor_correlation_id
+        self.detail = detail
+        self.requested = requested
+        self.supported = tuple(supported)
+        self.artifact = artifact
+        self.remedies = tuple(remedies)
+
+    def render(self) -> str:
+        """The one-line operator-facing projection of this refusal."""
+
+        return f"{self.status}: {self.detail}"
+
+    def response_fields(self) -> dict[str, object]:
+        """The bounded refusal facts a transport may publish."""
+
+        fields: dict[str, object] = {
+            "status": self.status,
+            "detail": self.detail,
+            "requested": self.requested,
+            "supported": list(self.supported),
+            "remedies": list(self.remedies),
+        }
+        if self.artifact is not None:
+            fields["artifact"] = self.artifact
+        return fields
 
 
-class HarnessAdapterBusyError(HarnessControlError):
-    """An adapter's final write-boundary guard proved that zero operation bytes were sent.
+@dataclass(frozen=True)
+class MemoryOptOutFacts:
+    """The bounded variable facts of a disabled-mode opt-out refusal."""
 
-    The common submission authority may move ``dispatching`` back to ``queued`` only for this
-    typed error.  A generic exception cannot safely make that claim because vendor bytes might
-    already have crossed the transport.
+    repository: str | None = None
+    reason: str | None = None
+    next_action: str | None = None
+    artifact: str | None = None
+    raw_cell: str | None = None
+
+
+class MemoryOptOutRefusedError(AgentsRememberError):
+    """A caller asked for, or a contract records, the removed disabled memory mode.
+
+    ``disabled`` was removed from the product (MIK-R50): a task in it can be
+    neither closed out, synced, integrated nor landed, and where converted
+    knowledge exists invariant work is mandatory (D5), so no task may opt out
+    of memory. The refusal names the mode, the repository, the true reason and
+    the way out (start again in the default mode, or abandon the legacy
+    contract and start again). It is never answered with the removed
+    ``internal`` mode's text or a general invalid-mode text, and it never asks
+    for a developer decision, because the action is known.
+
+    ``status`` is the stable, branchable code every surface publishes for this
+    refusal; it is one value rather than a per-surface spelling so a caller can
+    match on it directly.
     """
 
-    def __init__(self, detail: str, *, may_have_sent: bool = False) -> None:
-        if may_have_sent:
-            raise ValueError("HarnessAdapterBusyError must certify may_have_sent=False")
-        super().__init__(detail)
-        self.may_have_sent = False
-
-
-class HarnessRequestConflictError(HarnessControlError):
-    """A retained request id was reused with a different immutable source or payload."""
-
-
-class HarnessInteractionNotPendingError(HarnessControlError):
-    """An interaction response named an interaction that is not the pending one.
-
-    The submission authority raises this (never a generic control error) when a respond
-    request arrives with no matching pending interaction, with no active ordinary operation,
-    or twice for the same interaction, so the serving route can answer with the honest
-    ``not-pending`` conflict status instead of an unavailable claim.
-    """
-
-
-class HarnessBridgeEpochMismatchError(HarnessControlError):
-    """A caller addressed lifecycle state from a replaced hosted runner generation."""
-
-    def __init__(self, expected: str, actual: str) -> None:
-        super().__init__(
-            f"submission authority epoch changed (expected {expected!r}, actual {actual!r})"
-        )
-        self.expected = expected
-        self.actual = actual
-
-
-class CodexAppServerError(HarnessControlError):
-    """The negotiated Codex app-server protocol or its configured contract was violated."""
-
-
-class CodexAppServerRpcError(CodexAppServerError):
-    """A correlated Codex JSON-RPC request returned an error response."""
-
-    def __init__(self, method: str, code: int, message: str) -> None:
-        super().__init__(f"Codex app-server {method} failed ({code}): {message}")
-        self.method = method
-        self.code = code
-
-
-class NativeHistoryUnavailable(CodexAppServerError):
-    """One native-history read is unavailable without invalidating the shared adapter."""
-
-    def __init__(self, detail: str, *, code: str = "unavailable") -> None:
-        super().__init__(detail)
-        self.code = code
-
-
-class NativeHistoryLimitExceeded(NativeHistoryUnavailable):
-    """One native-history unit crossed its explicit bounded-materialization contract."""
+    status = "memory-opt-out-refused"
 
     def __init__(
         self,
         detail: str,
         *,
-        actual_bytes: int,
-        limit_bytes: int,
+        requested: str = "disabled",
+        supported: Sequence[str] = ("external",),
+        facts: MemoryOptOutFacts | None = None,
     ) -> None:
-        super().__init__(detail, code="materialization-limit")
-        self.actual_bytes = actual_bytes
-        self.limit_bytes = limit_bytes
+        super().__init__(detail)
+        self.detail = detail
+        self.requested = requested
+        self.supported = tuple(supported)
+        self.facts = facts if facts is not None else MemoryOptOutFacts()
+
+    @property
+    def repository(self) -> str | None:
+        return self.facts.repository
+
+    @property
+    def reason(self) -> str | None:
+        return self.facts.reason
+
+    @property
+    def next_action(self) -> str | None:
+        return self.facts.next_action
+
+    @property
+    def artifact(self) -> str | None:
+        return self.facts.artifact
+
+    @property
+    def raw_cell(self) -> str | None:
+        return self.facts.raw_cell
+
+    def render(self) -> str:
+        """The one-line operator-facing projection of this refusal."""
+
+        return f"{self.status}: {self.detail}"
+
+    def response_fields(self) -> dict[str, object]:
+        """The bounded refusal facts a transport may publish."""
+
+        fields: dict[str, object] = {
+            "status": self.status,
+            "detail": self.detail,
+            "requested": self.requested,
+            "supported": list(self.supported),
+        }
+        if self.facts.repository is not None:
+            fields["repository"] = self.facts.repository
+        if self.facts.reason is not None:
+            fields["reason"] = self.facts.reason
+        if self.facts.next_action is not None:
+            fields["nextAction"] = self.facts.next_action
+        if self.facts.artifact is not None:
+            fields["artifact"] = self.facts.artifact
+        if self.facts.raw_cell is not None:
+            fields["rawCell"] = self.facts.raw_cell
+        return fields
+
+
+class RolePreparationError(AgentsRememberError):
+    def __init__(self, status: str, detail: str, next_action: str) -> None:
+        self.status = status
+        self.detail = detail
+        self.next_action = next_action
+        super().__init__(f"{detail} ({status}). Next: {next_action}")
+
+
+class PaseoRuntimeFailure(AgentsRememberError):
+    """One named provisioning, status or stop step failed; ``detail`` carries Paseo's text."""
+
+    def __init__(self, code: str, step: str, message: str, detail: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.step = step
+        self.detail = detail
+
+    def as_payload(self) -> dict[str, object]:
+        return {"code": self.code, "step": self.step, "message": str(self), "detail": self.detail}

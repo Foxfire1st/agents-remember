@@ -1,69 +1,88 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
-from collections.abc import AsyncIterator
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Annotated, Any
+import hashlib
+import json
+import logging
+from collections.abc import AsyncGenerator, AsyncIterator
+from typing import TYPE_CHECKING, Annotated
 
-from fastapi import FastAPI, Header, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
+from agents_remember.canvas.explainer_paths import EXPLAINER_FRAME, generation_path, leaf_workspace
+from agents_remember.canvas.explainer_state import ledger_path
+from agents_remember.canvas.paths import task_root as leaf_task_root
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
 )
-from agents_remember.controlplane.expectation_rows import ExpectationRowStore
-from agents_remember.controlplane.gate_decisions import (
-    GateDecisionContext,
-    record_gate_decision,
-    record_lifecycle_gate_decision,
-)
-from agents_remember.controlplane.operator_inbox_records import (
-    InboxAddress,
-    InboxMessage,
-    InboxPoster,
-)
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.records import GateVerdict
-from agents_remember.controlplane.store import GateStore
-from agents_remember.models.operator_inbox import OperatorInboxPostResponse
-from agents_remember.models.tools.tool_response import finalize_tool_response
+from agents_remember.models.build_currentness import BuildCurrentnessPayload
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
-from agents_remember.observer.projection import TaskDocNode
+from agents_remember.observer.projection import TaskSummary
 from agents_remember.serving._app_common import (
-    OperatorInboxPostRequest,
-    _if_none_match_matches,
     _projection_body_cache,
     _ServingRuntime,
     stream_events,
 )
-from agents_remember.serving._app_lifespan import _agent_notifier_heartbeat_payload
 from agents_remember.serving.actions import (
     ActionEvaluationContext,
     ActionOutcome,
     ActionRequest,
     DismissalIntent,
-    GateDecisionIntent,
     evaluate_action,
 )
-from agents_remember.serving.dispatch_brief import HostedDelivery
-from agents_remember.serving.events import stream_raw_events
-from agents_remember.serving.operator_inbox_posts import (
-    OperatorInboxPostContext,
-    post_operator_inbox_entry,
+from agents_remember.serving.build_currentness import build_currentness
+from agents_remember.serving.conditional_read import if_none_match_matches
+from agents_remember.serving.direct_execution_grants import (
+    DeveloperGrantRequest,
+    developer_grant_tool,
 )
-from agents_remember.serving.projections.snapshots import read_task_document_body
+from agents_remember.serving.events import stream_raw_events
+from agents_remember.serving.explainer_move_watch import (
+    MoveNoticeWatch,
+    move_notice_watch,
+)
+from agents_remember.serving.explainer_watcher import (
+    NOTICE_EVENT,
+    LeafSelection,
+    notice_event,
+)
+from agents_remember.serving.projector import ProjectorClosed
 from agents_remember.serving.response_contract import (
     ACTION_RESPONSES,
     ActionAccepted,
     HttpDetailRefusal,
-    OperatorInboxDismissed,
-    StatusRefusal,
     StreamReadyMarker,
 )
-from agents_remember.serving.served_state import ServedWorkspaceProjection, served_state_tail
+from agents_remember.serving.review_memory_watch import (
+    ReviewMemoryRootPort,
+    multiplex_review_memory,
+)
+from agents_remember.serving.review_open_observation import OPEN_OBSERVATIONS
+from agents_remember.serving.review_publication_watch import (
+    PublicationInputs,
+    safe_publication_events,
+    valid_publication_identity,
+)
+from agents_remember.serving.served_state import (
+    ServedWorkspaceProjection,
+    served_state_tail,
+)
+from agents_remember.serving.stream_shutdown import until_shutdown
+
+logger = logging.getLogger(__name__)
+
+
+def _checkout_binding(runtime: _ServingRuntime) -> dict[str, object] | None:
+    """The disposable-root binding the process carries, as the state serves it (MIK-R83 rule 7)."""
+
+    binding = runtime.config.checkout_binding
+    return None if binding is None else binding.as_payload()
+
 
 if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
@@ -71,7 +90,20 @@ if TYPE_CHECKING:
     )
 
 
-def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Response:
+async def _wait_for_projection(runtime: _ServingRuntime) -> None:
+    """Wait on the single producer before a sync route uses its real snapshot."""
+    try:
+        await runtime.projector.wait_ready()
+    except ProjectorClosed as error:
+        raise HTTPException(status_code=503, detail="projection owner stopped") from error
+
+
+def _state_response(
+    runtime: _ServingRuntime,
+    if_none_match: str | None,
+    *,
+    currentness: BuildCurrentnessPayload | None = None,
+) -> Response:
     # The change gate: the ETag is the projector's content revision, which only
     # advances when the stable projection form changes (volatile ages excluded -- delta.py).
     # An If-None-Match poll of an unchanged projection therefore costs a header exchange
@@ -81,47 +113,252 @@ def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Resp
     if snapshot is None:
         raise HTTPException(status_code=503, detail="projection not ready")
     revision = runtime.projector.revision(seq)
+    currentness = currentness or build_currentness(runtime.config, role="dashboard")
+    if currentness is not None:
+        # The projection can stay unchanged across an install. Its revision alone
+        # must not turn the first stale-build answer into an empty 304.
+        stamp = json.dumps(currentness.model_dump(mode="json", exclude_none=True), sort_keys=True)
+        revision += ":" + hashlib.sha256(stamp.encode()).hexdigest()[:16]
     headers = {"ETag": f'W/"{revision}"', "Cache-Control": "no-cache"}
-    if _if_none_match_matches(if_none_match, revision):
+    if if_none_match_matches(if_none_match, revision):
         return Response(status_code=304, headers=headers)
-    # The dump rides the per-instance memo; only the volatile tail
-    # (build stamp + at-response-time heartbeat) is computed per request, on a copy.
-    # This body is therefore ASSEMBLED rather than dumped from one model -- the memo and the
-    # ETag both depend on the tick-time half being reusable and the serve-time half not
-    # being. What it assembles to is nonetheless declared: it is a
+    # The dump rides the per-instance memo; only the tail (the build stamp) is added per
+    # request, on a copy. This body is therefore ASSEMBLED rather than dumped from one
+    # model. What it assembles to is nonetheless declared: it is a
     # ``served_state.ServedWorkspaceProjection``, and the conformance suite validates the
     # real route's output against that model. Validating here instead would re-parse ~1.3 MB
     # per request and hand back exactly what the memo exists to save.
     body = dict(_projection_body_cache.body(snapshot))
     body.update(
-        served_state_tail(build=runtime.build, heartbeat=_agent_notifier_heartbeat_payload(runtime))
+        served_state_tail(
+            build=runtime.build,
+            watcher_health=runtime.projector.watcher_health(),
+            checkout_binding=_checkout_binding(runtime),
+            build_currentness=currentness,
+        )
     )
     return JSONResponse(content=body, headers=headers)
 
 
-def _task_document_response(runtime: _ServingRuntime, path: str) -> JSONResponse:
+def _state_request(runtime: _ServingRuntime, if_none_match: str | None, status: bool) -> Response:
+    if status:
+        return _state_response(
+            runtime,
+            None,
+            currentness=build_currentness(runtime.config, inspect_checkout=True, role="dashboard"),
+        )
+    return _state_response(runtime, if_none_match)
+
+
+def _task_document_response(
+    runtime: _ServingRuntime, path: str, if_none_match: str | None = None
+) -> Response:
     _, snapshot = runtime.projector.current()
     if snapshot is None:
         raise HTTPException(status_code=503, detail="projection not ready")
-    doc = read_task_document_body(
+    doc = runtime.task_bodies.read(
         runtime.config.coordination_root,
-        doc_path=path,
-        enclosures=snapshot.enclosures,
-        now=runtime.liveness_clock(),
+        path,
+        now=runtime.clock(),
     )
     if doc is None:
         raise HTTPException(status_code=404, detail="task document not found")
-    return JSONResponse(content=doc.model_dump(by_alias=True, exclude_none=True))
+    headers = {"ETag": f'W/"{doc.revision}"', "Cache-Control": "no-cache"}
+    if doc.generation.current() and if_none_match_matches(if_none_match, doc.revision):
+        return Response(status_code=304, headers=headers)
+    return Response(content=doc.body, media_type="application/json", headers=headers)
+
+
+async def _moved_events(
+    identity: tuple[str, str, str], watch: MoveNoticeWatch
+) -> AsyncGenerator[ServerSentEvent]:
+    """The review page's moved notice: one comparison when it opens, then every publish.
+
+    The comparison runs off the event loop (it captures Git trees), and a failure is logged rather
+    than sent: the page keeps its stream and shows no notice it cannot stand behind (rule 7).
+    """
+
+    selection = LeafSelection(*identity)
+    check = asyncio.create_task(asyncio.to_thread(watch.page_opened, selection))
+    check.add_done_callback(_note_check_failure)
+    try:
+        async with contextlib.aclosing(watch.channel.listen(selection)) as stream:
+            async for notice in stream:
+                yield ServerSentEvent(event=NOTICE_EVENT, data=notice_event(selection, notice))
+    finally:
+        check.cancel()
+
+
+async def _review_stream(
+    ordinary: AsyncGenerator[ServerSentEvent],
+    identity: tuple[str, str, str] | None,
+    root: ReviewMemoryRootPort | None,
+    watch: MoveNoticeWatch | None,
+) -> AsyncGenerator[ServerSentEvent]:
+    """One review page's stream: the projection, the memory invalidations, and the moved notice."""
+
+    async with contextlib.aclosing(multiplex_review_memory(ordinary, identity, root)) as events:
+        if identity is None or watch is None:
+            async for event in events:
+                yield event
+            return
+        async with (
+            contextlib.aclosing(_moved_events(identity, watch)) as moved,
+            contextlib.aclosing(_merged_stream(events, moved)) as streamed,
+        ):
+            async for event in streamed:
+                yield event
+
+
+def _note_check_failure(task: asyncio.Task[object]) -> None:
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        logger.warning("the moved watcher could not compare this review page: %s", error)
+
+
+#: How often ``/api/stream`` names itself alive. The transport's keepalive is a comment frame an
+#: EventSource never surfaces, so without this a healthy quiet stream looks dead to the page's
+#: liveness watchdog and is reopened; with it, silence means the transport died.
+STREAM_ALIVE_SECONDS = 15.0
+STREAM_ALIVE_EVENT = "alive"
+
+
+async def _alive_events() -> AsyncGenerator[ServerSentEvent]:
+    while True:
+        await asyncio.sleep(STREAM_ALIVE_SECONDS)
+        yield ServerSentEvent(event=STREAM_ALIVE_EVENT, data={})
+
+
+async def _status_events(
+    config: McpRuntimeConfig, previous: BuildCurrentnessPayload | None
+) -> AsyncGenerator[ServerSentEvent]:
+    """The existing liveness beat also publishes build-status transitions to open pages."""
+    async with contextlib.aclosing(_alive_events()) as beats:
+        async for event in beats:
+            yield event
+            current = build_currentness(config, role="dashboard")
+            if current is not None and current != previous:
+                yield ServerSentEvent(
+                    event="buildCurrentness",
+                    data=current.model_dump(mode="json", exclude_none=True),
+                )
+            previous = current
+
+
+async def _next_event(source: AsyncGenerator[ServerSentEvent]) -> ServerSentEvent:
+    return await anext(source)
+
+
+async def _merged_stream(
+    source: AsyncGenerator[ServerSentEvent], extra: AsyncGenerator[ServerSentEvent]
+) -> AsyncGenerator[ServerSentEvent]:
+    """Two event sources as one; the page's own stream ends the connection, notices never do."""
+
+    streams = {asyncio.create_task(_next_event(one)): one for one in (source, extra)}
+    try:
+        while streams:
+            done, _ = await asyncio.wait(streams, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                origin = streams.pop(task)
+                try:
+                    event = task.result()
+                except StopAsyncIteration:
+                    if origin is extra:
+                        continue
+                    return
+                yield event
+                streams[asyncio.create_task(_next_event(origin))] = origin
+    finally:
+        for task in streams:
+            task.cancel()
+        await asyncio.gather(*streams, return_exceptions=True)
+
+
+async def _publication_notices(
+    ordinary: AsyncGenerator[ServerSentEvent],
+    identity: tuple[str, str, str],
+    watch: MoveNoticeWatch | None,
+) -> AsyncGenerator[ServerSentEvent]:
+    if watch is None or not valid_publication_identity(identity):
+        async for event in ordinary:
+            yield event
+        return
+    async with (
+        contextlib.aclosing(_moved_events(identity, watch)) as moved,
+        contextlib.aclosing(_merged_stream(ordinary, moved)) as stream,
+    ):
+        async for event in stream:
+            yield event
+
+
+async def _publication_stream(
+    ordinary: AsyncGenerator[ServerSentEvent],
+    runtime: _ServingRuntime,
+    selection: str | None,
+    watch: MoveNoticeWatch | None = None,
+    moved_already: bool = False,
+) -> AsyncGenerator[ServerSentEvent]:
+    """Saved pages subscribe independently of live-memory admission, including landed leaves."""
+    async with contextlib.aclosing(ordinary):
+        if selection is None:
+            async for event in ordinary:
+                yield event
+            return
+        parts = selection.split("/", 2)
+        identity = (parts + [""] * 3)[:3]
+
+        def publication_pointer(selected: tuple[str, str, str]):
+            if runtime.explainer_application is None:
+                raise ValueError("explainer application is not wired")
+            repo, master, leaf = selected
+            root = leaf_task_root(runtime.config, repo, master)
+            frame = runtime.explainer_application.frame_scope(root, leaf, EXPLAINER_FRAME)
+            return PublicationInputs(
+                root=runtime.config.coordination_root,
+                pointer=frame.frame_dir / "ready.json",
+                workspace=leaf_workspace(runtime.config, repo, master, leaf),
+                generation_file=generation_path(runtime.config, repo, master, leaf),
+                ledger=ledger_path(runtime.config, repo, master, leaf),
+            )
+
+        selected = (identity[0], identity[1], identity[2])
+        extra_watch = None if moved_already else watch
+        async with (
+            contextlib.aclosing(_publication_notices(ordinary, selected, extra_watch)) as notices,
+            contextlib.aclosing(
+                safe_publication_events(
+                    (identity[0], identity[1], identity[2]), publication_pointer
+                )
+            ) as publications,
+            contextlib.aclosing(_merged_stream(notices, publications)) as merged,
+        ):
+            async for event in merged:
+                yield event
 
 
 def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     """The read side of the cockpit: the projection once, tailed, and the raw event river."""
+
+    async def projection_ready() -> None:
+        await _wait_for_projection(runtime)
+
+    # One watcher per coordination root: it remembers which pages it compared just now, and
+    # publishes to the process's one notice channel that review-scoped streams read (rule 7). The
+    # turn-end loop reads this same instance (``move_notice_watch(config).run()``).
+    move_watch = (
+        None
+        if runtime.explainer_application is None
+        else move_notice_watch(runtime.config, runtime.explainer_application.watcher)
+    )
 
     # The 304 branch is why this cannot become a model-returning handler: it answers with an
     # ETag and NO body at all, which no ``response_model`` can express. The declaration names
     # the 200 shape; ``mcp/tests/test_served_state_conformance.py`` holds both branches shut.
     @app.get(
         "/api/state",
+        dependencies=[Depends(projection_ready)],
         response_model=ServedWorkspaceProjection,
         responses={
             304: {"description": "Content revision unchanged; ETag only, no body"},
@@ -130,19 +367,25 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     )
     def api_state(
         if_none_match: Annotated[str | None, Header()] = None,
+        status: bool = False,
     ) -> Response:
-        return _state_response(runtime, if_none_match)
+        return _state_request(runtime, if_none_match, status)
 
     @app.get(
         "/api/task-document",
-        response_model=TaskDocNode,
+        dependencies=[Depends(projection_ready)],
+        response_model=TaskSummary,
         responses={
+            304: {"description": "Content revision unchanged; ETag only, no body"},
             404: {"model": HttpDetailRefusal, "description": "No such task document"},
             503: {"model": HttpDetailRefusal, "description": "Projection not ready"},
         },
     )
-    def api_task_document(path: Annotated[str, Query()]) -> JSONResponse:
-        return _task_document_response(runtime, path)
+    def api_task_document(
+        path: Annotated[str, Query()],
+        if_none_match: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        return _task_document_response(runtime, path, if_none_match)
 
     # An SSE route: the declared model is what a ``snapshot`` frame's ``data`` carries. A
     # ``delta`` frame is one bare projection node -- that asymmetry is the contract, and the
@@ -158,13 +401,53 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
             }
         },
     )
-    async def api_stream() -> AsyncIterator[ServerSentEvent]:
-        async for event in stream_events(
+    async def api_stream(
+        reviewRepo: str | None = None,
+        reviewMaster: str | None = None,
+        reviewLeaf: str | None = None,
+        publication: str | None = None,
+        # The page's own id (its review opens name it too): the page leaves when its last
+        # stream closes, and the open it was being served is released (D585).
+        page: str | None = None,
+    ) -> AsyncIterator[ServerSentEvent]:
+        supplied = (reviewRepo, reviewMaster, reviewLeaf)
+        identity = (
+            None
+            if all(value is None for value in supplied)
+            else (
+                reviewRepo or "",
+                reviewMaster or "",
+                reviewLeaf or "",
+            )
+        )
+        currentness = build_currentness(runtime.config, role="dashboard")
+        ordinary = stream_events(
             runtime.projector,
             build=runtime.build,
-            agent_notifier_heartbeat=_agent_notifier_heartbeat_payload(runtime),
+            watcher_health=runtime.projector.watcher_health(),
+            checkout_binding=_checkout_binding(runtime),
+            build_currentness=currentness,
+        )
+        # ``aclose`` the inner stream explicitly: ``async for`` does not close its iterator, and
+        # a disconnected page must release the projector's subscription at once (MIK-R81).
+        async with (
+            contextlib.aclosing(
+                _publication_stream(
+                    _review_stream(ordinary, identity, runtime.review_memory_root, move_watch),
+                    runtime,
+                    publication,
+                    move_watch,
+                    identity is not None,
+                )
+            ) as streamed,
+            contextlib.aclosing(
+                _merged_stream(streamed, _status_events(runtime.config, currentness))
+            ) as alive,
+            contextlib.aclosing(until_shutdown(alive, runtime.stream_shutdown)) as served,
         ):
-            yield event
+            with OPEN_OBSERVATIONS.page_stream(page):
+                async for event in served:
+                    yield event
 
     # The raw river: every ``event`` frame is a verbatim observer JSONL record replayed from
     # disk, so its schema belongs to the observer. What THIS route mints is the ready marker,
@@ -182,131 +465,60 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     )
     async def api_events(
         last_event_id: Annotated[str | None, Header()] = None,
+        # The same cursor for a page that reopens the river itself: a fresh EventSource cannot
+        # send the header, so it names the last event it had here (the header wins).
+        lastEventId: str | None = None,
     ) -> AsyncIterator[ServerSentEvent]:
-        async for event in stream_raw_events(
-            runtime.config, last_event_id=last_event_id, interval=runtime.interval
-        ):
-            yield event
-
-
-# --- action + operator-inbox routes -------------------------------------------------------------
-
-
-def _recorded_gate_decision(
-    config: McpRuntimeConfig, decision: GateDecisionIntent
-) -> dict[str, Any]:
-    """Durably record one gate decision as developer-attributed, and answer with the gate.
-
-    Developer attribution is the un-forgeable half of the contract -- the agent's own path is
-    model-attributed -- and it is what server-side closeout enforcement consumes.
-
-    Every intent that arrives here is ADDRESSED. Whether a request names a gate to decide is a
-    question about the request, so it is settled once, in the layer that validates requests:
-    ``actions._gate_decision_outcome`` refuses a decision naming neither a lifecycle target nor a
-    gate id with 400 ``missing-target`` and never builds an intent for that shape. A decision
-    without a lifecycle id is therefore the gate-id-only cancel that guard let through.
-    """
-
-    root = observer_root(config)
-    context = GateDecisionContext(
-        store=GateStore(root),
-        inbox_store=OperatorInboxStore(root),
-        expectation_store=ExpectationRowStore(root),
-        policy=config.orchestration.gate_policy,
-        now=datetime.now(UTC),
-    )
-    verdict = GateVerdict(
-        decision=decision.decision,
-        by="developer",
-        via="dashboard",
-        note=decision.note,
-    )
-    if decision.lifecycle_id is not None:
-        payload = record_lifecycle_gate_decision(
-            context,
-            lifecycle_id=decision.lifecycle_id,
-            expected_gate_id=decision.gate_id,
-            verdict=verdict,
-            evidence_refs=None,
+        raw = stream_raw_events(
+            runtime.config,
+            last_event_id=last_event_id or lastEventId,
+            interval=runtime.interval,
+            ledger=runtime.background_ledger,
         )
-        return finalize_tool_response("gate_decide_internal", payload)
-    assert decision.gate_id is not None
-    payload = record_gate_decision(
-        context,
-        gate_id=decision.gate_id,
-        lifecycle_id=None,
-        verdict=verdict,
-        evidence_refs=None,
-    )
-    return finalize_tool_response("gate_decide_internal", payload)
+        async with contextlib.aclosing(until_shutdown(raw, runtime.stream_shutdown)) as served:
+            async for event in served:
+                yield event
+
+    # MIK-R81 rule 1: the always-on background account. Read-only; a failure
+    # here never touches anything the dashboard serves (the route builds no
+    # projection and writes nothing).
+    @app.get("/api/diagnostics/background")
+    def api_diagnostics_background() -> JSONResponse:
+        ledger = runtime.background_ledger
+        if ledger is None:
+            raise HTTPException(status_code=503, detail="background accounting not ready")
+        return JSONResponse(content=ledger.snapshot())
 
 
-def _gate_decision_response(
-    config: McpRuntimeConfig,
-    outcome: ActionOutcome,
-    decision: GateDecisionIntent,
-    *,
-    target: str | None,
-) -> Response:
-    """Record the operator's gate decision and answer with the gate it wrote."""
-
-    try:
-        gate = _recorded_gate_decision(config, decision)
-    except KeyError as exc:
-        return JSONResponse(
-            content={
-                "status": "stale-gate" if decision.gate_id else "no-open-gate",
-                "detail": str(exc),
-                "target": target,
-            },
-            status_code=409,
-        )
-    return JSONResponse(content={**outcome.body, "gate": gate}, status_code=outcome.status_code)
+# --- action routes ---------------------------------------------------------------------------------
 
 
 def _dismissal_response(
     config: McpRuntimeConfig, outcome: ActionOutcome, intent: DismissalIntent
 ) -> Response:
-    """Apply one attention dismissal.
-
-    Dismissals are current acknowledgements, not history. A gate-open item is consumed by
-    cancelling the gate itself, so it needs no acknowledgement row once the source is gone.
-
-    Every intent that arrives here is SCOPED, because whether a request carries a scope is settled
-    once, in the layer that validates requests: ``actions._dismiss_action_outcome`` refuses an
-    acknowledgement that names neither a lifecycle, nor a gate to cancel, nor the repo-level
-    ``actionable-drift`` signal with 400 ``missing-lifecycle``. So a dismissal that is not the gate
-    cancel below is one of the two the acknowledgement row can be written for.
-    """
-
-    gate: dict[str, Any] | None = None
-    if intent.kind == "gate-open" and intent.gate_id is not None:
-        with contextlib.suppress(KeyError):
-            gate = _recorded_gate_decision(
-                config,
-                GateDecisionIntent(
-                    lifecycle_id=intent.lifecycle_id,
-                    gate_id=intent.gate_id,
-                    decision="cancel",
-                    note=intent.note or "Dismissed from attention queue.",
-                ),
-            )
-    else:
+    """Acknowledge only a successful durable write; a failure leaves the item visible."""
+    try:
         AttentionDismissalStore(observer_root(config)).dismiss(
             AttentionDismissalRecord(
                 itemId=intent.item_id,
                 dismissedAt=intent.dismissed_at,
                 kind=intent.kind,
-                lifecycleId=intent.lifecycle_id,
-                gateId=intent.gate_id,
+                actionableFingerprint=intent.actionable_fingerprint,
             )
         )
-    body = outcome.body if gate is None else {**outcome.body, "gate": gate}
-    return JSONResponse(content=body, status_code=outcome.status_code)
+    except OSError:
+        return JSONResponse(
+            content={
+                "status": "dismissal-not-held",
+                "detail": "Dismissal did not hold; try again.",
+            },
+            status_code=503,
+        )
+    return JSONResponse(content=outcome.body, status_code=outcome.status_code)
 
 
 def _action_response(runtime: _ServingRuntime, action: str, request: ActionRequest) -> Response:
-    """Route one action: acknowledge it, apply its dismissal, or record its gate decision."""
+    """Route one action: acknowledge it or apply its dismissal."""
 
     _, snapshot = runtime.projector.current()
     if snapshot is None:
@@ -318,75 +530,20 @@ def _action_response(runtime: _ServingRuntime, action: str, request: ActionReque
         ActionEvaluationContext(
             actor=request.actor,
             now=now_iso(),
-            gate_id=request.gateId,
-            note=request.note,
             item_id=request.itemId,
             kind=request.kind,
         ),
     )
     if outcome.dismissal is not None:
         return _dismissal_response(runtime.config, outcome, outcome.dismissal)
-    if outcome.gate_decision is not None:
-        return _gate_decision_response(
-            runtime.config, outcome, outcome.gate_decision, target=request.target
-        )
     return JSONResponse(content=outcome.body, status_code=outcome.status_code)
 
 
-def _operator_inbox_response(
-    runtime: _ServingRuntime, request: OperatorInboxPostRequest
-) -> Response:
-    # External-chat path: a dashboard response with no hosted session is written to the
-    # pull-based operator inbox. External agents read it through the MCP operator_inbox_poll /
-    # operator_inbox_consume tools; this endpoint only owns the developer/dashboard write side.
-    try:
-        payload = finalize_tool_response(
-            "operator_inbox_post",
-            post_operator_inbox_entry(
-                OperatorInboxPostContext(
-                    config=runtime.config,
-                    store=OperatorInboxStore(runtime.observer_root),
-                    delivery=HostedDelivery(
-                        enabled=request.deliver_to_hosted,
-                        catalog=runtime.catalog,
-                        host=runtime.host,
-                        paster=runtime.paster,
-                    ),
-                ),
-                address=InboxAddress(
-                    lifecycle_id=request.lifecycle_id,
-                    agent_id=request.agent_id,
-                    recipient_role=request.recipient_role,
-                ),
-                message=InboxMessage(
-                    ask=request.ask,
-                    response=request.response,
-                    message_kind=request.message_kind,
-                    gate_id=request.gate_id,
-                    artifact_path=request.artifact_path,
-                ),
-                poster=InboxPoster(
-                    created_by="developer",
-                    created_via="dashboard",
-                    sender_agent_id=request.sender_agent_id,
-                    sender_role=request.sender_role,
-                ),
-            ),
-        )
-    except ValueError as exc:
-        return JSONResponse(content={"status": "bad-address", "detail": str(exc)}, status_code=400)
-    return JSONResponse(content=payload, status_code=200)
-
-
-def _inbox_dismiss_response(runtime: _ServingRuntime, entry_id: str) -> Response:
-    removed = OperatorInboxStore(runtime.observer_root).delete(entry_id)
-    if not removed:
-        return JSONResponse(content={"status": "not-found", "entryId": entry_id}, status_code=404)
-    return JSONResponse(content={"status": "dismissed", "entryId": entry_id}, status_code=200)
-
-
 def _register_action_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
-    """The write side the developer drives: the gate return channel and the operator inbox."""
+    """The write side the developer drives: actions and the direct-execution grant."""
+
+    async def projection_ready() -> None:
+        await _wait_for_projection(runtime)
 
     # ``status_code=202`` because that is the status this route actually answers with: an
     # accepted intent is recorded, not applied. Left implicit it declared its success shape at
@@ -395,6 +552,7 @@ def _register_action_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     # only and moves no bytes.
     @app.post(
         "/api/actions/{action}",
+        dependencies=[Depends(projection_ready)],
         response_model=ActionAccepted,
         status_code=202,
         responses=ACTION_RESPONSES,
@@ -402,18 +560,21 @@ def _register_action_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     def api_action(action: str, request: ActionRequest) -> Response:
         return _action_response(runtime, action, request)
 
+    # The developer's direct-execution grant control (MIK-R94 rule 2): giving and
+    # taking back a leaf's grant from the dashboard. The handler returns a
+    # ``Response`` it built itself, so this is a declaration only and moves no
+    # bytes; the payload mirrors the architect's ``direct_execution_grant``
+    # function shape (``ok``/``state``/``changed``/``grant``).
     @app.post(
-        "/api/operator-inbox",
-        response_model=OperatorInboxPostResponse,
-        responses={400: {"model": StatusRefusal, "description": "Unaddressable inbox message"}},
+        "/api/direct-execution-grant",
+        status_code=200,
     )
-    def api_operator_inbox(request: OperatorInboxPostRequest) -> Response:
-        return _operator_inbox_response(runtime, request)
-
-    @app.post(
-        "/api/operator-inbox/{entry_id}/dismiss",
-        response_model=OperatorInboxDismissed,
-        responses={404: {"model": OperatorInboxDismissed, "description": "No such inbox entry"}},
-    )
-    def api_operator_inbox_dismiss(entry_id: str) -> Response:
-        return _inbox_dismiss_response(runtime, entry_id)
+    def api_direct_execution_grant(request: DeveloperGrantRequest) -> Response:
+        return JSONResponse(
+            content=developer_grant_tool(
+                runtime.config,
+                request.repository,
+                request.path,
+                request.action,
+            )
+        )

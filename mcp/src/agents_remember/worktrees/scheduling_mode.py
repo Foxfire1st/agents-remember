@@ -51,7 +51,7 @@ def resolve_scheduling_mode(
     """Resolve the one scheduling mode of a canonical orchestration sprint."""
 
     sprint = topology.resolve(sprint_ref)
-    if sprint.document.kind != "master" or not sprint.document.orchestrates:
+    if not sprint.document.is_sprint:
         raise TaskDocumentRefError(
             "task-execution-graph-sprint-required",
             f"scheduling mode requires an orchestration sprint: {sprint_ref.key}",

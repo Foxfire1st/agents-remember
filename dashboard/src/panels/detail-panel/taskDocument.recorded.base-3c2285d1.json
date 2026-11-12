@@ -1,0 +1,309 @@
+{
+  "bodies": {
+    "01_slugify.json": {
+      "ageSeconds": -66867.1767783165,
+      "bodyRevision": "413a75d298cb11e8ac4d5e9154ce4cd33d1a4aeb3f81ad1da6d1281a65fedfb2",
+      "codeExamples": [],
+      "createdAt": "2026-10-01T00:00:00+00:00",
+      "currentStep": "S2 \u2014 Write its test",
+      "decisions": [],
+      "design": null,
+      "discardedCount": null,
+      "discardedSubTasks": null,
+      "docPath": "/recorded-coordination/tasks/sandbox-app/recorded-master/01_slugify.json",
+      "executionGraph": null,
+      "executionGraphView": null,
+      "executionNature": null,
+      "executionWaves": [],
+      "id": "REC-M1-L1",
+      "kind": "subTask",
+      "lifecycleId": null,
+      "masterLifecycleId": null,
+      "objective": "- `slugify(text)` lowercases its text.\n- Every run of other characters becomes one hyphen.",
+      "openQuestions": [],
+      "orchestrates": [],
+      "references": [],
+      "repository": "sandbox-app",
+      "requirements": [],
+      "seats": [],
+      "sections": [],
+      "status": "inProgress",
+      "steps": [
+        {
+          "disposition": null,
+          "id": "S1",
+          "status": "done",
+          "substeps": [],
+          "title": "Write the function"
+        },
+        {
+          "disposition": null,
+          "id": "S2",
+          "status": "inProgress",
+          "substeps": [],
+          "title": "Write its test"
+        },
+        {
+          "disposition": null,
+          "id": "S3",
+          "status": "pending",
+          "substeps": [],
+          "title": "Hand the task over"
+        }
+      ],
+      "stepsDone": 1,
+      "stepsTotal": 3,
+      "subTasks": [],
+      "title": "Add slugify() and its test"
+    },
+    "task.json": {
+      "ageSeconds": -66867.17509555817,
+      "bodyRevision": "087f55f272f5ff7596474b19e4879b4a1cbc57c13b2014e69801fc6e72a16ae9",
+      "codeExamples": [],
+      "createdAt": "2026-10-01T00:00:00+00:00",
+      "currentStep": null,
+      "decisions": [],
+      "design": null,
+      "discardedCount": 0,
+      "discardedSubTasks": [],
+      "docPath": "/recorded-coordination/tasks/sandbox-app/recorded-master/task.json",
+      "executionGraph": null,
+      "executionGraphView": null,
+      "executionNature": "organizational",
+      "executionWaves": [],
+      "id": "REC-M1",
+      "kind": "master",
+      "lifecycleId": null,
+      "masterLifecycleId": null,
+      "objective": "A made-up master that holds one task with a review round.",
+      "openQuestions": [],
+      "orchestrates": [],
+      "references": [],
+      "repository": "sandbox-app",
+      "requirements": [],
+      "seats": [],
+      "sections": [],
+      "status": "inProgress",
+      "steps": [],
+      "stepsDone": 0,
+      "stepsTotal": 0,
+      "subTasks": [
+        {
+          "file": "01_slugify.md",
+          "linkedLifecycleId": null,
+          "masterRef": null,
+          "name": "Add slugify() and its test",
+          "number": "L1",
+          "scope": "",
+          "status": "inProgress"
+        }
+      ],
+      "title": "Recorded master: text helpers"
+    }
+  },
+  "documents": {
+    "01_slugify.json": {
+      "createdAt": "2026-10-01T00:00:00+00:00",
+      "headerNotes": [
+        {
+          "label": "Master",
+          "value": "task.md"
+        },
+        {
+          "label": "Stage",
+          "value": "review"
+        }
+      ],
+      "id": "REC-M1-L1",
+      "kind": "subTask",
+      "objective": "- `slugify(text)` lowercases its text.\n- Every run of other characters becomes one hyphen.",
+      "repo": "sandbox-app",
+      "reviewState": {
+        "baselineFindings": [
+          {
+            "description": "`slugify(None)` returns the text `none`.",
+            "findingId": "F1"
+          },
+          {
+            "description": "A run of digits and punctuation has no test.",
+            "findingId": "F2"
+          },
+          {
+            "description": "The test imports from the package root.",
+            "findingId": "F3"
+          }
+        ],
+        "pending": false,
+        "remainingFindingIds": ["F2"],
+        "round": 2
+      },
+      "schema": "ar-task-document/v1",
+      "slug": "01_slugify",
+      "status": "inProgress",
+      "statusNote": "Review round 2 is recorded: one of three findings is still open.",
+      "steps": [
+        {
+          "id": "S1",
+          "note": "One function, no module state.",
+          "status": "done",
+          "title": "Write the function"
+        },
+        {
+          "id": "S2",
+          "status": "inProgress",
+          "title": "Write its test"
+        },
+        {
+          "id": "S3",
+          "status": "pending",
+          "title": "Hand the task over"
+        }
+      ],
+      "title": "Add slugify() and its test",
+      "type": "SubTask (recorded payload)"
+    },
+    "task.json": {
+      "createdAt": "2026-10-01T00:00:00+00:00",
+      "executionNature": "organizational",
+      "headerNotes": [
+        {
+          "label": "Authority",
+          "value": "made up for a recorded payload"
+        }
+      ],
+      "id": "REC-M1",
+      "kind": "master",
+      "objective": "A made-up master that holds one task with a review round.",
+      "repo": "sandbox-app",
+      "schema": "ar-task-document/v1",
+      "slug": "task",
+      "status": "inProgress",
+      "statusNote": "One task is in work and stands in review.",
+      "subTasks": [
+        {
+          "file": "01_slugify.md",
+          "name": "Add slugify() and its test",
+          "number": "L1",
+          "status": "inProgress"
+        }
+      ],
+      "title": "Recorded master: text helpers",
+      "type": "Feature"
+    }
+  },
+  "recordedFrom": {
+    "bodies": "read_task_document_body(coordination_root, doc_path=<file>, enclosures=[], now=...)",
+    "build": "commit 3c2285d12f3fd8797774d4519321071523e2e5f5",
+    "command": "PYTHONPATH=<build>/mcp/src <venv>/bin/python record_payload.py <build> <build name> <out.json>, then `npx prettier --write <out.json>` in dashboard/",
+    "documentFiles": [
+      "tasks/sandbox-app/recorded-master/01_slugify.json",
+      "tasks/sandbox-app/recorded-master/task.json"
+    ],
+    "note": "All text is made up. The documents below were written with the build's own write_task_doc.",
+    "producer": "agents_remember.serving.projections.snapshots_impl._task_documents",
+    "script": "record_payload.py, sha256 140cfb4a07776ede49b6251139d539e9ceffb1d415592a6671ea34cba261b3e8",
+    "summaries": "read_task_documents(coordination_root, enclosures=[], now=2026-10-11T00:00:00Z)"
+  },
+  "summaries": [
+    {
+      "ageSeconds": -66867.17509555817,
+      "bodyRevision": "087f55f272f5ff7596474b19e4879b4a1cbc57c13b2014e69801fc6e72a16ae9",
+      "codeExamples": [],
+      "createdAt": "2026-10-01T00:00:00+00:00",
+      "currentStep": null,
+      "decisions": [],
+      "design": null,
+      "discardedCount": 0,
+      "discardedSubTasks": [],
+      "docPath": "/recorded-coordination/tasks/sandbox-app/recorded-master/task.json",
+      "executionGraph": null,
+      "executionGraphView": null,
+      "executionNature": "organizational",
+      "executionWaves": [],
+      "id": "REC-M1",
+      "kind": "master",
+      "lifecycleId": null,
+      "masterLifecycleId": null,
+      "objective": "",
+      "openQuestions": [],
+      "orchestrates": [],
+      "references": [],
+      "repository": "sandbox-app",
+      "requirements": [],
+      "seats": [],
+      "sections": [],
+      "status": "inProgress",
+      "steps": [],
+      "stepsDone": 0,
+      "stepsTotal": 0,
+      "subTasks": [
+        {
+          "file": "01_slugify.md",
+          "linkedLifecycleId": null,
+          "masterRef": null,
+          "name": "Add slugify() and its test",
+          "number": "L1",
+          "scope": "",
+          "status": "inProgress"
+        }
+      ],
+      "title": "Recorded master: text helpers"
+    },
+    {
+      "ageSeconds": -66867.1767783165,
+      "bodyRevision": "413a75d298cb11e8ac4d5e9154ce4cd33d1a4aeb3f81ad1da6d1281a65fedfb2",
+      "codeExamples": [],
+      "createdAt": "2026-10-01T00:00:00+00:00",
+      "currentStep": "S2 \u2014 Write its test",
+      "decisions": [],
+      "design": null,
+      "discardedCount": null,
+      "discardedSubTasks": null,
+      "docPath": "/recorded-coordination/tasks/sandbox-app/recorded-master/01_slugify.json",
+      "executionGraph": null,
+      "executionGraphView": null,
+      "executionNature": null,
+      "executionWaves": [],
+      "id": "REC-M1-L1",
+      "kind": "subTask",
+      "lifecycleId": null,
+      "masterLifecycleId": null,
+      "objective": "",
+      "openQuestions": [],
+      "orchestrates": [],
+      "references": [],
+      "repository": "sandbox-app",
+      "requirements": [],
+      "seats": [],
+      "sections": [],
+      "status": "inProgress",
+      "steps": [
+        {
+          "disposition": null,
+          "id": "S1",
+          "status": "done",
+          "substeps": [],
+          "title": "Write the function"
+        },
+        {
+          "disposition": null,
+          "id": "S2",
+          "status": "inProgress",
+          "substeps": [],
+          "title": "Write its test"
+        },
+        {
+          "disposition": null,
+          "id": "S3",
+          "status": "pending",
+          "substeps": [],
+          "title": "Hand the task over"
+        }
+      ],
+      "stepsDone": 1,
+      "stepsTotal": 3,
+      "subTasks": [],
+      "title": "Add slugify() and its test"
+    }
+  ]
+}

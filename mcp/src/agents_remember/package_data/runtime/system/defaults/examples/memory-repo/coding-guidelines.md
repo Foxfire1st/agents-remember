@@ -3,7 +3,6 @@
 Use this file as a starter for repository-specific coding guidance inside a
 memory root, for example:
 
-- `<repo>/ar-memory/system/coding-guidelines.md`
 - `ar-coordination/memory-repos/ar-<repo>/system/coding-guidelines.md`
 
 Keep concrete project preferences in the target repository's memory layer, not
@@ -62,4 +61,4 @@ no rerun at leaf integration, and one full-repository acceptance run at master i
 Do not infer an executor from another repository, add a compatibility fallback, or leave a required
 gate dependent on a file that the candidate can delete to disable its own validation. Link the
 operational invocation from `system/tools.md` and the landing boundaries from
-`system/git-workflow.md`.
+`system/task-publication.md`.

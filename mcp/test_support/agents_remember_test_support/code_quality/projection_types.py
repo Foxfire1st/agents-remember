@@ -1,18 +1,17 @@
 """Generate the dashboard projection contract from the Python wire schemas.
 
 ``WorkspaceProjection.model_json_schema()`` owns the persisted projection. The HTTP/SSE
-snapshot adds two serve-time fields declared by ``ServedWorkspaceProjection``; their
+snapshot adds the serve-time fields declared by ``ServedWorkspaceProjection``; their
 Pydantic definitions are folded into the TypeScript output so the existing public
 dashboard contract remains complete without a second field list.
 
 The schema describes accepted model input, while the dashboard reads serialized output.
 Core projection and serving-build models use ``exclude_none=True``, so nullable fields are
-omitted and become optional TypeScript properties. AgentNotifier heartbeat deliberately dumps
-nulls, so its nullable properties remain required ``T | null`` values. Non-null defaults
-are always serialized and therefore remain required on the output contract.
+omitted and become optional TypeScript properties. Non-null defaults are always serialized
+and therefore remain required on the output contract.
 
 The renderer rejects schema forms it does not understand.  JSON Schema owns runtime
-refinements that TypeScript cannot enforce structurally (for example a numeric minimum or
+refinements that TypeScript cannot enforce structurally (for example a numeric minimum or a
 string length); those refinements remain exact in the schema artifact and are emitted beside
 the affected TypeScript property as deterministic documentation.  Unknown keywords still
 fail closed instead of disappearing from either generated contract.
@@ -32,20 +31,23 @@ SCHEMA_OUTPUT = Path("dashboard/src/types/projection.schema.json")
 TYPESCRIPT_OUTPUT = Path("dashboard/src/types/projection.ts")
 
 DEFINITION_RENAMES = {
+    "BuildCurrentnessPayload": "BuildCurrentness",
+    "CheckoutBindingPayload": "CheckoutBinding",
     "ServingBuildPayload": "ServingBuild",
-    "AgentNotifierHeartbeatPayload": "AgentNotifierHeartbeat",
+    "WatcherHealthPayload": "WatcherHealth",
 }
 NAMED_VOCABULARIES = (
-    ("LifecycleProjection", "state", "State"),
-    ("LifecycleProjection", "phase", "Phase"),
     ("AttentionItem", "severity", "AttentionSeverity"),
     ("AttentionItem", "lane", "AttentionLane"),
+    ("AttentionItem", "itemClass", "AttentionItemClass"),
     ("CommitRefNode", "factState", "ProcessFactState"),
     ("EngineProcessNode", "health", "ProcessHealth"),
 )
-NULL_PRESERVING_MODELS = frozenset({"AgentNotifierHeartbeatPayload"})
 SCHEMA_ANNOTATION_KEYWORDS = frozenset({"default", "description", "title"})
-SCHEMA_REFINEMENT_KEYWORDS = frozenset({"maxItems", "maxLength", "minLength", "minimum", "pattern"})
+SCHEMA_REFINEMENT_KEYWORDS = frozenset(
+    {"format", "maxItems", "maxLength", "minLength", "minimum", "pattern"}
+)
+"""The runtime refinements emitted beside a TypeScript property instead of being enforced."""
 SCHEMA_KEYWORDS = (
     SCHEMA_ANNOTATION_KEYWORDS
     | SCHEMA_REFINEMENT_KEYWORDS
@@ -219,7 +221,9 @@ def _schema_allowed_keywords(
     if node.get("type") in {"integer", "number"}:
         allowed = allowed | {"minimum"}
     elif node.get("type") == "string":
-        allowed = allowed | {"maxLength", "minLength", "pattern"}
+        # `format` is the only refinement the served wire states for a textual time; it is kept
+        # as a refinement rather than dropped, so a date-time stays a date-time in both contracts.
+        allowed = allowed | {"format", "maxLength", "minLength", "pattern"}
     return allowed
 
 
@@ -398,16 +402,13 @@ def _without_null(node: Mapping[str, object]) -> Mapping[str, object]:
 
 
 def _property_line(
-    owner: str,
     name: str,
     node: Mapping[str, object],
     vocabularies: Mapping[tuple[str, ...], str],
 ) -> str:
-    preserve_null = owner in NULL_PRESERVING_MODELS
-    optional = _is_nullable(node) and not preserve_null
-    rendered_node = node if preserve_null else _without_null(node)
+    rendered_node = _without_null(node)
     rendered = _schema_type(rendered_node, vocabularies)
-    property_line = f"  {name}{'?' if optional else ''}: {rendered};"
+    property_line = f"  {name}{'?' if _is_nullable(node) else ''}: {rendered};"
     refinement = _refinement_comment(rendered_node)
     return property_line if refinement is None else f"{refinement}\n{property_line}"
 
@@ -419,43 +420,13 @@ def _model_interface(
 ) -> str:
     public_name = DEFINITION_RENAMES.get(schema_name, schema_name)
     properties = _properties(model, schema_name)
-    omitted = set(_metric_bucket_fields(model)) if schema_name == "Metrics" else set()
-    extension = " extends LifecycleStateCounts" if schema_name == "Metrics" else ""
-    lines = [f"export interface {public_name}{extension} {{"]
+    lines = [f"export interface {public_name} {{"]
     lines.extend(
-        _property_line(schema_name, name, _object(node, f"{schema_name}.{name}"), vocabularies)
+        _property_line(name, _object(node, f"{schema_name}.{name}"), vocabularies)
         for name, node in properties.items()
-        if name not in omitted
     )
     lines.append("}")
     return "\n".join(lines)
-
-
-def _state_count_field(state: str) -> str:
-    head, *tail = state.split("-")
-    return head + "".join(word[:1].upper() + word[1:] for word in tail) + "Count"
-
-
-def _state_partition(schema: Mapping[str, object]) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    definitions = _definitions(schema)
-    states, _definition_name = _property_enum(schema, "LifecycleProjection", "state")
-    if states is None:
-        raise ProjectionTypeGenerationError("LifecycleProjection.state must be an enum")
-    metrics = _object(definitions.get("Metrics"), "Metrics")
-    buckets = set(_metric_bucket_fields(metrics))
-    live = tuple(state for state in states if _state_count_field(state) in buckets)
-    terminal = tuple(state for state in states if state not in live)
-    mapped = {_state_count_field(state) for state in live}
-    if mapped != buckets:
-        raise ProjectionTypeGenerationError(
-            f"Metrics lifecycle buckets do not map one-to-one onto State: {sorted(buckets ^ mapped)}"
-        )
-    return live, terminal
-
-
-def _metric_bucket_fields(metrics: Mapping[str, object]) -> tuple[str, ...]:
-    properties = _properties(metrics, "Metrics")
-    return tuple(name for name in properties if name.endswith("Count") and name != "lifecycleCount")
 
 
 def _vocabulary(
@@ -473,77 +444,20 @@ def _tuple_constant(name: str, values: Sequence[str]) -> str:
 
 
 def _vocabulary_block(schema: Mapping[str, object]) -> tuple[str, dict[tuple[str, ...], str]]:
-    live, terminal = _state_partition(schema)
-    state, _state_definition = _property_enum(schema, "LifecycleProjection", "state")
-    phase, _phase_definition = _property_enum(schema, "LifecycleProjection", "phase")
-    if state is None or phase is None:
-        raise ProjectionTypeGenerationError("LifecycleProjection state and phase must be enums")
-    named = [
-        (state, "State"),
-        (phase, "Phase"),
-        _vocabulary(schema, "AttentionItem", "severity", "AttentionSeverity"),
-        _vocabulary(schema, "AttentionItem", "lane", "AttentionLane"),
-        _vocabulary(schema, "CommitRefNode", "factState", "ProcessFactState"),
-        _vocabulary(schema, "EngineProcessNode", "health", "ProcessHealth"),
-    ]
-    vocabulary_types = dict(named)
+    named = [_vocabulary(schema, model, field, label) for model, field, label in NAMED_VOCABULARIES]
+    constants = (
+        "ATTENTION_SEVERITIES",
+        "ATTENTION_LANES",
+        "ATTENTION_ITEM_CLASSES",
+        "PROCESS_FACT_STATES",
+        "PROCESS_HEALTHS",
+    )
     sections = [
-        _tuple_constant("LIVE_STATES", live),
-        _tuple_constant("TERMINAL_STATES", terminal),
-        "export const LIFECYCLE_STATES = [...LIVE_STATES, ...TERMINAL_STATES] as const;",
-        "export type State = (typeof LIFECYCLE_STATES)[number];",
-        "export type TerminalState = (typeof TERMINAL_STATES)[number];",
-        "export type ActiveState = (typeof LIVE_STATES)[number];",
-        "export const ACTIVE_STATES: readonly ActiveState[] = LIVE_STATES;",
-        "type FiledOnce<S extends never> = S;",
-        "export type StatesAreFiledOnce = FiledOnce<ActiveState & TerminalState>;",
-        _tuple_constant("PHASES", phase),
-        "export type Phase = (typeof PHASES)[number];",
-        _tuple_constant("ATTENTION_SEVERITIES", named[2][0]),
-        "export type AttentionSeverity = (typeof ATTENTION_SEVERITIES)[number];",
-        _tuple_constant("ATTENTION_LANES", named[3][0]),
-        "export type AttentionLane = (typeof ATTENTION_LANES)[number];",
-        _tuple_constant("PROCESS_FACT_STATES", named[4][0]),
-        "export type ProcessFactState = (typeof PROCESS_FACT_STATES)[number];",
-        _tuple_constant("PROCESS_HEALTHS", named[5][0]),
-        "export type ProcessHealth = (typeof PROCESS_HEALTHS)[number];",
+        _tuple_constant(constant, values) + f"\nexport type {label} = (typeof {constant})[number];"
+        for constant, (values, label) in zip(constants, named, strict=True)
     ]
-    return "\n\n".join(sections), vocabulary_types
+    return "\n\n".join(sections), dict(named)
 
-
-METRICS_HELPERS = """type Camel<S extends string> = S extends `${infer Head}-${infer Tail}`
-  ? `${Head}${Capitalize<Camel<Tail>>}`
-  : S;
-
-export type StateCountField<S extends ActiveState> = `${Camel<S>}Count`;
-
-export type LifecycleStateCounts = { [S in ActiveState as StateCountField<S>]: number };
-
-export function stateCountField<S extends ActiveState>(state: S): StateCountField<S> {
-  const [head, ...rest] = state.split("-");
-  const camel = head + rest.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join("");
-  return `${camel}Count` as StateCountField<S>;
-}
-
-function lifecycleStateCounts(
-  lifecycles: readonly Pick<LifecycleProjection, "state">[],
-): LifecycleStateCounts {
-  return Object.fromEntries(
-    ACTIVE_STATES.map((state) => [
-      stateCountField(state),
-      lifecycles.filter((entry) => entry.state === state).length,
-    ]),
-  ) as LifecycleStateCounts;
-}"""
-
-METRICS_FACTORY = """export function metricsFor(lifecycles: readonly LifecycleProjection[]): Metrics {
-  return {
-    lifecycleCount: lifecycles.length,
-    totalTokens: lifecycles.reduce((sum, entry) => sum + entry.tokens, 0),
-    stalenessHistogram: {},
-    ...lifecycleStateCounts(lifecycles),
-  };
-}"""
 
 HEADER = f"""// TypeScript mirror of WorkspaceProjection — GENERATED FILE; DO NOT EDIT.
 // Canonical core model: WorkspaceProjection.model_json_schema().
@@ -575,12 +489,7 @@ def render_typescript(schema: Mapping[str, object], served_schema: Mapping[str, 
     for name, raw_model in sorted({**definitions, **supplements}.items()):
         if name in vocabulary_definitions:
             continue
-        if name == "Metrics":
-            blocks.append(METRICS_HELPERS)
         blocks.append(_model_interface(name, _object(raw_model, name), vocabularies))
-        if name == "Metrics":
-            blocks.append(METRICS_FACTORY)
-    blocks.append("export type SubTaskRow = TaskSubTaskRefNode | SeriesSubTaskNode;")
     root = dict(_properties(schema, "WorkspaceProjection"))
     served_root = _properties(served_schema, "ServedWorkspaceProjection")
     root.update({name: node for name, node in served_root.items() if name not in root})

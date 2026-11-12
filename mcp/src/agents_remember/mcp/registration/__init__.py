@@ -1,6 +1,6 @@
 """The MCP tool surface, one module per tool family.
 
-``create_server`` owns process wiring -- the compact-content shim, the ambient lifecycle, the
+``create_server`` owns process wiring -- the compact-content shim, application services, the
 ``FastMCP`` instance -- and nothing else; every ``@server.tool()`` definition lives here. Each
 module exposes one ``register_*_tools(server, config)`` that declares its family against the
 server it is handed, and ``TOOL_REGISTRARS`` lists them in the order the server advertises
@@ -18,16 +18,14 @@ from mcp.server.fastmcp import FastMCP
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
-from .benchmarks import register_benchmark_tools
+from .capsule_serving import register_capsule_and_skill_tools
 from .closeout import register_closeout_tools
-from .code_search import register_code_search_tools
 from .core import register_core_tools
-from .gates import register_gate_tools
-from .lifecycle import register_lifecycle_tools
+from .explainer import register_explainer_tools
+from .knowledge import register_knowledge_tools
 from .memory import register_memory_tools
-from .orchestration import register_orchestration_tools
-from .providers import register_provider_tools
-from .sessions import register_session_tools
+from .role_agents import register_role_agent_tools
+from .seat_retirement import register_seat_retirement_tools
 from .tasks import register_task_tools
 from .worktrees import register_worktree_tools
 
@@ -35,17 +33,15 @@ ToolRegistrar = Callable[[FastMCP, McpRuntimeConfig], None]
 
 TOOL_REGISTRARS: tuple[ToolRegistrar, ...] = (
     register_core_tools,
-    register_session_tools,
+    register_seat_retirement_tools,
     register_memory_tools,
-    register_provider_tools,
-    register_code_search_tools,
     register_worktree_tools,
     register_closeout_tools,
     register_task_tools,
-    register_benchmark_tools,
-    register_lifecycle_tools,
-    register_gate_tools,
-    register_orchestration_tools,
+    register_capsule_and_skill_tools,
+    register_role_agent_tools,
+    register_knowledge_tools,
+    register_explainer_tools,
 )
 
 __all__ = ["TOOL_REGISTRARS", "ToolRegistrar"]

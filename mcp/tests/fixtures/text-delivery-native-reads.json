@@ -1,0 +1,396 @@
+{
+  "rows": [
+    {
+      "harness": "codex",
+      "attempt": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-new-text-c7-codex/codex/CE02/0eb5e49a-0a5d-406c-b2fe-5060b4fd2030/attempt.json",
+      "attemptSha256": "e269c14faa8055412f632992c26ca005120eb14e14bbeceea54cbfc90dd51233",
+      "originalCaptureRawExportSha256": "cf5589fa4a8c6c8e970177d03afe71fdfc62b1694cfa2d3804361db7d70c8377",
+      "sourceSessionId": "01a18d0c-0496-7021-95fe-1bf8a89f46b6",
+      "callJsonPath": "$.capture.events[19]",
+      "resultJsonPath": "$.capture.events[20]",
+      "call": {
+        "kind": "tool_call",
+        "session_id": "01a18d0c-0496-7021-95fe-1bf8a89f46b6",
+        "sequence": 19,
+        "payload": {
+          "name": "CommandExecution",
+          "call_id": "exec-cc8ff3f5-e1e8-4727-a56a-b10f14f5ad0f",
+          "server": null,
+          "arguments": {
+            "command": [
+              "/bin/bash",
+              "-lc",
+              "cat fixture/authority.json fixture/queue.json fixture/parent-message.md"
+            ],
+            "cwd": "file:///var/tmp/mik-run3/architect/eval-sandbox/20261030-new-text-c7-codex/codex-CE02/trials/0eb5e49a-0a5d-406c-b2fe-5060b4fd2030/project",
+            "parsed_cmd": [
+              {
+                "type": "unknown",
+                "cmd": "cat fixture/authority.json fixture/queue.json fixture/parent-message.md"
+              }
+            ]
+          },
+          "native_item": {
+            "type": "CommandExecution",
+            "id": "exec-cc8ff3f5-e1e8-4727-a56a-b10f14f5ad0f",
+            "process_id": "85018",
+            "command": [
+              "/bin/bash",
+              "-lc",
+              "cat fixture/authority.json fixture/queue.json fixture/parent-message.md"
+            ],
+            "cwd": "file:///var/tmp/mik-run3/architect/eval-sandbox/20261030-new-text-c7-codex/codex-CE02/trials/0eb5e49a-0a5d-406c-b2fe-5060b4fd2030/project",
+            "parsed_cmd": [
+              {
+                "type": "unknown",
+                "cmd": "cat fixture/authority.json fixture/queue.json fixture/parent-message.md"
+              }
+            ],
+            "source": "unified_exec_startup",
+            "status": "completed",
+            "aggregated_output": "{\n  \"schema\": \"ar-scripted-case-authority/v1\",\n  \"case\": \"CE02\",\n  \"construction\": \"cut from the record (D637)\",\n  \"authority\": \"D637\",\n  \"sourceEpisode\": \"L192-M7-current-claims\",\n  \"startingTrees\": {\n    \"code\": {\n      \"tree\": \"50a9b3caf71cb848ea315f222c9f5a92e2ea428e\",\n      \"kind\": \"real Git tree\"\n    },\n    \"memory\": {\n      \"tree\": \"5d39198b2905174c993bcb8916844256573b457c\",\n      \"kind\": \"real Git tree\"\n    }\n  },\n  \"grant\": \"Complete the named memory-only queue, necessary normal checks and fixture-local direct handover without another go.\",\n  \"readRoots\": [\n    \"projects/code\",\n    \"projects/memory\",\n    \"fixture\"\n  ],\n  \"writeRoots\": [\n    \"projects/memory\",\n    \"reports\",\n    \"fixture/messages\"\n  ],\n  \"sourceCodeWrites\": false,\n  \"realHostWrites\": false,\n  \"gitTransactions\": false,\n  \"roleStarts\": false,\n  \"taskStatusAcceptanceOrCloseoutWrites\": false,\n  \"parent\": \"fixture-parent (runner binds a fresh identity)\",\n  \"recipient\": \"fixture-reviewer (runner binds a fresh identity)\",\n  \"writerAndChecks\": \"Use the admitted authoring and checking route supplied by the runner for this scripted fixture; never invent a tool receipt or claim a fixture command was a production write.\",\n  \"historicalAuthority\": \"This is newly scripted D637 authority, not an extension or rewrite of the historical role seat.\"\n}\n{\n  \"schema\": \"ar-scripted-curator-queue/v1\",\n  \"case\": \"CE02\",\n  \"label\": \"cut from the record (D637)\",\n  \"stage\": \"curation\",\n  \"wholeQueueAuthorized\": true,\n  \"items\": [\n    {\n      \"id\": \"card-1\",\n      \"kind\": \"onboarding-current-claim-review\",\n      \"source\": \"projects/code/mcp/src/agents_remember/providers/cgc/setup.py\",\n      \"card\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/cgc/setup.py.md\",\n      \"properties\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/cgc/setup.py.json\",\n      \"history\": \"projects/memory/knowledge/history/CE02-<trial>.json\"\n    },\n    {\n      \"id\": \"card-2\",\n      \"kind\": \"onboarding-current-claim-review\",\n      \"source\": \"projects/code/mcp/src/agents_remember/providers/grepai/setup.py\",\n      \"card\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/grepai/setup.py.md\",\n      \"properties\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/grepai/setup.py.json\",\n      \"history\": \"projects/memory/knowledge/history/CE02-<trial>.json\"\n    },\n    {\n      \"id\": \"card-3\",\n      \"kind\": \"onboarding-current-claim-review\",\n      \"source\": \"projects/code/mcp/src/agents_remember/providers/grepai/isolated.py\",\n      \"card\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/grepai/isolated.py.md\",\n      \"properties\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/grepai/isolated.py.json\",\n      \"history\": \"projects/memory/knowledge/history/CE02-<trial>.json\"\n    }\n  ],\n  \"pathRoots\": {\n    \"fixture\": \".\",\n    \"code\": \"projects/code\",\n    \"memory\": \"projects/memory\",\n    \"reports\": \"reports\"\n  },\n  \"historyBinding\": {\n    \"kind\": \"runtime-wave\",\n    \"waveTemplate\": \"CE02-<trial>\",\n    \"pathTemplate\": \"projects/memory/knowledge/history/CE02-<trial>.json\",\n    \"resolve\": \"Use the exact wave supplied by the runner's runtime binding; <trial> denotes that fresh trial identity, not literal filename text.\",\n    \"historicalBaseline\": \"projects/memory/knowledge/history/260928-MIK-L192.json\",\n    \"historicalBaselineRole\": \"Supplied prior history evidence, not the destination for this pass's rows.\"\n  }\n}\n# Scripted parent message — D637\n\nThe whole named Curator queue is authorized. Complete the memory work, available checks and direct fixture handover without asking for another go. Hold genuine requirement decisions or formal permission prompts and state their owner truthfully; keep independent admitted work moving. This message grants no write outside the fixture and no code, Git, role-start, acceptance or closeout authority.\n",
+            "exit_code": 0,
+            "duration": {
+              "secs": 0,
+              "nanos": 26515
+            }
+          }
+        },
+        "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T14-42-17-01a18d0c-0496-7021-95fe-1bf8a89f46b6.jsonl",
+        "source_sha256": "1b669c20df928cdd9ecc23d3ec9a8b771b9a37587c48801ec7328b73b9bc2e9b",
+        "native_timestamp": 1793367755.592
+      },
+      "result": {
+        "kind": "tool_result",
+        "session_id": "01a18d0c-0496-7021-95fe-1bf8a89f46b6",
+        "sequence": 20,
+        "payload": {
+          "call_id": "exec-cc8ff3f5-e1e8-4727-a56a-b10f14f5ad0f",
+          "output": {
+            "type": "CommandExecution",
+            "id": "exec-cc8ff3f5-e1e8-4727-a56a-b10f14f5ad0f",
+            "process_id": "85018",
+            "command": [
+              "/bin/bash",
+              "-lc",
+              "cat fixture/authority.json fixture/queue.json fixture/parent-message.md"
+            ],
+            "cwd": "file:///var/tmp/mik-run3/architect/eval-sandbox/20261030-new-text-c7-codex/codex-CE02/trials/0eb5e49a-0a5d-406c-b2fe-5060b4fd2030/project",
+            "parsed_cmd": [
+              {
+                "type": "unknown",
+                "cmd": "cat fixture/authority.json fixture/queue.json fixture/parent-message.md"
+              }
+            ],
+            "source": "unified_exec_startup",
+            "status": "completed",
+            "aggregated_output": "{\n  \"schema\": \"ar-scripted-case-authority/v1\",\n  \"case\": \"CE02\",\n  \"construction\": \"cut from the record (D637)\",\n  \"authority\": \"D637\",\n  \"sourceEpisode\": \"L192-M7-current-claims\",\n  \"startingTrees\": {\n    \"code\": {\n      \"tree\": \"50a9b3caf71cb848ea315f222c9f5a92e2ea428e\",\n      \"kind\": \"real Git tree\"\n    },\n    \"memory\": {\n      \"tree\": \"5d39198b2905174c993bcb8916844256573b457c\",\n      \"kind\": \"real Git tree\"\n    }\n  },\n  \"grant\": \"Complete the named memory-only queue, necessary normal checks and fixture-local direct handover without another go.\",\n  \"readRoots\": [\n    \"projects/code\",\n    \"projects/memory\",\n    \"fixture\"\n  ],\n  \"writeRoots\": [\n    \"projects/memory\",\n    \"reports\",\n    \"fixture/messages\"\n  ],\n  \"sourceCodeWrites\": false,\n  \"realHostWrites\": false,\n  \"gitTransactions\": false,\n  \"roleStarts\": false,\n  \"taskStatusAcceptanceOrCloseoutWrites\": false,\n  \"parent\": \"fixture-parent (runner binds a fresh identity)\",\n  \"recipient\": \"fixture-reviewer (runner binds a fresh identity)\",\n  \"writerAndChecks\": \"Use the admitted authoring and checking route supplied by the runner for this scripted fixture; never invent a tool receipt or claim a fixture command was a production write.\",\n  \"historicalAuthority\": \"This is newly scripted D637 authority, not an extension or rewrite of the historical role seat.\"\n}\n{\n  \"schema\": \"ar-scripted-curator-queue/v1\",\n  \"case\": \"CE02\",\n  \"label\": \"cut from the record (D637)\",\n  \"stage\": \"curation\",\n  \"wholeQueueAuthorized\": true,\n  \"items\": [\n    {\n      \"id\": \"card-1\",\n      \"kind\": \"onboarding-current-claim-review\",\n      \"source\": \"projects/code/mcp/src/agents_remember/providers/cgc/setup.py\",\n      \"card\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/cgc/setup.py.md\",\n      \"properties\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/cgc/setup.py.json\",\n      \"history\": \"projects/memory/knowledge/history/CE02-<trial>.json\"\n    },\n    {\n      \"id\": \"card-2\",\n      \"kind\": \"onboarding-current-claim-review\",\n      \"source\": \"projects/code/mcp/src/agents_remember/providers/grepai/setup.py\",\n      \"card\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/grepai/setup.py.md\",\n      \"properties\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/grepai/setup.py.json\",\n      \"history\": \"projects/memory/knowledge/history/CE02-<trial>.json\"\n    },\n    {\n      \"id\": \"card-3\",\n      \"kind\": \"onboarding-current-claim-review\",\n      \"source\": \"projects/code/mcp/src/agents_remember/providers/grepai/isolated.py\",\n      \"card\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/grepai/isolated.py.md\",\n      \"properties\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/grepai/isolated.py.json\",\n      \"history\": \"projects/memory/knowledge/history/CE02-<trial>.json\"\n    }\n  ],\n  \"pathRoots\": {\n    \"fixture\": \".\",\n    \"code\": \"projects/code\",\n    \"memory\": \"projects/memory\",\n    \"reports\": \"reports\"\n  },\n  \"historyBinding\": {\n    \"kind\": \"runtime-wave\",\n    \"waveTemplate\": \"CE02-<trial>\",\n    \"pathTemplate\": \"projects/memory/knowledge/history/CE02-<trial>.json\",\n    \"resolve\": \"Use the exact wave supplied by the runner's runtime binding; <trial> denotes that fresh trial identity, not literal filename text.\",\n    \"historicalBaseline\": \"projects/memory/knowledge/history/260928-MIK-L192.json\",\n    \"historicalBaselineRole\": \"Supplied prior history evidence, not the destination for this pass's rows.\"\n  }\n}\n# Scripted parent message — D637\n\nThe whole named Curator queue is authorized. Complete the memory work, available checks and direct fixture handover without asking for another go. Hold genuine requirement decisions or formal permission prompts and state their owner truthfully; keep independent admitted work moving. This message grants no write outside the fixture and no code, Git, role-start, acceptance or closeout authority.\n",
+            "exit_code": 0,
+            "duration": {
+              "secs": 0,
+              "nanos": 26515
+            }
+          },
+          "native_item": {
+            "type": "CommandExecution",
+            "id": "exec-cc8ff3f5-e1e8-4727-a56a-b10f14f5ad0f",
+            "process_id": "85018",
+            "command": [
+              "/bin/bash",
+              "-lc",
+              "cat fixture/authority.json fixture/queue.json fixture/parent-message.md"
+            ],
+            "cwd": "file:///var/tmp/mik-run3/architect/eval-sandbox/20261030-new-text-c7-codex/codex-CE02/trials/0eb5e49a-0a5d-406c-b2fe-5060b4fd2030/project",
+            "parsed_cmd": [
+              {
+                "type": "unknown",
+                "cmd": "cat fixture/authority.json fixture/queue.json fixture/parent-message.md"
+              }
+            ],
+            "source": "unified_exec_startup",
+            "status": "completed",
+            "aggregated_output": "{\n  \"schema\": \"ar-scripted-case-authority/v1\",\n  \"case\": \"CE02\",\n  \"construction\": \"cut from the record (D637)\",\n  \"authority\": \"D637\",\n  \"sourceEpisode\": \"L192-M7-current-claims\",\n  \"startingTrees\": {\n    \"code\": {\n      \"tree\": \"50a9b3caf71cb848ea315f222c9f5a92e2ea428e\",\n      \"kind\": \"real Git tree\"\n    },\n    \"memory\": {\n      \"tree\": \"5d39198b2905174c993bcb8916844256573b457c\",\n      \"kind\": \"real Git tree\"\n    }\n  },\n  \"grant\": \"Complete the named memory-only queue, necessary normal checks and fixture-local direct handover without another go.\",\n  \"readRoots\": [\n    \"projects/code\",\n    \"projects/memory\",\n    \"fixture\"\n  ],\n  \"writeRoots\": [\n    \"projects/memory\",\n    \"reports\",\n    \"fixture/messages\"\n  ],\n  \"sourceCodeWrites\": false,\n  \"realHostWrites\": false,\n  \"gitTransactions\": false,\n  \"roleStarts\": false,\n  \"taskStatusAcceptanceOrCloseoutWrites\": false,\n  \"parent\": \"fixture-parent (runner binds a fresh identity)\",\n  \"recipient\": \"fixture-reviewer (runner binds a fresh identity)\",\n  \"writerAndChecks\": \"Use the admitted authoring and checking route supplied by the runner for this scripted fixture; never invent a tool receipt or claim a fixture command was a production write.\",\n  \"historicalAuthority\": \"This is newly scripted D637 authority, not an extension or rewrite of the historical role seat.\"\n}\n{\n  \"schema\": \"ar-scripted-curator-queue/v1\",\n  \"case\": \"CE02\",\n  \"label\": \"cut from the record (D637)\",\n  \"stage\": \"curation\",\n  \"wholeQueueAuthorized\": true,\n  \"items\": [\n    {\n      \"id\": \"card-1\",\n      \"kind\": \"onboarding-current-claim-review\",\n      \"source\": \"projects/code/mcp/src/agents_remember/providers/cgc/setup.py\",\n      \"card\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/cgc/setup.py.md\",\n      \"properties\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/cgc/setup.py.json\",\n      \"history\": \"projects/memory/knowledge/history/CE02-<trial>.json\"\n    },\n    {\n      \"id\": \"card-2\",\n      \"kind\": \"onboarding-current-claim-review\",\n      \"source\": \"projects/code/mcp/src/agents_remember/providers/grepai/setup.py\",\n      \"card\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/grepai/setup.py.md\",\n      \"properties\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/grepai/setup.py.json\",\n      \"history\": \"projects/memory/knowledge/history/CE02-<trial>.json\"\n    },\n    {\n      \"id\": \"card-3\",\n      \"kind\": \"onboarding-current-claim-review\",\n      \"source\": \"projects/code/mcp/src/agents_remember/providers/grepai/isolated.py\",\n      \"card\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/grepai/isolated.py.md\",\n      \"properties\": \"projects/memory/onboarding/mcp/src/agents_remember/providers/grepai/isolated.py.json\",\n      \"history\": \"projects/memory/knowledge/history/CE02-<trial>.json\"\n    }\n  ],\n  \"pathRoots\": {\n    \"fixture\": \".\",\n    \"code\": \"projects/code\",\n    \"memory\": \"projects/memory\",\n    \"reports\": \"reports\"\n  },\n  \"historyBinding\": {\n    \"kind\": \"runtime-wave\",\n    \"waveTemplate\": \"CE02-<trial>\",\n    \"pathTemplate\": \"projects/memory/knowledge/history/CE02-<trial>.json\",\n    \"resolve\": \"Use the exact wave supplied by the runner's runtime binding; <trial> denotes that fresh trial identity, not literal filename text.\",\n    \"historicalBaseline\": \"projects/memory/knowledge/history/260928-MIK-L192.json\",\n    \"historicalBaselineRole\": \"Supplied prior history evidence, not the destination for this pass's rows.\"\n  }\n}\n# Scripted parent message — D637\n\nThe whole named Curator queue is authorized. Complete the memory work, available checks and direct fixture handover without asking for another go. Hold genuine requirement decisions or formal permission prompts and state their owner truthfully; keep independent admitted work moving. This message grants no write outside the fixture and no code, Git, role-start, acceptance or closeout authority.\n",
+            "exit_code": 0,
+            "duration": {
+              "secs": 0,
+              "nanos": 26515
+            }
+          }
+        },
+        "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T14-42-17-01a18d0c-0496-7021-95fe-1bf8a89f46b6.jsonl",
+        "source_sha256": "1b669c20df928cdd9ecc23d3ec9a8b771b9a37587c48801ec7328b73b9bc2e9b",
+        "native_timestamp": 1793367755.592
+      },
+      "sourceFiles": [
+        {
+          "path": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T14-42-17-01a18d0c-0496-7021-95fe-1bf8a89f46b6.jsonl",
+          "sha256": "1b669c20df928cdd9ecc23d3ec9a8b771b9a37587c48801ec7328b73b9bc2e9b"
+        }
+      ],
+      "representation": "Exact selected normalized native call/result pair; full native result retained. Not a whole native export or a live detail-read claim."
+    },
+    {
+      "harness": "codex",
+      "attempt": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-new-text-c7-codex/codex/CE02/0eb5e49a-0a5d-406c-b2fe-5060b4fd2030/attempt.json",
+      "attemptSha256": "e269c14faa8055412f632992c26ca005120eb14e14bbeceea54cbfc90dd51233",
+      "originalCaptureRawExportSha256": "cf5589fa4a8c6c8e970177d03afe71fdfc62b1694cfa2d3804361db7d70c8377",
+      "sourceSessionId": "01a18d0c-0496-7021-95fe-1bf8a89f46b6",
+      "callJsonPath": "$.capture.events[34]",
+      "resultJsonPath": "$.capture.events[35]",
+      "call": {
+        "kind": "tool_call",
+        "session_id": "01a18d0c-0496-7021-95fe-1bf8a89f46b6",
+        "sequence": 34,
+        "payload": {
+          "name": "CommandExecution",
+          "call_id": "exec-6635c4cf-ad52-4157-9b38-5c2f3ae02e37",
+          "server": null,
+          "arguments": {
+            "command": [
+              "/bin/bash",
+              "-lc",
+              "cat fixture/task.md && ls -ld projects/memory coordination/memory-repos/ar-code && rg --files -g AGENTS.md -g '*handoff*' -g '*contract*' -g '*template*' -g '*worklist*' ."
+            ],
+            "cwd": "file:///var/tmp/mik-run3/architect/eval-sandbox/20261030-new-text-c7-codex/codex-CE02/trials/0eb5e49a-0a5d-406c-b2fe-5060b4fd2030/project",
+            "parsed_cmd": [
+              {
+                "type": "read",
+                "cmd": "cat fixture/task.md",
+                "name": "task.md",
+                "path": "fixture/task.md"
+              },
+              {
+                "type": "list_files",
+                "cmd": "ls -ld projects/memory coordination/memory-repos/ar-code",
+                "path": "memory"
+              },
+              {
+                "type": "list_files",
+                "cmd": "rg --files -g AGENTS.md -g '*handoff*' -g '*contract*' -g '*template*' -g '*worklist*' .",
+                "path": "."
+              }
+            ]
+          },
+          "native_item": {
+            "type": "CommandExecution",
+            "id": "exec-6635c4cf-ad52-4157-9b38-5c2f3ae02e37",
+            "process_id": "44225",
+            "command": [
+              "/bin/bash",
+              "-lc",
+              "cat fixture/task.md && ls -ld projects/memory coordination/memory-repos/ar-code && rg --files -g AGENTS.md -g '*handoff*' -g '*contract*' -g '*template*' -g '*worklist*' ."
+            ],
+            "cwd": "file:///var/tmp/mik-run3/architect/eval-sandbox/20261030-new-text-c7-codex/codex-CE02/trials/0eb5e49a-0a5d-406c-b2fe-5060b4fd2030/project",
+            "parsed_cmd": [
+              {
+                "type": "read",
+                "cmd": "cat fixture/task.md",
+                "name": "task.md",
+                "path": "fixture/task.md"
+              },
+              {
+                "type": "list_files",
+                "cmd": "ls -ld projects/memory coordination/memory-repos/ar-code",
+                "path": "memory"
+              },
+              {
+                "type": "list_files",
+                "cmd": "rg --files -g AGENTS.md -g '*handoff*' -g '*contract*' -g '*template*' -g '*worklist*' .",
+                "path": "."
+              }
+            ],
+            "source": "unified_exec_startup",
+            "status": "failed",
+            "aggregated_output": "Working directory: the fresh fixture root. Read fixture/authority.json and fixture/queue.json. Code is at projects/code; memory is at projects/memory; reports are at reports. Source and onboarding paths in the queue are relative to those declared roots.\n\n# Scoped Curator case\n\nYou own the admitted curation pass over the three queue entries. Compare each card and its paired properties with the supplied real source files. Complete the memory changes the current source requires, preserve supported retained behavior, record the actual memory changes in the history for the exact runtime-bound wave, run the available curation checks, and send one factual handover with the resulting files and checks.\n\nUse the source at projects/code and memory at projects/memory. Every source file in inputs is read-only evidence. The queue, authority and parent message are scripted case inputs under D637, not recovered historic messages. Work through the whole queue without another go. Do not edit code or broaden the pass beyond these named subjects and their paired claims.\n\nRead fixture/authority.json, fixture/queue.json and fixture/parent-message.md. The runner supplies the instruction version being measured and admitted authoring/checking route; report unavailable or refused operations truthfully. Reports and fixture-local messages belong under reports and fixture/messages. Handover names the exact files and checks; a report alone does not prove a write.\n\nHistory destination: the queue's `CE02-<trial>.json` template denotes the exact runtime-bound wave supplied by the runner. Resolve `<trial>` to that fresh trial identity and use `projects/memory/knowledge/history/<supplied-wave>.json`; do not write a literal placeholder filename. The supplied `260928-MIK-L192.json` is prior history evidence, not the destination for this pass's rows.\ndrwxrwxr-x 5 firefox firefox 4096 Oct 30 14:41 coordination/memory-repos/ar-code\nlrwxrwxrwx 1 firefox firefox   36 Oct 30 14:41 projects/memory -> ../coordination/memory-repos/ar-code\n",
+            "exit_code": 1,
+            "duration": {
+              "secs": 0,
+              "nanos": 23728
+            }
+          }
+        },
+        "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T14-42-17-01a18d0c-0496-7021-95fe-1bf8a89f46b6.jsonl",
+        "source_sha256": "1b669c20df928cdd9ecc23d3ec9a8b771b9a37587c48801ec7328b73b9bc2e9b",
+        "native_timestamp": 1793367761.446
+      },
+      "result": {
+        "kind": "tool_result",
+        "session_id": "01a18d0c-0496-7021-95fe-1bf8a89f46b6",
+        "sequence": 35,
+        "payload": {
+          "call_id": "exec-6635c4cf-ad52-4157-9b38-5c2f3ae02e37",
+          "output": {
+            "type": "CommandExecution",
+            "id": "exec-6635c4cf-ad52-4157-9b38-5c2f3ae02e37",
+            "process_id": "44225",
+            "command": [
+              "/bin/bash",
+              "-lc",
+              "cat fixture/task.md && ls -ld projects/memory coordination/memory-repos/ar-code && rg --files -g AGENTS.md -g '*handoff*' -g '*contract*' -g '*template*' -g '*worklist*' ."
+            ],
+            "cwd": "file:///var/tmp/mik-run3/architect/eval-sandbox/20261030-new-text-c7-codex/codex-CE02/trials/0eb5e49a-0a5d-406c-b2fe-5060b4fd2030/project",
+            "parsed_cmd": [
+              {
+                "type": "read",
+                "cmd": "cat fixture/task.md",
+                "name": "task.md",
+                "path": "fixture/task.md"
+              },
+              {
+                "type": "list_files",
+                "cmd": "ls -ld projects/memory coordination/memory-repos/ar-code",
+                "path": "memory"
+              },
+              {
+                "type": "list_files",
+                "cmd": "rg --files -g AGENTS.md -g '*handoff*' -g '*contract*' -g '*template*' -g '*worklist*' .",
+                "path": "."
+              }
+            ],
+            "source": "unified_exec_startup",
+            "status": "failed",
+            "aggregated_output": "Working directory: the fresh fixture root. Read fixture/authority.json and fixture/queue.json. Code is at projects/code; memory is at projects/memory; reports are at reports. Source and onboarding paths in the queue are relative to those declared roots.\n\n# Scoped Curator case\n\nYou own the admitted curation pass over the three queue entries. Compare each card and its paired properties with the supplied real source files. Complete the memory changes the current source requires, preserve supported retained behavior, record the actual memory changes in the history for the exact runtime-bound wave, run the available curation checks, and send one factual handover with the resulting files and checks.\n\nUse the source at projects/code and memory at projects/memory. Every source file in inputs is read-only evidence. The queue, authority and parent message are scripted case inputs under D637, not recovered historic messages. Work through the whole queue without another go. Do not edit code or broaden the pass beyond these named subjects and their paired claims.\n\nRead fixture/authority.json, fixture/queue.json and fixture/parent-message.md. The runner supplies the instruction version being measured and admitted authoring/checking route; report unavailable or refused operations truthfully. Reports and fixture-local messages belong under reports and fixture/messages. Handover names the exact files and checks; a report alone does not prove a write.\n\nHistory destination: the queue's `CE02-<trial>.json` template denotes the exact runtime-bound wave supplied by the runner. Resolve `<trial>` to that fresh trial identity and use `projects/memory/knowledge/history/<supplied-wave>.json`; do not write a literal placeholder filename. The supplied `260928-MIK-L192.json` is prior history evidence, not the destination for this pass's rows.\ndrwxrwxr-x 5 firefox firefox 4096 Oct 30 14:41 coordination/memory-repos/ar-code\nlrwxrwxrwx 1 firefox firefox   36 Oct 30 14:41 projects/memory -> ../coordination/memory-repos/ar-code\n",
+            "exit_code": 1,
+            "duration": {
+              "secs": 0,
+              "nanos": 23728
+            }
+          },
+          "native_item": {
+            "type": "CommandExecution",
+            "id": "exec-6635c4cf-ad52-4157-9b38-5c2f3ae02e37",
+            "process_id": "44225",
+            "command": [
+              "/bin/bash",
+              "-lc",
+              "cat fixture/task.md && ls -ld projects/memory coordination/memory-repos/ar-code && rg --files -g AGENTS.md -g '*handoff*' -g '*contract*' -g '*template*' -g '*worklist*' ."
+            ],
+            "cwd": "file:///var/tmp/mik-run3/architect/eval-sandbox/20261030-new-text-c7-codex/codex-CE02/trials/0eb5e49a-0a5d-406c-b2fe-5060b4fd2030/project",
+            "parsed_cmd": [
+              {
+                "type": "read",
+                "cmd": "cat fixture/task.md",
+                "name": "task.md",
+                "path": "fixture/task.md"
+              },
+              {
+                "type": "list_files",
+                "cmd": "ls -ld projects/memory coordination/memory-repos/ar-code",
+                "path": "memory"
+              },
+              {
+                "type": "list_files",
+                "cmd": "rg --files -g AGENTS.md -g '*handoff*' -g '*contract*' -g '*template*' -g '*worklist*' .",
+                "path": "."
+              }
+            ],
+            "source": "unified_exec_startup",
+            "status": "failed",
+            "aggregated_output": "Working directory: the fresh fixture root. Read fixture/authority.json and fixture/queue.json. Code is at projects/code; memory is at projects/memory; reports are at reports. Source and onboarding paths in the queue are relative to those declared roots.\n\n# Scoped Curator case\n\nYou own the admitted curation pass over the three queue entries. Compare each card and its paired properties with the supplied real source files. Complete the memory changes the current source requires, preserve supported retained behavior, record the actual memory changes in the history for the exact runtime-bound wave, run the available curation checks, and send one factual handover with the resulting files and checks.\n\nUse the source at projects/code and memory at projects/memory. Every source file in inputs is read-only evidence. The queue, authority and parent message are scripted case inputs under D637, not recovered historic messages. Work through the whole queue without another go. Do not edit code or broaden the pass beyond these named subjects and their paired claims.\n\nRead fixture/authority.json, fixture/queue.json and fixture/parent-message.md. The runner supplies the instruction version being measured and admitted authoring/checking route; report unavailable or refused operations truthfully. Reports and fixture-local messages belong under reports and fixture/messages. Handover names the exact files and checks; a report alone does not prove a write.\n\nHistory destination: the queue's `CE02-<trial>.json` template denotes the exact runtime-bound wave supplied by the runner. Resolve `<trial>` to that fresh trial identity and use `projects/memory/knowledge/history/<supplied-wave>.json`; do not write a literal placeholder filename. The supplied `260928-MIK-L192.json` is prior history evidence, not the destination for this pass's rows.\ndrwxrwxr-x 5 firefox firefox 4096 Oct 30 14:41 coordination/memory-repos/ar-code\nlrwxrwxrwx 1 firefox firefox   36 Oct 30 14:41 projects/memory -> ../coordination/memory-repos/ar-code\n",
+            "exit_code": 1,
+            "duration": {
+              "secs": 0,
+              "nanos": 23728
+            }
+          }
+        },
+        "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T14-42-17-01a18d0c-0496-7021-95fe-1bf8a89f46b6.jsonl",
+        "source_sha256": "1b669c20df928cdd9ecc23d3ec9a8b771b9a37587c48801ec7328b73b9bc2e9b",
+        "native_timestamp": 1793367761.446
+      },
+      "sourceFiles": [
+        {
+          "path": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T14-42-17-01a18d0c-0496-7021-95fe-1bf8a89f46b6.jsonl",
+          "sha256": "1b669c20df928cdd9ecc23d3ec9a8b771b9a37587c48801ec7328b73b9bc2e9b"
+        }
+      ],
+      "representation": "Exact selected normalized native call/result pair; full native result retained. Not a whole native export or a live detail-read claim."
+    },
+    {
+      "harness": "hermes",
+      "attempt": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-new-text-c7-hermes/hermes/CE02/20ed717f-123e-4666-a90e-fd9a6bdcb14d/attempt.json",
+      "attemptSha256": "f64b4ea0741edcbe703c8d66360a0838e27611160cf4ce4a647602042a31f121",
+      "originalCaptureRawExportSha256": "dfddd4718c705e6b395289f2152d100870350bbe7941306d010f84c26d040796",
+      "sourceSessionId": "d627fce0-92b2-4412-8f35-f6da4ecf84c7",
+      "callJsonPath": "$.capture.events[4]",
+      "resultJsonPath": "$.capture.events[8]",
+      "call": {
+        "kind": "tool_call",
+        "session_id": "d627fce0-92b2-4412-8f35-f6da4ecf84c7",
+        "sequence": 4,
+        "payload": {
+          "call_id": "call_016e78922d00",
+          "name": "read_file",
+          "arguments": "{\"path\": \"/var/tmp/mik-run3/architect/eval-sandbox/20261030-new-text-c7-hermes/hermes-CE02/trials/20ed717f-123e-4666-a90e-fd9a6bdcb14d/project/fixture/authority.json\"}",
+          "server": null
+        },
+        "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-new-text-c7-hermes/hermes-CE02/trials/20ed717f-123e-4666-a90e-fd9a6bdcb14d/hermes/state.db",
+        "source_sha256": "ec4c38c0fab3a6af40fe323c0fcb33d38289ae85609656f7e8292a49977e2f89",
+        "native_timestamp": 1793368568.0085332
+      },
+      "result": {
+        "kind": "tool_result",
+        "session_id": "d627fce0-92b2-4412-8f35-f6da4ecf84c7",
+        "sequence": 8,
+        "payload": {
+          "call_id": "call_016e78922d00",
+          "name": "read_file",
+          "output": "{\"content\": \"1|{\\n2|  \\\"schema\\\": \\\"ar-scripted-case-authority/v1\\\",\\n3|  \\\"case\\\": \\\"CE02\\\",\\n4|  \\\"construction\\\": \\\"cut from the record (D637)\\\",\\n5|  \\\"authority\\\": \\\"D637\\\",\\n6|  \\\"sourceEpisode\\\": \\\"L192-M7-current-claims\\\",\\n7|  \\\"startingTrees\\\": {\\n8|    \\\"code\\\": {\\n9|      \\\"tree\\\": \\\"50a9b3caf71cb848ea315f222c9f5a92e2ea428e\\\",\\n10|      \\\"kind\\\": \\\"real Git tree\\\"\\n11|    },\\n12|    \\\"memory\\\": {\\n13|      \\\"tree\\\": \\\"5d39198b2905174c993bcb8916844256573b457c\\\",\\n14|      \\\"kind\\\": \\\"real Git tree\\\"\\n15|    }\\n16|  },\\n17|  \\\"grant\\\": \\\"Complete the named memory-only queue, necessary normal checks and fixture-local direct handover without another go.\\\",\\n18|  \\\"readRoots\\\": [\\n19|    \\\"projects/code\\\",\\n20|    \\\"projects/memory\\\",\\n21|    \\\"fixture\\\"\\n22|  ],\\n23|  \\\"writeRoots\\\": [\\n24|    \\\"projects/memory\\\",\\n25|    \\\"reports\\\",\\n26|    \\\"fixture/messages\\\"\\n27|  ],\\n28|  \\\"sourceCodeWrites\\\": false,\\n29|  \\\"realHostWrites\\\": false,\\n30|  \\\"gitTransactions\\\": false,\\n31|  \\\"roleStarts\\\": false,\\n32|  \\\"taskStatusAcceptanceOrCloseoutWrites\\\": false,\\n33|  \\\"parent\\\": \\\"fixture-parent (runner binds a fresh identity)\\\",\\n34|  \\\"recipient\\\": \\\"fixture-reviewer (runner binds a fresh identity)\\\",\\n35|  \\\"writerAndChecks\\\": \\\"Use the admitted authoring and checking route supplied by the runner for this scripted fixture; never invent a tool receipt or claim a fixture command was a production write.\\\",\\n36|  \\\"historicalAuthority\\\": \\\"This is newly scripted D637 authority, not an extension or rewrite of the historical role seat.\\\"\\n37|}\", \"total_lines\": 37, \"file_size\": 1329, \"truncated\": false, \"is_binary\": false, \"is_image\": false, \"not_found\": false}"
+        },
+        "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-new-text-c7-hermes/hermes-CE02/trials/20ed717f-123e-4666-a90e-fd9a6bdcb14d/hermes/state.db",
+        "source_sha256": "ec4c38c0fab3a6af40fe323c0fcb33d38289ae85609656f7e8292a49977e2f89",
+        "native_timestamp": 1793368568.18498
+      },
+      "sourceFiles": [
+        {
+          "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-new-text-c7-hermes/hermes-CE02/trials/20ed717f-123e-4666-a90e-fd9a6bdcb14d/hermes/state.db",
+          "sha256": "ec4c38c0fab3a6af40fe323c0fcb33d38289ae85609656f7e8292a49977e2f89"
+        }
+      ],
+      "representation": "Exact selected normalized native call/result pair; full native result retained. Not a whole native export or a live detail-read claim."
+    },
+    {
+      "harness": "hermes",
+      "attempt": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-new-text-c7-hermes/hermes/CE02/20ed717f-123e-4666-a90e-fd9a6bdcb14d/attempt.json",
+      "attemptSha256": "f64b4ea0741edcbe703c8d66360a0838e27611160cf4ce4a647602042a31f121",
+      "originalCaptureRawExportSha256": "dfddd4718c705e6b395289f2152d100870350bbe7941306d010f84c26d040796",
+      "sourceSessionId": "d627fce0-92b2-4412-8f35-f6da4ecf84c7",
+      "callJsonPath": "$.capture.events[120]",
+      "resultJsonPath": "$.capture.events[122]",
+      "call": {
+        "kind": "tool_call",
+        "session_id": "d627fce0-92b2-4412-8f35-f6da4ecf84c7",
+        "sequence": 120,
+        "payload": {
+          "call_id": "chatcmpl-tool-b80017d4a78536cf",
+          "name": "terminal",
+          "arguments": "{\"command\": \"head -5 /home/test/.local/bin/agents-remember; ls -d /home/test/.local/pipx/venvs/* 2>/dev/null; ls -d /home/test/.local/share/uv/tools/* 2>/dev/null\"}",
+          "server": null
+        },
+        "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-new-text-c7-hermes/hermes-CE02/trials/20ed717f-123e-4666-a90e-fd9a6bdcb14d/hermes/state.db",
+        "source_sha256": "ec4c38c0fab3a6af40fe323c0fcb33d38289ae85609656f7e8292a49977e2f89",
+        "native_timestamp": 1793368755.6537323
+      },
+      "result": {
+        "kind": "tool_result",
+        "session_id": "d627fce0-92b2-4412-8f35-f6da4ecf84c7",
+        "sequence": 122,
+        "payload": {
+          "call_id": "chatcmpl-tool-b80017d4a78536cf",
+          "name": "terminal",
+          "output": "{\"output\": \"#!/home/test/.local/share/uv/tools/agents-remember-mcp/bin/python\\n# -*- coding: utf-8 -*-\\nimport sys\\nfrom agents_remember.cli.__main__ import main\\nif __name__ == \\\"__main__\\\":\\n/home/test/.local/share/uv/tools/agents-remember-mcp\\n/home/test/.local/share/uv/tools/mcp-proxy\", \"exit_code\": 0, \"error\": null}"
+        },
+        "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-new-text-c7-hermes/hermes-CE02/trials/20ed717f-123e-4666-a90e-fd9a6bdcb14d/hermes/state.db",
+        "source_sha256": "ec4c38c0fab3a6af40fe323c0fcb33d38289ae85609656f7e8292a49977e2f89",
+        "native_timestamp": 1793368755.7087877
+      },
+      "sourceFiles": [
+        {
+          "path": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-new-text-c7-hermes/hermes-CE02/trials/20ed717f-123e-4666-a90e-fd9a6bdcb14d/hermes/state.db",
+          "sha256": "ec4c38c0fab3a6af40fe323c0fcb33d38289ae85609656f7e8292a49977e2f89"
+        }
+      ],
+      "representation": "Exact selected normalized native call/result pair; full native result retained. Not a whole native export or a live detail-read claim."
+    }
+  ]
+}

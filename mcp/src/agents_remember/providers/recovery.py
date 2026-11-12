@@ -1,7 +1,8 @@
 """Shared provider recovery guidance."""
 
 PROVIDER_WATCHER_RESTART_RECOVERY = (
-    "Run provider_watchers(action='restart') to recreate watcher containers against "
-    "the current provider runner roots; this preserves provider indexes. Then run "
-    "provider_status or provider_diagnostics to inspect any remaining provider issue."
+    "Stop the named leftover process and rerun the install; no product path "
+    "restarts provider watchers. Only the providers-remove command deletes "
+    "leftover provider runtime folders, and server_info reports enabled "
+    "provider keys once as unused."
 )

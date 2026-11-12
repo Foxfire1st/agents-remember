@@ -4,6 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal, NotRequired, TypedDict
 
+from agents_remember.errors import CuratorCoherenceError
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import ahead_behind
 from agents_remember.models.worktree import (
@@ -11,16 +12,20 @@ from agents_remember.models.worktree import (
     NextTool,
     WorktreePhase,
 )
+from agents_remember.worktrees.integration.closeout.curator_coherence import (
+    current_curator_coherence_predecessor,
+)
 from agents_remember.worktrees.modules.git import branch_commit, is_ancestor, worktree_dirty
 from agents_remember.worktrees.modules.landing import landing_refs
 from agents_remember.worktrees.services import worktree_services
 from agents_remember.worktrees.source_lineage import source_lineage_for_contract
+from agents_remember.worktrees.task_document_copies import stale_copy_line
 from agents_remember.worktrees.worktree_contract import (
     CleanupStatus,
     CloseoutStatus,
     HumanReviewStatus,
     IntegrationStatus,
-    MemoryMode,
+    ReadableMemoryMode,
     WorkflowKind,
     WorktreeContract,
 )
@@ -91,7 +96,7 @@ class WorktreeStatusFacts(TypedDict):
     task_name: str
     code_repository_name: str
     workflow_kind: WorkflowKind
-    memory_mode: MemoryMode
+    memory_mode: ReadableMemoryMode
     kind: str
     leaf_id: str
     enclosure_path: str
@@ -119,6 +124,9 @@ class WorktreeStatusFacts(TypedDict):
     freshness: NotRequired[dict[str, object]]
     source_lineage: NotRequired[dict[str, object]]
     landing: NotRequired[list[dict[str, object]]]
+    # MIK-R111 rule 3: one line naming task-document copies that differ from
+    # their sources. Present only when something differs; absent is clean.
+    task_document_copies: NotRequired[str]
 
 
 class WorktreeStatusPayload(WorktreeStatusFacts, LifecycleGuidance):
@@ -225,6 +233,27 @@ def lifecycle_guidance(contract: WorktreeContract) -> LifecycleGuidance:
     )
 
 
+def _published_coherence_authority(contract: WorktreeContract) -> str:
+    """The digest of this leaf's published curator-coherence authority, or ``""``.
+
+    Never raises, and answers ``""`` for every contract the coherence route does not apply to (a
+    series contract, a leaf without external memory, a leaf with no memory worktree) and for a leaf
+    that has not published yet. This identifies historical evidence without validating it against
+    the live candidate after the closeout's own writes.
+    """
+
+    if (
+        contract.kind != "leaf"
+        or contract.memory_mode != "external"
+        or contract.memory_worktree is None
+    ):
+        return ""
+    try:
+        return current_curator_coherence_predecessor(contract)
+    except (CuratorCoherenceError, OSError):
+        return ""
+
+
 def _reclaimed_phase(contract: WorktreeContract) -> LifecycleGuidance | None:
     """Terminal phases: the worktrees are gone, by cleanup or by abandonment."""
     if contract.cleanup == "completed":
@@ -322,7 +351,9 @@ def _post_integration_phase(contract: WorktreeContract) -> LifecycleGuidance | N
             **next_guidance(
                 "continue_work",
                 tool="worktree_status",
-                args=contract_next_args(contract),
+                # Same requirement, same reason as the pre-integration phase's step: a
+                # `worktree_status` recommendation has to carry `repo_id` or it cannot be followed.
+                args=contract_next_args(contract, repo_id=contract.repo_name),
             ),
         }
     return None
@@ -333,13 +364,21 @@ def _pre_integration_phase(contract: WorktreeContract) -> LifecycleGuidance:
 
     slice 09: a dirty worktree is NOT a commit-approval gate. `commit-approval-pending` is owned by the
     closeout preview (the real gate moment, set in closeout.py) and — once the slice-6 gate plane is
-    adopted — by a raised `closeout-approval` gate surfaced via GateNode; it is never inferred from
+    adopted — by a raised `closeout-approval` gate; it is never inferred from
     `git status`. A dirty tree falls through to the honest lifecycle-position phase below.
     """
     if contract.closeout_status == "completed":
+        authority_digest = _published_coherence_authority(contract)
+        summary = "Closeout completed; integrate the task branches back into their source branches."
+        if authority_digest:
+            summary += (
+                f" The published curator-coherence authority ({authority_digest[:12]}...) records "
+                "the pre-closeout candidate; it does not validate the live tree after closeout's "
+                "history and fingerprint writes."
+            )
         return {
             "phase": "integration-pending",
-            "summary": "Closeout completed; integrate the task branches back into their source branches.",
+            "summary": summary,
             **next_guidance(
                 "request_integration_decision",
                 tool="worktree_integrate",
@@ -370,7 +409,13 @@ def _pre_integration_phase(contract: WorktreeContract) -> LifecycleGuidance:
         **next_guidance(
             "continue_work",
             tool="worktree_status",
-            args=contract_next_args(contract),
+            # `repo_id` travels with the recommendation because `worktree_status` cannot be called
+            # without it: its registered argument model names it as required
+            # (`1 validation error for worktree_statusArguments: repo_id Field required`), so a
+            # seat that followed this hint verbatim could not reach the operation the hint names.
+            # The contract already knows the repository, so the guidance supplies it rather than
+            # leaving the second step of the workflow unreachable (260918-TSIP-L8).
+            args=contract_next_args(contract, repo_id=contract.repo_name),
         ),
     }
 
@@ -466,6 +511,9 @@ def _status_payload_with_landing(
         # The one place a degraded read becomes visible to whoever called a worktree tool:
         # the phase below was computed from the substituted values, and this says so.
         facts["unknown_contract_cells"] = list(contract.unknown_cells)
+    copies_line = stale_copy_line(contract.coordination_root, contract.worktree_group)
+    if copies_line is not None:
+        facts["task_document_copies"] = copies_line
     providers = worktree_services().provider_lifecycle.setup_status(contract)
     if providers is not None:
         facts["providers"] = providers

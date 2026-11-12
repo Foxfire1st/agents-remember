@@ -20,11 +20,10 @@ from agents_remember.application.lifecycle.configured_contract_admission import 
     project_configured_contract_refusal,
 )
 from agents_remember.application.lifecycle.lifecycle_control_authority import (
-    LifecycleCallerError,
     completed_disposition_authorized,
-    resolve_lifecycle_caller,
 )
 from agents_remember.application.lifecycle.lifecycle_operation_location import (
+    LifecycleOperationLocation,
     LocationDecisionPayload,
     configured_lifecycle_operation_location,
     location_decision_payload,
@@ -32,6 +31,12 @@ from agents_remember.application.lifecycle.lifecycle_operation_location import (
     primary_operation_projection,
     unreadable_status_operations,
 )
+from agents_remember.application.memory_mode_refusal import (
+    memory_mode_refusal_evidence,
+    memory_mode_refusal_payload,
+    removed_memory_mode_fields_from_evidence,
+)
+from agents_remember.errors import MemoryModeUnsupportedError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
@@ -58,6 +63,7 @@ from agents_remember.worktrees.integration.lifecycle.observation.projection impo
     current_operation_projections,
 )
 from agents_remember.worktrees.modules.guidance import WorktreeStatusPayload
+from agents_remember.worktrees.reopen import _start_preview_args
 from agents_remember.worktrees.sync_transaction_state import observe_sync_operation
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
@@ -88,48 +94,23 @@ def worktree_status_packet(
     )
     try:
         contract = load_contract(resolved)
+    except MemoryModeUnsupportedError as error:
+        return _contract_read_failure_summary(resolved, location, error, sync_operation)
     except (ContractError, OSError, UnicodeError, ValueError) as error:
         # What is left here is a document that is not a contract at all: no front matter, an
         # unrecognized schema, a required field missing, an external-memory contract with no
         # memory repository. A cell whose *value* is outside its vocabulary is NOT one of
-        # these -- the reader substitutes and reports it (see `unknownContractCells` below),
-        # because refusing it here would only have made the packet honest about a task that
-        # `worktree_closeout_apply`, `worktree_integrate`, `worktree_cleanup`, `worktree_sync`
-        # and `worktree_abandon` had all simultaneously stopped being able to touch.
-        # ``load_contract`` deliberately translates file absence into ``ContractError``.
-        # Classify the live path only after locator authority has already been proven, so
-        # deletion affects the contract surface without hiding the retained root journal.
-        missing = isinstance(error, FileNotFoundError) or not resolved.exists()
-        failure = public_failure_evidence(
-            stage="contract-read",
-            side="contract",
-            name=resolved.name,
-            error_type=type(error).__name__,
-            observed={"state": "missing" if missing else "unreadable"},
-        )
-        observation = observe_contract_read_failure(location, failure)
-        retained = primary_operation_projection(list(observation.operations))
-        if observation.decision is not None:
-            return _contract_read_decision_summary(
-                resolved,
-                missing=missing,
-                failure=failure,
-                decision=observation.decision,
-                sync_operation=sync_operation,
-            )
-        return WorktreeSummary(
-            state="missingContract" if missing else "invalidContract",
-            contractPath=resolved.as_posix(),
-            enclosurePath=resolved.as_posix(),
-            error=(
-                "the canonical worktree contract is missing"
-                if missing
-                else "the canonical worktree contract is unreadable or invalid"
-            ),
-            errorEvidence=failure,
-            lifecycleOperation=retained,
-            syncOperation=sync_operation,
-        )
+        # these -- the reader substitutes the declared fallback and reports it (see
+        # `unknownContractCells` below), because refusing it here would only have made the
+        # packet honest about a task that `worktree_closeout_apply`, `worktree_integrate`,
+        # `worktree_cleanup`, `worktree_sync` and `worktree_abandon` had all simultaneously
+        # stopped being able to touch.
+        #
+        # The one exception is a *removed* memory mode, which is caught above this clause rather
+        # than here: it is not an unreadable token to degrade around but a specific state whose
+        # owner has to be told the recorded value, the supported set and the route out, so it
+        # must not be re-published as a generic parse failure.
+        return _contract_read_failure_summary(resolved, location, error, sync_operation)
     try:
         require_contract_matches_lifecycle_operation_location(contract, location)
     except LifecycleOperationLocationError as error:
@@ -149,6 +130,68 @@ def worktree_status_packet(
             if contract.kind == "series"
             else None
         ),
+    )
+
+
+def _contract_read_failure_summary(
+    contract_path: Path,
+    location: LifecycleOperationLocation,
+    error: Exception,
+    sync_operation: SyncOperationProjection | None,
+) -> WorktreeSummary:
+    """Project one failed ``load_contract`` onto the context packet's worktree summary.
+
+    Two shapes share this body because they share every consequence except the operator text.
+    A *removed* memory mode is a specific, previously supported state: it is reported with the
+    recorded value, the supported set and the route out, and its typed status is published. Any
+    other unreadable document keeps the generic classification.
+
+    ``load_contract`` deliberately translates file absence into ``ContractError``, and the live
+    path is classified only after locator authority has already been proven, so deletion affects
+    the contract surface without hiding the retained root journal.
+    """
+    removed_mode = error if isinstance(error, MemoryModeUnsupportedError) else None
+    missing = removed_mode is None and (
+        isinstance(error, FileNotFoundError) or not contract_path.exists()
+    )
+    failure = public_failure_evidence(
+        stage="contract-read",
+        side="contract",
+        name=contract_path.name,
+        error_type=type(error).__name__,
+        observed=(
+            memory_mode_refusal_evidence(removed_mode)
+            if removed_mode is not None
+            else {"state": "missing" if missing else "unreadable"}
+        ),
+    )
+    observation = observe_contract_read_failure(location, failure)
+    retained = primary_operation_projection(list(observation.operations))
+    if observation.decision is not None and removed_mode is None:
+        return _contract_read_decision_summary(
+            contract_path,
+            missing=missing,
+            failure=failure,
+            decision=observation.decision,
+            sync_operation=sync_operation,
+        )
+    return WorktreeSummary(
+        state="missingContract" if missing else "invalidContract",
+        contractPath=contract_path.as_posix(),
+        enclosurePath=contract_path.as_posix(),
+        error=(
+            removed_mode.detail
+            if removed_mode is not None
+            else (
+                "the canonical worktree contract is missing"
+                if missing
+                else "the canonical worktree contract is unreadable or invalid"
+            )
+        ),
+        status=removed_mode.status if removed_mode is not None else None,
+        errorEvidence=failure,
+        lifecycleOperation=retained,
+        syncOperation=sync_operation,
     )
 
 
@@ -268,6 +311,7 @@ def _summary_from_status_payload(
         nextArgs=payload.get("nextArgs"),
         nextRequiredArgs=payload.get("nextRequiredArgs"),
         unknownContractCells=payload.get("unknown_contract_cells"),
+        taskDocumentCopies=payload.get("task_document_copies"),
         lifecycleOperation=lifecycle_operation,
         syncOperation=sync_operation,
         atomicSeriesActivation=(
@@ -287,7 +331,14 @@ def project_contract_status(
     path: Path,
     caller: DeclaredCaller | None,
 ) -> dict[str, Any]:
-    terminal = admit_configured_terminal_contract(config, path.as_posix())
+    terminal = admit_configured_terminal_contract(
+        config,
+        path.as_posix(),
+        # Status keeps answering on a contract that carries the removed mode
+        # (MIK-R50 R3a): it shows the contract as it is today.
+        allow_disabled_memory=True,
+        operation="worktree_status",
+    )
     if isinstance(terminal, TerminalConfiguredContractAccepted):
         _project_terminal_contract_status(result, terminal)
         _replace_operation_status(result, [])
@@ -298,23 +349,37 @@ def project_contract_status(
         result.update(project_configured_contract_refusal(terminal, operation="worktree_status"))
         _replace_operation_status(result, [])
         return result
-    try:
-        resolved_caller = resolve_lifecycle_caller(config, caller)
-    except LifecycleCallerError as exc:
-        return {
-            "ok": False,
-            "operation": "worktree_status",
-            "state": "refused",
-            "status": exc.status,
-            "detail": exc.detail,
-        }
     read_failure = result.get("contractReadFailure")
     if isinstance(read_failure, dict):
         operations = unreadable_status_operations(config, result, path, read_failure)
     else:
-        operations = _readable_status_operations(config, result, path, resolved_caller)
+        operations = _readable_status_operations(config, result, path, caller)
+    _restore_reader_reason(result, read_failure)
     _replace_operation_status(result, operations)
     return result
+
+
+def _restore_reader_reason(
+    result: dict[str, Any],
+    read_failure: object,
+) -> None:
+    """Re-state a reader verdict that the shared observation replaced with a synthesis.
+
+    ``unreadable_status_operations`` publishes a synthesised publication-loss decision whenever
+    the enclosure retains no journal operation, whatever the read failure actually was. For a
+    contract that records the removed memory mode nothing was lost -- the contract is present and
+    readable -- so that decision states something false and drops the recorded value, the
+    supported set and the route. The reader's verdict is restored from its own evidence block,
+    and only over that one synthesised state: a real retained operation, or a real
+    location decision, keeps the answer it produced.
+    """
+    if not isinstance(read_failure, dict):
+        return
+    if result.get("state") != "operation-contract-publication-lost":
+        return
+    fields = removed_memory_mode_fields_from_evidence(read_failure)
+    if fields is not None:
+        result.update({"ok": False, **fields})
 
 
 def _readable_status_operations(
@@ -339,6 +404,24 @@ def _readable_status_operations(
     except LifecycleOperationLocationError as exc:
         result.update(location_decision_payload(exc))
         return []
+    except MemoryModeUnsupportedError as exc:
+        # A retained generation still outranks the refusal -- its recovery route is executable --
+        # so the shared observation runs first and the refusal only re-states the reason where
+        # that observation found no retained journal and synthesised its publication-loss
+        # decision. Nothing was lost here: the contract is present and readable, and it records a
+        # removed mode, so publishing "the proven initial contract is missing or unreadable"
+        # would tell the operator something false.
+        failure = public_failure_evidence(
+            stage="contract-read",
+            side="contract",
+            name=path.name,
+            error_type=type(exc).__name__,
+            observed=memory_mode_refusal_evidence(exc),
+        )
+        operations = unreadable_status_operations(config, result, path, failure)
+        result.update({"ok": False, **memory_mode_refusal_payload(exc)})
+        _restore_reader_reason(result, failure)
+        return operations
     except (ContractError, OSError, UnicodeError, ValueError) as exc:
         detail = "the canonical worktree contract is unreadable"
         result.update(
@@ -380,6 +463,9 @@ def _project_terminal_contract_status(
 ) -> None:
     authority = accepted.authority
     archive = authority.archive
+    if authority.state == "reopen-reset":
+        _project_reopened_contract_status(result, accepted)
+        return
     completed = authority.state == "cleanup-completed"
     status = "terminal-cleanup-completed" if completed else "terminal-archive-ready"
     result.update(
@@ -417,6 +503,55 @@ def _project_terminal_contract_status(
             ),
         }
     )
+
+
+def _project_reopened_contract_status(
+    result: dict[str, Any],
+    accepted: TerminalConfiguredContractAccepted,
+) -> None:
+    """Project a task that was reopened from its archived generation as reopened, not terminal.
+
+    The archive still proves the generation that was collected, and it stays the authority for
+    it (``terminalArchive`` below), but the surviving contract is the reopen's own reset: the
+    task is open again under the same id and its worktrees are gone until the next start. It is
+    *not* a terminal generation to clean up, which is what the two states above it name -- a
+    start that read it as one refused the task the developer had just reopened.
+    """
+
+    authority = accepted.authority
+    archive = authority.archive
+    result.update(
+        {
+            "ok": True,
+            "state": "reopened",
+            "status": "reopened",
+            "summary": (
+                "The task was reopened under its original id: its enclosure generation was "
+                "reset and its worktrees are gone. worktree_start recreates them off the "
+                "current source tips; the archived generation stays proven."
+            ),
+            "terminalArchive": {
+                "state": "terminal-archive-proven",
+                "cleanupOperation": archive.cleanupOperation,
+                "cleanupArguments": archive.cleanupArguments.model_dump(mode="json"),
+                "cleanupRequestId": archive.cleanupRequestId,
+                "archivePath": accepted.locator.terminalArchivePath,
+                "archiveSha256": accepted.locator.terminalArchiveSha256,
+                "receiptPath": accepted.locator.terminalReceiptPath,
+                "contractState": authority.state,
+            },
+            "nextAction": "start_reopened_task",
+            "nextTool": "worktree_start",
+        }
+    )
+    try:
+        next_args: dict[str, object] | None = _start_preview_args(accepted.contract)
+    except ValueError:
+        # A task root outside the coordination tasks folder cannot be addressed by a start's
+        # own arguments; the tool is still the answer, and the reopen that got here named them.
+        next_args = None
+    if next_args is not None:
+        result["nextArgs"] = next_args
 
 
 def _terminal_cleanup_next_args(

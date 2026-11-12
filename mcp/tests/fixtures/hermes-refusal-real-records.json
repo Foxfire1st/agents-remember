@@ -1,0 +1,134 @@
+[
+  {
+    "case": "CE02",
+    "attempt": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE02/a6798335-2f70-4668-8931-319000d52e23/attempt.json",
+    "attempt_sha256": "dc603a338b84e33e5bac034a4f9a7c993e05b33acae42c59b4de52bbc8cfc8cb",
+    "native_event_index": 250,
+    "call": {
+      "kind": "tool_call",
+      "session_id": "e10f5c9b-737f-48e5-822d-a0f5b9fb48f3",
+      "sequence": 250,
+      "payload": {
+        "call_id": "call_5ecf5158447743c4865a7beb",
+        "name": "tool_call",
+        "arguments": "{\"calls\":[{\"arguments\":{\"authorizationRef\":\"D637 scripted case CE02: fixture/authority.json + fixture/parent-message.md (whole named queue authorized, memory-only)\",\"handoff\":{\"history\":[{\"disposition\":\"updated\",\"items\":[],\"reason\":\"Correct the Logic account of what the worktree provider instance id namespaces: `_isolated_grepai_base_fields` sets the logical `workspace` key from the workspace identity, not the worktree instance id, so the instance-id list no longer claims the workspace key; the all-memory shape, roots replacement, log layout, seedFromContainer behavior and every boundary are unchanged.\",\"subject\":\"onboarding:mcp/src/agents_remember/providers/grepai/isolated.py\"},{\"disposition\":\"updated\",\"items\":[],\"reason\":\"Resolve reference 2's conversion-only unresolved target (a memory card path) into current code anchors `grepai_docker_mode` and `grepai_runner_settings` in the GrepAI lifecycle module; the Docker-owned claim in the note and the card's Markdown are unchanged.\",\"subject\":\"onboarding:mcp/src/agents_remember/providers/grepai/setup.py\"}]},\"handoffName\":\"CE02-curator-handoff.json\",\"repoId\":\"code\",\"wave\":\"CE02-a6798335-2f70-4668-8931-319000d52e23\"}}]}",
+        "server": null
+      },
+      "source": "/home/test/.hermes/state.db",
+      "source_sha256": "f5389af7e35ee1d1f4ee7b02d14559b73f05245ba06d21661ca9c6c9d25c46a0",
+      "native_timestamp": 1793324205.3582282
+    },
+    "result": {
+      "kind": "tool_result",
+      "session_id": "e10f5c9b-737f-48e5-822d-a0f5b9fb48f3",
+      "sequence": 252,
+      "payload": {
+        "call_id": "call_5ecf5158447743c4865a7beb",
+        "name": "tool_call",
+        "output": "{\"error\": \"tool_call calls[0] requires a 'name'\"}"
+      },
+      "source": "/home/test/.hermes/state.db",
+      "source_sha256": "f5389af7e35ee1d1f4ee7b02d14559b73f05245ba06d21661ca9c6c9d25c46a0",
+      "native_timestamp": 1793324205.3773444
+    }
+  },
+  {
+    "case": "CE09",
+    "attempt": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE09/c67856bb-c0c7-4869-82c1-0223f2459b03/attempt.json",
+    "attempt_sha256": "364ac50c4c8ea16ecc23622f826e640502fe7f34f5c1e63df3f214096773256a",
+    "native_event_index": 185,
+    "call": {
+      "kind": "tool_call",
+      "session_id": "b3126fcf-d56a-44b9-8f98-522fc9c58fc4",
+      "sequence": 185,
+      "payload": {
+        "call_id": "call_01_isiitxk60ve5rxm1v2bwnn3q",
+        "name": "tool_call",
+        "arguments": "{\"calls\": [{\"arguments\": {\"handoff\": {\"history\": [{\"disposition\": \"changed\", \"reason\": \"The invariant is assessed at creation: it states the criterion it meets with a justification in words, replacing the export-only legacy-unassessed marker.\", \"subject\": \"INV-1RWT3JRR\"}], \"records\": [{\"fields\": {\"admission\": {\"criteria\": [\"prevents_costly_mistake\"], \"justification\": \"Without the check, a reader that asks for lines past the recorded blob's end silently receives a linked range that names no bytes in that blob, and a citation built on it points at text that does not exist.\"}}, \"id\": \"INV-1RWT3JRR\", \"key\": \"inv-1rwt3jrr\", \"kind\": \"invariant\"}]}, \"handoffName\": \"ce09-curator-handoff.json\", \"repoId\": \"code\", \"wave\": \"CE09-c67856bb-c0c7-4869-82c1-0223f2459b03\"}}]}",
+        "server": null
+      },
+      "source": "/home/test/.hermes/state.db",
+      "source_sha256": "72ee52326a577be04b32ae9ff24024dba618a58646f1956e5ad7e778f581e5b9",
+      "native_timestamp": 1793325389.5119007
+    },
+    "result": {
+      "kind": "tool_result",
+      "session_id": "b3126fcf-d56a-44b9-8f98-522fc9c58fc4",
+      "sequence": 189,
+      "payload": {
+        "call_id": "call_01_isiitxk60ve5rxm1v2bwnn3q",
+        "name": "tool_call",
+        "output": "{\"error\": \"tool_call calls[0] requires a 'name'\"}"
+      },
+      "source": "/home/test/.hermes/state.db",
+      "source_sha256": "72ee52326a577be04b32ae9ff24024dba618a58646f1956e5ad7e778f581e5b9",
+      "native_timestamp": 1793325389.5824053
+    }
+  },
+  {
+    "case": "CE10",
+    "attempt": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE10/ea8d999f-162c-4947-8378-f862bb6da730/attempt.json",
+    "attempt_sha256": "19c00cbb90a237354f6405dcb3beaba74a491b79dfaaf01cc6ce9b03d4648035",
+    "native_event_index": 96,
+    "call": {
+      "kind": "tool_call",
+      "session_id": "e27ed7c9-fe0c-4c71-a442-57eaa22e6fce",
+      "sequence": 96,
+      "payload": {
+        "call_id": "chatcmpl-tool-b817063bd455df26",
+        "name": "tool_call",
+        "arguments": "{\"calls\": \"[{\\\"arguments\\\": {\\\"memoryRoot\\\": \\\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-hermes/hermes-CE10/trials/ea8d999f-162c-4947-8378-f862bb6da730/project/coordination/memory-repos/ar-code\\\", \\\"repositoryRoot\\\": \\\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-hermes/hermes-CE10/trials/ea8d999f-162c-4947-8378-f862bb6da730/project/projects/code\\\", \\\"view\\\": \\\"invariant\\\", \\\"codeTreeId\\\": \\\"f96a9144c8b3900a328183e51144c8a02bc66580\\\"}, {\\\"arguments\\\": {\\\"memoryRoot\\\": \\\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-hermes/hermes-CE10/trials/ea8d999f-162c-4947-8378-f862bb6da730/project/coordination/memory-repos/ar-code\\\", \\\"codeRoot\\\": \\\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-hermes/hermes-CE10/trials/ea8d999f-162c-4947-8378-f862bb6da730/project/projects/code\\\", \\\"baseCommits\\\": [\\\"49d7da1c26fce6f5fcc109f71b61f388140b6f14\\\"]}, \\\"name\\\": \\\"mcp__agents_remember_task__knowledge_integrity_check\\\"}]\"}",
+        "server": null
+      },
+      "source": "/home/test/.hermes/state.db",
+      "source_sha256": "df16c1ba7c574785ed79b4eca3dd223a8f8851135dfe50bf30d1484b6a0f9b8a",
+      "native_timestamp": 1793326063.7555838
+    },
+    "result": {
+      "kind": "tool_result",
+      "session_id": "e27ed7c9-fe0c-4c71-a442-57eaa22e6fce",
+      "sequence": 98,
+      "payload": {
+        "call_id": "chatcmpl-tool-b817063bd455df26",
+        "name": "tool_call",
+        "output": "{\"error\": \"tool_call 'calls' is not valid JSON: Expecting property name enclosed in double quotes: line 1 column 443 (char 442)\"}"
+      },
+      "source": "/home/test/.hermes/state.db",
+      "source_sha256": "df16c1ba7c574785ed79b4eca3dd223a8f8851135dfe50bf30d1484b6a0f9b8a",
+      "native_timestamp": 1793326063.7699711
+    }
+  },
+  {
+    "case": "CE10",
+    "attempt": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE10/ea8d999f-162c-4947-8378-f862bb6da730/attempt.json",
+    "attempt_sha256": "19c00cbb90a237354f6405dcb3beaba74a491b79dfaaf01cc6ce9b03d4648035",
+    "native_event_index": 100,
+    "call": {
+      "kind": "tool_call",
+      "session_id": "e27ed7c9-fe0c-4c71-a442-57eaa22e6fce",
+      "sequence": 100,
+      "payload": {
+        "call_id": "chatcmpl-tool-9ce37346db9efae9",
+        "name": "tool_call",
+        "arguments": "{\"calls\": \"[{\\\"arguments\\\": {\\\"codeTreeId\\\": \\\"f96a9144c8b3900a328183e51144c8a02bc66580\\\", \\\"memoryRoot\\\": \\\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-hermes/hermes-CE10/trials/ea8d999f-162c-4947-8378-f862bb6da730/project/coordination/memory-repos/ar-code\\\", \\\"repositoryRoot\\\": \\\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-hermes/hermes-CE10/trials/ea8d999f-162c-4947-8378-f862bb6da730/project/projects/code\\\", \\\"view\\\": \\\"invariant\\\"}, {\\\"arguments\\\": {\\\"baseCommits\\\": [\\\"49d7da1c26fce6f5fcc109f71b61f388140b6f14\\\"], \\\"codeRoot\\\": \\\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-hermes/hermes-CE10/trials/ea8d999f-162c-4947-8378-f862bb6da730/project/projects/code\\\", \\\"memoryRoot\\\": \\\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-hermes/hermes-CE10/trials/ea8d999f-162c-4947-8378-f862bb6da730/project/coordination/memory-repos/ar-code\\\"}, \\\"name\\\": \\\"mcp__agents_remember_task__knowledge_integrity_check\\\"}]\"}",
+        "server": null
+      },
+      "source": "/home/test/.hermes/state.db",
+      "source_sha256": "df16c1ba7c574785ed79b4eca3dd223a8f8851135dfe50bf30d1484b6a0f9b8a",
+      "native_timestamp": 1793326067.4561832
+    },
+    "result": {
+      "kind": "tool_result",
+      "session_id": "e27ed7c9-fe0c-4c71-a442-57eaa22e6fce",
+      "sequence": 102,
+      "payload": {
+        "call_id": "chatcmpl-tool-9ce37346db9efae9",
+        "name": "tool_call",
+        "output": "{\"error\": \"tool_call 'calls' is not valid JSON: Expecting property name enclosed in double quotes: line 1 column 443 (char 442)\"}"
+      },
+      "source": "/home/test/.hermes/state.db",
+      "source_sha256": "df16c1ba7c574785ed79b4eca3dd223a8f8851135dfe50bf30d1484b6a0f9b8a",
+      "native_timestamp": 1793326067.4764926
+    }
+  }
+]

@@ -1,20 +1,24 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import Literal
 
 from agents_remember.kernel.coordination_context.json_settings import (
     apply_json_storage_mode,
     parse_json_cross_repo_settings,
+    parse_json_landing_settings,
     parse_json_path_rule,
     parse_json_path_rules,
     parse_json_settings,
     parse_json_storage_settings,
 )
 from agents_remember.kernel.coordination_context.markdown_settings import parse_settings_block
-from agents_remember.kernel.coordination_context.models import CrossRepoSettings, StorageSettings
+from agents_remember.kernel.coordination_context.models import (
+    CrossRepoSettings,
+    LandingSettings,
+    StorageSettings,
+)
 from agents_remember.kernel.coordination_context.paths import (
-    default_storage_mode,
     extract_yaml_blocks,
     path_settings_path_for,
 )
@@ -27,6 +31,7 @@ from agents_remember.kernel.coordination_context.setting_values import (
     required_clean_string,
     string_list,
 )
+from agents_remember.kernel.recorded_reads import observed_exists, observed_text
 
 __all__ = [
     "apply_json_storage_mode",
@@ -40,6 +45,7 @@ __all__ = [
     "parse_json_path_rules",
     "parse_json_settings",
     "parse_json_storage_settings",
+    "parse_landing_settings",
     "parse_settings_block",
     "require_mapping",
     "required_clean_string",
@@ -47,24 +53,56 @@ __all__ = [
 ]
 
 
+def parse_landing_settings(
+    settings_path: Path,
+    *,
+    coordination_root: Path | None = None,
+) -> LandingSettings:
+    """The landing workflow this repository's memory settings choose (MIK-R202@v2 rule 13).
+
+    Read from the same JSON settings file the storage and cross-repo settings come from: the path
+    settings file when a coordination root supplies one, otherwise ``settings.json`` beside the
+    onboarding file. A repository that declares nothing lands as it always has, ``local``; a value
+    this product does not implement is refused by name at the parse, never carried this far.
+    """
+    path_settings_path = path_settings_path_for(settings_path, coordination_root=coordination_root)
+    for candidate in (path_settings_path, settings_path):
+        if candidate.suffix != ".json" or not observed_exists(candidate):
+            # Markdown settings predate the landing setting and carry no key for it; a repository
+            # still on that form lands locally until it moves to JSON settings.
+            continue
+        return parse_landing_settings_text(observed_text(candidate), str(candidate))
+    return LandingSettings()
+
+
+def parse_landing_settings_text(text: str, where: str) -> LandingSettings:
+    """The landing settings one JSON settings text holds; ``where`` names it in a refusal."""
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"invalid JSON settings in {where}: {error}") from error
+    return parse_json_landing_settings(require_mapping(data, "settings.json root"))
+
+
 def parse_coordination_settings(
     settings_path: Path,
-    topology: Literal["internal", "external"],
+    *,
+    coordination_root: Path | None = None,
 ) -> tuple[StorageSettings, CrossRepoSettings]:
-    mode = default_storage_mode(topology)
-    fallback_storage = StorageSettings(mode=mode, default=mode)
+    fallback_storage = StorageSettings()
     fallback_cross_repo = CrossRepoSettings()
-    path_settings_path = path_settings_path_for(settings_path)
-    if path_settings_path.exists():
-        return parse_json_settings(path_settings_path, topology)
+    path_settings_path = path_settings_path_for(settings_path, coordination_root=coordination_root)
+    if observed_exists(path_settings_path):
+        return parse_json_settings(path_settings_path)
 
-    if not settings_path.exists():
+    if not observed_exists(settings_path):
         return fallback_storage, fallback_cross_repo
 
     selected_storage: StorageSettings | None = None
     selected_cross_repo = CrossRepoSettings()
-    for block in extract_yaml_blocks(settings_path.read_text(encoding="utf-8")):
-        storage, cross_repo, saw_settings = parse_settings_block(block, topology)
+    for block in extract_yaml_blocks(observed_text(settings_path)):
+        storage, cross_repo, saw_settings = parse_settings_block(block)
         if not saw_settings:
             continue
         selected_storage = storage or selected_storage

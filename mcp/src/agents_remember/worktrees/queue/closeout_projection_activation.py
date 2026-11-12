@@ -13,9 +13,9 @@ from agents_remember.worktrees.activation.atomic_series_activation import (
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 _SELECTION_REPAIR = (
-    "select the intended master with dispatch_agent(role='manager') or resume it with "
-    "worktree_start/worktree_attach; the selecting transaction archives a malformed "
-    "activation snapshot and atomically publishes replacement authority"
+    "select the intended master with worktree_start or worktree_attach; the selecting "
+    "transaction archives a malformed activation snapshot and atomically publishes "
+    "replacement authority"
 )
 
 

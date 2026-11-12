@@ -1,0 +1,434 @@
+{
+ "code_sides": [
+  {
+   "side": "base",
+   "state": "available",
+   "tree": "804b3fd2659f01656a8f6ce5419c42ef2f3e220b"
+  },
+  {
+   "side": "candidate",
+   "state": "available",
+   "tree": "f7ab3267746015b52265ced94d3468674a4af76f"
+  }
+ ],
+ "comparison": {
+  "code_base": {
+   "commit": "8a2d4b478971bf40cca0f24d5e5d24a0844bd563",
+   "repository": "/tmp/mik-l31-real/code",
+   "tree": "804b3fd2659f01656a8f6ce5419c42ef2f3e220b"
+  },
+  "code_candidate": {
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L31/1",
+   "repository": "/tmp/mik-l31-real/code",
+   "tree": "f7ab3267746015b52265ced94d3468674a4af76f"
+  },
+  "leaf_id": "260928-MIK-L31",
+  "memory_base": {
+   "commit": "10fe223eb1bb3b290113ded28a94a56be805d971",
+   "repository": "/tmp/mik-l31-real/memory",
+   "tree": "36c8ded0464ee68c0e845986adba73941bfa5b86"
+  },
+  "memory_candidate": {
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L31/1",
+   "repository": "/tmp/mik-l31-real/memory",
+   "tree": "8496e69b4dc85774701a538fa94f29edfad59adb"
+  },
+  "number": 1,
+  "recorded_at": "2026-09-30T02:35:02+00:00",
+  "schema": "ar-review-tree-comparison/v1",
+  "task_id": "260928_maintained-invariant-knowledge"
+ },
+ "entries": [
+  {
+   "after": {
+    "blob": "36b2d679ee468d0e3c9409694d803b14288cbdbb",
+    "content": "sha256:c405e549eab3887145bc7f2ee49d30d66dad755472e4b3e744f0fb1b940c6075",
+    "currentness": "current",
+    "end_line": 164,
+    "excerpt": "def test_an_unchanged_path_no_recorded_realization_links_is_still_refused(\n    attributed_fixture: EndpointFixture,\n) -> None:\n    \"\"\"With both knowledge halves present, an unlinked unchanged path is refused, naming both answers.\"\"\"\n\n    fixture = attributed_fixture\n    inventory = _listed_inventory(fixture)\n    assert UNRELATED_PATH not in {entry[\"path\"] for entry in inventory[\"entries\"]}\n\n    detail = _refused(_expand(fixture, UNRELATED_PATH, **_pair(inventory)), UNRELATED_PATH)\n    assert \"the before snapshot records none\" in detail\n    assert \"the after snapshot records none\" in detail\n",
+    "excerpt_truncated": false,
+    "facet": "An unchanged path that no recorded realization links is refused as unresolved, and no content is read for it.",
+    "path": "mcp/tests/test_knowledge_review_attributed_source_content.py",
+    "recorded": true,
+    "start_line": 153,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "36b2d679ee468d0e3c9409694d803b14288cbdbb",
+    "content": "sha256:c405e549eab3887145bc7f2ee49d30d66dad755472e4b3e744f0fb1b940c6075",
+    "end_line": 164,
+    "excerpt_truncated": false,
+    "path": "mcp/tests/test_knowledge_review_attributed_source_content.py",
+    "recorded": false,
+    "start_line": 153,
+    "state": "resolved"
+   },
+   "change": "unchanged",
+   "id": "PRF-7Q3M5K",
+   "invariant": "INV-2TQGXFAX",
+   "invariant_key": "09b76b4c-9d5e-50a2-8a4d-de1485e8911c",
+   "kind": "proof"
+  },
+  {
+   "after": {
+    "blob": "98647f7fd93dc7c44adba4226c08651d6f1043f8",
+    "content": "sha256:f8f53610e955aa9e2c925ee3118ae702f460cf60d44433342ad7832688d27f2d",
+    "currentness": "current",
+    "end_line": 213,
+    "excerpt": "def _not_listed(\n    request: ReviewSourceContentRequest, inventory: ReviewSourceInventory, link_detail: str\n) -> ReviewRefusal:\n    \"\"\"The refusal for a path the measured pair does not list and no recorded realization links.\"\"\"\n\n    return refusal(\n        \"source_content_unresolved_path\",\n        (\n            f\"the requested path {request.path!r} is not one of the {inventory.listed_total} changed \"\n            \"path(s) this surface measured between the requested trees, and no realization recorded \"\n            f\"in the comparison's knowledge links it ({link_detail}), so no content was read for it; \"\n            \"this route reads an inventory entry, or an unchanged path a realization of the same \"\n            \"comparison is anchored at, and no other path\"\n        ),\n        next_action=(\n            \"expand a path the inventory listed for this generation or one a realization of this \"\n            \"comparison records, or reopen the review if the generation has moved\"\n        ),\n        offending_input=bounded_input(request.path),\n    )\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_admission.py",
+    "rationale": "Builds the source_content_unresolved refusal for a path the measured pair does not list and no recorded realization links. The refusal carries the link detail that says what each snapshot answered and states that no content was read for the path.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 194,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "3f1b804de40468d65d0f39515b8bf71095b13da1",
+    "content": "sha256:35208096f471216ee87820edc4f8bdf5b066971b0b8c2b55e347bd0bb297f3f3",
+    "currentness": "current",
+    "end_line": 213,
+    "excerpt": "def _not_listed(\n    request: ReviewSourceContentRequest, inventory: ReviewSourceInventory, link_detail: str\n) -> ReviewRefusal:\n    \"\"\"The refusal for a path the measured pair does not list and no recorded realization links.\"\"\"\n\n    return refusal(\n        \"source_content_unresolved\",\n        (\n            f\"the requested path {request.path!r} is not one of the {inventory.listed_total} changed \"\n            \"path(s) this surface measured between the requested trees, and no realization recorded \"\n            f\"in the comparison's knowledge links it ({link_detail}), so no content was read for it; \"\n            \"this route reads an inventory entry, or an unchanged path a realization of the same \"\n            \"comparison is anchored at, and no other path\"\n        ),\n        next_action=(\n            \"expand a path the inventory listed for this generation or one a realization of this \"\n            \"comparison records, or reopen the review if the generation has moved\"\n        ),\n        offending_input=bounded_input(request.path),\n    )\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_admission.py",
+    "rationale": "Builds the source_content_unresolved refusal for a path the measured pair does not list and no recorded realization links. The refusal carries the link detail that says what each snapshot answered and states that no content was read for the path.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 194,
+    "state": "resolved"
+   },
+   "change": "changed",
+   "id": "RLZ-CXH58B4W",
+   "invariant": "INV-2TQGXFAX",
+   "invariant_key": "09b76b4c-9d5e-50a2-8a4d-de1485e8911c",
+   "kind": "realization"
+  },
+  {
+   "after": {
+    "blob": "98647f7fd93dc7c44adba4226c08651d6f1043f8",
+    "content": "sha256:85ecad0a00bdb27828445af04d93d9803f4a0c91e4009d2f512d4c26fe69de44",
+    "currentness": "current",
+    "end_line": 157,
+    "excerpt": "def _attributed_or_refused(\n    request: ReviewSourceContentRequest,\n    inventory: ReviewSourceInventory,\n    link: RealizationLink,\n) -> SourceAdmission | ReviewRefusal:\n    \"\"\"Admit a measured-unchanged path that the comparison's recorded realization links, or refuse.\"\"\"\n\n    if not link.linked:\n        if not link.determined:\n            return _link_undetermined(request, inventory, link.detail)\n        return _not_listed(request, inventory, link.detail)\n    sides = \" and \".join(link.linking_sides)\n    return SourceAdmission(\n        entry=None,\n        path_bound=\"requested_generation\",\n        path_bound_detail=(\n            f\"the requested generation's own change set was measured ({inventory.listed_total} \"\n            \"changed path(s)) and does not list this path, so the path is unchanged between the \"\n            \"requested trees and is not an entry of that inventory\"\n        ),\n        admission=\"attributed_unchanged\",\n        admission_detail=(\n            f\"a realization recorded in the comparison's {sides} knowledge is anchored at this \"\n            f\"unchanged path ({link.detail}); it is opened as that realization's context at the \"\n            \"requested trees and is not counted as a changed file\"\n        ),\n    )\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_admission.py",
+    "rationale": "Makes the admission decision for a path the measured change set does not list. It admits the path only when the realization link reports a linking side, as admission attributed_unchanged with a detail naming the linking before/after knowledge and stating that the path is unchanged and not counted as a changed file; otherwise it returns the undetermined or not-listed refusal.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 131,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "3f1b804de40468d65d0f39515b8bf71095b13da1",
+    "content": "sha256:85ecad0a00bdb27828445af04d93d9803f4a0c91e4009d2f512d4c26fe69de44",
+    "currentness": "current",
+    "end_line": 157,
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_admission.py",
+    "rationale": "Makes the admission decision for a path the measured change set does not list. It admits the path only when the realization link reports a linking side, as admission attributed_unchanged with a detail naming the linking before/after knowledge and stating that the path is unchanged and not counted as a changed file; otherwise it returns the undetermined or not-listed refusal.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 131,
+    "state": "resolved"
+   },
+   "change": "unchanged",
+   "id": "RLZ-D43E5CF2",
+   "invariant": "INV-9ECAFVTQ",
+   "invariant_key": "b2400c01-fc05-51e5-b34a-08a97e8255f3",
+   "kind": "realization"
+  },
+  {
+   "after": {
+    "blob": "07e0e3fcba9e7086c5989cbc6c213447a9cedb3a",
+    "content": "sha256:94d21a126c19481e2d768f44a0fb8d8ef2ec691ce9f6762184bb287260c7a7a2",
+    "currentness": "current",
+    "end_line": 152,
+    "excerpt": "def recorded_realization_link(\n    config: McpRuntimeConfig,\n    request: ReviewSourceContentRequest,\n    resolved: ReviewCandidateResolution,\n) -> RealizationLink:\n    \"\"\"Whether a realization recorded in the requested comparison's knowledge links the path.\"\"\"\n\n    bound = _bound_knowledge(config, request, resolved)\n    if isinstance(bound, RealizationLink):\n        return bound\n    if not _anchor_spelling(request.path):\n        return RealizationLink(\n            linking_sides=(),\n            detail=(\n                f\"the requested spelling {request.path!r} is not exactly a path a recorded source \"\n                f\"anchor can carry, so no realization in {bound.description} can link it and it is \"\n                \"not matched to a nearby spelling\"\n            ),\n        )\n    try:\n        namespace = review_namespace(\n            bound.resolution.repository_id, bound.resolution.candidate_database\n        )\n    except KnowledgeStorageError as error:\n        return RealizationLink(\n            linking_sides=(),\n            detail=(\n                f\"the namespace of {bound.description} could not be read from the record beside \"\n                f\"its dataset ({error}), so neither half was read\"\n            ),\n            determined=False,\n        )\n    readings = tuple(\n        _side_reading(side, database, namespace, request.path) for side, database in _halves(bound)\n    )\n    linking: tuple[KnowledgeSide, ...] = tuple(\n        reading.side for reading in readings if reading.state == \"linked\"\n    )\n    unread = any(reading.state == \"unread\" for reading in readings)\n    return RealizationLink(\n        linking_sides=linking,\n        detail=_sentence(bound, readings),\n        determined=bool(linking) or not unread,\n    )\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_realization_link.py",
+    "rationale": "Answers whether the requested comparison's own knowledge links the path. It uses only the knowledge bound to that comparison (_bound_knowledge), requires the exact spelling to be anchor-shaped with no nearby match, reads each half for an anchor at exactly that path, and reports the linking sides; the result is undetermined when a half could not be read.",
+    "recorded": true,
+    "role": "support",
+    "start_line": 109,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "07e0e3fcba9e7086c5989cbc6c213447a9cedb3a",
+    "content": "sha256:94d21a126c19481e2d768f44a0fb8d8ef2ec691ce9f6762184bb287260c7a7a2",
+    "currentness": "current",
+    "end_line": 152,
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_realization_link.py",
+    "rationale": "Answers whether the requested comparison's own knowledge links the path. It uses only the knowledge bound to that comparison (_bound_knowledge), requires the exact spelling to be anchor-shaped with no nearby match, reads each half for an anchor at exactly that path, and reports the linking sides; the result is undetermined when a half could not be read.",
+    "recorded": true,
+    "role": "support",
+    "start_line": 109,
+    "state": "resolved"
+   },
+   "change": "unchanged",
+   "id": "RLZ-HD60BGRJ",
+   "invariant": "INV-9ECAFVTQ",
+   "invariant_key": "b2400c01-fc05-51e5-b34a-08a97e8255f3",
+   "kind": "realization"
+  },
+  {
+   "after": {
+    "blob": "07e0e3fcba9e7086c5989cbc6c213447a9cedb3a",
+    "content": "sha256:60ca04320f4b7404fedfe7f2805b5f467ec0456308bc98e463b8c51af6615f9c",
+    "currentness": "current",
+    "end_line": 166,
+    "excerpt": "def _anchor_spelling(path: str) -> bool:\n    \"\"\"Whether ``path`` is, unchanged, a spelling the stored-anchor shape rule admits.\n\n    The rule normalizes (it strips surrounding whitespace), so validating is not enough: the\n    validated value must be the requested string itself, or a padded spelling would be answered with\n    the link of the path it normalizes to.\n    \"\"\"\n\n    try:\n        return PathSeed(path=path).path == path\n    except ValidationError:\n        return False\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_realization_link.py",
+    "rationale": "Accepts a requested path as an anchor spelling only when PathSeed validation succeeds and the validated value is byte-identical to the request. A padded or otherwise normalized spelling returns False and is never matched to the path it would normalize to.",
+    "recorded": true,
+    "role": "enforcement",
+    "start_line": 155,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "07e0e3fcba9e7086c5989cbc6c213447a9cedb3a",
+    "content": "sha256:60ca04320f4b7404fedfe7f2805b5f467ec0456308bc98e463b8c51af6615f9c",
+    "currentness": "current",
+    "end_line": 166,
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_realization_link.py",
+    "rationale": "Accepts a requested path as an anchor spelling only when PathSeed validation succeeds and the validated value is byte-identical to the request. A padded or otherwise normalized spelling returns False and is never matched to the path it would normalize to.",
+    "recorded": true,
+    "role": "enforcement",
+    "start_line": 155,
+    "state": "resolved"
+   },
+   "change": "unchanged",
+   "id": "RLZ-3G19299R",
+   "invariant": "INV-M9AMAYWY",
+   "invariant_key": "3bce6092-4833-5d2a-b732-8633b2fa9e17",
+   "kind": "realization"
+  },
+  {
+   "after": {
+    "blob": "07e0e3fcba9e7086c5989cbc6c213447a9cedb3a",
+    "content": "sha256:781db4799e3aba7a5072754614565b4c94163636b43b0c12ad35b5d547efc5ef",
+    "currentness": "current",
+    "end_line": 232,
+    "excerpt": "def _bound_knowledge(\n    config: McpRuntimeConfig,\n    request: ReviewSourceContentRequest,\n    resolved: ReviewCandidateResolution,\n) -> _BoundKnowledge | RealizationLink:\n    \"\"\"The comparison the requested pair names, or the sentence that no knowledge is bound to it.\n\n    The baseline has already been required to be the resolution's own, so only the after tree can\n    differ; when it does, the pair is a superseded one and only a generation that recorded exactly\n    that pair holds its knowledge.\n    \"\"\"\n\n    if request.after_code_tree_id == resolved.candidate_code_tree_id:\n        return _BoundKnowledge(\n            resolution=resolved,\n            description=\"the knowledge this leaf's review binds to the requested pair\",\n        )\n    task_root = task_root_for_review(config, request.repository_id, request.master)\n    for ref in reversed(read_generation_refs(task_root, resolved.leaf_id)):\n        try:\n            manifest = read_manifest(ref.directory / COMPARISON_MANIFEST_NAME)\n        except KnowledgeStorageError:\n            continue\n        source = manifest.source\n        if (source.baseline_code_tree_id, source.candidate_code_tree_id) != (\n            request.before_code_tree_id,\n            request.after_code_tree_id,\n        ):\n            continue\n        reopened = resolve_committed_leaf_review(\n            config,\n            request.repository_id,\n            request.master,\n            request.leaf_id,\n            generation_id=ref.generation_id,\n        )\n        if isinstance(reopened, ReviewRefusal):\n            return RealizationLink(\n                linking_sides=(),\n                detail=(\n                    f\"the comparison generation {ref.generation_id} records the requested pair but \"\n                    f\"could not be reopened ({reopened.detail}), so its knowledge was not read\"\n                ),\n                determined=False,\n            )\n        return _BoundKnowledge(\n            resolution=reopened,\n            description=(\n                f\"the knowledge retained by comparison generation {ref.generation_id} (index \"\n                f\"{ref.generation_index}), which recorded exactly the requested pair\"\n            ),\n        )\n    return RealizationLink(\n        linking_sides=(),\n        detail=(\n            f\"the requested pair is not the one this leaf's review binds now (it binds \"\n            f\"{resolved.candidate_code_tree_id}), and no comparison generation this leaf published \"\n            \"records exactly the requested pair, so no knowledge is bound to the requested \"\n            \"comparison; the knowledge the leaf holds now is not substituted for it\"\n        ),\n    )\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_realization_link.py",
+    "rationale": "Chooses which knowledge may admit an unchanged path. The resolution's own halves are used when the requested after tree is the one the leaf binds now; otherwise it searches this leaf's comparison generations from newest to oldest for one that recorded exactly the requested tree pair and reopens it. With no such generation it returns an explicit no-knowledge link, and the leaf's current knowledge is never substituted.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 172,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "07e0e3fcba9e7086c5989cbc6c213447a9cedb3a",
+    "content": "sha256:781db4799e3aba7a5072754614565b4c94163636b43b0c12ad35b5d547efc5ef",
+    "currentness": "current",
+    "end_line": 232,
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_realization_link.py",
+    "rationale": "Chooses which knowledge may admit an unchanged path. The resolution's own halves are used when the requested after tree is the one the leaf binds now; otherwise it searches this leaf's comparison generations from newest to oldest for one that recorded exactly the requested tree pair and reopens it. With no such generation it returns an explicit no-knowledge link, and the leaf's current knowledge is never substituted.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 172,
+    "state": "resolved"
+   },
+   "change": "unchanged",
+   "id": "RLZ-7GKF4ASW",
+   "invariant": "INV-RS0EVBHD",
+   "invariant_key": "49473315-7e7f-5866-834f-c27d49271bbd",
+   "kind": "realization"
+  },
+  {
+   "after": {
+    "blob": "99a657e901a3a274e7393532701866730903f313",
+    "content": "sha256:d6c2f0cb4e05611a6ee870f5ac40440cd1b98f76becc8be2dfd54a95c43ae515",
+    "currentness": "current",
+    "end_line": 377,
+    "excerpt": "export interface ReviewSourceExpansion {\n  path: string;\n  status: ReviewFileStatus | \"unchanged\";\n  mode_change: boolean;\n  language: string;\n  before: ReviewSourceSide;\n  after: ReviewSourceSide;\n  before_code_tree_id: string;\n  after_code_tree_id: string;\n  currentness: \"current\" | \"superseded\" | \"unmeasured\";\n  currentness_detail: string;\n  path_bound: \"requested_generation\" | \"leaf_change_set\";\n  path_bound_detail: string;\n  admission: ReviewSourceAdmission;\n  admission_detail: string;\n  reference: string;\n  command: string;\n}\n",
+    "excerpt_truncated": false,
+    "path": "dashboard/src/data/review.ts",
+    "rationale": "Is the dashboard client's mirror of the served expansion: it declares the required admission and admission_detail fields and widens status to accept 'unchanged', so the client type carries why each path was opened as the server states it.",
+    "recorded": true,
+    "role": "presentation",
+    "start_line": 360,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "99a657e901a3a274e7393532701866730903f313",
+    "content": "sha256:d6c2f0cb4e05611a6ee870f5ac40440cd1b98f76becc8be2dfd54a95c43ae515",
+    "currentness": "current",
+    "end_line": 377,
+    "excerpt_truncated": false,
+    "path": "dashboard/src/data/review.ts",
+    "rationale": "Is the dashboard client's mirror of the served expansion: it declares the required admission and admission_detail fields and widens status to accept 'unchanged', so the client type carries why each path was opened as the server states it.",
+    "recorded": true,
+    "role": "presentation",
+    "start_line": 360,
+    "state": "resolved"
+   },
+   "change": "unchanged",
+   "id": "RLZ-CHCMPQ0Y",
+   "invariant": "INV-T23G8ZJM",
+   "invariant_key": "9f44474c-a3c6-5cca-8269-d4e22a93a27b",
+   "kind": "realization"
+  },
+  {
+   "after": {
+    "blob": "6c2e7ac2757c47106b9bcea90649843259b0ba17",
+    "content": "sha256:3a3dc099eb0b876ca6894e60776ea0f172e0feb5e9711146d9b0302d0a7be502",
+    "currentness": "current",
+    "end_line": 214,
+    "excerpt": "class ReviewSourceExpansion(KnowledgeModel):\n    \"\"\"One inventory entry opened: both endpoints' content, and the generation they came from.\n\n    This is the value the packet requires an entry to expand into. ``before_code_tree_id`` and\n    ``after_code_tree_id`` are the *requested* generation -- the two object ids the caller carried\n    in from the listing it is reading, echoed back -- so the content is never silently re-read from\n    a newer generation. ``currentness`` states whether that generation is still the pair the leaf's\n    review binds, and ``currentness_detail`` says what that means for the bytes beside it.\n\n    ``path_bound`` states which measurement admitted ``path``, because two can and only one of them\n    is the requested generation's: ``requested_generation`` when the requested pair's own change set\n    listed the path, and ``leaf_change_set`` when that measurement could not be made and the change\n    set this leaf's review actually publishes bounded the request instead. The second is not a wider\n    read -- the path is still a changed path of a measured pair -- and it is stated rather than\n    implied, so a reader can always tell which change set the row came from.\n\n    ``admission`` states why the path was opened: ``changed`` for a path a measured change set lists,\n    and ``attributed_unchanged`` for a path the requested pair's measured change set does not list but\n    that a realization recorded in the bound comparison's knowledge is anchored at. The second is\n    always ``unchanged`` in ``status`` and always bounded by the requested generation's own\n    measurement, because \"unchanged\" is only a fact about a pair that was measured.\n\n    ``command`` is the exact reproduction of the two reads, naming both trees and the path, so a\n    reader can obtain the same bytes without this surface. It is evidence *beside* the content and\n    never a substitute for it: a reference with no text is the failure this vocabulary exists to\n    make unrepresentable.\n    \"\"\"\n\n    path: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)\n    status: ReviewSourceExpansionStatus\n    mode_change: bool = False\n    language: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)\n    before: ReviewSourceSide\n    after: ReviewSourceSide\n    before_code_tree_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)\n    after_code_tree_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)\n    currentness: ReviewSourceCurrentness\n    currentness_detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)\n    path_bound: ReviewSourcePathBound\n    path_bound_detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)\n    admission: ReviewSourceAdmission\n    admission_detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)\n    reference: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)\n    command: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)\n\n    @model_validator(mode=\"after\")\n    def _require_attributed_context_to_be_a_measured_unchanged_path(\n        self,\n    ) -> ReviewSourceExpansion:\n        attributed = self.admission == \"attributed_unchanged\"\n        if attributed != (self.status == \"unchanged\"):\n            raise ValueError(\n                \"an attributed unchanged path is exactly the expansion whose status is 'unchanged': \"\n                \"a changed path opened as context, or unchanged context presented as a change, \"\n                \"would misstate what the measured pair holds\"\n            )\n        if attributed and self.path_bound != \"requested_generation\":\n            raise ValueError(\n                \"unchanged is a fact about a measured pair, so an attributed unchanged path is \"\n                \"bounded by the requested generation's own measurement and by no other\"\n            )\n        return self\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/models/knowledge/review_source_content.py",
+    "rationale": "Declares admission and a nonblank admission_detail as required fields of every served expansion. Its validator refuses an expansion whose attributed_unchanged admission and 'unchanged' status disagree in either direction, and one that is attributed_unchanged with any path_bound other than requested_generation.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 153,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "6c2e7ac2757c47106b9bcea90649843259b0ba17",
+    "content": "sha256:3a3dc099eb0b876ca6894e60776ea0f172e0feb5e9711146d9b0302d0a7be502",
+    "currentness": "current",
+    "end_line": 214,
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/models/knowledge/review_source_content.py",
+    "rationale": "Declares admission and a nonblank admission_detail as required fields of every served expansion. Its validator refuses an expansion whose attributed_unchanged admission and 'unchanged' status disagree in either direction, and one that is attributed_unchanged with any path_bound other than requested_generation.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 153,
+    "state": "resolved"
+   },
+   "change": "unchanged",
+   "id": "RLZ-BRC1Q5RQ",
+   "invariant": "INV-T23G8ZJM",
+   "invariant_key": "9f44474c-a3c6-5cca-8269-d4e22a93a27b",
+   "kind": "realization"
+  },
+  {
+   "after": {
+    "blob": "98647f7fd93dc7c44adba4226c08651d6f1043f8",
+    "content": "sha256:8915f9789c23ed06ede4c6d01b824a6d4f717a579df98283ce4a4e5ebceae030",
+    "currentness": "current",
+    "end_line": 240,
+    "excerpt": "def _link_undetermined(\n    request: ReviewSourceContentRequest, inventory: ReviewSourceInventory, link_detail: str\n) -> ReviewRefusal:\n    \"\"\"The refusal for an unlisted path whose link could not be determined from unreadable knowledge.\n\n    It never claims the path is unlinked: some knowledge this comparison binds was not read, so the\n    only true statements are which part was not read and why, and the remedy is to that cause.\n    \"\"\"\n\n    return refusal(\n        \"source_content_unresolved\",\n        (\n            f\"the requested path {request.path!r} is not one of the {inventory.listed_total} changed \"\n            \"path(s) this surface measured between the requested trees, and whether a realization \"\n            f\"recorded in the comparison's knowledge links it could not be determined ({link_detail}); \"\n            \"no content was read for it, because an unchanged path is opened only on an established \"\n            \"link and an unreadable snapshot establishes neither a link nor its absence\"\n        ),\n        next_action=(\n            \"restore or repair the knowledge snapshot the detail names as unreadable -- the leaf's \"\n            \"own knowledge halves, or the retained snapshot of the named comparison generation -- \"\n            \"then expand the path again; this generation's changed paths stay expandable meanwhile\"\n        ),\n        offending_input=bounded_input(request.path),\n    )\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_admission.py",
+    "rationale": "Builds the refusal for an unlisted path whose link could not be determined. It states that the link was undetermined, carries the detail naming which knowledge was unread and why, and directs repair of that snapshot, without claiming that no realization links the path.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 216,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "3f1b804de40468d65d0f39515b8bf71095b13da1",
+    "content": "sha256:8915f9789c23ed06ede4c6d01b824a6d4f717a579df98283ce4a4e5ebceae030",
+    "currentness": "current",
+    "end_line": 240,
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_admission.py",
+    "rationale": "Builds the refusal for an unlisted path whose link could not be determined. It states that the link was undetermined, carries the detail naming which knowledge was unread and why, and directs repair of that snapshot, without claiming that no realization links the path.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 216,
+    "state": "resolved"
+   },
+   "change": "unchanged",
+   "id": "RLZ-9EC7B6PN",
+   "invariant": "INV-XTXZESS6",
+   "invariant_key": "54d21b24-6258-58f4-86a5-257e9bd62a0d",
+   "kind": "realization"
+  },
+  {
+   "after": {
+    "blob": "07e0e3fcba9e7086c5989cbc6c213447a9cedb3a",
+    "content": "sha256:b7b0f0888b464d9c9315b39ed5a9a3b4e20f07f387b4e4998dd5f4c0891949bb",
+    "currentness": "current",
+    "end_line": 276,
+    "excerpt": "def _side_reading(side: KnowledgeSide, database: Path, namespace: str, path: str) -> _SideReading:\n    \"\"\"Ask one snapshot, by the read owner's exact claim-at-path query, whether it links ``path``.\n\n    The snapshot's identity is resolved from the file first (namespace, schema generation), so a file\n    that is not the dataset this comparison bound is ``unread`` with its cause rather than an absence.\n    \"\"\"\n\n    if not database.is_file():\n        return _SideReading(side, \"unread\", f\"the {side} snapshot is absent at {database}\")\n    try:\n        context = open_read_context(database, namespace)\n        connection = open_read_only_database(database)\n        try:\n            rows = fetch_realizations_at_path(connection, context.repository_id, path)\n        finally:\n            connection.close()\n    except (KnowledgeStorageError, OSError, ValueError, apsw.Error) as error:\n        return _SideReading(\n            side,\n            \"unread\",\n            f\"the {side} snapshot at {database} could not be read ({type(error).__name__}: {error})\",\n        )\n    if rows:\n        return _SideReading(side, \"linked\", f\"the {side} snapshot records a realization here\")\n    return _SideReading(side, \"not_linked\", f\"the {side} snapshot records none\")\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_realization_link.py",
+    "rationale": "Asks one bound snapshot through the read owner's exact fetch_realizations_at_path query, which reads claims at one path and expands no family, so scope size cannot fail it. An absent or unreadable snapshot is reported as unread with its cause, never as not_linked.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 252,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "07e0e3fcba9e7086c5989cbc6c213447a9cedb3a",
+    "content": "sha256:b7b0f0888b464d9c9315b39ed5a9a3b4e20f07f387b4e4998dd5f4c0891949bb",
+    "currentness": "current",
+    "end_line": 276,
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_realization_link.py",
+    "rationale": "Asks one bound snapshot through the read owner's exact fetch_realizations_at_path query, which reads claims at one path and expands no family, so scope size cannot fail it. An absent or unreadable snapshot is reported as unread with its cause, never as not_linked.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 252,
+    "state": "resolved"
+   },
+   "change": "unchanged",
+   "id": "RLZ-CHBR2MK5",
+   "invariant": "INV-XTXZESS6",
+   "invariant_key": "54d21b24-6258-58f4-86a5-257e9bd62a0d",
+   "kind": "realization"
+  },
+  {
+   "after": {
+    "blob": "98647f7fd93dc7c44adba4226c08651d6f1043f8",
+    "content": "sha256:38e8843a8cebfb16f766d607a7dee7674eb699fa1a559e313a7a5af4a6d746fb",
+    "currentness": "current",
+    "end_line": 128,
+    "excerpt": "def admit_source_path(\n    config: McpRuntimeConfig,\n    request: ReviewSourceContentRequest,\n    resolved: ReviewCandidateResolution,\n    inventory: ReviewSourceInventory,\n) -> SourceAdmission | ReviewRefusal:\n    \"\"\"The measurement that admits the requested path, or the refusal that none does.\n\n    The requested generation's own change set is asked first. When it was measured and does not list\n    the path, the only remaining admission is a realization the comparison's knowledge records there.\n    When it could not be measured, the change set this leaf's review publishes bounds the request\n    instead, and no unchanged path is admitted at all.\n    \"\"\"\n\n    entry = _entry_for(inventory, request.path)\n    if entry is not None:\n        return SourceAdmission(\n            entry=entry,\n            path_bound=\"requested_generation\",\n            path_bound_detail=(\n                \"the requested generation's own change set is the measurement that lists this path\"\n            ),\n        )\n    if inventory.state == \"measured\":\n        return _attributed_or_refused(\n            request, inventory, recorded_realization_link(config, request, resolved)\n        )\n    leaf = review_inventory(\n        source_tree_side(resolved.baseline_code_tree_id, resolved.baseline_code_root),\n        source_tree_side(resolved.candidate_code_tree_id, resolved.candidate_code_root),\n    )\n    if leaf.state == \"measured\" and _entry_for(leaf, request.path) is not None:\n        return SourceAdmission(\n            entry=None,\n            path_bound=\"leaf_change_set\",\n            path_bound_detail=(\n                f\"the requested generation could not be measured ({inventory.detail}), so the \"\n                f\"change set this leaf's review publishes -- its recorded baseline against the \"\n                f\"candidate tree it binds now, {leaf.listed_total} changed path(s) -- is the \"\n                \"measurement that lists this path\"\n            ),\n        )\n    return _unconfined(request, inventory, leaf)\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_admission.py",
+    "rationale": "Only reads the inventory it is given: it looks the path up with _entry_for and otherwise returns a SourceAdmission whose entry is None for an attributed unchanged path or a leaf-change-set bound. Opening attributed context therefore never appends an entry to the inventory or alters its listed_total.",
+    "recorded": true,
+    "role": "enforcement",
+    "start_line": 86,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "3f1b804de40468d65d0f39515b8bf71095b13da1",
+    "content": "sha256:38e8843a8cebfb16f766d607a7dee7674eb699fa1a559e313a7a5af4a6d746fb",
+    "currentness": "current",
+    "end_line": 128,
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/application/review_source_admission.py",
+    "rationale": "Only reads the inventory it is given: it looks the path up with _entry_for and otherwise returns a SourceAdmission whose entry is None for an attributed unchanged path or a leaf-change-set bound. Opening attributed context therefore never appends an entry to the inventory or alters its listed_total.",
+    "recorded": true,
+    "role": "enforcement",
+    "start_line": 86,
+    "state": "resolved"
+   },
+   "change": "unchanged",
+   "id": "RLZ-NM6160PK",
+   "invariant": "INV-YBS0CVBK",
+   "invariant_key": "bfb457a7-58d0-57d7-aa99-f4f9b4b0726c",
+   "kind": "realization"
+  }
+ ],
+ "knowledge_sides": [
+  {
+   "index_state": "complete",
+   "problems": [],
+   "side": "before",
+   "state": "available",
+   "tree": "36c8ded0464ee68c0e845986adba73941bfa5b86"
+  },
+  {
+   "index_state": "complete",
+   "problems": [],
+   "side": "after",
+   "state": "available",
+   "tree": "8496e69b4dc85774701a538fa94f29edfad59adb"
+  }
+ ],
+ "leaf_id": "260928-MIK-L31",
+ "master": "260928_maintained-invariant-knowledge",
+ "repository_id": "agents-remember",
+ "state": "trees"
+}

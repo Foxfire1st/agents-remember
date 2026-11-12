@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -16,19 +17,15 @@ from agents_remember.errors import (
     MemoryCandidatePairError,
     TaskIntentError,
 )
-from agents_remember.memory_quality.future_code_candidate import (
-    capture_future_code_candidate,
-)
-from agents_remember.memory_quality.memory_candidate_pair import (
-    resolve_memory_candidate_pair,
-)
 from agents_remember.models.closeout.source import EvidenceFact
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherenceAuthority,
+    CuratorCoherencePaths,
     CuratorCoherenceRecord,
     CuratorQualityAttestation,
     CuratorSourceCandidate,
     ValidatedCuratorCoherence,
+    ValidatedCuratorCoherenceGeneration,
     require_memory_quality_attestation_dependencies,
 )
 from agents_remember.models.lifecycles.evidence_dependencies import (
@@ -40,6 +37,20 @@ from agents_remember.models.lifecycles.evidence_dependencies import (
     require_evidence_dependencies,
 )
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
+from agents_remember.models.lifecycles.review_assessment import (
+    AssessmentEntry,
+    ReviewAssessment,
+    SubjectAssessmentState,
+    assessment_state_for,
+    assessment_subject_id,
+)
+from agents_remember.models.lifecycles.review_assessment_binding import (
+    supplied_measurement_statuses,
+)
+from agents_remember.models.lifecycles.review_assessment_store import (
+    assessment_edge_name,
+    recorded_assessment_digest,
+)
 from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
@@ -51,30 +62,36 @@ from agents_remember.tasks.task_intent import (
     require_current_task_intent,
     task_intent_identity,
 )
-from agents_remember.worktrees.modules.git import worktree_candidate_tree
+from agents_remember.worktrees.cutover_lock import legacy_format_refusal
+from agents_remember.worktrees.knowledge_gate import (
+    GateProbeError,
+    converted_memory,
+    leaf_gate_refusal,
+    leaf_line,
+)
+from agents_remember.worktrees.modules.future_code_candidate import (
+    capture_future_code_candidate,
+)
+from agents_remember.worktrees.modules.git import local_branch_ref, worktree_candidate_tree
+from agents_remember.worktrees.modules.memory_candidate_pair import (
+    resolve_memory_candidate_pair,
+)
 from agents_remember.worktrees.queue.closeout_projection_members import (
     candidate_task_topology_fingerprint,
 )
 from agents_remember.worktrees.queue.closeout_queue_graph import graph_context
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
-from .curator_coherence_render import render_curator_coherence
+from .curator_coherence_judgments import require_recorded_judgments_current
+from .curator_coherence_paths import (
+    curator_coherence_paths,
+    require_leaf_external_memory,
+    resolve_curator_evidence_ref,
+)
+from .curator_coherence_records import read_curator_coherence_generation
 
 QUALITY_REPORT_NAME = "curator-memory-quality.md"
 QUALITY_ATTESTATION_NAME = "curator-memory-quality.json"
-
-
-@dataclass(frozen=True)
-class CuratorCoherencePaths:
-    canonical: Path
-    generations: Path
-    snapshots: Path
-
-    def generation_record(self, digest: str) -> Path:
-        return self.generations / digest / "record.json"
-
-    def generation_report(self, digest: str) -> Path:
-        return self.generations / digest / "report.md"
 
 
 @dataclass(frozen=True)
@@ -132,23 +149,12 @@ def curator_coherence_no_impact(
     )
 
 
-def curator_coherence_paths(contract: WorktreeContract) -> CuratorCoherencePaths:
-    _require_leaf_external_memory(contract)
-    reports = contract.task_root / "notes" / "reports"
-    history = reports / "curator-coherence" / contract.leaf_id
-    return CuratorCoherencePaths(
-        canonical=reports / f"{contract.leaf_id}-curator-coherence.json",
-        generations=history / "generations",
-        snapshots=history / "attempts",
-    )
-
-
 def observe_curator_coherence_source(
     contract: WorktreeContract,
 ) -> CuratorCoherenceObservation:
     """Capture every identity a publication must freeze and later re-prove."""
 
-    _require_leaf_external_memory(contract)
+    require_leaf_external_memory(contract)
     try:
         pair_identity = resolve_memory_candidate_pair(
             contract,
@@ -256,58 +262,30 @@ def load_curator_coherence_authority(
             observed={"recordPath": authority.recordPath, "reportPath": authority.reportPath},
             next_action="publish",
         )
-    try:
-        record_bytes = record_path.read_bytes()
-        report_bytes = report_path.read_bytes()
-        record = CuratorCoherenceRecord.model_validate_json(record_bytes)
-    except (OSError, ValidationError) as exc:
-        raise CuratorCoherenceError(
-            "curator-coherence-generation-unreadable",
-            "the authority's content-addressed generation is absent or invalid",
-            next_action="publish",
-        ) from exc
-    record_digest = _digest(record_bytes)
-    report_digest = _digest(report_bytes)
-    if record_digest != authority.currentRecordDigest:
-        raise CuratorCoherenceError(
-            "curator-coherence-record-digest-mismatch",
-            "canonical record bytes do not match the authority digest",
-            expected={"recordDigest": authority.currentRecordDigest},
-            observed={"recordDigest": record_digest},
-            next_action="publish",
-        )
-    expected_projection = render_curator_coherence(record).encode("utf-8")
-    if (
-        report_digest,
-        record.reportSha256,
-        authority.reportSha256,
-        report_bytes,
-    ) != (
-        authority.reportSha256,
-        authority.reportSha256,
-        authority.reportSha256,
-        expected_projection,
-    ):
+    generation = load_curator_coherence_generation(contract, authority.currentRecordDigest)
+    if generation.record.reportSha256 != authority.reportSha256:
         raise CuratorCoherenceError(
             "curator-coherence-projection-digest-mismatch",
-            "generated Markdown does not match the structured record and authority digest",
+            "the live authority names a different generated projection digest",
             next_action="publish",
         )
-    _require_record_identity(contract, record)
-    _require_evidence_refs(contract, record)
     return ValidatedCuratorCoherence(
         authority=authority,
-        record=record,
-        record_path=record_path,
-        report_path=report_path,
-        record_digest=record_digest,
-        evidence=[
-            _fact(contract.worktree_group / "reports" / QUALITY_REPORT_NAME),
-            _fact(contract.worktree_group / "reports" / QUALITY_ATTESTATION_NAME),
-            _fact(paths.canonical),
-            _fact(record_path),
-            _fact(report_path),
-        ],
+        record=generation.record,
+        record_path=generation.record_path,
+        report_path=generation.report_path,
+        record_digest=generation.record_digest,
+        evidence=[_fact(paths.canonical), *generation.evidence],
+    )
+
+
+def load_curator_coherence_generation(
+    contract: WorktreeContract, record_digest: str
+) -> ValidatedCuratorCoherenceGeneration:
+    """Read an exact immutable generation without consulting the live pointer or live readiness."""
+
+    return read_curator_coherence_generation(
+        contract, curator_coherence_paths(contract), record_digest
     )
 
 
@@ -333,6 +311,7 @@ def require_current_curator_coherence(
             next_action=exc.next_action or "publish",
         ) from exc
     _require_current_dependencies(record)
+    require_recorded_judgments_current(contract, record.judgments)
     observed = {
         "pairIdentity": observation.pair_identity.model_dump(mode="json"),
         "codeCandidateTree": observation.code_candidate_tree,
@@ -369,11 +348,70 @@ def require_current_curator_coherence(
             "the live coherence record names a different leaf task document",
             next_action="publish",
         )
+    _require_knowledge_gate(contract, observation)
     return validated
 
 
+def _require_knowledge_gate(
+    contract: WorktreeContract, observation: CuratorCoherenceObservation
+) -> None:
+    """MIK-R09 rule 3: the closeout validator recomputes the gate over the exact candidate.
+
+    The worklist is recomputed and the validator run over the very code and memory trees this
+    authority binds; any open item, incomplete run or violation refuses. An unconverted leaf (no
+    layout marker on either side) is refused here with the one ``legacy-format`` message
+    (MIK-R46 rule 1): this independent validator answers the format itself, whatever the
+    closeout entries refused first. A probe Git cannot answer refuses by name, exactly as
+    the validator answers it.
+    """
+
+    repository = contract.memory_repo_path or contract.memory_worktree
+    official = contract.memory_source_branch
+    try:
+        official_ref = local_branch_ref(official) if official else ""
+        applies = repository is not None and converted_memory(
+            repository, observation.memory_candidate_tree, official_ref
+        )
+    except (GateProbeError, RuntimeError) as error:
+        raise CuratorCoherenceError(
+            "curator-coherence-knowledge-gate-refused",
+            str(error),
+            next_action="memory_quality_check",
+        ) from error
+    if not applies:
+        raise CuratorCoherenceError(
+            "curator-coherence-knowledge-gate-refused",
+            legacy_format_refusal(
+                repository,
+                operation="the curator-coherence knowledge gate",
+                subject=f"the unconverted memory of {leaf_line(contract)}",
+            ),
+            next_action="memory_quality_check",
+        )
+    refusal = leaf_gate_refusal(
+        contract,
+        code_tree=observation.code_candidate_tree,
+        memory_tree=observation.memory_candidate_tree,
+    )
+    if refusal is not None:
+        raise CuratorCoherenceError(
+            "curator-coherence-knowledge-gate-refused",
+            refusal,
+            next_action="memory_quality_check",
+        )
+
+
 def _require_current_dependencies(record: CuratorCoherenceRecord) -> None:
-    """Require the record's declared edges to equal the inputs its validator reads."""
+    """Require the record's declared edges to equal the inputs its validator reads.
+
+    A stored assessment's edge is recomputed from the record the edge points at: the digest in
+    ``review-record`` is the assessment's own content address, so a reader can tell that the stored
+    assessment is the one the record declared rather than a record that was edited beside it. That is
+    the *record's* dependency and it is one-directional -- the assessment's own binding declares the
+    inputs it examined and deliberately does not declare the record it lives in, because a record
+    citing itself is the self-invalidating sequence ``design/retrieval-review-design.md:368`` exists
+    to avoid.
+    """
 
     if not isinstance(record.taskIntent, TaskIntentIdentity):
         raise CuratorCoherenceError(
@@ -382,6 +420,10 @@ def _require_current_dependencies(record: CuratorCoherenceRecord) -> None:
             next_action="publish",
         )
     evidence = {judgment.evidenceRef: judgment.evidenceSha256 for judgment in record.judgments}
+    review_edges = {
+        assessment_edge_name(assessment.assessmentId): recorded_assessment_digest(assessment)
+        for assessment in record.assessments
+    }
     try:
         expected = build_evidence_dependencies(
             "curator-coherence/v1",
@@ -417,6 +459,10 @@ def _require_current_dependencies(record: CuratorCoherenceRecord) -> None:
                 *(
                     dependency("evidence-bytes", path, digest)
                     for path, digest in sorted(evidence.items())
+                ),
+                *(
+                    dependency("review-record", name, digest)
+                    for name, digest in sorted(review_edges.items())
                 ),
                 dependency(
                     "validator",
@@ -550,25 +596,85 @@ def _task_context(contract: WorktreeContract):
 
 def _memory_candidate_tree(contract: WorktreeContract) -> str:
     assert contract.memory_worktree is not None
-    reports = contract.worktree_group / "reports"
-    reports.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(prefix=".curator-coherence-memory-", dir=reports) as temporary:
+    # Rule 6 (MIK-R74): this capture is unrecorded scratch, so it must not create the
+    # enclosure's reports/ directory -- an empty reports/ left behind by a read is a
+    # boundary violation. The system temp directory holds the throwaway index instead,
+    # and the publication path that writes attestation/reports mkdirs its own parents.
+    with TemporaryDirectory(prefix=".curator-coherence-memory-") as temporary:
         return worktree_candidate_tree(contract.memory_worktree, Path(temporary) / "index")
 
 
-def _require_leaf_external_memory(contract: WorktreeContract) -> None:
-    if contract.kind != "leaf" or contract.memory_mode != "external":
-        raise CuratorCoherenceError(
-            "curator-coherence-not-applicable",
-            "curator coherence requires one external-memory leaf enclosure",
-            next_action="status",
+def curator_coherence_assessments(
+    validated: ValidatedCuratorCoherence,
+    *,
+    current: Mapping[str, Mapping[tuple[str, str], tuple[str, str]]] | None = None,
+) -> tuple[AssessmentEntry, ...]:
+    """Project the stored assessment collection without deciding anything about it.
+
+    ``current`` is the caller's measurement of the world -- ``assessmentId -> (kind, name) ->
+    (algorithm, digest)`` -- and omitting it means *nothing measured anything*, which is its own
+    state: every record is then reported ``not-measured`` rather than ``stale``, because a projection
+    that turned an absent measurement into a measured movement published a fact the store never held
+    (``ICR-R15@v1``). A supplied measurement is read the shipped comparison's way: an identity it
+    covers and that disagrees is a measured movement, an identity it does not cover is unmeasured, and
+    only a record whose whole declaration is covered and agrees is reported ``current``.
+    """
+
+    return _measured_state(validated.record.assessments, current).assessments
+
+
+def curator_coherence_subject_assessment_state(
+    validated: ValidatedCuratorCoherence,
+    subject_id: str,
+    *,
+    current: Mapping[str, Mapping[tuple[str, str], tuple[str, str]]] | None = None,
+) -> SubjectAssessmentState:
+    """Report one subject's assessment state as one of the distinct reportable states.
+
+    A subject with no stored assessment answers ``none-recorded`` with a zero count -- never a
+    disposition, never ``no_concern_found``, never ``compatible``. A subject whose record is
+    ``unresolved`` answers ``unresolved``. A subject whose record no longer matches its recorded
+    inputs answers ``stale`` and stays readable. A subject nobody measured answers ``not-measured``,
+    and one whose measurement failed answers ``unavailable``. Those, plus ``current``, are the whole
+    of the read layer's vocabulary for this question, and no path here manufactures another.
+    ``subject_id`` is compared against :func:`assessment_subject_id`, which is the one spelling both
+    a writer and a reader derive rather than two spellings that have to agree.
+    """
+
+    subject = [
+        assessment
+        for assessment in validated.record.assessments
+        if assessment_subject_id(assessment) == subject_id
+    ]
+    if not subject:
+        return assessment_state_for(())
+    return _measured_state(subject, current)
+
+
+def _measured_state(
+    assessments: Sequence[ReviewAssessment],
+    current: Mapping[str, Mapping[tuple[str, str], tuple[str, str]]] | None,
+) -> SubjectAssessmentState:
+    """One subject's (or collection's) state, from the caller's per-record measurement.
+
+    The conversion is the shipped binding module's, in one implementation: ``None`` measures nothing
+    and an empty mapping measures nothing either, so neither can promote a stored record to current
+    (``ICR-R15@v1``).
+    """
+
+    return assessment_state_for(
+        assessments, statuses=supplied_measurement_statuses(assessments, current)
+    )
+
+
+def all_assessment_subject_ids(validated: ValidatedCuratorCoherence) -> tuple[str, ...]:
+    """Return every subject the stored collection has an assessment for, in stored order."""
+
+    return tuple(
+        dict.fromkeys(
+            assessment_subject_id(assessment) for assessment in validated.record.assessments
         )
-    if contract.memory_worktree is None:
-        raise CuratorCoherenceError(
-            "curator-coherence-memory-worktree-missing",
-            "the external-memory leaf has no memory worktree",
-            next_action="worktree_status",
-        )
+    )
 
 
 def _require_authority_identity(
@@ -583,66 +689,6 @@ def _require_authority_identity(
             "the stable authority belongs to a different leaf or contract",
             next_action="developer-decision",
         )
-
-
-def _require_record_identity(contract: WorktreeContract, record: CuratorCoherenceRecord) -> None:
-    if (record.leafId, record.contractPath) != (
-        contract.leaf_id,
-        contract.contract_path.as_posix(),
-    ):
-        raise CuratorCoherenceError(
-            "curator-coherence-record-identity-mismatch",
-            "the selected record belongs to a different leaf or contract",
-            next_action="developer-decision",
-        )
-
-
-def _require_evidence_refs(contract: WorktreeContract, record: CuratorCoherenceRecord) -> None:
-    for judgment in record.judgments:
-        evidence = resolve_curator_evidence_ref(contract, judgment.evidenceRef)
-        observed = _digest(evidence.read_bytes())
-        if observed != judgment.evidenceSha256:
-            raise CuratorCoherenceError(
-                "curator-coherence-evidence-stale",
-                f"judgment evidence bytes changed: {judgment.evidenceRef}",
-                expected={"evidenceSha256": judgment.evidenceSha256},
-                observed={"evidenceSha256": observed},
-                next_action="publish",
-            )
-
-
-def resolve_curator_evidence_ref(contract: WorktreeContract, reference: str) -> Path:
-    """Resolve one explicit evidence namespace without implicit path fallback."""
-
-    namespace, separator, relative_text = reference.partition(":")
-    roots = {
-        "code": contract.code_worktree,
-        "memory": contract.memory_worktree,
-        "task": contract.task_root,
-    }
-    root = roots.get(namespace)
-    relative = Path(relative_text)
-    if (
-        not separator
-        or root is None
-        or not relative_text
-        or relative.is_absolute()
-        or relative == Path(".")
-    ):
-        raise CuratorCoherenceError(
-            "curator-coherence-evidence-invalid",
-            "judgment evidence must use one explicit code:, memory:, or task: file reference",
-            next_action="publish",
-        )
-    resolved_root = root.resolve()
-    resolved = (resolved_root / relative).resolve(strict=False)
-    if not resolved.is_relative_to(resolved_root) or not resolved.is_file():
-        raise CuratorCoherenceError(
-            "curator-coherence-evidence-invalid",
-            f"judgment evidence must identify one existing scoped file: {reference}",
-            next_action="publish",
-        )
-    return resolved
 
 
 def _task_relative(contract: WorktreeContract, path: Path) -> str:
@@ -675,6 +721,7 @@ __all__ = [
     "curator_coherence_paths",
     "current_curator_coherence_predecessor",
     "load_curator_coherence_authority",
+    "load_curator_coherence_generation",
     "observe_curator_coherence_source",
     "require_current_curator_coherence",
     "resolve_curator_evidence_ref",

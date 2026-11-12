@@ -3,7 +3,9 @@
 ``atomic_write_text`` and ``atomic_write_bytes`` create a per-call temporary file in the
 destination directory, flush and fsync its content, replace the destination, then fsync
 the directory. ``atomic_replace`` applies the same replace-and-directory-fsync contract to
-an existing temporary path. Failed publishes remove their temporary file.
+an existing temporary path. Failed publishes remove their temporary file. A writer that is killed
+before it can do so leaves its temporary file behind; the next publish of the same destination
+removes it.
 
 An empty payload replaces the destination with an empty file; it never unlinks the
 destination. These functions do not lock. Callers that require serialization must hold
@@ -12,10 +14,18 @@ their store's lock before publishing.
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import sys
+import threading
+from contextlib import nullcontext, suppress
+from glob import escape
 from pathlib import Path
 from uuid import uuid4
+
+from agents_remember.errors import AtomicReplaceError
+from agents_remember.kernel.own_writes import OWN_WRITES
 
 
 def _temp_path_for(path: Path) -> Path:
@@ -27,6 +37,55 @@ def _temp_path_for(path: Path) -> Path:
     call sites used -- is shared by every concurrent writer of the same destination.
     """
     return path.with_name(f".{path.name}.{os.getpid()}.{uuid4().hex}.tmp")
+
+
+# What ``_temp_path_for`` appends to ``.<name>``: the writer's process id and its per-call id.
+_TEMP_WRITER = re.compile(r"\.(\d+)\.[0-9a-f]{32}\.tmp")
+# The temps that writes of this process hold right now, in any thread.
+_temps_in_flight: set[Path] = set()
+_temps_in_flight_guard = threading.Lock()
+
+
+def _writer_is_gone(temp: Path, process_id: int) -> bool:
+    """Whether the write that created ``temp`` can no longer finish or remove it."""
+    if process_id == os.getpid():
+        # This process's own number: a write in flight in another thread, or a leftover of an
+        # earlier process that had the same number.
+        with _temps_in_flight_guard:
+            return temp not in _temps_in_flight
+    try:
+        os.kill(process_id, 0)
+    except ProcessLookupError:
+        return True
+    except (OSError, OverflowError, ValueError):
+        # an impossible pid must not fail a publish already replaced.
+        return False
+    return False
+
+
+def _remove_abandoned_temps(path: Path) -> None:
+    """Remove the temps that interrupted publishes of ``path`` left beside it.
+
+    A writer that is killed between creating its temp and the replace cannot clean up after
+    itself. Its temp is hidden and nothing reads it, but it holds a whole copy of what was about
+    to be published, and it travels with its directory. The next publish of the same destination
+    removes it.
+
+    Only a temp whose writer is gone is removed. A writer that is alive keeps its temp, because
+    these functions do not lock and two writers of one destination may overlap. Never raises: a
+    leftover that cannot be removed stays one, and the publish before it has already succeeded.
+
+    Skipped on Windows, which offers no probe for another process that cannot also signal it.
+    """
+    if sys.platform == "win32":
+        return
+    prefix = f".{path.name}"
+    with suppress(OSError):
+        for temp in path.parent.glob(f"{escape(prefix)}.*.tmp"):
+            writer = _TEMP_WRITER.fullmatch(temp.name[len(prefix) :])
+            if writer is not None and _writer_is_gone(temp, int(writer.group(1))):
+                with suppress(OSError):
+                    temp.unlink(missing_ok=True)
 
 
 def _fsync_directory(directory: Path) -> None:
@@ -48,31 +107,58 @@ def _fsync_directory(directory: Path) -> None:
         os.close(handle)
 
 
-def atomic_write_bytes(path: Path, payload: bytes) -> None:
+def atomic_write_bytes(path: Path, payload: bytes, *, note_own: bool = False) -> None:
     """Publish ``payload`` at ``path``: readers see the old file or the new one, never both.
 
     Creates ``path``'s parent, writes and fsyncs a private temp, replaces the
     destination, then fsyncs the directory. The temp is removed on any failure --
     ``BaseException``, so a ``KeyboardInterrupt`` or a cancellation between the write and
-    the replace does not leave an orphan either.
+    the replace does not leave an orphan either. A process that is killed leaves one; the next
+    publish of ``path`` removes it (:func:`_remove_abandoned_temps`).
+
+    With ``note_own``, announce the path before publishing and keep the temporary
+    descriptor open through rename and directory fsync. Its post-rename identity and
+    the payload digest are recorded only after durability succeeds. Native events
+    received while the note is pending are judged on the next watcher pass; a failed
+    write clears the announcement. Outside changes before the late note fail its
+    identity/digest check, so they still wake the projector. No file operation holds
+    the own-write registry's metadata lock.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _temp_path_for(path)
-    try:
-        with tmp.open("wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp, path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
-    _fsync_directory(path.parent)
+    operation = OWN_WRITES.announcing(os.fspath(path)) if note_own else nullcontext()
+    with operation as announcement:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _temp_path_for(path)
+        with _temps_in_flight_guard:
+            _temps_in_flight.add(tmp)
+        try:
+            with tmp.open("wb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+                os.replace(tmp, path)
+                written = os.fstat(handle.fileno())
+                _remove_abandoned_temps(path)
+                _fsync_directory(path.parent)
+                if note_own:
+                    OWN_WRITES.note_written_identity(
+                        os.fspath(path),
+                        written,
+                        content_sha256=hashlib.sha256(payload).hexdigest(),
+                        announcement=announcement,
+                    )
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        finally:
+            with _temps_in_flight_guard:
+                _temps_in_flight.discard(tmp)
 
 
-def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None:
+def atomic_write_text(
+    path: Path, text: str, *, encoding: str = "utf-8", note_own: bool = False
+) -> None:
     """:func:`atomic_write_bytes` for text. The encoding is explicit, never the locale's."""
-    atomic_write_bytes(path, text.encode(encoding))
+    atomic_write_bytes(path, text.encode(encoding), note_own=note_own)
 
 
 def atomic_replace(source: Path, destination: Path) -> None:
@@ -85,8 +171,40 @@ def atomic_replace(source: Path, destination: Path) -> None:
 
     Both directories are fsynced because a cross-directory rename changes two of them;
     when they are the same directory it is flushed once.
+
+    The two legs fail independently and are reported separately: a failed rename leaves the
+    destination on its previous bytes, while a failed directory flush happens *after* the
+    rename has already published the new bytes and moves nothing back. One indistinguishable
+    failure cannot tell a caller which of those two states it is in, so each leg raises
+    :class:`~agents_remember.errors.AtomicReplaceError` naming itself and the destination's state.
     """
-    os.replace(source, destination)
-    _fsync_directory(destination.parent)
-    if source.parent != destination.parent:
-        _fsync_directory(source.parent)
+    try:
+        os.replace(source, destination)
+    except OSError as exc:
+        raise AtomicReplaceError(
+            "replace",
+            destination.as_posix(),
+            destination_state="previous-bytes",
+            detail=(
+                f"the rename of {source.as_posix()} onto {destination.as_posix()} failed; the "
+                "destination still holds its previous bytes and nothing was published"
+            ),
+            cause=exc,
+        ) from exc
+    try:
+        _fsync_directory(destination.parent)
+        if source.parent != destination.parent:
+            _fsync_directory(source.parent)
+    except OSError as exc:
+        raise AtomicReplaceError(
+            "directory-fsync",
+            destination.as_posix(),
+            destination_state="source-absent",
+            detail=(
+                f"the rename of {source.as_posix()} onto {destination.as_posix()} succeeded and "
+                "the destination now holds the new bytes; flushing its directory entry to stable "
+                "storage failed, so the rename is published but not durable and a host loss may "
+                "restore the previous name state"
+            ),
+            cause=exc,
+        ) from exc

@@ -1,6 +1,10 @@
-import { ListBox, ListBoxItem, type Selection } from "react-aria-components";
+import { ListBox, ListBoxItem, type Selection } from 'react-aria-components';
+import { useRef } from 'react';
 
-import { css } from "../../../styled-system/css";
+import { css } from '../../../styled-system/css';
+import { useDashboard } from '../../data/store';
+import { TaskStatusWord } from '../detail-panel/pageParts';
+import { useElementVisible } from './useElementVisible';
 import {
   chip,
   healthDot,
@@ -11,17 +15,34 @@ import {
   stackMeta,
   stackRepo,
   stackTaskName,
-} from "./styles";
-import type { EngineProcessView } from "./engineRoomTypes";
+} from './styles';
+import type { EngineProcessView } from './engineRoomTypes';
 
-const headWrap = css({ display: "flex", alignItems: "center", gap: "0.35rem", minWidth: "0" });
+const headWrap = css({ display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: '0' });
 
-function enclosureLabel(node: EngineProcessView["node"]) {
+function enclosureLabel(node: EngineProcessView['node']) {
   return node.leafId || node.taskName;
 }
 
-function enclosureContext(node: EngineProcessView["node"]) {
+function enclosureContext(node: EngineProcessView['node']) {
   return node.leafId ? `${node.taskName} · ${node.repoName}` : node.repoName;
+}
+
+export function BoundTaskStatus({
+  enclosure,
+  active,
+  testid,
+}: {
+  enclosure: string;
+  active: boolean;
+  testid: string;
+}) {
+  const task = useDashboard((state) =>
+    Object.values(state.tasks).find((entry) =>
+      entry.worktrees.some((worktree) => worktree.enclosure === enclosure),
+    ),
+  );
+  return task ? <TaskStatusWord task={task} active={active} testid={testid} /> : null;
 }
 
 export function EnclosureStackList({
@@ -33,16 +54,19 @@ export function EnclosureStackList({
   selectedKey: string | null;
   onSelect: (key: string) => void;
 }) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const visible = useElementVisible(listRef);
   return (
     <ListBox
+      ref={listRef}
       aria-label="Worktree enclosures"
       selectionMode="single"
       disallowEmptySelection
       selectedKeys={selectedKey ? [selectedKey] : []}
       onSelectionChange={(keys: Selection) => {
-        if (keys === "all") return;
+        if (keys === 'all') return;
         for (const key of keys) {
-          if (typeof key === "string") {
+          if (typeof key === 'string') {
             onSelect(key);
             break;
           }
@@ -51,7 +75,7 @@ export function EnclosureStackList({
       className={stackList}
       data-testid="enclosure-stack-list"
     >
-      {views.map(({ node, lifecycle }) => {
+      {views.map(({ node }) => {
         const label = enclosureLabel(node);
         return (
           <ListBoxItem
@@ -70,10 +94,14 @@ export function EnclosureStackList({
             </div>
             <div className={stackRepo}>{enclosureContext(node)}</div>
             <div className={stackMeta}>
-              {lifecycle ? <span className={chip}>{lifecycle.state}</span> : null}
+              <BoundTaskStatus
+                enclosure={node.enclosure}
+                active={visible}
+                testid="engine-room-card-task-status"
+              />
               <span className={chip}>review {node.humanReviewStatus}</span>
               <span className={chip}>closeout {node.closeoutStatus}</span>
-              {node.integrationStatus !== "not-started" ? (
+              {node.integrationStatus !== 'not-started' ? (
                 <span className={chip}>integ {node.integrationStatus}</span>
               ) : null}
             </div>

@@ -17,13 +17,14 @@ MAX_DECLARED_ROLE_LENGTH = 64
 
 
 class DeclaredCaller(BaseModel):
-    """One declared structural identity (role + canonical task document).
+    """Declared identity of an ambient caller: a short role label plus the canonical task document it acts on."""
 
-    Strict and bounded: the role is a short non-blank label and the document is
-    a canonical ``TaskDocumentRef``. Semantic authorization (may this role grade,
-    select, decide, or declare) stays in the consuming mechanism -- this model
-    only bounds the shape of what an ambient caller may supply.
-    """
+    # Design rationale (not published in input schemas; kept short for callers
+    # per Parent ruling 0a408a8a): strict and bounded -- the role is a short
+    # non-blank label and the document is a canonical ``TaskDocumentRef``.
+    # Semantic authorization (may this role grade, select, decide, or declare)
+    # stays in the consuming mechanism -- this model only bounds the shape of
+    # what an ambient caller may supply.
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

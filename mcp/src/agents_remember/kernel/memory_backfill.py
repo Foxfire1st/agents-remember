@@ -56,7 +56,7 @@ also the only thing that can undo this: no ``git revert`` restores a commit obje
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -626,6 +626,7 @@ def apply_memory_backfill(
     request: MemoryBackfillRequest,
     *,
     expected_digest: str | None = None,
+    commit_check: Callable[[str], None] | None = None,
 ) -> MemoryBackfillResult:
     """Write the plan's trailers onto the history, moving only the refs the caller named.
 
@@ -640,6 +641,11 @@ def apply_memory_backfill(
     rewrite of this same history that nobody has looked at yet. The check comes AFTER the plan,
     because a run with nothing to write rescues nothing and a second run over an already-migrated
     history must therefore be a no-op rather than a refusal about refs the first run created.
+
+    Every rewritten commit's tree passes ``commit_check`` (MIK-R152 rules 1, 7) before any named
+    ref moves: the rewritten objects are new commits on possibly covered refs, and identical
+    trees alone do not establish an earlier hook pass. The check is injected because this kernel
+    module cannot import the runner; a run without one is refused, never silently unchecked.
     """
 
     plan = plan_memory_backfill(request)
@@ -650,6 +656,7 @@ def apply_memory_backfill(
     _refuse_unsafe_rescue(request.memory_repo, request.rescue_ref, targets)
     rescue_refs = _write_rescue_refs(request.memory_repo, request.rescue_ref, plan.tip, targets)
     identity = _rewrite_history(request.memory_repo, plan)
+    _require_commit_check_on_rewritten_trees(request.memory_repo, identity, commit_check)
     moved = _move_targets(request.memory_repo, targets, identity)
     return MemoryBackfillResult(
         old_tip=plan.tip,
@@ -797,7 +804,12 @@ def _rebuild(
     parents: Sequence[str],
     code_commit: str | None,
 ) -> str:
-    """One commit object, identical to its original but for the appended trailer."""
+    """One commit object, identical to its original but for the appended trailer.
+
+    The tree hash is the original commit's own (``%T``); the rewritten trees
+    still pass the repository's commit check before any ref moves
+    (:func:`_require_commit_check_on_rewritten_trees`, MIK-R152 rules 1, 7).
+    """
 
     message = _message(memory_repo, commit)
     if code_commit is not None:
@@ -832,6 +844,45 @@ def _identity(memory_repo: Path, commit: str) -> dict[str, str]:
         "GIT_COMMITTER_EMAIL": committer_email,
         "GIT_COMMITTER_DATE": committer_date,
     }
+
+
+def _require_commit_check_on_rewritten_trees(
+    memory_repo: Path,
+    identity: dict[str, str],
+    commit_check: Callable[[str], None] | None,
+) -> None:
+    """Run the repository's commit check on every rewritten tree before refs move (MIK-R152).
+
+    The rewritten commits are new objects the named refs will adopt; byte-identical
+    trees alone do not establish that the repository's hook ever judged them. Each
+    DISTINCT tree is judged once. A refusal moves no ref (the rescue refs already
+    written stay as the undo); a run with no check runner is refused, never
+    silently unchecked.
+    """
+    if commit_check is None:
+        raise MemoryBackfillRefusal(
+            "no commit-check runner was bound for this migration; refusing rather than "
+            "moving rewritten commits onto named refs unchecked"
+        )
+    trees: dict[str, str] = {}
+    for old, new in identity.items():
+        if new == old:
+            continue
+        tree = run_git(memory_repo, ["rev-parse", f"{new}^{{tree}}"])
+        if tree.returncode != 0:
+            raise MemoryBackfillRefusal(
+                f"rewritten commit {new} has no readable tree: "
+                f"{tree.stderr.strip() or 'git rev-parse failed'}"
+            )
+        trees.setdefault(tree.stdout.strip(), new)
+    for tree, commit in sorted(trees.items()):
+        try:
+            commit_check(tree)
+        except Exception as error:
+            raise MemoryBackfillRefusal(
+                f"rewritten commit {commit} (tree {tree}) is refused by the repository's "
+                f"commit check: {error}; no named ref moved"
+            ) from error
 
 
 def _move_targets(

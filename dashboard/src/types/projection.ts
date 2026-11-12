@@ -6,42 +6,19 @@
 // Regenerate: PYTHONPATH=mcp/src python scripts/sync-projection-types.py
 // Drift check: PYTHONPATH=mcp/src python scripts/sync-projection-types.py --check
 
-export const LIVE_STATES = ["running", "paused", "blocked", "awaiting-developer"] as const;
-
-export const TERMINAL_STATES = ["completed", "abandoned"] as const;
-
-export const LIFECYCLE_STATES = [...LIVE_STATES, ...TERMINAL_STATES] as const;
-
-export type State = (typeof LIFECYCLE_STATES)[number];
-
-export type TerminalState = (typeof TERMINAL_STATES)[number];
-
-export type ActiveState = (typeof LIVE_STATES)[number];
-
-export const ACTIVE_STATES: readonly ActiveState[] = LIVE_STATES;
-
-type FiledOnce<S extends never> = S;
-
-export type StatesAreFiledOnce = FiledOnce<ActiveState & TerminalState>;
-
-export const PHASES = ["request", "trust-checkpoint", "reframe-research", "decide", "build", "close"] as const;
-
-export type Phase = (typeof PHASES)[number];
-
 export const ATTENTION_SEVERITIES = ["alarm", "warn", "info"] as const;
-
 export type AttentionSeverity = (typeof ATTENTION_SEVERITIES)[number];
 
-export const ATTENTION_LANES = ["repo", "worktree", "lifecycle"] as const;
-
+export const ATTENTION_LANES = ["repo", "worktree", "agent", "task"] as const;
 export type AttentionLane = (typeof ATTENTION_LANES)[number];
 
-export const PROCESS_FACT_STATES = ["observed", "derived", "planned", "missing", "stale", "not-applicable"] as const;
+export const ATTENTION_ITEM_CLASSES = ["action", "notice", "operational"] as const;
+export type AttentionItemClass = (typeof ATTENTION_ITEM_CLASSES)[number];
 
+export const PROCESS_FACT_STATES = ["observed", "derived", "planned", "missing", "stale", "not-applicable"] as const;
 export type ProcessFactState = (typeof PROCESS_FACT_STATES)[number];
 
 export const PROCESS_HEALTHS = ["nominal", "running", "blocked", "failed", "stale", "skipped", "unknown", "complete"] as const;
-
 export type ProcessHealth = (typeof PROCESS_HEALTHS)[number];
 
 export interface ActionAvailability {
@@ -51,74 +28,53 @@ export interface ActionAvailability {
   nextSafeAction?: string;
 }
 
-export interface AgentNotifierHeartbeat {
-  ageSeconds: number | null;
-  lastSweepDurationSeconds: number | null;
-  lastTickAt: string | null;
-  pendingInboxCount: number;
-  redeliverableInboxCount: number;
-  stale: boolean;
-  staleCutoffSeconds: number;
-}
-
-export interface AgentPickupNode {
-  ageSeconds?: number;
-  agentId?: string;
-  artifactPath?: string;
-  attemptCount: number;
-  deliveredToSession?: string;
-  deliveryState: string;
-  entryId: string;
-  escalatedAt?: string;
-  gateId?: string;
-  id: string;
-  lastAttemptAt?: string;
-  lifecycleId?: string;
-  messageKind: string;
-  nextAttemptAt?: string;
-  ownerAgentId?: string;
-  ownerLifecycleId?: string;
-  ownerRole?: string;
-  ownerTaskDocumentRef?: TaskDocumentRef;
-  recipientRole?: string;
-  senderAgentId?: string;
-  senderRole?: string;
-  state: string;
-  subjectTaskDocumentRef?: TaskDocumentRef;
-  taskDocumentRef?: TaskDocumentRef;
-  ttlSeconds: number;
-}
-
 export interface Analytics {
-  agentPickups: AgentPickupNode[];
   attentionQueue: AttentionItem[];
   driftSnapshots: DriftSnapshotNode[];
   engineProcesses: EngineProcessNode[];
-  expectationRows: ExpectationRowNode[];
   ledgers: LedgerNode[];
   routeCoverage: RouteCoverageNode[];
-  series: SeriesNode[];
-  setupProgress: SetupProgressNode[];
-  setupSummaries: SetupSummaryNode[];
-  stalestSidecars: SidecarStaleNode[];
-  taskDocuments: TaskDocNode[];
   toolReports: ToolReportNode[];
 }
 
 export interface AttentionItem {
+  actionableFingerprint?: string;
+  agentId?: string;
+  agentRole?: string;
   detail?: string;
+  dismissible: boolean;
   enclosure?: string;
-  gateId?: string;
+  heldMessageId?: string;
   id: string;
+  itemClass: AttentionItemClass;
   kind: string;
   lane: AttentionLane;
-  lifecycleId?: string;
-  providerId?: string;
+  occurrenceId?: string;
+  promptId?: string;
   repoId?: string;
   severity: AttentionSeverity;
-  signalTs?: string;
+  taskKey?: string;
+  taskReference?: TaskDocumentRef;
   title: string;
   waitSeconds?: number;
+}
+
+export interface BuildCurrentness {
+  firstSeenAt?: string;
+  installedDigest?: string;
+  loadedDigest?: string;
+  mode: "installed" | "checkout";
+  reason?: string;
+  remedy?: string;
+  state: "current" | "stale" | "unknown";
+}
+
+export interface CheckoutBinding {
+  configuredRoot?: string;
+  coordinationRoot: string;
+  remedy: string;
+  state: string;
+  worktree: string;
 }
 
 export interface CloseoutCandidateNode {
@@ -161,6 +117,11 @@ export interface CommitRefNode {
   path?: string;
 }
 
+export interface DirectGrantNode {
+  grantedAt: string;
+  grantedBy: string;
+}
+
 export interface DiscardUnstartedProofNode {
   childJson: Record<string, unknown>;
   childMarkdown: Record<string, unknown>;
@@ -190,6 +151,7 @@ export interface DiscardedSubTaskNode {
 
 export interface DriftSnapshotNode {
   actionableCount: number;
+  actionableFingerprint?: string;
   branch: string;
   checkedAt?: string;
   counts: Record<string, number>;
@@ -237,13 +199,9 @@ export interface EngineProcessNode {
   closeoutStatus: string;
   codeSource: CommitRefNode;
   codeWorktree: CommitRefNode;
-  completedPhases: string[];
-  currentPhase?: string;
   edges: EngineProcessEdge[];
   enclosure: string;
-  failedPhases: string[];
   health: ProcessHealth;
-  heartbeatAgeSeconds?: number;
   humanReviewStatus: string;
   id: string;
   integrationStatus: string;
@@ -260,42 +218,13 @@ export interface EngineProcessNode {
   missingFacts: string[];
   nextAction?: string;
   phase: string;
-  providers: ProviderBootNode[];
   repoName: string;
-  retryArgs?: Record<string, unknown>;
-  seedFallback: boolean;
-  setupState?: string;
   sourceFiles: string[];
   sourceLineage?: SourceLineageProjection;
   summary: string;
   taskId: string;
   taskName: string;
   worktreeGroup: string;
-}
-
-export interface ExpectationRowNode {
-  dueAt: string;
-  id: string;
-  kind: string;
-  note?: string;
-  overdue: boolean;
-  sourceId: string;
-  state: string;
-  subjectAgentId?: string;
-  subjectLifecycleId?: string;
-  taskDocumentRef?: TaskDocumentRef;
-}
-
-export interface GateNode {
-  decidedBy?: string;
-  decidedVia?: string;
-  decisions: string[];
-  evidenceRefs: Record<string, unknown>[];
-  id: string;
-  kind: string;
-  packet: Record<string, unknown>;
-  state: string;
-  ts: string;
 }
 
 export interface LandingRefNode {
@@ -362,26 +291,6 @@ export interface LifecycleOperationProjection {
   worker?: LifecycleWorkerObservation;
 }
 
-export interface LifecycleProjection {
-  actions: ActionAvailability[];
-  ask?: Record<string, unknown>;
-  enclosure?: string;
-  fleeting: boolean;
-  gate?: GateNode;
-  id: string;
-  inferred: boolean;
-  lastEventTs: string;
-  phase: Phase;
-  repoId?: string;
-  scope?: string;
-  staleSeconds?: number;
-  startedAt: string;
-  state: State;
-  stateEnteredAt: string;
-  tokenSeries: TokenSample[];
-  tokens: number;
-}
-
 export interface LifecycleProjectionComponentBindings {
   /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
   approval?: string;
@@ -432,44 +341,18 @@ export interface LifecycleWorkerObservation {
   workerIdentitySha256?: string;
 }
 
-type Camel<S extends string> = S extends `${infer Head}-${infer Tail}`
-  ? `${Head}${Capitalize<Camel<Tail>>}`
-  : S;
-
-export type StateCountField<S extends ActiveState> = `${Camel<S>}Count`;
-
-export type LifecycleStateCounts = { [S in ActiveState as StateCountField<S>]: number };
-
-export function stateCountField<S extends ActiveState>(state: S): StateCountField<S> {
-  const [head, ...rest] = state.split("-");
-  const camel = head + rest.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join("");
-  return `${camel}Count` as StateCountField<S>;
+export interface LimitedSeat {
+  account: string;
+  agentId: string;
+  /** JSON Schema refinements: {"format":"date-time"} */
+  resetsAt: string;
+  role: string;
+  source: string;
+  window: string;
 }
 
-function lifecycleStateCounts(
-  lifecycles: readonly Pick<LifecycleProjection, "state">[],
-): LifecycleStateCounts {
-  return Object.fromEntries(
-    ACTIVE_STATES.map((state) => [
-      stateCountField(state),
-      lifecycles.filter((entry) => entry.state === state).length,
-    ]),
-  ) as LifecycleStateCounts;
-}
-
-export interface Metrics extends LifecycleStateCounts {
-  lifecycleCount: number;
-  stalenessHistogram: Record<string, number>;
-  totalTokens: number;
-}
-
-export function metricsFor(lifecycles: readonly LifecycleProjection[]): Metrics {
-  return {
-    lifecycleCount: lifecycles.length,
-    totalTokens: lifecycles.reduce((sum, entry) => sum + entry.tokens, 0),
-    stalenessHistogram: {},
-    ...lifecycleStateCounts(lifecycles),
-  };
+export interface Metrics {
+  ignoredHostAgents: number;
 }
 
 export interface ProjectionInvalidationResult {
@@ -503,24 +386,10 @@ export interface ProjectionSourceProblem {
   state: "missing" | "unreadable" | "invalid";
 }
 
-export interface ProviderBootNode {
-  factState: ProcessFactState;
-  id: string;
-  role: string;
-  runtimeState: string;
-}
-
-export interface ProviderNode {
-  id: string;
-  indexingState: string;
-  ok?: boolean;
-  repoId?: string;
-  role?: string;
-  scope: string;
-  snapshotStaleSeconds?: number;
-  state: string;
-  watcherUp: boolean;
-  worktreeGroup?: string;
+export interface ProviderLimit {
+  seats: LimitedSeat[];
+  /** JSON Schema refinements: {"format":"date-time"} */
+  until: string;
 }
 
 export interface RouteCoverageNode {
@@ -529,41 +398,6 @@ export interface RouteCoverageNode {
   repository?: string;
   route: string;
   sourceFilesInScope: number;
-}
-
-export interface SeriesNode {
-  ageSeconds?: number;
-  createdAt: string;
-  decisions: TaskDecisionNode[];
-  discardedCount: number;
-  /** JSON Schema refinements: {"maxItems":256} */
-  discardedSubTasks: DiscardedSubTaskNode[];
-  docPath: string;
-  doneCount: number;
-  objective: string;
-  repository: string;
-  sections: SeriesSectionNode[];
-  seriesId: string;
-  seriesTokenTotal: number;
-  status: string;
-  subTasks: SeriesSubTaskNode[];
-  title: string;
-  totalCount: number;
-}
-
-export interface SeriesSectionNode {
-  body: string;
-  heading: string;
-  kind: string;
-}
-
-export interface SeriesSubTaskNode {
-  createdAt?: string;
-  file: string;
-  name: string;
-  number: string;
-  scope: string;
-  status: string;
 }
 
 export interface ServingBuild {
@@ -575,32 +409,6 @@ export interface ServingBuild {
   pythonExecutable?: string;
   sourceDigest?: string;
   version: string;
-}
-
-export interface SetupProgressNode {
-  completedCount: number;
-  currentPhase?: string;
-  failedPhases: string[];
-  group: string;
-  heartbeatAgeSeconds?: number;
-  state: string;
-}
-
-export interface SetupSummaryNode {
-  action: string;
-  generatedAt?: string;
-  ok?: boolean;
-  ready?: boolean;
-  resultCounts: Record<string, number>;
-  snapshotStaleSeconds?: number;
-  state?: string;
-}
-
-export interface SidecarStaleNode {
-  ageSeconds?: number;
-  lastVerifiedDate: string;
-  onboardingFile: string;
-  repository: string;
 }
 
 export interface SourceLineageEdge {
@@ -638,45 +446,28 @@ export interface TaskCodeExampleNode {
   why: string;
 }
 
+export interface TaskCounts {
+  aborted: number;
+  completed: number;
+  paused: number;
+  planned: number;
+  started: number;
+  unknown: number;
+  waiting: number;
+  works: number;
+}
+
 export interface TaskDecisionNode {
   at: string;
   decision: string;
+  product_record: boolean;
   rationale: string;
 }
 
-export interface TaskDocNode {
-  ageSeconds?: number;
-  bodyRevision: string;
-  codeExamples: TaskCodeExampleNode[];
-  createdAt: string;
-  currentStep?: string;
-  decisions: TaskDecisionNode[];
-  design?: string;
-  discardedCount?: number;
-  /** JSON Schema refinements: {"maxItems":256} */
-  discardedSubTasks?: DiscardedSubTaskNode[];
-  docPath: string;
-  executionGraph?: TaskExecutionGraphNode;
-  executionGraphView?: TaskExecutionGraphView;
-  executionNature?: "organizational" | "atomic";
-  executionWaves: TaskExecutionNode[][];
+export interface TaskDependencyNode {
+  gone: boolean;
   id: string;
-  kind: string;
-  lifecycleId?: string;
-  masterLifecycleId?: string;
-  objective: string;
-  openQuestions: string[];
-  orchestrates: string[];
-  references: string[];
-  repository: string;
-  requirements: string[];
-  seats: TaskSeatNode[];
-  sections: TaskSectionNode[];
-  status: string;
-  steps: TaskStepNode[];
-  stepsDone: number;
-  stepsTotal: number;
-  subTasks: TaskSubTaskRefNode[];
+  reference?: TaskDocumentRef;
   title: string;
 }
 
@@ -698,6 +489,27 @@ export interface TaskDocProjectionEffect {
 export interface TaskDocumentRef {
   path: string;
   repository: string;
+}
+
+export interface TaskEntry {
+  activity?: "works" | "waiting" | "paused" | "unknown";
+  children: string[];
+  counts: TaskCounts;
+  disagreements?: TaskListDisagreement[];
+  eventAt?: string;
+  id: string;
+  key: string;
+  parent?: string;
+  providerLimit?: ProviderLimit;
+  reference?: TaskDocumentRef;
+  scope?: string;
+  stage: "planned" | "started" | "aborted" | "completed";
+  stepsDone: number;
+  stepsTotal: number;
+  summary?: TaskSummary;
+  title: string;
+  waitingSeats?: WaitingSeat[];
+  worktrees: EnclosureNode[];
 }
 
 export interface TaskExecutionEdgeNode {
@@ -728,6 +540,7 @@ export interface TaskExecutionNode {
 }
 
 export interface TaskExecutionNodeView {
+  cycle?: boolean;
   executionNature?: string;
   frontierState: "landed" | "ready" | "waiting" | "in-flight" | "abandoned";
   kind: "lump" | "segment";
@@ -747,10 +560,41 @@ export interface TaskExecutionPredecessorNode {
   reason: string;
 }
 
+export interface TaskHeaderNoteNode {
+  label: string;
+  value: string;
+}
+
 export interface TaskIntentIdentity {
   /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
   digest: string;
   schema: "task-intent/v1";
+}
+
+export interface TaskListDisagreement {
+  kind: "names-another-master" | "not-listed" | "listed-twice" | "unresolvable-master";
+  masterLiteral?: string;
+  parent?: string;
+  record: TaskDocumentRef;
+  recordMaster?: TaskDocumentRef;
+  row?: string;
+}
+
+export interface TaskReviewFindingNode {
+  description: string;
+  descriptionTruncated: boolean;
+  findingId: string;
+  open: boolean;
+}
+
+export interface TaskReviewStateNode {
+  additionalRounds: number;
+  developerApproval?: string;
+  findings: TaskReviewFindingNode[];
+  openFindings: number;
+  pending: boolean;
+  round: number;
+  totalFindings: number;
 }
 
 export interface TaskSeatNode {
@@ -777,6 +621,10 @@ export interface TaskStepDispositionNode {
 export interface TaskStepNode {
   disposition?: TaskStepDispositionNode;
   id: string;
+  note?: string;
+  noteTruncated: boolean;
+  outcome?: string;
+  outcomeTruncated: boolean;
   status: string;
   substeps: TaskSubStepNode[];
   title: string;
@@ -785,23 +633,50 @@ export interface TaskStepNode {
 export interface TaskSubStepNode {
   disposition?: TaskStepDispositionNode;
   id: string;
+  note?: string;
   status: string;
   title: string;
 }
 
-export interface TaskSubTaskRefNode {
-  file: string;
-  linkedLifecycleId?: string;
-  masterRef?: TaskDocumentRef;
-  name: string;
-  number: string;
-  scope: string;
-  status: string;
-}
-
-export interface TokenSample {
-  cumulative: number;
-  ts: string;
+export interface TaskSummary {
+  acceptance?: string;
+  ageSeconds?: number;
+  bodyRevision: string;
+  codeExamples: TaskCodeExampleNode[];
+  completedAt?: string;
+  createdAt: string;
+  currentStep?: string;
+  decisions: TaskDecisionNode[];
+  design?: string;
+  directGrant?: DirectGrantNode;
+  discardedCount?: number;
+  /** JSON Schema refinements: {"maxItems":256} */
+  discardedSubTasks?: DiscardedSubTaskNode[];
+  executionGraph?: TaskExecutionGraphNode;
+  executionGraphView?: TaskExecutionGraphView;
+  executionNature?: "organizational" | "atomic";
+  executionWaves: TaskExecutionNode[][];
+  form: "sprint" | "master" | "task";
+  headerNotes: TaskHeaderNoteNode[];
+  headerNotesTotal?: number;
+  integrationBranch?: string;
+  kind: string;
+  neededByTasks?: TaskDependencyNode[];
+  nonGoals?: string;
+  objective: string;
+  openQuestions: string[];
+  orchestrates: string[];
+  references: string[];
+  requirements: string[];
+  reviewState?: TaskReviewStateNode;
+  seats: TaskSeatNode[];
+  sections: TaskSectionNode[];
+  statusNote?: string;
+  statusNoteTruncated: boolean;
+  steps: TaskStepNode[];
+  type: string;
+  waitsFor?: string[];
+  waitsForTasks?: TaskDependencyNode[];
 }
 
 export interface ToolReportNode {
@@ -811,7 +686,21 @@ export interface ToolReportNode {
   tool: string;
 }
 
-export type SubTaskRow = TaskSubTaskRefNode | SeriesSubTaskNode;
+export interface WaitingSeat {
+  agentId: string;
+  /** JSON Schema refinements: {"format":"date-time"} */
+  checkDueAt?: string;
+  detail?: string;
+  role?: string;
+  /** JSON Schema refinements: {"format":"date-time"} */
+  since: string;
+  waitsFor: ("subagent" | "background")[];
+}
+
+export interface WatcherHealth {
+  downSince?: number;
+  running: boolean;
+}
 
 export interface WorkspaceProjection {
   activeWorktreeGroups: string[];
@@ -819,11 +708,13 @@ export interface WorkspaceProjection {
   closeoutQueues?: CloseoutQueueNode[];
   enclosures: EnclosureNode[];
   generatedAt: string;
-  lifecycles: LifecycleProjection[];
   metrics: Metrics;
-  providers: ProviderNode[];
+  taskCounts: TaskCounts;
+  tasks: TaskEntry[];
   version: number;
-  agentNotifierHeartbeat?: AgentNotifierHeartbeat;
+  buildCurrentness?: BuildCurrentness;
+  checkoutBinding?: CheckoutBinding;
   servingBuild?: ServingBuild;
-  supervisorHeartbeat?: AgentNotifierHeartbeat;
+  servingProcessId?: number;
+  watcherHealth?: WatcherHealth;
 }

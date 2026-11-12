@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "copies": [
+    {
+      "source": "skills",
+      "targets": [
+        {"label": "mcp package data", "path": "mcp/src/agents_remember/package_data/runtime/skills"}
+      ],
+      "ignoreNames": [".DS_Store", ".pytest_cache", ".ruff_cache", "__pycache__"],
+      "ignoreSuffixes": [".pyc"]
+    }
+  ]
+}

@@ -3,8 +3,7 @@
 A transport-side concern kept out of the reducer: ``project_and_write`` produces full
 :class:`WorkspaceProjection` snapshots, and this module turns two consecutive snapshots
 into the minimal set of per-entity change events the ``state`` SSE channel emits. The
-flat, id-keyed schema (lifecycles/enclosures/providers cross-referenced by id --
-North-Star #2) makes the diff a simple by-key compare; the client merges each named
+reference-keyed task entries and id-keyed enclosures makes the diff a simple by-key compare; the client merges each named
 event into its store by the same key. Output ordering is deterministic (upserts in
 projection order, removals sorted) so replay/sim fixtures compare byte-for-byte.
 
@@ -60,7 +59,9 @@ def _strip_volatile(value: Any) -> Any:
 
 def _stable_dump(model: BaseModel) -> Any:
     """One node's stable form: the wire dump (by-alias, none-free) minus volatile ages."""
-    return _strip_volatile(model.model_dump(by_alias=True, exclude_none=True))
+    # JSON mode: this form is compared and streamed as JSON, and a limited task carries
+    # `datetime` values in `providerLimit` (MIK-R190 rule 13).
+    return _strip_volatile(model.model_dump(mode="json", by_alias=True, exclude_none=True))
 
 
 @dataclass(frozen=True)
@@ -72,9 +73,9 @@ class StableProjectionState:
     payload) instead of re-dumping both sides of the compare.
     """
 
-    lifecycles: dict[str, Any]
     enclosures: dict[str, Any]
-    providers: dict[str, Any]
+    tasks: dict[str, Any]
+    task_counts: Any
     active_worktree_groups: list[str]
     metrics: Any
     analytics: Any
@@ -83,9 +84,9 @@ class StableProjectionState:
 def stable_projection_state(projection: WorkspaceProjection) -> StableProjectionState:
     """Compute the volatile-free compare forms for one projection."""
     return StableProjectionState(
-        lifecycles={item.id: _stable_dump(item) for item in projection.lifecycles},
+        tasks={item.key: _stable_dump(item) for item in projection.tasks},
+        task_counts=_stable_dump(projection.taskCounts),
         enclosures={item.enclosure: _stable_dump(item) for item in projection.enclosures},
-        providers={item.id: _stable_dump(item) for item in projection.providers},
         active_worktree_groups=list(projection.activeWorktreeGroups),
         metrics=_stable_dump(projection.metrics),
         analytics=_stable_dump(projection.analytics),
@@ -96,8 +97,8 @@ def stable_projection_state(projection: WorkspaceProjection) -> StableProjection
 class DeltaEvent:
     """One named SSE delta: an upserted projection node, or a removal marker.
 
-    ``event`` is the SSE event name the client listens on (``lifecycle``,
-    ``lifecycle.removed``, ``enclosure``, ``provider``, ``metrics``, ``analytics``).
+    ``event`` is the SSE event name the client listens on (``task``,
+    ``task.removed``, ``enclosure``, ``metrics``, ``analytics``).
     ``data`` is the upserted node (a projection ``BaseModel``) or, for a removal, a
     ``{key: id}`` marker.
     """
@@ -128,14 +129,11 @@ def diff_projection(
     prev = previous_state if previous_state is not None else stable_projection_state(previous)
     cur = current_state if current_state is not None else stable_projection_state(current)
     deltas: list[DeltaEvent] = []
-    deltas += _collection_deltas(
-        "lifecycle", current.lifecycles, prev.lifecycles, cur.lifecycles, key="id"
-    )
+    deltas += _collection_deltas("task", current.tasks, prev.tasks, cur.tasks, key="key")
+    if prev.task_counts != cur.task_counts:
+        deltas.append(DeltaEvent("taskCounts", current.taskCounts))
     deltas += _collection_deltas(
         "enclosure", current.enclosures, prev.enclosures, cur.enclosures, key="enclosure"
-    )
-    deltas += _collection_deltas(
-        "provider", current.providers, prev.providers, cur.providers, key="id"
     )
     if prev.active_worktree_groups != cur.active_worktree_groups:
         # A bare list isn't a node with a key, so it rides as a whole-value replacement

@@ -2,30 +2,20 @@
 
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from agents_remember.certification.certificate_store import (
-    CertificateStorePolicy,
-    ContentAddressedCertificateStore,
-)
 from agents_remember.models.certification.references import (
     CertificateObjectKind,
     CertificateObjectReference,
 )
 from agents_remember.models.lifecycles import operation
-from agents_remember.models.lifecycles.preparation import build_prepared_closeout_output
 from agents_remember.models.lifecycles.preparation_state import (
     OperationPreparationState,
     PreparedCodeRetention,
     SelectedPreparation,
     validate_prepared_code_retention,
-)
-from agents_remember.worktrees.integration.closeout.preparation_selection import (
-    _rebound_code_output,
 )
 
 
@@ -222,50 +212,3 @@ def test_prepared_code_retention_rejects_non_immediate_predecessor() -> None:
             selected,
             ("closeout", "c" * 64, 3, "e" * 64),
         )
-
-
-def test_rebound_prepared_output_retains_real_git_identity_and_date(tmp_path: Path) -> None:
-    repository = tmp_path / "code"
-    repository.mkdir()
-    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
-    subprocess.run(
-        ["git", "-C", str(repository), "config", "user.email", "fixture@example.test"],
-        check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(repository), "config", "user.name", "Fixture"],
-        check=True,
-    )
-    (repository / "prepared.txt").write_text("prepared\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(repository), "add", "prepared.txt"], check=True)
-    subprocess.run(
-        ["git", "-C", str(repository), "commit", "--quiet", "-m", "prepared fixture"],
-        check=True,
-    )
-    raw = subprocess.check_output(["git", "-C", str(repository), "cat-file", "commit", "HEAD"])
-    source = build_prepared_closeout_output(
-        raw,
-        _object_reference("preparation-intent", "a"),
-        disposition="created",
-    )
-    successor_intent = _object_reference("preparation-intent", "b")
-    objects = ContentAddressedCertificateStore(
-        tmp_path / "objects",
-        CertificateStorePolicy(
-            scopeId="retention-test",
-            maxObjects=100,
-            maxBytes=1_000_000,
-            reclamationOwner="test",
-        ),
-    )
-
-    rebound, reference = _rebound_code_output(objects, raw, source, successor_intent)
-
-    assert rebound.intent == successor_intent
-    assert (rebound.commit, rebound.tree, rebound.committerDate) == (
-        source.commit,
-        source.tree,
-        source.committerDate,
-    )
-    assert rebound.rawCommitSha256 == source.rawCommitSha256
-    assert objects.load_reference(reference) == rebound

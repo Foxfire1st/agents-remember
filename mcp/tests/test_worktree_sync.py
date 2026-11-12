@@ -16,6 +16,7 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_ledger import create_initial_ledger, write_ledger
 from agents_remember.worktrees import sync_transaction_git
@@ -28,6 +29,7 @@ from agents_remember.worktrees.modules.cleanup import (
 from agents_remember.worktrees.modules.startup.start_memory import prepare_memory_for_start
 from agents_remember.worktrees.modules.sync import sync_result
 from agents_remember.worktrees.modules.terminal_validation import terminal_preflight
+from agents_remember.worktrees.sync_transaction_git import _merge as sync_git_merge
 from agents_remember.worktrees.sync_transaction_state import (
     SyncOperationStore,
 )
@@ -44,17 +46,33 @@ from agents_remember.worktrees.worktree_contract import (
 class SyncFixture:
     """Live code/memory worktrees whose official lines can be moved."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, converted: bool = True, source_branch: str = "main") -> None:
         self.root = root
+        self.source_branch = source_branch
         self.code_repo = root / "repo-a"
         self.code_base = make_repo(self.code_repo)
+        if source_branch != "main":
+            git(self.code_repo, "switch", "-c", source_branch)
         self.memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
         memory_seed = make_repo(self.memory_repo)
+        if source_branch != "main":
+            git(self.memory_repo, "switch", "-c", source_branch)
+        if converted:
+            # MIK-R46 rule 8: shared fixtures build converted memory -- the layout marker
+            # rides the base commit, so ordinary syncs run the converted routes.
+            (self.memory_repo / "knowledge").mkdir(parents=True, exist_ok=True)
+            (self.memory_repo / "knowledge" / "layout.json").write_text(
+                '{\n  "conversion": "1",\n  "schema": "ar-memory-layout/v2"\n}\n',
+                encoding="utf-8",
+            )
         write_ledger(
             self.memory_repo / "memory.md",
             create_initial_ledger("repo-a", self.code_base, memory_seed),
         )
-        git(self.memory_repo, "add", "memory.md")
+        if converted:
+            git(self.memory_repo, "add", "memory.md", "knowledge/layout.json")
+        else:
+            git(self.memory_repo, "add", "memory.md")
         git(self.memory_repo, "commit", "-m", "Add memory ledger")
         self.memory_base = git(self.memory_repo, "rev-parse", "HEAD")
         self.contract = default_contract(
@@ -68,13 +86,13 @@ class SyncFixture:
             leaf=LeafIdentity(worktree_name="sync-thing"),
             code=RepoBranchPlan(
                 repo_path=self.code_repo,
-                source_branch="main",
+                source_branch=source_branch,
                 work_branch="ar/sync-thing",
                 base_commit=self.code_base,
             ),
             memory=RepoBranchPlan(
                 repo_path=self.memory_repo,
-                source_branch="main",
+                source_branch=source_branch,
                 work_branch="ar/sync-thing",
                 base_commit=self.memory_base,
             ),
@@ -87,7 +105,7 @@ class SyncFixture:
             "-b",
             self.contract.code_work_branch,
             str(self.contract.code_worktree),
-            "main",
+            source_branch,
         )
         git(
             self.memory_repo,
@@ -96,13 +114,13 @@ class SyncFixture:
             "-b",
             self.contract.memory_work_branch,
             str(self.contract.memory_worktree),
-            "main",
+            source_branch,
         )
         write_contract(self.contract.contract_path, self.contract)
 
     def move_official_code(self) -> str:
         commit_file(self.code_repo, "src/new.py", "VALUE = 'landed'")
-        return git(self.code_repo, "rev-parse", "main")
+        return git(self.code_repo, "rev-parse", self.source_branch)
 
     def map_official_memory(self, code_tip: str) -> str:
         """Land memory content attributed to the admitted code commit."""
@@ -116,7 +134,7 @@ class SyncFixture:
             "-m",
             render_memory_content_message("Update new.py onboarding", code_tip),
         )
-        return git(self.memory_repo, "rev-parse", "main")
+        return git(self.memory_repo, "rev-parse", self.source_branch)
 
     def sync(self, **kwargs: Any):
         return sync_result(WorktreeArgs(contract_path=self.contract.contract_path, **kwargs))
@@ -327,9 +345,14 @@ class WorktreeSyncTests(unittest.TestCase):
             reloaded = load_contract(fixture.contract.contract_path)
             self.assertEqual(reloaded.memory_base_commit, fixture.memory_base)
 
-    def test_memory_merge_discards_only_cache_conflicts_and_preserves_content_conflicts(
-        self,
-    ) -> None:
+    def test_memory_merge_settles_content_conflicts_in_the_transaction(self) -> None:
+        """A memory merge of unconverted lines: the clean one resumes, the conflicted one is retained.
+
+        Knowledge is text in Git and merges structurally (MIK-R26 rule 2); those cases are in
+        ``test_worktree_sync_knowledge_merge.py``. This case is the plain Git merge that remains
+        for lines that hold no converted memory.
+        """
+
         for real_conflict in (False, True):
             with self.subTest(real_conflict=real_conflict), tempfile.TemporaryDirectory() as tmp:
                 fixture = SyncFixture(Path(tmp))
@@ -410,11 +433,50 @@ class WorktreeSyncTests(unittest.TestCase):
                 self.assertEqual(section(result.payload, "memory")["wip"]["paths"], ["draft.md"])
                 self.assertEqual(git(worktree, "stash", "list"), "")
 
+    def test_cancel_after_a_memory_conflict_restores_the_branch_and_its_tracked_cache(
+        self,
+    ) -> None:
+        """L37 (P2 task 1): a line that still tracks ``memory.md`` cancels a conflicted memory sync.
+
+        The memory merge untracks the cache; without restoring it first, ``git merge --abort`` met
+        it as an untracked file and the cancel was refused, leaving the merge in place.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = SyncFixture(Path(tmp))  # tracks memory.md, the dormant lines' shape
+            worktree = fixture.contract.memory_worktree
+            assert worktree is not None
+            (worktree / "README.md").write_text("work version\n", encoding="utf-8")
+            git(worktree, "commit", "-qam", "leaf edits README")
+            before = git(worktree, "rev-parse", "HEAD")
+            code_tip = fixture.move_official_code()
+            (fixture.memory_repo / "README.md").write_text("source version\n", encoding="utf-8")
+            git(fixture.memory_repo, "add", "README.md")
+            git(
+                fixture.memory_repo,
+                "commit",
+                "-m",
+                render_memory_content_message("Source", code_tip),
+            )
+            conflicted = fixture.sync(memory_sync_choice="merge-memory")
+            self.assertEqual(conflicted.payload["state"], "sync-resolution-required")
+
+            cancelled = fixture.sync(resolution_action="cancel")
+
+            self.assertEqual(cancelled.payload["state"], "sync-cancelled", cancelled.payload)
+            self.assertEqual(git(worktree, "rev-parse", "HEAD"), before)
+            with self.assertRaises(AssertionError):
+                git(worktree, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+            self.assertEqual(git(worktree, "status", "--porcelain"), "")
+            self.assertEqual(git(worktree, "ls-files", "--", "memory.md"), "memory.md")
+            again = fixture.sync(memory_sync_choice="merge-memory")
+            self.assertEqual(again.payload["state"], "sync-resolution-required", again.payload)
+
     def _resume_staged_memory_with_unstaged_content(self, fixture: SyncFixture):
         worktree = fixture.contract.memory_worktree
         assert worktree is not None
         with mock.patch.object(
-            sync_transaction_git,
+            sync_git_merge,
             "_finish_staged_memory_merge",
             side_effect=sync_transaction_git.SyncGitProofError("interrupted before merge commit"),
         ):

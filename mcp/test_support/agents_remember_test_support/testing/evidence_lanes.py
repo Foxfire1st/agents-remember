@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -17,6 +18,9 @@ from agents_remember_test_support.testing.lane_manifest import (
     LaneManifestError,
     load_lane_manifest,
 )
+
+WORKER_REFUSAL = "arCollectionRefusal"
+"""The key under which an xdist worker hands its collection refusal to the controller."""
 
 
 class EvidenceTrigger(StrEnum):
@@ -198,6 +202,35 @@ def pytest_configure(config: pytest.Config) -> None:
     for lane in EVIDENCE_LANES:
         if lane.marker is not None:
             config.addinivalue_line("markers", f"{lane.marker}: {lane.authority}")
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_collection(session: pytest.Session) -> Generator[None, object, object]:
+    """Keep a usage error of a worker's collection for the controller.
+
+    With xdist workers every worker collects, and a refusal raised there (a test file without
+    a lane line, a lane list out of order) never reached the terminal: the controller only saw
+    workers that had stopped, and reported an internal error. The worker leaves the message in
+    its output, and the controller ends the run with it.
+    """
+
+    try:
+        return (yield)
+    except pytest.UsageError as error:
+        output = getattr(session.config, "workeroutput", None)
+        if output is not None:
+            output[WORKER_REFUSAL] = str(error)
+        raise
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node: object, error: object) -> None:
+    """End the run with a worker's collection refusal: once, and as a run without workers."""
+
+    del error
+    refusal = getattr(node, "workeroutput", {}).get(WORKER_REFUSAL)
+    if refusal is not None:
+        raise pytest.UsageError(refusal)
 
 
 @pytest.hookimpl(tryfirst=True)

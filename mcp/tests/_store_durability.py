@@ -1,4 +1,4 @@
-"""Force an append into the compaction window of eight real JSONL stores.
+"""Force an append into the compaction window of four real JSONL stores.
 
 Forked processes use disposable roots and independent receipt-versus-disk
 accounting. Bounded rendezvous and joins preserve termination when locking
@@ -8,37 +8,25 @@ correctly serializes the append behind compaction.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import multiprocessing
 import os
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agents_remember.controlplane.agent_notifier_signals import (
-    AgentNotifierSignalCooldownStore,
-    AgentNotifierSignalRecord,
-)
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
-)
-from agents_remember.controlplane.expectation_rows import ExpectationRow, ExpectationRowStore
-from agents_remember.controlplane.operator_inbox_records import (
-    OperatorInboxEntry,
-    OperatorInboxState,
-)
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.orchestration_nudges import (
-    OrchestrationNudgeRecord,
-    OrchestrationNudgeStore,
-    replace_records,
+    AttentionObservation,
 )
 from agents_remember.controlplane.records import (
     GateRecord,
 )
 from agents_remember.controlplane.store import GateStore
+from agents_remember.kernel.file_lock import lock_path_for
 from agents_remember.models.structural.gates import GateState
 from agents_remember.providers.degradation import (
     DEGRADATION_EVENT_SCHEMA,
@@ -50,6 +38,7 @@ from agents_remember.providers.metrics import (
     MetricsSnapshot,
     ProviderMetricsStore,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 # Survivors are what the harness accounts for. The anchor is a record that is never prunable and
 # never counted: it keeps the reclaimed set non-empty so a reclaim pass exercises the tmp +
@@ -132,55 +121,12 @@ class GateAdapter(StoreAdapter):
         store.compact(None, now=_now())
 
 
-class ExpectationAdapter(StoreAdapter):
-    name = "expectation"
-    log_name = "expectation-rows.jsonl"
-    RETAIN_SECONDS = 60.0
-
-    def open(self, root: Path) -> Any:
-        return ExpectationRowStore(root)
-
-    def write(self, store: Any, record_id: str) -> None:
-        stamp = _iso(_now())
-        store.append(
-            ExpectationRow(
-                id=record_id,
-                ts=stamp,
-                kind="ack-by",
-                state="pending",
-                createdAt=stamp,
-                dueAt=stamp,
-                sourceId="durability-harness",
-            )
-        )
-
-    def write_decoy(self, store: Any, tick: int) -> None:
-        # A terminal row whose terminal stamp is older than the retention window: prunable.
-        stale = _iso(_now() - timedelta(seconds=self.RETAIN_SECONDS * 60))
-        store.append(
-            ExpectationRow(
-                id=f"{DECOY_PREFIX}{os.getpid()}-{tick}",
-                ts=stale,
-                kind="ack-by",
-                state="met",
-                createdAt=stale,
-                dueAt=stale,
-                sourceId="durability-harness",
-                metAt=stale,
-            )
-        )
-
-    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
-        store.compact(now=_now(), retain_seconds=self.RETAIN_SECONDS)
-
-
 class AttentionAdapter(StoreAdapter):
     name = "attention"
     log_name = "attention-dismissals.jsonl"
     id_field = "itemId"
     # ``dismiss`` is a whole-file read-modify-write, not an append -- there is no ``"a"`` handle
     # to strand in an unlinked inode, so only the lost-update mechanism applies here.
-    LIVE_LIFECYCLE = "live-lifecycle"
 
     def open(self, root: Path) -> Any:
         return AttentionDismissalStore(root)
@@ -190,145 +136,30 @@ class AttentionAdapter(StoreAdapter):
             AttentionDismissalRecord(
                 itemId=record_id,
                 dismissedAt=_iso(_now()),
-                kind="gate-open",
-                lifecycleId=self.LIVE_LIFECYCLE,
+                kind="blocked-start",
             )
         )
 
     def write_decoy(self, store: Any, tick: int) -> None:
-        # A dismissal for a lifecycle that is not in the live set: dropped by prune_lifecycles.
+        # A start the source census no longer reports is reclaimable.
         store.dismiss(
             AttentionDismissalRecord(
                 itemId=f"{DECOY_PREFIX}{os.getpid()}-{tick}",
                 dismissedAt=_iso(_now()),
-                kind="gate-open",
-                lifecycleId="retired-lifecycle",
+                kind="blocked-start",
             )
         )
 
     def reclaim_now(self, store: Any) -> None:  # pragma: no cover
-        store.prune_lifecycles({self.LIVE_LIFECYCLE})
-
-
-class OperatorInboxAdapter(StoreAdapter):
-    name = "operator_inbox"
-    log_name = "operator-inbox.jsonl"
-
-    def open(self, root: Path) -> Any:
-        return OperatorInboxStore(root)
-
-    def _entry(self, record_id: str, state: OperatorInboxState) -> OperatorInboxEntry:
-        stamp = _iso(_now())
-        return OperatorInboxEntry(
-            id=record_id,
-            ts=stamp,
-            state=state,
-            lifecycleId="live-lifecycle",
-            ask="durability harness",
-            response="durability harness",
-            createdAt=stamp,
-            createdBy="durability-harness",
-            createdVia="cli",
-        )
-
-    def write(self, store: Any, record_id: str) -> None:
-        store.append(self._entry(record_id, "pending"))
-
-    def write_decoy(self, store: Any, tick: int) -> None:
-        # ``ladder-resolved`` rows drop immediately in ``_keep_inbox_entry``.
-        store.append(self._entry(f"{DECOY_PREFIX}{os.getpid()}-{tick}", "ladder-resolved"))
-
-    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
-        store.compact(now=_now())
-
-
-class NudgeAdapter(StoreAdapter):
-    name = "nudge"
-    log_name = "orchestration-nudges.jsonl"
-
-    def open(self, root: Path) -> Any:
-        return OrchestrationNudgeStore(root)
-
-    def _record(self, record_id: str) -> OrchestrationNudgeRecord:
-        return OrchestrationNudgeRecord(
-            id=record_id,
-            ts=_iso(_now()),
-            state="sent",
-            reason="manual",
-            message="durability harness",
-        )
-
-    def write(self, store: Any, record_id: str) -> None:
-        store.append(self._record(record_id))
-
-    def write_decoy(self, store: Any, tick: int) -> None:
-        store.append(self._record(f"{DECOY_PREFIX}{os.getpid()}-{tick}"))
-
-    @staticmethod
-    @contextlib.contextmanager
-    def _reclaim_lock(path: Path) -> Any:  # pragma: no cover
-        """Hold the nudge log's lock across read + filter + rewrite, if the tree has one.
-
-        This store is the only one of the six with no ``compact`` method: ``replace_records`` is
-        its documented rewrite entry point, so the read-filter half of a reclaim belongs to the
-        caller -- and a caller that reads outside the lock reintroduces the exact lost update the
-        lock exists to prevent. The harness therefore reclaims the way a correct compaction owner
-        would, so a failure here is the store's and not the harness's.
-        """
-        try:
-            # Deliberately local: this module also runs against a `git archive` of the leaf's
-            # base commit, where `durable_store` does not exist yet. A top-level import would
-            # make the harness unable to measure the very tree it exists to measure.
-            from agents_remember.controlplane.durable_store import (  # noqa: PLC0415
-                ORCHESTRATION_NUDGE_OWNERSHIP,
-                exclusive_access,
-            )
-        except ImportError:
-            yield  # base commit: there is no lock to hold
-            return
-        with exclusive_access(path, ORCHESTRATION_NUDGE_OWNERSHIP):
-            yield
-
-    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
-        path = store.log_path()
-        with self._reclaim_lock(path):
-            kept = [record for record in store.read() if not record.id.startswith(DECOY_PREFIX)]
-            replace_records(path, kept)
-
-
-class AgentNotifierSignalAdapter(StoreAdapter):
-    name = "agent_notifier_signal"
-    log_name = "supervisor-signals.jsonl"
-    RETAIN_SECONDS = 300.0
-
-    def open(self, root: Path) -> Any:
-        return AgentNotifierSignalCooldownStore(root)
-
-    def _record(self, record_id: str, stamp: str) -> AgentNotifierSignalRecord:
-        return AgentNotifierSignalRecord(
-            id=record_id,
-            ts=stamp,
-            state="sent",
-            findingKind="durability-harness",
-            detail="durability harness",
-            deliveryState="queued",
-        )
-
-    def write(self, store: Any, record_id: str) -> None:
-        store.append(self._record(record_id, _iso(_now())))
-
-    def write_decoy(self, store: Any, tick: int) -> None:
-        stale = _iso(_now() - timedelta(seconds=self.RETAIN_SECONDS * 60))
-        store.append(self._record(f"{DECOY_PREFIX}{os.getpid()}-{tick}", stale))
-
-    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
-        store.compact(now=_now(), retain_seconds=self.RETAIN_SECONDS)
+        observed_before = _now()
+        existing = {key for key in store.current() if not key.startswith(DECOY_PREFIX)}
+        store.reconcile([AttentionObservation("blocked-start", observed_before, existing=existing)])
 
 
 class ProviderStoreAdapter(StoreAdapter):
     """The two ``providers/`` logs, which sit under a coordination root rather than an observer one.
 
-    ``StoreAdapter.log_path`` resolves ``<root>/workspace/<log>`` because that is where the six
+    ``StoreAdapter.log_path`` resolves ``<root>/workspace/<log>`` because that is where the two
     control-plane logs live. Both provider stores build their own directory from a COORDINATION
     root instead (``<root>/logs/observer/providers``), so the harness root means the same thing to
     them -- a throwaway tree -- and only the path under it differs.
@@ -433,11 +264,7 @@ class ProviderDegradationAdapter(ProviderStoreAdapter):
 
 CONTROLPLANE_ADAPTERS: tuple[type[StoreAdapter], ...] = (
     GateAdapter,
-    ExpectationAdapter,
     AttentionAdapter,
-    OperatorInboxAdapter,
-    NudgeAdapter,
-    AgentNotifierSignalAdapter,
 )
 PROVIDER_ADAPTERS: tuple[type[StoreAdapter], ...] = (
     ProviderMetricsAdapter,
@@ -446,7 +273,7 @@ PROVIDER_ADAPTERS: tuple[type[StoreAdapter], ...] = (
 ADAPTERS: dict[str, type[StoreAdapter]] = {
     adapter.name: adapter for adapter in (*CONTROLPLANE_ADAPTERS, *PROVIDER_ADAPTERS)
 }
-# ``CASES`` stays the six control-plane stores and ``PROVIDER_CASES`` is separate, so adding the
+# ``CASES`` stays the two control-plane stores and ``PROVIDER_CASES`` is separate, so adding the
 # provider stores to the shared instrument does not silently widen what the control-plane
 # contract test asserts -- each test file names the stores it speaks for.
 CASES: tuple[str, ...] = tuple(adapter.name for adapter in CONTROLPLANE_ADAPTERS)
@@ -492,7 +319,7 @@ def surviving_ids(path: Path, id_field: str) -> tuple[set[str], int]:  # pragma:
 
 
 @contextlib.contextmanager
-def parked_rewrite(ready: Any, released: Any, seconds: float) -> Any:  # pragma: no cover
+def parked_rewrite(ready: Any, released: Any) -> Any:  # pragma: no cover
     """Park the next in-process log rewrite between its read and its commit.
 
     Two interposition points, whichever the implementation reaches first: ``Path.write_text``
@@ -506,10 +333,9 @@ def parked_rewrite(ready: Any, released: Any, seconds: float) -> Any:  # pragma:
     processes parked at ``os.replace`` collide on one temp path and the scenario degenerates into
     a ``FileNotFoundError`` instead of the silent lost update it is meant to expose.
 
-    ``ready`` fires when the rewrite is parked; the pause then lasts until ``released`` is set or
-    ``seconds`` elapse. The timeout is what keeps this terminating: an implementation that
-    serialises the other process out (the fix) never sets ``released``, so the rewrite resumes on
-    its own instead of deadlocking.
+    ``ready`` stays set only while the rewrite is parked. The parent releases it after witnessing
+    either the appender's refusal at the held lock or a completed write inside this window.
+    Missing release fails before the rewrite writes, rather than allowing an unforced race.
     """
     real_write_text = Path.write_text
     real_replace = os.replace
@@ -519,7 +345,13 @@ def parked_rewrite(ready: Any, released: Any, seconds: float) -> Any:  # pragma:
         if armed[0]:
             armed[0] = False
             ready.set()
-            released.wait(seconds)
+            try:
+                if not released.wait(HANG_GUARD_SECONDS):
+                    raise AssertionError(
+                        "the parked rewrite never received its opportunity release"
+                    )
+            finally:
+                ready.clear()
 
     def hooked_write_text(self: Path, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
         park()
@@ -536,11 +368,10 @@ def parked_rewrite(ready: Any, released: Any, seconds: float) -> Any:  # pragma:
     finally:
         Path.write_text = real_write_text  # type: ignore[assignment]
         os.replace = real_replace  # type: ignore[assignment]
-        ready.set()
 
 
 def _forced_reclaimer_main(
-    spec: dict[str, Any], ready: Any, appended: Any
+    spec: dict[str, Any], ready: Any, released: Any
 ) -> None:  # pragma: no cover
     """Reclaim once, parked inside the rewrite so an append can interleave.
 
@@ -551,26 +382,57 @@ def _forced_reclaimer_main(
     store = adapter.open(Path(spec["root"]))
     adapter.write_decoy(store, 0)
     try:
-        with parked_rewrite(ready, appended, spec["handoff_seconds"]):
+        with parked_rewrite(ready, released):
             adapter.reclaim_now(store)
     except Exception as exc:
         Path(spec["errors"]).write_text(f"{type(exc).__name__}: {exc}", encoding="utf-8")
 
 
+@contextlib.contextmanager
+def _observe_append_opportunity(log: Path, opportunity: Any) -> Any:
+    """Report an actual refusal by the reclaim's held lock, without weakening that lock."""
+    real_flock = fcntl.flock
+    lock = lock_path_for(log)
+
+    def observed_flock(descriptor: int, operation: int) -> None:
+        if operation == fcntl.LOCK_EX:
+            descriptor_stat = os.fstat(descriptor)
+            lock_stat = lock.stat()
+            if (descriptor_stat.st_dev, descriptor_stat.st_ino) == (
+                lock_stat.st_dev,
+                lock_stat.st_ino,
+            ):
+                try:
+                    real_flock(descriptor, operation | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    opportunity.set()
+                else:
+                    return
+        real_flock(descriptor, operation)
+
+    fcntl.flock = observed_flock
+    try:
+        yield
+    finally:
+        fcntl.flock = real_flock
+
+
 def _forced_appender_main(
-    spec: dict[str, Any], ready: Any, appended: Any
+    spec: dict[str, Any], ready: Any, opportunity: Any
 ) -> None:  # pragma: no cover
-    """Append one survivor once the reclaimer is parked mid-rewrite."""
+    """Reach the actual append/lock boundary while the reclaimer is parked mid-rewrite."""
     adapter = ADAPTERS[spec["case"]]()
     store = adapter.open(Path(spec["root"]))
-    ready.wait(spec["handoff_seconds"] * 3)
     try:
-        adapter.write(store, spec["record_id"])
+        if not ready.wait(HANG_GUARD_SECONDS):
+            raise AssertionError("the appender never observed a parked rewrite")
+        with _observe_append_opportunity(adapter.log_path(Path(spec["root"])), opportunity):
+            adapter.write(store, spec["record_id"])
+        # An unlocked implementation must really finish its write before releasing the rewrite.
+        opportunity.set()
         Path(spec["receipt"]).write_text(spec["record_id"], encoding="utf-8")
     except Exception as exc:
         Path(spec["errors"]).write_text(f"{type(exc).__name__}: {exc}", encoding="utf-8")
-    finally:
-        appended.set()
 
 
 # --------------------------------------------------------------------------------------------
@@ -590,7 +452,7 @@ def _join(processes: list[Any], timeout: float) -> list[str]:  # pragma: no cove
         if process.is_alive():
             stragglers.append(process.name)
             process.kill()
-            process.join(5.0)
+            process.join(HANG_GUARD_SECONDS)
     return stragglers
 
 
@@ -641,29 +503,43 @@ def run_forced_lost_update(case: str, root: Path) -> dict[str, Any]:
 
     ctx = _context()
     ready = ctx.Event()
-    appended = ctx.Event()
-    handoff = 2.0
+    released = ctx.Event()
+    opportunity = ctx.Event()
     reclaimer_spec = {
         "case": case,
         "root": str(root),
-        "handoff_seconds": handoff,
         "errors": str(work / "forced-reclaimer.err"),
     }
     appender_spec = {
         "case": case,
         "root": str(root),
         "record_id": f"{SURVIVOR_PREFIX}forced",
-        "handoff_seconds": handoff,
         "receipt": str(work / "forced.id"),
         "errors": str(work / "forced-appender.err"),
     }
     reclaimer = ctx.Process(
-        target=_forced_reclaimer_main, args=(reclaimer_spec, ready, appended), name="reclaimer"
+        target=_forced_reclaimer_main, args=(reclaimer_spec, ready, released), name="reclaimer"
     )
     appender = ctx.Process(
-        target=_forced_appender_main, args=(appender_spec, ready, appended), name="appender"
+        target=_forced_appender_main, args=(appender_spec, ready, opportunity), name="appender"
     )
     reclaimer.start()
     appender.start()
-    stragglers = _join([reclaimer, appender], 60.0)
-    return _forced_result("forced_lost_update", root, adapter, stragglers)
+    try:
+        if not ready.wait(HANG_GUARD_SECONDS):
+            raise AssertionError("the reclaimer never parked inside its rewrite")
+        if not opportunity.wait(HANG_GUARD_SECONDS):
+            raise AssertionError(
+                "the appender had no lock/write opportunity during the parked rewrite"
+            )
+        if not ready.is_set():
+            raise AssertionError(
+                "the appender's opportunity arrived after the rewrite stopped being parked"
+            )
+    finally:
+        released.set()
+        stragglers = _join([reclaimer, appender], HANG_GUARD_SECONDS * 2)
+    result = _forced_result("forced_lost_update", root, adapter, stragglers)
+    if result["reclaim_errors"] or result["append_errors"]:
+        raise AssertionError(f"the forced rendezvous failed: {result}")
+    return result

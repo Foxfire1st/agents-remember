@@ -1,8 +1,8 @@
 // The engine-room canvas motion substrate. GSAP owns the orchestrated, GSAP-native
-// parts: the DrawSVG draw-ons (conduit clone arcs + landing flows), drawn once per lane (a
+// parts: the DrawSVG draw-ons (flow conduits + landing flows), drawn once per lane (a
 // `data-drawn` guard stops them re-sweeping on each beat step), the MotionPath travelling flow packet
 // (rides its conduit's `data-path`, replacing CSS offset-path), and the repeating fx that used to be
-// CSS @keyframes (engine fault flicker, reindex pulse, warp-core surge, attention breath, terminal-STOP
+// CSS @keyframes (warp-core surge, attention breath, terminal-STOP
 // flash). Motion owns opacity/transform/charge
 // + enter/exit (in EnclosureCanvas); CSS is static. One `gsap.context` per enclosure, scoped to the SVG
 // root, selecting elements by `data-draw` / `data-fx` attributes — so the component renders the structure
@@ -49,8 +49,8 @@ export function phaseStage(phase: string): PhaseStage {
 }
 
 // A signature of everything the GSAP layer keys on: which lanes are drawing (running edges + resolved
-// landing flows) and which engines/couplers are in a repeating-fx state. The effect re-runs (revert →
-// rebuild) whenever this changes, so a planned→running lane re-draws and a cleared fault stops flickering.
+// landing flows) and which couplers are in a repeating-fx state. The effect re-runs (revert →
+// rebuild) whenever this changes, so a planned→running lane re-draws.
 function fxSignature(node: EngineProcessNode): string {
   const draws = node.edges
     .filter((edge) => edge.state === "running")
@@ -61,18 +61,14 @@ function fxSignature(node: EngineProcessNode): string {
     .map((ref) => `${ref.kind}:${ref.state}:${ref.factState}`)
     .sort()
     .join(",");
-  const engines = node.providers
-    .map((provider) => `${provider.role}:${provider.runtimeState}`)
-    .sort()
-    .join(",");
-  // A failed/stale seed-or-integration lane drives the one-shot refused-conduit flash. It is
+  // A failed/stale integration lane drives the one-shot refused-conduit flash. It is
   // NOT a `running` lane (so `draws` misses it); fold it in so the flash re-arms when the beat lands.
   const refused = node.edges
     .filter((edge) => edge.state === "failed" || edge.state === "stale")
     .map((edge) => `${edge.kind}:${edge.state}`)
     .sort()
     .join(",");
-  return [node.phase, draws, landing, engines, refused, node.seedFallback ? "reindex" : "", node.memoryMode].join("|");
+  return [node.phase, draws, landing, refused, node.memoryMode].join("|");
 }
 
 const DRAW = { duration: 0.6, ease: "power2.out" } as const;
@@ -81,17 +77,6 @@ const DRAW = { duration: 0.6, ease: "power2.out" } as const;
 // driven here by GSAP so CSS stays static. Alarm flickers stay ≤3 flashes/s (WCAG 2.3.1 — the master
 // invariant). `gsap.context` (the caller's) reverts every tween + restores inline state on teardown.
 function buildFx(q: gsap.utils.SelectorFunc): void {
-  const fault = q("[data-fx='fault']"); // a down engine breathes its red frame GENTLY (~1.7s sine), never a strobe
-  if (fault.length) gsap.fromTo(fault, { opacity: 0.5 }, { opacity: 0.95, duration: 1.7, repeat: -1, yoyo: true, ease: "sine.inOut" });
-
-  const reindex = q("[data-fx='reindex']"); // seedFallback → amber center-out pulse (a fallback, not a fault)
-  if (reindex.length)
-    gsap.fromTo(
-      reindex,
-      { scaleY: 0.25, transformOrigin: "center", opacity: 0.5 },
-      { scaleY: 1, opacity: 0.9, duration: 1.5, repeat: -1, ease: "power1.out" },
-    );
-
   const scan = q("[data-fx='scan']"); // pre-block verify sweep: a cyan ring expands + fades on the checked lane (transient)
   if (scan.length) {
     // The ring is a STROKED circle (scanRing: 2u cyan + a glow) and nothing in the tree declares a

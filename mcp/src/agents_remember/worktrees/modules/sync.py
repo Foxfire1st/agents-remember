@@ -5,11 +5,13 @@ from __future__ import annotations
 from agents_remember.worktrees.activation.atomic_series_activation_transaction import (
     sync_selected_atomic_series_under_authority,
 )
+from agents_remember.worktrees.disabled_memory import is_disabled_contract, opt_out_refusal_result
 from agents_remember.worktrees.integration.integration_branch_authority import require_sync_worktree
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.start import load_contract_from_args
 from agents_remember.worktrees.sync_source_refresh import fetch_source_upstreams
+from agents_remember.worktrees.sync_source_strategy import source_strategy
 from agents_remember.worktrees.sync_transaction import (
     sync_contract_under_authority,
     sync_input_refusal,
@@ -29,6 +31,9 @@ def sync_result(args: WorktreeArgs) -> WorktreeCommandResult:
     fetch: dict[str, object] = {}
     try:
         contract = load_contract_from_args(args)
+        if is_disabled_contract(contract):
+            # A contract that carries the removed mode never syncs (MIK-R50 R4a).
+            return opt_out_refusal_result(contract, "worktree_sync")
         require_sync_worktree(contract)
         if contract.kind == "leaf" and not contract.code_worktree.exists():
             return WorktreeCommandResult(
@@ -53,7 +58,7 @@ def sync_result(args: WorktreeArgs) -> WorktreeCommandResult:
                 ),
             }
             return sync_contract_under_authority(contract, args, fetch=fetch)
-        fetch = fetch_source_upstreams(contract)
+        fetch = fetch_source_upstreams(contract, args.sync_source)
         return _sync_live(contract, args, fetch)
     except _EXPECTED_SYNC_FAILURES as error:
         return WorktreeCommandResult(
@@ -84,6 +89,7 @@ def _sync_live(
                 "nextArgs": {
                     "contract_path": current.contract_path.as_posix(),
                     "dry_run": False,
+                    **source_strategy(args.sync_source).request_args(),
                 },
                 "fetch": fetch,
             },

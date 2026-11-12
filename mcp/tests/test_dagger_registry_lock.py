@@ -15,6 +15,7 @@ from agents_remember.controlplane import durable_store
 from agents_remember.kernel import file_lock
 from agents_remember.kernel.primitives import checkout_coordination
 from agents_remember.worktrees.modules.quality import dagger_authority as authority
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 
 @dataclass(frozen=True)
@@ -89,10 +90,10 @@ def _admit(
 def test_host_admission_keeps_undeclared_checkout_coordinator_writes_refused(
     registry: authority.AuthorityRegistry, tmp_path: Path
 ) -> None:
-    live_log = tmp_path / "live-coordinator" / "observer" / "operator-inbox.jsonl"
+    live_log = tmp_path / "live-coordinator" / "observer" / "gates.jsonl"
     with (
         pytest.raises(checkout_coordination.CheckoutCoordinationError),
-        durable_store.exclusive_access(live_log, durable_store.OPERATOR_INBOX_OWNERSHIP),
+        durable_store.exclusive_access(live_log, durable_store.GATE_OWNERSHIP),
     ):
         pytest.fail("live coordinator lock must refuse before entering")
     assert not live_log.parent.exists()
@@ -129,7 +130,7 @@ def _process_lock_status(path: Path) -> int:
         ],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=HANG_GUARD_SECONDS,
         check=False,
     )
     assert result.stderr == ""
@@ -150,7 +151,9 @@ def test_registry_nested_exception_retains_then_releases_thread_and_process_excl
     physical_lock = registry.root / "authority.lock.lock"
     with ThreadPoolExecutor(max_workers=1) as pool:
         with pytest.raises(ValueError, match="outer body"), registry.exclusive_access():
-            assert not pool.submit(_thread_can_take_mutex, registry.lock_path).result(timeout=10)
+            assert not pool.submit(_thread_can_take_mutex, registry.lock_path).result(
+                timeout=HANG_GUARD_SECONDS
+            )
             assert _process_lock_status(physical_lock) == 17
             with pytest.raises(ValueError, match="nested body"), registry.exclusive_access():
                 raise ValueError("nested body")
@@ -158,7 +161,9 @@ def test_registry_nested_exception_retains_then_releases_thread_and_process_excl
             assert _process_lock_status(physical_lock) == 17
             raise ValueError("outer body")
         assert not file_lock.lock_held(registry.lock_path)
-        assert pool.submit(_thread_can_take_mutex, registry.lock_path).result(timeout=10)
+        assert pool.submit(_thread_can_take_mutex, registry.lock_path).result(
+            timeout=HANG_GUARD_SECONDS
+        )
         assert _process_lock_status(physical_lock) == 0
         with registry.exclusive_access():
             assert _process_lock_status(physical_lock) == 17

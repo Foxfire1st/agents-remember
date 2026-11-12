@@ -15,19 +15,31 @@ Benchmarks are not installed by default. Install benchmark fixtures explicitly:
 runtime_install(dry_run=false, include_benchmarks=true)
 ```
 
-Then inspect or run them through the MCP benchmark tools:
+Then inspect or run them through the benchmark runner CLI (the MCP benchmark
+tools left the surface in MIK-R112):
 
 ```text
-codex_benchmark_prepare(target="case", case_id="agents-remember-drift-workflow")
-codex_benchmark_run(target="case", case_id="agents-remember-drift-workflow", dry_run=true)
+python -m agents_remember.benchmarks.runner prepare case agents-remember-drift-workflow
+python -m agents_remember.benchmarks.runner run case agents-remember-drift-workflow
 ```
 
 For source-package debugging, run the package module from a checkout where
 `agents-remember/mcp/src` is on `PYTHONPATH`.
 
-Benchmark preparation copies the runtime skill tree into the memory-enabled
-workspace by default. Use `--skill-exposure-mode none` only when skill discovery
-is handled outside the benchmark harness.
+## Provider setup in benchmarks (MIK-R112 F02)
+
+Benchmark commands run providerless: the retired codegraphcontext/grepai
+providers never count as enabled, so `prepare` performs no provider install,
+seed, watcher start or status and returns empty results, which the runner
+treats as a successful no-provider setup. The memory comparison above
+(source-only vs memory-enabled environments) is unaffected — it never
+depended on provider backends. The explicitly required old-watcher stop is a
+separate install-time mechanism and is unchanged.
+
+Benchmark preparation registers the package MCP server in the memory-enabled workspace.
+Its `skill://index.json` resource lists the skills served from that installed package;
+selected skill and supporting-file URIs read those package bytes. Preparation creates
+no coordination-root or harness-local skill tree.
 
 ## Current Cases
 
@@ -62,8 +74,6 @@ benchmarks/
           config.toml
           mcp/
             agents-remember-benchmark.settings.json
-          skills/
-            agents-remember/ # copied tree from ar-coordination/skills
         AGENTS.md              # rendered from templates/workspace-AGENTS.md
         ar-coordination/
           AGENTS.md
@@ -87,7 +97,7 @@ Each prompt has comparable variants:
 - `with-onboarding`: Codex works from `workspaces/<case-id>/with-memory/`, where `ar-coordination/` resolves to the cloned pinned external memory and `repos/<repo>/` contains the same pinned checkout.
 - `with-onboarding-warm`: when present, Codex starts from the same memory-enabled workspace but treats the benchmark-local memory as already validated, so it can test steady-state memory use without spending the run on startup resolver and drift gates.
 
-The memory-enabled workspace also exposes the benchmark-local Agents Remember runtime through `.codex/skills/agents-remember` and writes the benchmark-local MCP server registration to `.codex/config.toml`. During `codex exec`, the runner forwards that registration as explicit `-c mcp_servers...` overrides so the child process gets the same MCP surface that `ar-coordination/AGENTS.md` references without relying on a parent workspace's `.codex` tree. The runner copies that tree by default.
+The memory-enabled workspace writes the package MCP server registration to `.codex/config.toml`. During `codex exec`, the runner forwards that registration as explicit `-c mcp_servers...` overrides so the child process gets the benchmark-local MCP settings and the package-served skill resources without relying on a parent workspace's `.codex` tree. No skill directory is installed into the workspace.
 
 Each prompt defaults to three repetitions per variant. For each repetition, the selected variants are placed under the same dated run root and submitted together when the job count allows parallelism. The runner writes raw JSONL, stderr, final messages, metadata, and generated summaries under `user-runs/`.
 

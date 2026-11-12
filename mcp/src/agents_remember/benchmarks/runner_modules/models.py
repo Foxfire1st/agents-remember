@@ -85,7 +85,6 @@ class BenchmarkPreparation:
 
     benchmarks_root: Path
     dry_run: bool = True
-    skill_exposure_mode: str = "copy"
     force_clone: bool = False
     provider_timeout: int = 1800
     # See BenchmarkPrepareRequest.allowed_provider_ids (containment R1).
@@ -108,7 +107,6 @@ class BenchmarkPrepareRequest:
     target: str = "all"
     case_id: str | None = None
     dry_run: bool = True
-    skill_exposure_mode: str = "copy"
     force_clone: bool = False
     provider_timeout: int = 1800
     # Containment R1 (260707-HFX-L1): the live MCP authority's provider ids. The
@@ -124,7 +122,6 @@ class BenchmarkPrepareRequest:
         return BenchmarkPreparation(
             benchmarks_root=self.benchmarks_root.resolve(),
             dry_run=self.dry_run,
-            skill_exposure_mode=self.skill_exposure_mode,
             force_clone=self.force_clone,
             provider_timeout=self.provider_timeout,
             allowed_provider_ids=self.allowed_provider_ids,
@@ -142,7 +139,6 @@ class BenchmarkRunRequest:
     jobs: int | None = None
     dry_run: bool = True
     skip_prepare: bool = False
-    skill_exposure_mode: str = "copy"
     force_clone: bool = False
     provider_timeout: int = 1800
     codex_sandbox: str = CODEX_BENCHMARK_SANDBOX
@@ -154,7 +150,6 @@ class BenchmarkRunRequest:
         return BenchmarkPreparation(
             benchmarks_root=self.benchmarks_root.resolve(),
             dry_run=self.dry_run,
-            skill_exposure_mode=self.skill_exposure_mode,
             force_clone=self.force_clone,
             provider_timeout=self.provider_timeout,
             allowed_provider_ids=self.allowed_provider_ids,

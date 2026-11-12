@@ -8,22 +8,23 @@ from tempfile import TemporaryDirectory
 from typing import NoReturn
 
 from agents_remember.errors import FutureCodeCandidateError, MemoryCandidatePairError
-from agents_remember.memory_quality.future_code_candidate import (
-    capture_future_code_candidate,
-)
-from agents_remember.memory_quality.memory_candidate_pair import (
-    resolve_memory_candidate_pair,
-)
 from agents_remember.models.task_document import CanonicalTaskObservation
 from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
 from agents_remember.tasks.store import TaskDocSourceSnapshot, current_task_doc_source
 from agents_remember.tasks.task_intent import task_intent_identity
+from agents_remember.worktrees.modules.future_code_candidate import (
+    capture_future_code_candidate,
+)
 from agents_remember.worktrees.modules.git import require_git, worktree_candidate_tree
+from agents_remember.worktrees.modules.memory_candidate_pair import (
+    resolve_memory_candidate_pair,
+)
 from agents_remember.worktrees.queue.closeout_projection_members import (
     candidate_task_topology_fingerprint,
 )
+from agents_remember.worktrees.queue.closeout_queue_errors import missing_commanded_master_text
 from agents_remember.worktrees.queue.closeout_queue_graph import graph_context
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -64,7 +65,7 @@ def observe_scope_candidate(
             requested_repo_id=contract.repo_name,
         )
         code_candidate = capture_future_code_candidate(contract).codeCandidateTree
-        memory_candidate = _candidate_tree(contract.memory_worktree, contract.worktree_group)
+        memory_candidate = _candidate_tree(contract.memory_worktree)
         task_pair = observe_contract_task_pair(contract)
     except ScopeUnprovenError:
         raise
@@ -147,7 +148,13 @@ def observe_contract_task(contract: WorktreeContract) -> CanonicalTaskObservatio
         )
         intent = task_intent_identity(contract.task_root, candidate)
     except (TaskDocumentRefError, ValueError) as exc:
-        _refuse("task-owner-unavailable", f"canonical task owner refused: {type(exc).__name__}")
+        # A sprint that commands a missing master is refused in the product's own words, which
+        # name the repair; every other refusal stays bounded to its type.
+        named = missing_commanded_master_text(exc) or missing_commanded_master_text(exc.__cause__)
+        _refuse(
+            "task-owner-unavailable",
+            named or f"canonical task owner refused: {type(exc).__name__}",
+        )
     if not isinstance(intent, TaskIntentIdentity):
         _refuse("task-intent-unavailable", "canonical R02 task intent is unavailable")
     if any(current_task_doc_source(source) != source for source in accepted_sources):
@@ -262,10 +269,11 @@ def _blob(repository: Path, tree: str, path: str) -> str:
     return require_git(repository, ["rev-parse", f"{tree}:{path}"])
 
 
-def _candidate_tree(repository: Path, worktree_group: Path) -> str:
-    reports = worktree_group / "reports"
-    reports.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(prefix=".scope-candidate-", dir=reports) as temporary:
+def _candidate_tree(repository: Path) -> str:
+    # Rule 6 (MIK-R74): this capture is unrecorded scratch, so it must not create the
+    # enclosure's reports/ directory -- an empty reports/ left behind by a read is a
+    # boundary violation. The system temp directory holds the throwaway index instead.
+    with TemporaryDirectory(prefix=".scope-candidate-") as temporary:
         return worktree_candidate_tree(repository, Path(temporary) / "index")
 
 

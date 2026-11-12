@@ -4,45 +4,61 @@ These are the *persisted and served* contract -- written atomically to
 ``latest-state.json`` / ``latest-metrics.json`` and (slice 04) streamed over
 SSE. Like :mod:`agents_remember.observer.events` they are deliberately **not**
 MCP response models: they carry no token-accounting fields, are never returned
-by a tool, and are absent from ``PUBLIC_TOOL_RESPONSE_MODELS``. Fields are
+by a tool, and are absent from ``TOOL_RESPONSE_MODELS``. Fields are
 camelCase to match the package's wire convention; ``extra="forbid"`` keeps the
 served contract honest.
 
 The shapes are client-agnostic (North-Star #2): a dashboard, a future TUI, and
 an orchestrating agent are equal clients. The state tree is expressed as linked
-flat collections (lifecycles, enclosures, providers) cross-referenced by id
-(``enclosure.lifecycleId``, ``provider.repoId``) rather than deep nesting --
-friendlier to every client than one nested document, and it keeps multi-repo
-enclosures (North-Star #4) from being keyed to a single repo.
+one reference-keyed task collection with child references and bound worktree
+facts, plus unbound enclosures. Clients read these published
+relationships without reconstructing task membership or activity.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
-from agents_remember.models.task_document import MasterExecutionNature
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import SourceLineageProjection
-from agents_remember.observer.lifecycle_state import (
-    LIVE_STATES,
-    LifecycleVocabularyError,
-    LiveState,
-    Phase,
-    State,
-)
-from agents_remember.observer.projection_closeout import (
-    CloseoutProjectionProblemNode,
-    DiscardedSubTaskNode,
-)
-from agents_remember.observer.projection_graph import TaskExecutionGraphView
+from agents_remember.observer.host_activity import WaitingSeat
+from agents_remember.observer.provider_limits import ProviderLimit
+
+from . import projection_task_documents as task_documents
+
+CloseoutProjectionProblemNode = task_documents.CloseoutProjectionProblemNode
+DiscardedSubTaskNode = task_documents.DiscardedSubTaskNode
+TaskExecutionGraphView = task_documents.TaskExecutionGraphView
+TaskStepDispositionNode = task_documents.TaskStepDispositionNode
+TaskSubStepNode = task_documents.TaskSubStepNode
+TaskStepNode = task_documents.TaskStepNode
+TaskDecisionNode = task_documents.TaskDecisionNode
+TaskHeaderNoteNode = task_documents.TaskHeaderNoteNode
+TaskReviewFindingNode = task_documents.TaskReviewFindingNode
+TaskReviewStateNode = task_documents.TaskReviewStateNode
+TaskCodeExampleNode = task_documents.TaskCodeExampleNode
+TaskSubTaskRefNode = task_documents.TaskSubTaskRefNode
+TaskSeatNode = task_documents.TaskSeatNode
+TaskSectionNode = task_documents.TaskSectionNode
+TaskExecutionEndpointNode = task_documents.TaskExecutionEndpointNode
+TaskExecutionNode = task_documents.TaskExecutionNode
+TaskExecutionEdgeNode = task_documents.TaskExecutionEdgeNode
+TaskExecutionGraphNode = task_documents.TaskExecutionGraphNode
+CloseoutCandidateNode = task_documents.CloseoutCandidateNode
+CloseoutQueueNode = task_documents.CloseoutQueueNode
+TaskDependencyNode = task_documents.TaskDependencyNode
+TaskSummary = task_documents.TaskSummary
+TaskDocNode = task_documents.TaskDocNode
+DirectGrantNode = task_documents.DirectGrantNode
+
 
 type AttentionSeverity = Literal["alarm", "warn", "info"]
-type AttentionLane = Literal["repo", "worktree", "lifecycle"]
+type AttentionLane = Literal["repo", "worktree", "agent", "task"]
+type AttentionItemClass = Literal["action", "notice", "operational"]
 type ProcessFactState = Literal[
     "observed", "derived", "planned", "missing", "stale", "not-applicable"
 ]
@@ -67,91 +83,11 @@ class ActionAvailability(BaseModel):
     nextSafeAction: str | None = None
 
 
-class TokenSample(BaseModel):
-    """One point on a lifecycle's cumulative-token fuel gauge (slice 3b, §2.4).
-
-    Derived from the event log: every ``tool.completed`` event carries the tokens
-    that call cost, so the running total over event timestamps is the time series
-    note 03 gap #2 ("no token-spend persistence") wanted -- now derivable because
-    the event substrate (slice 02) persists it.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    ts: str
-    cumulative: int
-
-
-class GateNode(BaseModel):
-    """A durable gate materialized into the projection (slice 6c): the dashboard's
-    review surface for a decision point on a lifecycle.
-
-    Distinct from the event-derived ``ask`` proto-gate -- this is the persisted
-    ``GateRecord`` (``controlplane``) the operator acts on. ``decisions`` is the set
-    of verbs the cockpit may POST for an open gate (empty once decided), so the UI
-    renders the affordances straight from the reducer, never inferring them.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    kind: str
-    state: str
-    decidedBy: str | None = None
-    decidedVia: str | None = None
-    evidenceRefs: list[dict[str, Any]] = Field(default_factory=list)
-    decisions: list[str] = Field(default_factory=list)
-    packet: dict[str, Any] = Field(default_factory=dict)
-    ts: str
-
-
-class LifecycleProjection(BaseModel):
-    """One lifecycle's resolved state, folded from its event log.
-
-    Fleeting lifecycles project as bare-bones entries (no ``enclosure``);
-    persistent ones carry the full enclosure detail -- the slice-05 visual
-    distinction falls out of this shape, not UI inference.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    state: State
-    phase: Phase
-    fleeting: bool
-    enclosure: str | None = None
-    repoId: str | None = None
-    scope: str | None = None
-    tokens: int = 0
-    startedAt: str
-    lastEventTs: str
-    # When the lifecycle last *entered its current written state* (seeded at
-    # ``startedAt``, advanced on every state-changing event in the fold). Unlike
-    # ``lastEventTs`` it is immune to heartbeats, so it is the stable
-    # triggering-signal anchor the attention queue uses to honor a lifecycle
-    # acknowledgement of an awaiting-developer / blocked item and to re-surface it on a *new*
-    # occurrence. Inferred transitions (stale -> paused) intentionally do not move it.
-    stateEnteredAt: str = ""
-    staleSeconds: float | None = None
-    # True when ``state`` was *derived* by the reducer (stale heartbeat -> paused;
-    # dormant fleeting -> abandoned) rather than read from a written transition.
-    # Keeps "never pretend declared is observed" enforceable from the data alone.
-    inferred: bool = False
-    # The latest open block ask (the proto-gate); slice 06 materializes the record.
-    ask: dict[str, Any] | None = None
-    # The durable gate materialized from the GateStore (slice 6c): the dashboard's
-    # review surface. None when the lifecycle has no open gate.
-    gate: GateNode | None = None
-    actions: list[ActionAvailability] = Field(default_factory=list)
-    # The cumulative-token fuel gauge, folded from the log's tool.completed events.
-    tokenSeries: list[TokenSample] = Field(default_factory=list)
-
-
 class EnclosureNode(BaseModel):
     """A worktree enclosure (contract + group): the persistent identity anchor.
 
-    ``lifecycleId`` cross-references the lifecycle this enclosure anchors (it is
-    ``""`` for a legacy contract written before the lifecycle field existed).
+    ``lifecycleId`` is the contract's operation-binding key. It is not a
+    separately projected agent session or a source of task activity.
 
     ``codeWorktreeExists`` / ``memoryWorktreeExists`` are the worktree-existence
     TRUTH (L11): stat'ed at snapshot time in the I/O layer, exactly how the worktree
@@ -182,145 +118,12 @@ class EnclosureNode(BaseModel):
     actions: list[ActionAvailability] = Field(default_factory=list)
 
 
-class ProviderNode(BaseModel):
-    """One provider's current-state snapshot (data surfaces 1 and 4).
-
-    ``snapshotStaleSeconds`` is the age of the ``current.json`` file: provider
-    state is call-triggered and stale between calls, so the reducer surfaces how
-    old the snapshot is rather than pretending it is live. Workspace providers
-    can be aggregate nodes or repo-covered nodes when the provider snapshot
-    carries per-repo evidence. Worktree providers carry ``worktreeGroup`` and
-    bind to their isolated enclosure.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    state: str
-    ok: bool | None = None
-    watcherUp: bool = False
-    indexingState: str = "unknown"
-    snapshotStaleSeconds: float | None = None
-    # Binding (slice 5c + task 12 S2): a provider is either workspace-scoped or
-    # part of a worktree's isolated stack. Workspace providers can carry repoId
-    # when current-state has repo coverage evidence (CGC watcher rows, GrepAI
-    # targetRepos); worktreeGroup remains the join key back to an enclosure and
-    # takes precedence over repoId client-side.
-    scope: str = "workspace"  # "workspace" | "worktree"
-    role: str | None = None  # "code" (CGC) | "memory" (GrepAI)
-    repoId: str | None = None
-    worktreeGroup: str | None = None
-
-
-# The states :class:`Metrics` buckets: the LIVE half of the vocabulary, verbatim.
-# ``lifecycleCount`` already counts every lifecycle and ``totalTokens`` sums every one, so what
-# the per-state buckets add is the live workload -- a ``completed``/``abandoned`` lifecycle is
-# history, not work in flight. This is the live half itself and not a subtraction: a set
-# difference re-derives the answer from a second list (``TERMINAL_STATES``) that could be wrong,
-# and a hand-written bucket list is exactly what let ``awaiting-developer`` inflate
-# ``lifecycleCount`` and ``totalTokens`` while landing in no bucket at all -- the rollup could
-# not show a lifecycle that had handed the turn back. A seventh state must join
-# ``LiveState`` or ``TerminalState`` to exist at all (``check_state_partition``); joining the
-# live half grows a bucket here, a count in the reducer, and (via ``extra="forbid"``) a loud
-# failure if the field below is missing -- never another silent zero.
-#
-# STATE OF THE MIRROR (``dashboard/src/types/projection.ts``): it holds the same partition, in the
-# same shape. It declares ``LIVE_STATES`` and ``TERMINAL_STATES`` as the two halves, spreads them
-# into ``LIFECYCLE_STATES`` (live half first, so it enumerates in exactly the order ``STATES``
-# does here -- no consumer on either side indexes it, but the two sides now agree for free), derives
-# ``State`` from that tuple and ``ActiveState`` from the live half, and sets
-# ``ACTIVE_STATES = LIVE_STATES`` -- the live half itself, not a subtraction, for the reason given
-# above. Its ``stateCountField`` matches the naming rule below; Python moved to that spelling, not
-# the other way round, because TypeScript's type-level ``Capitalize<>`` cannot lower-case a tail
-# and the runtime helper must agree with the type.
-#
-# What the two sides ENFORCE differs, and only in the direction of this file being stricter.
-# Composition alone makes two of :func:`check_state_partition`'s three refusals unrepresentable on
-# either side: a state cannot be on ``State`` yet filed nowhere, nor filed yet absent from
-# ``State``. The third -- one state filed on BOTH halves -- is representable in both, and this file
-# refuses it at import while the mirror refuses it at compile time (``ActiveState & TerminalState``
-# is constrained to ``never``, so ``tsc -b`` fails naming the offending state). Where the mirror
-# genuinely cannot follow is a duplicate WITHIN one half: ``Literal["a", "a"]`` collapses to one
-# member here, while a TypeScript tuple keeps both -- the dashboard's contract test catches that at
-# runtime instead (one bucket per live state), which is a weaker gate but not an absent one.
-ACTIVE_STATES: tuple[LiveState, ...] = LIVE_STATES
-
-
-def state_count_field(state: str) -> str:
-    """The :class:`Metrics` field that buckets one lifecycle state.
-
-    ``running`` -> ``runningCount``, ``awaiting-developer`` -> ``awaitingDeveloperCount``: the
-    package's camelCase wire convention applied to the hyphenated state name, so the field
-    *name* is derived from the vocabulary too and not merely the count behind it.
-
-    Each segment after the first has its FIRST character upper-cased and the rest left alone.
-    ``str.capitalize`` would lower-case the tail instead (``awaiting-DEVELOPER`` ->
-    ``awaitingDeveloperCount``), which both disagrees with the TypeScript mirror -- whose
-    ``Capitalize<>`` cannot lower-case a tail, so it renders ``awaitingDEVELOPERCount`` -- and
-    quietly merges states that differ only in the case of a tail. Two copies of one rule are
-    only safe while they are the same rule.
-    """
-    head, *rest = state.split("-")
-    return f"{head}{''.join(word[:1].upper() + word[1:] for word in rest)}Count"
-
-
-def state_count_fields(states: Sequence[str]) -> dict[str, str]:
-    """Map each state to its bucket field, refusing a mapping that is not one-to-one.
-
-    :func:`state_count_field` is not injective (``a-b`` and ``aB`` both bucket into
-    ``aBCount``), and a collision does not announce itself: :func:`Metrics` is keyed by
-    field, so two states sharing a bucket means the later count silently OVERWRITES the
-    earlier and the rollup under-reports without a single field being wrong-looking. The
-    collision is a naming problem in the vocabulary, so it is refused where the map is
-    built, naming both states.
-    """
-    fields: dict[str, str] = {}
-    owner: dict[str, str] = {}
-    for state in states:
-        bucket = state_count_field(state)
-        collides_with = owner.get(bucket)
-        if collides_with is not None:
-            raise LifecycleVocabularyError(
-                f"states {collides_with!r} and {state!r} both bucket into {bucket!r}; "
-                "one Metrics field cannot count two states -- rename one state"
-            )
-        owner[bucket] = state
-        fields[state] = bucket
-    return fields
-
-
-STATE_COUNT_FIELDS: dict[str, str] = state_count_fields(ACTIVE_STATES)
-"""Lifecycle state -> its ``Metrics`` bucket field, one-to-one. The reducer's counting loop and
-the vocabulary-coverage tests both read this instead of re-enumerating the buckets."""
-
-
 class Metrics(BaseModel):
-    """Workspace rollups: 3a point counts + the 3b derived aggregates.
-
-    The ``*Count`` fields below are not a free-form list: they are exactly
-    :data:`STATE_COUNT_FIELDS` (one per non-terminal lifecycle state) plus ``lifecycleCount``,
-    the all-states total. They stay written out because they are the served contract the
-    dashboard reads by name and pyright checks by name; what makes them non-drifting is that
-    the reducer fills them from the vocabulary and a test asserts this declaration equals it.
-
-    ``stalenessHistogram`` buckets every onboarding sidecar by the age of its
-    ``lastVerifiedCommitDate`` (slice 3b, surface 11) -- the git-free
-    verification-age distribution note 03 wanted, computed without classifying
-    drift. Per-lifecycle token *series* live on each ``LifecycleProjection``; these
-    are the workspace-wide rollups.
-    """
+    """Workspace host-observation diagnostics; task counts belong to task entries."""
 
     model_config = ConfigDict(extra="forbid")
 
-    lifecycleCount: int = 0
-    runningCount: int = 0
-    blockedCount: int = 0
-    pausedCount: int = 0
-    # The NOTIFY-AND-CONTINUE turn end: the model stopped and the developer holds the turn.
-    # Non-terminal, so it belongs in the live rollup rather than in history.
-    awaitingDeveloperCount: int = 0
-    totalTokens: int = 0
-    stalenessHistogram: dict[str, int] = Field(default_factory=dict)
+    ignoredHostAgents: int = 0
 
 
 class DriftSnapshotNode(BaseModel):
@@ -328,8 +131,8 @@ class DriftSnapshotNode(BaseModel):
 
     The reducer never classifies drift (that is git-per-sidecar -- far too costly for
     a poll-cadence write); it reads the snapshot the memory_quality drift run
-    persisted and surfaces ``snapshotStaleSeconds`` (age of ``checkedAt``), exactly
-    like a provider tile. The full per-sidecar rows stay in the snapshot file; the
+    persisted and surfaces ``snapshotStaleSeconds`` (age of ``checkedAt``), the same
+    age honesty every snapshot-backed surface carries. The full per-sidecar rows stay in the snapshot file; the
     projection carries only the classification counts a gauge needs.
     """
 
@@ -339,118 +142,12 @@ class DriftSnapshotNode(BaseModel):
     branch: str
     counts: dict[str, int] = Field(default_factory=dict)
     actionableCount: int = 0
+    actionableFingerprint: str | None = None
     checkedAt: str | None = None
     sourceRoot: str | None = None
     memoryRoot: str | None = None
     reportPath: str | None = None
     snapshotStaleSeconds: float | None = None
-
-
-class SidecarStaleNode(BaseModel):
-    """One onboarding sidecar's verification age (slice 3b, surface 11; git-free).
-
-    Read from the sidecar's table metadata (``lastVerifiedCommitDate``) with no git
-    -- the always-on complement to the drift snapshot. The projection carries only
-    the *stalest* bounded sample (a leaderboard); the full distribution is the
-    ``Metrics.stalenessHistogram`` rollup.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    onboardingFile: str
-    repository: str
-    lastVerifiedDate: str
-    ageSeconds: float | None = None
-
-
-class SetupSummaryNode(BaseModel):
-    """The latest provider-setup outcome for one action (slice 3b, surface 2)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    action: str
-    ok: bool | None = None
-    ready: bool | None = None
-    state: str | None = None
-    generatedAt: str | None = None
-    snapshotStaleSeconds: float | None = None
-    resultCounts: dict[str, int] = Field(default_factory=dict)
-
-
-class SetupProgressNode(BaseModel):
-    """A worktree group's live provider-setup progress (slice 3b, surface 3).
-
-    Projected through ``setup_progress.progress_status``, so a ``running`` group
-    whose heartbeat went stale reads ``stale`` -- the boot-sequence widget data.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    group: str
-    state: str
-    currentPhase: str | None = None
-    heartbeatAgeSeconds: float | None = None
-    completedCount: int = 0
-    failedPhases: list[str] = Field(default_factory=list)
-
-
-class AgentPickupNode(BaseModel):
-    """A pending dashboard response waiting for a turn-boundary landing.
-
-    N16: the system acks -- a row lands when a correlated adapter acceptance reaches the
-    recipient at a turn boundary, so this list surfaces "pending / not yet landed" for the
-    dashboard. ``operator_inbox_consume`` is an optional attribution marker with nothing
-    mechanical attached. The attempt/backoff fields ride along so the panel can show
-    redelivery state without a second surface; the sweep predicates read the stores directly
-    and never this projection.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    entryId: str
-    lifecycleId: str | None = None
-    agentId: str | None = None
-    taskDocumentRef: TaskDocumentRef | None = None
-    subjectTaskDocumentRef: TaskDocumentRef | None = None
-    senderAgentId: str | None = None
-    senderRole: str | None = None
-    recipientRole: str | None = None
-    ownerRole: str | None = None
-    ownerTaskDocumentRef: TaskDocumentRef | None = None
-    ownerAgentId: str | None = None
-    ownerLifecycleId: str | None = None
-    gateId: str | None = None
-    messageKind: str = "message"
-    artifactPath: str | None = None
-    deliveryState: str = "queued"
-    deliveredToSession: str | None = None
-    attemptCount: int = 0
-    lastAttemptAt: str | None = None
-    nextAttemptAt: str | None = None
-    escalatedAt: str | None = None
-    state: str
-    ageSeconds: float | None = None
-    ttlSeconds: float
-
-
-class ExpectationRowNode(BaseModel):
-    """A durable what-must-happen-by-when row (R2/R5, 260707-HFX2-L1): projected for dashboard/
-    architect observability. An L2 predicate reads ``ExpectationRowStore`` directly, never this
-    node -- surfacing only, never the correctness path."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    kind: str
-    state: str
-    sourceId: str
-    subjectAgentId: str | None = None
-    subjectLifecycleId: str | None = None
-    taskDocumentRef: TaskDocumentRef | None = None
-    dueAt: str
-    overdue: bool = False
-    note: str | None = None
 
 
 class RouteCoverageNode(BaseModel):
@@ -525,341 +222,6 @@ class LedgerNode(BaseModel):
     rows: list[LedgerRefNode] = Field(default_factory=list)
 
 
-class TaskStepDispositionNode(BaseModel):
-    """Why and when one exact task work unit was intentionally skipped."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    kind: Literal["intentionalSkip"]
-    reason: str
-    recordedAt: str
-    recordedVia: Literal["task_doc.skip_step"]
-    lifecycleId: str | None = None
-
-
-class TaskSubStepNode(BaseModel):
-    """One substep of a task step (the JSON's finer-grained progress unit)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    title: str
-    status: str
-    disposition: TaskStepDispositionNode | None = None
-
-
-class TaskStepNode(BaseModel):
-    """One step of a task document, with its substeps -- the actual task *content* (slice 5c).
-
-    The 3c projection carried only step counts; the cockpit detail needs the step list itself to
-    show what a lifecycle is actually doing, so the served node carries the titles + statuses.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    title: str
-    status: str
-    disposition: TaskStepDispositionNode | None = None
-    substeps: list[TaskSubStepNode] = Field(default_factory=list)
-
-
-class TaskDecisionNode(BaseModel):
-    """One decision-log row of a task document."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    at: str
-    decision: str
-    rationale: str
-
-
-class TaskCodeExampleNode(BaseModel):
-    """One proposed-code-example block of a task document (the plan's distinct change shapes)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    title: str
-    distinctChange: str
-    why: str
-    language: str = ""
-    snippet: str = ""
-
-
-class TaskSubTaskRefNode(BaseModel):
-    """One slice in a master's series index -- the drill-in row (slice 6g).
-
-    Mirrors ``tasks.document.SubTaskRef``: ``status`` drives the index marker and ``file`` is the
-    drill-in match key (its stem resolves to the slice document's slug).
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    number: str
-    name: str
-    file: str = ""
-    status: str
-    scope: str = ""
-    # When `file` points at another master (a parallel/external series), the contract-paired lifecycle
-    # it links to — the dashboard renders such a row as a "→" cross-series jump (slice 6g). Null for an
-    # in-series slice row.
-    linkedLifecycleId: str | None = None
-    # The typed master link (L14-R1): on an orchestration sprint, the exact commanded master document
-    # this row tracks — the dashboard opens that document directly (sprint → master drill-down). Null
-    # for an ordinary master's leaf rows and for legacy slug-only membership rows.
-    masterRef: TaskDocumentRef | None = None
-
-
-class TaskSeatNode(BaseModel):
-    """One first-class seat of an orchestration sprint (L14-R3).
-
-    Mirrors ``tasks.document.SprintSeat``: the sprint document owns the seat record, so seat task
-    documents leave the sprint's task index (existing ones stay on disk as historical records).
-    ``identity`` is a correlatable session or catalog id — provenance for correlation, never an
-    authority source.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    role: str
-    label: str = ""
-    identity: str | None = None
-    state: str = "planned"  # planned | active | retired
-
-
-class TaskSectionNode(BaseModel):
-    """One ordered section of a master's render plan: freeform prose or a generated block (6g).
-
-    Mirrors ``tasks.document.Section`` so the master overview renders its bespoke sections in order.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    kind: str
-    heading: str
-    body: str = ""
-
-
-class TaskExecutionEndpointNode(BaseModel):
-    """One resolved-form edge endpoint: the master ref plus the segment-sampling leaf id.
-
-    The persisted grammar also allows a bare ref (lump/legacy); the before-validator
-    lifts that form so the served shape is uniform.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    ref: TaskDocumentRef
-    leafId: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _lift_bare_ref(cls, value: Any) -> Any:
-        if isinstance(value, TaskDocumentRef):
-            return {"ref": value}
-        if isinstance(value, dict) and "ref" not in value and "repository" in value:
-            return {"ref": value}
-        return value
-
-
-class TaskExecutionNode(BaseModel):
-    """One graph node: a whole-master lump or a leaf-segment of one master (L11-R1)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    kind: str = "master"
-    ref: TaskDocumentRef
-    leafIds: list[str] = Field(default_factory=list)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _lift_bare_ref(cls, value: Any) -> Any:
-        if isinstance(value, TaskDocumentRef):
-            return {"ref": value}
-        if isinstance(value, dict) and "ref" not in value and "repository" in value:
-            return {"ref": value}
-        return value
-
-
-class TaskExecutionEdgeNode(BaseModel):
-    """One reasoned dependency edge in a sprint task document."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    predecessor: TaskExecutionEndpointNode
-    successor: TaskExecutionEndpointNode
-    reason: str
-    judgmentId: str | None = None
-
-
-class TaskExecutionGraphNode(BaseModel):
-    """Persisted AON graph projected without adding scheduler judgment."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    nodes: list[TaskExecutionNode] = Field(default_factory=list)
-    edges: list[TaskExecutionEdgeNode] = Field(default_factory=list)
-
-
-class CloseoutCandidateNode(BaseModel):
-    """One exact-current member of the disposable scheduling projection."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    generationId: str
-    taskDocumentRef: TaskDocumentRef
-    owningMaster: TaskDocumentRef
-    classification: str
-    priority: str
-    order: int = 0
-    reasons: list[str] = Field(default_factory=list, max_length=256)
-
-
-class CloseoutQueueNode(BaseModel):
-    """Exact effective state for one disposable sprint scheduling projection."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    sprintRef: TaskDocumentRef
-    revision: int = 0
-    serviceCondition: str
-    sourceClassification: str | None = None
-    sourceFingerprint: str | None = None
-    sourceProblems: list[CloseoutProjectionProblemNode] = Field(
-        default_factory=list,
-        max_length=256,
-    )
-    members: list[CloseoutCandidateNode] = Field(default_factory=list)
-
-
-class TaskDocNode(BaseModel):
-    """A task document's progress and reader content (slice 3c, surface 7).
-
-    Read from the JSON-primary ``ar-task-document/v1`` document, so the dashboard
-    can show what a task is doing without opening files on disk. ``lifecycleId``
-    is runtime attachment, not the admission ticket: planning documents can be
-    projected before an enclosure or lifecycle exists.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    lifecycleId: str | None = None
-    repository: str
-    title: str
-    status: str
-    kind: str
-    stepsDone: int = 0
-    stepsTotal: int = 0
-    currentStep: str | None = None
-    docPath: str
-    # Hash of the reader body fields omitted from the always-on summary. Dashboard readers use it
-    # to refetch an already-open task document only when the on-demand body changed.
-    bodyRevision: str = ""
-    createdAt: str = ""
-    ageSeconds: float | None = None
-    steps: list[TaskStepNode] = Field(default_factory=list)
-    # The readable task content (slice 5c): so the dashboard *is* the task reader -- you never
-    # have to open the JSON on disk. The doc is the JSON-primary source (slice 3c).
-    objective: str = ""
-    requirements: list[str] = Field(default_factory=list)
-    design: str | None = None
-    codeExamples: list[TaskCodeExampleNode] = Field(default_factory=list)
-    decisions: list[TaskDecisionNode] = Field(default_factory=list)
-    openQuestions: list[str] = Field(default_factory=list)
-    references: list[str] = Field(default_factory=list)
-    # Master docs use these for the series index + ordered render plan; non-master task docs may
-    # carry freeform sections. Empty when the document has no authored sections.
-    subTasks: list[TaskSubTaskRefNode] = Field(default_factory=list)
-    # Only master documents own discard-unstarted audit history. ``None`` distinguishes a
-    # non-master task from a master whose typed history is present and empty.
-    discardedCount: int | None = None
-    discardedSubTasks: list[DiscardedSubTaskNode] | None = Field(
-        default=None,
-        max_length=256,
-    )
-    sections: list[TaskSectionNode] = Field(default_factory=list)
-    # The lifecycle of the parent master this doc declares via its `master` ref, when that ref points to
-    # a master in another series (a different lifecycle) -- drives a "↑ parent series" breadcrumb (6g).
-    masterLifecycleId: str | None = None
-    # The orchestration-command relation (260703-L14): non-empty only on a ``master`` doc that IS an
-    # orchestration task -- the master task names it commands. The dashboard derives the
-    # orchestration > master > leaf hierarchy from it; docs without the field render as before.
-    orchestrates: list[str] = Field(default_factory=list)
-    # The sprint's first-class seats (L14-R3): non-empty only on an orchestration sprint master;
-    # the dashboard renders them as structure, never as seat task documents.
-    seats: list[TaskSeatNode] = Field(default_factory=list)
-    # A commanded master's declared Git execution nature. None is an explicit legacy/migration
-    # signal, never an organizational default.
-    executionNature: MasterExecutionNature | None = None
-    # Sprint-only persisted graph plus mechanically derived topological waves.
-    executionGraph: TaskExecutionGraphNode | None = None
-    executionWaves: list[list[TaskExecutionNode]] = Field(default_factory=list)
-    # Render-ready per-node sprint graph (L12-R4): the dashboard renders this view directly and
-    # never joins raw refs to titles or re-derives waves/frontier state from the persisted graph.
-    executionGraphView: TaskExecutionGraphView | None = None
-
-
-class SeriesSubTaskNode(BaseModel):
-    """One subtask of a series master -- a single checkbox.
-
-    ``status`` is the lever: ``planning`` -> ⬜, ``inProgress`` -> 🔨, ``Completed`` -> ✅.
-    ``createdAt`` is resolved from the referenced leaf task document when present; the dashboard
-    uses it for creation-order display without parsing file-name prefixes.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    number: str
-    name: str
-    file: str = ""
-    status: str
-    scope: str = ""
-    createdAt: str | None = None
-
-
-class SeriesSectionNode(BaseModel):
-    """One ordered render section of a series master (freeform prose or a structured block)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    kind: str
-    heading: str
-    body: str = ""
-
-
-class SeriesNode(BaseModel):
-    """A series master's progress, keyed by its task FOLDER (R1 -- never a lifecycle).
-
-    The master is also projected as a :class:`TaskDocNode` for direct document selection.
-    ``SeriesNode`` is the folder-keyed aggregation/compatibility surface: the master
-    checklist where each subtask is one checkbox and ``doneCount`` counts the *declared*
-    ``Completed`` subtasks, authoritative over a slice's own internal steps. Carries the
-    full master render (subTasks + sections + decisions) so older clients can still render
-    the series reader.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    seriesId: str
-    repository: str
-    title: str
-    status: str
-    createdAt: str = ""
-    objective: str = ""
-    subTasks: list[SeriesSubTaskNode] = Field(default_factory=list)
-    discardedCount: int = 0
-    discardedSubTasks: list[DiscardedSubTaskNode] = Field(default_factory=list, max_length=256)
-    doneCount: int = 0
-    totalCount: int = 0
-    seriesTokenTotal: int = 0
-    sections: list[SeriesSectionNode] = Field(default_factory=list)
-    decisions: list[TaskDecisionNode] = Field(default_factory=list)
-    docPath: str
-    ageSeconds: float | None = None
-
-
 class AttentionItem(BaseModel):
     """One thing that needs the human, decided by the reducer (note 06, slice 05).
 
@@ -868,6 +230,17 @@ class AttentionItem(BaseModel):
     TUI, agent) shares one queue, and ``waitSeconds`` is a server-computed age, never
     a client's render time. The ``*Id`` / ``enclosure`` cross-refs point back into the
     structural tree so the UI can couple a queue item to its operation-tree node.
+
+    MIK-R200@v2 rules 7 and 8 give every row its subject and its dismissal rule. Every published
+    row is dismissed once per occurrence, so ``dismissible`` is true for all of them: the
+    acknowledgement hides exactly that occurrence and changes nothing at its cause. ``itemClass``
+    says only how the occurrence also ends -- an ``action`` is a live native cause that clears when
+    that cause ends, a ``notice`` is a terminal occurrence the bounded notice store retains,
+    ``operational`` is a surviving pre-existing kind whose source observes recovery. ``dismissible``
+    stays in the published contract so a served row states its own dismissibility instead of
+    leaving a client to infer it from the kind. ``taskKey``/``taskReference`` and
+    ``agentId``/``agentRole`` name the actual subject -- never matched by title, and a taskless
+    seat keeps ``taskKey`` absent rather than inventing one.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -879,17 +252,21 @@ class AttentionItem(BaseModel):
     title: str
     detail: str | None = None
     waitSeconds: float | None = None
-    lifecycleId: str | None = None
-    gateId: str | None = None
     enclosure: str | None = None
     repoId: str | None = None
-    providerId: str | None = None
-    # The triggering signal's timestamp (state-entry / gate / snapshot time), used to
-    # honor a current lifecycle acknowledgement: an item is suppressed while an
-    # acknowledgement at-or-after this exists, and re-surfaces when a *newer* signal arrives.
-    # ``None`` means no freshness anchor, so an acknowledgement holds until the underlying
-    # condition clears.
-    signalTs: str | None = None
+    # Complete actionable findings from the native drift producer, excluding its clock.
+    actionableFingerprint: str | None = None
+    itemClass: AttentionItemClass = "operational"
+    dismissible: bool = True
+    # The canonical task this row opens (its entry key and the document it names).
+    taskKey: str | None = None
+    taskReference: TaskDocumentRef | None = None
+    # The actual agent and native occurrence identities a row names, when it has them.
+    agentId: str | None = None
+    agentRole: str | None = None
+    promptId: str | None = None
+    heldMessageId: str | None = None
+    occurrenceId: str | None = None
 
 
 class CommitRefNode(BaseModel):
@@ -915,28 +292,12 @@ class CommitRefNode(BaseModel):
     factState: ProcessFactState = "missing"
 
 
-class ProviderBootNode(BaseModel):
-    """One isolated engine in a worktree's provider runtime: CGC (code) or GrepAI (memory).
-
-    The boot *sequence* (seed/clone/watcher phases) lives on the owning
-    :class:`EngineProcessNode` because provider setup is one progress file per worktree
-    group; this node is the engine's identity + its current runtime health.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    role: str  # "code" (CGC) | "memory" (GrepAI)
-    runtimeState: str  # nominal | indexing | down | configured | missing | unknown
-    factState: ProcessFactState = "observed"
-
-
 class EngineProcessEdge(BaseModel):
     """One conduit in the process map, with a state-backed visual treatment (slice 5e).
 
-    Edges are derived from facts, never decoration: a ``cgc-seed`` edge reads ``running``
-    only while the seed phase is live, ``failed`` on a failed phase, ``planned`` before it
-    starts -- so an animated conduit always means an observed transition.
+    Edges are derived from facts, never decoration: a worktree-add edge reads ``complete``
+    only where the checkout was observed, ``planned`` before it starts -- so an animated
+    conduit always means an observed transition.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -981,11 +342,11 @@ class LandingRefNode(BaseModel):
 class EngineProcessNode(BaseModel):
     """One worktree enclosure as a state-backed process -- the Engine Room's unit (slice 5e).
 
-    Composed (like ``attentionQueue``) from the contract + status guidance + provider boot +
-    lifecycle, **not** read from a new file. The center of the Engine Room is this enclosure,
-    not a provider card: the official source line, the code/memory worktrees, the contract
-    coupling them, and the two isolated engines bound to that worktree group. ``health`` and
-    the per-side ``factState``s carry the observed/derived/planned/missing honesty 5e demands.
+    Composed (like ``attentionQueue``) from the contract + status guidance +
+    lifecycle, **not** read from a new file. The center of the Engine Room is this enclosure:
+    the official source line, the code/memory worktrees and the contract coupling them.
+    ``health`` and the per-side ``factState``s carry the observed/derived/planned/missing
+    honesty 5e demands.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1006,7 +367,7 @@ class EngineProcessNode(BaseModel):
 
     codeSource: CommitRefNode
     codeWorktree: CommitRefNode
-    memoryMode: str  # "external" | "internal" | "disabled"
+    memoryMode: str  # "external" | "disabled"
     memorySource: CommitRefNode | None = None
     memoryWorktree: CommitRefNode | None = None
     ledgerPath: str | None = None
@@ -1027,16 +388,6 @@ class EngineProcessNode(BaseModel):
     # (read from the official ledger); None until carried. Display-only -- 5k renders the seam.
     carryoverDoneAt: str | None = None
 
-    # Provider boot: one setup-progress sequence per worktree group (slice 3b reused).
-    setupState: str | None = None  # running|stale|failed|failed-unchecked|ok|complete|prepared
-    currentPhase: str | None = None
-    completedPhases: list[str] = Field(default_factory=list)
-    failedPhases: list[str] = Field(default_factory=list)
-    heartbeatAgeSeconds: float | None = None
-    seedFallback: bool = False
-    retryArgs: dict[str, Any] | None = None
-
-    providers: list[ProviderBootNode] = Field(default_factory=list)
     edges: list[EngineProcessEdge] = Field(default_factory=list)
     # The successful-landing arc -- remote/PR refs observed during closeout/integration (5h). Empty
     # until the lifecycle reaches a landing phase or when no probe could run.
@@ -1057,7 +408,7 @@ class EngineProcessFacts:
     An *input* carrier, not a served node: ``contract`` is the pure ``contract_payload``
     dump (branches, commits, paths, gate states); ``guidance`` is the pure
     ``lifecycle_guidance`` (phase + next operation); ``status`` is the best-effort
-    ``status_payload`` (worktree existence, dirty flags, base freshness, provider boot) or
+    ``status_payload`` (worktree existence, dirty flags, base freshness) or
     ``None`` when its git probes could not run. Defined here -- the module both the I/O reader
     (:mod:`agents_remember.observer.snapshots`) and the pure
     :func:`agents_remember.observer.reducer.build_engine_processes` already import -- so the
@@ -1073,13 +424,15 @@ class EngineProcessFacts:
     ledger_row_count: int = 0
 
 
-# 260707-HFX2-L13 F6/CS-6 D2+D1: ``TaskDocNode`` in the always-on projection is a bounded summary.
-# The full reader body is fetched through the on-demand task-document endpoint. This budget remains as
-# a regression guardrail: the write path should now measure 0 body bytes for broadcast task documents.
+# 260707-HFX2-L13 F6/CS-6 D2+D1: ``TaskDocNode`` in the always-on projection is a summary -- the
+# reader body is omitted there and fetched through the on-demand task-document endpoint. No bound
+# limits how many documents are projected (260916-TDPU removed the document-count cap); "summary"
+# describes the omitted fields only. This budget remains as a regression guardrail: the write path
+# should now measure 0 body bytes for broadcast task documents.
 TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES = 256 * 1024
 
 
-def task_documents_body_bytes(docs: list[TaskDocNode]) -> int:
+def task_documents_body_bytes(docs: list[TaskSummary]) -> int:
     """Approximate byte cost of task-doc reader bodies still present in the broadcast (F6 guardrail).
 
     For summary nodes this returns zero; tests seed full nodes to prove the guard still catches any
@@ -1103,13 +456,81 @@ def task_documents_body_bytes(docs: list[TaskDocNode]) -> int:
     return total
 
 
+class TaskState(BaseModel):
+    """The task facts, computed together once by the task-entry producer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage: Literal["planned", "started", "aborted", "completed"]
+    activity: Literal["works", "waiting", "paused", "unknown"] | None = None
+    eventAt: str | None = None
+    # MIK-R190 rule 13: present only when the task is started, nothing of it works
+    # and one of its seats is limited; the dashboard shows it instead of `paused`.
+    providerLimit: ProviderLimit | None = None
+    # Present only when the task is started, nothing of it works and a seat's declared
+    # wait has its check still to come: `activity` is then `waiting`, not `paused`.
+    waitingSeats: list[WaitingSeat] | None = None
+
+
+class TaskCounts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    planned: int = 0
+    started: int = 0
+    aborted: int = 0
+    completed: int = 0
+    works: int = 0
+    waiting: int = 0
+    paused: int = 0
+    unknown: int = 0
+
+
+class TaskListDisagreement(BaseModel):
+    """One task record that a master's sub-task list and the record's own master place apart.
+
+    ``names-another-master``: this master lists the record, the record names ``recordMaster``.
+    ``not-listed``: the record names this master (or, naming none, lies in its folder) and no
+    master lists it. ``listed-twice``: this master lists a record that ``parent`` holds already.
+    ``unresolvable-master``: the record's ``master`` text, served as ``masterLiteral``, names no
+    task document; this master lists the record (``row``) or holds its folder.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["names-another-master", "not-listed", "listed-twice", "unresolvable-master"]
+    record: TaskDocumentRef
+    row: str | None = None
+    recordMaster: TaskDocumentRef | None = None
+    masterLiteral: str | None = None
+    parent: str | None = None
+
+
+class TaskEntry(TaskState):
+    """One qualified task, its authored summary, runtime facts and ordered children."""
+
+    key: str
+    reference: TaskDocumentRef | None = None
+    id: str
+    scope: str | None = None
+    title: str
+    stepsDone: int = 0
+    stepsTotal: int = 0
+    summary: TaskSummary | None = None
+    parent: str | None = None
+    worktrees: list[EnclosureNode] = Field(default_factory=list)
+    children: list[str] = Field(default_factory=list)
+    counts: TaskCounts = Field(default_factory=TaskCounts)
+    # Served only on a master where a record and a list disagree; at most one per listed row
+    # and one per record that no list holds, so the corpus bounds it.
+    disagreements: list[TaskListDisagreement] | None = None
+
+
 class Analytics(BaseModel):
     """The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.
 
-    Kept apart from the structural tree (lifecycles/enclosures/providers) so the
-    client-agnostic core stays small. Large raw inventories are deliberately *not*
-    here -- drift rows stay in the snapshot file, the full sidecar list collapses to
-    the histogram + a bounded leaderboard -- so the served projection stays lean.
+    Kept apart from the structural task/enclosure tree so the
+    client-agnostic core stays small. Converted drift counts,
+    route coverage, tool reports and memory-ledger currency describe the retained analytics.
 
     ``attentionQueue`` (slice 05) and ``engineProcesses`` (slice 5e) are the *derived*
     surfaces here: the reducer composes them from the structural tree + these signals (not
@@ -1119,41 +540,28 @@ class Analytics(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     driftSnapshots: list[DriftSnapshotNode] = Field(default_factory=list)
-    stalestSidecars: list[SidecarStaleNode] = Field(default_factory=list)
-    setupSummaries: list[SetupSummaryNode] = Field(default_factory=list)
-    setupProgress: list[SetupProgressNode] = Field(default_factory=list)
     routeCoverage: list[RouteCoverageNode] = Field(default_factory=list)
     toolReports: list[ToolReportNode] = Field(default_factory=list)
-    agentPickups: list[AgentPickupNode] = Field(default_factory=list)
-    expectationRows: list[ExpectationRowNode] = Field(default_factory=list)
     ledgers: list[LedgerNode] = Field(default_factory=list)
-    taskDocuments: list[TaskDocNode] = Field(default_factory=list)
     attentionQueue: list[AttentionItem] = Field(default_factory=list)
     # The enclosure-centered Engine Room process map (slice 5e): one node per worktree
-    # enclosure, derived from contract + status guidance + provider boot + lifecycle.
+    # enclosure, derived from contract and status guidance.
     engineProcesses: list[EngineProcessNode] = Field(default_factory=list)
-    # The series/master surface (R1): one node per series master, keyed by its task FOLDER
-    # (masters carry no lifecycleId, so the lifecycle-keyed taskDocuments never include them).
-    series: list[SeriesNode] = Field(default_factory=list)
 
 
 class WorkspaceProjection(BaseModel):
-    """The whole resolved tree: lifecycles + enclosures + providers + metrics + analytics."""
+    """The resolved tasks, unbound worktrees, counts and analytics."""
 
     model_config = ConfigDict(extra="forbid")
 
     version: int = 2
     generatedAt: str
-    lifecycles: list[LifecycleProjection] = Field(default_factory=list)
+    tasks: list[TaskEntry] = Field(default_factory=list)
+    taskCounts: TaskCounts = Field(default_factory=TaskCounts)
     enclosures: list[EnclosureNode] = Field(default_factory=list)
-    providers: list[ProviderNode] = Field(default_factory=list)
-    # Worktree-group basenames whose enclosure lifecycle is still active (non-terminal,
-    # cleanup not completed/abandoned). The shared `enclosures`/`lifecycles` collections keep
-    # every historical entry for the Operations/Lifecycle history surfaces; this is the bounded
-    # active set the Topology constellation filters on so it shows live work, not all-time work.
-    # Sourced from the same `active_enclosure_worktree_groups` admission the Engine Room uses,
-    # so the two views share one definition of "active". The join key matches the worktree-scoped
-    # `ProviderNode.worktreeGroup` (a basename) and `Path(EnclosureNode.worktreeGroup).name`.
+    # Worktree-group basenames admitted by their nonterminal enclosure contracts.
+    # Engine Room and Topology use the same active_enclosure_worktree_groups
+    # membership. This is operational admission, never a task-stage source.
     activeWorktreeGroups: list[str] = Field(default_factory=list)
     # Projected closeout queues (one per sprint master with an execution graph), carrying candidate
     # states, grades, waiting reasons, and the active atomic blocker (L8-R1/R2/R5).

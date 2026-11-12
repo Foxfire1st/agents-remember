@@ -1,323 +1,247 @@
-# Harnesses & Spawn Knobs Reference
+# Harnesses and role settings
 
-The single manual for the spawn surface (260703-L16): what a harness is to
-Agents Remember, every role-knob parameter and its delivery vehicle, the
-dynamic native catalogs, detection and refusal behavior, and a
-worked example that teaches the system a brand-new harness through settings.
+This page says what a harness is to Agents Remember and how the launch of a role agent is set.
+It covers the role settings, the files that hold them, the order in which a start takes its
+choices, and the step-up of a role.
 
-Related references: `settings-json.md` (the settings families and merge
-rules), `skills/l-01-agent-lifecycles` (the role doctrine the knobs
-parameterize).
+Related pages: [Settings Reference](settings-json.md) describes the four settings files,
+[Roles and role agents](../roles.md) describes the roles and their starts, and
+[Host](../host.md) describes the host.
 
-## What A Harness Is
+## What a harness is
 
-A **harness** is a TUI coding agent the framework can launch into a hosted
-tmux session — via the dashboard's launch buttons or the agent-facing structural
-`dispatch_agent` tool (one public spawn surface; no parallel agent launch path).
-Plane-hosted callers use injected seat identity and direct-child scope. An
-identity-free developer launcher uses canonical target-document resolution plus
-role-altitude validation to create the first architect seat. The request shape
-is identical and a plane refusal never falls back to ambient.
-Each harness is described by an entry with:
+A harness is a coding-agent program: Claude Code, Codex, Cursor, Hermes, Pi or OpenClaw. Agents
+Remember meets a harness in two places:
 
-| Field | Meaning |
+- **The harness you work in.** You register the tool server in it, and its chat calls the tools.
+- **The harness of a role agent.** The host (Paseo) runs each role agent as a chat of a harness.
+  The host's catalog names the harnesses it can start, their models and their efforts. The role
+  launcher of the dashboard shows that catalog, and `agents-remember paseo status` lists its
+  [host providers](../concepts.md#host-provider) under `providers`. Whether a harness of an id
+  exists is the host's answer.
+
+A row of the role settings names the harness of a role in `harness`. A start names it in `agent`.
+Both take a harness id, the id under which the role settings and the host name a harness.
+
+## What each harness needs
+
+Each harness page has a section that lists what that harness needs to work with Agents Remember:
+
+- [Claude Code](../install/claude-code.md#what-this-harness-needs)
+- [Codex](../install/codex.md#what-this-harness-needs)
+- [Cursor](../install/cursor.md#what-this-harness-needs)
+- [Hermes](../install/hermes.md#what-this-harness-needs)
+- [Pi](../install/pi.md#what-this-harness-needs)
+- [OpenClaw](../install/openclaw.md#what-this-harness-needs)
+
+[Host](../host.md#what-the-host-needs) lists what a harness needs when the host runs it for a
+role agent.
+
+A role agent receives the tools of Agents Remember from one tool server that its start gives it,
+named `agents-remember-task`. The whole result of `role_start`, in the file that `log` names,
+says `"secondCopyLoaded": false` when the start kept the tools of the tool server
+`agents-remember` out of the role agent, which it does on Claude Code only, and `true` otherwise.
+
+## The harness ids of the role settings
+
+The role settings know four built-in ids: `claude`, `codex`, `pi` and `eve`. `claude`, `codex`
+and `pi` are the ids of Claude Code, Codex and Pi. `eve` is the id of the harness Eve, for which
+this documentation has no install page; a start with it needs a host provider of that id on the
+host. Hermes takes the id of its provider entry, `hermes` on [its page](../install/hermes.md).
+Cursor and OpenClaw have no id: the host starts no role agent on them. The family
+`orchestration.harnesses` adds ids; it is keyed by id:
+
+- An entry under a new id adds that id. The entry is an object, and it may be empty.
+- An entry accepts the key `extraArgs`, for the id `claude` and in the user settings file only.
+- The loader, the part of Agents Remember that reads and checks the role settings, also accepts
+  the keys `name`, `command`, `argv`, `modelFlag`, `effortFlag`, `effortFlagValues`,
+  `effortSessionValues` and `effortSessionCommand` in an entry and reads none of them.
+- A key that the loader does not know is refused.
+
+`orchestration.spawn.harness` names the harness of every role whose row names none. The loader
+accepts a built-in id or an id that `orchestration.harnesses` adds, and refuses another value.
+The `harness` of a role row is not checked against these ids. A start checks it against the
+host's catalog, so a role row may name any harness for which the host has a host provider.
+
+## The role settings
+
+The role settings choose the harness, the model, the effort and the permission mode of each role.
+A role agent takes them at its start; a change does not alter a running role agent.
+
+### The two files
+
+| Layer | File | Holds |
+| --- | --- | --- |
+| user settings file | `~/.config/agents-remember/settings.json`, or `$XDG_CONFIG_HOME/agents-remember/settings.json` when that variable is set | your choices for every code repository |
+| repository settings file | `<code-repository>/system/settings.json` | choices for the tasks of one code repository |
+
+Both files hold the same family under the top-level key `orchestration`. The product reads both
+at each use and lays the repository settings file over the user settings file, key by key.
+Either file may be absent.
+
+`user_settings_init` creates the user settings file open to writing, and `server_info` names an
+open file under `openUserSettings`. You can close the file to writing.
+[Settings Reference](settings-json.md) gives the command that closes the file and the
+command that opens it again for an edit.
+
+### The keys of a role row
+
+A role row stands under `orchestration.roles.<role>`. The role is `architect`, `investigator`,
+`orchestrator`, `manager`, `worker`, `reviewer`, `curator` or `bootstrap`. A row accepts these
+keys. It also accepts `launchArgs`, `promptKeywords` and `sessionCommands`, and reads none of
+them. A key that the loader does not know is refused, and the refusal names the file and the key.
+
+| Key | What it sets at a start | Layer |
+| --- | --- | --- |
+| `harness` | the harness that runs the role agent, by its harness id | both |
+| `model` | the model of that harness | both |
+| `effort` | the thinking option of that model | both |
+| `serviceTier` | the speed selection of the model: the value of the feature `service_tier` | both |
+| `featureValues` | values for features of the model. The host's catalog lists the features of each model; a feature is a toggle, which takes `true` or `false` (for example `fast_mode`), or a selection, which takes one of its option ids (for example `service_tier`) | `service_tier` and `fast_mode` in both; every other feature in the user settings file only |
+| `mode` | the [permission mode](../concepts.md#permission-mode) of the agent | user settings file only |
+| `notes` | your own instruction text for the role. The product adds it to the role's [role capsule](../concepts.md#role-capsule); a text whose first line is `<overwrite>` replaces the capsule. The `notes` of the [host profile](../concepts.md#host-profile) of the role, when they are not empty, take the place of this text. | user settings file only |
+| `extraArgs` | extra command-line arguments for the harness; accepted for `claude` only | user settings file only |
+| `stepUp` | a second set of choices for the role; see [Step-up](#step-up) | user settings file only |
+
+A repository file that holds a key of the user settings file only is refused when the settings
+load. The refusal names the file and the key.
+
+The loader checks that `harness`, `model` and `effort` are non-empty texts. A start checks them
+against the host's catalog and matches a name to the host's id or label without regard to case.
+
+Besides the eight roles, the family accepts the row name `review-presenter`. That row sets the
+launch of the explainer of the review page. It is not a role.
+
+### A row for one level
+
+`orchestration.rolesPerLevel.<level>.<role>` holds a row of the same shape for one level. The
+level follows the role:
+
+| Level | Roles |
 | --- | --- |
-| `id` | The stable identifier settings and dashboard launches use (`"claude"`). Never a command. |
-| `name` | Display name (dashboard buttons). |
-| `command` | The executable probed on `PATH` for detection. |
-| `argv` | The exact launch command array, e.g. `["claude"]`. Fixed server-side. |
-| `modelFlag` | Optional compatibility mapping for a settings-defined non-native harness. Native adapters do not use it. |
-| `effortFlag` + `effortFlagValues` | Optional launch mapping and vocabulary for a settings-defined non-native harness. Declared together. |
-| `effortSessionValues` + `effortSessionCommand` | Optional explicit session-command mapping for a settings-defined non-native harness. Declared together. |
+| `leaf` | `worker`, `reviewer`, `curator` |
+| `master` | `manager` |
+| `portfolio` | `architect`, `investigator`, `orchestrator` |
 
-### Built-in registry (good defaults, not a wall)
+A start reads the row of the role's own level only. A row of a role under another level is
+accepted and read by no start. `bootstrap` has no level.
 
-The curated defaults live in `mcp/src/agents_remember/serving/harnesses.py`:
+A level row lies over the role row key by key: a key that the level row does not name comes from
+the role row. Across both files the order is, strongest first:
 
-| id | base argv | token-free catalog | initial configuration | acceptance evidence |
-| --- | --- | --- | --- | --- |
-| `claude` (Claude Code) | `["claude"]` | `list_models` control request | `--model <key> --effort <level>` | model echoed by `system/init`; effort is catalog-validated because stream-json init has no effort echo |
-| `codex` (Codex) | `["codex"]` | `model/list` | `thread/start` model + `config.model_reasoning_effort` | thread/model/effort echo validation |
-| `pi` (Pi.dev) | `["pi"]` | `get_available_models` | `--model <provider/id> --thinking <level>` plus adapter-owned `--mode rpc` | `get_state` model/thinking echo validation |
+1. the level row of the repository file;
+2. the level row of the user settings file;
+3. the role row of the repository file;
+4. the role row of the user settings file.
 
-For role-configured native spawns, `model` and `effort` are a required pair. They still ride
-`AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT` as provenance, but those env names are not the vendor
-configuration mechanism. The adapter first discovers the installed/account catalog with the base
-argv, validates the model-gated selection, then applies its native launch material to a fresh real
-adapter. A stale value never falls back to the vendor default.
+### The order of choices at a start
 
-### Structured-protocol compatibility
+A start takes each choice from the first source that names it:
 
-Production adapters launch the installed harness and decide compatibility from
-the structured protocol evidence Agents Remember consumes, not from an exact
-CLI package-version comparison:
+| Choice | Order, strongest first |
+| --- | --- |
+| harness, model, effort | the start (`agent`, `model`, `effort` of `role_start`, or the selectors "Role agent override", "Role model override" and "Role effort override" of the role launcher); the host profile of the role; the role settings; the host's default |
+| permission mode | the host profile of the role; the role settings; the least permissive mode that the product knows for the harness: `default` for `claude`, `auto` for `codex` |
+| feature values | the role settings; over them the host profile of the role; over that the start |
+| notes | the host profile of the role, when its `notes` are not empty; else the role settings |
 
-- Claude startup uses three distinct evidence sources. The correlated
-  `control_request/initialize` success must contain `commands` rows with `name` and optional
-  `aliases`; its envelope may also carry `pending_permission_requests` and
-  `pending_user_dialog_requests`. `system/init` must contain `session_id`,
-  `claude_code_version`, `cwd`, the current `model`, `permissionMode`, `tools`, and
-  `slash_commands`. Agents Remember then separately issues a correlated
-  `control_request/list_models`; its dynamic `models` rows contain `value`, `displayName`,
-  `description`, optional `resolvedModel`/`disabled`, and model-local
-  `supportsEffort`/`supportedEffortLevels`, and the current model must resolve to one row. In
-  Claude 2.1.210 neither `control_request/initialize` nor `system/init` provides account or
-  catalog data; the separate `list_models` response is the catalog source.
-- Codex must complete `initialize`, `model/list`, and `thread/start` or
-  `thread/resume`; the reported client identity and thread CLI-version token
-  must agree, and the selected model, reasoning-effort menu, cwd, thread state,
-  and configured policies must validate.
-- Pi RPC does not expose an installed package version in its startup protocol.
-  Compatibility therefore comes from correlated `get_state` and `get_entries`
-  responses plus the documented event/interaction fields. The exact Pi package
-  used by a smoke fixture is not a production launch pin.
+Four rules complete the table:
 
-Reported version text remains diagnostic evidence. Missing, malformed, or
-contradictory required fields fail loudly; there is no pane/log fallback or
-version-range guess.
+- The host profile of a role is the agent profile that the host keeps under the role id as its
+  name; see [Host profiles](../host.md#host-profiles).
+- A model or an effort from a lower source counts only for the harness it was written for. When
+  the start names another harness, the model and the effort of the role settings do not apply.
+- A start cannot set the permission mode. A start may set the features `service_tier` and
+  `fast_mode` and no other feature.
+- A `model` or an `effort` on `role_start` without `agent` is refused, except for `bootstrap`.
 
-### Serving-cutover restart contract
+### Defaults
 
-The dashboard daemon and MCP servers share durable operator-inbox and terminal
-catalog files while keeping their Python schemas loaded in memory. A serving
-upgrade is therefore one reload boundary, not a dashboard-only restart. After
-live work is saved and reported, reload every long-lived consumer before
-post-cutover validation:
+Without a user settings file and without a repository file, these values hold:
 
-1. Restart the `agents-remember dashboard` daemon (including an auto-started
-   daemon supervised by an MCP server) so its FastAPI routes, projector,
-   agent-notifier, inbox store, catalog models, and packaged dashboard assets come
-   from the new build.
-2. Restart or reload every connected harness/client process that owns an
-   Agents Remember MCP server subprocess. Each Claude, Codex, Pi, or other MCP
-   client has its own in-memory `OperatorInboxEntry` and catalog reader; leaving
-   even one pre-cutover process alive can make its private inbox reader or writer fail against
-   rows written by the new daemon.
-3. End and recreate each bridge-backed hosted session that must be validated.
-   Its per-session `harness_control_runner` and vendor adapter are separate
-   long-lived Python processes and do not hot-reload when only the dashboard
-   daemon changes. Preserve/report session work before replacement.
-4. Reload open browser dashboard tabs after the daemon is serving the new build
-   so the JavaScript projection models match the server response shape.
+| Choice | Value |
+| --- | --- |
+| harness | `orchestration.spawn.harness`; without it, the first of the [harness ids](#the-harness-ids-of-the-role-settings) `claude`, `codex`, `pi`, `eve` and the added ids for which the host has a host provider |
+| model, effort | the host's default for the harness |
+| permission mode | `default` for `claude` and `auto` for `codex`, when the host offers that mode; for another harness the product names none |
+| `orchestration.roleMessageLimit` | 1,000 characters |
+| `orchestration.loops.defaults.maxRounds` | 5 review rounds |
 
-One-shot CLI commands started after the cutover load the current package and do
-not need a separate reload. Settings do not need mutation for this contract.
+A Bootstrap role agent takes the harness of the chat that started it, unless the call names
+`agent`. When the host has no host provider for that harness, the call is refused. Its `detail`,
+in the log file that the answer names under `log`, lists the harnesses the host knows, and
+`agents-remember paseo status` shows which of them are available. Make the call again with one
+of them in `agent`.
 
-### Extending or overriding via settings (`orchestration.harnesses`)
+### Step-up
 
-The registry is **good defaults, never a rigid wall** (developer ruling
-2026-07-07). The `orchestration.harnesses` settings family — global
-`<coordinationRoot>/system/settings.json`, repo-local
-`<repo>/system/settings.json`, standard L13 merge and fail-loud rules —
-merges over the registry **by id**:
+A step-up is a second set of choices for a role, for work that the first set did not finish.
+`orchestration.roles.<role>.stepUp` accepts `harness`, `model`, `effort`, `serviceTier`, `mode`,
+`featureValues` and `notes`. It accepts no `extraArgs` and no step-up of its own, and the loader
+refuses a step-up whose choices equal those of the role.
 
-- A **new id ADDS a harness** the framework never enumerated. It must declare
-  `command` and/or `argv` (`command` defaults to `argv[0]`; `argv` defaults to
-  `[command]`).
-- An **existing id OVERRIDES the defaults per field**: its `argv` array
-  REPLACES ours — launch the harness exactly the way you would run it
-  yourself. Native model/effort ownership remains in the adapter, not this registry entry.
-- Detection still applies: the `command` is probed on `PATH` at dispatch; an
-  undetected harness refuses with `harness-not-detected`.
-- Vocabulary fields come in delivery-vehicle pairs and must resolve together:
-  `effortFlag` with `effortFlagValues`, `effortSessionValues` with
-  `effortSessionCommand`. A flag without a vocabulary would reintroduce the
-  silent-degrade risk, so the loader refuses it.
-- For a new non-native id, a settings-declared `effortFlagValues` enum is authoritative. Native
-  Claude/Codex/Pi ids always validate against their dynamic adapter catalog.
-- The `effortSessionCommand` **template** must render with `{value}` and
-  reference no other placeholder: a stray field (`/set {mode}={value}`), a
-  positional `{}`, or an unmatched brace is refused by the loader naming the
-  harness. The check runs post-merge (a builtin override may supply just the
-  command), so a bad template surfaces the same structured refusal every other
-  bad knob gets instead of crashing the spawn with a raw `str.format` error.
+A start with the step-up reads no host profile. When the step-up names another harness or another
+model, the start takes no choice of the role's own row that the step-up does not name, and
+without a `mode` in the step-up it takes the host's default mode for that harness.
 
-An id known neither in the registry nor in settings refuses **loudly** at
-dispatch, naming the known set and pointing here — never a crash.
+A step-up is taken in two ways:
 
-## The Role Knobs, Parameter By Parameter
+- **By count.** For `worker` and `curator`, the key `afterTries` names a number of tries; it is 3
+  when the row does not name it. A try of a Worker is a recorded round of code review that leaves
+  findings; a try of a Curator is such a round of memory review. When the count is reached, the
+  answer of the review record says that the role steps up, and the next start of that role on
+  the task takes the step-up. Another role refuses `afterTries`.
+- **On request.** `role_start` with `step_up` set to one sentence that gives the reason starts
+  the role with its step-up. The button "Step up" of the role launcher does the same and asks for
+  the sentence. Without a step-up in the settings the call is refused.
 
-Role knobs live in `orchestration.roles.<role>` (flat defaults) and
-`orchestration.rolesPerLevel.<level>.<role>` (per-level overrides). For ordinary
-agent-driven dispatches, these settings are the sole developer-controlled spend
-surface. Callers name only a canonical child task document and role; the plane derives role/level
-launch state and never accepts caller `harness`/`model`/`effort` or direct launch/session spend
-controls. Three
-settings layers have distinct validation postures:
+### Example
 
-### Layer 1 — validated enum knobs
+This user settings file loads as it stands:
 
-| Knob | Delivery vehicle | Validation |
-| --- | --- | --- |
-| `harness` | Selects the harness entry (argv comes from it). | Must be a known id: builtin or `orchestration.harnesses`-defined. Checked at settings load AND at dispatch. |
-| `model` | Native adapter launch port; also rides env as `AR_SPAWN_MODEL` provenance. | Required for a role-configured native spawn and validated against the installed/account dynamic catalog. A settings-defined non-native harness uses its declared `modelFlag`. |
-| `effort` | Native adapter launch port; also rides env as `AR_SPAWN_EFFORT` provenance. | Required for a role-configured native spawn and validated under the selected model against only `launchSettable` dynamic options. A settings-defined non-native harness uses its declared mapping. |
-
-This model-gated dynamic validation prevents both stale package enums and silent CLI clamping. For
-example, Claude's launch flag accepts `low|medium|high|xhigh|max`; `ultracode` is not launch-settable
-and is refused rather than converted into a `/effort` prompt. Pi's silently clamped thinking input
-is likewise verified against `get_state` after launch.
-
-### Layer 2 — launch free-form: `launchArgs`
-
-A list of strings appended VERBATIM to the settings-owned base argv before adapter preparation.
-It remains the escape hatch for unrelated flags and is recorded in spawn provenance. A value that
-duplicates an adapter-owned selector (`--model`, `--effort`, `--thinking`, or Codex model/reasoning
-config) refuses instead of creating two authorities. Example: `["--dangerously-skip-permissions"]`.
-
-### Layer 3 — session free-form: `sessionCommands` and `promptKeywords`
-
-- `sessionCommands`: a list of explicit lines submitted through the protocol bridge during launch,
-  before any task assignment. Native model/effort is never synthesized into this list. This
-  launch-command outcome is distinct
-  from brief delivery and cannot make a seat active work. Once the later dispatch brief binds the
-  harness log, an evidence-capable adapter (currently Claude) retroactively proves every pre-brief
-  command from command entry + successful stdout; a missing or errored command alone is re-issued,
-  and the dispatch row remains pending unless every required proof succeeds. Harnesses without a
-  truthful command-entry/output adapter retain their existing launch-time transport semantics and
-  keep that outcome explicitly unproven; they are not placed into an impossible retry loop. The
-  initial command delivery never moves out of launch. Never caller-validated; recorded in spawn
-  provenance.
-- `promptKeywords`: a list of keywords prepended as the first line of the
-  post-readiness dispatch-brief exactly once (session modes the model interprets, e.g. a prompt
-  keyword like `ultracode`). Never validated; recorded in spawn provenance.
-
-The private dispatch order is explicit: **launch (argv → settings session commands) → readiness
-on the plane-owned occupant → one durable exact-pinned `dispatch-brief` (keywords first)**.
-`spawned-unbriefed` is an internal transaction phase, not a public success result or a caller
-workflow. `dispatch_agent` exposes only the structural seat and delivery state after the exact
-brief is durable. A launched-only or not-ready seat is not active work. Brief delivery is accepted
-only when the durable row reports
-`deliveryState=delivered` and `deliveryDetail=harness-log-confirmed`. A failed attempt leaves that
-same row pending for recovery; it does not create a duplicate brief or replacement session.
-
-### The dispatch level: `level` and `orchestration.rolesPerLevel`
-
-The L12 doctrine runs each level with its own agent set; `rolesPerLevel`
-makes that expressible (ruling 2026-07-07T08:15):
-
-```jsonc
-"orchestration": {
-  "roles": {                       // flat DEFAULTS (existing files unchanged)
-    "reviewer": { "harness": "claude", "model": "sonnet", "effort": "high" }
-  },
-  "rolesPerLevel": {               // per-level overrides; vocabulary = leaf|master|portfolio
-    "master":    { "reviewer": { "model": "opus",  "effort": "xhigh" } },
-    "portfolio": { "reviewer": { "model": "fable", "effort": "max" } }
-  }
-}
-```
-
-The structural dispatcher derives dispatch level (`leaf` | `master` | `portfolio`) from the
-canonical target-document altitude: worker/curator seats bind leaves, a manager binds a master,
-sprint roles bind the sprint, and a reviewer follows the exact leaf/master/sprint review seat.
-The level override
-deep-merges over the flat default at field granularity (unset fields
-inherit; lists replace). Full spend resolution chain:
-
-**repo-local level override > global level override > repo-local role default >
-global role default > spawn preference/detection.**
-
-Legacy caller-supplied `harness`, `model`, `effort`, `launch_args`,
-`prompt_keywords`, `session_commands`, `env.AR_SPAWN_MODEL`, or
-`env.AR_SPAWN_EFFORT` values return `spend-override-unsupported` before any
-session is spawned. Harness-native spend/endpoint env keys for the built-in
-Claude/Anthropic and Codex/OpenAI families, such as `ANTHROPIC_MODEL`,
-`ANTHROPIC_BASE_URL`, `OPENAI_MODEL`, `OPENAI_BASE_URL`, and API key/project
-selectors, refuse the same way because caller `env` is otherwise seeded into
-the spawned harness process. Move those choices into `orchestration.roles`,
-`orchestration.rolesPerLevel`, `orchestration.spawn`, or
-`orchestration.harnesses`.
-
-The resolution walk for the reviewer economics above (role riding the spawn
-env as `AR_SPAWN_ROLE=reviewer`):
-
-| Dispatch | harness | model | effort | effort vehicle |
-| --- | --- | --- | --- | --- |
-| `level="leaf"` (or omitted) | claude (flat) | sonnet (flat) | high (flat) | `--effort high` |
-| `level="master"` | claude (inherited) | opus (master override) | xhigh (master override) | `--effort xhigh` |
-| `level="portfolio"` | claude (inherited) | fable (portfolio override) | max (portfolio override) | native `--effort max` |
-
-The RESOLVED level and its source (`explicit`/`default`) are recorded in
-spawn provenance (`spawnLevel`/`spawnLevelSource` on the catalog row and the
-payload).
-
-## Detection
-
-A harness is launchable only when its `command` resolves on `PATH`
-(`shutil.which`). `GET /api/harnesses` reports the effective set with
-per-harness detection; private launch resolution order is role
-knobs (level-merged) > `orchestration.spawn.harness` preference > the first
-detected effective-registry harness.
-
-## Refusals (never crashes)
-
-| Status | Trigger | Message carries |
-| --- | --- | --- |
-| `harness-unknown` | id known neither in the registry nor in settings | the id, the known set, and a pointer to `orchestration.harnesses` + this manual |
-| `harness-not-detected` | known id whose command is not on `PATH` | the id (and the settings source when a configured preference caused it) |
-| `effort-invalid` | effort outside the harness's vocabulary, or any effort for a mapping-less settings-defined harness | the harness, BOTH value sets (flag + session), and the launchArgs/sessionCommands guidance |
-| `model-invalid` | model knob for a settings-defined harness with no `modelFlag` | the harness and the declare-or-launchArgs guidance |
-| `launch-selection-invalid` | role-configured native launch omitted model or effort | the exact missing field; refused before tmux creation |
-| `spend-override-unsupported` | ordinary caller supplied removed spend fields (`harness`, `model`, `effort`, launch/session controls, `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT`, or harness-native spend/endpoint env keys such as `ANTHROPIC_MODEL` / `OPENAI_BASE_URL`) | the removed fields and the settings families that own them |
-| `level-invalid` | dispatch level outside `leaf|master|portfolio` | the value and the valid set |
-| `seat-taken` | the target task document already has a running same-role occupant | structural refusal (the private occupant remains server-owned) |
-
-Unknown, unselectable, non-launch-settable, or conflicting native selections fail at the hosted
-runner launch boundary after the catalog row/tmux exists but before the configured real vendor
-session starts. The endpoint remains addressable with `control=failed`, `acceptance=rejected`, and
-the exact message in `raw.bridgeError`, so readiness/daemon consumers do not see a generic fallback
-or disconnect. Roleless legacy/dashboard opens remain selection-less until the L4 per-session
-request/default authority is available.
-
-## Worked Example: Teaching The System `hermes`
-
-Suppose you use a TUI agent called `hermes` that nobody registered. A role
-configured with `"harness": "hermes"` refuses at settings load until the harness
-is declared:
-
-> orchestration.roles.worker.harness must be a harness registry id or an
-> orchestration.harnesses-defined id (claude, codex, pi), got 'hermes'
-> (see docs/reference/harnesses.md).
-
-Teach it in the GLOBAL agentic settings
-(`<coordinationRoot>/system/settings.json`):
-
-```jsonc
+```json
 {
   "orchestration": {
-    "harnesses": {
-      "hermes": {
-        "name": "Hermes",
-        "command": "hermes",                    // probed on PATH for detection
-        "argv": ["hermes", "--tui"],            // launched exactly like this
-        "modelFlag": "--model",
-        "effortFlag": "--reasoning",            // hermes's own effort flag...
-        "effortFlagValues": ["low", "high"]     // ...and the values it accepts
+    "spawn": { "harness": "claude" },
+    "roles": {
+      "architect": { "model": "opus", "effort": "high" },
+      "worker": {
+        "harness": "codex",
+        "effort": "high",
+        "stepUp": { "harness": "claude", "model": "opus", "afterTries": 2 }
+      },
+      "reviewer": {
+        "model": "sonnet",
+        "effort": "high",
+        "mode": "default",
+        "notes": "Read the test output before the diff."
       }
     },
-    "roles": {
-      "worker": { "harness": "hermes", "model": "h-1", "effort": "high" }
+    "rolesPerLevel": {
+      "leaf": { "curator": { "model": "sonnet" } }
     }
   }
 }
 ```
 
-Now `dispatch_agent(task_document_ref=<leaf>, role="worker", brief=...)` privately launches
-`hermes --tui --model h-1 --reasoning high`, and
-`effort: "turbo"` refuses naming `[low, high]`. Had you declared NO
-`effortFlag`/vocabulary, the effort knob itself would refuse with guidance —
-declare the mapping or carry a deliberate raw argv through settings-owned
-`launchArgs` — explicit over guessing a flag that might mean something else. A repo-local
-`<repo>/system/settings.json` may override any leaf of the entry (e.g. a
-different `argv`) for that repo's dispatches.
+It sets these launches, where neither a start nor the host profile of a role names another
+choice:
 
-Pre-customizing a BUILTIN works the same way — override by id:
+- The Worker runs on `codex`. Every other role runs on `claude`, except Bootstrap, which takes the
+  harness of the chat that started it.
+- The Architect takes the model `opus` with the effort `high`.
+- The Worker steps up to `claude` with the model `opus` after two rounds of code review that
+  left findings.
+- The Reviewer takes the model `sonnet`, the effort `high` and the mode `default`, and receives
+  the note with its role capsule.
+- The Curator takes the model `sonnet`.
+- The Investigator, the Orchestrator and the Manager take the host's default model for `claude`.
 
-```jsonc
-"orchestration": {
-  "harnesses": {
-    "claude": { "argv": ["claude", "--continue"] }   // replaces base argv; native adapter still owns model/effort
-  }
-}
-```
+The model and effort names are examples. A start refuses a name that the host's catalog does not
+offer for the harness.
+
+## Create the user settings file
+
+`user_settings_init` with `target` set to `role-settings` creates the user settings file with a
+harness for each named role. It writes no model and no effort, and it never writes a file that
+exists. Call it with `dry_run` first.

@@ -25,6 +25,8 @@ IGNORED_NAMES = frozenset(
 
 @dataclass(frozen=True)
 class RuntimeTarget:
+    """One canonical tree and where its generated copy belongs."""
+
     label: str
     source: Path
     path: Path
@@ -35,18 +37,20 @@ class RuntimeDiff:
     missing: tuple[Path, ...]
     extra: tuple[Path, ...]
     changed: tuple[Path, ...]
+    source_missing: bool = False
+    """Whether the canonical source itself is absent.
+
+    Without this flag a target whose source and generated copy are *both* missing compared equal
+    and reported ``ok``: an empty comparison is not evidence of a synced tree, and a caller who
+    pointed the generator at the wrong root would read a green row per target for nothing.
+    """
 
     @property
     def in_sync(self) -> bool:
-        return not self.missing and not self.extra and not self.changed
+        return not self.source_missing and not self.missing and not self.extra and not self.changed
 
 
 TARGETS = (
-    RuntimeTarget(
-        "agents-md-files",
-        REPO_ROOT / "agents-md-files",
-        PACKAGE_DATA / "runtime/agents-md-files",
-    ),
     RuntimeTarget("benchmarks", REPO_ROOT / "benchmarks", PACKAGE_DATA / "benchmarks"),
     RuntimeTarget("providers", REPO_ROOT / "providers", PACKAGE_DATA / "runtime/providers"),
     RuntimeTarget("system", REPO_ROOT / "system", PACKAGE_DATA / "runtime/system"),
@@ -109,6 +113,8 @@ def file_digests(root: Path) -> dict[Path, str]:
 
 
 def diff_target(target: RuntimeTarget) -> RuntimeDiff:
+    if not target.source.is_dir():
+        return RuntimeDiff(missing=(), extra=(), changed=(), source_missing=True)
     source = file_digests(target.source)
     current = file_digests(target.path)
 
@@ -134,13 +140,22 @@ def sync_target(target: RuntimeTarget) -> None:
 
 
 def replace_tree(source: Path, target: Path) -> None:
-    """Copy-then-swap so no crash window leaves a missing or partial target.
+    """Build a complete staged copy, then swap it in with two separate renames.
 
     The previous delete-then-copy left the target gutted when the copy (or the
     delete itself) failed mid-way — a real incident on a Windows host without
-    long-path support. The staged copy is built first; the live target is only
-    renamed aside once a complete replacement exists, and a re-run cleans any
-    leftovers from an earlier crash."""
+    long-path support. Staging first closes that window: a copy that fails before
+    the first rename leaves the live target exactly as it was, and a re-run prunes
+    leftovers from an earlier crash and rebuilds the staging copy from source.
+
+    The window between the two renames remains. The live target is renamed to
+    ``<target>.ar-sync-old`` before ``<target>.ar-sync-new`` is renamed onto the
+    live path, and those renames are separate operations: a failure after the
+    first leaves the live path absent, with the previous copy and the complete
+    replacement both still on disk. A re-run deletes both leftovers before it
+    copies again, so a second failure can consume the last copy of the old bytes.
+    Nothing here is atomic and nothing rolls back; only a later successful run
+    reconstructs the target from source."""
     staging = extended_length(target.parent / f"{target.name}.ar-sync-new")
     retired = extended_length(target.parent / f"{target.name}.ar-sync-old")
     target_ext = extended_length(target)
@@ -158,6 +173,8 @@ def replace_tree(source: Path, target: Path) -> None:
 
 def print_diff(target: RuntimeTarget, diff: RuntimeDiff) -> None:
     print(f"[sync-runtime] out of sync: {target.label} ({repo_relative(target.path)})")
+    if diff.source_missing:
+        print(f"  canonical source is missing: {repo_relative(target.source)}")
     for label, paths in (
         ("missing", diff.missing),
         ("extra", diff.extra),

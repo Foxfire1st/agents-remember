@@ -1,0 +1,14 @@
+{
+ "contextPacketVersion": 3,
+ "log": "/world/coord/logs/mcp/ar-tools-2026-10-10/231645479425-context_packet-cddef89e.json",
+ "ok": true,
+ "pair": {
+  "code": "4585010bbbba17faad5407ea3748f74eb136c9bb",
+  "memory": "d060b79ff4e6ccca9cb066569958fa5b14839dc3"
+ },
+ "roots": {
+  "code": "/world/coord/repo-a",
+  "memory": "/world/coord/memory-repos/ar-repo-a"
+ },
+ "servingBuild": "076cc40e"
+}

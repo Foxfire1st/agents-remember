@@ -16,6 +16,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from agents_remember.worktrees.attention_terminal_notices import (
+    begin_landed_notice,
+    confirm_notice,
+    discard_notice,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
     WorktreeContract,
@@ -62,5 +67,20 @@ def record_landed_integration(
         ),
         cells,
     )
-    write_contract(contract.contract_path, updated)
+    # MIK-R200 rule 5: only the FINAL landing is a notice, captured at this native publication
+    # boundary. The intent is taken before the write and confirmed after it, so a crash between
+    # the two leaves a row the projection pass can settle against the contract it reads anyway.
+    occurrence = (
+        None
+        if checkpoint
+        else begin_landed_notice(updated, code_commit=landed.code_commit, strategy=landed.strategy)
+    )
+    try:
+        write_contract(contract.contract_path, updated)
+    except BaseException:
+        if occurrence is not None:
+            discard_notice(updated, occurrence)
+        raise
+    if occurrence is not None:
+        confirm_notice(updated, occurrence)
     return updated

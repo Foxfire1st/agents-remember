@@ -1,98 +1,184 @@
 # Benchmark Methodology
 
-Agents Remember benchmarks compare paired Codex headless runs against the same pinned repository commit:
+The benchmarks of Agents Remember compare headless runs of the Codex command-line program on one
+pinned commit of a repository: each run is one call of `codex exec` that gets its prompt on
+standard input and asks for no approval ([Run Shape](#run-shape)). Each case runs the same task
+in two environments:
 
-- a source-only `no-onboarding` variant
-- a `with-onboarding` variant that resolves a pinned external-memory repo from an isolated benchmark workspace
+- `no-onboarding`: a source-only environment without memory, in the folder `source-only/`;
+- `with-onboarding`: an environment that resolves a pinned memory repository from a coordination
+  root of its own, in the folder `with-memory/`.
 
-Cases may add a `with-onboarding-warm` variant. That variant uses the same
-memory-enabled workspace but treats the benchmark-local memory as already
-validated, which isolates steady-state memory use from resolver and drift-gate
-startup cost.
+A case may add a variant `with-onboarding-warm`. It runs in the same memory-enabled environment,
+`with-memory/`. Its prompt tells the agent that the benchmark memory matches the pinned source, so
+the run shows the use of memory without the cost of the first checks.
 
-The suite is meant to show whether mature path-derived memory changes exploration efficiency and answer quality. It is not a universal model evaluation, a leaderboard, or a claim that every prompt benefits from onboarding.
+The benchmarks show whether memory changes how much an agent explores and how good its answer is.
+They are no general evaluation of a model and no ranking. They do not claim that every prompt
+gains from memory.
+
+## The Benchmark Runner
+
+The benchmark tooling is one Python module of the package, the benchmark runner. The tool server
+registers no benchmark tool, and `agents-remember` has no sub-command for benchmarks. Run the
+module with the Python interpreter of the environment that holds the package. For the package
+installed with `uv tool install`, that interpreter is
+`"$(uv tool dir)/agents-remember-mcp/bin/python"`; in a development checkout it is
+`mcp/.venv/bin/python`. The lines below write it as `python`:
+
+```bash
+python -m agents_remember.benchmarks.runner list
+python -m agents_remember.benchmarks.runner prepare case <case-id>
+python -m agents_remember.benchmarks.runner run case <case-id>
+python -m agents_remember.benchmarks.runner analyze <run-root> --write-summary
+```
+
+| Sub-command | What it does |
+| --- | --- |
+| `list` | Prints each case with its status, its size band and its pinned repository commit. |
+| `prepare all`, `prepare case <case-id>` | Creates the workspaces of the cases. Options: `--force-clone`, `--dry-run`, `--provider-timeout <seconds>`: the time allowed for each install or index command of a search provider that a variant names (default 1800). |
+| `run all`, `run case <case-id>` | Prepares the workspaces and runs the prompts. Options: `--prompt`, `--variant`, `--repetitions`, `--jobs`, `--skip-prepare`, `--force-clone`, `--dry-run`, `--codex-sandbox`, and `--provider-timeout <seconds>` as for `prepare`. |
+| `analyze <run-root>` | Reads the results of one run and prints a summary. With `--write-summary` it writes the summary to `<run-root>/summary.md`. |
+
+The option `--benchmarks-root <folder>` stands before the sub-command and names the benchmark
+root: the folder that holds `cases/` and `templates/`. The runner writes the workspaces and the
+results under that root. Without the option, the runner uses the benchmark root inside the
+installed package.
+
+Advice: copy the benchmark material into the coordination root and name that copy as the
+benchmark root. The tool `runtime_install` makes the copy when it is called with
+`include_benchmarks=true`:
+
+```text
+runtime_install(include_benchmarks=true)
+```
+
+The copy lies in `<coordination-root>/benchmarks/`. A later call renews the cases and templates,
+removes the generated folder `<coordination-root>/benchmarks/workspaces/` and keeps
+`<coordination-root>/benchmarks/user-runs/`.
+
+The runner needs three things on the machine: the program `codex` on the `PATH`, which the npm
+package `@openai/codex` installs, Git, and network access to the repositories that a case pins.
 
 ## Case Design
 
-Each case pins:
+A case is a folder `cases/<case-id>/` of the benchmark root. Its manifest `case.json` pins:
 
-- repository URL
-- commit hash
-- approximate file-count band
-- prompt set
-- benchmark workspace path
-- external memory repository URL and commit
-- author-provided result reports
+- the URL and the commit of the repository;
+- the number of tracked files and a size band;
+- the prompts, and for each prompt its variants and its number of runs;
+- the paths of the workspace;
+- the URL and the commit of the memory repository;
+- the result reports of the author.
 
-The source package does not commit case workspaces. It commits manifests, prompts, author results, and workspace templates. `prepare` generates the case workspace as resettable state with a source-only environment and a memory-enabled environment. Each environment gets a benchmark root marker and rendered harness `AGENTS.md` so Codex treats that environment as the project root. Beyond those harness files, the source-only environment contains only the pinned source checkout under `repos/` and no active memory context. The memory-enabled environment clones the same pinned source checkout under `repos/`, clones the pinned memory repository under the benchmark-local `ar-coordination/` root, copies benchmark-local runtime skills under `.codex/skills/agents-remember`, and registers the benchmark-local MCP server under `.codex/config.toml` for harness discovery. Reinstalling the benchmark package can prune and refresh generated workspaces when the pinned commit, prompt, memory, template, or author results change. User-generated outputs live separately under `benchmarks/user-runs/`.
+The package holds manifests, prompts, author results and workspace templates. It holds no
+workspace. `prepare` creates the workspace of a case under `<benchmark-root>/workspaces/<case-id>/`
+with two environments:
 
-Agents Remember path rules should exclude resettable benchmark workspaces from onboarding. In particular, workspace-local cloned repos, workspace-local `ar-coordination/` trees, cloned benchmark memory snapshots, and `benchmarks/user-runs/` are benchmark state, not source files that should receive onboarding companions. This prevents benchmark memory from recursively producing more onboarding for itself.
+| Environment | Contents |
+| --- | --- |
+| `source-only/` | The pinned source checkout under `repos/`, a marker file `.benchmark-root` and an `AGENTS.md` made from a template. No memory. |
+| `with-memory/` | The same source checkout under `repos/`, the marker file and an `AGENTS.md`. In addition: a coordination root `ar-coordination/` with the pinned memory repository under `ar-coordination/memory-repos/`, and a file `.codex/config.toml` that registers the tool server of this package for the environment. |
 
-Benchmark assets are package data. When developing from a source checkout without installing the MCP package into the child benchmark environment, set `AGENTS_REMEMBER_BENCHMARK_MCP_SRC` to the checkout's `mcp/src` path so the generated child `.codex/config.toml` uses that explicit development source.
+The marker file makes Codex take the environment as the project root: `run` names it in the
+Codex setting `project_root_markers`, whose default is `.git`. `run` passes the registration of
+`.codex/config.toml` to `codex exec` as explicit `-c mcp_servers...` options.
+
+The tool server of the memory-enabled environment serves the skills of the package. Its resource
+`skill://index.json` lists them.
+
+A workspace is generated state. `prepare` reuses a checkout that exists and resets it to the
+pinned commit, so a change that you made in the checkout is lost. `--force-clone` removes the
+checkouts and clones again.
+
+Advice: when a benchmark root lies inside a code repository that Agents Remember manages, exclude
+its folders `workspaces/` and `user-runs/` by [exclude rules](reference/path-rules.md#exclude-rules)
+of the path rules of that repository. Benchmark memory then gets no cards of its own.
+
+For work on a source checkout: when the environment of the benchmark's tool server does not hold
+the package, set `AGENTS_REMEMBER_BENCHMARK_MCP_SRC` to the folder `mcp/src` of the checkout. The
+generated `.codex/config.toml` then starts the tool server from that source.
 
 ## Task Selection
 
-Prefer tasks with stable completion criteria:
+Advice: prefer tasks with a stable criterion for a complete answer:
 
-- exploratory architecture explanations
-- debugging investigations
-- workflow or data-flow explanations
-- bug localization without requiring a source edit
+- an explanation of an architecture;
+- the investigation of a defect;
+- an explanation of a workflow or of a data flow;
+- the localization of a defect without a source edit.
 
-Avoid using feature-building tasks as primary benchmark evidence. A coding agent can make many valid implementation choices, which makes exact comparison less repeatable.
+Advice: do not use the building of a feature as the main evidence. A coding agent can make many
+valid implementation choices, so two runs are hard to compare.
 
 ## Run Shape
 
-Each prompt should run the source-only and memory-enabled variants. The default repetition count is three runs per prompt and variant. For each repetition, the selected variants share one dated run root and are submitted together when the configured job count allows parallelism.
+`run` executes each selected variant of a prompt. The number of runs for a prompt and a variant
+is the number of the manifest, or 3 when the manifest names none; `--repetitions` sets another
+number. All runs of one case in one call share one run root,
+`<benchmark-root>/user-runs/<case-id>/<run id>/`.
 
-The runner accepts `--skill-exposure-mode copy|none` on `prepare` and `run`.
-`copy` is the default and exposes benchmark-local skills under
-`.codex/skills/agents-remember`. `none` is only for preconfigured
-workspaces where skill discovery is handled outside the benchmark harness.
+The variants of one repetition start together. `--jobs` bounds the number of Codex runs at the
+same time; its default is the number of selected variants.
 
-The runner records:
+Each run is one call of `codex exec --json --ephemeral` in the folder of its environment. The
+prompt arrives on standard input, and the approval policy is `never`. `--codex-sandbox` is
+`default` or `danger-full-access`. With `default` the runner passes no sandbox option, and Codex
+uses its configured sandbox.
 
-- raw JSONL
-- stderr
-- final message text
-- process metadata
-- parsed metrics
-- a Markdown summary
+For each run the runner writes four files under `<run-root>/<prompt-id>/<variant-id>/`:
+
+| File | Contents |
+| --- | --- |
+| `run-<nnn>.jsonl` | The event stream that Codex printed. |
+| `run-<nnn>.stderr` | The error output of Codex. |
+| `run-<nnn>.final.md` | The last message of the agent. |
+| `run-<nnn>.metadata.json` | The case, the prompt, the variant, the repetition, the folder, the command, the sandbox policy, the duration and the exit code. |
+
+After the last run, `run` writes `<run-root>/summary.md`. A Codex process that ends with an exit
+code other than 0 does not stop the other runs: the metadata of that run records the code.
 
 ## Metrics
 
-The analyzer reports metrics when they are available in the JSONL stream or runner metadata:
+The summary groups the runs by prompt and variant. For each group it gives the range of these
+values:
 
-- duration
-- event count
-- detected command/tool events
-- input tokens
-- fresh input tokens
-- output tokens
-- reasoning tokens
-- JSONL size
-- exit code
-- detected errors
+| Metric | Source |
+| --- | --- |
+| `duration_seconds` | The duration in the metadata. |
+| `event_count` | The number of events in the JSONL stream. |
+| `command_event_count` | The number of completed items of the type `command_execution` in the stream. |
+| `input_tokens`, `cached_input_tokens`, `output_tokens`, `reasoning_output_tokens` | The usage that Codex reports when a turn completes, summed over the turns of the run. |
+| `jsonl_size_bytes` | The size of the JSONL file. |
+| `exit_code` | The exit codes of the runs. |
 
-Token fields are parsed defensively because Codex JSONL schemas can evolve. When cumulative token fields appear more than once, the analyzer keeps the largest observed value for each field.
+For each run the summary also gives the duration, the size of the JSONL file and the number of
+detected errors. A value that the stream does not hold is reported as `n/a` or as 0, because the
+JSONL format of Codex can change between versions.
 
 ## Validity Checks
 
-A useful result report should state whether the variant boundary held:
+Advice: a result report states whether the boundary between the variants held:
 
-- The `no-onboarding` run should not read `ar-coordination/memory-repos/`, `ar-memory/`, or target onboarding files.
-- The `with-onboarding` run should resolve the benchmark-local coordination root, not the user's normal workspace.
-- Both variants should use the same pinned source commit.
-- The final answer should complete the primary task, not stop after startup checks.
+- The `no-onboarding` run read neither `ar-coordination/memory-repos/` nor a card.
+- The `with-onboarding` run resolved the coordination root of its environment, not the
+  coordination root of your own installation.
+- Both variants used the same pinned source commit.
+- The final answer completes the task and does not stop after the first checks.
 
 ## Limitations
 
-These benchmarks are evidence, not proof in the mathematical sense.
+A benchmark result is evidence, not a proof.
 
-- Model behavior is stochastic.
-- Codex versions, model choices, and tool behavior can change.
-- Hardware, filesystem, shell, network, and cache state can affect duration.
-- A mature memory snapshot reflects the author's curation choices.
-- Benchmarks can become stale when a pinned repo commit or memory fixture changes.
+- The behavior of a model varies between runs.
+- Codex versions, models and tools change.
+- Hardware, file system, shell, network and caches change the duration.
+- The memory of a case reflects the choices of the author who curated it.
+- A case goes out of date when its pinned repository commit or its memory changes.
 
-The most useful comparison is a pattern across cases of different sizes: small repositories may not benefit, while larger or more architecturally confusing repositories may show better efficiency and fewer wrong conclusions.
+Advice: read a pattern across cases of different sizes. A small repository may show no gain, and
+a large or confusing one may show fewer wrong conclusions and less exploration.
+
+The cases and their author results lie in the folder
+[`benchmarks/`](https://github.com/Foxfire1st/agents-remember/tree/main/benchmarks) of the
+repository.

@@ -32,5 +32,10 @@
     "autoLandOnIntegration": true,
     "autoLandOnFinalize": true,
     "autoCloseCompletedSeats": true
+  },
+  "toolLog": {
+    "keepDays": 14,
+    "maxBytes": 268435456,
+    "enclosureMaxBytes": 67108864
   }
 }

@@ -19,13 +19,27 @@ from agents_remember.worktrees.activation.atomic_series_activation import (
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
+SELECTION_MISSING_STATUS = "atomic-series-activation-selection-missing"
+"""The refusal a release raises when this contract holds no exact series selection.
+
+``worktrees/modules/pause.py`` answers exactly this status itself, because the vacancy it names
+is the state a pause produces, so the literal is declared once -- here, where it is raised --
+and read from here by the one other module that has to recognise it.
+"""
+
 
 def release_atomic_series_selection(
     contract: WorktreeContract,
     *,
     timestamp: str | None = None,
+    paused_at: str | None = None,
 ) -> AtomicSeriesActivationObservation:
-    """Release only the exact currently selected contract to durable vacancy."""
+    """Release only the exact currently selected contract to durable vacancy.
+
+    ``paused_at`` is written onto the released record and nothing else reads it: the explicit
+    ``worktree_pause`` route supplies it so a reader can tell a developer's stop from a vacancy
+    that sync cancellation or terminal cleanup produced (MIK-R200 rule 4).
+    """
 
     ACTIVATION_OWNERSHIP.check_declared_writer()
     path = activation_path(contract.coordination_root, contract)
@@ -42,7 +56,7 @@ def release_atomic_series_selection(
         record = previous.record
         if record is None:
             raise AtomicSeriesActivationError(
-                "atomic-series-activation-selection-missing",
+                SELECTION_MISSING_STATUS,
                 "explicit sync cancellation requires an existing exact series selection",
             )
         if not _record_selects_contract(record, contract, selected_master):
@@ -50,7 +64,13 @@ def release_atomic_series_selection(
                 "atomic-series-activation-selected-contract-mismatch",
                 "explicit sync cancellation cannot release another selected atomic master",
             )
-        return _release_record(previous, contract, selected_master, selected_at=selected_at)
+        return _release_record(
+            previous,
+            contract,
+            selected_master,
+            selected_at=selected_at,
+            paused_at=paused_at,
+        )
 
 
 def release_terminal_atomic_series_selection_if_exact(
@@ -94,11 +114,14 @@ def _release_record(
     selected_master: TaskDocumentRef,
     *,
     selected_at: str,
+    paused_at: str | None = None,
 ) -> AtomicSeriesActivationObservation:
     record = previous.record
     if record is None:
         raise RuntimeError("atomic-series release requires a selected record")
     if record.state == "vacant":
+        # An already-vacant record changes only for its first pause mark; a repeat of the same
+        # stop, or any release that is not a pause, writes nothing.
         return previous
     released = AtomicSeriesActivationRecord(
         contractFingerprint=previous.contract_fingerprint,
@@ -107,6 +130,7 @@ def _release_record(
         state="vacant",
         revision=record.revision + 1,
         selectedAt=selected_at,
+        pausedAt=paused_at,
     )
     atomic_write_text(previous.activation_path, released.model_dump_json(indent=2) + "\n")
     return AtomicSeriesActivationObservation(

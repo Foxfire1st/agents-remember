@@ -14,7 +14,7 @@ import os
 import sys
 import tempfile
 import unittest
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -32,6 +32,7 @@ from agents_remember.worktrees.worktree_contract import (
 from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
 from test_config import write_json
+from test_converted_carryover import _converted_world
 from test_worktree_support import (
     commit_file,
     git,
@@ -145,9 +146,9 @@ class StdioTransportTests(unittest.TestCase):
         with the protocol pipes intact afterwards."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            fixture = build_carryover_fixture(root)
-            settings_path = root / "harness" / "mcp-settings.json"
-            write_json(settings_path, harness_settings_payload(root))
+            world, _contract, selection = _converted_world(root)
+            fixture = asdict(selection)
+            settings_path = world.cfg.config_path
 
             payload = asyncio.run(
                 call_tool_over_stdio(
@@ -159,11 +160,12 @@ class StdioTransportTests(unittest.TestCase):
             )
 
             self.assertTrue(payload["ok"], msg=payload)
-            self.assertEqual(payload["operation"], "memory_carryover_plan")
+            # The delivered answer strips the envelope (MIK-R108 rule 2: `operation`
+            # repeats the tool's name, which the protocol already tells the caller).
             self.assertEqual(payload["state"], "would-carryover")
             self.assertEqual(payload["counts"], {"auto-carry": 1})
 
-    def test_ping_returns_over_stdio(self) -> None:
+    def test_server_info_returns_over_stdio(self) -> None:
         """Baseline: a trivial tool proves the harness itself is sound."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -173,7 +175,7 @@ class StdioTransportTests(unittest.TestCase):
             write_json(settings_path, harness_settings_payload(root))
 
             payload = asyncio.run(
-                call_tool_over_stdio(settings_path, "ping", {}, timeout=CALL_TIMEOUT)
+                call_tool_over_stdio(settings_path, "server_info", {}, timeout=CALL_TIMEOUT)
             )
 
             self.assertTrue(payload["ok"], msg=payload)

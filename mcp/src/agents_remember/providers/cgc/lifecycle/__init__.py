@@ -12,8 +12,6 @@ _EXPORT_MODULES = (
     "agents_remember.providers.cgc.lifecycle.runner",
     "agents_remember.providers.cgc.lifecycle.installation",
     "agents_remember.providers.cgc.lifecycle.process_control",
-    "agents_remember.providers.cgc.lifecycle.query",
-    "agents_remember.providers.cgc.lifecycle.refresh",
 )
 
 

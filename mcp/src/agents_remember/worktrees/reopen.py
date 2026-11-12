@@ -30,31 +30,37 @@ the leaf id never changed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import subprocess
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.kernel.primitives.observer_paths import LANDING_FINAL_BASENAME
+from agents_remember.tasks import master_sync
 from agents_remember.tasks.document import TaskDocument
-from agents_remember.tasks.leaf_doc import find_leaf_doc
-from agents_remember.tasks.master_sync import demote_completed_master_if_unresolved
+from agents_remember.tasks.leaf_doc import find_leaf_doc, require_task_document_in_place
 from agents_remember.tasks.store import (
     json_path_for,
     markdown_path_for,
     read_task_doc,
     write_task_docs,
 )
+from agents_remember.worktrees.disabled_memory import opt_out_result_fields, subject_for_contract
 
 from .integration.integration_branch_authority import require_parent_series
 from .integration.integration_ref_transaction import (
     IntegratedCommits,
     require_integrated_memory_ancestry,
 )
+from .integration.lifecycle.lifecycle_enclosure_terminal import (
+    restartable_predecessor_contract,
+)
 from .integration.lifecycle.lifecycle_operation_location import (
     LifecycleOperationLocationError,
     require_terminal_lifecycle_predecessor,
 )
+from .modules.git import branch_commit, is_ancestor
 from .modules.guidance import (
     RecoveryOperation,
     RecoveryTool,
@@ -62,16 +68,22 @@ from .modules.guidance import (
     status_payload,
 )
 from .modules.models import WorktreeCommandResult
-from .source_lineage import lineage_block_payload, lineage_refusal, parent_source_lineage
+from .reopen_reset import (
+    _clear_frozen_landing,
+    _contract_reopen_facts,
+    _reopened_contract,
+    _ReopenTransitionRefusal,
+)
+from .reopen_row_guard import require_reopenable_row
+from .reopen_series import reopen_series
 from .task_fact_publication import (
     contract_projection_scopes,
     preview_contract_task_facts,
     publish_task_fact_mutation,
 )
+from .task_resolver import series_contract_path
 from .worktree_contract import (
-    ContractCells,
     WorktreeContract,
-    amend_contract,
     load_contract,
     write_contract,
 )
@@ -79,41 +91,6 @@ from .worktree_contract import (
 
 class ReopenTaskDocumentError(ValueError):
     """The leaf and its parent index could not be prevalidated for one reset."""
-
-
-class _ReopenTransitionRefusal(RuntimeError):
-    """The locked reopen authority no longer matches its reviewed terminal leaf."""
-
-
-def _contract_reopen_facts(contract: WorktreeContract) -> dict[str, object]:
-    """Pure contract facts for reopen responses.
-
-    This deliberately does not call ``status_payload``: that interactive projection reads
-    providers, landing state, Git freshness, and descendant source lineage. A cleaned leaf has
-    no branches left for those probes to inspect, and the only actionable fact at this boundary
-    is its stable task identity plus the explicit recovery call.
-    """
-    return {
-        "task_id": contract.task_id,
-        "task_name": contract.task_name,
-        "code_repository_name": contract.repo_name,
-        "workflow_kind": contract.workflow_kind,
-        "memory_mode": contract.memory_mode,
-        "kind": contract.kind,
-        "leaf_id": contract.leaf_id,
-        "enclosure_path": contract.contract_path.as_posix(),
-        "contract_path": contract.contract_path.as_posix(),
-        "parent_contract_path": (
-            contract.parent_contract_path.as_posix() if contract.parent_contract_path else ""
-        ),
-        "worktree_group": contract.worktree_group.as_posix(),
-        "human_review_status": contract.human_review_status,
-        "approved_for_commit": contract.approved_for_commit,
-        "closeout_status": contract.closeout_status,
-        "integration_status": contract.integration_status,
-        "cleanup": contract.cleanup,
-        "lifecycle_id": contract.lifecycle_id,
-    }
 
 
 def _reopen_preview_args(contract: WorktreeContract) -> dict[str, object]:
@@ -142,9 +119,12 @@ def _start_preview_args(contract: WorktreeContract) -> dict[str, object]:
         "workflow_kind": contract.workflow_kind,
         "source_branch": contract.code_source_branch,
         "work_branch": contract.code_work_branch,
-        "memory_mode": contract.memory_mode,
         "dry_run": True,
     }
+    if contract.memory_mode == "external":
+        # Restart arguments never carry the removed mode (MIK-R50): a restart
+        # names no mode and starts in the default external mode.
+        args["memory_mode"] = contract.memory_mode
     if len(relative.parts) > 1:
         args["parent_task"] = relative.parts[-2]
     return args
@@ -159,6 +139,47 @@ def _response_guidance(
 ) -> dict[str, object]:
     guidance = recovery_guidance(operation, tool=tool, args=args)
     return {**guidance, "nextStep": {"summary": summary, **guidance}}
+
+
+def _already_reopened_result(
+    contract: WorktreeContract, *, dry_run: bool
+) -> WorktreeCommandResult | None:
+    """Answer a repeat ``task_reopen`` on a leaf that already carries the reopen tombstone.
+
+    A reopened leaf is not a completed one, so the "fully landed leaf" preflight refused it --
+    and the refusal named three cells the reopen itself had just cleared. The task is already
+    where a second reopen would put it (``restartable_predecessor_contract``), so the honest
+    answer is the reopen's own answer with the same next step and no write: the caller that
+    repeated the call, or an interrupted first call resumed, continues at the start.
+    """
+
+    if contract.cleanup != "reopened" or not restartable_predecessor_contract(contract):
+        return None
+    if _live_worktree_blockers(contract):
+        # A started generation is somebody's live work: it is not a reset that has not happened.
+        return None
+    summary = (
+        "Leaf task is already reopened under its original id: nothing was changed. Edit the "
+        "doc's steps via task_doc, then preview worktree_start with this same leaf id to "
+        "recreate the worktrees off the current source tips."
+    )
+    return WorktreeCommandResult(
+        0,
+        {
+            **_contract_reopen_facts(contract),
+            "state": "would-reopen" if dry_run else "reopened",
+            "doc": None,
+            "frozenLanding": _clear_frozen_landing(contract, dry_run=True),
+            "projectionEffects": [],
+            "summary": summary,
+            **_response_guidance(
+                "start_reopened_task",
+                tool="worktree_start",
+                args=_start_preview_args(contract),
+                summary=summary,
+            ),
+        },
+    )
 
 
 def reopen_required_start_result(contract: WorktreeContract) -> WorktreeCommandResult:
@@ -184,40 +205,18 @@ def reopen_required_start_result(contract: WorktreeContract) -> WorktreeCommandR
     )
 
 
-def _reopened_contract(contract: WorktreeContract) -> WorktreeContract:
-    """The contract with every review/closeout/integration cell reset (task reopen)."""
-
-    return amend_contract(
-        replace(
-            contract,
-            approved_for_commit=False,
-            commit_approval_note="",
-            code_commit="",
-            memory_content_commit="",
-            integration_strategy="",
-            integrated_code_commit="",
-            integrated_memory_content_commit="",
-            lifecycle_id="",
-            memory_state="",
-        ),
-        # The vocabulary cells go through the typed record, which is what puts them in front
-        # of pyright: `dataclasses.replace` is `**changes: Any` in typeshed, so the `reopened`
-        # marker below crossed the boundary unchecked for as long as it was spelled as a
-        # `replace` keyword -- and it was one of the six values the packet then rejected.
-        ContractCells(
-            human_review_status="pending-review",
-            closeout_status="not-started",
-            integration_status="not-started",
-            cleanup="reopened",
-        ),
-    )
-
-
 def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeCommandResult:
     contract = load_contract(contract_path)
-    refusal = _reopen_preflight_refusal(contract)
-    if refusal is not None:
-        return refusal
+    if contract.kind == "series":
+        return reopen_series(contract, dry_run=dry_run)
+    # A task already carrying the reopen tombstone answers `reopened` again; every other state
+    # goes through the preflight, which still owns what "a fully landed leaf" means.
+    for answer in (
+        _already_reopened_result(contract, dry_run=dry_run),
+        _reopen_preflight_refusal(contract),
+    ):
+        if answer is not None:
+            return answer
     try:
         require_terminal_lifecycle_predecessor(contract)
     except LifecycleOperationLocationError as error:
@@ -311,6 +310,22 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
 
 
 def _reopen_preflight_refusal(contract: WorktreeContract) -> WorktreeCommandResult | None:
+    if contract.memory_mode != "external":
+        # A contract that carries the removed mode is reopened nowhere (MIK-R50
+        # R3c): the way out is abandon and a fresh start, not a state reset.
+        fields = opt_out_result_fields(
+            subject_for_contract(contract),
+            "task_reopen",
+            "series" if contract.kind == "series" else "leaf",
+        )
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": fields["status"],
+                "summary": fields["detail"],
+                **fields,
+            },
+        )
     blockers = _reopen_blockers(contract)
     if blockers:
         return WorktreeCommandResult(
@@ -329,13 +344,20 @@ def _reopen_preflight_refusal(contract: WorktreeContract) -> WorktreeCommandResu
     try:
         require_parent_series(contract, operation="task_reopen")
     except RuntimeError as exc:
+        detail = str(exc)
+        parent = contract.parent_contract_path or series_contract_path(contract.task_root)
+        if "parent series contract" in detail and not parent.exists():
+            # The developer's precondition (D519): the leaf's master is there. When it is not,
+            # the answer names the exact file that is missing rather than only the rule that
+            # wants it, so the reader can see what to restore.
+            detail = f"{detail} (missing at {parent.as_posix()})"
         return WorktreeCommandResult(
             2,
             {
                 "state": "blocked",
                 **status_payload(contract),
-                "blockers": [str(exc)],
-                "summary": f"Reopen refused before resetting task state: {exc}",
+                "blockers": [detail],
+                "summary": f"Reopen refused before resetting task state: {detail}",
             },
         )
 
@@ -360,48 +382,76 @@ def _reopen_preflight_refusal(contract: WorktreeContract) -> WorktreeCommandResu
                 },
             )
 
-    # A terminal leaf's source already contains that leaf's exact landed commits.
-    # Pre-start lineage compares against the recorded base, which is intentionally
-    # older after a successful integration. Reopen instead proves that the current
-    # source tips are the exact durable landing recorded by this completed leaf.
-    landed = replace(
-        contract,
-        code_base_commit=contract.integrated_code_commit,
-        memory_base_commit=(
-            contract.integrated_memory_content_commit if contract.memory_mode == "external" else ""
-        ),
-    )
-    lineage = parent_source_lineage(landed)
-    if lineage_refusal(lineage) is not None:
-        assert lineage is not None
+    # A completed, cleaned-up leaf stands behind its master's tip by definition. The reopen
+    # requires only that its recorded landing is an ancestor of that tip, and restarts the
+    # leaf from the tip (MIK-R61 rule 10); the next worktree_start recreates the worktrees
+    # off the current source tips under the same leaf id.
+    ancestry = _landing_ancestry_refusal(contract)
+    if ancestry is not None:
         return WorktreeCommandResult(
             2,
             {
+                "state": "blocked",
                 **status_payload(contract),
-                **lineage_block_payload(lineage),
-                "summary": ("Reopen refused before resetting task state: " + lineage.summary),
+                "blockers": [ancestry],
+                "summary": f"Reopen refused before resetting task state: {ancestry}",
             },
         )
     return None
 
 
-def _clear_frozen_landing(contract: WorktreeContract, *, dry_run: bool) -> str:
-    """Delete the frozen landing-final.json so the reopened arc starts clean.
+def _landing_ancestry_refusal(contract: WorktreeContract) -> str | None:
+    """Prove the recorded landing lies on the current source line (MIK-R61 rule 10).
 
-    The landing freeze persists a finished leaf's landing facts beside its
-    contract and pulls it out of the landing sweep permanently. A reopen makes those facts a
-    lie: the leaf re-enters the sweep, but until this file is gone its second finish cannot
-    re-freeze (a stale-but-loadable file would keep the leaf out of the sweep and serve the
-    first-finish facts forever). Removing it here is what lets the re-finished leaf freeze with
-    fresh facts.
+    A completed, cleaned-up leaf stands behind its master's tip by definition: the reopen
+    requires only that its landing is an ancestor of that tip, and restarts the leaf from
+    the tip. Where the landing is not an ancestor of the tip, the reopen refuses and says
+    so. The refusal names no next action a cleaned-up leaf cannot take: a sync of
+    worktrees that do not exist is such an action, so none is named.
     """
-    final_path = contract.contract_path.parent / LANDING_FINAL_BASENAME
-    if not final_path.exists():
-        return "absent"
-    if dry_run:
-        return "would-delete"
-    final_path.unlink()
-    return "deleted"
+
+    pairs: list[tuple[str, Path | None, str, str]] = [
+        (
+            "code",
+            contract.code_repo_path,
+            contract.code_source_branch,
+            contract.integrated_code_commit,
+        )
+    ]
+    if contract.memory_mode == "external":
+        pairs.append(
+            (
+                "memory",
+                contract.memory_repo_path,
+                contract.memory_source_branch,
+                contract.integrated_memory_content_commit,
+            )
+        )
+    for side, repo, branch, landed in pairs:
+        if repo is None:
+            return (
+                f"leaf {contract.leaf_id!r} records no {side} repository, so its {side} "
+                "landing cannot be proven on the line."
+            )
+        if not landed:
+            return (
+                f"leaf {contract.leaf_id!r} records no integrated {side} landing, so the "
+                "leaf cannot start again from the tip."
+            )
+        try:
+            tip = branch_commit(repo, branch)
+        except (RuntimeError, subprocess.SubprocessError, OSError) as error:
+            return (
+                f"leaf {contract.leaf_id!r} cannot prove its {side} landing is on the "
+                f"line: the tip of {branch} cannot be read ({error})."
+            )
+        if not is_ancestor(repo, landed, tip):
+            return (
+                f"leaf {contract.leaf_id!r} landed {side} {landed}, which is not an "
+                f"ancestor of the current {branch} tip {tip}: the landing is not on the "
+                "line, so the leaf cannot start again from that tip."
+            )
+    return None
 
 
 def _reopen_blockers(contract: WorktreeContract) -> list[str]:
@@ -415,10 +465,21 @@ def _reopen_blockers(contract: WorktreeContract) -> list[str]:
         blockers.append(f"integration is {contract.integration_status!r}, not completed.")
     if contract.cleanup != "completed":
         blockers.append(f"cleanup is {contract.cleanup!r}, not completed.")
-    for label, worktree in (("code", contract.code_worktree), ("memory", contract.memory_worktree)):
-        if worktree is not None and worktree.exists():
-            blockers.append(f"the {label} worktree still exists at {worktree.as_posix()}.")
+    blockers.extend(_live_worktree_blockers(contract))
     return blockers
+
+
+def _live_worktree_blockers(contract: WorktreeContract) -> list[str]:
+    """Why this contract is still somebody's live generation, in either worktree's words."""
+
+    return [
+        f"the {label} worktree still exists at {worktree.as_posix()}."
+        for label, worktree in (
+            ("code", contract.code_worktree),
+            ("memory", contract.memory_worktree),
+        )
+        if worktree is not None and worktree.exists()
+    ]
 
 
 def _plan_leaf_doc_reset(
@@ -432,6 +493,7 @@ def _plan_leaf_doc_reset(
             "task_reopen cannot produce an actionable worktree_start identity"
         )
     json_path, doc = found
+    require_task_document_in_place(json_path, doc, ReopenTaskDocumentError)
     stamp = datetime.now(UTC).astimezone().strftime("%Y-%m-%dT%H:%M")
     data = doc.model_dump(by_alias=True)
     data["status"] = "planning"
@@ -498,7 +560,10 @@ def _preview_reopen_transition(
         None,
         [
             effect.model_dump(by_alias=True)
-            for effect in preview_contract_task_facts(contract, tuple(documents))
+            for effect in preview_contract_task_facts(
+                contract,
+                tuple((json_path_for(contract.task_root, doc), doc) for doc in documents),
+            )
         ],
     )
 
@@ -532,7 +597,13 @@ class _ReopenPublication:
         self.doc_reset = doc_reset
 
     def projection_scopes(self) -> tuple:
-        return contract_projection_scopes(self.contract, self.prepared_documents())
+        return contract_projection_scopes(
+            self.contract,
+            tuple(
+                (json_path_for(self.contract.task_root, doc), doc)
+                for doc in self.prepared_documents()
+            ),
+        )
 
     def publish(self) -> tuple[str, dict | None]:
         docs = self.prepared_documents()
@@ -596,6 +667,7 @@ def _plan_master_index_reset(
         ) from exc
     if master.kind != "master":
         raise ReopenTaskDocumentError(f"parent task document is not a master: {master_path}")
+    require_task_document_in_place(master_path, master, ReopenTaskDocumentError)
     data = master.model_dump(by_alias=True)
     refs = data.get("subTasks", [])
     rows = [ref for ref in refs if ref.get("number") == doc.id]
@@ -609,37 +681,18 @@ def _plan_master_index_reset(
         raise ReopenTaskDocumentError(
             f"parent master must contain exactly one row {doc.id!r}; found {len(rows)}"
         )
-    _validate_reopen_row_path(master_path, leaf_path, doc.id, rows[0])
+    require_reopenable_row(master, master_path, leaf_path, rows[0], ReopenTaskDocumentError)
     rows[0]["status"] = "planning"
-    updated = demote_completed_master_if_unresolved(TaskDocument.model_validate(data))
+    updated = master_sync.demote_completed_master_if_unresolved(TaskDocument.model_validate(data))
     return updated, "reset"
 
 
-def _validate_reopen_row_path(
-    master_path: Path,
-    leaf_path: Path,
-    leaf_id: str,
-    row: dict,
-) -> None:
-    file_name = str(row.get("file") or "")
-    if not file_name:
-        return
-    row_path = (master_path.parent / Path(file_name).with_suffix(".json")).resolve(strict=False)
-    if row_path != leaf_path.resolve(strict=False):
-        raise ReopenTaskDocumentError(
-            f"parent row {leaf_id!r} points at {row_path}, not leaf {leaf_path}"
-        )
-
-
 def _reopen_master_path(task_root: Path, doc: TaskDocument) -> Path | None:
-    if not doc.master:
-        default = task_root / "task.json"
-        return default if default.exists() else None
-    root = task_root.resolve(strict=False)
-    ref = Path(doc.master)
-    candidate = (root / ref.with_suffix(".json")).resolve(strict=False)
-    if candidate.parent != root:
-        raise ReopenTaskDocumentError(
-            f"leaf master reference must resolve to a direct child of {root}: {doc.master!r}"
+    if not doc.master:  # the finalizer and the master sync resolve an unnamed leaf by this rule
+        return master_sync.folder_master_json_path(task_root, doc)
+    try:
+        return master_sync.master_json_path_from_ref(
+            task_root, leaf_id=doc.id, master_ref=doc.master
         )
-    return candidate
+    except ValueError as exc:
+        raise ReopenTaskDocumentError(str(exc)) from exc

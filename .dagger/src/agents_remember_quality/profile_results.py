@@ -9,10 +9,6 @@ from datetime import UTC, datetime
 import dagger
 
 BASELINE_CODEX_PROTOCOL = "initialize -> initialized -> thread/list"
-AMBIENT_CODEX_PROTOCOL = (
-    f"{BASELINE_CODEX_PROTOCOL}; real app-server MCP connected -> "
-    "turn/start -> normally discovered MCP function calls"
-)
 
 
 @dataclass
@@ -171,68 +167,18 @@ def quality_result_payload(
         attempt_nonce=attempt_nonce,
         gates=gates,
     )
-    e2e_completed = "ambient-role-chat-e2e" in progress.completed
-    e2e_attempted = "ambient-role-chat-e2e" in progress.attempted
-    e2e_skipped = "ambient-role-chat-e2e" in progress.skipped
-    codex_attempted = e2e_attempted or "codex-read-only-probe" in progress.attempted
-    result.update(
-        {
-            "codexProtocol": (
-                AMBIENT_CODEX_PROTOCOL
-                if e2e_completed
-                else BASELINE_CODEX_PROTOCOL
-                if "codex-read-only-probe" in progress.completed
-                else None
-            ),
-            "promptSubmitted": (
-                True if e2e_completed else None if e2e_attempted and not e2e_skipped else False
-            ),
-        }
+    result["codexProtocol"] = (
+        BASELINE_CODEX_PROTOCOL if "codex-read-only-probe" in progress.completed else None
     )
-    if codex_attempted:
+    if "codex-read-only-probe" in progress.attempted:
         result["codexMode"] = "real"
     if "causal-preflight" in progress.completed:
         result["causalFailureReport"] = "causal-failures.json"
         result["causalFailureSummary"] = "causal-failures.md"
-    ambient_evidence = _ambient_evidence(
-        e2e_completed=e2e_completed,
-        e2e_skipped=e2e_skipped,
-    )
-    if "ambient-role-chat-e2e" in progress.not_applicable:
-        result["ambientRoleChatEvidence"] = {
-            "status": "not-applicable",
-            "sourceSelection": progress.not_applicable["ambient-role-chat-e2e"],
-            "zeroStart": True,
-        }
-    elif ambient_evidence is not None:
-        result["ambientRoleChatEvidence"] = ambient_evidence
     return result
 
 
-def _ambient_evidence(
-    *,
-    e2e_completed: bool,
-    e2e_skipped: bool,
-) -> dict[str, object] | None:
-    if e2e_completed:
-        return {
-            "status": "passed",
-            "summary": "ambient-role-chat-e2e/summary.json",
-            "runs": [
-                "ambient-role-chat-e2e/run-1.json",
-                "ambient-role-chat-e2e/run-2.json",
-            ],
-        }
-    if e2e_skipped:
-        return {
-            "status": "skipped",
-            "summary": "ambient-role-chat-e2e/summary.json",
-        }
-    return None
-
-
 __all__ = [
-    "AMBIENT_CODEX_PROTOCOL",
     "BASELINE_CODEX_PROTOCOL",
     "QualityProgress",
     "gate_catalog_payload",

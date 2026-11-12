@@ -4,7 +4,8 @@ The JSON document is the source of truth; this module is the **only** writer of
 the rendered markdown. It mirrors ``worktrees.worktree_contract.contract_to_text``:
 small per-section helpers assemble lines from the model, so a re-render fully
 regenerates the document and freeform markdown prose is never round-tripped back.
-The ``w-02-light-task-workflow`` ``template.md`` is the spec these helpers follow.
+The authoring scaffolds are ``skills/l-01-agent-lifecycles/templates/leaf-task.md``
+and ``master-task.md``; these helpers render the authoritative task model.
 
 Output is deterministic: the same document renders byte-for-byte identically.
 Section bodies carry no leading/trailing blank lines and join their own blocks
@@ -13,6 +14,13 @@ normalization that would corrupt blank lines inside code fences).
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agents_remember.kernel.direct_execution_grants import DirectExecutionGrant
+
+    from .master_order import MasterOrder
 
 from agents_remember.models.task_intent import (
     AcceptanceObligationQuestion,
@@ -24,6 +32,7 @@ from .document import (
     CodeExample,
     Decision,
     DiscardedSubTask,
+    IntentReview,
     RouteReviewRecord,
     Section,
     SprintExecutionEndpoint,
@@ -42,16 +51,26 @@ from .execution_graph_titles import SprintGraphTitles
 _MASTER_INDEX_HEADING = "Master Index"
 
 
-def render_markdown(doc: TaskDocument, *, graph_titles: SprintGraphTitles | None = None) -> str:
+def render_markdown(
+    doc: TaskDocument,
+    *,
+    graph_titles: SprintGraphTitles | None = None,
+    direct_grant: DirectExecutionGrant | None = None,
+    master_order: MasterOrder | None = None,
+) -> str:
     if doc.kind == "master":
-        return _render_master(doc, graph_titles=graph_titles)
+        return _render_master(doc, graph_titles=graph_titles, master_order=master_order)
     title = f"# Task: {doc.title}"
     if doc.kind == "subTask":
         title = f"{title} (Sub-task {doc.id})"
-    parts: list[str] = [title, "", *_header_lines(doc)]
+    parts: list[str] = [title, "", *_header_lines(doc, direct_grant=direct_grant)]
     parts += _section("Objective", [doc.objective or "_To be defined._"])
+    if doc.nonGoals:
+        parts += _section("Non-goals", [doc.nonGoals])
     parts += _section("Requirements", _requirement_lines(doc.requirements))
     parts += _section("Design", [doc.design or "No design reasoning needed."])
+    if doc.acceptance:
+        parts += _section("Acceptance", [doc.acceptance])
     parts += _section("Implementation Steps", _step_lines(doc.steps))
     parts += _section("Route Review", _route_review_lines(doc.routeReview))
     if doc.executionRegistrations:
@@ -89,7 +108,12 @@ _MARKER: dict[str, str] = {
 }
 
 
-def _render_master(doc: TaskDocument, *, graph_titles: SprintGraphTitles | None = None) -> str:
+def _render_master(
+    doc: TaskDocument,
+    *,
+    graph_titles: SprintGraphTitles | None = None,
+    master_order: MasterOrder | None = None,
+) -> str:
     """Render a series ``master``: header + the ordered ``sections`` plan.
 
     Each section is freeform prose (a verbatim ``body``) or a structured block --
@@ -99,10 +123,13 @@ def _render_master(doc: TaskDocument, *, graph_titles: SprintGraphTitles | None 
     rendered (L14-R1): the durable markdown must show the sprint → master list.
     """
     parts: list[str] = [f"# Task: {doc.title}", "", *_header_lines(doc)]
+    parts += _master_fixed_prose_lines(doc)
     if doc.executionGraph is not None:
         parts += _section(
             "Execution Graph", _execution_graph_lines(doc.executionGraph, graph_titles)
         )
+    if master_order is not None:
+        parts += _section("Order", _master_order_lines(master_order))
     for section in doc.sections:
         parts += _section(section.heading, _master_body(doc, section))
     if (
@@ -121,6 +148,45 @@ def _render_master(doc: TaskDocument, *, graph_titles: SprintGraphTitles | None 
     if doc.discardedSubTasks:
         parts += _section("Discarded Sub-Tasks", _discarded_subtask_lines(doc.discardedSubTasks))
     return "\n".join(parts) + "\n"
+
+
+def _master_fixed_prose_lines(doc: TaskDocument) -> list[str]:
+    parts: list[str] = []
+    if doc.objective:
+        parts += _section("Objective", doc.objective.split("\n"))
+    if doc.nonGoals:
+        parts += _section("Non-goals", [doc.nonGoals])
+    if doc.requirements:
+        parts += _section("Requirements", _requirement_lines(doc.requirements))
+    if doc.design:
+        parts += _section("Design", doc.design.split("\n"))
+    if doc.acceptance:
+        parts += _section("Acceptance", [doc.acceptance])
+    return parts
+
+
+def _master_order_lines(order: MasterOrder) -> list[str]:
+    completed = sum(task.status == "Completed" for task in order.tasks)
+    lines = [
+        f"Completed tasks: {completed}.",
+        "",
+        "| Wave | Task | State | Waits for |",
+        "| --- | --- | --- | --- |",
+    ]
+    if any(task.cycle and task.status != "Completed" for task in order.tasks):
+        lines[2:2] = [f"Legacy cycle members: {', '.join(order.cycle_ids)}.", ""]
+    for task in sorted(order.tasks, key=lambda task: task.wave):
+        if task.status == "Completed":
+            continue
+        wave = "in work" if task.status == "inProgress" and not task.cycle else str(task.wave)
+        if task.cycle:
+            wave = f"{wave} (cycle)"
+        name = f"[{task.id} — {task.title}]({task.file})" if task.file else task.id
+        state = f"{task.status} · intent review open" if task.intent_review_open else task.status
+        lines.append(
+            f"| {wave} | {_cell(name)} | {_cell(state)} | {_cell(', '.join(task.waits_for))} |"
+        )
+    return lines
 
 
 def _master_body(doc: TaskDocument, section: Section) -> list[str]:
@@ -144,7 +210,11 @@ def _subtask_lines(subtasks: list[SubTaskRef]) -> list[str]:
         # without one keeps the plain bold name + file code span.
         name = f"[**{ref.name}**]({_master_ref_link(ref)})" if ref.masterRef else f"**{ref.name}**"
         file_suffix = f" · `{ref.file}`" if ref.file else ""
-        scope_suffix = f" — {ref.scope}" if ref.scope else ""
+        scope = ref.scope
+        if ref.retirement is not None:
+            retirement = ref.retirement
+            scope = f"{scope + '; ' if scope else ''}Retired {retirement.masterRef.key} at {retirement.retiredAt}: {retirement.reason}"
+        scope_suffix = f" — {scope}" if scope else ""
         marker = _MARKER[ref.status]
         lines.append(f"{ref.number}. {marker} {name}{file_suffix}{scope_suffix}")
     return lines
@@ -177,7 +247,15 @@ def _master_ref_link(ref: SubTaskRef) -> str:
     return f"../{target}"
 
 
-def _header_lines(doc: TaskDocument) -> list[str]:
+def _waits_for_header(doc: TaskDocument) -> list[str]:
+    if not doc.waitsFor:
+        return []
+    return ["**Waits for:** " + ", ".join(f"`{task_id}`" for task_id in doc.waitsFor)]
+
+
+def _header_lines(
+    doc: TaskDocument, *, direct_grant: DirectExecutionGrant | None = None
+) -> list[str]:
     status = f"**Status:** {doc.status}"
     if doc.statusNote:  # descriptive suffix beside the strict enum (R4)
         status = f"{status} — {doc.statusNote}"
@@ -187,20 +265,62 @@ def _header_lines(doc: TaskDocument) -> list[str]:
         f"**Type:** {doc.type}",
         f"**Created:** {doc.createdAt}",
     ]
+    if direct_grant is not None:  # MIK-R94 rule 4: read from the one record, never stored
+        lines.append(f"**Direct execution:** {direct_grant.describe()}")
     if doc.master:
         lines.append(f"**Master:** `{doc.master}`")
+    lines.extend(_waits_for_header(doc))
     if doc.orchestrates:  # the orchestration-command relation (L14); master-only by schema
         lines.append("**Orchestrates:** " + ", ".join(f"`{name}`" for name in doc.orchestrates))
     if doc.integrationBranch:
         lines.append(f"**Integration branch:** `{doc.integrationBranch}`")
     if doc.executionNature:
         lines.append(f"**Execution nature:** `{doc.executionNature}`")
+    lines.extend(_declared_scope_lines(doc))
+    if doc.expectedKnowledgeEffects:  # MIK-R11: declared before implementation
+        lines.append("**Expected knowledge effects:**")
+        lines += [
+            f"- `{one.subject}` — `{one.effect}` ({one.requirementRef})"
+            for one in doc.expectedKnowledgeEffects
+        ]
     if doc.seats:  # the sprint's first-class seats (L14-R3); sprint-only by schema
         lines += _seat_lines(doc.seats)
     lines += [
         f"**{note.label}:** {note.value}" for note in doc.headerNotes
     ]  # extra header lines (R4)
     return lines
+
+
+def _declared_scope_lines(doc: TaskDocument) -> list[str]:
+    """Header lines that exist only when the leaf declared them.
+
+    The maintenance scope (MIK-R08) and the intent review (MIK-R189 rule 8) are one such pair;
+    neither writes a line for a document that does not carry it, so older renders stay identical.
+    """
+
+    lines: list[str] = []
+    if doc.knowledgeMaintenanceScope:  # MIK-R08: the worklist classifies every base entry
+        lines.append("**Knowledge maintenance scope:** `true`")
+    if doc.intentReview is not None:  # MIK-R189 rule 8: the answer asked for before any start
+        lines.append(_intent_review_line(doc.intentReview))
+    return lines
+
+
+def _intent_review_line(review: IntentReview) -> str:
+    """The leaf's one intent-review header line: the state, its decision and the agreed revision."""
+
+    line = f"**Intent review:** {review.state}"
+    if review.decisionRef:
+        line = f"{line} — {review.decisionRef}"
+    revision = review.agreedRevision
+    if revision is not None:
+        packets = (
+            f"; packets {', '.join(revision.packetVersions)}" if revision.packetVersions else ""
+        )
+        line = (
+            f"{line}; agreed revision `{revision.revisionId}` (sha256 `{revision.sha256}`{packets})"
+        )
+    return line
 
 
 def _seat_lines(seats: list[SprintSeat]) -> list[str]:

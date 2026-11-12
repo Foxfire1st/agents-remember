@@ -142,6 +142,12 @@ def _prepare_atomic_leaf_landing(
     git(contract.code_worktree, "add", "-A")
     git(contract.code_worktree, "commit", "-m", "atomic child candidate")
     candidate_commit = git(contract.code_worktree, "rev-parse", "HEAD")
+    # An external-memory closeout also commits the memory content it produced. The fixture's
+    # memory worktree carries the same uncommitted content as its code worktree, so it is
+    # committed here too -- a repo-sidecar contract used to have no memory worktree at all.
+    if contract.memory_worktree is not None:
+        git(contract.memory_worktree, "add", "-A")
+        git(contract.memory_worktree, "commit", "-m", "atomic child memory content")
     fixture.declare(MASTER_A)
     contract = load_contract(contract.contract_path)
     start_closeout_operation(
@@ -154,12 +160,19 @@ def _prepare_atomic_leaf_landing(
     )
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     assert start_operation_record(store).status == "running"
+    current = load_contract(contract.contract_path)
+    memory_content_commit = (
+        git(current.memory_worktree, "rev-parse", "HEAD")
+        if current.memory_worktree is not None
+        else ""
+    )
     finalized = replace(
-        load_contract(contract.contract_path),
+        current,
         human_review_status="approved",
         approved_for_commit=True,
         closeout_status="completed",
         code_commit=candidate_commit,
+        memory_content_commit=memory_content_commit,
     )
     write_contract(finalized.contract_path, finalized)
     publish_closeout_finalization(store, finalized)
@@ -182,7 +195,7 @@ def test_closeout_never_gates_on_a_route_review_record_at_either_altitude(
     atomic leaf-to-master landing proven with both task documents review-free.
     """
 
-    atomic_fixture = QueueFixture(tmp_path / "atomic", atomic_a=True, memory_mode="internal")
+    atomic_fixture = QueueFixture(tmp_path / "atomic", atomic_a=True)
     atomic_contract = atomic_fixture.contracts[MASTER_A]
     atomic_doc_path = _remove_leaf_review(atomic_contract)
     before_doc = atomic_doc_path.read_bytes()
@@ -196,6 +209,7 @@ def test_closeout_never_gates_on_a_route_review_record_at_either_altitude(
             {
                 "contract_path": atomic_contract.contract_path.as_posix(),
                 "code_commit_message": "atomic child candidate",
+                "memory_commit_message": "atomic child memory candidate",
             },
         )
     )
@@ -241,7 +255,7 @@ def test_closeout_never_gates_on_a_route_review_record_at_either_altitude(
     assert read_task_doc(atomic_doc_path).routeReview is None
     assert read_task_doc(atomic_contract.task_root / "task.json").routeReview is None
 
-    organizational_fixture = QueueFixture(tmp_path / "organizational", memory_mode="internal")
+    organizational_fixture = QueueFixture(tmp_path / "organizational")
     organizational_contract = organizational_fixture.contracts[MASTER_A]
     _remove_leaf_review(organizational_contract)
     organizational_payload = _assert_wire_payload(
@@ -251,6 +265,7 @@ def test_closeout_never_gates_on_a_route_review_record_at_either_altitude(
             {
                 "contract_path": organizational_contract.contract_path.as_posix(),
                 "code_commit_message": "organizational candidate",
+                "memory_commit_message": "organizational memory candidate",
             },
         )
     )

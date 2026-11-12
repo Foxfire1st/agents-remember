@@ -1,0 +1,387 @@
+{
+  "schema": "r57-published-current-raw-captures/v1",
+  "captured_at": "2026-10-15T18:54:37.948831+00:00",
+  "published_at": "2026-10-15T18:56:23.670496+00:00",
+  "command": [
+    "../scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/replay_http.py",
+    "--source-root",
+    "../scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/candidate-source-02",
+    "--world",
+    "../scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-03-original",
+    "--requests",
+    "../scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/real-requests.json",
+    "--out",
+    "../scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01"
+  ],
+  "observed_import": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/candidate-source-02/mcp/src/agents_remember/__init__.py",
+  "source_manifest": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/provenance.json",
+  "source_manifest_sha256": "b0bfd3545f211b810a0432f60d53556a8bf16f0eabcaeee682e136b822899628",
+  "source_population_sha256": "e8371bf82037bf56f2b711e44106be9ecb702043701d4b7e167b2b1f00265487",
+  "selection_rule": "First real served answer for each literal request. No structural-signature retries, no response mutation, no ID normalization. L37 comparison 5; scratch-cloned original objects.",
+  "fixtures": [
+    {
+      "file": "subjectReview.successorFamily.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/subjectReview.successorFamily.captured.json",
+      "raw_sha256": "2a4621f84171f3d722740bddd84496ebbaefa42538dcf92c6d7a4732d48af8cb",
+      "bytes": 270999,
+      "previous_sha256": "217b51f05f723da57fc935959d04d5753efef94be954c39c8d7da4c85f2096b3",
+      "route": "/api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "history": "recorded",
+        "selectorKind": "family",
+        "selectorId": "fa2aac3a-f406-595a-a1e6-b50c656704ca"
+      },
+      "state": "review"
+    },
+    {
+      "file": "subjectReview.successorInvariant.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/subjectReview.successorInvariant.captured.json",
+      "raw_sha256": "c5afaba7ee5e8ea8c2fd003d4e2d0422c49304cbd71fa40a0bfc654f08018797",
+      "bytes": 270609,
+      "previous_sha256": "c0b39ebc94805b10d7193acf01c557d5137bd6c858559c3a41d2d3840e7466c1",
+      "route": "/api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "history": "recorded",
+        "selectorKind": "invariant",
+        "selectorId": "8b1a17ca-96ba-5ede-a09f-abfb11ada0a5"
+      },
+      "state": "review"
+    },
+    {
+      "file": "subjectReview.noFamily.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/subjectReview.noFamily.captured.json",
+      "raw_sha256": "fcf34721bbc361ca3967a038dc294262b8dddd9aa93cdf3bb1b40ffc7bca749f",
+      "bytes": 128970,
+      "previous_sha256": "d3192500b87f5eb36e16e6ce08a5eb6f91426d97111d738cb29b32fbef8ea3ec",
+      "route": "/api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "history": "recorded",
+        "selectorKind": "invariant",
+        "selectorId": "7651e8f5-37aa-5834-9df3-c406a55d78cf"
+      },
+      "state": "review"
+    },
+    {
+      "file": "l57.invariant.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l57.invariant.captured.json",
+      "raw_sha256": "d9ab4558bb99695b37f50350aa70cc668718ea909260232008c2f001d5324f5c",
+      "bytes": 283497,
+      "previous_sha256": null,
+      "route": "/api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "history": "recorded",
+        "selectorKind": "invariant",
+        "selectorId": "104c2f90-c046-578f-950a-2a66c9ac93d0"
+      },
+      "state": "review"
+    },
+    {
+      "file": "l57.family.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l57.family.captured.json",
+      "raw_sha256": "bc6805f6f2318bc4e53d0e9388537c226d8d7eb1e06707305a66291a8ae444b3",
+      "bytes": 288243,
+      "previous_sha256": null,
+      "route": "/api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "history": "recorded",
+        "selectorKind": "family",
+        "selectorId": "b6bbe31f-6ff4-50cc-aa80-c1dc91809539"
+      },
+      "state": "review"
+    },
+    {
+      "file": "l57.no-impact.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l57.no-impact.captured.json",
+      "raw_sha256": "89ac0771df5638ac9be72b1e80e9a93c5c9b336ac068a368fb4162417914057a",
+      "bytes": 243327,
+      "previous_sha256": null,
+      "route": "/api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "history": "recorded",
+        "selectorKind": "invariant",
+        "selectorId": "0b171ed1-ce31-5c55-88ab-335127bf9d37"
+      },
+      "state": "review"
+    },
+    {
+      "file": "l86.entries.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l86.entries.captured.json",
+      "raw_sha256": "d801f194e4cce5e4dbd683510cec8b81fea0e51aaf9ab0c3f69bd3042f119091",
+      "bytes": 67284,
+      "previous_sha256": "cc982e94c0e865b94a6061c9125f087a967526f43b6e704a7cecbff76647ce2f",
+      "route": "/api/review/intent/entries",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37"
+      },
+      "state": "entries"
+    },
+    {
+      "file": "l86.task.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l86.task.captured.json",
+      "raw_sha256": "379791fb80737838c32694ff4bbd76a46b64142fdc3d74ccff3a76dbb09a1637",
+      "bytes": 118253,
+      "previous_sha256": "81661ffc43d9202d07334afd7a9fd6f7b06a2a05c09dec0dd33a7785335f5329",
+      "route": "/api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "history": "recorded"
+      },
+      "state": "review"
+    },
+    {
+      "file": "l86.family.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l86.family.captured.json",
+      "raw_sha256": "050e11c942137ef6689f8b05f1edd7ecd82c5d16cd7a928d95c69c562e8105a7",
+      "bytes": 302139,
+      "previous_sha256": "f1ed3484ce6cbdb36188b7a4557c9b178e539c40f53268fde8fc1894229772e9",
+      "route": "/api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "history": "recorded",
+        "selectorKind": "family",
+        "selectorId": "ccd6de6f-cfca-549c-8ee0-08fc418f3fd9"
+      },
+      "state": "review"
+    },
+    {
+      "file": "l86.member.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l86.member.captured.json",
+      "raw_sha256": "c5afaba7ee5e8ea8c2fd003d4e2d0422c49304cbd71fa40a0bfc654f08018797",
+      "bytes": 270609,
+      "previous_sha256": "297c19a6b007ddab7379fa9a807efb3fabb569d293c8047bb526675282e0a544",
+      "route": "/api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "history": "recorded",
+        "selectorKind": "invariant",
+        "selectorId": "8b1a17ca-96ba-5ede-a09f-abfb11ada0a5"
+      },
+      "state": "review"
+    },
+    {
+      "file": "l86.lane.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l86.lane.captured.json",
+      "raw_sha256": "90cbb600bc8a9626973f0439a9a8c5905ab33ac916e7a1da7bfbfc53ac3d668f",
+      "bytes": 78881,
+      "previous_sha256": "ca89fd115354131d7e7495ff644f99c500ecb3fedde466fc74c216b2a419bd6b",
+      "route": "/api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "comparison": "5",
+        "lane": "files"
+      },
+      "state": "trees"
+    },
+    {
+      "file": "l86.cards.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l86.cards.captured.json",
+      "raw_sha256": "bc15c97a3527517c87a06135664ba0b2180402a370cfd73b549b15c05eada023",
+      "bytes": 34674,
+      "previous_sha256": "c27cc4b1a4bd0d3b4a607ca92a80968d28b297970a4357e6f5fe8a827173590d",
+      "route": "/api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "comparison": "5",
+        "invariants": "b2400c01-fc05-51e5-b34a-08a97e8255f3,bfb457a7-58d0-57d7-aa99-f4f9b4b0726c,9f44474c-a3c6-5cca-8269-d4e22a93a27b,54d21b24-6258-58f4-86a5-257e9bd62a0d,3bce6092-4833-5d2a-b732-8633b2fa9e17,09b76b4c-9d5e-50a2-8a4d-de1485e8911c,49473315-7e7f-5866-834f-c27d49271bbd"
+      },
+      "state": "trees"
+    },
+    {
+      "file": "l86.member-cards.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l86.member-cards.captured.json",
+      "raw_sha256": "83a9e83558dd2b21999bc0872449446cf28e91667b522ba53fae75166a147612",
+      "bytes": 43373,
+      "previous_sha256": "3bc297d359f1021e9f8d757a44ef9d85adbe79502de612da2ee3b187125c8a30",
+      "route": "/api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "comparison": "5",
+        "invariants": "8b1a17ca-96ba-5ede-a09f-abfb11ada0a5,6ec03cae-83a4-5f63-9fa4-66b135506c2a,c88cc287-0469-556c-9f42-b742b2377478"
+      },
+      "state": "trees"
+    },
+    {
+      "file": "l86.full-file.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l86.full-file.captured.json",
+      "raw_sha256": "e4125a57ae87456fb3d6c419b99fa1fa01bdd0736fd6c7df65b04e5626d3d108",
+      "bytes": 392930,
+      "previous_sha256": "0c2c7dbd2ed1b89e8167eeffff50abc7add2eb8e27e24305c85be918084c9015",
+      "route": "/api/review/intent/source-content",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "path": "mcp/src/agents_remember/application/knowledge_curator_ingest.py",
+        "beforeCodeTreeId": "3dc2ab0cf59cdc87ec478f6563d4ac6696871076",
+        "afterCodeTreeId": "3063ca45768fd3fc6c0aeeccd2f302407c731c07"
+      },
+      "state": "content"
+    },
+    {
+      "file": "l86.changeset.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l86.changeset.captured.json",
+      "raw_sha256": "3530e6beac88382b7290de99947b13f12b0ac2828280d8e6acb4f2c122707f56",
+      "bytes": 64428,
+      "previous_sha256": "3530e6beac88382b7290de99947b13f12b0ac2828280d8e6acb4f2c122707f56",
+      "route": "/api/changeset/task",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "comparison": "5"
+      },
+      "state": null
+    },
+    {
+      "file": "l86.diff.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l86.diff.captured.json",
+      "raw_sha256": "d9c4d0967b736cbeab0413a5b2619fd04c5d2804fd724fa1c804ad73af572b56",
+      "bytes": 26851,
+      "previous_sha256": "d9c4d0967b736cbeab0413a5b2619fd04c5d2804fd724fa1c804ad73af572b56",
+      "route": "/api/changeset/file-diff",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "comparison": "5",
+        "kind": "code",
+        "path": ".agents/skills/c-02-memory-quality-control/SKILL.md"
+      },
+      "state": null
+    },
+    {
+      "file": "l86.classification.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l86.classification.captured.json",
+      "raw_sha256": "fbd6f083bb5752092a79f48680ab3ea02cac8e04993ba931bfd2583ca25a9630",
+      "bytes": 2305,
+      "previous_sha256": "5b554e683ec0c799d7927b7a81abadaae4846e74e4871708d9afc20aa117ec76",
+      "route": "/api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "comparison": "5",
+        "file": "mcp/src/agents_remember/application/knowledge_curator_ingest.py"
+      },
+      "state": "refused"
+    }
+  ],
+  "not_published": [
+    {
+      "file": "l86.trees.captured.json",
+      "reason": {
+        "code": "candidate_unresolved",
+        "detail": "reviewer worklist child omitted required actual-read evidence",
+        "next_action": "correct the named worklist process failure, then reopen the review",
+        "offending_input": "reviewer worklist process"
+      }
+    }
+  ],
+  "additional_fixture_replacements": [
+    {
+      "file": "subjectReview.family.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/subjectReview.successorFamily.captured.json",
+      "sha256": "2a4621f84171f3d722740bddd84496ebbaefa42538dcf92c6d7a4732d48af8cb",
+      "previous_sha256": "24fb0979b9859d72012bbd855ba226bc29f75f4d24c19c3b96250866392b4fd3",
+      "bytes": 270999,
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/provenance.json",
+      "provenance_sha256": "b0bfd3545f211b810a0432f60d53556a8bf16f0eabcaeee682e136b822899628"
+    },
+    {
+      "file": "subjectReview.invariant.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l57.invariant.captured.json",
+      "sha256": "d9ab4558bb99695b37f50350aa70cc668718ea909260232008c2f001d5324f5c",
+      "previous_sha256": "71926526671d2a6b1ea63650cee02c12493435a396533a2fd1c49a8772a0d7c6",
+      "bytes": 283497,
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/provenance.json",
+      "provenance_sha256": "b0bfd3545f211b810a0432f60d53556a8bf16f0eabcaeee682e136b822899628"
+    },
+    {
+      "file": "familyReview.emptyRoster.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/empty-family-01/raw/familyReview.emptyRoster.captured.json",
+      "sha256": "08b64f4627ed24f1e32c5d80949a856122810cfccfccb7a831daec1b4481bf5a",
+      "previous_sha256": "94e5701de9583bfb5de759d92f7ab7f0926757673148dc593c63f51493362620",
+      "bytes": 135023,
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/empty-family-01/capture-provenance.json",
+      "provenance_sha256": "0fd5d21f5285e2146b8d15b8a1f3eb6b9ee5a8c6f82b1e42659782a8199eb2b5"
+    }
+  ],
+  "judgment_state_fixtures": [
+    {
+      "file": "l57.none.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/subjectReview.noFamily.captured.json",
+      "sha256": "fcf34721bbc361ca3967a038dc294262b8dddd9aa93cdf3bb1b40ffc7bca749f",
+      "bytes": 128970,
+      "state": "none",
+      "proof_state": null,
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/provenance.json",
+      "provenance_sha256": "b0bfd3545f211b810a0432f60d53556a8bf16f0eabcaeee682e136b822899628",
+      "scope": "Real L37 history/member/proof data. Fault-injected scratch input tree for stale, missing-path and unreadable-history scenarios; no response mutation. Missing path is stale under the observed producer, not unverifiable."
+    },
+    {
+      "file": "l57.unavailable.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/proof-04-history-broken/raw/member.json",
+      "sha256": "787b4f1e1c47421860c35c9ee09b8e628b17925e9d0a06b424a72df388e14091",
+      "bytes": 266625,
+      "state": "unavailable",
+      "proof_state": "current",
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/proof-04-history-broken/capture-provenance.json",
+      "provenance_sha256": "c47dfe86e8d7e725565a678e7f44f2006e71999272e2e39010010ab72c4179ff",
+      "scope": "Real L37 history/member/proof data. Fault-injected scratch input tree for stale, missing-path and unreadable-history scenarios; no response mutation. Missing path is stale under the observed producer, not unverifiable."
+    },
+    {
+      "file": "l57.stale-proof.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/proof-04-stale/raw/member.json",
+      "sha256": "3ede5f3f1a9fa3ad5de233dd4b26a58b1d20b388ca1c464ed11314e69db4548a",
+      "bytes": 270867,
+      "state": "rows",
+      "proof_state": "stale",
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/proof-04-stale/capture-provenance.json",
+      "provenance_sha256": "0ad18147e86df7024562d82d5e62d6bfa32a03997276e852ac35390fdcdc2cb0",
+      "scope": "Real L37 history/member/proof data. Fault-injected scratch input tree for stale, missing-path and unreadable-history scenarios; no response mutation. Missing path is stale under the observed producer, not unverifiable."
+    },
+    {
+      "file": "l57.missing-proof.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/proof-04-missing/raw/member.json",
+      "sha256": "e30250cbf1960e82d1c3e17bbfaf0c82e98b9dd601608593db664d7f01cebf1f",
+      "bytes": 270096,
+      "state": "rows",
+      "proof_state": "stale",
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/proof-04-missing/capture-provenance.json",
+      "provenance_sha256": "7aceabffd05122b94cc8e6c1fd8e41e3ce82601bcc8a0551b3a13d019dca6431",
+      "scope": "Real L37 history/member/proof data. Fault-injected scratch input tree for stale, missing-path and unreadable-history scenarios; no response mutation. Missing path is stale under the observed producer, not unverifiable."
+    }
+  ]
+}

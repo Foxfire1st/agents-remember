@@ -1,0 +1,423 @@
+"""A task-context review carries the source comparison without selecting a subject.
+
+No knowledge operand or history judgment is invented. Unavailable knowledge sides
+keep their reasons while the independently measured code inventory remains readable.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from pathlib import Path
+
+import apsw
+
+from agents_remember.application.knowledge_before_half import (
+    read_dataset_identity,
+    unreadable_half_refusal,
+)
+from agents_remember.application.knowledge_diff import open_diff_side
+from agents_remember.application.review_attribution import (
+    AttributionSideInput,
+    index_incomplete_detail,
+    review_attribution,
+    selected_subject,
+)
+from agents_remember.application.review_candidate_resolution import (
+    ReviewCandidateResolution,
+    candidate_receipt_refusal,
+    candidate_ref,
+    missing_dataset_half,
+    require_current_candidate_identity,
+)
+from agents_remember.application.review_committed_leaf import (
+    closed_leaf_intent_detail,
+    closed_leaf_limitations,
+)
+from agents_remember.application.review_external_git_movement import external_git_movement
+from agents_remember.application.review_legacy_comparison import (
+    knowledge_unavailable_detail,
+    knowledge_unavailable_limitations,
+)
+from agents_remember.application.review_record_rendering import refused, submission
+from agents_remember.application.review_source_inventory import (
+    attribution_limitations,
+    inventory_limitations,
+    source_pane,
+)
+from agents_remember.memory.knowledge.diff_display import TreePaths
+from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
+from agents_remember.models.knowledge.diff import ReadSide, SourceAttribution
+from agents_remember.models.knowledge.read import KnowledgeReadSeed
+from agents_remember.models.knowledge.review import (
+    KnowledgeReviewPayload,
+    KnowledgeReviewResult,
+    ReviewKnowledgePane,
+    ReviewRefusal,
+    ReviewSideContent,
+    ReviewSourceInventory,
+    ReviewStaleness,
+    ReviewSurfaceRequest,
+)
+from agents_remember.models.knowledge.review_family_context import ReviewFamilyContext
+from agents_remember.models.knowledge.review_judgment import ReviewJudgmentPane
+from agents_remember.models.knowledge.review_meaning_effects import ReviewMeaningEffects
+
+__all__ = ["pair_attribution", "task_context_review"]
+
+
+def task_context_review(
+    resolved: ReviewCandidateResolution,
+    request: ReviewSurfaceRequest,
+    inventory: ReviewSourceInventory,
+    observed: TreePaths,
+) -> KnowledgeReviewResult:
+    """One review opened from the task alone: the complete source inventory and no compared operand.
+
+    The captured candidate is re-derived immediately before the payload is built, exactly as the
+    subject review re-derives it: a capture input that moved while the inventory was being measured
+    is a named refusal rather than an inventory attributed to a candidate the leaf no longer holds.
+
+    The pair's own preflight runs here too, and it is deliberately **stated rather than raised**: a
+    half that is present but cannot be read as a dataset is a fact about the knowledge half, and this
+    review compares no dataset -- refusing would trade the whole source review away for a knowledge
+    state it never reads, which is the failure this entry exists to remove. The state reaches the
+    caller as the pane's own reason and as a declared limitation, so it is never silent.
+
+    The attribution partition is measured here, from the same two halves the inventory was measured
+    from: a readable half's registered mappings attribute its changes even when the other half is
+    absent or unreadable, and the changes it did not attribute stay *undetermined* rather than
+    becoming confirmed unregistered -- which is what an unread snapshot cannot establish.
+    """
+
+    moved = require_current_candidate_identity(resolved)
+    if moved is not None:
+        return refused(request.repository_id, moved)
+    # Three ways the knowledge half can be unusable, all three *stated* here rather than raised: a
+    # dataset that is present but unreadable, a candidate receipt that exists and does not validate
+    # (which leaves no namespace to open either half under), and a half that is simply absent.
+    receipt = candidate_receipt_refusal(resolved)
+    attribution = pair_attribution(resolved, observed, request.selector, namespace_refusal=receipt)
+    # Asked once more *after* the pair read: a receipt that read as one at the preflight and broke
+    # before the sides were bound reaches the partition's side entries, and this second question is
+    # what carries the same state into the pane and the declared limitations instead of leaving it one
+    # level down. It costs one small read in the ordinary case, where the answer is already known.
+    receipt = receipt or candidate_receipt_refusal(resolved)
+    unreadable = (
+        unreadable_half_refusal(resolved.baseline_database, resolved.candidate_database) or receipt
+    )
+    return KnowledgeReviewResult(
+        state="review",
+        repository_id=request.repository_id,
+        payload=KnowledgeReviewPayload(
+            candidate=candidate_ref(
+                resolved,
+                repository_id=request.repository_id,
+                master=request.master,
+            ),
+            comparison=None,
+            knowledge=_task_context_pane(resolved, unreadable),
+            # No comparison travels beside the inventory: this review selected no subject.
+            source=source_pane(None, inventory, attribution),
+            judgment=ReviewJudgmentPane(
+                state="unavailable",
+                detail=knowledge_unavailable_detail(resolved)
+                or "No knowledge subject was selected for this review",
+            ),
+            # A review that selected no subject composed no family context, and it says so with the
+            # one state that claims nothing: the recorded families of a subject nobody named are not
+            # an unread scope, an unavailable one or a measured zero (ICR-R31@v1).
+            family_context=ReviewFamilyContext(
+                state="no_subject_selected",
+                detail=(
+                    "no knowledge subject was selected for this review, so no recorded family, "
+                    "guarantee or member roster was resolved; All changes, the change-set page "
+                    "the review links, carries the complete inventory of the bound source pair "
+                    "independently of any family membership"
+                ),
+            ),
+            # No subject was selected, so no record's steps are covered; the field is still
+            # present, because a current build's answer without it is invalid (MIK-R43 rule 9).
+            meaning_effects=ReviewMeaningEffects(records=()),
+            # The status chip's one-sentence reason (MIK-R89 v2 rule 6): it names where the
+            # review page shows the inventory now.
+            staleness=ReviewStaleness(
+                state="not_compared",
+                statement=(
+                    "no knowledge subject was selected for this review, so no comparison binding "
+                    "exists to be current or stale; All changes, the change-set page the review "
+                    "links, carries the complete inventory of the bound source pair"
+                ),
+            ),
+            submission=submission(stale=False),
+            # The raw-Git boundary is measured on this entry too (ICR-R23@v1), and for the same
+            # reason it is measured on the subject review: a task-context review is a review boundary,
+            # and a declared identity replaced under it is a fact about the task rather than about a
+            # selected subject. The value states which identities were replaced and which recovery
+            # routes exist; nothing here refuses on it, because this entry carries no comparison a
+            # stale state could disable.
+            external_git_movement=external_git_movement(resolved),
+            limitations=(
+                "limitation:no_knowledge_subject_selected",
+                *unreadable_half_limitations(unreadable),
+                *attribution_limitations(attribution),
+                *inventory_limitations(inventory),
+                # A reopened review declares which record answered and what it recorded about the
+                # intent half (ICR-R12); a live candidate contributes no token.
+                *closed_leaf_limitations(resolved),
+                *knowledge_unavailable_limitations(resolved),
+            ),
+        ),
+    )
+
+
+def unreadable_half_limitations(unreadable: ReviewRefusal | None) -> tuple[str, ...]:
+    """The declared limit one unreadable knowledge half adds to a task-context review.
+
+    A limit a reader has to open a pane to discover is a limit the response did not state, so the
+    same fact the pane's reason carries is declared at the top level beside the inventory's own.
+    """
+
+    return () if unreadable is None else ("limitation:knowledge_half_unreadable",)
+
+
+def _task_context_pane(
+    resolved: ReviewCandidateResolution,
+    unreadable: ReviewRefusal | None = None,
+) -> ReviewKnowledgePane:
+    """Pane 1 for a task-context review: no operand compared, and the reason it was not.
+
+    The two sides are ``unresolved`` rather than empty, because an empty statement is a statement
+    about a snapshot and this pane made none.
+    """
+
+    detail = task_context_detail(resolved, unreadable=unreadable)
+    side = ReviewSideContent(state="unresolved", language="text", detail=detail)
+    return ReviewKnowledgePane(
+        before_statement=side,
+        after_statement=side,
+        selection_state="task_context",
+        selection_detail=detail,
+    )
+
+
+def task_context_detail(
+    resolved: ReviewCandidateResolution, *, unreadable: ReviewRefusal | None = None
+) -> str:
+    """Why a task-context review compared no operand, naming the dataset half that answers for it.
+
+    Five states, each named with its own fact and in the order that decides them. A **closed leaf
+    whose review was reopened from its records** answers first and in its record's own words
+    (ICR-R12): an intent generation the leaf never recorded is a typed absence about the
+    repository's history, and one that was recorded and no longer resolves is unavailable content --
+    the two must not be reported as each other, and neither is content that was expected and lost on
+    a live candidate. Then, for a live candidate: a half whose bytes are there and cannot be read
+    (the pair's own preflight, stated here because this review raises nothing for it), a half that is
+    absent, and a pair that is present and simply was not selected over. The last is not a degraded
+    first: it is what a review of the task alone is.
+    """
+
+    unavailable = knowledge_unavailable_detail(resolved)
+    if unavailable is not None:
+        return f"No knowledge subject was selected; {unavailable}. The complete recorded source comparison remains available."
+    historical = closed_leaf_intent_detail(resolved)
+    if historical is not None:
+        return historical
+    if unreadable is not None:
+        return (
+            "no invariant or family subject was selected for this review, so no knowledge operand "
+            f"was compared -- and this pair could not have been compared anyway: {unreadable.detail}. "
+            f"To act on it: {unreadable.next_action}. "
+            "That state is stated here rather than raised, because this review reads no dataset and "
+            "refusing would remove the source review with it; All changes, the change-set page "
+            "the review links, carries the complete source change inventory of the bound pair"
+        )
+    absent = missing_dataset_half(resolved)
+    if absent is None:
+        return (
+            "no invariant or family subject was selected for this review, so no knowledge operand "
+            "was compared and none is reported as empty; All changes, the change-set page the "
+            "review links, carries the complete source change inventory of the bound pair"
+        )
+    half, database = absent
+    return (
+        f"no subject was selected and the resolved {half} dataset is absent ({database.name}), so "
+        "no knowledge operand was compared; All changes, the change-set page the review links, "
+        "carries the complete source change inventory of the bound pair, which does not depend on "
+        "knowledge availability"
+    )
+
+
+def pair_attribution(
+    resolved: ReviewCandidateResolution,
+    observed: TreePaths,
+    selector: KnowledgeReadSeed | None,
+    *,
+    namespace_refusal: ReviewRefusal | None = None,
+) -> SourceAttribution:
+    """The attribution partition of one resolved pair, measured from the pair's own two datasets.
+
+    This is the task-context path's own measurement, and it exists because a task review compares no
+    dataset and therefore has no comparison to inherit one from -- while its source changes still have
+    attribution, which is precisely the state a task with an absent or unreadable knowledge half must
+    be able to report. Each half is opened read-only when it is there, and a half that is not becomes
+    an *unavailable* side: no negative attribution conclusion is drawn from its silence, and a valid
+    positive mapping on the readable side is still an attribution.
+
+    ``namespace_refusal`` is the refusal the pair's own record earned, when the caller already asked
+    (:func:`candidate_receipt_refusal`); a caller that passes none has the question asked here instead.
+    Either way this reader is **total**: a pair whose shared namespace cannot be established still
+    binds every side whose own bytes disclose theirs and carries the refusal on the side that cannot
+    be bound, so no state of the candidate's record becomes an exception out of the composition.
+    """
+
+    failure = (
+        candidate_receipt_refusal(resolved) if namespace_refusal is None else namespace_refusal
+    )
+    if failure is not None:
+        return _pair_without_namespace(resolved, observed, selector, failure)
+    halves: tuple[tuple[ReadSide, Path, Path | None, str | None], ...] = (
+        (
+            "before",
+            resolved.baseline_database,
+            resolved.baseline_code_root,
+            resolved.baseline_code_tree_id,
+        ),
+        (
+            "after",
+            resolved.candidate_database,
+            resolved.candidate_code_root,
+            resolved.candidate_code_tree_id,
+        ),
+    )
+    sides = tuple(
+        _bound_pair_side(resolved, side, database, root, tree_id)
+        for side, database, root, tree_id in halves
+    )
+    return review_attribution(observed, sides=sides, subject=selected_subject(selector))
+
+
+def index_incompleteness(resolved: ReviewCandidateResolution) -> dict[ReadSide, str]:
+    """Only actual partial tree sides constrain the completeness of their attribution reads."""
+    if resolved.trees is None:
+        return {}
+    return {
+        side.side: index_incomplete_detail(side.tree, side.problems)
+        for side in resolved.trees.sides()
+        if side.index_state == "partial"
+    }
+
+
+def _bound_pair_side(
+    resolved: ReviewCandidateResolution,
+    side: ReadSide,
+    database: Path,
+    root: Path | None,
+    tree_id: str | None,
+) -> AttributionSideInput:
+    """Bind each actual tree side independently, preserving partial-index positive mappings."""
+    for name, state, detail in resolved.knowledge_unavailable:
+        if name == side:
+            return AttributionSideInput(
+                side=side, database=database, unreadable=f"{state}: {detail}"
+            )
+    trees = resolved.trees
+    wire = None if trees is None else next(one for one in trees.sides() if one.side == side)
+    if wire is not None and wire.state != "available":
+        return AttributionSideInput(
+            side=side,
+            database=database,
+            unreadable=f"memory tree {wire.tree} is {wire.state}: {wire.detail}",
+        )
+    bound = _pair_side(side, database, root, tree_id)
+    if wire is not None and wire.index_state == "partial":
+        bound = replace(bound, incomplete=index_incomplete_detail(wire.tree, wire.problems))
+    return bound
+
+
+def _pair_without_namespace(
+    resolved: ReviewCandidateResolution,
+    observed: TreePaths,
+    selector: KnowledgeReadSeed | None,
+    failure: ReviewRefusal,
+) -> SourceAttribution:
+    """One side bound from the namespace its own bytes disclose, the other carrying the refusal.
+
+    The pair's shared namespace comes from the candidate's sealed receipt, and when that record cannot
+    be read the *candidate* half is the one that cannot be bound: a review reads a candidate through
+    its admission, and substituting the namespace its dataset row happens to declare is the very
+    substitution ``review_namespace`` refuses. The before half is a different matter -- it has no
+    admission record to lose, and its own bytes disclose the namespace it is bound to, which
+    ``open_diff_side`` verifies against them -- so it is bound and its registered mappings attribute
+    their paths exactly as they do in every other single-sided state (``ICR-R04``: "a valid positive
+    mapping on the readable side remains attributed with its incompleteness labeled"). The after side
+    carries the refusal, and every path only it could have attributed stays undetermined.
+    """
+
+    after = AttributionSideInput(
+        side="after", database=resolved.candidate_database, unreadable=failure.detail
+    )
+    before = _side_from_own_bytes(
+        resolved.baseline_database,
+        resolved.baseline_code_root,
+        resolved.baseline_code_tree_id,
+        failure.detail,
+    )
+    return review_attribution(observed, sides=(before, after), subject=selected_subject(selector))
+
+
+def _side_from_own_bytes(
+    database: Path,
+    root: Path | None,
+    tree_id: str | None,
+    reason: str,
+) -> AttributionSideInput:
+    """One before half bound from the namespace its own dataset bytes record, or carrying ``reason``.
+
+    The dataset is read as a dataset first (the shipped reader answers that with a reason rather than an
+    exception), then its own recorded namespace is used as the binding ``open_diff_side`` verifies
+    against those same bytes. Anything that fails along the way leaves the side unavailable with the
+    reason the caller established, so this reader is total in every state.
+    """
+
+    reading = read_dataset_identity(database)
+    if isinstance(reading, str):
+        return AttributionSideInput(side="before", database=database, unreadable=reading)
+    try:
+        context = open_diff_side(
+            database,
+            reading.repository_id,
+            repository_root=root,
+            code_tree_id=tree_id,
+        )
+    except (KnowledgeStorageError, OSError, ValueError, apsw.Error):
+        return AttributionSideInput(side="before", database=database, unreadable=reason)
+    return AttributionSideInput(side="before", database=database, context=context)
+
+
+def _pair_side(
+    side: ReadSide,
+    database: Path,
+    root: Path | None,
+    tree_id: str | None,
+) -> AttributionSideInput:
+    """One half of a resolved pair as an attribution side, or as a half nothing could be read from.
+
+    The half is *read* as a dataset before a read context is bound to it, through the shipped reader
+    that already answers "is this file a dataset of this code" with a reason rather than an exception.
+    A half that fails that reading is carried with its reason: the partition then reports it as an
+    uninspected snapshot, which is what keeps the other half's valid mappings attributed while
+    preventing any negative conclusion about the paths it does not mention.
+    """
+
+    reading = read_dataset_identity(database)
+    if isinstance(reading, str):
+        return AttributionSideInput(side=side, database=database, unreadable=reading)
+    try:
+        context = open_diff_side(
+            database, reading.repository_id, repository_root=root, code_tree_id=tree_id
+        )
+    except (KnowledgeStorageError, OSError, ValueError, apsw.Error) as error:
+        return AttributionSideInput(
+            side=side, database=database, unreadable=f"{type(error).__name__}: {error}"
+        )
+    return AttributionSideInput(side=side, database=database, context=context)

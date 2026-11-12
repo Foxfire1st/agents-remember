@@ -53,7 +53,13 @@ def started_result(
             **next_guidance(
                 "continue_work",
                 tool="worktree_status",
-                args=contract_next_args(contract),
+                # The operational triple is the channel a seat follows for the chain, so it has to
+                # be callable: `worktree_status`'s registered input model requires `repo_id`
+                # (`1 validation error for worktree_statusArguments: repo_id Field required`), and
+                # the contract already knows the repository. Without it the *successful* start
+                # response of every leaf names an operation the seat cannot invoke
+                # (260918-TSIP-L8; the same repair as the phase machine's `worktree-started` step).
+                args=contract_next_args(contract, repo_id=contract.repo_name),
             ),
             **_start_result_facts(contract, state.code, state.memory, state.providers),
             "projectionEffects": projection_effects or [],

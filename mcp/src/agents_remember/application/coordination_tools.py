@@ -1,8 +1,16 @@
-"""Application entry points for coordination-context MCP tools."""
+"""Shared coordination-context vocabulary helpers.
+
+The mounted ``resolve_context`` tool is removed (MIK-R109 rule 5): what a
+caller needs from it is in ``context_packet``, and nothing registers the
+name as a tool. What stays here is the topology narrowing every surface
+reports the same way, plus the unregistered ``resolve_context_tool``
+function for its one former reader, ``scripts/pnt_sandbox/build_roots.py``
+(mark 56; that file is untouched).
+"""
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.kernel.authority import require_repo, require_within_coordination
@@ -13,12 +21,11 @@ from agents_remember.kernel.coordination_context_resolver import (
     context_to_dict,
     resolve_coordination_context,
 )
+from agents_remember.kernel.memory_mode import Topology, require_supported_topology
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
-
-Topology = Literal["internal", "external"]
 
 
 def resolve_context_tool(
@@ -28,6 +35,11 @@ def resolve_context_tool(
     worktree_name: str | None = None,
     topology: str | None = None,
 ) -> dict[str, Any]:
+    """The retired tool's former computation, kept for its one former reader.
+
+    Not registered as a tool (MIK-R109 rule 5); ``scripts/pnt_sandbox/build_roots.py``
+    is its only caller.
+    """
     repo = require_repo(config, task.repo_id)
     context = resolve_coordination_context(
         code_repository_name=repo.repo_id,
@@ -60,10 +72,13 @@ def resolve_context_tool(
 
 
 def _topology(value: str | None) -> Topology | None:
+    """Narrow a caller-supplied topology onto the supported set, or refuse.
+
+    Every narrowing goes through the shared vocabulary helper rather than an inline comparison,
+    so every surface reports the same typed status and the same supported set -- and, equally,
+    so an unknown token stays a plain invalid-argument refusal instead
+    of being reported as a removal that never happened.
+    """
     if value is None:
         return None
-    if value == "internal":
-        return "internal"
-    if value == "external":
-        return "external"
-    raise ValueError("topology must be 'internal' or 'external'")
+    return require_supported_topology(value)

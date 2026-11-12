@@ -2,26 +2,35 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Callable
+import os
+import time
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
 
-from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
-from agents_remember.controlplane.expectation_rows import ExpectationRowStore
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.kernel.agentic_settings import (
-    DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS,
-    AgenticSettings,
-    load_agentic_settings,
+from agents_remember.cli.paseo_warmup import (
+    WARMUP_POLL_SECONDS,
+    check_host_once,
+    resume_agent,
+)
+from agents_remember.cli.paseo_warmup_driver import WarmupDriver
+from agents_remember.cli.paseo_warmup_run import WarmupRun, read_available_memory
+from agents_remember.cli.paseo_warmup_state import (
+    TRACKER as _warmup_tracker,
+)
+from agents_remember.cli.paseo_warmup_state import WarmupClaim, read_warmup_priority
+from agents_remember.cli.role_launch_archive_recovery import (
+    RECOVERY_TICK_SECONDS,
+    LeafArchiveRecovery,
 )
 from agents_remember.observer.event_retention import (
     WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS,
     compact_workspace_river,
 )
-from agents_remember.observer.store import EventStore
 from agents_remember.providers.degradation import evaluate_provider_degradation
 from agents_remember.providers.metrics import (
     DEFAULT_SAMPLE_INTERVAL_SECONDS,
@@ -30,15 +39,18 @@ from agents_remember.providers.metrics import (
 )
 from agents_remember.providers.watcher_service import run_configured_watchers
 from agents_remember.serving._app_common import _ServingRuntime, logger
-from agents_remember.serving.agent_notifier import AgentNotifierContext, run_agent_notifier_sweep
-from agents_remember.serving.agent_notifier_heartbeat import (
-    AgentNotifierHeartbeatPayload,
-    heartbeat_age_seconds,
+from agents_remember.serving.background_accounting import (
+    OWNER_HELD_DELIVERY,
+    OWNER_METRICS,
+    OWNER_RIVER_COMPACTION,
+    OWNER_STARTUP,
+    OWNER_TERMINAL_OBSERVATION,
+    OWNER_WARMUP,
+    BackgroundLedger,
+    measured,
+    offload,
 )
-from agents_remember.serving.control_plane_identity_migration import (
-    migrate_control_plane_identity_logs,
-)
-from agents_remember.serving.degradation_delivery import DegradationAlertDelivery
+from agents_remember.serving.explainer_move_watch import move_notice_watch
 from agents_remember.serving.heap_diag import (
     heap_diag_loop,
     malloc_trim_enabled,
@@ -46,39 +58,77 @@ from agents_remember.serving.heap_diag import (
     start_heap_tracing,
     trim_malloc,
 )
-from agents_remember.serving.relay_death_watch import relay_death_watch_loop
+from agents_remember.serving.projections.host_activity import UsageReadPort
+from agents_remember.serving.server_registry import register_server
 
 if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
         McpRuntimeConfig,
     )
+    from agents_remember.serving.explainer import ExplainerApplicationPorts
 
 
-async def _to_thread_drained_on_cancel[**Args, Result](
+async def _to_thread_owned[**Args, Result](
+    owner: str,
+    ledger: BackgroundLedger | None,
     function: Callable[Args, Result],
     /,
     *args: Args.args,
     **kwargs: Args.kwargs,
 ) -> Result:
-    """Do not let a cancelled lifespan return while its worker thread still writes."""
-    worker = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+    """The drained handoff with worker-thread owner attribution (F01).
+
+    The worker thread's own CPU is attributed to ``owner``; the event loop's wait is
+    never measured, only the thread that runs the unit. Failures record through the
+    ``measured`` finally, and cancellation still drains the worker before returning.
+    """
+
+    return await offload(owner, ledger, function, *args, **kwargs)
+
+
+async def _leaf_archive_recovery_loop(runtime: _ServingRuntime) -> None:
+    """The serving lifetime's owner of the leaf agents' archive recovery.
+
+    The pass limits itself (one bounded scan per ``RECOVERY_INTERVAL_SECONDS``); this loop owns
+    only the attempt cadence. The sleep is taken AFTER each attempt returns, so a slow pass
+    delays the next attempt instead of queueing ticks, and two attempts never overlap.
+    """
+
+    archives = LeafArchiveRecovery(runtime.config)
     try:
-        return await asyncio.shield(worker)
-    except asyncio.CancelledError:
-        with contextlib.suppress(Exception):
-            await worker
-        raise
+        while True:
+            # Attribute each archive recovery attempt to its worker thread,
+            # never to the event loop while it waits.
+            try:
+                await _to_thread_owned(
+                    OWNER_TERMINAL_OBSERVATION, runtime.background_ledger, archives.tick
+                )
+            except Exception:
+                logger.exception("leaf agent archive observation failed; retrying next interval")
+            await asyncio.sleep(RECOVERY_TICK_SECONDS)
+    finally:
+        archives.close()
 
 
-async def _metrics_loop(config: McpRuntimeConfig, metrics_store: ProviderMetricsStore) -> None:
-    degradation_alerts = DegradationAlertDelivery(config.coordination_root)
+async def _metrics_loop(
+    config: McpRuntimeConfig,
+    metrics_store: ProviderMetricsStore,
+    ledger: BackgroundLedger | None = None,
+) -> None:
     while True:
+        # One accounted unit per sample stage (MIK-R81 rule 1, F01): each worker
+        # thread's own CPU is its unit; the loop's waits are never measured.
         try:
-            snapshot = await _to_thread_drained_on_cancel(
-                sample_provider_containers, cwd=config.coordination_root
+            snapshot = await _to_thread_owned(
+                OWNER_METRICS,
+                ledger,
+                sample_provider_containers,
+                cwd=config.coordination_root,
             )
-            await _to_thread_drained_on_cancel(metrics_store.record, snapshot)
-            await _to_thread_drained_on_cancel(
+            await _to_thread_owned(OWNER_METRICS, ledger, metrics_store.record, snapshot)
+            await _to_thread_owned(
+                OWNER_METRICS,
+                ledger,
                 evaluate_provider_degradation,
                 config,
                 stop_provider_stacks=partial(
@@ -86,111 +136,128 @@ async def _metrics_loop(config: McpRuntimeConfig, metrics_store: ProviderMetrics
                     action="stop",
                     dry_run=False,
                 ),
-                degradation_alerts=degradation_alerts,
             )
             # Reclaim the append-only metrics log (O(1) stat unless past its byte budget).
-            await _to_thread_drained_on_cancel(metrics_store.compact)
+            await _to_thread_owned(OWNER_METRICS, ledger, metrics_store.compact)
         except Exception:
             logger.exception("provider metrics sample failed; retrying next interval")
         await asyncio.sleep(DEFAULT_SAMPLE_INTERVAL_SECONDS)
 
 
-def _agent_notifier_context(
-    runtime: _ServingRuntime,
-    settings: AgenticSettings | None = None,
-) -> AgentNotifierContext:
-    """One sweep's view of every store its predicates read directly.
+@dataclass(frozen=True)
+class _DeliveryCollaborators:
+    """The two optional ports one held-delivery tick may call."""
 
-    The sweep loop passes its resolved (possibly last-good) settings so the context is built
-    from exactly the same snapshot the enabled-check and interval used.
+    usage_read: UsageReadPort | None = None
+    explainer: ExplainerApplicationPorts | None = None
+
+
+async def _held_delivery_loop(runtime: _ServingRuntime) -> None:
+    """Deliver durably held role messages on the dashboard's own tick (MIK-R100 rule 4a).
+
+    The dashboard runs without a model, and a start of the product starts this loop with
+    it. While it does not run, messages stay held and are delivered when it runs again.
+    A failed sweep never kills the loop; the store keeps everything that still waits.
+
+    Two cadences since MIK-R171 rule 1. Every ``HELD_TURN_END_TICK_SECONDS`` the host's
+    activity record is read, and a recipient whose turn it reports ended is drained at
+    once: a message held for a recipient in a turn does not wait for another message.
+    Every ``HELD_DELIVERY_SWEEP_SECONDS`` the sweep runs as the fallback, visiting the
+    receipts that hold messages first. Both are the same bounded work as before: the
+    turn-end tick reads one small publication and touches only queued receipts.
     """
 
-    settings = (
-        settings
-        if settings is not None
-        else load_agentic_settings(runtime.config.coordination_root)
-    )
-    root = runtime.observer_root
-    return AgentNotifierContext(
-        catalog=runtime.catalog,
-        host=runtime.host,
-        paster=runtime.paster,
-        inbox_store=OperatorInboxStore(root),
-        expectation_store=ExpectationRowStore(root),
-        signal_cooldown_store=AgentNotifierSignalCooldownStore(root),
-        event_store=EventStore(root),
-        heartbeat_store=runtime.heartbeat_store,
-        coordination_root=runtime.config.coordination_root,
-        register_execution_evidence=(
-            None
-            if runtime.register_inbox_execution_evidence is None
-            else partial(
-                runtime.register_inbox_execution_evidence,
-                runtime.config.coordination_root,
-            )
-        ),
-        stale_seat_seconds=max(settings.agent_notifier.interval_seconds * 4, 60.0),
-        redeliver_rate_limit_seconds=settings.agent_notifier.redeliver_rate_limit_seconds,
-        signal_cooldown_seconds=settings.agent_notifier.signal_cooldown_seconds,
-        redeliver_budget=settings.agent_notifier.redeliver_budget,
-        escalation_budget=settings.agent_notifier.escalation_budget,
+    from agents_remember.cli.role_held_messages import (  # noqa: PLC0415
+        HELD_DELIVERY_SWEEP_SECONDS,
+        HELD_TURN_END_TICK_SECONDS,
     )
 
-
-async def _agent_notifier_loop(runtime: _ServingRuntime) -> None:
-    """The notifier sweep loop, with last-good settings resilience (R7/N5).
-
-    ``load_agentic_settings`` runs INSIDE the loop's try: a failed read keeps the previous
-    good configuration for that sweep, fails loud per tick, and never kills the loop. Only
-    with no last-good snapshot at all does the loop skip the sweep and retry next interval.
-    """
-    last_good: AgenticSettings | None = None
+    ledger = runtime.background_ledger
+    seen: dict[str, str] = {}
+    usage_seen: dict[str, str] = {}
+    next_sweep = 0.0
     while True:
+        # One accounted unit per tick (MIK-R81 rule 1, F01): the worker thread's own CPU is
+        # the unit; the loop's wait is never measured.
         try:
-            settings = load_agentic_settings(runtime.config.coordination_root)
-            last_good = settings
-        except Exception:
-            if last_good is None:
-                logger.exception(
-                    "agent-notifier settings load failed; no last-good settings yet; "
-                    "retrying next interval"
-                )
-                await asyncio.sleep(DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS)
-                continue
-            logger.exception(
-                "agent-notifier settings load failed; using last-good settings for this sweep"
-            )
-            settings = last_good
-        try:
-            if not settings.agent_notifier.enabled:
-                await asyncio.sleep(settings.agent_notifier.interval_seconds)
-                continue
-            # Notifier predicates depend on current control/turn boundaries. Dashboard HTTP
-            # clients also refresh this catalog, but delivery correctness must not depend on a
-            # browser polling ``/api/terminal/sessions``. Refresh through the one liveness owner
-            # immediately before each headless notifier sweep.
-            await _to_thread_drained_on_cancel(runtime.liveness_sweeper.refresh)
-            ctx = _agent_notifier_context(runtime, settings=settings)
-            await _to_thread_drained_on_cancel(
-                run_agent_notifier_sweep,
-                ctx,
-                now=runtime.liveness_clock(),
+            sweep = time.monotonic() >= next_sweep
+            if sweep:
+                next_sweep = time.monotonic() + HELD_DELIVERY_SWEEP_SECONDS
+            await _to_thread_owned(
+                OWNER_HELD_DELIVERY,
+                ledger,
+                _held_delivery_tick,
+                runtime.config,
+                seen,
+                usage_seen,
+                sweep=sweep,
+                collaborators=_DeliveryCollaborators(
+                    usage_read=runtime.usage_read,
+                    explainer=runtime.explainer_application,
+                ),
             )
         except Exception:
-            logger.exception("agent-notifier sweep failed; retrying next interval")
-        await asyncio.sleep(settings.agent_notifier.interval_seconds)
+            logger.exception("held-message delivery sweep failed; retrying next interval")
+        await asyncio.sleep(HELD_TURN_END_TICK_SECONDS)
 
 
-async def _malloc_trim_loop() -> None:
+def _held_delivery_tick(
+    config: McpRuntimeConfig,
+    seen: dict[str, str],
+    usage_seen: dict[str, str] | None = None,
+    *,
+    sweep: bool,
+    collaborators: _DeliveryCollaborators | None = None,
+) -> None:
+    """One tick of the held-message delivery: the turn ends, and the sweep as fallback.
+
+    The host's activity record decides which recipients just ended a turn, and those are
+    drained first (MIK-R171 rule 1); the sweep then visits everything the queue names and
+    the receipts no holder named. Both are bounded: one small publication and the
+    receipts a holder published, then the sweep's own per-tick census budget.
+
+    MIK-R190 rule 7 adds one read before that delivery, and only for a new stamped end
+    (``new_stamped_ends``): the product's limit file is then current for the check every
+    send makes. With no new stamped end there is no read at all — no timer and no
+    periodic read, after a plugin reload too. ``usage_read`` is the composition root's
+    port for that read: ``serving`` may not import the bridge's caller (rule 19).
+    """
+
+    from agents_remember.cli.role_held_messages import (  # noqa: PLC0415
+        deliver_ended_turns,
+        sweep_held_messages,
+    )
+    from agents_remember.serving.projections.host_activity import (  # noqa: PLC0415
+        new_stamped_ends,
+        turn_ended_agents,
+    )
+
+    collaborators = collaborators or _DeliveryCollaborators()
+    ended = turn_ended_agents(config, seen)
+    if usage_seen is not None:
+        fresh = new_stamped_ends(config, usage_seen)
+        if fresh and collaborators.usage_read is not None:
+            # The read comes before this tick's delivery to the same agents.
+            collaborators.usage_read(config, fresh)
+    if ended:
+        deliver_ended_turns(config, ended)
+        if collaborators.explainer is not None:
+            move_notice_watch(config, collaborators.explainer.watcher).after_turn_ends(ended)
+    if sweep:
+        sweep_held_messages(config)
+
+
+async def _malloc_trim_loop(ledger: BackgroundLedger | None = None) -> None:
     # Opt-in glibc arena reclaim. The steady RSS growth is allocator
     # fragmentation from per-tick projection churn (gc object count is flat while RSS climbs);
     # malloc_trim(0) returns the freed arena pages to the OS and holds RSS flat. Off unless
     # AR_MALLOC_TRIM is set, glibc-only, and run off the event loop since it walks the arenas.
+    # The trim runs as an accounted startup-maintenance unit (MIK-R81 rule 1, F01/F02).
     interval = malloc_trim_interval_seconds()
     while True:
         await asyncio.sleep(interval)
         try:
-            await asyncio.to_thread(trim_malloc)
+            await _to_thread_owned(OWNER_STARTUP, ledger, trim_malloc)
         except Exception:
             logger.exception("malloc_trim failed; retrying next interval")
 
@@ -198,87 +265,338 @@ async def _malloc_trim_loop() -> None:
 async def _workspace_river_compaction_loop(runtime: _ServingRuntime) -> None:
     while True:
         await asyncio.sleep(WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS)
+        # One accounted unit per compaction (MIK-R81 rule 1, F01): the worker
+        # thread's own CPU is the unit; the loop's wait is never measured.
         try:
-            await asyncio.to_thread(
-                compact_workspace_river, runtime.observer_root, now=runtime.liveness_clock()
+            await offload(
+                OWNER_RIVER_COMPACTION,
+                runtime.background_ledger,
+                compact_workspace_river,
+                runtime.observer_root,
+                now=runtime.clock(),
             )
         except Exception:
             logger.exception("workspace event-river compaction failed; retrying next interval")
 
 
+async def _drive_warmup_run(
+    runtime: _ServingRuntime,
+    run: WarmupRun,
+    claim: WarmupClaim,
+    end_note: dict[str, str | None],
+) -> None:
+    """Drive one host start's warmup pass to its record, whatever it costs.
+
+    The pass never fails the loop: a resume that raises is the run's note, and
+    anything else is logged. Cancellation (lifespan exit, a newer start, the host
+    going away) propagates so the driver still drains; the end note tells whether
+    the pass finished or was retired, and the record says which.
+    """
+    try:
+        home = claim.path.parent
+
+        async def _measured_resume(agent_id: str) -> None:
+            """One warmup resume, attributed to the warmup owner on its worker (F01/F02)."""
+            await offload(
+                OWNER_WARMUP,
+                runtime.background_ledger,
+                resume_agent,
+                runtime.config,
+                agent_id,
+                run.role_receipts[agent_id],
+            )
+
+        def progress() -> None:
+            with measured(OWNER_WARMUP, runtime.background_ledger):
+                _warmup_tracker.write_progress()
+
+        def priority() -> list[str]:
+            with measured(OWNER_WARMUP, runtime.background_ledger):
+                return read_warmup_priority(home)
+
+        def memory() -> int | None:
+            with measured(OWNER_WARMUP, runtime.background_ledger):
+                return read_available_memory()
+
+        await run.run(
+            resume_fn=_measured_resume,
+            mem_fn=memory,
+            progress_fn=progress,
+            priority_fn=priority,
+        )
+    except asyncio.CancelledError:
+        end_note["end_reason"] = (
+            end_note.get("end_reason") or "the loading pass was cancelled before it finished"
+        )
+        raise
+    except Exception as error:
+        end_note["end_reason"] = f"the loading pass failed: {error}"
+        logger.exception("host warmup pass failed")
+    finally:
+        reason = end_note.get("end_reason")
+        with measured(OWNER_WARMUP, runtime.background_ledger):
+            if reason is None:
+                _warmup_tracker.note_run_finished(run, claim)
+            else:
+                _warmup_tracker.note_run_ended(run, claim, reason)
+
+
+async def _warmup_watch_loop(runtime: _ServingRuntime) -> None:
+    """Notice a start of the chat host and warm the tree's agents (MIK-R145).
+
+    The watch is server-side, not page-driven: one light live listing per
+    interval notices a ``serverId`` never seen in this process, with no page
+    open or with many. The listing is one accounted background unit (MIK-R81
+    rule 1); the pass it starts is accounted per resume the same way. A pass of
+    a previous start that is still going is retired when the new one starts, and
+    every driving pass ends with its record when the host goes away (F26).
+    """
+
+    def drive(
+        run: WarmupRun, claim: WarmupClaim, end_note: dict[str, str | None]
+    ) -> asyncio.Task[None]:
+        return asyncio.create_task(_drive_warmup_run(runtime, run, claim, end_note))
+
+    driver = WarmupDriver(_warmup_tracker)
+    try:
+        while True:
+            # The listing is one accounted background unit (MIK-R81 rule 1, F01):
+            # the worker thread's own CPU is the unit, never the loop's wait.
+            try:
+                claimed = await offload(
+                    OWNER_WARMUP, runtime.background_ledger, check_host_once, runtime.config
+                )
+            except Exception:
+                logger.exception("host warmup watch failed; retrying next interval")
+                claimed = None
+            if await driver.noticed(claimed, drive):
+                continue
+            await asyncio.sleep(WARMUP_POLL_SECONDS)
+    finally:
+        await driver.aclose()
+
+
+#: The preview switch: set it and this serving process delivers nothing the live dashboard owns.
+#:
+#: A preview process is started from a worktree against the developer's real data, so it must not be
+#: a second deliverer of held role messages, a second archive recoverer, a second warmup that
+#: resumes agents, a second workspace-river compactor or a second metrics writer. What it MAY do is
+#: serve, build and keep the projection: those are the app itself.
+_PREVIEW_BACKGROUND_ENV = "AR_SERVING_PREVIEW_NO_BACKGROUND"
+
+_PREVIEW_SUPPRESSED_LOOPS = (
+    "held-delivery",
+    "leaf-archive-recovery",
+    "warmup-watch",
+    "workspace-river-compaction",
+    "metrics",
+)
+"""The loops only the live dashboard may own, in the order the startup notice names them."""
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _preview_suppresses(environ: Mapping[str, str] | None = None) -> frozenset[str]:
+    """The live-only loops this process must skip, empty unless the preview switch is truthy.
+
+    Read from ``os.environ`` at lifespan start rather than at import, so a reloaded process (or a
+    test that sets the variable) decides for itself. Absent or false leaves the default path
+    untouched: an installed host starts every loop exactly as before.
+    """
+
+    env = environ if environ is not None else os.environ
+    if env.get(_PREVIEW_BACKGROUND_ENV, "").strip().lower() not in _TRUTHY:
+        return frozenset()
+    return frozenset(_PREVIEW_SUPPRESSED_LOOPS)
+
+
+def _live_background_task[**Args](
+    name: str,
+    suppressed: frozenset[str],
+    function: Callable[Args, Coroutine[Any, Any, None]],
+    /,
+    *args: Args.args,
+    **kwargs: Args.kwargs,
+) -> asyncio.Task[None] | None:
+    """Start one live-only loop, or return ``None`` when the preview switch suppresses it."""
+
+    if name in suppressed:
+        return None
+    return asyncio.create_task(function(*args, **kwargs))
+
+
+async def _prepare_launcher_catalog(runtime: _ServingRuntime) -> None:
+    """One read-only startup unit; normal launches keep their existing catalog owner."""
+    prepare = runtime.launcher_catalog_prepare
+    if prepare is None:
+        return
+    try:
+        await offload(OWNER_STARTUP, runtime.background_ledger, prepare)
+    except Exception:
+        logger.exception("launcher catalog preparation failed")
+
+
 def _serving_lifespan(
     runtime: _ServingRuntime, metrics_store: ProviderMetricsStore
 ) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
-    """The app lifespan: prime the projection, run the background loops, stop them cleanly."""
+    """Prepare the launcher's catalog while the existing serving lifetime starts."""
+    serving = _running_lifespan(runtime, metrics_store)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        unregister = register_server(runtime.config, "dashboard")
+        # This is the preview's own read-only preparation, not the live host's agent
+        # warmup. It starts before projection priming and shares the catalog's lock.
+        preparation = (
+            None
+            if runtime.launcher_catalog_prepare is None
+            else asyncio.create_task(_prepare_launcher_catalog(runtime))
+        )
+        runtime.stream_shutdown.install()
+        try:
+            async with serving(app):
+                yield
+        finally:
+            unregister()
+            runtime.stream_shutdown.uninstall()
+            if preparation is not None:
+                preparation.cancel()
+                # offload drains its worker even if priming failed or shutdown cancels
+                # repeatedly. No catalog discovery can outlive this serving lifetime.
+                with contextlib.suppress(asyncio.CancelledError):
+                    await preparation
+
+    return lifespan
+
+
+async def _project_until_shutdown(runtime: _ServingRuntime) -> None:
+    """One producer owns the first projection and every later tick."""
+    await runtime.projector.prime()
+    await runtime.projector.run()
+
+
+async def _prepare_master_inputs(runtime: _ServingRuntime) -> None:
+    """Offer missing exact pairs after serving starts; requests join the same jobs."""
+    assert runtime.master_preparation is not None
+    try:
+        # Startup selections share the projection's four-thread pool. Let its first
+        # publication through before offering a whole catalogue of optional counters.
+        # Explicit requests still prepare their own exact generation immediately.
+        await runtime.projector.wait_ready()
+        await runtime.master_preparation.prepare_inputs()
+    except Exception:
+        logger.exception("startup master preparation discovery failed")
+
+
+def _running_lifespan(
+    runtime: _ServingRuntime, metrics_store: ProviderMetricsStore
+) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
+    """The app lifespan: serve while shared inputs prepare, then stop their owners cleanly."""
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        await asyncio.to_thread(
-            migrate_control_plane_identity_logs,
-            runtime.config.coordination_root,
-            include_agent_notifier_signals=True,
-        )
+        # A preview process serves and builds, and leaves the live dashboard's own background
+        # ownership alone. Read once here so every loop below decides from the same value.
+        suppressed = _preview_suppresses()
+        if suppressed:
+            logger.warning(
+                "preview background switch %s=%s: skipped %s",
+                _PREVIEW_BACKGROUND_ENV,
+                os.environ.get(_PREVIEW_BACKGROUND_ENV, "").strip(),
+                ", ".join(name for name in _PREVIEW_SUPPRESSED_LOOPS if name in suppressed),
+            )
         # Compact once before accepting clients, then keep compacting on a slow live
         # cadence. Workspace cursors are virtual (base offset + physical offset), and append/compact/read
         # share a cross-process lock, so this is cursor-safe while MCP and serving processes both write.
-        await asyncio.to_thread(
-            compact_workspace_river, runtime.observer_root, now=runtime.liveness_clock()
+        await offload(
+            OWNER_STARTUP,
+            runtime.background_ledger,
+            compact_workspace_river,
+            runtime.observer_root,
+            now=runtime.clock(),
         )
-        await runtime.projector.prime()
-        projection_task = asyncio.create_task(runtime.projector.run())
-        metrics_task = asyncio.create_task(_metrics_loop(runtime.config, metrics_store))
-        agent_notifier_task = asyncio.create_task(_agent_notifier_loop(runtime))
-        relay_death_watch_task = asyncio.create_task(relay_death_watch_loop(runtime))
-        river_compaction_task = asyncio.create_task(_workspace_river_compaction_loop(runtime))
+        projection_task = asyncio.create_task(_project_until_shutdown(runtime))
+        master_preparation_task = (
+            None
+            if runtime.master_preparation is None
+            else asyncio.create_task(_prepare_master_inputs(runtime))
+        )
+        # The provider safety sampler. Suppression is preview-only: a preview shares its coordination
+        # root with the installed host, which runs this loop and writes the metrics samples the
+        # preview reads, so the preview's fail-safe is not blind while the host runs. What must hold
+        # is the *default* path: with the switch absent, `_preview_suppresses()` is empty and every
+        # loop below starts.
+        metrics_task = _live_background_task(
+            "metrics",
+            suppressed,
+            _metrics_loop,
+            runtime.config,
+            metrics_store,
+            runtime.background_ledger,
+        )
+        archive_recovery_task = _live_background_task(
+            "leaf-archive-recovery", suppressed, _leaf_archive_recovery_loop, runtime
+        )
+        held_delivery_task = _live_background_task(
+            "held-delivery", suppressed, _held_delivery_loop, runtime
+        )
+        river_compaction_task = _live_background_task(
+            "workspace-river-compaction", suppressed, _workspace_river_compaction_loop, runtime
+        )
+        warmup_watch_task = _live_background_task(
+            "warmup-watch", suppressed, _warmup_watch_loop, runtime
+        )
+        move_watch_task = (
+            None
+            if runtime.explainer_application is None
+            else asyncio.create_task(
+                move_notice_watch(runtime.config, runtime.explainer_application.watcher).run()
+            )
+        )
         optional: list[asyncio.Task[None]] = []
         # The heap-growth diagnostic only exists when AR_HEAP_DIAG is set (tracemalloc started here
         # so the very first snapshot has a full trace history); otherwise there is no extra task at all.
-        if start_heap_tracing():
-            optional.append(asyncio.create_task(heap_diag_loop()))
+        with measured(OWNER_STARTUP, runtime.background_ledger):
+            heap_enabled = start_heap_tracing()
+        if heap_enabled:
+            optional.append(asyncio.create_task(heap_diag_loop(runtime.background_ledger)))
         # Opt-in RSS bound (glibc arena reclaim), independent of the diagnostic above.
         if malloc_trim_enabled():
-            optional.append(asyncio.create_task(_malloc_trim_loop()))
-        background = [
-            river_compaction_task,
-            agent_notifier_task,
-            relay_death_watch_task,
-            metrics_task,
-            projection_task,
-            *optional,
+            optional.append(asyncio.create_task(_malloc_trim_loop(runtime.background_ledger)))
+        background: list[asyncio.Task[None]] = [
+            task
+            for task in (
+                archive_recovery_task,
+                river_compaction_task,
+                held_delivery_task,
+                warmup_watch_task,
+                move_watch_task,
+                metrics_task,
+            )
+            if task is not None
         ]
+        background.append(projection_task)
+        background.extend(optional)
         try:
             yield
         finally:
+            runtime.projector.close_readiness()
+            if master_preparation_task is not None:
+                master_preparation_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await master_preparation_task
+            if runtime.master_preparation is not None:
+                await runtime.master_preparation.aclose()
+            if runtime.review_trees_shutdown is not None:
+                # Shutdown work is startup-owned teardown: attributed and drained, so a
+                # cancelled shutdown still waits for the worker before returning (F01).
+                await _to_thread_owned(
+                    OWNER_STARTUP, runtime.background_ledger, runtime.review_trees_shutdown
+                )
             for task in background:
                 task.cancel()
             for task in background:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-            runtime.host.shutdown()
 
     return lifespan
-
-
-# --- projection routes --------------------------------------------------------------------------
-
-
-def _agent_notifier_heartbeat_payload(runtime: _ServingRuntime) -> AgentNotifierHeartbeatPayload:
-    # The tick age at RESPONSE time (not the ETag-gated content revision --
-    # a heartbeat is deliberately volatile, the same "ages excluded" posture delta.py already
-    # applies to other live ages, so it never busts the projection's change-gate revision).
-    settings = load_agentic_settings(runtime.config.coordination_root)
-    moment = runtime.liveness_clock()
-    heartbeat = runtime.heartbeat_store.read()
-    age = heartbeat_age_seconds(heartbeat, now=moment)
-    stale_cutoff = settings.agent_notifier.stale_cutoff_seconds
-    return AgentNotifierHeartbeatPayload(
-        lastTickAt=heartbeat.lastTickAt if heartbeat is not None else None,
-        ageSeconds=age,
-        staleCutoffSeconds=stale_cutoff,
-        stale=age is None or age >= stale_cutoff,
-        pendingInboxCount=heartbeat.pendingInboxCount if heartbeat is not None else 0,
-        redeliverableInboxCount=(heartbeat.redeliverableInboxCount if heartbeat is not None else 0),
-        lastSweepDurationSeconds=(
-            heartbeat.lastSweepDurationSeconds if heartbeat is not None else None
-        ),
-    )

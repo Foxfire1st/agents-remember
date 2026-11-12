@@ -41,7 +41,3 @@ Two consequences worth stating plainly:
   from the dashboard source as it stands now — the value `vite.config.ts` compiles into the
   bundle as `__AR_DASHBOARD_BUILD__`. So the sidecar is a value read back out of the bundle,
   never a stamp applied over one.
-
-`npm run e2e:production` runs Playwright against `npm run preview`, which serves
-`dashboard/dist`, and its fixture reads `package_data/dashboard.fingerprint`; run the full
-build-and-place chain above before it.

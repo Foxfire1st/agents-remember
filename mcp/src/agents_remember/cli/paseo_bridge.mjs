@@ -1,0 +1,1708 @@
+#!/usr/bin/env node
+// The one bridge between Agents Remember and the Paseo runtime's agent, workspace and catalog
+// functions (PNT-R02). paseo_bridge.py runs `node paseo_bridge.mjs <command>` with the JSON payload
+// on standard input and reads one JSON object from standard output: the command's result with
+// exit status 0, or `{ok: false, error: {code, message}}` with exit status 1.
+//
+// Commands. Each is one function in the "Commands" section and one row in COMMANDS; adding a
+// command adds exactly that. A command receives `{api, daemon, deadline}` and its payload, and
+// returns a JSON object. Connecting, the deadline, closing and error mapping are shared and live
+// in `main`, `connect` and `failure`.
+//
+//   catalog  {refresh?: boolean, mode?: "full"|"metadata"|"selected",
+//             selectedProvider?: string, selectedModel?: string}
+//            -> {runtime: {serverId, version},
+//                providers: [{id, label, models: [{id, label, description?, isDefault?,
+//                             efforts: [{id, label}], defaultEffort?}], listingError?,
+//                             acceptsToolServers?: boolean, toolServerError?}], readAt}
+//            The providers the runtime reports as ready and enabled, each with the models and
+//            thinking options the runtime lists for it. `refresh` asks the runtime to rediscover
+//            its providers first. Unavailable parts are omitted with a named error; successful
+//            empty arrays remain authoritative empty answers. readAt timestamps this question.
+//            A provider still being discovered keeps its modes and a model-list error.
+//            metadata asks no model features. selected asks only the named provider/model's
+//            features and returns selectedFeatures beside runtime/readAt, without an inventory.
+//            `acceptsToolServers: false` marks a provider whose entry in the runtime's
+//            configuration declares that it takes no tool servers from its host
+//            (`options.supportsMcpServers: false`); the runtime refuses to create an agent with
+//            tool servers for such a provider.
+//
+//   runtime-info  {}
+//            -> {serverId}
+//            The server id of the configured daemon and nothing else. An answer means that the
+//            daemon is reachable and is the configured one; no runtime function is called.
+//
+//   host-activity-snapshot {} -> {serverId, publication: {bootId}}
+//            Reconciles the AR plugin publication with one whole host-agent listing, and in the
+//            same process lists the running provider subagents of the role agents the host holds
+//            with an open session, handing them to the plugin (MIK-R190 rule 3). A closed or
+//            archived agent is never asked: asking loads its session from storage.
+//
+//   usage-reports {agentIds: [string], leafAgentIds?: [string]} -> {serverId, reports}
+//            One usage read per agent, for the limit only (MIK-R190 rule 7). The client answers
+//            the pinned `{requestId, reports}` envelope. A leaf seat's entry older than 60 s is
+//            refreshed once with that entry's reportIds and no agent (0.12.0 to 0.15.4 refuse a call
+//            that names both); a shared report is refreshed at most once per batch, and an entry that
+//            already reads error is never forced. One agent's failure is its own `error` and stops
+//            no other. Ids and labels only: an account's own fields never leave the host.
+//
+//   role-profiles {} -> {profiles, readAt}: reads getDaemonConfig only, never writes profiles.
+//
+//   daemon-config {} -> {config, readAt}: the running daemon's own configuration document, as it
+//            reports it. The providers sit at `config.providers` -- the map the catalog reads, and
+//            not the file's `agents.providers` -- so a start can tell a clean live map from a
+//            drifted one (MIK-R192). Reads getDaemonConfig only, never writes it.
+//
+//   workspace-open  {cwd: string, masterProject?: {directory, key, name}, task?: {key, title}}
+//            -> {serverId, preparation?: "created" | "found" | "opened",
+//                workspace: {id, directory, name, projectId, projectKind}}
+//            Master/task placement creates or replays one directory workspace under the explicit
+//            project, keyed by canonical master/task refs. Names follow the saved payload; an old
+//            replay may restore older display names. Preparation comes from the public creation
+//            observer; cwd-only Projects opens report "opened", without a creation outcome.
+//            Cwd-only controller and persisted v1 calls
+//            retain directory-open semantics. Explicit placement never falls back to that path.
+//
+//   agent-create  {agentId, idempotencyKey, workspaceId, provider, model?, thinkingOptionId?,
+//                  title, labels, prompt?, systemPrompt?, parentAgentId?, modeId?, featureValues?, toolPolicy?,
+//                  providerOptions?: {disallowedTools?: [<rule>], extraArgs?: {<name>: string|null}},
+//                  mcpServers?: {<name>: {type: 'stdio', command, args, env}}}
+//            -> {serverId, existing: boolean, agent: AGENT, creationError?}
+//            One agent under the caller's agent id (a UUID) in that workspace's directory, with
+//            the supplied mode/features/read policy from creation (an absent mode is left absent).
+//            An agent that already has the id is returned
+//            with `existing: true` and nothing is created; so is one that exists although the
+//            creation answered with an error (`creationError` carries the runtime's text). A
+//            creation the runtime refuses, with no agent under the id afterwards, fails with
+//            `paseo_call_failed`. Without `model` the creation goes through the daemon client
+//            (below), because the public client requires a provider/model pair; the provider
+//            then applies its own default model. `systemPrompt` and `mcpServers` are stored by
+//            the runtime with the agent and applied again whenever it resumes the agent's
+//            session: the text is added to the provider's system-level instructions where the
+//            provider has such, and each tool server is started for the agent with exactly the
+//            given command and environment. A map that names `agents-remember-task` is handed
+//            on without an entry `agents-remember`. `parentAgentId` names the agent that starts this one:
+//            the runtime records it as the new agent's parent (the label `paseo.parent-agent-id`,
+//            which AGENT's `labels` shows) and refuses the creation when it has no such agent
+//            loaded. The agent still runs in `workspaceId`, not in the parent's workspace.
+//            `prompt` is the first message; without it the agent is left idle. The agent is
+//            always created without a message, and the first message is sent to it afterwards
+//            under a message id derived from `idempotencyKey`. A repeat of the call sends the
+//            message to an agent that has had no message yet and nothing to one that has had
+//            one; the runtime, which delivers a message id once, keeps two calls that run at the
+//            same time from delivering it twice. An agent with tool servers is first given
+//            TOOL_SERVER_START_MS, counted from this call's creation or lookup of it, and a
+//            closed session is opened before that time starts: a harness that starts its tool
+//            servers with the session offers a turn only the tools of the servers that have
+//            answered when the turn begins, and the runtime reports nothing about them. An
+//            archived agent is sent nothing. A first message that the runtime does not accept
+//            for an agent that exists fails with `paseo_first_message_undelivered`; a repeat of
+//            the call sends it. A closed session of an agent without a message that the runtime
+//            cannot open again fails with `paseo_agent_without_message_lost`: no repeat can
+//            deliver the message to that agent, and the caller starts a new one. `agent` is the
+//            agent as created or found, before the message.
+//
+//   agent-get  {agentId: string}
+//            -> {serverId, agent: AGENT | null}
+//            The agent with exactly that id, archived or not; null when the runtime has none.
+//
+//   agent-archive  {agentId: string}
+//            -> {serverId, agentId, found: boolean, archived: boolean, alreadyArchived?: boolean,
+//                archivedAt?: string}
+//            Archives a live agent. An agent that is already archived, or that the runtime does
+//            not have, is not an error.
+//
+//   AGENT is {id, provider, model, thinkingOptionId, title, labels, workspaceId, cwd, status,
+//   archivedAt, createdAt}: what the runtime reports as applied, `thinkingOptionId` being the
+//   effective one.
+//
+//   presenter-transcript {agentId: string}
+//            -> {serverId, state, available, entries: [{id, at, role, text}], hasOlder?, detail?}
+//            Up to 200 presenter-only timeline entries, without loading a closed session.
+//
+//   presenter-cancel {agentId: string}
+//            -> {serverId, agent}
+//            Cancels only the named presenter session; it never changes an AR role.
+//
+//   agent-cancel  {agentId: string, requestId?: string}
+//            -> {serverId, agent: AGENT | null, cancelled: boolean, requestId}
+//            Cancels the exact agent named, never an archive or a replacement; `requestId` is
+//            echoed so the caller can name what it cancelled.
+//
+//   agent-state  {agentId: string}
+//            -> {serverId, agent: STATE | null}
+//            What the runtime reports about the agent with exactly that id, archived or not; null
+//            when it has none. A read with no effect on the agent: nothing is sent, resumed or
+//            un-archived. The runtime keeps no outcome of the last turn, so that is taken from the
+//            end of the agent's timeline, and the timeline is read only while the agent is idle
+//            with an open session: reading the timeline of a closed session makes the runtime
+//            resume it.
+//
+//   agents-live  {}
+//            -> {serverId, agentIds: string[], complete: boolean}
+//            The ids of the agents the runtime holds that are not archived, from one listing read
+//            in pages (at most LIVE_PAGES pages of LIVE_PAGE_LIMIT). `complete` is true only when
+//            the runtime said that the listing ended. It is false when the listing did not end
+//            within those pages, and when a page announced further agents without naming the page
+//            that holds them: an id that is absent then says nothing about its agent. A read with
+//            no effect on any agent.
+//
+//   agent-resume  {agentId: string}
+//            -> {serverId, agent: STATE | null, resume: {attempted: boolean, resumed: boolean,
+//                error?: string}}
+//            Opens the closed session of a live agent as the same agent, without a message. The
+//            runtime loads an agent when its timeline is read; that read is the resume. An agent
+//            that is missing, archived or already open is left alone (`attempted: false`), and
+//            nothing is ever created or un-archived. A resume the runtime refuses is
+//            `resumed: false` with the runtime's text in `error`. `agent` is the state afterwards.
+//
+//   STATE is {id, status, archivedAt, turnActive, pendingPermissions: [{name, kind}], lastError,
+//   attentionReason, lastTurn}. `status` is the runtime's own word (initializing, idle, running,
+//   error, closed). `attentionReason` is the runtime's own mark on the agent (finished, error,
+//   permission, or null); it is the one trace of a failed turn that outlives a closed session.
+//   `lastTurn` is null unless the agent is idle with an open session; then it is
+//   {state: 'none'} when the agent has not run a turn, {state: 'replied', text} when the timeline
+//   ends with the agent's reply (at most 3,000 characters of it), and {state: 'unreplied'} when
+//   the last turn ended without one, which is what a cancelled turn leaves behind.
+//
+//   agent-send  {agentId: string, text: string, messageId: string, afterResume?: boolean,
+//                turnReportedByHost?: boolean, images?: [{data, mimeType}],
+//                attachments?: [{type: 'text', mimeType: 'text/plain', title?, text}]}
+//            -> {serverId, delivery: {delivered: true, taken: 'started' | 'steered' | 'replaced',
+//                                     turnId: string | null}
+//                        | {delivered: false, refused: 'not-found' | 'archived' | 'closed' | 'busy',
+//                           detail: string, permissionPending?: true, permission?: string}}
+//            One message to the agent with exactly that id, for a live agent with an open
+//            session only: a missing, archived or closed agent is refused and left as it is,
+//            because the runtime would un-archive or resume it to deliver. An idle agent starts a
+//            turn with the message (`started`). An agent that is mid-turn is sent the message
+//            with the runtime's steer behaviour, which hands it to the running turn (`steered`).
+//            The runtime has no "steer or refuse": for a provider without steering it cancels
+//            the running turn and starts another, and it reports which providers those are only
+//            through their entry in its configuration (they extend its ACP driver). Such a
+//            recipient, and one that is still initializing, is refused as `busy`. So is an
+//            agent that waits for a permission decision (`permissionPending`, with the name of
+//            the permission when the runtime gives one): the runtime answers every pending
+//            permission of the recipient with a denial when it delivers a message. A permission
+//            the agent asks for between this look and the send is still denied. `taken` says
+//            what the runtime did, read from the turn the agent runs before and after the send;
+//            `replaced` means the runtime cancelled the running turn all the same. `turnId` is
+//            the turn that took the message, when it is still running. `messageId` is the
+//            caller's id of the message; the runtime records it with the message in the timeline.
+//            A connection lost while the message is being sent fails with
+//            `paseo_send_outcome_unknown`: the runtime may have accepted it. Once the runtime
+//            has accepted the message the command answers `delivered: true`, also when the
+//            lookup afterwards fails (`turnId` is then null). `afterResume` says that the
+//            caller has just resumed the agent's session and that the agent has tool servers:
+//            the command then waits TOOL_SERVER_START_MS before it looks at the agent, for the
+//            reason given under `agent-create`. `images` and text `attachments` go with the
+//            message only when a list is given and not empty (paseo_send_attachments.mjs), so a
+//            send without them keeps its options; a malformed entry refuses the payload before
+//            the agent is read.
+//
+//   agent-has-message  {agentId: string, messageId: string}
+//            -> {serverId, present: boolean}
+//            Reads the agent's timeline and says whether a user message carrying this client
+//            message id is already in it. A held message whose send the host did not answer is
+//            reconciled with this record before it is sent again, so the delivery is at most
+//            once even on a host that does not deduplicate (MIK-R171 rule 3).
+//
+//   agent-wait  {agentId: string, messageId?: string, turnId?: string, steered?: boolean,
+//                waitMs?: number}
+//            -> {serverId, wait: {state: 'running', turnId: string | null}
+//                              | {state: 'permission', permission: string}
+//                              | {state: 'ended', outcome: 'finished' | 'failed' | 'cancelled',
+//                                 text: string | null, textTruncated: boolean, error?: string,
+//                                 laterTurn?: boolean}
+//                              | {state: 'undecided', reason: string}
+//                              | {state: 'unavailable', reason: 'not-found' | 'archived' | 'closed'}}
+//            Waits, for at most `waitMs` and never past this call's own deadline, until the turn
+//            that consumed the message `messageId` has ended, or the agent asks for a permission.
+//            `turnId` is the turn the caller knows to hold the message (as `agent-send` or an
+//            earlier `running` answer returned it). `running` means the time was up first; the
+//            caller repeats the call with the `turnId` of the answer.
+//            A message that began its turn was consumed by that turn: the wait ends when that
+//            turn has ended, and a turn the agent runs afterwards is not followed. When the
+//            caller names no turn and nothing stands behind the message yet, the turn may not
+//            have begun: it is given five seconds to begin.
+//            A message handed to a running turn (`steered`) is consumed by that turn or by the
+//            next one: a harness can leave such a message unread until its turn has ended and
+//            then run it as a turn of its own, which the runtime begins without recording a
+//            message for it. A turn that went on to another step (a tool call) behind the
+//            message has read it. A turn that ended without one is given five seconds in which
+//            another can begin, and a turn the agent runs after it is followed, unless a newer
+//            message of another turn stands behind ours in the timeline.
+//            `ended` carries the outcome and the text of the turn that consumed the message:
+//            the runtime's own event of that turn's end when this call saw it; otherwise
+//            `failed` when the agent is in an error state, `finished` when the turn closed with
+//            text of the agent, and `cancelled` when it did not. `text` is that turn's text
+//            behind its last message or tool call (at most 20,000 characters). For a `steered`
+//            message `laterTurn` says which turn that is: true for a turn that began after the
+//            one that was running, false for the running turn itself.
+//            `undecided` means that the message is not among the timeline entries read, so no
+//            text can be said to answer it. Nothing is sent, resumed or un-archived.
+//
+// The runtime is addressed by the environment paseo_bridge.py derives from `paseoRuntime`:
+//   AR_PASEO_INSTALL_PREFIX  install prefix; the client package is loaded from its node_modules
+//   AR_PASEO_URL             ws://<listen>/ws
+//   AR_PASEO_SERVER_ID       server id of the configured daemon home; any other daemon is refused
+//   AR_PASEO_VERSION         the pinned version, sent as the client's app version
+//   AR_PASEO_DEADLINE_MS     budget of this call; the script answers before the caller's hard stop
+//
+// Non-public Paseo entry points used here, with the reason (PNT-R02 item 2):
+//   @getpaseo/client/internal/daemon-client  DaemonClient
+//     The public createPaseoClient() builds this client and hides it. The bridge constructs it
+//     itself and wraps it in the public createPaseoApi(), so that it can read the daemon's
+//     server_info (getLastServerInfoMessage) and refuse a daemon that is not the configured one.
+//     Every call a command makes goes through the public `api` unless a row above says otherwise.
+//     `agent-create` is such a row: without a model it calls this client's createAgent(), because
+//     the public client only creates an agent for a provider/model pair.
+
+import { failure, nonEmpty, optionalText, requiredText, serverIdOf } from './paseo_bridge_primitives.mjs'
+import { openWorkspace } from './paseo_workspaces.mjs'
+import { listLiveAgents } from './paseo_live_agents.mjs'
+import { sendExtras } from './paseo_send_attachments.mjs'
+import { readFileSync, realpathSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import path from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+
+const COMMANDS = {
+  catalog: readCatalog,
+  'runtime-info': readRuntimeInfo,
+  'host-activity-snapshot': readHostActivitySnapshot,
+  'usage-reports': readUsageReports,
+  'workspace-open': openWorkspace,
+  'agent-create': createAgent,
+  'role-profiles': readRoleProfiles,
+  'daemon-config': readDaemonConfig,
+  'agent-get': getAgent,
+  'agent-archive': archiveAgent,
+  'agent-state': readAgentState,
+  'presenter-transcript': presenterTranscript,
+  'presenter-cancel': presenterCancel,
+  'agent-cancel': cancelSeat,
+  'agents-live': listLiveAgents,
+  'agent-resume': resumeAgent,
+  'agent-send': sendToAgent,
+  'agent-has-message': agentHasMessage,
+  'agent-wait': waitForAgent
+}
+
+const DEFAULT_DEADLINE_MS = 55000
+const CONNECT_TIMEOUT_MS = 10000
+const CLOSE_TIMEOUT_MS = 1000
+// Time kept back from the deadline (at most this much, and at most the given share of what is
+// left) so that a slow provider listing becomes that provider's listingError instead of a timeout
+// of the whole call, and so that the reply is written before the deadline.
+const LISTING_RESERVE_MS = 10000
+const REPLY_RESERVE_MS = 2000
+const MESSAGE_LIMIT = 800
+// agents-live: the runtime refuses a page above 200 entries; ten pages bound the read at 2,000
+// agents. Only the runtime's own word that no agents follow ends a listing: a read that stops
+// at the bound, or at a page that names no next page, answers that the listing did not end.
+// agent-state and agent-resume: the runtime's word for an agent without a running harness
+// process, the timeline entries that mark the end of a turn, how many entries are read from the
+// end, and the length of the reply text that is returned.
+const CLOSED_SESSION = 'closed'
+const TURN_ITEMS = new Set(['user_message', 'assistant_message', 'tool_call'])
+// The driver whose providers the product knows cannot take a steer: a provider the runtime drives
+// through its ACP driver has no autonomous steering, so a message to its running turn is held.
+const DRIVER_WITHOUT_STEERING = 'acp'
+const TIMELINE_TAIL = 20
+// How far back the reconciliation reads for a message id: enough for the turns a recipient ran
+// while one message waited, and one bounded read either way.
+const RECONCILE_TAIL = 200
+const FINAL_TEXT_LIMIT = 3000
+// agent-send and agent-wait: the provider entries of the runtime's configuration that cannot
+// take a message into a running turn, the default and the reserve of one wait, the timeline
+// entries read for the reply, and the runtime's events that end a turn. The reply comes back
+// whole; the role-message tool cuts it at the settings' limit (MIK-R117).
+const WAIT_DEFAULT_MS = 30000
+const WAIT_RESERVE_MS = 6000
+// How often a wait looks at the agent while a turn runs, how long a turn that has ended is given
+// for a following turn to begin, and how often the agent is looked at in that time.
+const WAIT_POLL_MS = 1000
+const TURN_GAP_MS = 5000
+const TURN_GAP_POLL_MS = 250
+const REPLY_TAIL = 200
+const TURN_ENDS = { turn_completed: 'finished', turn_failed: 'failed', turn_canceled: 'cancelled' }
+// agent-create and agent-send: how long an agent with tool servers is given between the opening
+// of its session and a message, and what makes the first message's id out of the idempotency
+// key. The build's tool server had answered its tool list 2.2 s after the creation of one agent,
+// 3.2 s with three agents created at once and 5.3 s with six (261001-PNT master pass, 2026-10-02).
+const TOOL_SERVER_START_MS = 6000
+const FIRST_MESSAGE_SUFFIX = ':first-message'
+// MIK-R190 rule 7: how stale a leaf seat's cached usage entry may be before the bridge refreshes
+// it. Declared with the other constants because `main()` runs inside this module's own top-level
+// await (below): a `const` declared after that point is still in its temporal dead zone while a
+// command executes, so the refresh would throw instead of running.
+const USAGE_REFRESH_AGE_MS = 60000
+// Standard output carries the reply and nothing else: the client's log lines, and anything a
+// command or a package prints through the console, go to standard error.
+const STDERR_LOGGER = { debug() {}, info: logToStderr, warn: logToStderr, error: logToStderr }
+const STILL_LOADING = Symbol('providers still loading')
+console.log = console.info = console.debug = console.error
+
+await (async () => {
+  // Importing this module (for the exported pure row builders) must not start
+  // the bridge: main runs only when node executes this file as the script.
+  let invoked = false
+  try {
+    invoked = process.argv[1] !== undefined &&
+      realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
+  } catch {
+    invoked = false
+  }
+  if (invoked) await main()
+})()
+
+async function main() {
+  const command = process.argv[2]
+  const deadline = Date.now() + positiveInteger(process.env.AR_PASEO_DEADLINE_MS, DEFAULT_DEADLINE_MS)
+  const connection = { current: null }
+  try {
+    if (typeof command !== 'string' || !Object.hasOwn(COMMANDS, command)) {
+      throw failure(
+        'unsupported_bridge_command',
+        `The Paseo bridge has no ${JSON.stringify(command ?? '')} command.`
+      )
+    }
+    const result = await within(
+      (async () => {
+        const payload = await readPayload()
+        connection.current = await connect(deadline)
+        return await COMMANDS[command]({ ...connection.current, deadline }, payload)
+      })(),
+      deadline,
+      () => failure('paseo_bridge_timeout', `The Paseo bridge call ${command} ran out of time.`)
+    )
+    await finish(0, result, connection.current)
+  } catch (error) {
+    await finish(1, { ok: false, error: describe(error, connection.current) }, connection.current)
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------------------------
+
+async function readCatalog({ api, daemon, deadline }, input) {
+  const cwd = requiredText(input, 'cwd')
+  const remaining = deadline - Date.now()
+  const discoveryDeadline = deadline - Math.min(LISTING_RESERVE_MS, remaining / 5)
+  const listingDeadline = deadline - Math.min(REPLY_RESERVE_MS, remaining / 20)
+  const mode = input.mode ?? 'full'
+  if (!['full', 'metadata', 'selected'].includes(mode)) {
+    throw failure('invalid_catalog_mode', 'Catalog mode must be full, metadata or selected.')
+  }
+  const discoveryTimeout = () =>
+    failure('paseo_bridge_timeout', 'The Paseo runtime did not finish provider discovery in time.')
+  if (input.refresh === true) await within(api.providers.refresh(), discoveryDeadline, discoveryTimeout)
+  if (mode === 'selected') {
+    const provider = requiredText(input, 'selectedProvider')
+    const model = requiredText(input, 'selectedModel')
+    const selectedFeatures = { provider, model, ...await modelFeatures(api, provider, model, listingDeadline, cwd) }
+    return catalogReply(daemon, { selectedFeatures })
+  }
+  // waitForReady answers once no provider is loading. When the discovery time is up first,
+  // the available snapshot still supplies provider identities and any known modes.
+  const settled = await within(
+    api.providers.waitForReady({ timeoutMs: Math.max(1, deadline - Date.now()) }),
+    discoveryDeadline,
+    () => STILL_LOADING
+  ).catch((error) => {
+    if (error !== STILL_LOADING) throw error
+    return null
+  })
+  const snapshot = settled ?? (await within(api.providers.snapshot(), listingDeadline, discoveryTimeout))
+  if (!Array.isArray(snapshot?.entries)) {
+    throw failure('paseo_catalog_unavailable', 'The Paseo runtime supplied no provider listing.')
+  }
+  if (snapshot.entries.some((entry) => !nonEmpty(entry?.provider) || typeof entry.enabled !== 'boolean')) {
+    throw failure('paseo_catalog_unavailable', 'The Paseo runtime supplied an invalid provider listing.')
+  }
+  const enabled = snapshot.entries.filter((entry) => entry.enabled === true)
+  // Independent parts share the bounded listing window; a slow support read must not
+  // consume the final reply reserve or discard model answers that already arrived.
+  const [providers, support] = await Promise.all([
+    Promise.all(enabled.map((entry) =>
+      entry.status === 'ready' ? listProvider(api, entry, listingDeadline, cwd, mode === 'full') : stillLoading(entry)
+    )),
+    toolServerSupport(api, listingDeadline)
+  ])
+  // What the runtime reports about tool servers before an agent exists is the provider's entry
+  // in its configuration.
+  return catalogReply(daemon, { providers: providers.map((row) => support.error
+    ? { ...row, toolServerError: support.error }
+    : { ...row, acceptsToolServers: support.providers[row.id]?.options?.supportsMcpServers !== false }) })
+}
+
+function catalogReply(daemon, parts) {
+  if (daemon.getConnectionState().status !== 'connected') {
+    throw failure('paseo_daemon_unreachable', 'The connection to the Paseo daemon was lost while reading the catalog.')
+  }
+  const info = daemon.getLastServerInfoMessage()
+  return {
+    runtime: { serverId: info.serverId, version: typeof info.version === 'string' ? info.version : null },
+    readAt: new Date().toISOString(), ...parts
+  }
+}
+
+async function toolServerSupport(api, deadline) {
+  try {
+    const reply = await within(api.config?.get(), deadline, () => new Error('Tool-server support discovery timed out'))
+    if (!reply?.config || typeof reply.config !== 'object') throw new Error('The runtime supplied no configuration')
+    const providers = reply.config.providers ?? {}
+    if (typeof providers !== 'object' || Array.isArray(providers)) throw new Error('The runtime supplied an invalid provider configuration')
+    return { providers }
+  } catch (error) {
+    return { error: text(error?.message ?? error) }
+  }
+}
+
+async function readRoleProfiles({ daemon }) {
+  const reply = await daemon.getDaemonConfig()
+  return { profiles: reply.config?.agentProfiles ?? [], readAt: new Date().toISOString() }
+}
+
+async function readDaemonConfig({ daemon }) {
+  return daemonConfiguration(await daemon.getDaemonConfig())
+}
+
+// The daemon's configuration document, as the daemon reports it, under the one envelope the
+// caller reads: a reply with no configuration object is a failed read and says so, because a map
+// that was not read must never look like a clean one (MIK-R192 rule 8).
+export function daemonConfiguration(reply) {
+  const config = reply !== null && typeof reply === 'object' ? reply.config : null
+  if (config === null || typeof config !== 'object' || Array.isArray(config)) {
+    throw failure('daemon_config_unreadable', 'The Paseo daemon reported no configuration document.')
+  }
+  return { config, readAt: new Date().toISOString() }
+}
+
+function providerRow(entry) {
+  return {
+    id: entry.provider, label: nonEmpty(entry.label) ?? entry.provider,
+    ...(Array.isArray(entry.modes)
+      ? { modes: entry.modes, defaultModeId: entry.defaultModeId ?? null }
+      : { modeError: 'The runtime supplied no permission-mode listing' }),
+    fetchedAt: entry.fetchedAt ?? null
+  }
+}
+
+function stillLoading(entry) {
+  return {
+    ...providerRow(entry),
+    listingError: nonEmpty(entry.error) ?? 'the runtime was still listing the models of this provider when the call ended'
+  }
+}
+
+async function listProvider(api, entry, deadline, cwd, includeFeatures) {
+  const row = providerRow(entry)
+  try {
+    const listing = await within(
+      api.providers.listModels(entry.provider),
+      deadline,
+      () => new Error('the runtime did not list the models in time')
+    )
+    if (listing?.error) throw new Error(text(listing.error))
+    if (!Array.isArray(listing?.models)) throw new Error('The runtime supplied no model listing')
+    if (listing.models.some((model) => !nonEmpty(model?.id))) throw new Error('The runtime supplied an invalid model listing')
+    const models = await Promise.all(listing.models.map(async (model) => {
+      const result = projectModel(model)
+      return includeFeatures
+        ? { ...result, ...await modelFeatures(api, entry.provider, model.id, deadline, cwd) }
+        : result
+    }))
+    return { ...row, models }
+  } catch (error) {
+    return { ...row, listingError: text(error?.message ?? error) }
+  }
+}
+
+
+async function modelFeatures(api, provider, model, deadline, cwd) {
+  try {
+    const reply = await within(api.providers.listFeatures({ provider: `${provider}/${model}`, cwd }), deadline, () => new Error('Service tier discovery timed out'))
+    if (reply?.error) throw new Error(text(reply.error))
+    if (!Array.isArray(reply?.features)) throw new Error('The runtime supplied no feature listing')
+    return { features: reply.features, serviceTiers: tierOptions(reply.features) }
+  } catch (error) {
+    return { featureError: text(error?.message ?? error), serviceTierError: text(error?.message ?? error) }
+  }
+}
+
+function projectModel(model) {
+  return {
+    id: model.id,
+    label: nonEmpty(model.label) ?? model.id,
+    ...(nonEmpty(model.description) ? { description: model.description } : {}),
+    ...(model.isDefault === true ? { isDefault: true } : {}),
+    ...(Array.isArray(model.thinkingOptions) ? {
+      efforts: model.thinkingOptions.filter((option) => nonEmpty(option?.id))
+        .map((option) => ({ id: option.id, label: nonEmpty(option.label) ?? option.id }))
+    } : { effortError: 'The runtime supplied no thinking-option listing' }),
+    ...(nonEmpty(model.defaultThinkingOptionId) ? { defaultEffort: model.defaultThinkingOptionId } : {})
+  }
+}
+
+function tierOptions(features) {
+  const feature = Array.isArray(features) ? features.find((row) => row.id === 'service_tier' && row.type === 'select') : null
+  return (feature?.options ?? []).map(({ id, label }) => ({ id, label }))
+}
+
+async function readRuntimeInfo({ daemon }) {
+  return { serverId: serverIdOf(daemon) }
+}
+
+async function readHostActivitySnapshot({ api, daemon }) {
+  const publication = await daemon.invokePluginRpc('ar-plugin', 'ar.host-activity-snapshot', {})
+  // MIK-R190 rule 3's second step, in this same process: after the plugin has subscribed and
+  // reconciled, list the running subagents of AR's role agents that the host holds with an open
+  // session and hand them to the plugin. Only a DaemonClient can list them, and a closed or
+  // archived agent is never asked, because asking loads its session from storage.
+  const lists = await listRoleAgentSubagents(api, daemon)
+  if (lists.length > 0) {
+    // L184-R1-F08: the list names the reconciliation it answers, taken from the answer above, so
+    // two snapshots in flight cannot bind one boot's list to the other's still-unanswered slot.
+    const reconcile = publication?.reconcile
+    await daemon.invokePluginRpc('ar-plugin', 'ar.host-activity-subagents', {
+      lists,
+      ...(typeof reconcile === 'number' ? { reconcile } : {}),
+    })
+  }
+  return { serverId: serverIdOf(daemon), publication }
+}
+
+// MIK-R190 rule 3: the role record names the agents whose subagents the plugin follows. It is
+// read here rather than asked of the host, so a listing asks only about AR's own seats.
+function readRoleAgentIds() {
+  const home = process.env.PASEO_HOME
+  if (!home || home === '') return []
+  try {
+    const document = JSON.parse(
+      readFileSync(path.join(home, 'agents-remember', 'role-agents.json'), 'utf8')
+    )
+    const agents = document?.agents
+    return agents !== null && typeof agents === 'object' && !Array.isArray(agents)
+      ? Object.keys(agents)
+      : []
+  } catch {
+    return []
+  }
+}
+
+const SUBAGENT_PAGE_LIMIT = 8
+const SUBAGENT_PAGE_SIZE = 200
+
+async function listRoleAgentSubagents(api, daemon) {
+  const wanted = new Set(readRoleAgentIds())
+  if (wanted.size === 0) return []
+  const open = []
+  try {
+    const seen = new Set()
+    let cursor
+    for (let page = 0; page < SUBAGENT_PAGE_LIMIT; page += 1) {
+      const listed = await api.agents.list({
+        filter: { includeArchived: true },
+        page: cursor === undefined ? { limit: SUBAGENT_PAGE_SIZE } : { limit: SUBAGENT_PAGE_SIZE, cursor }
+      })
+      for (const entry of listed?.entries ?? []) {
+        const agent = entry?.agent
+        if (agent?.id === undefined || !wanted.has(agent.id)) continue
+        if (agent.archivedAt || agent.status === CLOSED_SESSION) continue
+        open.push(agent.id)
+      }
+      if (listed?.pageInfo?.hasMore !== true) break
+      const next = listed?.pageInfo?.nextCursor
+      if (next === undefined || next === null || seen.has(next)) break
+      seen.add(next)
+      cursor = next
+    }
+  } catch (error) {
+    logToStderr(
+      { command: 'host-activity-snapshot' },
+      `the host listing failed, so no subagent list was taken: ${text(error?.message ?? error)}`
+    )
+    return []
+  }
+  const lists = []
+  for (const agentId of open) {
+    try {
+      const answer = await daemon.listProviderSubagents(agentId)
+      const subagents = (Array.isArray(answer?.subagents) ? answer.subagents : []).flatMap((sub) =>
+        typeof sub?.id === 'string' && typeof sub?.createdAt === 'string' && typeof sub?.status === 'string'
+          ? [{ id: sub.id, createdAt: sub.createdAt, status: sub.status }]
+          : []
+      )
+      lists.push({ agentId, subagents })
+    } catch (error) {
+      // One agent's failure changes nothing for that agent and stops no other.
+      logToStderr(
+        { command: 'host-activity-snapshot', agentId },
+        `no subagent list for this agent: ${text(error?.message ?? error)}`
+      )
+    }
+  }
+  return lists
+}
+
+// MIK-R190 rule 7: the reports the product judges a limit by. The bridge is the only place that
+// can ask, because only a DaemonClient maps an agent to its usage accounts and can refresh one.
+async function readUsageReports({ daemon }, input) {
+  const agentIds = Array.isArray(input.agentIds) ? input.agentIds.filter((id) => nonEmpty(id)) : []
+  const leaf = new Set(Array.isArray(input.leafAgentIds) ? input.leafAgentIds : [])
+  const reports = []
+  // Rule 7: one forced read per report, however many seats named it in this batch. An account's
+  // report is one report, so two leaf seats on it must not refresh it twice.
+  const refreshed = new Map()
+  for (const agentId of agentIds) {
+    try {
+      const entries = await usageEntriesFor(daemon, agentId, leaf.has(agentId), refreshed)
+      reports.push({ agentId, entries })
+    } catch (error) {
+      // Rule 7: one agent's failure changes nothing for it and does not stop the others.
+      reports.push({ agentId, error: text(error?.message ?? error) || 'usage read failed' })
+    }
+  }
+  return { serverId: serverIdOf(daemon), reports }
+}
+
+async function usageEntriesFor(daemon, agentId, leaf, refreshed) {
+  const cached = await daemon.listUsageReports({ agentId })
+  let entries = usageReportsOf(cached)
+  if (!leaf) return entries.map(projectUsageEntry)
+  for (const entry of entries) {
+    // A forced fetch after a 429 is refused until Retry-After and turns the shared entry into an
+    // error, so an entry that already reads `error` is never forced.
+    if (entry?.report?.status === 'error') continue
+    if (typeof entry?.id !== 'string') continue
+    const shared = refreshed.get(entry.id)
+    if (shared !== undefined) {
+      // Rule 7 bounds a shared report to one refresh: a later seat in this batch reads the row
+      // the earlier seat's refresh already returned, instead of asking the host again.
+      entries = entries.map((row) => (row === entry ? shared : row))
+      continue
+    }
+    const fetchedAt = Date.parse(entry?.fetchedAt ?? '')
+    if (!Number.isFinite(fetchedAt) || Date.now() - fetchedAt <= USAGE_REFRESH_AGE_MS) continue
+    refreshed.set(entry.id, entry)
+    try {
+      // 0.12.0 to 0.15.4 refuse a call that names both selectors ("agentId and reportIds cannot
+      // be combined"): a forced read selects the report it refreshes, and no agent.
+      const forced = await daemon.listUsageReports({ forceRefresh: true, reportIds: [entry.id] })
+      const fresh = usageReportsOf(forced).find((row) => row?.id === entry.id)
+      if (fresh !== undefined) {
+        refreshed.set(entry.id, fresh)
+        entries = entries.map((row) => (row === entry ? fresh : row))
+      }
+    } catch {
+      // The cache's own entry stands: a failed refresh changes no fact, and this batch does not
+      // ask the host for the same report again.
+    }
+  }
+  return entries.map(projectUsageEntry)
+}
+
+// The pinned client answers `{requestId, reports}`; anything else names no report at all.
+function usageReportsOf(answer) {
+  const reports = answer?.reports
+  return Array.isArray(reports) ? reports : []
+}
+
+// Ids and labels only: an account's own fields never leave the host.
+function projectUsageEntry(entry) {
+  if (entry === null || typeof entry !== 'object') return {}
+  const { account, ...rest } = entry
+  const label = account?.label
+  return { ...rest, ...(typeof label === 'string' ? { account: { label } } : {}) }
+}
+
+async function createAgent({ api, daemon, deadline }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const request = agentCreation(input, agentId)
+  const serverId = serverIdOf(daemon)
+  const present = await findAgent(api, daemon, agentId)
+  if (present) {
+    await sendFirstMessage(api, daemon, present, request)
+    return { serverId, existing: true, agent: projectAgent(present) }
+  }
+  let created
+  try {
+    created = await request.create(api, daemon, deadline)
+  } catch (error) {
+    // The runtime answered with an error. Whether an agent exists under the id decides what that
+    // means: it exists (a repeat that lost its creation record), or the runtime refused the
+    // creation.
+    if (daemon.getConnectionState().status !== 'connected') throw error
+    const after = await findAgent(api, daemon, agentId)
+    if (!after) throw error
+    await sendFirstMessage(api, daemon, after, request)
+    return {
+      serverId,
+      existing: true,
+      agent: projectAgent(after),
+      creationError: text(error?.message ?? error)
+    }
+  }
+  if (created?.id !== agentId) {
+    throw failure(
+      'paseo_bridge_invalid_reply',
+      'The Paseo runtime created an agent under another id than the one given.'
+    )
+  }
+  await sendFirstMessage(api, daemon, created, request)
+  return { serverId, existing: false, agent: projectAgent(created) }
+}
+
+// Send the first message of a launch to an agent that has had no message yet. An agent that
+// has had a message is taken to have this one. That holds as long as nothing else reaches the
+// agent before its launch has answered: the role-message tool refuses a recipient whose start
+// has not finished, but a message typed into the agent's own chat in that time comes first. The
+// message id is the same on every run: the runtime keeps a delivery record per agent and message
+// id, and two calls that run at once deliver it once. A closed session is opened first, so that
+// its tool servers start before the wait: reading the timeline is the runtime's resume. A session
+// that cannot be opened has its own failure: a harness may keep nothing of a session that never
+// ran a turn, and then no repeat can deliver the message.
+async function sendFirstMessage(api, daemon, agent, request) {
+  if (!request.prompt || nonEmpty(agent.archivedAt) || nonEmpty(agent.lastUserMessageAt)) return
+  const handle = api.agents.ref(agent.id)
+  if (agent.status === CLOSED_SESSION) {
+    try {
+      await handle.timeline.refetch({ direction: 'tail', limit: 1 })
+    } catch (error) {
+      if (daemon.getConnectionState().status !== 'connected') throw error
+      throw failure(
+        'paseo_agent_without_message_lost',
+        `Agent ${agent.id} exists in the Paseo runtime without its first message, and its ` +
+          `closed session cannot be opened again (${text(error?.message ?? error)}).`
+      )
+    }
+  }
+  try {
+    if (request.hasToolServers) await toolServerStart()
+    // A newly created agent runs no turn yet; no active-turn behaviour is asked for, so a
+    // message never ends a turn (MIK-R171 rule 2).
+    await handle.send(request.prompt, { messageId: request.firstMessageId })
+  } catch (error) {
+    if (daemon.getConnectionState().status !== 'connected') throw error
+    throw failure(
+      'paseo_first_message_undelivered',
+      `Agent ${agent.id} exists in the Paseo runtime, but its first message was not delivered ` +
+        `(${text(error?.message ?? error)}). Repeat the request to send it.`
+    )
+  }
+}
+
+// The time a session's tool servers are given to start before a message begins a turn.
+function toolServerStart() {
+  return new Promise((resolve) => setTimeout(resolve, TOOL_SERVER_START_MS))
+}
+
+// Check the payload and return how the agent is created: through the public client, or, for a
+// provider launched without a model, through the daemon client with the same request.
+function agentCreation(input, agentId) {
+  const workspaceId = requiredText(input, 'workspaceId')
+  const provider = requiredText(input, 'provider')
+  const model = optionalText(input, 'model')
+  const thinkingOptionId = optionalText(input, 'thinkingOptionId')
+  const modeId = optionalText(input, 'modeId')
+  const featureValues = input.featureValues
+  if (featureValues !== undefined && (featureValues === null || typeof featureValues !== 'object' ||
+    Array.isArray(featureValues) || Object.entries(featureValues).some(([id, value]) =>
+      !nonEmpty(id) || !(typeof value === 'boolean' || nonEmpty(value))))) {
+    throw failure('invalid_bridge_payload', 'featureValues must map feature ids to booleans or nonempty option ids.')
+  }
+  const prompt = optionalText(input, 'prompt')
+  const idempotencyKey = requiredText(input, 'idempotencyKey')
+  const shared = { agentId, idempotencyKey, labels: requiredLabels(input) }
+  const title = requiredText(input, 'title')
+  const parentAgentId = optionalText(input, 'parentAgentId')
+  const systemPrompt = optionalText(input, 'systemPrompt')
+  const toolPolicy = input.toolPolicy
+  if (toolPolicy !== undefined && (!toolPolicy || !Array.isArray(toolPolicy.preapproved) ||
+      toolPolicy.preapproved.some((grant) => grant?.kind !== 'mcp' || !nonEmpty(grant.server) || !nonEmpty(grant.tool)))) {
+    throw failure('invalid_bridge_payload', 'toolPolicy must contain exact MCP server/tool grants.')
+  }
+  const mcpServers = input.mcpServers ?? null
+  const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+  const wellFormed =
+    mcpServers === null ||
+    (isRecord(mcpServers) &&
+      Object.values(mcpServers).every(
+        (server) =>
+          isRecord(server) &&
+          server.type === 'stdio' &&
+          nonEmpty(server.command) &&
+          Array.isArray(server.args) &&
+          server.args.every((argument) => typeof argument === 'string') &&
+          isRecord(server.env) &&
+          Object.values(server.env).every((value) => typeof value === 'string')
+      ))
+  if (!wellFormed) {
+    throw failure(
+      'invalid_bridge_payload',
+      'The Paseo bridge payload needs mcpServers as stdio definitions with command, args and env.'
+    )
+  }
+  // MIK-R132: beside the task server, an entry for the product's other tool server is a second
+  // copy of the product's tools. A supplied map loses that one entry (agents-remember, cf.
+  // OTHER_PRODUCT_TOOL_SERVER in application/agent_binding.py); the task server's entry and the
+  // user's servers stay as they are. The same filter as exclusion_applied_agent in
+  // cli/paseo_launch.py, applied here again.
+  const appliedServers =
+    isRecord(mcpServers) && Object.hasOwn(mcpServers, 'agents-remember-task')
+      ? Object.fromEntries(Object.entries(mcpServers).filter(([name]) => name !== 'agents-remember'))
+      : mcpServers
+  // MIK-R132: what keeps the product's other tool server out of this one agent. The one key
+  // the pinned host reads for it is disallowedTools of a provider's options; which provider,
+  // and where the host reads it, stands in application/agent_binding.py. Nothing else is
+  // handed over under this name, apart from MIK-R192's extra harness arguments below.
+  //
+  // MIK-R192 rule 5: extraArgs is the second key admitted here, beside disallowedTools. Each is
+  // checked in its own shape — a flag name without its dashes to a string value or null — and
+  // any other key is still refused.
+  let providerOptions = input.providerOptions
+  if (providerOptions !== undefined) {
+    if (!isRecord(providerOptions)) {
+      throw failure('invalid_bridge_payload', 'providerOptions must be an object.')
+    }
+    const unexpected = Object.keys(providerOptions).filter(
+      (key) => key !== 'disallowedTools' && key !== 'extraArgs'
+    )
+    if (unexpected.length > 0) {
+      throw failure(
+        'invalid_bridge_payload',
+        `providerOptions admits disallowedTools and extraArgs, and nothing else (got ${unexpected.join(', ')}).`
+      )
+    }
+    if (Object.keys(providerOptions).length === 0) {
+      throw failure('invalid_bridge_payload', 'providerOptions must hold disallowedTools or extraArgs.')
+    }
+    if (
+      Object.hasOwn(providerOptions, 'disallowedTools') &&
+      (!Array.isArray(providerOptions.disallowedTools) ||
+        providerOptions.disallowedTools.length === 0 ||
+        providerOptions.disallowedTools.some((rule) => !nonEmpty(rule)))
+    ) {
+      throw failure('invalid_bridge_payload', 'providerOptions.disallowedTools must be a non-empty list of rules.')
+    }
+    if (Object.hasOwn(providerOptions, 'extraArgs')) {
+      const extraArgs = providerOptions.extraArgs
+      // The value contract is the settings parser's: a flag name without its dashes to a string
+      // value or null, and a string crosses exactly as written -- empty and whitespace-only
+      // values included, which the pinned host accepts and a presenter's own `tools: ''` uses.
+      // A name is what must be non-empty; the value need not be (MIK-R192 rule 1).
+      const wellFormed =
+        isRecord(extraArgs) &&
+        Object.keys(extraArgs).length > 0 &&
+        Object.entries(extraArgs).every(
+          ([name, value]) => extraArgName(name) && (value === null || typeof value === 'string')
+        )
+      if (!wellFormed) {
+        throw failure(
+          'invalid_bridge_payload',
+          'providerOptions.extraArgs must map a flag name without its dashes to a string or null.'
+        )
+      }
+    }
+  }
+  // MIK-R105 @ v4 / MIK-R186 @ v2 rule 3: there is no presenter-only launch check and no
+  // Claude-only tool fence: the provider test the base made for `claude` and the extraArgs it set
+  // are gone. A seat is launched as the settings role names it, on any harness, and what a harness
+  // brings itself is documented under D154 rather than excluded here. The boundary the product enforces
+  // is the bound server's tool surface, which the server itself applies at registration and dispatch.
+  // What the runtime keeps with the agent and applies again on every resume of its session.
+  const kept = {
+    ...(modeId ? { modeId } : {}),
+    ...(toolPolicy ? { toolPolicy } : {}),
+    ...(thinkingOptionId ? { thinkingOptionId } : {}),
+    ...(featureValues ? { featureValues } : {}),
+    ...(systemPrompt ? { systemPrompt } : {}),
+    ...(appliedServers ? { mcpServers: appliedServers } : {}),
+  }
+  return {
+    prompt,
+    firstMessageId: `${idempotencyKey}${FIRST_MESSAGE_SUFFIX}`,
+    hasToolServers: appliedServers !== null && Object.keys(appliedServers).length > 0,
+    kept,
+    // The agent is created without a message; `sendFirstMessage` sends `prompt` afterwards.
+    async create(api, daemon, deadline = Date.now() + DEFAULT_DEADLINE_MS) {
+      const workspace = api.workspaces.ref(workspaceId)
+      let cwd
+      let applied = kept
+      if (featureValues) {
+        cwd = (await workspace.refresh())?.workspaceDirectory
+        if (!nonEmpty(cwd)) throw new Error(`Workspace ${workspaceId} has no available directory`)
+        applied = { ...kept, featureValues: await creationFeatureValues(
+          daemon, { provider, cwd, ...(model ? { model } : {}) }, featureValues, deadline
+        ) }
+      }
+      if (model) {
+        const handle = await workspace.agents.create({
+          ...shared,
+          config: { provider: `${provider}/${model}`, ...applied, ...(providerOptions ? { options: providerOptions } : {}) },
+          title,
+          ...(parentAgentId ? { parent: parentAgentId } : {})
+        })
+        return handle.current()
+      }
+      cwd = cwd ?? (await workspace.refresh())?.workspaceDirectory
+      if (!nonEmpty(cwd)) throw new Error(`Workspace ${workspaceId} has no available directory`)
+      return await daemon.createAgent({
+        ...shared,
+        config: { provider, cwd, title, ...applied, ...(providerOptions ? { providerOptions } : {}) },
+        workspaceId,
+        ...(parentAgentId ? { callerAgentId: parentAgentId } : {})
+      })
+    }
+  }
+}
+
+
+// R214: the create boundary uses the resolver's ID-first, then label matching rule.
+// An unavailable listing is no claim about what is offered; leave those values to Paseo.
+async function creationFeatureValues(daemon, selection, values, deadline) {
+  let reply
+  try {
+    const remaining = Math.max(0, deadline - Date.now())
+    const listingDeadline = deadline - Math.min(REPLY_RESERVE_MS, remaining / 20)
+    reply = await within(daemon.listProviderFeatures(selection), listingDeadline,
+      () => new Error('Feature discovery timed out'))
+  } catch {
+    return values
+  }
+  if (reply?.error || !Array.isArray(reply?.features)) return values
+  return Object.fromEntries(Object.entries(values).map(([id, value]) => {
+    const feature = reply.features.find((row) => row?.id === id)
+    if (!feature) throw unofferedFeature(id, value, selection)
+    if (feature.type === 'toggle') {
+      if (typeof value !== 'boolean') throw unofferedFeature(id, value, selection)
+      return [id, value]
+    }
+    if (!Array.isArray(feature.options) || feature.options.some((row) => !nonEmpty(row?.id))) {
+      return [id, value]
+    }
+    const option = namedOption(feature.options, value)
+    if (!option) throw unofferedFeature(id, value, selection)
+    return [id, option.id]
+  }))
+}
+
+function namedOption(options, value) {
+  if (typeof value !== 'string') return null
+  const folded = value.toLowerCase()
+  for (const key of ['id', 'label']) {
+    const found = options.find((option) => typeof option?.[key] === 'string' && option[key].toLowerCase() === folded)
+    if (found) return found
+  }
+  return null
+}
+
+function unofferedFeature(id, value, selection) {
+  return new Error(`Feature ${id} value ${JSON.stringify(value)} is not offered for ${selection.provider}/${selection.model ?? 'native default'}`)
+}
+
+async function getAgent({ api, daemon }, input) {
+  const agent = await findAgent(api, daemon, requiredText(input, 'agentId'))
+  return { serverId: serverIdOf(daemon), agent: agent ? projectAgent(agent) : null }
+}
+
+async function archiveAgent({ api, daemon }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const serverId = serverIdOf(daemon)
+  const agent = await findAgent(api, daemon, agentId)
+  if (!agent) return { serverId, agentId, found: false, archived: false }
+  const archived = { serverId, agentId, found: true, archived: true }
+  if (nonEmpty(agent.archivedAt)) {
+    return { ...archived, alreadyArchived: true, archivedAt: agent.archivedAt }
+  }
+  let result
+  try {
+    result = await api.agents.ref(agentId).archive()
+  } catch (error) {
+    // Another caller may have archived or removed the agent between the lookup and this call.
+    // What the runtime holds now decides: archived or gone is not an error; anything else is.
+    if (daemon.getConnectionState().status !== 'connected') throw error
+    const after = await findAgent(api, daemon, agentId)
+    if (!after) return { serverId, agentId, found: false, archived: false }
+    if (!nonEmpty(after.archivedAt)) throw error
+    return { ...archived, alreadyArchived: true, archivedAt: after.archivedAt }
+  }
+  return { ...archived, alreadyArchived: false, archivedAt: result.archivedAt }
+}
+
+async function readAgentState({ api, daemon }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const agent = await findAgent(api, daemon, agentId)
+  return { serverId: serverIdOf(daemon), agent: agent ? await agentState(api, agent) : null }
+}
+
+async function presenterAgent(api, daemon, input) {
+  const agent = await findAgent(api, daemon, requiredText(input, 'agentId'))
+  if (!agent || agent.labels?.['ar.capability'] !== 'review-presenter') {
+    throw failure('unknown_presenter', 'The host has no presenter under this exact identity.')
+  }
+  return agent
+}
+
+async function presenterTranscript({ api, daemon }, input) {
+  const agent = await presenterAgent(api, daemon, input)
+  // A timeline read loads a closed native session. Passive history must not resume it.
+  if (agent.status === CLOSED_SESSION || nonEmpty(agent.archivedAt)) {
+    return {serverId: serverIdOf(daemon), state: agent.status, available: false, entries: [],
+      detail: 'Native history cannot be read without loading this closed/archived session.'}
+  }
+  const page = await api.agents.ref(agent.id).timeline.refetch({
+    direction: 'tail', limit: 200, projection: 'projected'
+  })
+  return {
+    serverId: serverIdOf(daemon), state: agent.status, available: true,
+    entries: (page?.entries ?? []).filter((entry) =>
+      ['user_message', 'assistant_message'].includes(entry?.item?.type)
+    ).map((entry) => ({
+      id: entry.id, at: entry.timestamp ?? entry.createdAt ?? '',
+      role: entry.item.type === 'user_message' ? 'developer' : 'presenter',
+      text: String(entry.item.text ?? '').slice(0, 8192)
+    })),
+    hasOlder: page?.hasOlder === true
+  }
+}
+
+async function presenterCancel({ api, daemon }, input) {
+  const agent = await presenterAgent(api, daemon, input)
+  // The pinned public handle exposes no cancellation. The daemon client's named cancellation
+  // is the host operation; it cancels this exact session and never archives or replaces it.
+  await daemon.cancelAgent(agent.id)
+  const after = await findAgent(api, daemon, agent.id)
+  return { serverId: serverIdOf(daemon), agent: await agentState(api, after ?? agent) }
+}
+
+async function cancelSeat({ api, daemon }, input) {
+  // The explainer seat's cancel (MIK-R105 v1 rule 9): the exact agent the caller names, never a
+  // presenter lookup and never an archive or a replacement. The request identity rides along and
+  // is echoed, so the Python host can name what it cancelled.
+  const agentId = requiredText(input, 'agentId')
+  const requestId = optionalText(input, 'requestId') ?? null
+  const agent = await findAgent(api, daemon, agentId)
+  if (!agent) return { serverId: serverIdOf(daemon), agent: null, cancelled: false, requestId }
+  await daemon.cancelAgent(agent.id)
+  const after = await findAgent(api, daemon, agent.id)
+  return {
+    serverId: serverIdOf(daemon),
+    agent: after ? await agentState(api, after) : null,
+    cancelled: Boolean(after),
+    requestId
+  }
+}
+
+async function resumeAgent({ api, daemon }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const serverId = serverIdOf(daemon)
+  const agent = await findAgent(api, daemon, agentId)
+  const untouched = { attempted: false, resumed: false }
+  if (!agent) return { serverId, agent: null, resume: untouched }
+  if (nonEmpty(agent.archivedAt) || agent.status !== CLOSED_SESSION) {
+    // Reading the timeline of an archived agent would load it, and an open session needs nothing.
+    return { serverId, agent: await agentState(api, agent), resume: untouched }
+  }
+  let refusal = null
+  try {
+    await api.agents.ref(agentId).timeline.refetch({ direction: 'tail', limit: 1 })
+  } catch (error) {
+    if (daemon.getConnectionState().status !== 'connected') throw error
+    refusal = text(error?.message ?? error) || 'The Paseo runtime did not resume the agent.'
+  }
+  const after = await findAgent(api, daemon, agentId)
+  return {
+    serverId,
+    agent: after ? await agentState(api, after) : null,
+    resume: {
+      attempted: true,
+      resumed: Boolean(after) && after.status !== CLOSED_SESSION,
+      ...(refusal ? { error: refusal } : {})
+    }
+  }
+}
+
+// What the runtime says about one agent, plus how its last turn ended when that can be read
+// without loading the agent: only an idle agent has an open session and no turn in progress.
+async function agentState(api, agent) {
+  const permissions = Array.isArray(agent.pendingPermissions) ? agent.pendingPermissions : []
+  const readable = agent.status === 'idle' && !nonEmpty(agent.archivedAt)
+  return {
+    id: agent.id,
+    // MIK-R105 v2 rule 9: the seat's provider is part of what a resume must be able to check.
+    provider: nonEmpty(agent.provider),
+    status: agent.status ?? null,
+    archivedAt: agent.archivedAt ?? null,
+    turnActive:
+      Object.hasOwn(agent, 'activeTurn') && agent.activeTurn !== undefined
+        ? Boolean(agent.activeTurn)
+        : null,
+    pendingPermissions: permissions.map((request) => ({
+      name: nonEmpty(request?.name) ?? nonEmpty(request?.title) ?? 'a tool',
+      kind: request?.kind ?? null
+    })),
+    lastError: nonEmpty(agent.lastError) ? text(agent.lastError) : null,
+    attentionReason: nonEmpty(agent.attentionReason),
+    // MIK-R105 v2 rule 9 tests "a closed seat that never ran a turn" by `lastUserMessageAt`. It is a
+    // field of the record, so it costs no timeline read and can be published for a closed or archived
+    // agent too -- unlike `lastTurn`, which is read only for an idle one because reading the timeline
+    // of a closed agent would load it.
+    lastUserMessageAt: nonEmpty(agent.lastUserMessageAt),
+    lastStatus: nonEmpty(agent.lastStatus),
+    lastTurn: readable ? await lastTurn(api, agent) : null
+  }
+}
+
+// How the last turn ended, from the end of the timeline. A turn that finished ends with the
+// agent's reply. The runtime records no cancellation; a cancelled turn leaves a user message or a
+// tool call as the last entry instead. Entries of other kinds (reasoning, to-do lists, compaction)
+// say nothing about the end of a turn and are skipped.
+async function lastTurn(api, agent) {
+  const page = await api.agents
+    .ref(agent.id)
+    .timeline.refetch({ direction: 'tail', limit: TIMELINE_TAIL, projection: 'projected' })
+  const kinds = (Array.isArray(page?.entries) ? page.entries : [])
+    .map((entry) => entry?.item)
+    .filter((item) => TURN_ITEMS.has(item?.type))
+  if (kinds.length === 0) {
+    const ran = nonEmpty(agent.lastUserMessageAt) || page?.hasOlder === true
+    return { state: ran ? 'unreplied' : 'none' }
+  }
+  let first = kinds.length
+  while (first > 0 && kinds[first - 1].type === 'assistant_message') first -= 1
+  const reply = kinds
+    .slice(first)
+    .map((item) => (typeof item.text === 'string' ? item.text : ''))
+    .join('')
+  if (!reply.trim()) return { state: 'unreplied' }
+  // Cut by code points: twice the limit in UTF-16 units always holds the first 3,000 of them.
+  const head = Array.from(reply.slice(0, 2 * FINAL_TEXT_LIMIT)).slice(0, FINAL_TEXT_LIMIT)
+  return { state: 'replied', text: head.join('') }
+}
+
+async function sendToAgent({ api, daemon }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const message = requiredText(input, 'text')
+  const messageId = requiredText(input, 'messageId')
+  const extras = sendExtras(input)
+  const serverId = serverIdOf(daemon)
+  const refused = (reason, detail) => ({ serverId, delivery: { delivered: false, refused: reason, detail } })
+  if (input.afterResume === true) await toolServerStart()
+  const before = await findAgent(api, daemon, agentId)
+  if (!before) return refused('not-found', 'the host has no such agent')
+  if (nonEmpty(before.archivedAt)) return refused('archived', 'the agent is archived')
+  if (before.status === CLOSED_SESSION) return refused('closed', 'the session of the agent is closed')
+  if (before.status === 'initializing') return refused('busy', 'the agent is still starting')
+  if (pendingPermission(before) !== null) {
+    const refusal = refused(
+      'busy',
+      'the agent waits for a permission decision, which a message would answer with a denial'
+    )
+    const permission = pendingPermissionName(before)
+    Object.assign(refusal.delivery, { permissionPending: true, ...(permission ? { permission } : {}) })
+    return refusal
+  }
+  // MIK-R171@v2 rule 2: the recipient's state is read just before the send, and the host's own
+  // activity record counts as a read of it (the snapshot can lag a turn the host has published).
+  const running = turnOf(before)
+  const inTurn = running.active || input.turnReportedByHost === true
+  // A steer goes into a running turn only for a provider the product knows takes one. Every
+  // other message to a recipient in a turn is held, and rule 1 delivers it after the turn ends.
+  if (inTurn && !(await providerSteers(api, before.provider))) {
+    return refused(
+      'busy',
+      'the agent is in a turn and its provider is not one that takes a steer, so the message is ' +
+        'held until the turn ends'
+    )
+  }
+  try {
+    await api.agents.ref(agentId).send(
+      message,
+      inTurn ? { messageId, activeTurnBehavior: 'steer', ...extras } : { messageId, ...extras }
+    )
+  } catch (error) {
+    if (daemon.getConnectionState().status === 'connected') throw error
+    throw failure(
+      'paseo_send_outcome_unknown',
+      'The connection to the Paseo daemon was lost while the message was being sent; it is not ' +
+        'known whether the message was delivered.'
+    )
+  }
+  // The runtime accepted the message. What the agent runs now is looked up for the answer only.
+  const after = turnOf((await findAgent(api, daemon, agentId).catch(() => null)) ?? {})
+  const replaced = inTurn && after.id !== null && running.id !== null && after.id !== running.id
+  return {
+    serverId,
+    delivery: {
+      delivered: true,
+      // The named gap of v2 rule 2: a provider known to steer may replace the turn at that
+      // moment, and a turn may begin between the read and the send. The answer says so.
+      taken: !inTurn ? 'started' : replaced ? 'replaced' : 'steered',
+      turnId: after.id
+    }
+  }
+}
+
+async function agentHasMessage({ api, daemon }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const messageId = requiredText(input, 'messageId')
+  const serverId = serverIdOf(daemon)
+  const agent = await findAgent(api, daemon, agentId)
+  if (!agent) return { serverId, present: false }
+  // The record the recipient already holds, read without sending anything: the timeline's
+  // user messages carry the client message id a send used (MIK-R171 rule 3).
+  let page
+  try {
+    page = await api.agents
+      .ref(agentId)
+      .timeline.refetch({ direction: 'tail', limit: RECONCILE_TAIL, projection: 'projected' })
+  } catch (error) {
+    if (daemon.getConnectionState().status !== 'connected') throw error
+    throw failure(
+      'paseo_timeline_unreadable',
+      `The Paseo runtime could not read the timeline of agent ${agentId}: ${text(error?.message ?? error)}`
+    )
+  }
+  const entries = Array.isArray(page?.entries) ? page.entries : []
+  const present = entries.some((entry) => {
+    const item = entry?.item
+    if (item?.type !== 'user_message') return false
+    return item.clientMessageId === messageId || item.messageId === messageId
+  })
+  return { serverId, present }
+}
+
+async function waitForAgent({ api, daemon, deadline }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const messageId = optionalText(input, 'messageId')
+  const steered = input.steered === true
+  let followed = optionalText(input, 'turnId')
+  const serverId = serverIdOf(daemon)
+  const answer = (wait) => ({ serverId, wait })
+  const stop =
+    Date.now() +
+    Math.min(positiveInteger(input.waitMs, WAIT_DEFAULT_MS), Math.max(0, deadline - Date.now() - WAIT_RESERVE_MS))
+  let agent = await findAgent(api, daemon, agentId)
+  const unavailable = waitUnavailable(agent)
+  if (unavailable) return answer(unavailable)
+  // The runtime's turn events are live only, so they are followed for as long as this call
+  // waits: the end of each turn is kept for the outcome, and every start or end of a turn wakes
+  // the wait, which otherwise looks at the agent at intervals.
+  const ends = { byTurn: new Map(), last: null }
+  let wake = () => {}
+  let following = true
+  const unsubscribe = api.agents.ref(agentId).timeline.subscribe((update) => {
+    const event = update?.event
+    if (!following || !event) return
+    const outcome = TURN_ENDS[event.type]
+    if (outcome) {
+      ends.last = { outcome, ...(nonEmpty(event.error) ? { error: text(event.error) } : {}) }
+      if (nonEmpty(event.turnId)) ends.byTurn.set(event.turnId, ends.last)
+    }
+    if (outcome || event.type === 'turn_started') wake()
+  })
+  const pause = (ms) =>
+    new Promise((resolve) => {
+      wake = resolve
+      setTimeout(resolve, Math.max(0, ms))
+    })
+  const view = () => messageView(api, agentId, messageId)
+  let quietSince = null
+  let settled = null
+  try {
+    // Without the events the outcome is taken from the agent's state afterwards.
+    await unsubscribe.ready.catch(() => {})
+    for (;;) {
+      agent = await findAgent(api, daemon, agentId)
+      const gone = waitUnavailable(agent)
+      if (gone) return answer(gone)
+      const permission = pendingPermission(agent)
+      if (permission !== null) return answer({ state: 'permission', permission })
+      const running = turnOf(agent)
+      if (running.active) {
+        quietSince = null
+        if (messageId && running.id !== null && running.id !== followed) {
+          // Another turn than the one known to hold the message. A newer message began it, or
+          // the message began a turn that is over: then the turn that consumed ours has ended.
+          const seen = await view()
+          if (!seen.found || seen.newer || (followed !== null && !steered)) {
+            return answer(waitEnded(seen, ends, agent, steered, followed))
+          }
+          followed = running.id
+        }
+        if (Date.now() >= stop) return answer({ state: 'running', turnId: followed })
+        await pause(Math.min(WAIT_POLL_MS, stop - Date.now()))
+        continue
+      }
+      // No turn runs. What the timeline holds says whether one can still begin for the message.
+      if (quietSince === null) {
+        const seen = await view()
+        if (!seen.found || seen.newer || !turnMayBegin(seen, steered, followed)) {
+          settled = seen
+          break
+        }
+        quietSince = Date.now()
+      }
+      if (Date.now() - quietSince >= TURN_GAP_MS) break
+      if (Date.now() >= stop) return answer({ state: 'running', turnId: followed })
+      await pause(TURN_GAP_POLL_MS)
+    }
+  } finally {
+    following = false
+    unsubscribe()
+  }
+  return answer(waitEnded(settled ?? (await view()), ends, agent, steered, followed))
+}
+
+// Whether, with no turn running, a turn can still begin that takes the message up. A message
+// handed to a running turn: when that turn may not have read it. A message for which no turn is
+// known: while nothing stands behind it, because the turn it began may not have started yet.
+function turnMayBegin(seen, steered, followed) {
+  if (steered) return !consumedBy(seen, steered, followed).read
+  return followed === null && seen.nothingBehind
+}
+
+// The turn that consumed the message, and whether it is known to have read it. A message that
+// began its turn: that turn. A message handed to a running turn: the last turn that ran behind
+// it, by the timeline or, for a turn that left nothing there, by what this call followed
+// (`followed`). Such a message was read when a later turn than its own ran, or when its own turn
+// went on to another step behind it; otherwise a turn that takes it up may still begin.
+function consumedBy(seen, steered, followed) {
+  const { own, latest } = seen
+  if (!steered) return { turn: own ?? latest, read: true }
+  const after = latest !== null && latest !== own ? latest : followed
+  const later = own !== null && after !== null && after !== own
+  return { turn: later ? after : latest, later, read: later || seen.stepBehind }
+}
+
+// The answer of a wait once the turn that consumed the message is over: the text that turn left
+// in the timeline, with the runtime's own event of its end when this call saw it.
+function waitEnded(seen, ends, agent, steered, followed) {
+  if (!seen.found) {
+    return {
+      state: 'undecided',
+      reason: `the message is not among the last ${REPLY_TAIL} timeline entries of the agent`
+    }
+  }
+  const { turn, later } = consumedBy(seen, steered, followed)
+  // For a message handed to a running turn the answer says which turn it is about.
+  const reply = { ...seen.closing(turn), ...(steered ? { laterTurn: later === true } : {}) }
+  const event = turn === null ? ends.last : ends.byTurn.get(turn)
+  if (event) return { state: 'ended', ...event, ...reply }
+  // The agent's state now is that of its last turn; it says nothing of an earlier one.
+  const failed = nonEmpty(agent.lastError) ? text(agent.lastError) : null
+  const last = !seen.newer && (seen.latest === null || turn === null || turn === seen.latest)
+  if (last && (agent.status === 'error' || failed)) {
+    return { state: 'ended', outcome: 'failed', error: failed ?? 'the agent is in an error state', ...reply }
+  }
+  return { state: 'ended', outcome: reply.text === null ? 'cancelled' : 'finished', ...reply }
+}
+
+// What the agent's timeline holds behind one message. `found`: the message is among the entries
+// read. `newer`: a newer message of another turn stands behind it; what is said below is about
+// the entries between the two (all of the rest, when there is no newer one). `own`: the turn the
+// message was recorded in. `latest`: the turn of the last entry. `nothingBehind`: there is no
+// entry at all. `stepBehind`: a tool call lies behind the message, so the turn went on to
+// another step after it. `closing(turn)`: the agent's text that closes that turn's entries. A
+// message of the same turn as ours is not a newer one: the prompt that began a turn can be
+// recorded after a message that was handed to it. Without a message id the whole tail is looked
+// at; without turn ids, everything is one turn.
+async function messageView(api, agentId, messageId) {
+  const page = await api.agents
+    .ref(agentId)
+    .timeline.refetch({ direction: 'tail', limit: REPLY_TAIL, projection: 'projected' })
+  const entries = (Array.isArray(page?.entries) ? page.entries : []).filter((entry) =>
+    TURN_ITEMS.has(entry?.item?.type)
+  )
+  const mine = messageId
+    ? entries.findLastIndex(
+        (entry) =>
+          entry.item.type === 'user_message' &&
+          [entry.item.messageId, entry.item.clientMessageId].includes(messageId)
+      )
+    : -1
+  if (messageId && mine < 0) return { found: false }
+  const own = mine < 0 ? null : nonEmpty(entries[mine].turnId)
+  const behind = entries.slice(mine + 1)
+  const next = messageId
+    ? behind.findIndex(
+        (entry) => entry.item.type === 'user_message' && (own === null || nonEmpty(entry.turnId) !== own)
+      )
+    : -1
+  const between = next < 0 ? behind : behind.slice(0, next)
+  return {
+    found: true,
+    newer: next >= 0,
+    own,
+    latest: nonEmpty(between.at(-1)?.turnId),
+    nothingBehind: between.length === 0,
+    stepBehind: between.some((entry) => entry.item.type === 'tool_call'),
+    closing: (turn) =>
+      closingText(
+        between.filter((entry) => turn === null || nonEmpty(entry.turnId) === turn).map((entry) => entry.item)
+      )
+  }
+}
+
+// The agent's text behind the last message or tool call of these items, whole: the
+// role-message tool cuts a longer reply at the settings' limit and files it (MIK-R117),
+// so the bridge no longer owns a bound of its own.
+function closingText(items) {
+  let first = items.length
+  while (first > 0 && items[first - 1].type === 'assistant_message') first -= 1
+  const reply = items
+    .slice(first)
+    .map((item) => (typeof item.text === 'string' ? item.text : ''))
+    .join('')
+    .trim()
+  if (!reply) return { text: null, textTruncated: false }
+  return { text: reply, textTruncated: false }
+}
+
+// The turn an agent runs, as the runtime reports it.
+function turnOf(agent) {
+  const id = nonEmpty(agent?.activeTurn?.turnId)
+  return { active: Boolean(agent?.activeTurn) || agent?.status === 'running', id }
+}
+
+function waitUnavailable(agent) {
+  if (!agent) return { state: 'unavailable', reason: 'not-found' }
+  if (nonEmpty(agent.archivedAt)) return { state: 'unavailable', reason: 'archived' }
+  if (agent.status === CLOSED_SESSION) return { state: 'unavailable', reason: 'closed' }
+  return null
+}
+
+function pendingPermission(agent) {
+  const pending = Array.isArray(agent?.pendingPermissions) ? agent.pendingPermissions : []
+  if (pending.length === 0) return null
+  return pendingPermissionName(agent) ?? 'a tool'
+}
+
+// The name the runtime gives the first pending permission of an agent, or null.
+function pendingPermissionName(agent) {
+  const first = Array.isArray(agent?.pendingPermissions) ? agent.pendingPermissions[0] : null
+  return nonEmpty(first?.name) ?? nonEmpty(first?.title) ?? null
+}
+
+// The agent with exactly this id, or null. The runtime also resolves an id prefix and a title; an
+// answer under another id is not the agent that was asked for. A lookup the runtime fails for
+// another reason says nothing about the agent, so it is not reported as a refused call.
+// Whether the runtime hands a message to a running turn of this provider. It says so nowhere
+// directly; a provider the runtime drives through its ACP driver has no steering, and such a
+// provider is an entry of the runtime's configuration that extends that driver.
+async function providerSteers(api, provider) {
+  const entries = (await api.config?.get())?.config?.providers ?? {}
+  return entries[provider]?.extends !== DRIVER_WITHOUT_STEERING
+}
+
+async function findAgent(api, daemon, agentId) {
+  let result
+  try {
+    result = await api.agents.ref(agentId).refresh()
+  } catch (error) {
+    if (/^Agent not found\b/.test(String(error?.message ?? ''))) return null
+    if (daemon.getConnectionState().status !== 'connected') throw error
+    throw failure(
+      'paseo_agent_lookup_failed',
+      `The Paseo runtime could not look up agent ${agentId}: ${text(error?.message ?? error)}`
+    )
+  }
+  return result?.agent?.id === agentId ? result.agent : null
+}
+
+// MIK-R192 rule 5: a flag name as the settings carry it — no leading dashes, no `=`, no whitespace.
+function extraArgName(name) {
+  return typeof name === 'string' && /^[^-\s=][^\s=]*$/.test(name)
+}
+
+function projectAgent(agent) {
+  const serviceTier = agent.features?.find((feature) => feature.id === 'service_tier')?.value
+  return {
+    id: agent.id,
+    provider: agent.provider ?? null,
+    model: agent.model ?? null,
+    thinkingOptionId: agent.effectiveThinkingOptionId ?? agent.thinkingOptionId ?? null,
+    modeId: agent.currentModeId ?? null,
+    featureValues: Object.fromEntries((agent.features ?? []).map((feature) => [feature.id, feature.value])),
+    ...(typeof serviceTier === 'string' ? { serviceTier } : {}),
+    title: agent.title ?? null,
+    labels: agent.labels ?? {},
+    workspaceId: agent.workspaceId ?? null,
+    cwd: agent.cwd ?? null,
+    status: agent.status ?? null,
+    archivedAt: agent.archivedAt ?? null,
+    createdAt: agent.createdAt ?? null
+  }
+}
+
+
+
+function requiredLabels(input) {
+  const labels = input.labels
+  const valid =
+    labels !== null &&
+    typeof labels === 'object' &&
+    !Array.isArray(labels) &&
+    Object.values(labels).every((value) => typeof value === 'string')
+  if (!valid) {
+    throw failure(
+      'invalid_bridge_payload',
+      'The Paseo bridge payload needs labels as an object of text values.'
+    )
+  }
+  return labels
+}
+
+// ---------------------------------------------------------------------------------------------
+// Shared: connection, deadline, reply
+// ---------------------------------------------------------------------------------------------
+
+async function connect(deadline) {
+  const url = requiredEnvironment('AR_PASEO_URL')
+  const expectedServerId = requiredEnvironment('AR_PASEO_SERVER_ID')
+  const { DaemonClient, createPaseoApi } = await loadClientPackage()
+  if (typeof globalThis.WebSocket !== 'function') {
+    throw failure('paseo_bridge_unavailable', 'The Paseo bridge needs Node.js 22 or newer (global WebSocket).')
+  }
+  const daemon = new DaemonClient({
+    url,
+    clientId: `agents-remember-bridge-${globalThis.crypto.randomUUID()}`,
+    clientType: 'cli',
+    ...(nonEmpty(process.env.AR_PASEO_VERSION) ? { appVersion: process.env.AR_PASEO_VERSION } : {}),
+    reconnect: { enabled: false },
+    logger: STDERR_LOGGER,
+    connectTimeoutMs: Math.max(1, Math.min(CONNECT_TIMEOUT_MS, deadline - Date.now()))
+  })
+  try {
+    await daemon.connect()
+  } catch (error) {
+    await daemon.close().catch(() => {})
+    throw failure(
+      'paseo_daemon_unreachable',
+      `The Paseo daemon at ${url} cannot be reached: ${text(error?.message ?? error)}`
+    )
+  }
+  const serverId = daemon.getLastServerInfoMessage()?.serverId
+  if (serverId !== expectedServerId) {
+    await daemon.close().catch(() => {})
+    throw failure(
+      'paseo_runtime_mismatch',
+      `The daemon at ${url} is ${serverId ?? 'unidentified'}, not the configured Paseo runtime ${expectedServerId}.`
+    )
+  }
+  return { api: createPaseoApi(daemon), daemon }
+}
+
+async function loadClientPackage() {
+  const prefix = requiredEnvironment('AR_PASEO_INSTALL_PREFIX')
+  try {
+    const modules = path.join(realpathSync(prefix), 'node_modules') + path.sep
+    const resolve = createRequire(path.join(prefix, 'package.json')).resolve
+    const [api, internal] = await Promise.all(
+      ['@getpaseo/client', '@getpaseo/client/internal/daemon-client'].map((specifier) => {
+        const entry = realpathSync(resolve(specifier))
+        if (!entry.startsWith(modules)) throw new Error(`${specifier} resolves outside the install prefix`)
+        return import(pathToFileURL(entry).href)
+      })
+    )
+    if (typeof api.createPaseoApi !== 'function' || typeof internal.DaemonClient !== 'function') {
+      throw new Error('the package does not export createPaseoApi and DaemonClient')
+    }
+    return { createPaseoApi: api.createPaseoApi, DaemonClient: internal.DaemonClient }
+  } catch (error) {
+    throw failure(
+      'paseo_client_unavailable',
+      `The Paseo client package cannot be loaded from ${prefix}; run runtime_install, then agents-remember dashboard --daemon. ` +
+        text(error?.message ?? error)
+    )
+  }
+}
+
+// Settle with the promise, or reject with `onTimeout()` once the absolute deadline has passed.
+function within(promise, deadline, onTimeout) {
+  let timer
+  const expired = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(onTimeout()), Math.max(0, deadline - Date.now()))
+  })
+  return Promise.race([promise, expired]).finally(() => clearTimeout(timer))
+}
+
+async function finish(exitCode, reply, connection) {
+  if (connection) {
+    const closing = (async () => {
+      await connection.api.dispose().catch(() => {})
+      await connection.daemon.close().catch(() => {})
+    })()
+    await within(closing, Date.now() + CLOSE_TIMEOUT_MS, () => new Error('close timed out')).catch(() => {})
+  }
+  // Exit from the write callback: an abandoned call may still hold the socket open.
+  process.stdout.write(JSON.stringify(reply), () => process.exit(exitCode))
+}
+
+function logToStderr(fields, message) {
+  console.error(message ?? '', fields ?? '')
+}
+
+// A failure a command raised with `failure` keeps its code. Anything else the client threw is the
+// runtime refusing the call, unless the connection is gone: then the daemon is unreachable.
+// The client's errors carry a name, and sometimes a code, on top of a bare message ('Transport'),
+// and a bare message does not let a reader tell a refused call from a daemon that is gone. The words
+// the runtime itself used stay first; what kind of error it was follows in parentheses.
+function errorKind(error) {
+  const parts = [error?.name, error?.code, error?.cause?.code].filter(
+    (part) => typeof part === 'string' && part.length > 0 && part !== 'Error'
+  )
+  return parts.length > 0 ? ` (${[...new Set(parts)].join(' ')})` : ''
+}
+
+function describe(error, connection) {
+  if (error?.bridgeFailure === true) return { code: error.code, message: text(error.message) }
+  const stated = text(error?.message ?? error) || 'The Paseo runtime refused the call.'
+  const message = `${stated}${errorKind(error)}`
+  if (connection && connection.daemon.getConnectionState().status !== 'connected') {
+    return {
+      code: 'paseo_daemon_unreachable',
+      message: text(`The connection to the Paseo daemon was lost: ${message}`)
+    }
+  }
+  return { code: 'paseo_call_failed', message }
+}
+
+async function readPayload() {
+  const chunks = []
+  for await (const chunk of process.stdin) chunks.push(chunk)
+  const raw = Buffer.concat(chunks).toString('utf8')
+  let payload
+  try {
+    payload = raw.trim() ? JSON.parse(raw) : {}
+  } catch {
+    throw failure('invalid_bridge_payload', 'The Paseo bridge payload is not JSON.')
+  }
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw failure('invalid_bridge_payload', 'The Paseo bridge payload must be a JSON object.')
+  }
+  return payload
+}
+
+function requiredEnvironment(name) {
+  const value = nonEmpty(process.env[name])
+  if (!value) throw failure('paseo_bridge_unavailable', `The Paseo bridge was started without ${name}.`)
+  return value
+}
+
+function positiveInteger(value, fallback) {
+  const parsed = Number.parseInt(value ?? '', 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+
+
+function text(value) {
+  return String(value ?? '').slice(0, MESSAGE_LIMIT)
+}
+
+export { agentCreation, agentState };

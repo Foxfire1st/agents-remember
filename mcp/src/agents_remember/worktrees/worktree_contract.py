@@ -14,14 +14,20 @@ from pathlib import Path
 from typing import cast, get_args
 
 from agents_remember.controlplane.durable_store import SCHEMA_VERSION, schema_version_supported
-from agents_remember.errors import AgentsRememberError
+from agents_remember.errors import AgentsRememberError, ContractPlaceError
 from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.kernel.memory_mode import (
+    MemoryMode,
+    ReadableMemoryMode,
+    is_removed_memory_mode,
+    refuse_removed_memory_mode,
+)
+from agents_remember.kernel.recorded_reads import observed_exists, observed_text
 from agents_remember.models.worktree import (
     CleanupStatus,
     CloseoutStatus,
     HumanReviewStatus,
     IntegrationStatus,
-    MemoryMode,
     WorkflowKind,
 )
 from agents_remember.worktrees.leaf_refs import (
@@ -31,6 +37,8 @@ from agents_remember.worktrees.leaf_refs import (
 )
 from agents_remember.worktrees.task_resolver import (
     TaskResolutionError,
+    canonical_contract_place,
+    is_foreign_enclosure_contract,
     iter_leaf_enclosure_contracts,
     leaf_enclosure_path,
     resolve_active_task_root,
@@ -138,22 +146,23 @@ def _vocabulary_cell[Cell: str](
     return fallback
 
 
-def _memory_mode_fallback(memory: dict[str, str]) -> MemoryMode:
+def _memory_mode_fallback(memory: dict[str, str]) -> ReadableMemoryMode:
     """What an unreadable ``memory_mode`` degrades to, read off the section it governs.
 
-    The one cell whose fallback cannot be a constant: ``internal`` and ``external`` are not
-    two shades of the same state, they decide whether there is a second repository to commit
-    and a ledger to map. Guessing ``internal`` for a contract that owns a memory worktree
-    would make closeout skip work that exists. The memory section itself already answers the
-    question -- a recorded worktree or ledger *is* an external topology, and ``state:
-    disabled`` is written by ``default_contract`` for a disabled one -- so the degrade reads
-    the facts rather than picking a default.
+    The one cell whose fallback cannot be a constant: ``external`` and the removed
+    ``disabled`` mode are not two shades of the same state, they decide whether there
+    is a second repository to commit and a ledger to map. Guessing ``external`` for a
+    contract that owns no memory worktree would make closeout claim work that does not
+    exist. The memory section itself already answers the question -- a recorded worktree
+    or ledger *is* an external topology -- so the degrade reads the facts rather than
+    picking a default. A section showing neither is the shape a contract in the removed
+    ``disabled`` mode (MIK-R50) left behind, and ``disabled`` is the only mode with no
+    memory repository; the cell still carries its quarantine record when the raw token
+    was not exactly ``disabled``.
     """
-    if _scalar(memory.get("state")) == "disabled":
-        return "disabled"
     if _scalar(memory.get("worktree")) or _scalar(memory.get("ledger")):
         return "external"
-    return "internal"
+    return "disabled"
 
 
 def _task_vocabulary(task: ContractTask) -> tuple[WorkflowKind, MemoryMode]:
@@ -169,6 +178,8 @@ def _task_vocabulary(task: ContractTask) -> tuple[WorkflowKind, MemoryMode]:
     mistake to refuse before it is written down. ``build_start_contract`` turns this refusal
     into a blocked ``worktree_start`` result rather than letting it leave the tool handler.
     """
+    if is_removed_memory_mode(task.memory_mode):
+        refuse_removed_memory_mode(task.memory_mode)
     if task.memory_mode not in VALID_MEMORY_MODES:
         raise ContractError(f"memory_mode must be one of {sorted(VALID_MEMORY_MODES)}")
     if task.workflow_kind not in VALID_WORKFLOW_KINDS:
@@ -192,6 +203,10 @@ class ContractCells:
     closeout_status: CloseoutStatus | None = None
     integration_status: IntegrationStatus | None = None
     cleanup: CleanupStatus | None = None
+    # The durable why behind a terminal finish that had nothing to archive or
+    # delete (MIK-R82 rule 5 no-remains exception). Free text, not vocabulary:
+    # ``None`` leaves the cell alone, a value replaces it wholesale.
+    terminal_note: str | None = None
 
 
 def amend_contract(contract: WorktreeContract, cells: ContractCells) -> WorktreeContract:
@@ -222,6 +237,9 @@ def amend_contract(contract: WorktreeContract, cells: ContractCells) -> Worktree
         closeout_status=cells.closeout_status or contract.closeout_status,
         integration_status=cells.integration_status or contract.integration_status,
         cleanup=cells.cleanup or contract.cleanup,
+        terminal_note=(
+            cells.terminal_note if cells.terminal_note is not None else contract.terminal_note
+        ),
     )
 
 
@@ -231,7 +249,7 @@ class WorktreeContract:
     task_name: str
     repo_name: str
     workflow_kind: WorkflowKind
-    memory_mode: MemoryMode
+    memory_mode: ReadableMemoryMode
     coordination_root: Path
     task_root: Path
     contract_path: Path
@@ -260,6 +278,11 @@ class WorktreeContract:
     integrated_code_commit: str = ""
     integrated_memory_content_commit: str = ""
     cleanup: CleanupStatus = DEFAULT_CLEANUP_STATUS
+    # Why the enclosure finished terminal with nothing to archive or delete
+    # (MIK-R82 rule 5 no-remains exception). Additive on schema v1 like
+    # ``lifecycle_id``: contracts written before this field existed parse to
+    # ``""``, and only a terminal no-remains publication ever sets it.
+    terminal_note: str = ""
     kind: str = "leaf"
     leaf_id: str = ""
     parent_task_name: str = ""
@@ -268,6 +291,13 @@ class WorktreeContract:
     # promotion, read by worktree_attach to resume. Additive on schema v1 -- old
     # contracts parse to "" (the v2 schema flip is the deliberate 3.0 cutover).
     lifecycle_id: str = ""
+    # The generation's scratch root outside ``~/projects`` (MIK-R207): where it is, which
+    # generation it was allocated for, and the digest of the marker inside it that proves who
+    # owns it. Additive on schema v1 in the same way: a contract written before this change
+    # parses to "", and an enclosure without a recorded root is handled exactly as before.
+    outside_scratch_root: str = ""
+    outside_scratch_generation: str = ""
+    outside_scratch_marker_sha256: str = ""
     # Mid-task base syncs (issue #54): one entry per worktree_sync that advanced
     # the recorded base pair. A real dataclass field because the closeout/contract
     # rewrite regenerates the document from this model — freeform contract prose
@@ -352,12 +382,10 @@ def default_contract(
     task_artifact = task_root / "task.md"
     worktree_group = worktree_group_for(task.coordination_root, task.repo_name, leaf.worktree_name)
     code_worktree = worktree_group / slugify(leaf.worktree_name)
-    memory_worktree = (
-        worktree_group / f"memory-{slugify(leaf.worktree_name)}"
-        if task.memory_mode == "external"
-        else None
-    )
-    ledger_path = memory_worktree / "memory.md" if memory_worktree else None
+    # A started task always runs external memory (MIK-R50): the vocabulary
+    # above refuses any other request, so there is no disabled branch left here.
+    memory_worktree = worktree_group / f"memory-{slugify(leaf.worktree_name)}"
+    ledger_path = memory_worktree / "memory.md"
     return WorktreeContract(
         kind="leaf",
         task_id=task_id,
@@ -381,7 +409,7 @@ def default_contract(
         memory_base_commit=memory.base_commit if memory is not None else "",
         memory_worktree=memory_worktree,
         ledger_path=ledger_path,
-        memory_state="disabled" if task.memory_mode == "disabled" else "",
+        memory_state="",
         lifecycle_id=leaf.lifecycle_id,
         leaf_id=persisted_leaf,
         parent_task_name=task.parent_task_name,
@@ -449,9 +477,10 @@ def load_contract(path: Path) -> WorktreeContract:
     refusal that says a field is missing without saying which file to open sends them
     hunting through a tasks tree for it.
     """
-    if not path.exists():
+    if not observed_exists(path):
         raise ContractError(f"worktree contract does not exist: {path}")
-    contract = parse_contract_text(path.read_text(encoding="utf-8"), path=path)
+    contract = parse_contract_text(observed_text(path), path=path)
+    _require_named_place(contract, path)
     if contract.unknown_cells:
         logger.warning(
             "worktree contract %s carries %d cell(s) outside their vocabulary: %s",
@@ -460,6 +489,38 @@ def load_contract(path: Path) -> WorktreeContract:
             "; ".join(contract.unknown_cells),
         )
     return contract
+
+
+def _require_named_place(contract: WorktreeContract, found_at: Path) -> None:
+    """Refuse a contract at a canonical place whose cell names another path (MIK-R83 rule 3).
+
+    Only a canonical place binds this: a contract handed in from a scratch
+    clone, a test fixture or a review bundle keeps loading as it did. At a
+    canonical place the cell is what makes the file authority, so a copy
+    beside its original is refused with both paths, never obeyed.
+    """
+
+    if not canonical_contract_place(found_at):
+        return
+    # MIK-R83 rule 3 stands without exception (Manager ruling on F11): the cell must name the file
+    # it was read from. A fixture that writes a master's path into an enclosure contract is a
+    # fixture to fix, not a rule to widen.
+    if _same_path(contract.contract_path, found_at):
+        return
+    raise ContractPlaceError(
+        found_at=found_at.as_posix(),
+        recorded=contract.contract_path.as_posix(),
+    )
+
+
+def _same_path(one: Path, other: Path) -> bool:
+    # One absolute spelling names one file: resolving both sides could only answer the same.
+    if one.is_absolute() and one == other:
+        return True
+    try:
+        return one.resolve() == other.resolve()
+    except OSError:
+        return one == other
 
 
 def parse_contract_text(text: str, *, path: Path) -> WorktreeContract:
@@ -503,14 +564,13 @@ def heal_contract_leaf_ids(coordination_root: Path, *, dry_run: bool = False) ->
     """
     healed: list[dict[str, str]] = []
     errors: list[dict[str, str]] = []
+    skipped: list[dict[str, str]] = []
     canonical = 0
     unchanged = 0
     doc_id_index: dict[Path, frozenset[str]] = {}
     for path in iter_leaf_enclosure_contracts(coordination_root / "tasks"):
-        try:
-            contract = load_contract(path)
-        except (ContractError, OSError) as error:
-            errors.append({"contract": path.as_posix(), "error": str(error)})
+        contract = _load_sweep_contract(path, errors, skipped)
+        if contract is None:
             continue
         if contract.kind != "leaf" or not contract.leaf_id:
             unchanged += 1
@@ -540,12 +600,10 @@ def heal_contract_leaf_ids(coordination_root: Path, *, dry_run: bool = False) ->
             healed_contract.leaf_id,
             " (dry run)" if dry_run else "",
         )
-        if not dry_run:
-            try:
-                write_contract(path, healed_contract)
-            except Exception as error:  # a failed rewrite is reported, never fatal to the sweep
-                errors.append({"contract": path.as_posix(), "error": str(error)})
-                continue
+        rewrite_error = _maybe_rewrite_healed_contract(path, healed_contract, dry_run)
+        if rewrite_error is not None:
+            errors.append({"contract": path.as_posix(), "error": rewrite_error})
+            continue
         healed.append(
             {
                 "contract": path.as_posix(),
@@ -558,8 +616,50 @@ def heal_contract_leaf_ids(coordination_root: Path, *, dry_run: bool = False) ->
         "canonical": canonical,
         "unchanged": unchanged,
         "errors": errors,
+        "skipped": skipped,
         "dryRun": dry_run,
     }
+
+
+def _load_sweep_contract(
+    path: Path,
+    errors: list[dict[str, str]],
+    skipped: list[dict[str, str]],
+) -> WorktreeContract | None:
+    """Load one sweep contract, routing problems to their report lists.
+
+    Unloadable files land in ``errors``; a foreign contract is never read as
+    an enclosure and lands in ``skipped``.
+    """
+
+    try:
+        contract = load_contract(path)
+    except (ContractError, OSError) as error:
+        errors.append({"contract": path.as_posix(), "error": str(error)})
+        return None
+    if is_foreign_enclosure_contract(path, contract.task_artifact):
+        skipped.append(
+            {
+                "contract": path.as_posix(),
+                "reason": "task document lies outside its repository tasks",
+            }
+        )
+        return None
+    return contract
+
+
+def _maybe_rewrite_healed_contract(
+    path: Path, healed_contract: WorktreeContract, dry_run: bool
+) -> str | None:
+    """Write one healed contract; the error text, or None on success."""
+
+    if dry_run:
+        return None
+    try:
+        write_contract(path, healed_contract)
+    except Exception as error:  # a failed rewrite is reported, never fatal to the sweep
+        return str(error)
+    return None
 
 
 def normalize_contract_leaf_id(
@@ -586,6 +686,23 @@ def normalize_contract_leaf_id(
     if resolved.doc_id == contract.leaf_id:
         return contract
     return replace(contract, leaf_id=resolved.doc_id)
+
+
+def _outside_scratch_lines(contract: WorktreeContract) -> list[str]:
+    """The recorded outside scratch root, or nothing at all for an older enclosure.
+
+    An empty section is never written: a contract that records no root is a pre-MIK-R207
+    enclosure, and it keeps the exact text it had.
+    """
+
+    if not contract.outside_scratch_root:
+        return []
+    return [
+        "outside_scratch:",
+        f"  root: {contract.outside_scratch_root}",
+        f"  generation: {contract.outside_scratch_generation}",
+        f"  marker_sha256: {contract.outside_scratch_marker_sha256}",
+    ]
 
 
 def _memory_lines(contract: WorktreeContract) -> list[str]:
@@ -620,6 +737,16 @@ def _sync_lines(contract: WorktreeContract) -> list[str]:
         f"  log: {json.dumps(list(contract.sync_log), separators=(',', ':'))}",
         "",
     ]
+
+
+def original_base_pair(contract: WorktreeContract) -> tuple[str, str]:
+    """The initial pair, retained by the first sync even after checkpoints advance source refs."""
+
+    first = contract.sync_log[0] if contract.sync_log else {}
+    return (
+        first.get("codeBaseFrom", "") or contract.code_base_commit,
+        first.get("memoryBaseFrom", "") or contract.memory_base_commit,
+    )
 
 
 def _parse_sync_log(value: str) -> tuple[dict[str, str], ...]:
@@ -669,6 +796,10 @@ def _integration_lines(contract: WorktreeContract) -> list[str]:
     if contract.integrated_memory_content_commit:
         lines.append(f"  memory_content_commit: {contract.integrated_memory_content_commit}")
     lines.append(f"  cleanup: {contract.cleanup}")
+    if contract.terminal_note:
+        # Single-line by construction: the only writer records the fixed
+        # no-remains reason, so the limited front-matter parser round-trips it.
+        lines.append(f"  terminal_note: {contract.terminal_note}")
     return lines
 
 
@@ -729,6 +860,7 @@ def contract_to_text(contract: WorktreeContract) -> str:
             "lifecycle:",
             f"  id: {contract.lifecycle_id}",
             "",
+            *_outside_scratch_lines(contract),
             *_memory_lines(contract),
             "",
             *_sync_lines(contract),
@@ -807,6 +939,13 @@ def validate_contract(contract: WorktreeContract, *, path: Path) -> None:
     if contract.kind not in VALID_KINDS:
         raise ContractError(f"invalid contract kind: {contract.kind} (in {path})")
     for name, value, vocabulary in _contract_vocabularies(contract):
+        if value == "disabled" and name == "memory mode":
+            # A contract on disk that carries the removed ``disabled`` mode stays
+            # readable and rewritable in its other cells (MIK-R50: status, attach
+            # and guarded abandon need it). Nothing may *create* this state: the
+            # request vocabulary refuses it before any write, so it can only
+            # arrive from outside and can only leave.
+            continue
         if value not in vocabulary:
             raise ContractError(f"invalid {name}: {value} (in {path})")
     if contract.kind == "leaf" and not contract.leaf_id:
@@ -910,23 +1049,41 @@ class _ParsedVocabulary:
     """
 
     workflow_kind: WorkflowKind
-    memory_mode: MemoryMode
+    memory_mode: ReadableMemoryMode
     human_review_status: HumanReviewStatus
     closeout_status: CloseoutStatus
     integration_status: IntegrationStatus
     cleanup: CleanupStatus
 
 
-def _parsed_vocabulary(data: dict[str, object], quarantined: list[str]) -> _ParsedVocabulary:
+def _parsed_vocabulary(
+    data: dict[str, object], quarantined: list[str], contract_path: Path
+) -> _ParsedVocabulary:
     """Read the six vocabulary cells, appending to ``quarantined`` for each one that failed.
 
-    All six read the same way, with one rule and no exceptions: blank is the declared
+    All six read the same way, with one rule and one exception: blank is the declared
     default, a member is itself, anything else is the default plus a quarantine record.
     `workflow_kind` used to be the odd one out -- no `or <default>`, so a cell a developer
     had emptied was a hard refusal where its five siblings were tolerant, on a file the
     packet was perfectly able to report.
+
+    The exception is a *removed* memory mode other than ``disabled``. That is not an
+    unreadable token to degrade around: it is a specific, previously supported state whose
+    owner must be told which contract still records it, because the route out of it is the
+    developer's decision. It is refused with the contract path attached and the file is left
+    byte-identical.
+
+    ``disabled`` is the second removed mode (MIK-R50), and it reads the opposite way: a
+    contract on disk that carries it stays readable -- status, attach and guarded abandon
+    need it -- while every route that would change or land the task refuses it with the
+    opt-out refusal. An explicit ``disabled`` token reads as itself with no quarantine
+    record; an empty or unknown token still degrades through the fallback below, so the
+    raw cell is named in the refusal exactly when the mode was read from one.
     """
     memory = _section(data, "memory")
+    recorded_memory_mode = _scalar(data.get("memory_mode")) or _scalar(memory.get("mode"))
+    if is_removed_memory_mode(recorded_memory_mode) and recorded_memory_mode != "disabled":
+        refuse_removed_memory_mode(recorded_memory_mode, artifact=contract_path.as_posix())
     human_review = _section(data, "human_review")
     closeout = _section(data, "closeout")
     integration = _section(data, "integration")
@@ -938,12 +1095,20 @@ def _parsed_vocabulary(data: dict[str, object], quarantined: list[str]) -> _Pars
             DEFAULT_WORKFLOW_KIND,
             quarantined,
         ),
-        memory_mode=_vocabulary_cell(
-            _scalar(data.get("memory_mode")) or _scalar(memory.get("mode")),
-            VALID_MEMORY_MODES,
-            "memory_mode",
-            _memory_mode_fallback(memory),
-            quarantined,
+        memory_mode=(
+            # The removed ``disabled`` mode stays readable on disk (MIK-R50): an
+            # explicit token reads as itself with no quarantine record, so the
+            # raw cell is named in a refusal only when the mode was read from an
+            # empty or unknown cell through the fallback below.
+            "disabled"
+            if recorded_memory_mode == "disabled"
+            else _vocabulary_cell(
+                recorded_memory_mode,
+                VALID_MEMORY_MODES,
+                "memory_mode",
+                _memory_mode_fallback(memory),
+                quarantined,
+            )
         ),
         human_review_status=_vocabulary_cell(
             _scalar(human_review.get("status")),
@@ -990,9 +1155,10 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
     closeout = _section(data, "closeout")
     integration = _section(data, "integration")
     lifecycle = _section(data, "lifecycle")
+    outside_scratch = _section(data, "outside_scratch")
     # Every cell this parse could not read, collected as it goes and carried on the result.
     quarantined: list[str] = []
-    vocabulary = _parsed_vocabulary(data, quarantined)
+    vocabulary = _parsed_vocabulary(data, quarantined, contract_path)
     path = (
         _optional_path(coordination.get("series_contract_path", ""))
         or _optional_path(coordination.get("enclosure_path", ""))
@@ -1039,10 +1205,14 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         integrated_code_commit=integration.get("code_commit", ""),
         integrated_memory_content_commit=integration.get("memory_content_commit", ""),
         cleanup=vocabulary.cleanup,
+        terminal_note=integration.get("terminal_note", ""),
         leaf_id=coordination.get("leaf_id", ""),
         parent_task_name=coordination.get("parent_task_name", ""),
         parent_contract_path=_optional_path(coordination.get("parent_contract_path", "")),
         lifecycle_id=lifecycle.get("id", ""),
+        outside_scratch_root=outside_scratch.get("root", ""),
+        outside_scratch_generation=outside_scratch.get("generation", ""),
+        outside_scratch_marker_sha256=outside_scratch.get("marker_sha256", ""),
         sync_log=_parse_sync_log(sync.get("log", "")),
     )
     return replace(contract, unknown_cells=tuple(quarantined)) if quarantined else contract

@@ -11,7 +11,7 @@ import hashlib
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Literal, Self
+from typing import Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -22,6 +22,7 @@ EvidenceRecordType = Literal[
     "memory-quality-attestation/v1",
     "route-review/v1",
     "curator-coherence/v1",
+    "review-assessment/v1",
     "quality-report/v2",
     "closeout-door/v1",
     "lifecycle-closeout-operation/v3",
@@ -49,6 +50,33 @@ EvidenceDependencyKind = Literal[
     "validator",
 ]
 DigestAlgorithm = Literal["git-object", "sha256"]
+
+MAX_CURATOR_SOURCE_CANDIDATES: Final = 2048
+# The assessment collection's own bound. It is deliberately far below the candidate bound: an
+# assessment is an authored act a human writes, not a machine-produced row per changed file, so a
+# thousand of them on one leaf is already a defect rather than a workload.
+MAX_CURATOR_REVIEW_ASSESSMENTS: Final = 256
+
+# MIK-R52 rule 12: the dependency capacity follows from the coherence record's own bounds, so no
+# bare number stands in the field below. The coherence record builder
+# (``worktrees/integration/closeout/curator_coherence_publication.py::_record``) declares at most:
+# its fixed dependencies (code-tree, memory-tree, semantic-topology, task-intent,
+# memory-attestation, the memory-quality-report evidence-bytes edge, and at most one
+# predecessor-record edge), one evidence-bytes edge for each of at most
+# ``MAX_CURATOR_SOURCE_CANDIDATES`` judgments, one review-record edge for each of at most
+# ``MAX_CURATOR_REVIEW_ASSESSMENTS`` assessments, and its validator edges. The bound covers every
+# record builder whose model bounds its payload, and it is coherence-derived: 7 + 2048 + 256 + 1
+# = 2312. The master-scope route review has no bound of its own: its model sets no upper bound on
+# its lists, so no cap is imposed on it here — but it is still limited by this shared constant,
+# and its refusal names the bound and the count.
+_COHERENCE_FIXED_DEPENDENCIES: Final = 7
+_COHERENCE_VALIDATOR_DEPENDENCIES: Final = 1
+MAX_EVIDENCE_DEPENDENCIES: Final = (
+    _COHERENCE_FIXED_DEPENDENCIES
+    + MAX_CURATOR_SOURCE_CANDIDATES
+    + MAX_CURATOR_REVIEW_ASSESSMENTS
+    + _COHERENCE_VALIDATOR_DEPENDENCIES
+)
 
 
 class EvidenceDependencyError(ValueError):
@@ -101,7 +129,9 @@ class EvidenceDependencies(_StrictModel):
     schemaVersion: Literal["ar-evidence-dependencies/v1"] = EVIDENCE_DEPENDENCY_SCHEMA
     recordType: EvidenceRecordType
     validatorVersion: Literal["evidence-dependency-validator/v1"] = EVIDENCE_DEPENDENCY_VALIDATOR
-    edges: tuple[EvidenceDependency, ...] = Field(min_length=1, max_length=256)
+    edges: tuple[EvidenceDependency, ...] = Field(
+        min_length=1, max_length=MAX_EVIDENCE_DEPENDENCIES
+    )
 
     @model_validator(mode="after")
     def _edges_are_unique_and_canonical(self) -> Self:
@@ -161,7 +191,35 @@ EVIDENCE_DEPENDENCY_POLICIES: Mapping[EvidenceRecordType, EvidenceDependencyPoli
             "evidence-bytes",
             "validator",
         ),
-        optional=("predecessor-record",),
+        # ``review-record`` is optional and is present exactly when the record stores one or more
+        # ``ReviewAssessment`` rows (``KS-R15@v1`` §8.1). The kind already existed in this closed
+        # vocabulary (``KS-R15@v1`` §5.1 measures it at ``:45``); what this leaf adds is the
+        # permission for the coherence record to use it, which is what lets a reader resolve an
+        # assessment from the record without parsing a payload. The record's *own* edge to the
+        # assessment is the only direction: the assessment does not declare the record it lives in.
+        optional=("predecessor-record", "review-record"),
+    ),
+    # One ``ReviewAssessment``'s binding to the exact inputs it examined (``KS-R15@v1`` §5.1). The
+    # required set is that clause's own enumeration and nothing else: ``candidate-state`` is the exact
+    # knowledge snapshot identity, ``code-tree`` and the optional ``memory-tree`` are the source
+    # trees, ``semantic-topology`` is the registered-scope manifest, ``task-intent`` is the
+    # task/requirement identity pair, ``evidence-bytes`` is the cited bytes, and ``validator`` is the
+    # resolver/policy version pair. ``review-record`` is deliberately NOT required here: the edge
+    # that carries it is the *coherence record's* edge to the assessment, so requiring it inside the
+    # assessment would be a record citing itself. Nothing about the vocabulary is widened --
+    # ``evidence-bytes`` and ``review-record`` already existed (``KS-R15@v1`` §5.1) -- so this entry
+    # adds one policy and no kind, and the policy is the additive kind of change a new record type is
+    # supposed to make here.
+    "review-assessment/v1": _policy(
+        required=(
+            "candidate-state",
+            "code-tree",
+            "task-intent",
+            "semantic-topology",
+            "evidence-bytes",
+            "validator",
+        ),
+        optional=("memory-tree", "predecessor-record", "review-record"),
     ),
     "quality-report/v2": _policy(
         required=("code-tree", "rail-execution", "evidence-bytes", "validator"),
@@ -333,6 +391,9 @@ __all__ = [
     "EVIDENCE_DEPENDENCY_POLICIES",
     "EVIDENCE_DEPENDENCY_SCHEMA",
     "EVIDENCE_DEPENDENCY_VALIDATOR",
+    "MAX_CURATOR_REVIEW_ASSESSMENTS",
+    "MAX_CURATOR_SOURCE_CANDIDATES",
+    "MAX_EVIDENCE_DEPENDENCIES",
     "EvidenceDependencies",
     "EvidenceDependency",
     "EvidenceDependencyError",

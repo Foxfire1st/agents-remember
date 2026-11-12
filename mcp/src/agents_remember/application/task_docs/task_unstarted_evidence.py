@@ -12,11 +12,10 @@ from typing import Any, Literal
 from agents_remember.application.lifecycle.lifecycle_operation_location import (
     primary_operation_projection,
 )
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.kernel.primitives.observer_paths import observer_root
+from agents_remember.application.memory_mode_refusal import memory_mode_refusal_payload
+from agents_remember.errors import MemoryModeUnsupportedError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
-from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.tasks import (
     DiscardSourceProof,
     DiscardUnstartedProof,
@@ -25,11 +24,13 @@ from agents_remember.tasks import (
     TaskExecutionRegistration,
     capture_task_doc_source,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_location_cache import (
+    resolve_lifecycle_operation_location,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     LifecycleLocatorObservation,
     LifecycleOperationLocationError,
     inspect_lifecycle_operation_locator,
-    resolve_lifecycle_operation_location,
 )
 from agents_remember.worktrees.integration.lifecycle.observation.projection import (
     current_operation_projections,
@@ -42,7 +43,6 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
 )
 
-_LEAF_SEAT_ROLES = frozenset({"worker", "reviewer", "curator"})
 RecoveryRoute = tuple[str, str | None, dict[str, object] | None]
 
 
@@ -102,16 +102,18 @@ class _StartedRouteEvidence:
     contract: WorktreeContract | None
     locator: LifecycleLocatorObservation
     projections: tuple[LifecycleOperationProjection, ...]
-    seat_ids: tuple[str, ...]
-    report_ids: tuple[str, ...]
     task_registrations: tuple[TaskExecutionRegistration, ...]
 
 
 def prove_task_unstarted(
-    config: McpRuntimeConfig,
+    _config: McpRuntimeConfig,
     binding: LeafTaskBinding,
 ) -> TaskUnstartedEvidence:
-    """Prove absence from canonical task, locator/contract, journal, seat, and report sources."""
+    """Prove absence from canonical task, locator/contract and journal sources.
+
+    Every source is addressed through the binding. The configuration that the callers of
+    the landing chain pass is not read.
+    """
 
     facts: list[dict[str, Any]] = []
     severity: list[Literal["started", "ambiguous"]] = []
@@ -145,8 +147,6 @@ def prove_task_unstarted(
         contract,
         contract_failure,
     )
-    seat_ids = _seat_facts(config, binding, facts, severity)
-    report_ids = _report_facts(config, binding, facts, severity)
     state: Literal["unstarted", "started", "ambiguous"] = (
         "ambiguous" if "ambiguous" in severity else "started" if severity else "unstarted"
     )
@@ -160,8 +160,6 @@ def prove_task_unstarted(
                 contract=contract,
                 locator=locator,
                 projections=projections,
-                seat_ids=seat_ids,
-                report_ids=report_ids,
                 task_registrations=(
                     tuple(binding.leaf.executionRegistrations) if binding.leaf is not None else ()
                 ),
@@ -248,7 +246,7 @@ def _contract_fact(
     binding: LeafTaskBinding,
     facts: list[dict[str, Any]],
     severity: list[Literal["started", "ambiguous"]],
-) -> tuple[WorktreeContract | None, dict[str, str] | None]:
+) -> tuple[WorktreeContract | None, dict[str, object] | None]:
     path = binding.contract_path
     try:
         mode = path.lstat().st_mode
@@ -271,6 +269,24 @@ def _contract_fact(
         return None, {"state": "unreadable", "errorType": "NonRegularFile"}
     try:
         contract = load_contract(path)
+    except MemoryModeUnsupportedError as exc:
+        # The unstarted census must report the removed mode, not a generic unreadable enclosure:
+        # the operator's next action depends on which of the two it is.
+        severity.append("ambiguous")
+        facts.append(_fact("enclosure", "unreadable", path, detail=exc.requested))
+        facts.append(
+            {
+                "kind": "memoryMode",
+                "state": "removed",
+                "address": path.as_posix(),
+                **memory_mode_refusal_payload(exc),
+            }
+        )
+        return None, {
+            "state": "removed-mode",
+            "errorType": type(exc).__name__,
+            **memory_mode_refusal_payload(exc),
+        }
     except (ContractError, OSError, UnicodeError, ValueError) as exc:
         severity.append("ambiguous")
         facts.append(_fact("enclosure", "unreadable", path, detail=type(exc).__name__))
@@ -301,7 +317,7 @@ def _operation_facts(
     census: _EvidenceCensus,
     locator: LifecycleLocatorObservation,
     contract: WorktreeContract | None,
-    contract_failure: dict[str, str] | None,
+    contract_failure: dict[str, object] | None,
 ) -> tuple[LifecycleOperationProjection, ...]:
     """Read exact locator-addressed manifest/journals even when contract bytes are lost."""
 
@@ -353,9 +369,10 @@ def _operation_facts(
         )
     else:
         failure = contract_failure or {"state": "unreadable", "errorType": "ContractError"}
+        error_type = failure["errorType"]
         projections = unreadable_contract_operation_projections(
             location,
-            error_type=failure["errorType"],
+            error_type=error_type if isinstance(error_type, str) else "ContractError",
             name=binding.contract_path.name,
         )
     if not projections:
@@ -375,80 +392,6 @@ def _operation_facts(
             )
         )
     return tuple(projections)
-
-
-def _seat_facts(
-    config: McpRuntimeConfig,
-    binding: LeafTaskBinding,
-    facts: list[dict[str, Any]],
-    severity: list[Literal["started", "ambiguous"]],
-) -> tuple[str, ...]:
-    path = terminal_catalog_path(config.coordination_root)
-    if not _canonical_file_present(path, "seat", facts, severity):
-        return ()
-    try:
-        rows = TerminalCatalog(path).list(include_terminated=True)
-    except (OSError, ValueError, TypeError) as exc:
-        severity.append("ambiguous")
-        facts.append(_fact("seat", "unreadable", path, detail=type(exc).__name__))
-        return ()
-    matched = [
-        row
-        for row in rows
-        if row.binding_role in _LEAF_SEAT_ROLES
-        and binding.task_ref in {row.task_document_ref, row.replacement_for_task_document_ref}
-    ]
-    if not matched:
-        facts.append(_fact("seat", "absent", path))
-        return ()
-    severity.append("started")
-    facts.append(
-        _fact(
-            "seat",
-            "present",
-            path,
-            detail=",".join(sorted(f"{row.id}:{row.status}" for row in matched)),
-        )
-    )
-    return tuple(sorted(row.id for row in matched))
-
-
-def _report_facts(
-    config: McpRuntimeConfig,
-    binding: LeafTaskBinding,
-    facts: list[dict[str, Any]],
-    severity: list[Literal["started", "ambiguous"]],
-) -> tuple[str, ...]:
-    store = OperatorInboxStore(observer_root(config))
-    path = store.log_path()
-    if not _canonical_file_present(path, "review-report", facts, severity):
-        return ()
-    try:
-        entries = store.current().values()
-    except (OSError, ValueError, TypeError) as exc:
-        severity.append("ambiguous")
-        facts.append(_fact("review-report", "unreadable", path, detail=type(exc).__name__))
-        return ()
-    matched = [
-        entry
-        for entry in entries
-        if entry.messageKind == "turn-report"
-        and entry.senderRole in _LEAF_SEAT_ROLES
-        and binding.task_ref in {entry.subjectTaskDocumentRef, entry.taskDocumentRef}
-    ]
-    if not matched:
-        facts.append(_fact("review-report", "absent", path))
-        return ()
-    severity.append("started")
-    facts.append(
-        _fact(
-            "review-report",
-            "present",
-            path,
-            detail=",".join(sorted(entry.id for entry in matched)),
-        )
-    )
-    return tuple(sorted(entry.id for entry in matched))
 
 
 def _started_route(evidence: _StartedRouteEvidence) -> RecoveryRoute:
@@ -569,10 +512,6 @@ def _locator_recovery_route(evidence: _StartedRouteEvidence) -> RecoveryRoute | 
 
 
 def _record_recovery_route(evidence: _StartedRouteEvidence) -> RecoveryRoute:
-    if evidence.seat_ids:
-        return "retire-task-seat", "session_retire", {"session_id": evidence.seat_ids[0]}
-    if evidence.report_ids:
-        return "complete-started-task", "task_doc", _task_route_args(evidence.binding)
     if evidence.task_registrations:
         return "complete-started-task", "task_doc", _task_route_args(evidence.binding)
     return "developer-decision", None, None
@@ -584,30 +523,6 @@ def _task_route_args(binding: LeafTaskBinding) -> dict[str, object]:
         "task_name": binding.task_name,
         "task_document_ref": binding.task_ref.model_dump(mode="json"),
     }
-
-
-def _canonical_file_present(
-    path: Path,
-    kind: str,
-    facts: list[dict[str, Any]],
-    severity: list[Literal["started", "ambiguous"]],
-) -> bool:
-    """Distinguish canonical absence from present-but-unreadable evidence."""
-
-    try:
-        mode = path.lstat().st_mode
-    except FileNotFoundError:
-        facts.append(_fact(kind, "absent", path))
-        return False
-    except OSError as exc:
-        severity.append("ambiguous")
-        facts.append(_fact(kind, "unreadable", path, detail=type(exc).__name__))
-        return False
-    if not stat.S_ISREG(mode):
-        severity.append("ambiguous")
-        facts.append(_fact(kind, "unreadable", path, detail=f"mode={mode}"))
-        return False
-    return True
 
 
 def _fact(

@@ -22,6 +22,12 @@ class QualityFinding:
     previous_timestamp: str | None = None
     previous_line: int | None = None
     report_only: bool = False
+    # A row the CLOSEOUT owns rather than the curator: an anchor that resolves more than once in
+    # the cited file cannot be made unique by any edit a curator may write, so the check's
+    # remediation asks for a stamp decision. See ``claim_reopen`` for the population that made
+    # this necessary; the flag travels with the finding so the routing is one structural fact
+    # rather than a message match at the reporting layer.
+    closeout_owned: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -40,6 +46,8 @@ class QualityFinding:
             payload["previousLine"] = self.previous_line
         if self.report_only:
             payload["reportOnly"] = True
+        if self.closeout_owned:
+            payload["closeoutOwned"] = True
         return payload
 
 

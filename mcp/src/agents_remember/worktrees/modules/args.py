@@ -12,8 +12,9 @@ import argparse
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
+from agents_remember.kernel.memory_mode import Topology
 from agents_remember.kernel.primitives.gate_policy import (
     DEFAULT_GATE_POLICY,
     GatePolicy,
@@ -22,7 +23,7 @@ from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecoveryCommits,
 )
-from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction
+from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction, SyncSource
 from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
 
 if TYPE_CHECKING:
@@ -39,7 +40,7 @@ class WorktreeArgs:
     certification_profile: Path | None = None
     coordination_root: Path | None = None
     workspace_root: Path | None = None
-    topology: Literal["internal", "external"] | None = None
+    topology: Topology | None = None
     contract_path: Path | None = None
     task_name: str | None = None
     parent_task: str | None = None
@@ -54,6 +55,7 @@ class WorktreeArgs:
     memory_choice: str | None = None
     stale_base_choice: str | None = None
     memory_sync_choice: MemorySyncChoice | None = None
+    sync_source: SyncSource | None = None
     resolution_action: SyncResolutionAction | None = None
     custom_instruction: str | None = None
     lifecycle_id: str = ""
@@ -89,6 +91,9 @@ class WorktreeArgs:
     operation_key: str = ""
     operation_generation: int = 0
     candidate_tree: str | None = None
+    # The code head observed just before ``candidate_tree`` was read from the worktree; the code
+    # commit's only parent. ``None`` when the tree was supplied without one.
+    candidate_head: str | None = None
     approval_claimed: bool = False
     recovery_commits: LifecycleOperationRecoveryCommits | None = None
     integration_certification_owner: IntegrationCertificationOwner | None = None

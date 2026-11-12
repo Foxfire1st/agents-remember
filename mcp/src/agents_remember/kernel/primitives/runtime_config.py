@@ -7,6 +7,8 @@ may import without reversing the package dependency direction.
 from __future__ import annotations
 
 import json
+import logging
+import sys
 import warnings
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
@@ -15,16 +17,28 @@ from typing import Any
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.agentic_settings import (
     AgenticSettingsError,
-    agentic_settings_path,
     load_agentic_settings,
     parse_gate_delegation,
+    user_agentic_settings_path,
 )
 from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.memory_mode import (
+    legacy_internal_memory_root,
+    refuse_removed_memory_mode,
+)
 from agents_remember.kernel.primitives import checkout_coordination
 from agents_remember.kernel.primitives.gate_policy import DEFAULT_GATE_POLICY, GatePolicy
 from agents_remember.kernel.primitives.identity import (
     explicit_provider_instance_id,
     provider_instance_id,
+)
+from agents_remember.kernel.primitives.paseo_authority import (
+    HostAuthorityRefused,
+    load_authority_paseo_runtime,
+)
+from agents_remember.kernel.primitives.paseo_runtime_settings import (
+    PaseoRuntimeSettings,
+    PaseoRuntimeSettingsError,
 )
 from agents_remember.kernel.primitives.provider_degradation_settings import (
     ProviderDegradationSettings,
@@ -34,6 +48,14 @@ from agents_remember.kernel.primitives.provider_degradation_settings import (
 
 DEFAULT_PROVIDER_SETUP_SECONDS = 1800
 DEFAULT_DOCKER_CONTROL_SECONDS = 120
+
+_logger = logging.getLogger(__name__)
+
+#: Authority-file paths (with shadowed state) that already emitted the
+#: one-cycle gateDelegation migration warning in this process. The warning
+#: is a boot warning; per-call settings re-resolution must not re-emit it
+#: (pytest escalates warnings to errors inside tool calls).
+_LEGACY_GATE_DELEGATION_WARNED: set[tuple[str, bool]] = set()
 
 # The documented timeout caps (see examples/mcp/settings.example.json and
 # docs/reference/settings-json.md). Unknown keys are rejected so a typo
@@ -48,20 +70,14 @@ DEFAULT_DASHBOARD_PORT = 8765
 # Same fail-loud discipline as timeoutCaps: a typo ("autostart") must surface at
 # boot, not silently leave the daemon unsupervised.
 KNOWN_DASHBOARD_FIELDS = frozenset({"autoStart", "port"})
-# Completion-seat cleanup is boot-snapshot MCP authority. The two historical edge gates keep
-# their names for compatibility; ``autoCloseCompletedSeats`` selects retire (default) versus the
-# old landed/archive behavior when an enabled completion edge runs. The legacy autoRetire* names
-# remain migration aliases for the edge gates in existing local authority files.
-KNOWN_RETIREMENT_FIELDS = frozenset(
-    {
-        "autoLandOnIntegration",
-        "autoLandOnFinalize",
-        "autoCloseCompletedSeats",
-        "autoRetireOnIntegration",
-        "autoRetireOnFinalize",
-    }
-)
-# The agentic orchestration family moved to the coordinator's global settings
+# MIK-R113 rule 4: top-level sections an earlier build read and this one does not. A file that
+# holds one loads; nothing in it is read or checked, and its keys are named once as no longer
+# used (``McpRuntimeConfig.unused_settings_keys``).
+UNUSED_SETTINGS_SECTIONS = ("retirement",)
+# MIK-R108 rule 3: the tool-call log keeping. Unknown keys fail loud, like
+# every other settings family.
+KNOWN_TOOL_LOG_FIELDS = frozenset({"keepDays", "maxBytes", "enclosureMaxBytes"})
+# The agentic orchestration family lives in the user's settings
 # file (260703-L13); the authority file keeps ONLY the one-cycle gateDelegation
 # legacy fallback. loops/roles/concurrency/spawn here fail loud, pointing at
 # the new home (roles/concurrency were previously reserved-and-silently-dropped
@@ -107,18 +123,68 @@ class OrchestrationSettings:
     require_reviewer_verdict_at_seams: bool = False
 
 
-@dataclass(frozen=True)
-class RetirementSettings:
-    """The optional ``retirement`` settings object: completion-seat cleanup.
+# MIK-R108 rule 3: the tool-call log keeping. 14 days when absent.
+TOOL_LOG_KEEP_DAYS_DEFAULT = 14
+# MIK-R108 rule 3: the log-folder budgets in bytes (D1-D4). 256 MiB for the
+# transcript root, 64 MiB for the logs/ of one enclosure, when absent.
+TOOL_LOG_MAX_BYTES_DEFAULT = 268435456
+TOOL_LOG_ENCLOSURE_MAX_BYTES_DEFAULT = 67108864
 
-    The edge gates and auto-close behavior default ON. A successful completion edge therefore
-    retires report-bearing leaf-altitude seats and frees their tmux processes. Turning only
-    ``auto_close_completed_seats`` off restores the prior landed/archive behavior end to end.
+
+@dataclass(frozen=True)
+class ToolLogSettings:
+    """The optional ``toolLog`` settings object (MIK-R108 rule 3).
+
+    ``keepDays`` bounds the coordination-root tool log: the first call of a
+    day removes the log files and detail folders older than it (14 when
+    absent). In an enclosure, no age-based removal happens before cleanup.
+    ``maxBytes`` bounds the transcript-root log folder in bytes (256 MiB
+    when absent); ``enclosureMaxBytes`` bounds the ``logs/`` of one
+    enclosure (64 MiB when absent). In an enclosure the budget is the only
+    removal before cleanup.
     """
 
-    auto_land_on_integration: bool = True
-    auto_land_on_finalize: bool = True
-    auto_close_completed_seats: bool = True
+    keep_days: int = TOOL_LOG_KEEP_DAYS_DEFAULT
+    max_bytes: int = TOOL_LOG_MAX_BYTES_DEFAULT
+    enclosure_max_bytes: int = TOOL_LOG_ENCLOSURE_MAX_BYTES_DEFAULT
+
+
+@dataclass(frozen=True)
+class CheckoutBinding:
+    """What an undeclared linked-checkout process is bound to (MIK-R83 rule 7).
+
+    A process that loads this package from a linked worktree without declaring
+    an execution mode is bound to that worktree's disposable coordination root,
+    not the root its settings name. The same three facts are printed by the
+    command line and carried as a field by ``server_info`` and the dashboard's
+    served state, so no surface has to be asked separately.
+    """
+
+    worktree: str
+    disposable_root: str
+    configured_root: str | None
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "state": "disposable-coordination-root",
+            "worktree": self.worktree,
+            "coordinationRoot": self.disposable_root,
+            "configuredRoot": self.configured_root,
+            "remedy": (
+                "run the installed command for the configured root, or declare the test "
+                "mode for scratch work; --config does not change the binding"
+            ),
+        }
+
+    def sentence(self) -> str:
+        configured = self.configured_root or "none named by the given settings"
+        return (
+            f"agents-remember is loaded from the linked worktree {self.worktree} and bound "
+            f"to its disposable coordination root {self.disposable_root}; the configured "
+            f"root {configured} is not used, and --config does not change the binding. "
+            "Run the installed command for the configured root, or declare the test mode "
+            "for scratch work."
+        )
 
 
 @dataclass(frozen=True)
@@ -127,21 +193,27 @@ class McpRuntimeConfig:
     coordination_root: Path
     workspace_root: Path
     transcript_root: Path
-    harness_skill_root: Path | None = None
     repositories: dict[str, RepositoryScope] = field(default_factory=dict)
     providers: dict[str, ProviderScope] = field(default_factory=dict)
     timeout_caps: dict[str, int] = field(default_factory=dict)
     benchmarks_enabled: bool = False
-    # Policy gate for sanctioned direct execution (branch-addressed
-    # series-contract bindings and the direct landing operation): explicit
-    # opt-ins that refuse unless this is enabled. Fail-closed default.
-    direct_execution_enabled: bool = False
     dashboard: DashboardSettings = field(default_factory=DashboardSettings)
     orchestration: OrchestrationSettings = field(default_factory=OrchestrationSettings)
     provider_degradation: ProviderDegradationSettings = field(
         default_factory=ProviderDegradationSettings
     )
-    retirement: RetirementSettings = field(default_factory=RetirementSettings)
+    tool_log: ToolLogSettings = field(default_factory=ToolLogSettings)
+    # MIK-R113 rule 4: the keys this file holds that are no longer read, as dotted names.
+    unused_settings_keys: tuple[str, ...] = ()
+    # MIK-R83 rule 7: the disposable coordination root an undeclared linked
+    # checkout is bound to, with the configured root it did not use.
+    checkout_binding: CheckoutBinding | None = None
+
+    @property
+    def paseo_runtime(self) -> PaseoRuntimeSettings | None:
+        """Host authority is per-use, so adding its block never requires a server restart."""
+        settings = _paseo_runtime_block(self.config_path)
+        return None if settings is None else replace(settings, command_config_path=self.config_path)
 
     @property
     def allowed_repo_ids(self) -> tuple[str, ...]:
@@ -244,6 +316,8 @@ def require_config_path(config_path: str | Path) -> Path:
     if not path.is_absolute():
         raise ConfigError("--config must be an absolute path")
     path = path.resolve()
+    if path == user_agentic_settings_path().resolve():
+        raise ConfigError(f"user agentic settings are not an MCP authority settings file: {path}")
     if path.name == "settings.json" and path.parent.name == "system":
         raise ConfigError("coordinator system/settings.json is not an MCP authority settings file")
     if not path.exists():
@@ -259,11 +333,6 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
     transcript_root = optional_absolute_path(data, "transcriptRoot", owner="MCP settings")
     if transcript_root is None:
         transcript_root = coordination_root / "logs" / "mcp"
-    harness_skill_root = optional_absolute_path(
-        data,
-        "harnessSkillRoot",
-        owner="MCP settings",
-    ) or infer_harness_skill_root(config_path)
 
     if path_is_relative_to(config_path, coordination_root):
         raise ConfigError("MCP settings must not live inside the coordinator root")
@@ -277,9 +346,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
     providers = parse_providers(data.get("providers", {}), coordination_root, workspace_root)
     timeout_caps = parse_timeout_caps(data.get("timeoutCaps", {}))
     benchmarks_enabled = parse_benchmarks_enabled(data.get("benchmarksEnabled", False))
-    direct_execution_enabled = parse_direct_execution_enabled(
-        data.get("directExecutionEnabled", False)
-    )
+    warn_retired_direct_execution_key(data, config_path)
     dashboard = parse_dashboard_settings(data.get("dashboard"))
     try:
         provider_degradation = parse_provider_degradation_settings(data.get("providerDegradation"))
@@ -290,24 +357,50 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         coordination_root=coordination_root,
         config_path=config_path,
     )
-    retirement = parse_retirement_settings(data.get("retirement"))
+    tool_log = parse_tool_log_settings(data.get("toolLog"))
+    # MIK-R196 rule 3: the authority file now holds the host block it establishes itself, so that
+    # block is read authority, not a stray key and not a per-harness override to migrate.
 
     return McpRuntimeConfig(
         config_path=config_path,
         coordination_root=coordination_root,
         workspace_root=workspace_root,
         transcript_root=transcript_root,
-        harness_skill_root=harness_skill_root,
         repositories=repositories,
         providers=providers,
         timeout_caps=timeout_caps,
         benchmarks_enabled=benchmarks_enabled,
-        direct_execution_enabled=direct_execution_enabled,
         dashboard=dashboard,
         orchestration=orchestration,
         provider_degradation=provider_degradation,
-        retirement=retirement,
+        tool_log=tool_log,
+        unused_settings_keys=unused_settings_keys(data),
     )
+
+
+def load_paseo_runtime_settings(config_path: str | Path) -> PaseoRuntimeSettings | None:
+    """Read the ``paseoRuntime`` block of the authority file this call names.
+
+    MIK-R196 rule 3: the host authority is the product's own settings file, so the block a cold
+    first run writes and the block every later call reads are the same bytes in the same file.
+    """
+    # A cold root has no authority file yet: that is "no host configured", not an unreadable
+    # settings file, and MIK-R196 rule 3 has the launch create the block before the host stage.
+    candidate = Path(config_path).expanduser()
+    if not candidate.exists() and not candidate.is_symlink():
+        return None
+    path = require_config_path(candidate)
+    settings = _paseo_runtime_block(path)
+    return None if settings is None else replace(settings, command_config_path=path)
+
+
+def _paseo_runtime_block(config_path: Path) -> PaseoRuntimeSettings | None:
+    # An unreadable or malformed authority file is a settings refusal with a recovery action, not
+    # an exception that escapes the model: every caller answers `settings_invalid` (L188-B07).
+    try:
+        return load_authority_paseo_runtime(config_path)
+    except (PaseoRuntimeSettingsError, HostAuthorityRefused) as error:
+        raise ConfigError(str(error)) from error
 
 
 def _parse_repository_entry(
@@ -402,8 +495,9 @@ def _require_unique_repository_git_identities(
             if repository.memory_root is not None
             else None
         )
-        # An internal memory directory is intentionally part of the code repository, not
-        # a second external-memory authority edge.
+        # A memory root inside the code repository would not be a second authority edge, but
+        # no supported mode has one: `default_memory_root` refuses that layout before this
+        # check, so a memory identity here is always a real external edge.
         if memory_identity is not None and memory_identity != code_identity:
             _claim_configured_git_identity(owners, memory_identity, repo_id, "memory")
 
@@ -435,16 +529,16 @@ def _claim_configured_git_identity(
 
 
 def default_memory_root(repo_path: Path, coordination_root: Path, repo_id: str) -> Path:
-    internal_memory_root = repo_path / "ar-memory"
-    if internal_memory_root.exists():
-        return internal_memory_root.resolve()
+    """The configured repository's memory root: the external one, always.
+
+    A repo-sidecar ``<repo>/ar-memory`` root used to win here silently. It is now reported
+    instead: a repository still carrying one is in the removed layout, and answering with its
+    path would re-admit the mode through the configuration reader.
+    """
+    legacy_root = legacy_internal_memory_root(repo_path)
+    if legacy_root.exists():
+        refuse_removed_memory_mode("internal", artifact=legacy_root.as_posix())
     return coordination_root / "memory-repos" / f"ar-{repo_id}"
-
-
-def infer_harness_skill_root(config_path: Path) -> Path | None:
-    if config_path.parent.name != "mcp":
-        return None
-    return (config_path.parent.parent / "skills").resolve()
 
 
 def parse_providers(
@@ -524,10 +618,21 @@ def provider_runtime_name(provider_id: str) -> str:
         raise ConfigError(f"unsupported provider id: {provider_id}") from error
 
 
-def parse_direct_execution_enabled(raw: object) -> bool:
-    if not isinstance(raw, bool):
-        raise ConfigError("directExecutionEnabled must be a boolean")
-    return raw
+def warn_retired_direct_execution_key(data: dict[str, Any], config_path: Path) -> None:
+    """The retired switch loads with one notice per load: a grant per task decides now.
+
+    Logged, not warned: the warnings policy suppresses a repeated notice for
+    the same file in one process, while the packet requires one notice per
+    load under the ordinary default configuration (F11).
+    """
+    if "directExecutionEnabled" in data:
+        _logger.warning(
+            "directExecutionEnabled in %s is retired and ignored; "
+            "direct execution is decided by a direct-execution grant per task now "
+            "(given by the developer on the task in the dashboard, or by an "
+            "architect with direct_execution_grant). Nothing is refused because of the key.",
+            config_path,
+        )
 
 
 def parse_benchmarks_enabled(raw: object) -> bool:
@@ -555,27 +660,45 @@ def parse_dashboard_settings(raw: object) -> DashboardSettings:
     return DashboardSettings(auto_start=auto_start, port=port)
 
 
-def parse_retirement_settings(raw: object) -> RetirementSettings:
+def unused_settings_keys(data: dict[str, Any]) -> tuple[str, ...]:
+    """The keys of the sections that are no longer read, as dotted names (MIK-R113 rule 4)."""
+    names: list[str] = []
+    for section in UNUSED_SETTINGS_SECTIONS:
+        if section not in data:
+            continue
+        held = data[section]
+        if isinstance(held, dict) and held:
+            names.extend(f"{section}.{key}" for key in sorted(held))
+        else:
+            names.append(section)
+    return tuple(names)
+
+
+def parse_tool_log_settings(raw: object) -> ToolLogSettings:
     if raw is None:
-        return RetirementSettings()
+        return ToolLogSettings()
     if not isinstance(raw, dict):
-        raise ConfigError("retirement settings must be an object")
-    unknown = sorted(set(raw) - KNOWN_RETIREMENT_FIELDS)
+        raise ConfigError("toolLog settings must be an object")
+    unknown = sorted(set(raw) - KNOWN_TOOL_LOG_FIELDS)
     if unknown:
-        allowed = ", ".join(sorted(KNOWN_RETIREMENT_FIELDS))
+        allowed = ", ".join(sorted(KNOWN_TOOL_LOG_FIELDS))
         unknown_text = ", ".join(unknown)
-        raise ConfigError(f"unsupported retirement setting(s): {unknown_text}; allowed: {allowed}")
-    for key in sorted(KNOWN_RETIREMENT_FIELDS):
-        if key in raw and not isinstance(raw[key], bool):
-            raise ConfigError(f"retirement.{key} must be a boolean")
-    auto_land_on_integration = raw.get(
-        "autoLandOnIntegration", raw.get("autoRetireOnIntegration", True)
-    )
-    auto_land_on_finalize = raw.get("autoLandOnFinalize", raw.get("autoRetireOnFinalize", True))
-    return RetirementSettings(
-        auto_land_on_integration=auto_land_on_integration,
-        auto_land_on_finalize=auto_land_on_finalize,
-        auto_close_completed_seats=raw.get("autoCloseCompletedSeats", True),
+        raise ConfigError(f"unsupported toolLog setting(s): {unknown_text}; allowed: {allowed}")
+    keep_days = raw.get("keepDays", TOOL_LOG_KEEP_DAYS_DEFAULT)
+    if isinstance(keep_days, bool) or not isinstance(keep_days, int) or keep_days < 1:
+        raise ConfigError("toolLog.keepDays must be an integer of at least 1")
+    max_bytes = raw.get("maxBytes", TOOL_LOG_MAX_BYTES_DEFAULT)
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 1:
+        raise ConfigError("toolLog.maxBytes must be an integer of at least 1")
+    enclosure_max_bytes = raw.get("enclosureMaxBytes", TOOL_LOG_ENCLOSURE_MAX_BYTES_DEFAULT)
+    if (
+        isinstance(enclosure_max_bytes, bool)
+        or not isinstance(enclosure_max_bytes, int)
+        or enclosure_max_bytes < 1
+    ):
+        raise ConfigError("toolLog.enclosureMaxBytes must be an integer of at least 1")
+    return ToolLogSettings(
+        keep_days=keep_days, max_bytes=max_bytes, enclosure_max_bytes=enclosure_max_bytes
     )
 
 
@@ -588,7 +711,7 @@ def parse_orchestration_settings(
     """Resolve the boot-snapshot orchestration settings (260703-L13, GQ1).
 
     ``orchestration.gateDelegation``'s home is the GLOBAL agentic settings file
-    (``<coordinationRoot>/system/settings.json``), read once at boot through the
+    (``~/.config/agents-remember/settings.json``), read once at boot through the
     kernel agentic-settings loader -- a change still needs a restart (documented
     boot-snapshot semantics; the downstream ``gate_policy`` wiring is
     unchanged). An authority-file value is honored as a one-cycle legacy
@@ -597,27 +720,26 @@ def parse_orchestration_settings(
     Any other ``orchestration.*`` key in the authority file fails loud -- those
     knobs never belonged here (loops) or moved home (roles/concurrency/spawn).
     """
-    legacy = _parse_legacy_authority_gate_delegation(raw, coordination_root, config_path)
+    legacy = _parse_legacy_authority_gate_delegation(raw, config_path)
     try:
         agentic = load_agentic_settings(coordination_root)
     except AgenticSettingsError as error:
         raise ConfigError(str(error)) from error
     if agentic.gate_delegation_configured:
         if legacy is not None:
-            _warn_legacy_gate_delegation(config_path, coordination_root, shadowed=True)
+            _warn_legacy_gate_delegation(config_path, shadowed=True)
         return OrchestrationSettings(
             gate_policy=agentic.gate_policy,
             require_reviewer_verdict_at_seams=agentic.require_reviewer_verdict_at_seams,
         )
     if legacy is not None:
-        _warn_legacy_gate_delegation(config_path, coordination_root, shadowed=False)
+        _warn_legacy_gate_delegation(config_path, shadowed=False)
         return legacy
     return OrchestrationSettings()
 
 
 def _parse_legacy_authority_gate_delegation(
     raw: object,
-    coordination_root: Path,
     config_path: Path,
 ) -> OrchestrationSettings | None:
     """The authority file's ``orchestration`` block: gateDelegation-only, legacy."""
@@ -633,7 +755,7 @@ def _parse_legacy_authority_gate_delegation(
             "authority file only reads the legacy gateDelegation fallback -- "
             "agentic orchestration settings (gateDelegation, loops, roles, "
             "rolesPerLevel, concurrency, spawn, harnesses) live in "
-            f"{agentic_settings_path(coordination_root)}"
+            f"{user_agentic_settings_path()}"
         )
     gate_raw = raw.get("gateDelegation")
     if gate_raw is None:
@@ -652,12 +774,15 @@ def _parse_legacy_authority_gate_delegation(
 
 def _warn_legacy_gate_delegation(
     config_path: Path,
-    coordination_root: Path,
     *,
     shadowed: bool,
 ) -> None:
     """One-cycle migration warning (GQ1): the authority-file key must move home."""
-    new_home = agentic_settings_path(coordination_root)
+    key = (str(config_path), shadowed)
+    if key in _LEGACY_GATE_DELEGATION_WARNED:
+        return
+    _LEGACY_GATE_DELEGATION_WARNED.add(key)
+    new_home = user_agentic_settings_path()
     if shadowed:
         message = (
             f"orchestration.gateDelegation in the MCP authority file ({config_path}) "
@@ -750,12 +875,42 @@ def _config_for_execution(config_path: str | Path) -> Path | McpRuntimeConfig:
         raise ConfigError(str(error)) from error
     if checkout is None:
         return require_config_path(config_path)
+    binding = CheckoutBinding(
+        worktree=checkout.checkout_root.as_posix(),
+        disposable_root=checkout.coordination_root.as_posix(),
+        configured_root=_configured_coordination_root(config_path),
+    )
+    # MIK-R83 rule 7: one line, on stderr, before the run answers from the
+    # disposable root. A silent empty world was the debt this ends.
+    print(binding.sentence(), file=sys.stderr)
     return _checkout_runtime_config(
         checkout_root=checkout.checkout_root,
         worktree_group=checkout.worktree_group,
         coordination_root=checkout.coordination_root,
         synthetic_config_path=checkout.synthetic_config_path,
+        binding=binding,
     )
+
+
+def _configured_coordination_root(config_path: str | Path) -> str | None:
+    """The root the given settings name, named but not used by a bound process.
+
+    It is only read for the sentence: a settings file that is absent, not JSON
+    or names no root contributes nothing, and the sentence says so rather than
+    inventing a root the caller never wrote.
+    """
+
+    if not config_path:
+        return None
+    path = Path(config_path)
+    try:
+        if not path.is_absolute() or not path.is_file():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+    root = data.get("coordinationRoot") if isinstance(data, dict) else None
+    return str(root) if isinstance(root, str) and root else None
 
 
 def _read_config_mapping(path: Path) -> dict[str, Any]:
@@ -774,6 +929,7 @@ def _checkout_runtime_config(
     worktree_group: Path,
     coordination_root: Path,
     synthetic_config_path: Path,
+    binding: CheckoutBinding,
 ) -> McpRuntimeConfig:
     """Build the minimal non-authority config for an unpublished linked checkout."""
     repository = RepositoryScope(
@@ -789,12 +945,7 @@ def _checkout_runtime_config(
         repositories={"agents-remember": repository},
         providers={},
         benchmarks_enabled=False,
-        direct_execution_enabled=False,
         dashboard=DashboardSettings(auto_start=False),
         orchestration=OrchestrationSettings(),
-        retirement=RetirementSettings(
-            auto_land_on_integration=False,
-            auto_land_on_finalize=False,
-            auto_close_completed_seats=False,
-        ),
+        checkout_binding=binding,
     )

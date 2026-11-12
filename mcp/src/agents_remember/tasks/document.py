@@ -6,7 +6,7 @@ This is the persisted source of truth for a task's plan and progress. ``task.md`
 peer of ``observer.projection`` -- a persisted/served Pydantic contract, **not**
 an MCP response model.
 
-Scope (slice 3c): ``light`` standalone tasks and ``subTask`` slices of a series
+Scope (slice 3c): legacy ``light`` documents and ``subTask`` slices of a series
 (the lifecycle-keyed work-content documents), plus the series ``master`` itself
 (commit 3). A master is the series-aggregation entity: a structured ``subTasks``
 index (each slice a checkable entry) + an ordered ``sections`` render plan that
@@ -16,27 +16,46 @@ the observer never projects them as a lifecycle node.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Self
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ModelWrapValidatorHandler,
     PrivateAttr,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    ValidationError,
     field_validator,
     model_serializer,
     model_validator,
 )
 
+from agents_remember.models.knowledge.effect import EffectLabel
+from agents_remember.models.knowledge_files.planned import (
+    DECLARED_SUBJECT_PATTERN,
+    REQUIREMENT_REF_PATTERN,
+)
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.task_document import DocStatus, MasterExecutionNature, StepStatus
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.task_execution_edges import (
+    SprintExecutionEdge,
+    SprintExecutionEndpoint,
+)
 from agents_remember.models.task_intent import (
     AcceptanceObligationQuestion,
     ApprovedRequirementPacketRef,
 )
+from agents_remember.models.task_retirement import MasterRetirementProof
 
 from .execution_graph_validation import (
     ExecutionGraphAnalysis,
@@ -46,7 +65,11 @@ from .execution_graph_validation import (
     find_execution_graph_cycle,
     validate_execution_graph,
 )
+from .launch_review_read import launch_review_fallback, preserve_unreadable_review
+from .progress import current_step, step_done, step_total  # noqa: F401  # preserve public exports
 from .route_review import (  # noqa: F401  # preserve existing task-document model exports
+    MemoryReviewState,
+    ReviewApproval,
     ReviewFinding,
     ReviewState,
     RouteReviewChildIntent,
@@ -55,6 +78,7 @@ from .route_review import (  # noqa: F401  # preserve existing task-document mod
     RouteReviewUnit,
     RouteReviewVerdict,
 )
+from .task_paths import slugify
 
 TASK_DOCUMENT_SCHEMA = "ar-task-document/v1"
 
@@ -62,9 +86,7 @@ DocKind = Literal["light", "subTask", "master"]
 # The structural task altitude per role. Reviewer is deliberately polymorphic across the three
 # review seams; SprintSeat admits it in addition to the ordinary sprint roles. ``document_refs``
 # re-exports these constants for its altitude checks, so their canonical home is here.
-SPRINT_ROLES = frozenset(
-    {"architect", "orchestrator", "strategist", "designer", "system-specialist"}
-)
+SPRINT_ROLES = frozenset({"architect", "orchestrator", "investigator"})
 MASTER_ROLES = frozenset({"manager"})
 LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
 REVIEWER_ALTITUDES = frozenset({"sprint", "master", "leaf"})
@@ -135,6 +157,24 @@ class Decision(_Doc):
     rationale: str
 
 
+# Entries the product writes itself into a document's decision log: records of an act,
+# not decisions (MIK-R126 rule 6 under the lifecycle-records ruling). The projection
+# marks them from these same constants; the page matches no text and the stored entry
+# keeps its shape.
+FINALIZE_TASK_LIFECYCLE_DECISION = "Finalize task lifecycle."
+REMOVED_STEP_DECISION_PREFIX = "Removed step "
+SKIP_STEP_DECISION_PREFIX = "Intentionally skip step "
+PRODUCT_RECORD_DECISION_EXACT = frozenset({FINALIZE_TASK_LIFECYCLE_DECISION})
+PRODUCT_RECORD_DECISION_PREFIXES = (REMOVED_STEP_DECISION_PREFIX, SKIP_STEP_DECISION_PREFIX)
+
+
+def is_product_record_decision(decision: str) -> bool:
+    """True when a decision-log entry is a product-written record, not an authored decision."""
+    return decision in PRODUCT_RECORD_DECISION_EXACT or decision.startswith(
+        PRODUCT_RECORD_DECISION_PREFIXES
+    )
+
+
 class CodeExample(_Doc):
     id: str
     title: str
@@ -170,28 +210,6 @@ class TaskExecutionRegistration(_Doc):
         trimmed = value.strip()
         if not trimmed:
             raise ValueError("task execution registration identity must not be blank")
-        return trimmed
-
-
-class SprintExecutionEndpoint(_Doc):
-    """One edge endpoint: a bare master ref, or a leaf id sampling the target segment.
-
-    A bare ``ref`` addresses the master's only node (a lump, or its single segment);
-    ``ref`` + ``leafId`` addresses the segment node containing that leaf. Resolution
-    to a node happens in graph validation, never at parse time.
-    """
-
-    ref: TaskDocumentRef
-    leafId: str | None = None
-
-    @field_validator("leafId")
-    @classmethod
-    def _trim_nonblank_leaf_id(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        trimmed = value.strip()
-        if not trimmed:
-            raise ValueError("execution-graph endpoint leafId must not be blank")
         return trimmed
 
 
@@ -251,39 +269,6 @@ class SprintExecutionNode(_Doc):
         if self.kind == "master":
             return ref
         return {"kind": "segment", "ref": ref, "leafIds": list(self.leafIds)}
-
-
-class SprintExecutionEdge(_Doc):
-    """One reasoned predecessor edge in the sprint's activity-on-node graph."""
-
-    predecessor: TaskDocumentRef | SprintExecutionEndpoint
-    successor: TaskDocumentRef | SprintExecutionEndpoint
-    reason: str
-    judgmentId: str | None = None
-
-    @field_validator("reason")
-    @classmethod
-    def _trim_nonblank_reason(cls, value: str) -> str:
-        trimmed = value.strip()
-        if not trimmed:
-            raise ValueError("execution-graph edge reason must not be blank")
-        return trimmed
-
-    @field_validator("judgmentId")
-    @classmethod
-    def _trim_nonblank_judgment_id(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        trimmed = value.strip()
-        if not trimmed:
-            raise ValueError("execution-graph edge judgmentId must not be blank")
-        return trimmed
-
-    @model_validator(mode="after")
-    def _check_distinct_endpoints(self) -> Self:
-        if self.predecessor == self.successor:
-            raise ValueError("execution-graph edge cannot point a node to itself")
-        return self
 
 
 def resolve_graph_endpoint(
@@ -529,6 +514,17 @@ class SubTaskRef(_Doc):
     status: DocStatus = "planning"
     scope: str = ""
     masterRef: TaskDocumentRef | None = None
+    retirement: MasterRetirementProof | None = None
+
+    @model_validator(mode="after")
+    def _retired_row_is_plain(self) -> Self:
+        # A retired row may keep a ``file`` cell: the seat document of the legacy row it took the
+        # place of, so that the seat's documents stay reachable from the sprint.
+        if self.retirement is not None and (
+            self.masterRef is not None or self.status != "abandoned"
+        ):
+            raise ValueError("a retired master row is abandoned and carries no live masterRef")
+        return self
 
 
 class DiscardSourceProof(_Doc):
@@ -618,7 +614,7 @@ class SprintSeat(_Doc):
     def _check_sprint_role(cls, value: str) -> str:
         role = value.strip()
         allowed = SPRINT_ROLES | {"reviewer"}
-        if role not in allowed:
+        if canonical_role(role) not in allowed:
             raise ValueError(f"sprint seat role must be one of {sorted(allowed)}")
         return role
 
@@ -646,6 +642,402 @@ class Section(_Doc):
     body: str = ""
 
 
+class ExpectedKnowledgeEffect(_Doc):
+    """One declared knowledge effect of a leaf, written before implementation (MIK-R11 rule 1).
+
+    ``subject`` is ``invariant:<INV-ID>``, ``family:<FAM-ID>`` or ``new:<hand-off label>``;
+    ``effect`` is one of the nine effect labels; ``requirementRef`` is the packet identity
+    ``<stable ID>@v<n>`` the effect answers. The task plane checks the shape only: it never reads
+    knowledge, so an ID the memory does not hold is the worklist's ``subject_unknown`` fact.
+    """
+
+    subject: str = Field(min_length=1, max_length=512, pattern=DECLARED_SUBJECT_PATTERN)
+    effect: EffectLabel
+    requirementRef: str = Field(min_length=1, max_length=256, pattern=REQUIREMENT_REF_PATTERN)
+
+
+IntentReviewState = Literal["pending", "review-first", "go"]
+
+# The named refusal every start of a leaf answers while its intent review is open
+# (MIK-R189 rule 2). The gate, the stage move and the role launch all answer with it.
+INTENT_REVIEW_REFUSAL = "intent-review-open"
+INTENT_REVIEW_ERASURE_REFUSAL = "intent-review-erasure-refused"
+
+
+class IntentReviewRevision(_Doc):
+    """The revision the developer agreed to at the go (MIK-R189 rule 8).
+
+    ``revisionId`` names the revision he said yes to, ``sha256`` is the digest of its bytes and
+    ``packetVersions`` lists the packet identities (``<stable ID>@v<n>``) it illustrated. The
+    revision is pinned here and copied into the leaf's reference folder; it never overrides the
+    packets.
+    """
+
+    revisionId: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    packetVersions: list[str] = Field(default_factory=list)
+
+    @field_validator("revisionId")
+    @classmethod
+    def _trim_revision_id(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("an agreed revision id must not be blank")
+        return trimmed
+
+    @field_validator("packetVersions")
+    @classmethod
+    def _check_packet_versions(cls, value: list[str]) -> list[str]:
+        trimmed = [version.strip() for version in value]
+        if any(not version for version in trimmed):
+            raise ValueError("an agreed revision's packet versions must not be blank")
+        if len(set(trimmed)) != len(trimmed):
+            raise ValueError("an agreed revision's packet versions must be unique")
+        return trimmed
+
+
+class IntentReview(_Doc):
+    """The architect's record of the developer's answer before a leaf starts (MIK-R189 rule 8).
+
+    ``pending`` (a leaf created after the rule landed) and ``review-first`` both refuse every
+    start of the leaf with :data:`INTENT_REVIEW_REFUSAL`; ``go`` admits it. ``agreed`` is not a
+    state: the agreed revision is the field ``agreedRevision``, written together with ``go``.
+    The record holds no agent id -- the decision stays the architect's document, not a session's.
+    """
+
+    state: IntentReviewState
+    decisionRef: str | None = None
+    agreedRevision: IntentReviewRevision | None = None
+
+    @field_validator("decisionRef")
+    @classmethod
+    def _trim_decision_ref(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("an intent-review decision reference must not be blank")
+        return trimmed
+
+    @model_validator(mode="after")
+    def _agreed_revision_rides_the_go(self) -> Self:
+        if self.agreedRevision is not None and self.state != "go":
+            raise ValueError(
+                "agreedRevision is written with the go; an intent review that is "
+                f"{self.state!r} carries no agreed revision"
+            )
+        return self
+
+
+def intent_review_open(document: TaskDocument) -> IntentReview | None:
+    """The open intent review that refuses this leaf's start, or ``None``.
+
+    A leaf without the field is every leaf from before the rule: it was never asked, so it is
+    admitted (MIK-R189 rule 2, "old leaves").
+    """
+
+    review = document.intentReview
+    if review is None or review.state == "go":
+        return None
+    return review
+
+
+def intent_review_refusal(document: TaskDocument) -> str | None:
+    """The refusal text naming ``intent-review-open`` for this leaf, or ``None`` when admitted."""
+
+    review = intent_review_open(document)
+    if review is None:
+        return None
+    return (
+        f"{INTENT_REVIEW_REFUSAL}: leaf {document.id!r} waits for the architect's go; its intent "
+        f"review is {review.state!r}, so no start of it is admitted. The architect records the "
+        "developer's answer as `go` in `intentReview` through task_doc, then the same start is "
+        "admitted. Do not retry this start."
+    )
+
+
+def intent_review_stage_refusal(
+    original: TaskDocument | None, candidate: TaskDocument
+) -> str | None:
+    """Refuse moving a leaf to ``inProgress`` while its intent review is open (MIK-R189 rule 2)."""
+
+    if candidate.kind != "subTask" or candidate.status != "inProgress":
+        return None
+    if original is not None and original.status not in {"planning", "abandoned"}:
+        return None
+    return intent_review_refusal(candidate)
+
+
+def intent_review_erasure_refusal(
+    operation: str, original: TaskDocument | None, candidate: TaskDocument
+) -> str | None:
+    """Refuse dropping an existing leaf ``intentReview`` across any write route (MIK-R189 rule 8)."""
+
+    if original is None or original.intentReview is None or candidate.intentReview is not None:
+        return None
+    return (
+        f"{INTENT_REVIEW_ERASURE_REFUSAL}: {operation} cannot drop intentReview; it records "
+        "the developer's answer before any start. Re-supply the same value, or change it "
+        "with task_doc set_field fields.intentReview."
+    )
+
+
+#: The frame id whose retained revisions hold the agreed page (MIK-R189 rule 9).
+AGREED_FRAME_ID = "explainer"
+#: A symlink on the way to the retained revision is refused, never followed (rule 9).
+AGREED_REVISION_SYMLINK_REFUSAL = "agreed-revision-symlink-refused"
+
+
+@dataclass(frozen=True)
+class ResolvedAgreedRevision:
+    """The agreed revision, resolved from its strict fields to its exact retained bytes.
+
+    ``revision`` is the retained revision number the strict ``revisionId`` names, ``manifest_path``
+    the revision's manifest and ``manifest_bytes`` its exact bytes. ``sha256`` is the digest the
+    architect recorded at the go, and ``digest_verified`` whether the retained manifest still
+    carries it: the same validated agreement identifies, seals and supplies the actual agreed page
+    to display, removal, receipts and the enclosure copy (MIK-R189 rule 9).
+    """
+
+    revision: int
+    revision_id: str
+    sha256: str
+    packet_versions: tuple[str, ...]
+    manifest_path: Path
+    manifest_bytes: bytes
+    digest_verified: bool
+
+
+def resolve_agreed_revision(
+    task_root: Path,
+    document: TaskDocument | IntentReview | IntentReviewRevision | Mapping[str, Any] | None = None,
+    *,
+    leaf_id: str | None = None,
+    frame_id: str = AGREED_FRAME_ID,
+) -> ResolvedAgreedRevision | None:
+    """Resolve ``intentReview.agreedRevision`` through its strict fields to the exact retained revision.
+
+    Only the strict native record counts (MIK-R189 rule 8): ``revisionId`` names the retained
+    revision, ``sha256`` is the digest of its manifest bytes and ``packetVersions`` cites the
+    packets the agreed page illustrated. The resolver accepts a task document, its
+    ``intentReview``, the ``agreedRevision`` record itself, or a JSON mapping carrying one of
+    those -- never loose packet keys. The retained revisions live under
+    ``<task_root>/notes/reports/review-frames/<leaf>/``. An agreement whose record fails the strict
+    schema, or whose revision is not retained there, resolves to ``None``; a retained manifest
+    whose bytes no longer match the recorded digest resolves with ``digest_verified`` false, so
+    consumers refuse instead of guessing. A symlink on the way is refused, never followed.
+    """
+
+    agreement = _strict_agreement(document)
+    if agreement is None:
+        return None
+    resolved_leaf = _agreement_leaf(document, leaf_id)
+    if resolved_leaf is None:
+        return None
+    frames_base = _refuse_symlink_parents(task_root)
+    revision = agreement.revisionId.strip()
+    number_candidates = _revision_number_candidates(revision)
+    for area_name in _area_candidates(resolved_leaf, document):
+        area = frames_base / area_name
+        if area.is_symlink():
+            raise ValueError(f"{AGREED_REVISION_SYMLINK_REFUSAL}: {area} is a symlink")
+        if not area.is_dir():
+            continue
+        for revisions_dir in _revision_roots(area, frame_id):
+            found = _match_revision_dir(revisions_dir, number_candidates)
+            if found is None:
+                continue
+            manifest_path = found / "manifest.json"
+            if manifest_path.is_symlink() or not manifest_path.is_file():
+                return ResolvedAgreedRevision(
+                    revision=int(found.name),
+                    revision_id=revision,
+                    sha256=agreement.sha256,
+                    packet_versions=tuple(agreement.packetVersions),
+                    manifest_path=manifest_path,
+                    manifest_bytes=b"",
+                    digest_verified=False,
+                )
+            manifest_bytes = manifest_path.read_bytes()
+            verified = _manifest_carries_digest(manifest_bytes, agreement.sha256)
+            return ResolvedAgreedRevision(
+                revision=int(found.name),
+                revision_id=revision,
+                sha256=agreement.sha256,
+                packet_versions=tuple(agreement.packetVersions),
+                manifest_path=manifest_path,
+                manifest_bytes=manifest_bytes,
+                digest_verified=verified,
+            )
+    return None
+
+
+def _strict_agreement(
+    document: TaskDocument | IntentReview | IntentReviewRevision | Mapping[str, Any] | None,
+) -> IntentReviewRevision | None:
+    """The one strict agreement record, or ``None`` when the input does not carry a valid one."""
+
+    raw = _raw_agreement(document)
+    if raw is None:
+        return None
+    if isinstance(raw, IntentReviewRevision):
+        return raw
+    try:
+        return IntentReviewRevision.model_validate(raw)
+    except ValidationError:
+        return None
+
+
+def _raw_agreement(
+    document: TaskDocument | IntentReview | IntentReviewRevision | Mapping[str, Any] | None,
+) -> Mapping[str, Any] | IntentReviewRevision | None:
+    """The agreement record the source carries, extracted before its strict validation."""
+
+    if isinstance(document, IntentReviewRevision):
+        return document
+    if isinstance(document, IntentReview):
+        return document.agreedRevision
+    if isinstance(document, TaskDocument):
+        return None if document.intentReview is None else document.intentReview.agreedRevision
+    if not isinstance(document, Mapping):
+        return None
+    raw: object | None = None
+    if "intentReview" in document:
+        review = document.get("intentReview")
+        if isinstance(review, Mapping):
+            raw = review.get("agreedRevision")
+    elif any(key in document for key in ("revisionId", "sha256", "packetVersions")):
+        raw = document
+    return raw if isinstance(raw, Mapping) else None
+
+
+def _agreement_leaf(
+    document: TaskDocument | IntentReview | IntentReviewRevision | Mapping[str, Any] | None,
+    leaf_id: str | None,
+) -> str | None:
+    if leaf_id:
+        return leaf_id
+    if isinstance(document, TaskDocument):
+        return document.id
+    if isinstance(document, Mapping) and isinstance(document.get("id"), str):
+        return str(document["id"])
+    return None
+
+
+def _area_candidates(leaf_id: str, document: object) -> list[str]:
+    slug = ""
+    if isinstance(document, TaskDocument):
+        slug = document.slug
+    elif isinstance(document, Mapping) and isinstance(document.get("slug"), str):
+        slug = str(document["slug"])
+    return list(dict.fromkeys(name for name in (slugify(leaf_id), leaf_id, slug) if name))
+
+
+def _refuse_symlink_parents(task_root: Path) -> Path:
+    """The task-owned frame store root, after refusing a symlink on the way to it."""
+
+    frames_base = task_root / "notes" / "reports" / "review-frames"
+    for parent in (task_root / "notes", task_root / "notes" / "reports", frames_base):
+        if parent.is_symlink():
+            raise ValueError(f"{AGREED_REVISION_SYMLINK_REFUSAL}: {parent} is a symlink")
+    return frames_base
+
+
+def _revision_roots(area: Path, frame_id: str) -> list[Path]:
+    """The retained-revision directories of one frame area: its own and every child frame's."""
+
+    if not area.is_dir():
+        return []
+    roots: list[Path] = []
+    for candidate in [area / frame_id, *sorted(area.iterdir())]:
+        if candidate.is_symlink():
+            raise ValueError(f"{AGREED_REVISION_SYMLINK_REFUSAL}: {candidate} is a symlink")
+        if candidate.is_dir() and (candidate / "revisions").is_dir():
+            roots.append(candidate / "revisions")
+    return roots
+
+
+def _revision_number_candidates(revision_id: str) -> list[str]:
+    """The directory names one ``revisionId`` can name: itself, and its number's spellings."""
+
+    cleaned = revision_id.strip()
+    candidates = [cleaned]
+    digits = re.sub(r"^[^0-9]+", "", cleaned)
+    if digits and digits.isdecimal():
+        for variant in (str(int(digits)), f"rev-{int(digits)}"):
+            if variant not in candidates:
+                candidates.append(variant)
+    return candidates
+
+
+def _match_revision_dir(revisions_dir: Path, candidates: list[str]) -> Path | None:
+    """The exact retained revision directory the strict id names, refusing symlinks on the way.
+
+    A retained revision's directory name is a decimal number; a candidate name that is not one
+    cannot be the exact retained revision the strict record identifies.
+    """
+
+    if revisions_dir.is_symlink() or not revisions_dir.is_dir():
+        return None
+    for name in candidates:
+        if not name.isdecimal():
+            continue
+        candidate = revisions_dir / name
+        if candidate.is_symlink():
+            raise ValueError(f"{AGREED_REVISION_SYMLINK_REFUSAL}: {candidate} is a symlink")
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def _manifest_carries_digest(manifest_bytes: bytes, sha256: str) -> bool:
+    """Whether the manifest's own bytes, or its declared artifact digest, carry the strict digest."""
+
+    if hashlib.sha256(manifest_bytes).hexdigest() == sha256:
+        return True
+    try:
+        parsed = json.loads(manifest_bytes)
+    except (OSError, ValueError):
+        return False
+    return isinstance(parsed, dict) and sha256 in {
+        str(parsed.get("artifactDigest") or ""),
+        str(parsed.get("artifact_digest") or ""),
+    }
+
+
+def _check_expected_knowledge_effects(
+    kind: DocKind,
+    effects: list[ExpectedKnowledgeEffect] | None,
+    requirements: list[str | ApprovedRequirementPacketRef],
+) -> None:
+    if effects is None:
+        return
+    if kind == "master":
+        raise ValueError("expectedKnowledgeEffects belongs to a leaf document, not a master")
+    if not effects:
+        raise ValueError(
+            "expectedKnowledgeEffects declares at least one effect; clear it with null instead"
+        )
+    packets = {
+        f"{packet.stableId}@{packet.version}"
+        for packet in requirements
+        if isinstance(packet, ApprovedRequirementPacketRef)
+    }
+    unknown = sorted({effect.requirementRef for effect in effects} - packets)
+    if packets and unknown:
+        raise ValueError(
+            "expectedKnowledgeEffects requirementRef names no packet in requirements: "
+            + ", ".join(unknown)
+        )
+    counts = Counter(f"{effect.subject}#{effect.effect}" for effect in effects)
+    repeated = sorted(key for key, count in counts.items() if count > 1)
+    if repeated:
+        raise ValueError(
+            "expectedKnowledgeEffects repeats a declaration (the same subject and effect): "
+            + ", ".join(repeated)
+        )
+
+
 class TaskDocument(_Doc):
     schema_: Literal["ar-task-document/v1"] = Field(default=TASK_DOCUMENT_SCHEMA, alias="schema")
     id: str
@@ -659,6 +1051,8 @@ class TaskDocument(_Doc):
     repo: str
     type: str = ""
     createdAt: str
+    completedAt: str | None = None
+    waitsFor: list[str] | None = None
     master: str | None = None
     # Extra "**Key:** value" header lines beyond the standard block (e.g. Verified/Source); R4.
     headerNotes: list[HeaderNote] = Field(default_factory=list)
@@ -677,9 +1071,21 @@ class TaskDocument(_Doc):
     # "never started". One marker per source kind and role keeps the task document bounded.
     executionRegistrations: list[TaskExecutionRegistration] = Field(default_factory=list)
     lifecycleId: str | None = None
+    # MIK-R08 definition 5: a knowledge-maintenance leaf classifies every entry of its memory base,
+    # not only those its code change reaches. Absent means false; only ``true`` is ever written.
+    knowledgeMaintenanceScope: bool | None = None
+    # MIK-R11: the invariant and family effects the leaf expects, declared before implementation.
+    # Absent means no declaration: every worklist item is ``unplanned``.
+    expectedKnowledgeEffects: list[ExpectedKnowledgeEffect] | None = None
+    # MIK-R189 rule 8: the architect's record of the developer's answer before a start. Absent is
+    # an older leaf, which is admitted; ``pending`` and ``review-first`` refuse every start of the
+    # leaf with ``intent-review-open``. ``go``, with the agreed revision, admits it.
+    intentReview: IntentReview | None = None
     objective: str = ""
     requirements: list[str | ApprovedRequirementPacketRef] = Field(default_factory=list)
     design: str | None = None
+    nonGoals: str | None = None
+    acceptance: str | None = None
     steps: list[Step] = Field(default_factory=list)
     codeExamples: list[CodeExample] = Field(default_factory=list)
     # Why code examples are absent (e.g. "Drafted at the plan gate.") -- distinguishes a
@@ -690,6 +1096,7 @@ class TaskDocument(_Doc):
     # Missing review state means zero rounds.  The state is written only by the dedicated
     # begin/record review operations; generic task mutations cannot rewrite it.
     reviewState: ReviewState | None = None
+    memoryReviewState: MemoryReviewState | None = None
     openQuestions: list[str | AcceptanceObligationQuestion] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
     # subTasks is the master series index (master-only). sections is the master's ordered
@@ -709,6 +1116,34 @@ class TaskDocument(_Doc):
     # Legal only on an orchestration sprint; roles are unique among non-retired seats.
     seats: list[SprintSeat] = Field(default_factory=list)
 
+    _unreadable_review: dict[str, tuple[Any, str]] = PrivateAttr(default_factory=dict)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _launch_without_unreadable_review(
+        cls, value: Any, handler: ModelWrapValidatorHandler[Self]
+    ) -> Self:
+        try:
+            return handler(value)
+        except ValidationError as error:
+            fallback = launch_review_fallback(value, error)
+            if fallback is None:
+                raise
+            data, unreadable = fallback
+            document = handler(data)
+            document._unreadable_review = unreadable
+            return document
+
+    @property
+    def review_read_error(self) -> str | None:
+        return "; ".join(error for _, error in self._unreadable_review.values()) or None
+
+    @model_serializer(mode="wrap")
+    def _preserve_unreadable_review(
+        self, handler: SerializerFunctionWrapHandler, info: SerializationInfo
+    ) -> dict[str, Any]:
+        return preserve_unreadable_review(handler(self), self._unreadable_review, info)
+
     @model_validator(mode="after")
     def _check_kind_fields(self) -> Self:
         if self.kind == "master":
@@ -719,6 +1154,9 @@ class TaskDocument(_Doc):
         self._check_sprint_rows_and_seats()
         self._check_discarded_subtasks()
         self._normalize_integration_branch()
+        _check_expected_knowledge_effects(
+            self.kind, self.expectedKnowledgeEffects, self.requirements
+        )
         return self
 
     def _check_master_fields(self) -> None:
@@ -728,10 +1166,11 @@ class TaskDocument(_Doc):
             or self.codeExamplesNote is not None
             or self.lifecycleId is not None
             or self.executionRegistrations
+            or self.intentReview is not None
         ):
             raise ValueError(
                 "a master document has no steps, codeExamples, codeExamplesNote, lifecycleId, "
-                "or executionRegistrations"
+                "executionRegistrations, or intentReview"
             )
 
     def _check_nonmaster_fields(self) -> None:
@@ -784,10 +1223,23 @@ class TaskDocument(_Doc):
                     "discardedSubTasks proof identity must match the parent repository and file"
                 )
 
+    @property
+    def is_sprint(self) -> bool:
+        """Whether this is an orchestration sprint, for every reader that asks.
+
+        A sprint commands masters. One that lost its last master to a retirement commands
+        nothing any more and is a sprint still: it holds the retirement rows, and a master can be
+        attached to it again.
+        """
+
+        return self.kind == "master" and (
+            bool(self.orchestrates) or any(row.retirement is not None for row in self.subTasks)
+        )
+
     def _check_execution_fields(self) -> None:
         if self.kind != "master":
             return
-        if self.orchestrates and self.executionNature is not None:
+        if self.is_sprint and self.executionNature is not None:
             raise ValueError("an orchestration sprint has no executionNature")
         if not self.orchestrates and self.executionGraph is not None:
             raise ValueError("executionGraph belongs only to an orchestration sprint")
@@ -802,9 +1254,9 @@ class TaskDocument(_Doc):
             )
         if not self.seats:
             return
-        if self.kind != "master" or not self.orchestrates:
+        if not self.is_sprint:
             raise ValueError("seats belong only to an orchestration sprint")
-        live_roles = [seat.role for seat in self.seats if seat.state != "retired"]
+        live_roles = [canonical_role(seat.role) for seat in self.seats if seat.state != "retired"]
         if len(set(live_roles)) != len(live_roles):
             raise ValueError("sprint seat roles must be unique among planned/active seats")
 
@@ -814,7 +1266,7 @@ class TaskDocument(_Doc):
         branch = self.integrationBranch.strip()
         if self.kind != "master":
             raise ValueError("integrationBranch is master-only")
-        if not self.orchestrates:
+        if not self.is_sprint:
             raise ValueError(
                 "integrationBranch belongs only to an orchestration sprint with orchestrates"
             )
@@ -823,43 +1275,14 @@ class TaskDocument(_Doc):
         self.integrationBranch = branch
 
 
-def _declared_statuses(doc: TaskDocument) -> list[StepStatus]:
-    """Every declared step and substep, matching terminal-readiness semantics."""
-    statuses: list[StepStatus] = []
-    for step in doc.steps:
-        statuses.append(step.status)
-        statuses.extend(sub.status for sub in step.substeps)
-    return statuses
-
-
-def step_total(doc: TaskDocument) -> int:
-    return len(_declared_statuses(doc))
-
-
-def step_done(doc: TaskDocument) -> int:
-    return sum(1 for status in _declared_statuses(doc) if status == "done")
-
-
-def current_step(doc: TaskDocument) -> str | None:
-    """The active step for the dashboard: first in-progress/blocked, else first unfinished."""
-    for step in doc.steps:
-        if step.status in ("inProgress", "blocked"):
-            return f"{step.id} — {step.title}"
-        for sub in step.substeps:
-            if sub.status in ("inProgress", "blocked"):
-                return f"{step.id}/{sub.id} — {sub.title}"
-    for step in doc.steps:
-        if step.status != "done":
-            return f"{step.id} — {step.title}"
-        for sub in step.substeps:
-            if sub.status != "done":
-                return f"{step.id}/{sub.id} — {sub.title}"
-    return None
-
-
 def series_total(doc: TaskDocument) -> int:
-    """A master's checkboxes are its subtasks: each ``SubTaskRef`` is one box."""
-    return len(doc.subTasks)
+    """A master's checkboxes are its subtasks that will run: each such ``SubTaskRef`` is one box.
+
+    An abandoned row is left out. It is neither done nor still to do, so counting it would keep
+    a master whose remaining rows are all ``Completed`` from reading complete;
+    :func:`series_abandoned` names those rows beside the figure instead.
+    """
+    return len(doc.subTasks) - series_abandoned(doc)
 
 
 def series_done(doc: TaskDocument) -> int:
@@ -867,6 +1290,11 @@ def series_done(doc: TaskDocument) -> int:
 
     The declared subtask status is the lever and is authoritative: a slice marked
     ``Completed`` in the master counts as done even if its own leaf doc still has open
-    boxes. Never derived from a slice's internal steps.
+    boxes. Never derived from a slice's internal steps. An abandoned row is not done.
     """
     return sum(1 for sub in doc.subTasks if sub.status == "Completed")
+
+
+def series_abandoned(doc: TaskDocument) -> int:
+    """Rows that will not run, a retired master's row among them; named beside done/total."""
+    return sum(1 for sub in doc.subTasks if sub.status == "abandoned")

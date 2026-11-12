@@ -1,4 +1,4 @@
-// Engine Room flow/overlay tokens: seed/clone/integrate conduits, refused flashes, stop bars,
+// Engine Room flow/overlay tokens: intake/integrate conduits, refused flashes, stop bars,
 // attention badges, closeout beats, and teardown records.
 import { css, cva } from "../../../styled-system/css";
 
@@ -8,7 +8,7 @@ export const flowConduit = cva({
     state: {
       nominal: { stroke: "token(colors.amber)", opacity: "0.8" },
       complete: { stroke: "token(colors.amber)", opacity: "0.6" },
-      // running (seed/clone): solid cyan. GSAP DrawSVG draws it on once per activation (05n) via
+      // running (an active flow): solid cyan. GSAP DrawSVG draws it on once per activation (05n) via
       // useEngineTimeline — DrawSVG owns the stroke-dasharray/offset, so the recipe carries NO dash here
       // (a CSS dash would fight DrawSVG, and pathLength is gone — DrawSVG measures the real length). Under
       // data-effects=off no tween runs and the path simply rests solid (= fully drawn).
@@ -26,13 +26,13 @@ export const flowConduit = cva({
   },
 });
 
-// The travelling flow packet — a cyan energy dot that rides a seeding/cloning conduit via GSAP MotionPath
+// The travelling flow packet — a cyan energy dot that rides a running conduit via GSAP MotionPath
 // (05n — the conduit path string is on the packet's data-path; replaces CSS offset-path). The packet only
 // renders while animate, so under effects=off / reduced-motion there is no static dot.
 export const flowPacket = css({ fill: "token(colors.cyan)", opacity: "0.95", filter: "drop-shadow(0 0 5px token(colors.cyan))" });
 
 // --- failure-mode primitives (05o §10) ---------------------------------------
-// Scan ring — the pre-block verify sweep (a ledger-map check / stale-base preflight / provider probe): a
+// Scan ring — the pre-block verify sweep (a ledger-map check / stale-base preflight): a
 // cyan ring expands + fades on the lane being checked, cyan because a check IS the active step. Transient,
 // like the flow packet — no settled state (opacity 0 at rest); GSAP (data-fx='scan') drives the r/opacity
 // expand-fade, and the <circle> is only rendered while animate, so under effects=off / reduced-motion it
@@ -53,11 +53,11 @@ export const scanRing = css({
 // group opacity (a className opacity on a Motion element loses on a static frame — see worktreeWire).
 export const ghostedLane = css({ opacity: "0.32", filter: "grayscale(0.45)" });
 
-// 05o refused-conduit flash (SHARED — T9B red fault · T9C amber reroute · T14C red conflict). The seed/
-// return conduit that did not take (podstage `.refused`/`.refred`): cyan → white spark → its polarity
-// colour → fade out. AMBER = a fallback/reroute (CGC seed stale → reindex), RED = a fault/conflict (GrepAI
-// seed fault, integration conflict). Polarity is NEVER a class alone and never a field on the edge — it is
-// DERIVED from edge.state (failed→red / stale→amber) and carried as the cva variant.
+// 05o refused-conduit flash (T14C red conflict). The return conduit that did not take (podstage
+// `.refused`/`.refred`): cyan → white spark → its polarity colour → fade out. AMBER = a reroute (a stale
+// return lane), RED = a fault/conflict (a failed return lane). Polarity is NEVER a class alone and never a
+// field on the edge — it is DERIVED from edge.state (failed→red / stale→amber) and carried as the cva
+// variant.
 // The one-shot colour sweep + the fade are owned by GSAP (data-fx='refuse', repeat:0 — CSS stays static,
 // 05f §8); the base recipe rests at opacity 0 (a one-shot flash has no settled state — it ends GONE, like
 // the prototype's `animation:refused .9s ease forwards` ending at opacity 0), so under effects=off the lane
@@ -66,24 +66,12 @@ export const refusedConduit = cva({
   base: { fill: "none", strokeWidth: "2.6", opacity: "0" },
   variants: {
     polarity: {
-      // amber = reroute (a fallback, not a failure) — the T9C seed-refused lane
+      // amber = reroute (a fallback, not a failure) — a stale return lane
       amber: { stroke: "token(colors.amber)", filter: "drop-shadow(0 0 4px token(colors.amber))" },
-      // red = fault / conflict — the T9B seed fault + the T14C integration conflict
+      // red = fault / conflict — the T14C integration conflict
       red: { stroke: "token(colors.alarm)", filter: "drop-shadow(0 0 4px token(colors.alarm))" },
     },
   },
-});
-
-// 05o/T7B — a faint dropout halo behind the UNLIT worktree engines (the provider-plan block: the engines
-// never light because the runtime config is missing). A static, alarm-toned dashed outline marking the
-// engine slot as HELD (not merely not-yet, which is the build-up's faded-absent engine). No animation.
-export const engineDropout = css({
-  fill: "none",
-  stroke: "token(colors.alarm)",
-  strokeWidth: "1.4",
-  strokeDasharray: "5 5",
-  opacity: "0.5",
-  filter: "drop-shadow(0 0 4px token(colors.alarm))",
 });
 
 // 05o/T12B — the "moved" remote indicator (podstage .imsg `moved`, soft/cyan): a ▲ up-triangle + a pill
@@ -118,8 +106,8 @@ export const fleetingBoxTitle = css({
 export const fleetingBoxReason = css({ fill: "token(colors.muted)", fontSize: "12px", letterSpacing: "0.02em" });
 
 // --- failure overlays (5g G3) ------------------------------------------------
-// blocked = STEADY red gate over the blocked lane (a human choice required) — never the fault flicker
-// (that's the engine, G4). Every blocked/fault raises the alarm-parity attention badge. A local reason
+// blocked = STEADY red gate over the blocked lane (a human choice required) — never a fault flash.
+// Every blocked/fault raises the alarm-parity attention badge. A local reason
 // badge (cyan-dot pointer + pill) states WHY at the lane; recovery chips offer the next action. All
 // driven off node.health / edge.state / missingFacts / nextAction — colour-as-state, no inferred chrome.
 export const gateBar = css({ fill: "token(colors.alarm)", opacity: "0.92", filter: "drop-shadow(0 0 7px token(colors.alarm))" });

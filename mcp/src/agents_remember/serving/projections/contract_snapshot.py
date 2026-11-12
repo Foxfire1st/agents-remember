@@ -9,24 +9,27 @@ pass ONCE at tick start and hands the result to all three readers as an immutabl
 ``mtime_ns`` + size + ``ctime_ns``) so an unchanged contract file is not re-read
 or re-parsed on later ticks at all.
 
-Concurrency discipline (mirrors ``projection_store._lifecycle_log_cache``): the
-cache is mutated only inside ``build``, which runs on the projection worker
+Concurrency discipline: the cache is mutated only inside ``build``, which runs on the projection worker
 thread -- the projector serializes ticks by awaiting each ``asyncio.to_thread``
 call, so builds never overlap. The published :class:`ContractSnapshot` is an
 immutable value (read-only mapping of frozen contracts) that may be handed to any
-consumer without locks. The landing refresher and agent-notifier sweep keep their own
-independent passes; they never touch this cache.
+consumer without locks. The landing refresher keeps its own independent pass; it never
+touches this cache.
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
-from agents_remember.worktrees.task_resolver import iter_leaf_enclosure_contracts
+from agents_remember.tasks.task_paths import is_archived_path, is_below_notes
+from agents_remember.worktrees.task_resolver import (
+    is_foreign_enclosure_contract,
+    iter_leaf_enclosure_contracts,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
@@ -78,25 +81,71 @@ class ContractSnapshotCache:
 
     def __init__(self) -> None:
         self._entries: dict[Path, _ParseCacheEntry] = {}
+        self._failed: set[Path] = set()
 
-    def build(self, tasks_root: Path) -> ContractSnapshot:
-        """Enumerate + parse the live leaf contracts once; publish an immutable snapshot."""
+    def build(self, tasks_root: Path, only: Collection[Path] | None = None) -> ContractSnapshot:
+        """Enumerate + parse the live leaf contracts once; publish an immutable snapshot.
+
+        With ``only``, no enumeration happens: exactly those contract paths are
+        stat-checked and (re-)parsed, deletions drop their entries, and everything
+        else is retained as-is (F09). The caller passes ``only`` only from a complete
+        wake path sample, which holds every watcher-accepted change including
+        additions, so nothing outside it could have moved; full refreshes enumerate
+        and reconcile, which also prunes entries whose paths left the tree.
+        """
+        if only is not None:
+            return self._build_scoped(tasks_root, only)
         contracts: dict[Path, WorktreeContract] = {}
         skipped: set[Path] = set()
         seen: set[Path] = set()
         for path in iter_leaf_enclosure_contracts(tasks_root):
             seen.add(path)
-            stat = _safe_stat(path)
-            cached = self._cached_contract(path, stat)
-            if cached is not None:
-                contracts[path] = cached
+            contract = self._parse_live(path)
+            if contract is None:
+                skipped.add(path)
                 continue
+            contracts[path] = contract
+        for stale in [path for path in self._entries if path not in seen]:
+            del self._entries[stale]
+        self._failed = skipped
+        return ContractSnapshot(contracts=MappingProxyType(contracts), skipped=frozenset(skipped))
+
+    def _build_scoped(self, tasks_root: Path, only: Collection[Path]) -> ContractSnapshot:
+        """Re-parse exactly the given contract paths against the retained entries."""
+        # Failed reads are retried on every build, including a scoped pass for a
+        # different path. Keep their addresses, never a cached failed answer.
+        for path in set(only) | self._failed:
+            if (
+                is_archived_path(path)
+                or is_below_notes(path, tasks_root)
+                or not os.path.lexists(path)
+            ):
+                self._entries.pop(path, None)
+                self._failed.discard(path)
+                continue
+            if self._parse_live(path) is None:
+                self._failed.add(path)
+            else:
+                self._failed.discard(path)
+        contracts = {
+            path: entry.contract
+            for path, entry in self._entries.items()
+            if entry.contract is not None
+        }
+        return ContractSnapshot(
+            contracts=MappingProxyType(contracts), skipped=frozenset(self._failed)
+        )
+
+    def _parse_live(self, path: Path) -> WorktreeContract | None:
+        """The cached parse while its stat identity holds, else a fresh parse."""
+        stat = _safe_stat(path)
+        contract = self._cached_contract(path, stat)
+        if contract is None:
             try:
                 contract = load_contract(path)
             except (ContractError, OSError):
                 self._entries.pop(path, None)
-                skipped.add(path)
-                continue
+                return None
             if stat is not None:
                 self._entries[path] = _ParseCacheEntry(
                     mtime_ns=stat.st_mtime_ns,
@@ -105,11 +154,13 @@ class ContractSnapshotCache:
                     contract=contract,
                 )
             else:
+                # No stat to bind the parse to: usable once, never cached (a failed
+                # stat must not introduce a new skip path).
                 self._entries.pop(path, None)
-            contracts[path] = contract
-        for stale in [path for path in self._entries if path not in seen]:
-            del self._entries[stale]
-        return ContractSnapshot(contracts=MappingProxyType(contracts), skipped=frozenset(skipped))
+        if is_foreign_enclosure_contract(path, contract.task_artifact):
+            self._entries.pop(path, None)
+            return None
+        return contract
 
     def _cached_contract(self, path: Path, stat: os.stat_result | None) -> WorktreeContract | None:
         """The cached parse, only while the stat identity (mtime_ns + size + ctime_ns) holds."""

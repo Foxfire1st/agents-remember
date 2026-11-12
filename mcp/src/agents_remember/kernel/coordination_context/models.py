@@ -2,30 +2,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Protocol, TypedDict
+from typing import Any, Protocol, TypedDict
 
 from agents_remember.errors import AgentsRememberError
+from agents_remember.kernel.memory_mode import ReadableMemoryMode, Topology
 
 
 class MissingMemoryError(AgentsRememberError):
-    """Raised when neither supported durable memory location exists."""
+    """Raised when the supported durable memory location does not exist."""
 
     def __init__(
         self,
         code_repository_name: str,
-        internal_root: Path,
         coordination_root: Path,
         external_memory: Path,
     ) -> None:
         self.code_repository_name = code_repository_name
-        self.internal_root = internal_root
         self.coordination_root = coordination_root
         self.external_memory = external_memory
         super().__init__(
             "Agents Remember memory is missing for "
-            f"{code_repository_name!r}. Checked internal memory at {internal_root.as_posix()} "
-            f"and external memory at {external_memory.as_posix()} using coordination root {coordination_root.as_posix()}. "
-            "Ask the developer whether to initialize memory with c-00-initialize-memory-repo, then run c-03-repo-bootstrap if they want onboarding content generated."
+            f"{code_repository_name!r}. Checked external memory at {external_memory.as_posix()} "
+            f"using coordination root {coordination_root.as_posix()}. "
+            "Memory setup is not a message's job to prescribe: the memory initialization guide "
+            "(docs/guides/onboard-existing-repo.md) owns creating or repairing this root; repository "
+            "generating onboarding content under it."
         )
 
 
@@ -38,11 +39,36 @@ class StorageRule(TypedDict, total=False):
     exclude_file_types: list[str]
 
 
+DEFAULT_STORAGE_MODE = "memory-repo"
+"""Storage for eligible onboarding when a repository declares no override.
+
+``internal`` memory used to default this to ``repo-sidecar``; with ``internal`` removed,
+``memory-repo`` is the only derived default. ``repo-sidecar`` remains a *declarable* mode for
+an individual path rule -- it says where one artifact is written, not where memory lives.
+"""
+
+
 @dataclass
 class StorageSettings:
-    mode: str = "repo-sidecar"
-    default: str = "repo-sidecar"
+    mode: str = DEFAULT_STORAGE_MODE
+    default: str = DEFAULT_STORAGE_MODE
     path_rules: list[StorageRule] = field(default_factory=list)
+
+
+LANDING_WORKFLOW_LOCAL = "local"
+LANDING_WORKFLOW_PULL_REQUEST = "pull-request"
+LANDING_WORKFLOWS = (LANDING_WORKFLOW_LOCAL, LANDING_WORKFLOW_PULL_REQUEST)
+"""The landing workflows a repository's memory settings may choose (MIK-R202@v2 rule 13).
+
+``local`` is today's behavior and the value a missing key means: the integration moves the master
+line and the Manager pushes it. ``pull-request`` publishes each leaf landing as a merged pull
+request, and the master chain proof admits that one merge and nothing else.
+"""
+
+
+@dataclass
+class LandingSettings:
+    workflow: str = LANDING_WORKFLOW_LOCAL
 
 
 @dataclass
@@ -65,7 +91,7 @@ class CrossRepoSettings:
 
 @dataclass
 class CoordinationSelection:
-    topology: Literal["internal", "external"]
+    topology: Topology
     coordination_root: Path
     memory_root: Path
     settings_path: Path
@@ -99,7 +125,7 @@ class CoordinationHints:
     absent.
     """
 
-    topology: Literal["internal", "external"] | None = None
+    topology: Topology | None = None
     coordination_root: Path | None = None
     settings_path: Path | None = None
     onboarding_root: Path | None = None
@@ -168,7 +194,7 @@ class CoordinationRoots:
     """The coordination tree after resolution: which topology won, and the four roots that
     topology implies. Detection produces them together and no reader wants a subset."""
 
-    topology: Literal["internal", "external"]
+    topology: Topology
     coordination_root: Path
     memory_root: Path
     onboarding_root: Path
@@ -177,7 +203,7 @@ class CoordinationRoots:
 
 @dataclass
 class CoordinationContext:
-    topology: Literal["internal", "external"]
+    topology: Topology
     code_repository_name: str
     code_repository_root: Path
     coordination_root: Path
@@ -194,16 +220,14 @@ class CoordinationContext:
     storage: StorageSettings
     path_rules: list[StorageRule]
     cross_repo: CrossRepoSettings
-    # From the worktree contract whenever one is in scope: `resolver.build_coordination_context`
-    # (resolver.py line 284) reads `contract.memory_mode` straight into this field, falling back
+    # From the worktree contract whenever one is in scope: `build_coordination_context` in
+    # `resolver.py` reads `contract.memory_mode` straight into this field, falling back
     # to `_memory_mode(roots.topology)` only when there is no contract. So the vocabulary is the
-    # contract's, and this alias is the one declaration rather than a second copy of the pair.
-    memory_mode: MemoryMode
+    # contract's readable one (a legacy `disabled` contract still reports itself), and this
+    # alias is the one declaration rather than a second copy of the pair.
+    memory_mode: ReadableMemoryMode
     contract_path: Path | None = None
     worktree_group: Path | None = None
     code_worktree: Path | None = None
     memory_worktree: Path | None = None
     ledger_path: Path | None = None
-
-
-MemoryMode = Literal["internal", "external", "disabled"]

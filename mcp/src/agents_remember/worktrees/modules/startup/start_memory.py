@@ -7,6 +7,16 @@ from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_cache import derive_memory_ledger
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
+from agents_remember.worktrees.cutover_lock import first_conversion_procedure
+from agents_remember.worktrees.disabled_memory import (
+    OptOutSubject,
+    opt_out_result_fields,
+)
+from agents_remember.worktrees.knowledge_validation import (
+    LayoutProbeError,
+    has_layout_marker,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
     branch_exists,
@@ -22,25 +32,65 @@ def _memory_source_state(
 ) -> dict[str, object] | None:
     """Verify the configured memory repository before preparing its worktree."""
 
-    if contract.memory_mode == "internal":
-        return {"state": "internal", "reason": "memory lives in the code worktree"}
-    if contract.memory_mode == "disabled":
-        return {"state": "disabled"}
     assert contract.memory_repo_path is not None
     if not contract.memory_repo_path.exists():
-        return _missing_memory_repo_state(args)
+        return _missing_memory_repo_state(contract, args)
     return None
+
+
+def _memory_format_for_start(contract: WorktreeContract) -> dict[str, object]:
+    """The memory format fact for the start result (MIK-R46 rule 6).
+
+    ``worktree_start`` works on unconverted memory; its result then says
+    ``memoryFormat: "legacy-format"`` with the first-conversion procedure. Converted memory
+    says ``"converted"``. When the format cannot be told (no official line yet, or a probe
+    Git cannot answer) the fact is omitted rather than guessed.
+    """
+
+    worktree = contract.memory_worktree
+    if worktree is not None and (worktree / LAYOUT_MARKER_PATH).is_file():
+        return {"memoryFormat": "converted"}
+    repository = contract.memory_repo_path
+    assert repository is not None
+    if not branch_exists(repository, contract.memory_source_branch):
+        return {}
+    try:
+        converted = has_layout_marker(repository, contract.memory_source_branch)
+    except LayoutProbeError:
+        return {}
+    if converted:
+        return {"memoryFormat": "converted"}
+    return {
+        "memoryFormat": "legacy-format",
+        "memoryFormatProcedure": (
+            "this memory line is unconverted (no knowledge/layout.json): "
+            f"{first_conversion_procedure()}"
+        ),
+    }
 
 
 def prepare_memory_for_start(
     contract: WorktreeContract,
     args: WorktreeArgs,
+    *,
+    preview_parent: WorktreeContract | None = None,
 ) -> dict[str, object]:
     source_state = _memory_source_state(contract, args)
     if source_state is not None:
         return source_state
-    memory_source_branch = _ensure_memory_source_branch(contract)
     assert contract.memory_repo_path is not None
+    if (
+        args.dry_run
+        and preview_parent is not None
+        and not preview_parent.contract_path.exists()
+        and not preview_parent.contract_path.is_symlink()
+        and not branch_exists(contract.memory_repo_path, contract.memory_source_branch)
+    ):
+        # Parent admission already proved this exact unpublished series plan. Its pinned
+        # memory commit is readable without creating the future integration ref.
+        memory_source_branch = {"state": "would-create", "branch": contract.memory_source_branch}
+    else:
+        memory_source_branch = _ensure_memory_source_branch(contract)
     assert contract.memory_worktree is not None
     ledger = derive_memory_ledger(
         contract.memory_repo_path,
@@ -56,6 +106,7 @@ def prepare_memory_for_start(
         "mtimeSync": mtime_sync,
         "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
         "lastMemoryContentCommit": ledger.last_memory_content_commit,
+        **_memory_format_for_start(contract),
     }
 
 
@@ -129,20 +180,34 @@ def _memory_divergence_paths(source: Path, target: Path) -> set[str] | None:
     return {line.strip() for line in diff.stdout.splitlines() if line.strip()}
 
 
-def _disabled_memory_choice(args: WorktreeArgs) -> dict[str, object] | None:
+def _disabled_memory_choice(contract: WorktreeContract) -> dict[str, object]:
+    """The opt-out refusal for the removed ``disabled-memory`` recovery answer.
+
+    The answer is still parsed so it can be refused by name (MIK-R50 R1c) with
+    the mode, the reason and the action -- it is never honored, and it is no
+    longer offered as a choice.
+    """
+
+    return {
+        "state": "memory-opt-out-refused",
+        **opt_out_result_fields(
+            OptOutSubject(
+                coordination_root=contract.coordination_root,
+                repo_name=contract.repo_name,
+            ),
+            "worktree_start",
+            "start",
+        ),
+    }
+
+
+def _missing_memory_repo_state(contract: WorktreeContract, args: WorktreeArgs) -> dict[str, object]:
     if args.memory_choice == "disabled-memory":
-        return {"state": "disabled", "reason": "human selected disabled memory"}
-    return None
-
-
-def _missing_memory_repo_state(args: WorktreeArgs) -> dict[str, object]:
-    disabled = _disabled_memory_choice(args)
-    if disabled:
-        return disabled
+        return _disabled_memory_choice(contract)
     return {
         "state": "blocked",
-        "reason": "external memory repo is missing; run c-00-initialize-memory-repo before starting an external-memory worktree",
-        "choices": ["initialize-memory-repo", "disabled-memory"],
+        "reason": "external memory repo is missing; follow docs/guides/onboard-existing-repo.md before starting an external-memory worktree",
+        "choices": ["initialize-memory-repo"],
     }
 
 

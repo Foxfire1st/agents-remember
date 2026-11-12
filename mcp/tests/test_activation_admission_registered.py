@@ -14,6 +14,8 @@ import anyio
 from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.server import create_server
+from agents_remember.models.tokens import count_response_tokens
+from agents_remember.models.tools.tool_answer import bound_for
 from agents_remember.tasks import SubTaskRef, read_task_doc, write_task_doc
 from agents_remember.worktrees.activation.atomic_series_activation import (
     activation_path,
@@ -31,7 +33,8 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 from mcp.shared.memory import create_connected_server_and_client_session
-from test_atomic_series_activation import ActivationFixture
+from test_atomic_series_activation import REPO, ActivationFixture
+from test_worktree_support import git, init_repo
 
 
 class RegisteredActivationAdmissionTests(unittest.TestCase):
@@ -73,7 +76,15 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
     @staticmethod
     async def _call(server, name: str, arguments: dict[str, object]):
         async with create_connected_server_and_client_session(server._mcp_server) as client:
-            return await client.call_tool(name, arguments)
+            result = await client.call_tool(name, arguments)
+        payload = result.structuredContent
+        if name == "worktree_start" and payload is not None and not payload["ok"]:
+            assert not result.isError and not payload.get("overflow"), payload
+            assert count_response_tokens(payload) <= bound_for(name)
+            assert payload["code"] and payload["summary"] and payload["nextTool"]
+            assert "error" not in payload
+            assert not {"admission", "detail", "retryPrecondition", "statusAction"} & payload.keys()
+        return result
 
     @staticmethod
     def _arguments(**values: object) -> dict[str, object]:
@@ -88,18 +99,23 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
 
     def _assert_bounded_parser_refusal(self, result, contract, malformed_bytes) -> None:
+        # L111's repair keeps the parser diagnosis whole in the detail file,
+        # while the refusal envelope itself fits the existing L108 bound.
         self.assertFalse(result.isError)
         assert result.structuredContent is not None
         payload = result.structuredContent
         self.assertFalse(payload["ok"])
-        self.assertEqual(payload["state"], "atomic-series-contract-unreadable")
-        self.assertEqual(payload["status"], "atomic-series-contract-unreadable")
-        self.assertEqual(payload["contract_path"], contract.contract_path.as_posix())
-        self.assertIn("invalid contract kind:", payload["detail"])
-        self.assertLessEqual(len(payload["detail"]), 8192)
-        self.assertTrue(payload["detail"].endswith("\u2026 [detail truncated]"))
+        self.assertFalse(payload.get("overflow", False))
+        self.assertEqual(payload["code"], "atomic-series-contract-unreadable")
+        self.assertLessEqual(count_response_tokens(payload), bound_for("worktree_start"))
+        # The next-step address is sufficient; diagnosis and admission stay whole.
+        whole = self._whole(result)
+        self.assertEqual(whole["contract_path"], contract.contract_path.as_posix())
+        self.assertIn("invalid contract kind:", whole["detail"])
+        self.assertLessEqual(len(whole["detail"]), 8192)
+        self.assertTrue(whole["detail"].endswith("\u2026 [detail truncated]"))
 
-        admission = payload["admission"]
+        admission = whole["admission"]
         self.assertNotIn("classification", admission)
         self.assertNotIn("blocking", admission)
         self.assertEqual(admission["status"], "atomic-series-contract-unreadable")
@@ -121,13 +137,23 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
             admission["statusAction"]["args"]["contract_path"],
             contract.contract_path.as_posix(),
         )
-        self.assertIn("before retrying", payload["retryPrecondition"])
+        self.assertIn("before retrying", whole["retryPrecondition"])
         self.assertEqual(payload["nextTool"], "worktree_status")
-        self.assertEqual(payload["nextArgs"]["repo_id"], "repo-a")
-        self.assertEqual(payload["nextArgs"]["contract_path"], contract.contract_path.as_posix())
-        self.assertIn("invalid contract kind:", self._text(result))
+        self.assertEqual(whole["nextArgs"]["repo_id"], "repo-a")
+        self.assertEqual(whole["nextArgs"]["contract_path"], contract.contract_path.as_posix())
+        self.assertIn("invalid contract kind:", json.dumps(whole))
         self.assertIn("worktree_status", self._text(result))
         self.assertEqual(contract.contract_path.read_bytes(), malformed_bytes)
+
+    def _whole(self, result):
+        # MIK-R111 rule 1: admission and parser fact pins read the validated
+        # whole result; the bounded answer may shed their evidence.
+        assert result.structuredContent is not None
+        payload = result.structuredContent
+        self.assertIsInstance(payload.get("log"), str)
+        whole = json.loads(Path(payload["log"]).read_text(encoding="utf-8"))
+        self.assertEqual(whole["ok"], payload["ok"])
+        return whole
 
     def _publish_locator(self, contract) -> None:
         publish_new_lifecycle_operation_location(
@@ -136,15 +162,15 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
 
     def _contract(self, name: str):
-        # The configured-authority route derives an internal memory edge when the configured
-        # code repository carries its ``ar-memory`` root. Keep this fixture local and untracked
-        # while exercising the same series activation source pair.
-        (self.fixture.code / "ar-memory").mkdir(exist_ok=True)
-        internal_coordination = self.fixture.code / "ar-coordination"
-        if not internal_coordination.exists():
-            internal_coordination.symlink_to(self.fixture.coord, target_is_directory=True)
-        contract = self.fixture.contract(name)
-        configured = replace(contract, memory_mode="internal")
+        # The configured-authority route binds the contract to the memory root the settings
+        # resolve for this repository, and that root is external now that the repo-sidecar
+        # ``ar-memory/`` layout is gone. Provision the external memory repository the
+        # configuration actually resolves to, so the fixture still exercises a real edge.
+        memory_repo = self.fixture.coord / "memory-repos" / f"ar-{REPO}"
+        if not (memory_repo / ".git").exists():
+            init_repo(memory_repo, "main")
+            git(memory_repo, "branch", "super", "main")
+        configured = self.fixture.contract(name, memory_root=memory_repo)
         lifecycle_operation_locator_path(
             configured.coordination_root, configured.contract_path
         ).unlink(missing_ok=True)
@@ -167,12 +193,12 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
 
         self.assertFalse(result.isError)
         assert result.structuredContent is not None
-        payload = result.structuredContent
-        self.assertEqual(payload["atomicSeriesActivation"]["state"], "active")
+        whole = self._whole(result)
+        self.assertEqual(whole["atomicSeriesActivation"]["state"], "active")
         self.assertEqual(
-            payload["atomicSeriesActivation"]["address"], selected.activation_path.as_posix()
+            whole["atomicSeriesActivation"]["address"], selected.activation_path.as_posix()
         )
-        self.assertGreaterEqual(payload["atomicSeriesActivation"]["record"]["revision"], 1)
+        self.assertGreaterEqual(whole["atomicSeriesActivation"]["record"]["revision"], 1)
         self.assertEqual(selected.activation_path.read_bytes(), before)
 
     def test_registered_sync_refusal_addresses_only_this_contracts_own_state(self) -> None:
@@ -201,7 +227,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         assert result.structuredContent is not None
         payload = result.structuredContent
         self.assertFalse(payload["ok"])
-        admission = payload["admission"]
+        admission = self._whole(result)["admission"]
         self.assertNotIn("classification", admission)
         self.assertNotIn("blocking", admission)
         self.assertNotIn("sourcePair", admission)
@@ -217,7 +243,9 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
         self.assertIn("not sufficient to continue", admission["retryPrecondition"])
         self.assertNotIn("master-b/task.json", self._text(result))
-        self.assertIn("worktree_status", self._text(result))
+        # MIK-R111 rule 1: the bounded text may shed admission guidance;
+        # its whole-result log retains the same status-address sentence.
+        self.assertIn("worktree_status", self._whole(result)["summary"])
         self.assertEqual(path_a.read_bytes(), before)
 
     def test_registered_sync_refusal_distinguishes_vacant_and_unreadable(self) -> None:
@@ -237,11 +265,11 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
         self.assertFalse(vacant.isError)
         assert vacant.structuredContent is not None
-        vacant_payload = vacant.structuredContent
-        self.assertNotIn("blocking", vacant_payload["admission"])
-        self.assertEqual(vacant_payload["admission"]["activation"]["observedState"], "vacant")
-        self.assertIn("not sufficient to continue", vacant_payload["retryPrecondition"])
-        self.assertIn("not sufficient to continue", self._text(vacant))
+        vacant_whole = self._whole(vacant)
+        self.assertNotIn("blocking", vacant_whole["admission"])
+        self.assertEqual(vacant_whole["admission"]["activation"]["observedState"], "vacant")
+        self.assertIn("not sufficient to continue", vacant_whole["retryPrecondition"])
+        self.assertIn("not sufficient to continue", json.dumps(vacant_whole))
 
         path.write_text("{broken", encoding="utf-8")
         unreadable = anyio.run(
@@ -255,12 +283,10 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
         self.assertFalse(unreadable.isError)
         assert unreadable.structuredContent is not None
-        unreadable_payload = unreadable.structuredContent
+        unreadable_whole = self._whole(unreadable)
+        self.assertEqual(unreadable_whole["admission"]["activation"]["observedState"], "unreadable")
         self.assertEqual(
-            unreadable_payload["admission"]["activation"]["observedState"], "unreadable"
-        )
-        self.assertEqual(
-            unreadable_payload["admission"]["activation"]["errorType"],
+            unreadable_whole["admission"]["activation"]["errorType"],
             "ValidationError",
         )
         self.assertEqual(path.read_text(encoding="utf-8"), "{broken")
@@ -286,7 +312,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
 
         self.assertFalse(status.isError)
         assert status.structuredContent is not None
-        status_activation = status.structuredContent["atomicSeriesActivation"]
+        status_activation = self._whole(status)["atomicSeriesActivation"]
         self.assertEqual(status_activation["state"], "unreadable")
         self.assertEqual(status_activation["errorType"], "ValidationError")
         self.assertLessEqual(len(status_activation["detail"]), 8192)
@@ -309,13 +335,18 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         assert sync.structuredContent is not None
         sync_payload = sync.structuredContent
         self.assertFalse(sync_payload["ok"])
-        admission = sync_payload["admission"]
+        # Both oversized admission diagnoses remain whole in the log;
+        # L111's refusal envelope fits the unchanged guard without a cut.
+        self.assertFalse(sync_payload.get("overflow", False))
+        self.assertLessEqual(count_response_tokens(sync_payload), bound_for("worktree_sync"))
+        self.assertNotIn("admission", sync_payload)
+        self.assertEqual(sync_payload["nextTool"], "worktree_sync")
+        admission = self._whole(sync)["admission"]
         self.assertEqual(admission["activation"]["observedState"], "unreadable")
         self.assertEqual(admission["activation"]["errorType"], "ValidationError")
         self.assertLessEqual(len(admission["activation"]["detail"]), 8192)
         self.assertTrue(admission["activation"]["detail"].endswith("\u2026 [detail truncated]"))
         self.assertEqual(admission["statusAction"]["tool"], "worktree_status")
-        self.assertIn("ValidationError", self._text(sync))
         self.assertIn("worktree_status", self._text(sync))
         self.assertEqual(path.read_bytes(), before)
 
@@ -359,13 +390,12 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         payload = result.structuredContent
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "atomic-series-contract-edge-mismatch")
-        self.assertEqual(
-            payload["admission"]["expected"]["branchEdge"]["codeSourceBranch"], "super"
-        )
-        self.assertEqual(payload["admission"]["observed"]["branchEdge"]["codeSourceBranch"], "main")
+        whole = self._whole(result)
+        self.assertEqual(whole["admission"]["expected"]["branchEdge"]["codeSourceBranch"], "super")
+        self.assertEqual(whole["admission"]["observed"]["branchEdge"]["codeSourceBranch"], "main")
         self.assertEqual(payload["nextTool"], "worktree_status")
-        self.assertEqual(payload["nextArgs"]["repo_id"], "repo-a")
-        self.assertEqual(payload["nextArgs"]["contract_path"], contract.contract_path.as_posix())
+        self.assertEqual(whole["nextArgs"]["repo_id"], "repo-a")
+        self.assertEqual(whole["nextArgs"]["contract_path"], contract.contract_path.as_posix())
         self.assertIn("declared edge", self._text(result))
 
     def test_registered_start_reread_refusal_preserves_edges_and_guidance(self) -> None:
@@ -392,7 +422,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
             return {}
 
         with patch(
-            "agents_remember.worktrees.modules.startup.start_contract.fetch_source_upstreams",
+            "agents_remember.worktrees.modules.startup.series_contract_activation.fetch_source_upstreams",
             side_effect=drift_after_fetch,
         ):
             result = anyio.run(
@@ -413,13 +443,12 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         payload = result.structuredContent
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "atomic-series-contract-edge-mismatch")
-        self.assertEqual(
-            payload["admission"]["expected"]["branchEdge"]["codeSourceBranch"], "super"
-        )
-        self.assertEqual(payload["admission"]["observed"]["branchEdge"]["codeSourceBranch"], "main")
+        whole = self._whole(result)
+        self.assertEqual(whole["admission"]["expected"]["branchEdge"]["codeSourceBranch"], "super")
+        self.assertEqual(whole["admission"]["observed"]["branchEdge"]["codeSourceBranch"], "main")
         self.assertEqual(payload["nextTool"], "worktree_status")
-        self.assertEqual(payload["nextArgs"]["repo_id"], "repo-a")
-        self.assertEqual(payload["nextArgs"]["contract_path"], contract.contract_path.as_posix())
+        self.assertEqual(whole["nextArgs"]["repo_id"], "repo-a")
+        self.assertEqual(whole["nextArgs"]["contract_path"], contract.contract_path.as_posix())
         self.assertIn("declared edge", self._text(result))
 
     def test_registered_start_unreadable_contract_keeps_parser_reason(self) -> None:
@@ -462,10 +491,11 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         payload = result.structuredContent
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "atomic-series-contract-unreadable")
-        self.assertIn("worktree contract must start with a front matter block", payload["detail"])
+        whole = self._whole(result)
+        self.assertIn("worktree contract must start with a front matter block", whole["detail"])
         self.assertIn(
             "worktree contract must start with a front matter block",
-            payload["admission"]["observed"]["detail"],
+            whole["admission"]["observed"]["detail"],
         )
         self.assertEqual(payload["nextTool"], "worktree_status")
         self.assertIn("worktree_status", self._text(result))
@@ -477,8 +507,14 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         malformed_bytes = contract.contract_path.read_bytes()
         with self.assertRaises(ContractError) as parser_error:
             load_contract(contract.contract_path)
-        self.assertEqual(len(str(parser_error.exception)), 9099)
-        self.assertTrue(str(parser_error.exception).startswith("invalid contract kind:"))
+        message = str(parser_error.exception)
+        self.assertTrue(message.startswith("invalid contract kind:"))
+        # The parser message embeds the contract path, so its exact length
+        # depends on the test root: derive it instead of hardcoding it.
+        self.assertEqual(
+            len(message),
+            len("invalid contract kind: ") + 9000 + len(f" (in {contract.contract_path})"),
+        )
 
         oversized = anyio.run(
             self._call,

@@ -10,6 +10,12 @@ from typing import Literal, cast
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agents_remember.errors import TaskIntentError
+from agents_remember.kernel.recorded_reads import (
+    ABSENT,
+    bytes_identity,
+    observed_resolve,
+    record_read,
+)
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.task_intent import (
     TASK_INTENT_SCHEMA,
@@ -20,7 +26,15 @@ from agents_remember.models.task_intent import (
     require_task_intent_identity,
 )
 
-from .document import CodeExample, Step, SubStep, TaskDocument
+from .document import (
+    CodeExample,
+    ExpectedKnowledgeEffect,
+    IntentReview,
+    IntentReviewRevision,
+    Step,
+    SubStep,
+    TaskDocument,
+)
 from .document_field_effects import (
     TaskDocumentFieldEffect,
     TaskDocumentFieldEffectProjector,
@@ -85,8 +99,18 @@ class TaskIntentAcceptanceObligation(_StrictProjection):
     question: str
 
 
+class TaskIntentExpectedKnowledgeEffect(_StrictProjection):
+    subject: str
+    effect: str
+    requirementRef: str
+
+
 class TaskIntentV1(_StrictProjection):
-    """Only explicitly allowlisted normative slots; never a whole-document hash."""
+    """Only explicitly allowlisted normative slots; never a whole-document hash.
+
+    ``expectedKnowledgeEffects`` (MIK-R11) is optional: a leaf that declares none projects exactly
+    as before, without the key, so every existing intent digest is unchanged.
+    """
 
     schema_: Literal["task-intent/v1"] = Field(default=TASK_INTENT_SCHEMA, alias="schema")
     leaf: TaskIntentLeafIdentity
@@ -97,9 +121,16 @@ class TaskIntentV1(_StrictProjection):
     codeExamples: tuple[TaskIntentCodeExample, ...]
     codeExamplesNote: str | None
     acceptanceObligations: tuple[TaskIntentAcceptanceObligation, ...]
+    expectedKnowledgeEffects: tuple[TaskIntentExpectedKnowledgeEffect, ...] | None = None
+    nonGoals: str | None = None
+    acceptance: str | None = None
 
     def canonical_value(self) -> dict[str, object]:
-        return self.model_dump(mode="json", by_alias=True, exclude_none=False)
+        value = self.model_dump(mode="json", by_alias=True, exclude_none=False)
+        for name in ("expectedKnowledgeEffects", "nonGoals", "acceptance"):
+            if value.get(name) is None:
+                value.pop(name, None)  # absent fields leave existing identities unchanged
+        return value
 
 
 _ROOT_FIELDS = frozenset(
@@ -113,10 +144,14 @@ _ROOT_FIELDS = frozenset(
         "objective",
         "requirements",
         "design",
+        "nonGoals",
+        "acceptance",
         "steps",
         "codeExamples",
         "codeExamplesNote",
         "openQuestions",
+        "expectedKnowledgeEffects",
+        "intentReview",
     }
 )
 _NESTED_FIELDS: dict[type[BaseModel], frozenset[str]] = {
@@ -126,6 +161,9 @@ _NESTED_FIELDS: dict[type[BaseModel], frozenset[str]] = {
     ApprovedRequirementPacketRef: frozenset({"kind", "path", "stableId", "version"}),
     AcceptanceObligationQuestion: frozenset({"kind", "id", "question"}),
     TaskDocumentRef: frozenset({"repository", "path"}),
+    ExpectedKnowledgeEffect: frozenset({"subject", "effect", "requirementRef"}),
+    IntentReview: frozenset({"state", "decisionRef", "agreedRevision"}),
+    IntentReviewRevision: frozenset({"revisionId", "sha256", "packetVersions"}),
 }
 
 
@@ -159,6 +197,8 @@ def task_intent_projection(
             objective=candidate.document.objective,
             requirements=_requirements(task_root, candidate.document),
             design=candidate.document.design,
+            nonGoals=candidate.document.nonGoals,
+            acceptance=candidate.document.acceptance,
             steps=tuple(
                 TaskIntentStep.model_validate(value)
                 for value in cast(list[object], projected["steps"])
@@ -169,6 +209,7 @@ def task_intent_projection(
             ),
             codeExamplesNote=candidate.document.codeExamplesNote,
             acceptanceObligations=_acceptance_obligations(candidate.document),
+            expectedKnowledgeEffects=_expected_effects(projected),
         )
     except (KeyError, TypeError, ValidationError) as exc:
         raise TaskIntentError(
@@ -215,6 +256,9 @@ def task_intent_master_projection(
         )
     _validate_allowlisted_classifications()
     projected = _normative_projection(candidate.document)
+    for name in ("expectedKnowledgeEffects", "nonGoals", "acceptance"):
+        if projected.get(name) is None:
+            projected.pop(name, None)  # absent fields leave existing identities unchanged
     projected["requirements"] = [
         value.model_dump(mode="json", by_alias=True)
         for value in _requirements(task_root, candidate.document)
@@ -313,20 +357,35 @@ def _approved_packet_ref(
     task_root: Path,
     reference: ApprovedRequirementPacketRef,
 ) -> TaskIntentRequirementPacket:
-    root = task_root.resolve()
+    root = observed_resolve(task_root)
     supplied = Path(reference.path)
-    resolved = (root / supplied).resolve(strict=False)
+    resolved = observed_resolve(root / supplied)
     if supplied.is_absolute() or not resolved.is_relative_to(root) or resolved.suffix != ".md":
         raise TaskIntentError(
             "task-intent-requirement-packet-outside-task",
             f"requirement packet must be one task-relative Markdown file: {reference.path}",
         )
     try:
-        text = resolved.read_text(encoding="utf-8")
+        data = resolved.read_bytes()
     except OSError as exc:
+        record_read(
+            root / supplied,
+            ABSENT if isinstance(exc, FileNotFoundError) else f"unreadable ({type(exc).__name__})",
+        )
         raise TaskIntentError(
             "task-intent-requirement-packet-missing",
             f"approved requirement packet is absent or unreadable: {reference.path}",
+        ) from exc
+    # The confined owner reads once. Keep the caller's logical locator in the memo so
+    # retargeting a symlink cannot hide behind unchanged bytes at its former physical target.
+    record_read(root / supplied, bytes_identity(data))
+    record_read(resolved, bytes_identity(data))
+    try:
+        text = data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    except UnicodeDecodeError as exc:
+        raise TaskIntentError(
+            "task-intent-requirement-packet-encoding-invalid",
+            f"approved requirement packet is not valid UTF-8: {reference.path}",
         ) from exc
     metadata = _packet_metadata(text, packet_path=reference.path)
     identifiers = {metadata[key] for key in ("Stable ID", "Requirement ID") if key in metadata}
@@ -362,6 +421,18 @@ def _packet_metadata(text: str, *, packet_path: str) -> dict[str, str]:
     return metadata
 
 
+def _expected_effects(
+    projected: dict[str, object],
+) -> tuple[TaskIntentExpectedKnowledgeEffect, ...] | None:
+    declared = projected.get("expectedKnowledgeEffects")
+    if declared is None:
+        return None
+    return tuple(
+        TaskIntentExpectedKnowledgeEffect.model_validate(value)
+        for value in cast(list[object], declared)
+    )
+
+
 def _acceptance_obligations(
     document: TaskDocument,
 ) -> tuple[TaskIntentAcceptanceObligation, ...]:
@@ -376,6 +447,7 @@ __all__ = [
     "TaskIntentAcceptanceObligation",
     "TaskIntentCodeExample",
     "TaskIntentError",
+    "TaskIntentExpectedKnowledgeEffect",
     "TaskIntentLeafIdentity",
     "TaskIntentRequirementPacket",
     "TaskIntentRequirementText",

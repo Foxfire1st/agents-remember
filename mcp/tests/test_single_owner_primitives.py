@@ -92,7 +92,7 @@ class ReplaceSweepFalsePositiveTests(unittest.TestCase):
     """The 83 near neighbours measured in the package. None of these may be reported."""
 
     def test_a_bare_replace_from_dataclasses_is_not_the_one_from_os(self) -> None:
-        # observer/landing_state.py and serving/terminal_catalog.py both do exactly this.
+        # worktrees/direct_landing.py and worktrees/reopen_reset.py both do exactly this.
         source = "from dataclasses import dataclass, replace\nrow = replace(entry, at=now)\n"
         self.assertEqual(_replace(source), [])
         self.assertEqual(_replace("from dataclasses import replace\nrow = replace(entry)\n"), [])

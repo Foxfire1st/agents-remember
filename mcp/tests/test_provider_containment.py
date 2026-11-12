@@ -73,5 +73,40 @@ class WorktreeStartVetoTests(unittest.TestCase):
         self.assertEqual(veto["bootSnapshotProviders"], ["grepai-memory"])
 
 
+class WorktreeStartGateTruthfulnessTests(unittest.TestCase):
+    """What the start gate actually tests, and what it does not check at all (D-17).
+
+    The refusal used to read *"worktree_start refuses to repoint the active persistent lifecycle"*,
+    which describes a protection that does not exist: the test reads only the session's **current**
+    lifecycle and only its ``fleeting`` flag, so no other leaf, enclosure or session can block a
+    start. And the tool never checked a leaf's declared dependencies at all -- a leaf previewed as
+    ``would-start`` while a requirement its packet requires was unlanded. Both facts now travel with
+    the response instead of living in a session's memory.
+    """
+
+    def test_a_start_result_reports_that_the_declared_dependencies_were_not_checked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _armed_boot_config(Path(tmp), disk_providers={})
+
+            def fake_start(
+                args: worktree_tools.git_worktree_manager.WorktreeArgs,
+            ) -> worktree_tools.git_worktree_manager.WorktreeCommandResult:
+                return worktree_tools.git_worktree_manager.WorktreeCommandResult(
+                    returncode=0, payload={"state": "would-start"}
+                )
+
+            with mock.patch.object(worktree_tools.git_worktree_manager, "start_result", fake_start):
+                result = worktree_tools.worktree_start_tool(
+                    config,
+                    worktree_tools.TaskIdentity(repo_id="repo", task_name="t", worktree_name="w"),
+                )
+
+        # The tool states the check it did not perform instead of letting a caller read
+        # ``would-start`` as "this leaf's declared dependencies are satisfied".
+        self.assertEqual(result["state"], "would-start")
+        self.assertEqual(result["eligibility"]["requiresCheck"], "not-performed")
+        self.assertIn("Requires lines", str(result["eligibility"]["detail"]))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,410 @@
+"""Every public tool's production entry point, swept in one hermetic world.
+
+This module is the durable form of `260918-TSIP-L5`'s trace: it drives **every** tool the
+server advertises through the same adapter a consumer's call takes — a real in-memory MCP
+client session against a server built by ``create_server`` — and asserts that each one
+answers in the product's own vocabulary.
+
+**The arms this sweep publishes, and where each one is reachable:**
+
+======================== =============================================================
+``payload``              the tool answered, its whole result (read back from the file
+                         the answer names) validates, and its delivered answer is
+                         judged as delivered.
+``refusal``              ``ok: false`` with a machine-readable refusal identity, a
+                         code, or a next action, so the caller keeps ``ok`` and a
+                         way forward.
+``bare-not-ok``          ``ok: false`` with none of those — pinned below.
+``unvalidatable``        a call the classifier cannot judge **where it must**: the
+                         whole result is missing or unreadable, the whole refuses
+                         its model, or the delivered answer is not the shape
+                         MIK-R108 delivers — an envelope field kept, or a key
+                         neither the whole result nor the shaping accounts for,
+                         at any depth. The bypass shape below reads here too,
+                         through whichever of those rejections it meets first:
+                         a handler that returns a raw dict past the choke point
+                         hands the consumer a payload nothing validated.
+``boundary-validation``  a raise in which the tool's OWN registered response model refused the
+                         payload its producer built — the shape a ``T7``-class break takes when
+                         the producer emits the key *through* ``_tool_payload``. Asserted empty
+                         by name, so such a break is diagnosed instead of appearing anonymous.
+``argument-validation``  a raise in which some other model refused, in practice the generated
+                         ``<tool>Arguments`` input model: the CALLER's error. It shares a
+                         message shape with the arm above and is separated by model identity,
+                         never by wording. Asserted empty by name too.
+``error``                any other raise: the envelope is gone. Pinned twice, below.
+======================== =============================================================
+
+`T34` (owner `L6`, registered on master `260918_tool-surface-and-process-integrity`)
+repaired the original nine raisers: an ordinary absent-capability condition used to
+escape as a bare Python exception, so the caller lost ``ok``, ``status`` and every
+recovery key. `L5`'s round-1 trace measured them; the positive and regression cases
+below keep measuring them, so a repaired tool that raises again fails here by name.
+The second pin below is the same defect on the lifecycle family's *state*
+precondition, which this sweep reaches a typed branch for by arranging the state
+its tools document — so it would otherwise read green over those five.
+
+The current nonempty pins record the measured surface since `b52adc8b` under the
+architect's pin handover: four lifecycle preconditions that raise (owner `L111`,
+repaired under MIK-R111 rule 7). The fifth pin, one bare ``memory_quality_check``
+(owner `L110`), was emptied by its repair under MIK-R110 rule 4 in the same change —
+see the copied comments at the constants. They are records of what the sweep observes, not waivers: each owner's
+rule binds it to empty its pin with its repair.
+
+**The rule for the pins:** when the owning leaf repairs one of these tools, delete
+that entry **in the same change** that lands the repair — never delete a constant,
+and never widen one to make a new failure pass. A further raiser, or a bare
+``ok: false`` the pin does not name, is a failure: each pin is asserted *equal* to
+what was observed, in both directions.
+
+The positive control is a case, not a comment (``ChokePointControlTests``, in
+``test_tool_entry_point_controls.py``): it drives
+``models/tools/tool_response.py::finalize_tool_response`` with a payload its model forbids and
+requires it to refuse, and requires the sweep's own classifier to mark that payload
+unvalidatable. If the choke point ever stops validating, that case goes red rather than the
+whole sweep quietly passing on payloads nothing checked.
+
+The sweep's control cases live in test_tool_entry_point_sweep_controls.py, its
+read-only-mark cases in test_tool_entry_point_read_only.py, and its world and
+classifier in tool_entry_point_sweep_support.py (MIK-R196 rule 10). The cases
+this module keeps are the ones the evidence lifecycle catalog names by node.
+"""
+
+from __future__ import annotations
+
+import sys
+import unittest
+from typing import Any
+from unittest.mock import patch
+
+import anyio
+from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
+from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
+from tool_entry_point_sweep_support import (
+    ENVELOPE_LOSING_RAISERS,
+    KNOWN_MEMORY_SCAFFOLD_ADDITIONS,
+    NAVIGATION_KEYS,
+    REFUSAL_IDENTITY_KEYS,
+    T34_REPAIRED_TOOLS,
+    UNMARKED_NOT_OK,
+    EntryPointWorld,
+    _git,
+    refusal_marks,
+)
+from tool_entry_point_world import EntryPointWorld as OrdinaryEntryPointWorld
+
+# test_tool_refusal_conformance.py imports this pin from this module's path; the
+# value now lives in tool_entry_point_sweep_support.py, so it is re-exported here.
+__all__ = ["T34_REPAIRED_TOOLS"]
+
+
+class EntryPointExceptionEvidenceTests(unittest.TestCase):
+    def test_both_worlds_retain_exception_evidence(self) -> None:
+        for world_type in (OrdinaryEntryPointWorld, EntryPointWorld):
+            for message in ("synthetic runtime warning", ""):
+                with self.subTest(world=world_type.__module__, message=message):
+                    raise_lines: list[int] = []
+
+                    def inner(
+                        expected_message: str = message, lines: list[int] = raise_lines
+                    ) -> None:
+                        lines.append(sys._getframe().f_lineno + 1)
+                        raise RuntimeWarning(expected_message)
+
+                    def run_wrapper(*_args: Any, **_kwargs: Any) -> None:
+                        inner()
+
+                    world = world_type.__new__(world_type)
+                    with patch.object(anyio, "run", side_effect=run_wrapper):
+                        kind, answer = world.call("synthetic_exception", {})
+
+                    self.assertEqual(kind, "RAISED RuntimeWarning")
+                    self.assertEqual(
+                        answer,
+                        {
+                            "detail": message,
+                            "exceptionType": "RuntimeWarning",
+                            "exceptionLocation": f"{__file__}:{raise_lines[0]}",
+                        },
+                    )
+
+
+class EntryPointCoverageTests(unittest.TestCase):
+    """The swept population is derived, so a new tool cannot arrive unswept."""
+
+    def test_the_swept_population_is_the_advertised_one(self) -> None:
+        world = EntryPointWorld()
+        self.addCleanup(world.close)
+        arguments = world.benign()
+        self.assertEqual(set(), set(PUBLIC_TOOLS) - set(arguments), "roster tools with no case")
+        self.assertEqual(set(), set(arguments) - set(PUBLIC_TOOLS), "cases for no tool")
+        self.assertEqual(
+            set(),
+            set(PUBLIC_TOOLS) - set(TOOL_RESPONSE_MODELS),
+            "advertised tools with no registered response model",
+        )
+        # Both sides are derived from the live server, so the sweep covers what is advertised
+        # rather than what this module believes is advertised.
+        advertised = {tool.name for tool in anyio.run(world.server.list_tools)}
+        self.assertEqual(set(PUBLIC_TOOLS), advertised)
+
+
+class EntryPointProbeTests(unittest.TestCase):
+    """One sweep, one world, and the assertions that make it mean something."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.world = EntryPointWorld()
+        cls.addClassCleanup(cls.world.close)
+        cls.world.build()
+        cls.before_contract = cls.world.contract.read_bytes()
+        cls.before_worktrees = _git(cls.world.code, "worktree", "list")
+        cls.before_code = cls.world.repository_state(cls.world.code)
+        cls.before_memory = cls.world.repository_state(cls.world.memory)
+        cls.before_coordination = cls.world.coordination_census()
+        cls.results = cls.world.sweep()
+
+    def test_every_public_tool_answers_in_the_products_own_vocabulary(self) -> None:
+        # MIK-R130 rule 6: every aspect below runs even when an earlier one
+        # fails -- one tool's failure no longer keeps the aspects behind it
+        # unrun. Each tool is judged on its own subTest, so one tool's
+        # failure does not hide the rest either.
+        for tool, row in sorted(self.results.items()):
+            with self.subTest(tool=tool, aspect="unvalidatable"):
+                self.assertNotEqual(
+                    "unvalidatable",
+                    row["arm"],
+                    f"payloads that failed their own response model: {row['detail']}",
+                )
+            # Not "no exceptions": a producer key its model forbids arrives HERE at the entry
+            # point, because the choke point validates before returning. Asserted by name so a
+            # T7-class break is diagnosed as what it is instead of as a raiser.
+            with self.subTest(tool=tool, aspect="boundary-validation"):
+                self.assertNotEqual(
+                    "boundary-validation",
+                    row["arm"],
+                    "a tool's own response model refused its payload at the boundary: "
+                    f"{row['detail']}",
+                )
+        with self.subTest(aspect="raisers"):
+            errors = {tool for tool, row in self.results.items() if row["arm"] == "error"}
+            self.assertEqual(
+                set(ENVELOPE_LOSING_RAISERS),
+                errors,
+                "tools that raise instead of answering (L111 pins these preconditions)",
+            )
+        with self.subTest(aspect="unmarked"):
+            self.assertEqual(
+                set(UNMARKED_NOT_OK),
+                {tool for tool, row in self.results.items() if row["arm"] == "bare-not-ok"},
+                "a payload reporting ok:false with no refuse code and no next action appeared or "
+                "disappeared: update UNMARKED_NOT_OK in the same change",
+            )
+        with self.subTest(aspect="census"):
+            self.assertEqual(
+                len(PUBLIC_TOOLS),
+                len(self.results),
+                "the sweep did not invoke every public tool",
+            )
+
+    def test_the_pinned_raisers_are_exactly_the_ones_that_lose_the_envelope(
+        self,
+    ) -> None:
+        """The lifecycle pin is exact; T34's original nine must remain repaired.
+
+        Equality checks the observed error arm in BOTH directions. An unpinned raiser or an
+        entry whose tool no longer raises fails here; L111 removes each entry with its repair.
+        """
+
+        observed = {tool for tool, row in self.results.items() if row["arm"] == "error"}
+        self.assertEqual(
+            set(ENVELOPE_LOSING_RAISERS),
+            observed,
+            "a raiser appeared or disappeared: update ENVELOPE_LOSING_RAISERS in the same "
+            "change that repairs or introduces it (lifecycle preconditions, owner L111)",
+        )
+        self.assertEqual(
+            set(),
+            observed & T34_REPAIRED_TOOLS,
+            "an original T34 repaired tool lost its refusal envelope again (owner L6)",
+        )
+
+    def test_the_t34_family_answers_with_a_named_refusal_instead_of_raising(
+        self,
+    ) -> None:
+        """`T34`'s positive control: the nine repaired tools answer, and the answer is typed.
+
+        Before the repair each of these nine raised `ToolError` with ``envelope_keys=[]``, so
+        the caller lost ``ok``/``status``/``nextAction``. This case is the durable form of that
+        finding: every one of the nine is still advertised, still answers, and the answer names
+        **what refused** (a refusal identity), **why** (a non-empty detail) and **the next
+        action**.
+
+        Its control is not a comment. The same assertions are run against an `ok: false` payload
+        with the refusal keys stripped, and that control must fail them -- so the case proves it
+        can see a refusal that stopped naming anything rather than describing one.
+        """
+
+        def assert_named_refusal(tool: str, payload: dict[str, Any]) -> None:
+            self.assertEqual(False, payload.get("ok"), f"{tool} did not refuse")
+            identity = refusal_marks(payload)
+            self.assertTrue(
+                [key for key in REFUSAL_IDENTITY_KEYS if key in identity],
+                f"{tool} refused without a refusal identity: {sorted(payload)}",
+            )
+            self.assertTrue(
+                str(payload.get("detail") or "").strip(),
+                f"{tool} refused without saying why (no detail)",
+            )
+            self.assertTrue(
+                [key for key in NAVIGATION_KEYS if key in identity],
+                f"{tool} refused without a machine-readable next action: {sorted(payload)}",
+            )
+
+        missing = T34_REPAIRED_TOOLS - set(PUBLIC_TOOLS)
+        self.assertEqual(set(), missing, "a repaired T34 tool is no longer advertised")
+        self.assertEqual(
+            set(),
+            T34_REPAIRED_TOOLS - set(self.results),
+            "the sweep did not invoke a repaired T34 tool",
+        )
+        for tool in sorted(T34_REPAIRED_TOOLS):
+            row = self.results[tool]
+            self.assertNotEqual("error", row["arm"], f"{tool} lost the envelope again")
+            assert_named_refusal(tool, row["payload"])
+
+        # The control: the same predicate, on the shape a bare raise would have produced.
+        with self.assertRaises(AssertionError):
+            assert_named_refusal(
+                "memory_baseline_adopt",
+                {"ok": False, "operation": "memory_baseline_adopt"},
+            )
+
+    def test_every_refusal_carries_a_machine_readable_identity(self) -> None:
+        """Marks are read from the PAYLOAD, so a mislabelled arm cannot satisfy this case."""
+
+        unmarked: dict[str, str] = {}
+        marked = 0
+        for tool, row in sorted(self.results.items()):
+            payload = row["payload"]
+            if not isinstance(payload, dict) or payload.get("ok") is not False:
+                continue
+            marks = refusal_marks(payload)
+            if marks:
+                marked += 1
+                continue
+            unmarked[tool] = f"ok:false with none of {(*REFUSAL_IDENTITY_KEYS, *NAVIGATION_KEYS)}"
+        self.assertTrue(marked, "a sweep with no marked refusal proves nothing")
+        self.assertEqual(
+            set(UNMARKED_NOT_OK),
+            set(unmarked),
+            "a refusal lost or gained its machine-readable identity: update UNMARKED_NOT_OK in "
+            "the same change that causes it",
+        )
+
+    def test_the_sweep_reads_the_worktree_instead_of_performing_the_operations(
+        self,
+    ) -> None:
+        """The bound is a boundary, not "wrote nothing" — and here is exactly what it covers.
+
+        Asserted, per repository: HEAD, the Git status, and every file OUTSIDE ``.git`` by
+        digest. ``.git`` is excluded and deliberately so: opening a linked worktree rewrites its
+        administrative files (measured, the memory worktree's ``.git/worktrees/…/index``), which
+        is Git doing its job, not the product writing where it should not. Asserted for the
+        coordination root: nothing is removed, and nothing is added or rewritten outside the
+        declared write zones. Not asserted: anything inside ``.git``.
+        """
+
+        self._assert_repositories_untouched()
+        self._assert_coordination_root_respected()
+
+    def _assert_repositories_untouched(self) -> None:
+
+        self.assertTrue(self.world.contract.exists(), "the enclosure contract is gone")
+        self.assertEqual(
+            self.before_contract,
+            self.world.contract.read_bytes(),
+            "the sweep rewrote the enclosure contract",
+        )
+        self.assertEqual(
+            self.before_worktrees,
+            _git(self.world.code, "worktree", "list"),
+            "the sweep moved a worktree",
+        )
+        self.assertEqual(
+            "not-started",
+            self._closeout_status(),
+            "the sweep started the closeout it is only supposed to probe",
+        )
+        after_code = self.world.repository_state(self.world.code)
+        self.assertEqual(self.before_code["head"], after_code["head"], "the code HEAD moved")
+        self.assertEqual(self.before_code["status"], after_code["status"], "the code repo is dirty")
+        self.assertEqual(
+            self.before_code["census"],
+            after_code["census"],
+            "the sweep wrote to, rewrote or deleted a file in the code repository",
+        )
+        after_memory = self.world.repository_state(self.world.memory)
+        self.assertEqual(self.before_memory["head"], after_memory["head"], "the memory HEAD moved")
+        added = set(after_memory["census"]) - set(self.before_memory["census"])
+        removed = set(self.before_memory["census"]) - set(after_memory["census"])
+        rewritten = {
+            path
+            for path in set(self.before_memory["census"]) & set(after_memory["census"])
+            if self.before_memory["census"][path] != after_memory["census"][path]
+        }
+        self.assertEqual(set(), removed, "the sweep deleted a file from the memory repository")
+        self.assertEqual(set(), rewritten, "the sweep rewrote a file in the memory repository")
+        self.assertEqual(
+            set(KNOWN_MEMORY_SCAFFOLD_ADDITIONS),
+            added,
+            "the memory repository gained a file the sweep is not declared to add",
+        )
+        # The memory status is compared too, in the one way the declared additions allow: every
+        # TRACKED line must be identical, and the untracked lines must be exactly the additions.
+        self.assertEqual(
+            [
+                line
+                for line in self.before_memory["status"].splitlines()
+                if not line.startswith("??")
+            ],
+            [line for line in after_memory["status"].splitlines() if not line.startswith("??")],
+            "the sweep changed the memory repository's tracked status",
+        )
+        self.assertEqual(
+            sorted(f"?? {path}" for path in KNOWN_MEMORY_SCAFFOLD_ADDITIONS),
+            sorted(line for line in after_memory["status"].splitlines() if line.startswith("??")),
+            "the memory repository reports untracked files the sweep is not declared to add",
+        )
+
+    def _assert_coordination_root_respected(self) -> None:
+        """Nothing under the coordination root disappears, and nothing moves outside a zone."""
+
+        boundary = self.world.coordination_boundary(
+            self.before_coordination, self.world.coordination_census()
+        )
+        self.assertEqual(
+            [],
+            boundary["removed"],
+            "the sweep deleted a file from its own coordination root",
+        )
+        self.assertEqual(
+            [],
+            boundary["added_outside_zones"],
+            "the sweep added a file outside the declared coordination write zones",
+        )
+        self.assertEqual(
+            [],
+            boundary["rewritten_outside_zones"],
+            "the sweep rewrote a file outside the declared coordination write zones",
+        )
+
+    def _closeout_status(self) -> str:
+        lines = self.world.contract.read_text(encoding="utf-8").splitlines()
+        start = lines.index("closeout:")
+        for line in lines[start + 1 :]:
+            if line.startswith("  status:"):
+                return line.split(":", 1)[1].strip()
+            if line and not line.startswith(" "):
+                break
+        return ""

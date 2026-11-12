@@ -1,15 +1,10 @@
 """Memory-root tools: drift, quality, route index, init, baseline, and carryover."""
 
-from typing import Any
+from importlib import import_module
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
-from agents_remember.application.memory_tools import (
-    CarryoverCommitMessages,
-    CarryoverSelection,
-    CitationOperationScope,
-    MemoryBranches,
-)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.memory import (
     MemoryQualityCheckRequest,
@@ -17,19 +12,7 @@ from agents_remember.models.memory import (
     MemoryQualityStartRequest,
 )
 
-from ..tools import (
-    citation_fix_payload,
-    drift_check_payload,
-    memory_baseline_adopt_payload,
-    memory_baseline_status_payload,
-    memory_carryover_apply_payload,
-    memory_carryover_plan_payload,
-    memory_init_payload,
-    memory_quality_check_payload,
-    memory_quality_check_poll_payload,
-    memory_quality_check_start_payload,
-    route_index_refresh_payload,
-)
+from .lazy import tools
 
 
 def register_memory_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -50,73 +33,71 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
     """
 
     @server.tool()
-    def drift_check(
-        repo_id: str,
-        detail_limit: int = 50,
-        contract_path: str | None = None,
-    ) -> dict[str, Any]:
-        """Task-start gate: classify how far onboarding has drifted from the code since it was last
-        verified. Read-only (writes only a temp drift report). A nonzero actionable count is
-        expected after code changes, not a failure. Pass `contract_path` (a leaf enclosure
-        contract) to check that leaf's memory worktree; omit it for the official memory repo."""
-        return drift_check_payload(
-            config, repo_id, detail_limit=detail_limit, contract_path=contract_path
-        )
-
-    @server.tool()
     def memory_quality_check(
         request: MemoryQualityCheckRequest,
     ) -> dict[str, Any]:
-        """Prepare memory before certification admission using drift-integrity and style checks.
-        It never changes code or memory. A full contract-scoped call atomically replaces the one
-        operational checklist at `<worktree enclosure>/reports/curator-memory-quality.md` and its
-        structured, report-digest-bound `.json` attestation; subset and unscoped calls write
-        neither. Every contract-scoped execution also publishes the complete structural
-        census to reports/memory-census.json and returns bounded memoryCensus diagnostics.
-        This worklist requires no code-gate results and does not certify semantic decisions.
-        ok=false means findings exist (e.g. dirty-source
-        drift), not that the tool failed. `curatorActionableCount` and
-        `qualityChecklistStatus` are the onboarding-repair loop gate. Once the raw checklist is
-        `ready-for-closeout`, combined `checklistStatus=coherence-required` means the caller must
-        prepare, publish, and validate the exact structured `curator_coherence` authority;
-        `closeoutReady=true` is impossible until that same validator accepts it. Checklist and
-        attestation rendering are deterministic, so a same-input rerun preserves the published
-        authority; changed inputs stale it and require republishing. Final commit stamps remain
-        closeout-owned. The request is exactly one discriminated mode:
-        `sync` and `start` carry repository plus optional scope/check/detail fields, while
-        `poll` carries repository, run id, and the same contract path for a candidate run.
-        Repository-only calls are explicitly official diagnostics and cannot become candidate
-        acceptance. A saturated unique start returns `capacity-reached` without launching work.
-        A poll returns the identical pair-bound result; `run-not-found` means the run was evicted,
-        belongs to another repository, or the server restarted, so submit a new start request
-        with the original contract path for a candidate run."""
+        """
+        Check memory before closeout: findings, counts and checklist location, not semantic
+        certification. Pass sync/start/poll; candidate runs use the leaf contract. Full leaf logs
+        add knowledgeWorklist (state, path, digest, counts, unreadable inputs) and
+        knowledgeGate (exact-tree verdict and finding counts). Ready memory also needs validated
+        curator_coherence. Conversion, index build, formatter and worklist have no separate MCP
+        tool: conversion runs at crossing or once per repository; reads build the index; the
+        writer formats; this check computes the worklist. Docs: docs/tool-details.md.
+        """
         if isinstance(request, MemoryQualityPollRequest):
-            return memory_quality_check_poll_payload(config, request)
+            return tools.memory_quality_check_poll_payload(config, request)
         if isinstance(request, MemoryQualityStartRequest):
-            return memory_quality_check_start_payload(config, request)
-        return memory_quality_check_payload(config, request)
+            return tools.memory_quality_check_start_payload(config, request)
+        return tools.memory_quality_check_payload(config, request)
 
     @server.tool()
     def citation_fix(
         repo_id: str,
-        contract_path: str,
+        contract_path: str | None = None,
+        *,
         document: str | None = None,
-        expected_snapshot: str | None = None,
+        documents: list[str] | None = None,
         dry_run: bool = False,
+        mode: Literal["sync", "start", "poll"] = "sync",
+        run_id: str | None = None,
     ) -> dict[str, Any]:
-        """Regenerate anchored citation ranges inside one leaf memory worktree. The enclosure
-        contract is mandatory and the application guard refuses the official memory repo. A
-        pure move is repaired; renamed, deleted, or ambiguous anchors remain a curator worklist.
-        Preview with dry_run=true. Use document for one onboarding-relative file and
-        expected_snapshot to assert a previously built immutable source generation."""
-        return citation_fix_payload(
+        """Repair moved citation anchors in a leaf memory worktree. Pass repo_id and contract_path, with documents for a batch or document for one card; preview with dry_run. For a background preview use mode=start and dry_run=true, then mode=poll with its run_id and the same scope. Renames, deletions and ambiguous anchors remain curator work. Old-format memory is refused: convert before repair. Converted repairs author sidecar references; full lists are in logged detail. Longer explanation: docs/tool-details.md."""
+        return tools.citation_fix_payload(
             config,
             repo_id,
             contract_path=contract_path,
-            operation_scope=CitationOperationScope(
+            operation_scope=import_module(
+                "agents_remember.application.memory_tools"
+            ).CitationOperationScope(
                 document=document,
-                expected_snapshot=expected_snapshot,
+                documents=tuple(documents) if documents is not None else None,
             ),
+            dry_run=dry_run,
+            mode=mode,
+            run_id=run_id,
+        )
+
+    @server.tool()
+    def citation_note_revision(
+        repo_id: str,
+        contract_path: str,
+        *,
+        card: str,
+        reference: int,
+        note: str,
+        base_digest: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Revise one reference's note in a leaf memory worktree, keeping every target, anchor and other reference byte-identical. Pass repo_id, contract_path, card (the converted card), reference (n), note and base_digest (the sidecar's sha256 as read); preview with dry_run. A missing key, a stale base_digest, an empty note, an absent card or sidecar are refused, nothing written. Moved anchors are citation_fix's work. More: docs/tool-details.md."""
+        return tools.citation_note_revision_payload(
+            config,
+            repo_id,
+            contract_path,
+            card=card,
+            reference=reference,
+            note=note,
+            base_digest=base_digest,
             dry_run=dry_run,
         )
 
@@ -126,10 +107,8 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         dry_run: bool = False,
         contract_path: str | None = None,
     ) -> dict[str, Any]:
-        """Regenerate the overview.index.json route indexes so they match the current onboarding
-        tree. Apply requires a leaf enclosure contract and writes only that leaf's memory
-        worktree. An unscoped call is read-only and therefore requires dry_run=true."""
-        return route_index_refresh_payload(
+        """Refresh route indexes for a leaf memory worktree using repo_id and contract_path. Preview with dry_run; unscoped writes require pre-baseline admission. More: docs/tool-details.md."""
+        return tools.route_index_refresh_payload(
             config, repo_id, dry_run=dry_run, contract_path=contract_path
         )
 
@@ -142,22 +121,30 @@ def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -
         repo_id: str,
         dry_run: bool = False,
         initialize_git: bool = True,
+        initial_branch: str | None = None,
     ) -> dict[str, Any]:
-        """Initialize or repair a repository's memory root (scaffold system/ files, onboarding
-        layout, optionally `git init`). Does not overwrite existing onboarding content. Preview
-        with dry_run=true. Usually driven by the c-00-initialize-memory-repo skill."""
-        return memory_init_payload(
+        """Initialize or repair a repository's memory root (scaffold `system/` files, the
+        `onboarding/` and `docs/` layout, optionally `git init`). `initial_branch` names the code
+        branch the memory is the foundation of: it becomes the memory repository's initial branch
+        and the recorded `agents-remember.defaultBranch` that baseline adoption and every worktree
+        entry point check against. Omitted, it defaults to the configured code repository's
+        currently checked-out branch, and the call refuses rather than inventing a name when
+        neither is available. Creates missing paths only and never overwrites existing onboarding
+        content. Preview with dry_run=true. Documented in docs/guides/onboard-existing-repo.md.
+        """
+        return tools.memory_init_payload(
             config,
             repo_id,
             dry_run=dry_run,
             initialize_git=initialize_git,
+            initial_branch=initial_branch,
         )
 
     @server.tool()
     def memory_baseline_status(repo_id: str) -> dict[str, Any]:
         """Report drift and Git attribution state to decide whether an external-memory baseline can be
         adopted. Read-only."""
-        return memory_baseline_status_payload(config, repo_id)
+        return tools.memory_baseline_status_payload(config, repo_id)
 
     @server.tool()
     def memory_baseline_adopt(
@@ -167,14 +154,14 @@ def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -
         work_branch: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Create the first attributed memory baseline for an external memory repo. Mutating: commits
-        memory content and refreshes its disposable ledger cache. Gated on clean drift unless accept_drift=true. Preview with
-        dry_run=true. Usually driven by the c-10-adopt-memory-baseline skill."""
-        return memory_baseline_adopt_payload(
+        """Adopt the first attributed external-memory baseline and commit memory. Pass repo_id; preview with dry_run. accept_drift lifts the drift gate on stale anchors only: the baseline still refuses a stale code or test reference anchor as R198.1-reference-anchor. More: docs/tool-details.md."""
+        return tools.memory_baseline_adopt_payload(
             config,
             repo_id,
             accept_drift=accept_drift,
-            branches=MemoryBranches(source_branch=source_branch, work_branch=work_branch),
+            branches=import_module("agents_remember.application.memory_tools").MemoryBranches(
+                source_branch=source_branch, work_branch=work_branch
+            ),
             dry_run=dry_run,
         )
 
@@ -193,11 +180,10 @@ def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) 
         old_base: str,
         replace_existing: bool = False,
     ) -> dict[str, Any]:
-        """Plan (non-mutating) carrying richer onboarding from a source branch into the exact open
-        external-memory leaf. Review it, then apply before normal leaf closeout/integration."""
-        return memory_carryover_plan_payload(
+        """Plan converted pairs/records at equal versions; observe official-code anchors, review conflicts. Curator authors history; no commit/report. More: docs/tool-details.md."""
+        return tools.memory_carryover_plan_payload(
             config,
-            CarryoverSelection(
+            import_module("agents_remember.application.memory_tools").CarryoverSelection(
                 repo_id=repo_id,
                 contract_path=contract_path,
                 source_memory=source_memory,
@@ -220,14 +206,11 @@ def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) 
         intent_note: str,
         replace_existing: bool = False,
         include_review_required: list[str] | None = None,
-        memory_commit_message: str = "Carry over landed branch memory",
     ) -> dict[str, Any]:
-        """Apply an approved plan inside the exact ordinary recovery leaf, committing attributed memory
-        content and refreshing the ledger cache. Mutating and approval-gated; requires intent_note. Close and integrate
-        the leaf normally afterward."""
-        return memory_carryover_apply_payload(
+        """Apply converted pairs/records; reanchor, index, validate. Refusal restores bytes; skip edited targets, retry safely. No commit/history carry; curator authors rows before closeout. Requires intent_note. More: docs/tool-details.md."""
+        return tools.memory_carryover_apply_payload(
             config,
-            CarryoverSelection(
+            import_module("agents_remember.application.memory_tools").CarryoverSelection(
                 repo_id=repo_id,
                 contract_path=contract_path,
                 source_memory=source_memory,
@@ -238,5 +221,4 @@ def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) 
             ),
             intent_note=intent_note,
             include_review_required=include_review_required,
-            messages=CarryoverCommitMessages(memory=memory_commit_message),
         )

@@ -1,8 +1,7 @@
 """Log/snapshot reading and atomic projection writes -- the reducer's I/O edge.
 
-``read_lifecycle_logs`` enumerates the per-lifecycle truth; ``project_and_write``
-ties reading, the pure reduction, and the write together (the entry the serving
-layer drives on a tick). Projections are published through
+``project_and_write`` ties domain-invalidated source reads, pure reduction and
+publication together (the entry the serving layer drives on a tick). Projections are published through
 :mod:`agents_remember.kernel.atomic_write` so a polling dashboard reader never sees a
 half-written ``latest-state.json`` -- stronger than the plain ``write_text`` of the
 ``setup_progress`` precedent, which a concurrent reader can tear.
@@ -18,17 +17,13 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
-from agents_remember.controlplane.attention_dismissals import AttentionDismissalStore
 from agents_remember.kernel.atomic_write import atomic_write_text
-from agents_remember.observer.events import Event
-from agents_remember.observer.lifecycle_state import TERMINAL_STATES
 from agents_remember.observer.projection import (
     TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES,
     LedgerNode,
     RouteCoverageNode,
-    SidecarStaleNode,
     WorkspaceProjection,
     task_documents_body_bytes,
 )
@@ -37,8 +32,7 @@ from agents_remember.observer.reducer import (
     WorkspaceStructure,
     project_workspace,
 )
-from agents_remember.observer.store import EventStore
-from agents_remember.providers.status import refresh_current_provider_state
+from agents_remember.serving.delta import StableProjectionState, stable_projection_state
 from agents_remember.serving.projections.contract_snapshot import ContractSnapshotCache
 from agents_remember.serving.projections.paths import observer_root
 from agents_remember.serving.projections.projection_inputs import (
@@ -50,7 +44,6 @@ from agents_remember.serving.projections.projection_inputs import (
 from agents_remember.serving.projections.snapshots import (
     read_ledger,
     read_route_coverage,
-    read_sidecar_staleness,
 )
 
 if TYPE_CHECKING:
@@ -61,10 +54,9 @@ if TYPE_CHECKING:
 
 LATEST_STATE = "latest-state.json"
 LATEST_METRICS = "latest-metrics.json"
-PROVIDER_REFRESH_TTL_SECONDS = 10.0
 # Repo-surface TTL: this walk opens+parses every onboarding document across EVERY managed
 # repo (8 memory repos, thousands of markdown files) — py-spy measured it as the dominant slice
-# of the projection tick at the old 15 s TTL. Staleness/coverage/ledger panels tolerate minutes
+# of the projection tick at the old 15 s TTL. Coverage/ledger panels tolerate minutes
 # of lag; the tick budget does not tolerate the walk.
 REPO_SURFACE_REFRESH_TTL_SECONDS = 120.0
 # Guardrail: the projection ticks every 1s, so a per-tick over-budget warning would be pure spam.
@@ -81,17 +73,10 @@ _last_task_payload_warn: dict[str, datetime] = {}
 @dataclass(frozen=True)
 class _RepoSurfaceCacheEntry:
     at: datetime
-    value: tuple[list[SidecarStaleNode], list[RouteCoverageNode], list[LedgerNode]]
+    value: tuple[list[RouteCoverageNode], list[LedgerNode]]
 
 
 _repo_surface_cache: dict[tuple[tuple[str, str, str], ...], _RepoSurfaceCacheEntry] = {}
-
-
-@dataclass
-class _LifecycleLogCacheEntry:
-    mtime_ns: int
-    size: int
-    log_events: list[Event]
 
 
 # ONE leaf-enclosure-contract enumeration + parse pass per tick, shared by
@@ -99,116 +84,43 @@ class _LifecycleLogCacheEntry:
 # own walk + load_contract pass = 3x per tick). The cache reuses a parsed contract while its
 # (mtime_ns, size, ctime_ns) is unchanged and prunes to the live enumeration each build. Mutated only on the
 # projection worker thread (ticks are serialized by the projector's awaited asyncio.to_thread),
-# matching the module-level cache discipline of _lifecycle_log_cache below.
+# matching the serialized projection input snapshot.
 _contract_snapshot_cache = ContractSnapshotCache()
-
-# The projection re-read + re-validated EVERY lifecycle's full events.jsonl
-# each 1s tick. Heartbeats append only every 15s (and stop entirely once a leaf is parked past its
-# inactivity cutoff), so most logs are byte-identical between ticks. This cache reuses the parsed
-# event list when a log's (mtime_ns, size) is unchanged, bounding per-tick parse cost to the logs
-# that actually changed. Keyed by log path; pruned to the live set each tick so it cannot leak.
-_lifecycle_log_cache: dict[str, _LifecycleLogCacheEntry] = {}
-
-
-def read_lifecycle_logs(root: Path) -> list[list[Event]]:
-    """Every per-lifecycle log under ``lifecycles/<id>/events.jsonl``, validated (cached).
-
-    Heartbeats are coalesced into ``heartbeat.json`` sidecars, so a heartbeat tick changes one tiny
-    JSON file instead of invalidating the cached parse of the full event log.
-    """
-    store = EventStore(root)
-    lifecycles_dir = root / "lifecycles"
-    if not lifecycles_dir.is_dir():
-        return []
-    logs: list[list[Event]] = []
-    seen: set[str] = set()
-    for entry in sorted(lifecycles_dir.iterdir()):
-        if not entry.is_dir():
-            continue
-        path = entry / "events.jsonl"
-        try:
-            stat = path.stat()
-        except OSError:
-            continue
-        key = str(path)
-        seen.add(key)
-        cached = _lifecycle_log_cache.get(key)
-        if (
-            cached is not None
-            and cached.mtime_ns == stat.st_mtime_ns
-            and cached.size == stat.st_size
-        ):
-            log_events = cached.log_events
-        else:
-            log_events = store.read_log(entry.name)
-            _lifecycle_log_cache[key] = _LifecycleLogCacheEntry(
-                mtime_ns=stat.st_mtime_ns, size=stat.st_size, log_events=log_events
-            )
-        events = list(log_events)
-        heartbeat = store.read_heartbeat(entry.name)
-        if heartbeat is not None and (not events or heartbeat.ts >= events[-1].ts):
-            events.append(heartbeat)
-        if events:
-            logs.append(events)
-    for stale in [key for key in _lifecycle_log_cache if key not in seen]:
-        _lifecycle_log_cache.pop(stale, None)
-    return logs
 
 
 def write_projection(root: Path, projection: WorkspaceProjection) -> None:
     """Atomically write ``latest-state.json`` + ``latest-metrics.json``."""
     root.mkdir(parents=True, exist_ok=True)
-    _write_json(root / LATEST_STATE, projection.model_dump(by_alias=True, exclude_none=True))
+    # JSON mode: a task's `providerLimit` carries `datetime` values (MIK-R190 rule 13) and this
+    # file is JSON. Without `mode="json"` one limited task made `json.dumps` raise, so every
+    # projection tick failed and nothing served advanced while any seat was limited.
     _write_json(
-        root / LATEST_METRICS, projection.metrics.model_dump(by_alias=True, exclude_none=True)
+        root / LATEST_STATE, projection.model_dump(mode="json", by_alias=True, exclude_none=True)
+    )
+    _write_json(
+        root / LATEST_METRICS,
+        projection.metrics.model_dump(mode="json", by_alias=True, exclude_none=True),
     )
 
 
-class ProviderStateRefresher:
-    """Refresh provider current-state snapshots before the observer reads them."""
-
-    def __init__(
-        self,
-        *,
-        ttl_seconds: float = PROVIDER_REFRESH_TTL_SECONDS,
-        refresh: Any = refresh_current_provider_state,
-    ) -> None:
-        self._ttl_seconds = ttl_seconds
-        self._refresh = refresh
-        self._last_refresh: datetime | None = None
-
-    def maybe_refresh(self, config: McpRuntimeConfig, *, now: datetime) -> None:
-        if not config.providers:
-            return
-        if self._last_refresh is not None:
-            age = (now - self._last_refresh).total_seconds()
-            if age < self._ttl_seconds:
-                return
-        self._last_refresh = now
-        try:
-            self._refresh(config, checked_at=now)
-        except Exception:
-            logger.warning(
-                "provider current-state refresh failed; using last snapshot", exc_info=True
-            )
-
-
-class ProviderStateRefresh(Protocol):
-    """Structural contract for projection pre-read provider refreshers."""
-
-    def maybe_refresh(self, config: McpRuntimeConfig, *, now: datetime) -> None: ...
-
-
-@dataclass(frozen=True)
+@dataclass
 class ProjectionTickState:
     """What a projector carries between ticks: the retained input snapshot it re-reads
-    incrementally, and the two pre-read refreshers (provider current state, landing state) it
-    drives before reading. All three are the projector's own long-lived collaborators; a tick
-    given some of them and not others silently reverts to a cold read."""
+    incrementally, and the pre-read landing-state refresher it drives before reading. Both are
+    the projector's own long-lived collaborators; a tick given some of them and not others
+    silently reverts to a cold read.
+
+    ``stable`` is filled in by the tick itself: it is the stable form the tick computed for its
+    own write decision, published afterwards instead of being computed a second time. The value
+    is live only for the tick that set it, so it is not part of the state a tick starts from.
+    """
 
     input_state: ProjectionInputState | None = None
-    provider_refresher: ProviderStateRefresh | None = None
     landing_state: LandingStateReader | None = None
+    # The stable form this tick computed for its own write decision, so publication compares the
+    # same dump instead of computing a second one (MIK-R179 rule 2: no repeated work with no new
+    # input). ``None`` until the tick has computed it.
+    stable: StableProjectionState | None = None
 
 
 def project_and_write(
@@ -216,31 +128,32 @@ def project_and_write(
     *,
     now: datetime | None = None,
     refresh: ProjectionRefresh | None = None,
+    previous_stable: StableProjectionState | None = None,
     tick: ProjectionTickState | None = None,
 ) -> WorkspaceProjection:
-    """Read logs + structural + analytical snapshots, reduce the tree, write it atomically."""
+    """Read logs + structural + analytical snapshots, reduce the tree, write it atomically.
+
+    ``latest-state.json`` (and its metrics sibling) is rewritten only when the
+    projection's stable content moved since ``previous_stable`` (MIK-R81 rule 3:
+    a tick whose content did not change costs no file write and wakes no echo).
+    The first projection (``previous_stable=None``) always writes.
+    """
     tick = tick or ProjectionTickState()
     moment = now or datetime.now(UTC)
     root = observer_root(config)
-    if tick.provider_refresher is not None:
-        tick.provider_refresher.maybe_refresh(config, now=moment)
     state = tick.input_state or ProjectionInputState(contract_cache=_contract_snapshot_cache)
     inputs = state.read(
         config,
         ProjectionReaders(
-            lifecycle=read_lifecycle_logs,
             repo_surfaces=_gather_repo_surfaces_cached,
             landing_state=tick.landing_state,
         ),
         observer_root=root,
         pass_=RefreshPass(now=moment, refresh=refresh or ProjectionRefresh.full()),
     )
-    attention_store = AttentionDismissalStore(root)
     projection = project_workspace(
-        inputs.lifecycle_logs,
         structure=WorkspaceStructure(
             enclosures=inputs.enclosures,
-            providers=inputs.providers,
             # The Topology constellation filters its tree on this active set — the same
             # active-enclosure admission the Engine Room's engine_process_facts use, so both
             # views share one definition of "active" rather than diverging.
@@ -249,32 +162,26 @@ def project_and_write(
         now=moment,
         given=AnalyticalInputs(
             drift_snapshots=inputs.drift_snapshots,
-            sidecar_staleness=inputs.sidecar_staleness,
-            setup_summaries=inputs.setup_summaries,
-            setup_progress=inputs.setup_progress,
             route_coverage=inputs.route_coverage,
             tool_reports=inputs.tool_reports,
-            agent_pickups=inputs.agent_pickups,
-            expectation_rows=inputs.expectation_rows,
             ledgers=inputs.ledgers,
-            task_documents=inputs.task_documents,
-            series=inputs.series,
+            task_sources=inputs.task_sources,
+            host_activity=inputs.host_activity,
             closeout_queues=inputs.closeout_queues,
             engine_process_facts=inputs.engine_process_facts,
             engine_start_progress=inputs.engine_start_progress,
-            gates=inputs.gates,
             attention_dismissals=inputs.attention_dismissals,
+            native_attention=inputs.native_attention,
+            task_entries=inputs.task_entries,
         ),
     )
-    attention_store.prune_lifecycles(
-        {
-            lifecycle.id
-            for lifecycle in projection.lifecycles
-            if lifecycle.state not in TERMINAL_STATES
-        }
-    )
     _warn_if_task_documents_payload_over_budget(projection, now=moment)
-    write_projection(root, projection)
+    if previous_stable is None:
+        write_projection(root, projection)
+    else:
+        tick.stable = stable_projection_state(projection)
+        if tick.stable != previous_stable:
+            write_projection(root, projection)
     return projection
 
 
@@ -284,10 +191,12 @@ def _warn_if_task_documents_payload_over_budget(
     """Flag (rate-limited) when the broadcast serialises a body-heavy task-doc payload.
 
     Returns the measured body-byte cost so callers/tests can assert on it. This is observability only --
-    no truncation, no contract change -- surfacing the unbounded ``analytics.taskDocuments`` payload that
-    a planned windowing follow-up will bound, so the growth is visible in logs instead of silent.
+    no truncation or contract change. Full document bodies are read on demand;
+    this measures only the text previews retained in native task summaries.
     """
-    payload_bytes = task_documents_body_bytes(projection.analytics.taskDocuments)
+    payload_bytes = task_documents_body_bytes(
+        [task.summary for task in projection.tasks if task.summary is not None]
+    )
     if payload_bytes <= TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES:
         return payload_bytes
     last = _last_task_payload_warn.get("at")
@@ -297,51 +206,45 @@ def _warn_if_task_documents_payload_over_budget(
             return payload_bytes
     _last_task_payload_warn["at"] = now
     logger.warning(
-        "analytics.taskDocuments broadcast body payload %d bytes exceeds budget %d across %d docs; "
-        "task-doc bodies are serialised into every projection tick -- F6 windowing (bodies on-demand) "
-        "is the follow-up that bounds this",
+        "task summary preview payload %d bytes exceeds budget %d across %d documents",
         payload_bytes,
         TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES,
-        len(projection.analytics.taskDocuments),
+        len([task.summary for task in projection.tasks if task.summary is not None]),
     )
     return payload_bytes
 
 
 def _gather_repo_surfaces(
-    config: McpRuntimeConfig, moment: datetime
-) -> tuple[list[SidecarStaleNode], list[RouteCoverageNode], list[LedgerNode]]:
-    """Per-repo analytical surfaces (sidecar staleness, route coverage, ledger).
+    config: McpRuntimeConfig,
+) -> tuple[list[RouteCoverageNode], list[LedgerNode]]:
+    """Per-repo analytical surfaces (route coverage, ledger).
 
     These walk each managed repo's onboarding/memory roots, so they are gathered
     per ``RepositoryScope`` rather than once under the coordination root.
     """
-    sidecar_staleness: list[SidecarStaleNode] = []
     route_coverage: list[RouteCoverageNode] = []
     ledgers: list[LedgerNode] = []
     for scope in config.repositories.values():
         if scope.memory_root is None:
             continue
         onboarding_root = scope.memory_root / "onboarding"
-        sidecar_staleness.extend(
-            read_sidecar_staleness(onboarding_root, repository=scope.repo_id, now=moment)
-        )
         route_coverage.extend(read_route_coverage(onboarding_root, repository=scope.repo_id))
         ledger = read_ledger(scope.memory_root, code_root=scope.path)
         if ledger is not None:
             ledgers.append(ledger)
-    return sidecar_staleness, route_coverage, ledgers
+    return route_coverage, ledgers
 
 
 def _gather_repo_surfaces_cached(
     config: McpRuntimeConfig, moment: datetime
-) -> tuple[list[SidecarStaleNode], list[RouteCoverageNode], list[LedgerNode]]:
+) -> tuple[list[RouteCoverageNode], list[LedgerNode]]:
     key = _repo_surface_cache_key(config)
     entry = _repo_surface_cache.get(key)
     if entry is not None:
         age = (moment - entry.at).total_seconds()
         if 0 <= age < REPO_SURFACE_REFRESH_TTL_SECONDS:
             return entry.value
-    value = _gather_repo_surfaces(config, moment)
+    value = _gather_repo_surfaces(config)
     _repo_surface_cache[key] = _RepoSurfaceCacheEntry(at=moment, value=value)
     return value
 

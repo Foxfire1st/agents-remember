@@ -15,6 +15,9 @@ from agents_remember.models.task_intent import (
 )
 
 from .document import (
+    FINALIZE_TASK_LIFECYCLE_DECISION,
+    REMOVED_STEP_DECISION_PREFIX,
+    SKIP_STEP_DECISION_PREFIX,
     TASK_DOCUMENT_SCHEMA,
     CodeExample,
     Decision,
@@ -48,9 +51,11 @@ from .document import (
     TaskExecutionRegistration,
     current_step,
     derived_leaf_placement,
+    is_product_record_decision,
     leaf_placement_facts,
     numbering_drift_hints,
     resolve_graph_endpoint,
+    series_abandoned,
     series_done,
     series_total,
     step_done,
@@ -64,6 +69,7 @@ from .execution_graph_titles import (
 from .readiness import CompletionBlocker, completion_blockers, master_is_terminal
 from .render import render_markdown
 from .route_review import (
+    ReviewApproval,
     ReviewFinding,
     ReviewState,
 )
@@ -85,6 +91,9 @@ from .store import (
 )
 
 __all__ = [
+    "FINALIZE_TASK_LIFECYCLE_DECISION",
+    "REMOVED_STEP_DECISION_PREFIX",
+    "SKIP_STEP_DECISION_PREFIX",
     "TASK_DOCUMENT_SCHEMA",
     "AcceptanceObligationQuestion",
     "ApprovedRequirementPacketRef",
@@ -99,6 +108,7 @@ __all__ = [
     "HeaderNote",
     "LeafPlacement",
     "MasterExecutionNature",
+    "ReviewApproval",
     "ReviewFinding",
     "ReviewState",
     "RouteReviewChildIntent",
@@ -132,6 +142,7 @@ __all__ = [
     "current_task_doc_source",
     "derived_leaf_placement",
     "doc_stem",
+    "is_product_record_decision",
     "json_path_for",
     "leaf_placement_facts",
     "markdown_path_for",
@@ -143,6 +154,7 @@ __all__ = [
     "read_task_doc_with_source",
     "render_markdown",
     "resolve_graph_endpoint",
+    "series_abandoned",
     "series_done",
     "series_total",
     "step_done",

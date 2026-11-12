@@ -10,7 +10,9 @@ import tempfile
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest import mock
 
+import _store_durability as durability
 import pytest
 from _store_durability import (
     ADAPTERS,
@@ -20,7 +22,7 @@ from _store_durability import (
 from agents_remember.controlplane.records import GateRecord
 from agents_remember.controlplane.store import GateStore
 from agents_remember.serving.projections.paths import observer_logs_root
-from agents_remember.serving.projections.snapshots import read_gates
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from pydantic import ValidationError
 
 # A line cut off mid-write: exactly what a crash or an interleaved append leaves behind.
@@ -28,15 +30,11 @@ TORN_LINE = '{"schema":"ar-gate-record/v1","id":"torn","ts":"2026-0'
 
 # Which reads are correctness-bearing (a dropped row changes a decision) and which only paint a
 # screen. Derived from the call sites, not from the docstrings:
-#   gate            -> worktrees/modules/closeout.py, worktrees/modules/integrate.py and
-#                      serving/hosted_interactions.py fold it to permit or refuse a mutation, none
-#                      of them wrapping the read in a suppression.
-#   expectation     -> the L2 overdue sweep reads it directly (observer/snapshots.py calls itself
-#                      "surfacing only" and says so).
-#   operator_inbox  -> mcp/tools/operator_inbox.py consumes rows; a consume is the ack of record.
-#   attention       -> observer/snapshots.py + observer/projection_inputs.py only: dashboard state.
-#   nudge           -> rate-limit bookkeeping for orchestration nudges.
-#   agent-notifier -> the sweep's cooldown memory, documented as non-authoritative.
+#   gate            -> worktrees/modules/closeout.py, worktrees/modules/integrate.py,
+#                      worktrees/direct_landing.py and the closeout finalization fold it to permit
+#                      or refuse a mutation, none of them wrapping the read in a suppression.
+#   attention       -> serving/projections/projection_inputs.py and
+#                      serving/projections/projection_store.py only: dashboard state.
 
 
 def _describe(result: dict[str, object]) -> str:
@@ -85,7 +83,7 @@ class _TempRootTest(unittest.TestCase):
 
 
 class MultiProcessDurabilityTests(_TempRootTest):
-    """R10: N processes appending while one compacts, over all six record types."""
+    """R10: N processes appending while one compacts, over both control-plane record types."""
 
     @pytest.mark.evidence_integration
     def test_no_record_is_lost_when_an_append_races_a_compaction(self) -> None:
@@ -102,15 +100,51 @@ class MultiProcessDurabilityTests(_TempRootTest):
                 self.assertEqual(result["lost"], 0, _describe(result))
                 self.assertEqual(result["stragglers"], [], _describe(result))
 
+        with self.subTest("a missing release cannot perform an unforced rewrite"):
+            released = mock.Mock()
+            released.wait.return_value = False
+            ready = mock.Mock()
+            with mock.patch.object(Path, "write_text") as write:
+                with (
+                    self.assertRaisesRegex(
+                        AssertionError, "never received its opportunity release"
+                    ),
+                    durability.parked_rewrite(ready, released),
+                ):
+                    Path("unused").write_text("unjudged rewrite")
+                write.assert_not_called()
+            released.wait.assert_called_once_with(HANG_GUARD_SECONDS)
+            ready.clear.assert_called_once_with()
+
+        with self.subTest(
+            "a delayed appender cannot turn missing opportunity into a passing result"
+        ):
+            ready = mock.Mock()
+            opportunity = mock.Mock()
+            opportunity.wait.return_value = False
+            released = mock.Mock()
+            context = mock.Mock()
+            context.Event.side_effect = [ready, released, opportunity]
+            with (
+                mock.patch.object(durability, "_context", return_value=context),
+                mock.patch.object(durability, "_join", return_value=[]),
+                mock.patch.object(durability, "_forced_result") as result,
+            ):
+                with self.assertRaisesRegex(AssertionError, "no lock/write opportunity"):
+                    run_forced_lost_update(CASES[0], self.tmp / "absent-opportunity")
+                result.assert_not_called()
+            opportunity.wait.assert_called_once_with(HANG_GUARD_SECONDS)
+            released.set.assert_called_once_with()
+
 
 class TornLinePolicyTests(_TempRootTest):
     """R8: the fold that decides and the fold that renders need opposite torn-line policies.
 
-    Which is why gates and expectation-rows each ship TWO readers instead of one compromise:
-    ``read`` raises for the enforcement fold, ``read_for_projection`` skips the bad row and keeps
-    going for the dashboard. Both halves are pinned below, on both logs -- a strict reader that
-    started skipping and a tolerant reader that started raising are each a defect, and each has a
-    test here that fails on it.
+    Which is why the gate log ships TWO readers instead of one compromise: ``read`` raises for
+    the enforcement fold, ``read_for_projection`` skips the bad row and keeps going for a
+    rendering fold. Both halves are pinned below -- a strict reader that started skipping and a
+    tolerant reader that started raising are each a defect, and each has a test here that fails
+    on it.
     """
 
     def _seed_gate(self) -> None:
@@ -134,7 +168,7 @@ class TornLinePolicyTests(_TempRootTest):
         """The enforcement fold must fail loudly, never skip.
 
         ``current`` / ``all_current`` are what ``worktrees/modules/closeout.py``,
-        ``worktrees/modules/integrate.py`` and ``serving/hosted_interactions.py`` read to decide
+        ``worktrees/modules/integrate.py`` and the closeout finalization read to decide
         whether a mutation may proceed, and none of them wraps the read in a suppression. Skipping
         a malformed line there could drop exactly the ``applied`` marker that closes the replay
         window, and the second mutation would be permitted with no error and no log line.
@@ -152,20 +186,22 @@ class TornLinePolicyTests(_TempRootTest):
                 read()
 
     def test_gate_projection_fold_degrades_instead_of_crashing(self) -> None:
-        """The dashboard fold over the same log must survive a torn line, per row.
+        """The rendering fold over the same log must survive a torn line, per row.
 
-        ``observer/snapshots.read_gates`` is the projection side; it runs on the 1s tick and
-        behind the dashboard's ASGI handlers. A single malformed row must neither raise nor cost
-        the reader every other gate in that log -- degrading to "one row missing" is a dashboard
+        ``GateStore.projected_current`` is the tolerant side: the keep-filtered live set folded
+        from ``read_for_projection``. A single malformed row must neither raise nor cost the
+        reader every other gate in that log -- degrading to "one row missing" is a display
         degrading; degrading to "no gates at all" is the projection losing its content.
         """
         self._seed_gate()
         self._append_torn_line()
 
-        gates = read_gates(self.tmp, now=datetime.now(UTC))
+        gates = GateStore(observer_logs_root(self.tmp)).projected_current(
+            None, now=datetime.now(UTC)
+        )
 
         self.assertEqual(
-            [gate.id for gate in gates],
+            [gate.id for gate in gates.values()],
             ["gate-intact"],
             "the projection must still surface the intact gates beside a torn line",
         )

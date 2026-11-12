@@ -1,0 +1,42 @@
+{
+  "scope": "All files below are current real tree route captures; the former dataset-only assessed/ambiguous shapes are removed. The family/invariant names remain only as shared consumer seeds, not compatibility fixtures.",
+  "producer": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/replay_http.py",
+  "fixtures": [
+    {
+      "file": "subjectReview.family.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/subjectReview.successorFamily.captured.json",
+      "sha256": "2a4621f84171f3d722740bddd84496ebbaefa42538dcf92c6d7a4732d48af8cb",
+      "previous_sha256": "24fb0979b9859d72012bbd855ba226bc29f75f4d24c19c3b96250866392b4fd3",
+      "bytes": 270999,
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/provenance.json",
+      "provenance_sha256": "b0bfd3545f211b810a0432f60d53556a8bf16f0eabcaeee682e136b822899628"
+    },
+    {
+      "file": "subjectReview.invariant.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l57.invariant.captured.json",
+      "sha256": "d9ab4558bb99695b37f50350aa70cc668718ea909260232008c2f001d5324f5c",
+      "previous_sha256": "71926526671d2a6b1ea63650cee02c12493435a396533a2fd1c49a8772a0d7c6",
+      "bytes": 283497,
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/provenance.json",
+      "provenance_sha256": "b0bfd3545f211b810a0432f60d53556a8bf16f0eabcaeee682e136b822899628"
+    },
+    {
+      "file": "subjectReview.successorFamily.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/subjectReview.successorFamily.captured.json",
+      "sha256": "2a4621f84171f3d722740bddd84496ebbaefa42538dcf92c6d7a4732d48af8cb",
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/provenance.json"
+    },
+    {
+      "file": "subjectReview.successorInvariant.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/subjectReview.successorInvariant.captured.json",
+      "sha256": "c5afaba7ee5e8ea8c2fd003d4e2d0422c49304cbd71fa40a0bfc654f08018797",
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/provenance.json"
+    },
+    {
+      "file": "subjectReview.noFamily.captured.json",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/subjectReview.noFamily.captured.json",
+      "sha256": "fcf34721bbc361ca3967a038dc294262b8dddd9aa93cdf3bb1b40ffc7bca749f",
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/provenance.json"
+    }
+  ]
+}

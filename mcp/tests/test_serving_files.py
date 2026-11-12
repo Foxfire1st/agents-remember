@@ -34,14 +34,18 @@ _SIDECAR = (
 )
 
 
-def _make_repo(code_root: Path, *, with_memory: bool) -> None:
-    """A small code tree; one file has a sidecar, one does not."""
+def _make_repo(code_root: Path, memory_root: Path, *, with_memory: bool) -> None:
+    """A small code tree; one file has a sidecar, one does not.
+
+    Memory is external: the configured memory root for a repository is the coordination
+    tree's ``memory-repos/ar-<repo>``, and a repo-sidecar ``ar-memory/`` root is refused.
+    """
     (code_root / "pkg").mkdir(parents=True)
     (code_root / "pkg" / "mod.py").write_text("x = 1\n", encoding="utf-8")
     (code_root / "pkg" / "other.py").write_text("y = 2\n", encoding="utf-8")
     (code_root / "README.md").write_text("# readme\n", encoding="utf-8")
     if with_memory:
-        onboarding = code_root / "ar-memory" / "onboarding"
+        onboarding = memory_root / "onboarding"
         (onboarding / "pkg").mkdir(parents=True)
         (onboarding / "pkg" / "mod.py.md").write_text(_SIDECAR, encoding="utf-8")
         (onboarding / "overview.md").write_text("# repo overview\n", encoding="utf-8")
@@ -57,7 +61,8 @@ class RouteTests(unittest.TestCase):
 
     def _client(self, *, with_memory: bool) -> TestClient:
         code_root = self.tmp / "ws" / "R"
-        _make_repo(code_root, with_memory=with_memory)
+        memory_root = self.tmp / "coord" / "memory-repos" / "ar-R"
+        _make_repo(code_root, memory_root, with_memory=with_memory)
         config = McpRuntimeConfig(
             config_path=self.tmp / "settings.json",
             coordination_root=self.tmp / "coord",

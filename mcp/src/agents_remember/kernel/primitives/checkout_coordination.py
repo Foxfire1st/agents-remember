@@ -108,16 +108,12 @@ def resolve_checkout_location(source_path: Path | None = None) -> CheckoutLocati
     return None
 
 
-def checkout_cli_location() -> CheckoutLocation | None:
-    """Return the linked checkout for undeclared CLI code, or refuse primary.
+def require_linked(location: CheckoutLocation | None) -> CheckoutLocation | None:
+    """``location`` when it may write, else refuse a primary checkout; ``None`` when it does not apply.
 
-    Installed-package CLI behavior is unchanged because an installed wheel has
-    no owning Agents Remember Git checkout.  Trusted daemon and explicit test
-    processes are also outside checkout CLI mode.
+    The refusal is the guard's whole decision, so a caller that has the location in hand (or a test
+    that builds a real primary or linked layout) runs the same rule as the CLI does.
     """
-    if declared_execution_mode() is not None:
-        return None
-    location = resolve_checkout_location()
     if location is None:
         return None
     if location.kind == "primary":
@@ -127,6 +123,18 @@ def checkout_cli_location() -> CheckoutLocation | None:
             "writes are isolated under provider-runtime/dev-ar-coordination"
         )
     return location
+
+
+def checkout_cli_location() -> CheckoutLocation | None:
+    """Return the linked checkout for undeclared CLI code, or refuse primary.
+
+    Installed-package CLI behavior is unchanged because an installed wheel has
+    no owning Agents Remember Git checkout.  Trusted daemon and explicit test
+    processes are also outside checkout CLI mode.
+    """
+    if declared_execution_mode() is not None:
+        return None
+    return require_linked(resolve_checkout_location())
 
 
 def require_durable_write_target(target: Path) -> None:

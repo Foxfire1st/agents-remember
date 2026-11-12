@@ -10,7 +10,14 @@ from typing import Literal
 
 from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, GitRunnerOptions, run_git
 from agents_remember.kernel.memory_ledger import MEMORY_CACHE_EXCLUDE
+from agents_remember.worktrees.integration.integration_branch_repository import (
+    memory_repository_default_branch,
+    repository_default_branch,
+)
 from agents_remember.worktrees.modules.git import local_branch_ref, repository_identity
+from agents_remember.worktrees.modules.terminal_branch_retirement import (
+    _kept_line_branch_proof,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
@@ -48,7 +55,14 @@ def require_series_children_retired(series: WorktreeContract) -> None:
         series.coordination_root, series.repo_name, series.task_name
     )
     if series.worktree_group.resolve() != expected_group.resolve():
-        raise RuntimeError("atomic series worktree group does not match its task authority")
+        raise RuntimeError(
+            f"master {series.task_id!r}: the coordination.worktree_group cell of "
+            f"{series.contract_path} records {series.worktree_group}, but the coordination.root, "
+            f"repo_name and task_name cells of the same contract place this master's worktree "
+            f"group at {expected_group}. Set coordination.worktree_group to that path (first move "
+            "the master's own .lifecycle and reports folders there if they still sit under the "
+            "recorded path), then retry"
+        )
     if not enclosure_root.exists():
         return
     blockers: list[str] = []
@@ -176,7 +190,7 @@ def terminal_preflight(
     mode: TerminalMode,
     force: bool,
 ) -> TerminalPreflight:
-    worktrees, worktree_blockers = _worktree_preflight(contract, force=force)
+    worktrees, worktree_blockers = _worktree_preflight(contract, force=force, mode=mode)
     branches: dict[str, dict[str, object]] = {}
     branch_blockers: list[dict[str, object]] = []
     allowed_worktrees = {
@@ -282,7 +296,17 @@ def terminal_result_blockers(result: TerminalResult) -> list[dict[str, object]]:
             _result_blockers(
                 "driftSnapshot",
                 result.drift_snapshots,
-                expect=TerminalExpectation(done_key="removed"),
+                # Every sibling collection above propagates ``preview``; this one did not, so a
+                # preview's ``would_remove`` entry was read with the real call's ``would_delete``
+                # key, looked like a blockage, and ``_blocker`` raised on the missing reason. The
+                # producer answers a dry run with ``would_remove``
+                # (``kernel/primitives/drift_snapshot.py::_remove_snapshot_file``) exactly as the
+                # worktree, directory and provider collections beside it do, so without it the
+                # entry was neither reclaimed, nor pending, nor reasoned and every preview of a
+                # task that HAS a drift snapshot crashed on its own producer's output
+                # (260918-TSIP ``T62``/``D49``; the same keyword was fixed independently on the
+                # incoming line, which is why this merge met a comment-only conflict).
+                expect=TerminalExpectation(done_key="removed", preview=result.preview),
             )
         )
     return blockers
@@ -292,11 +316,17 @@ def _worktree_preflight(
     contract: WorktreeContract,
     *,
     force: bool,
+    mode: TerminalMode,
 ) -> tuple[dict[str, dict[str, object]], list[dict[str, object]]]:
     if contract.kind == "series":
         return {}, []
     candidates = {"code": contract.code_worktree}
-    if contract.memory_mode == "external" and contract.memory_worktree is not None:
+    # The abandon's own steps reach every leg the contract carries: a removed
+    # mode never shields a live memory checkout from preflight or teardown
+    # (MIK-R50 rule 3). Cleanup keeps the external-only shape.
+    if contract.memory_worktree is not None and (
+        contract.memory_mode == "external" or mode == "abandon"
+    ):
         candidates["memory"] = contract.memory_worktree
     previews: dict[str, dict[str, object]] = {}
     blockers: list[dict[str, object]] = []
@@ -345,6 +375,19 @@ def _branch_targets(
         )
     ]
     if contract.memory_mode == "external" and contract.memory_repo_path is not None:
+        targets.append(
+            BranchTarget(
+                "memory",
+                contract.memory_repo_path,
+                contract.memory_work_branch,
+                contract.memory_source_branch,
+            )
+        )
+    elif (
+        mode == "abandon" and contract.memory_repo_path is not None and contract.memory_work_branch
+    ):
+        # Abandon reaches a carried memory branch whatever the mode names:
+        # a removed mode never shields it from preflight or deletion.
         targets.append(
             BranchTarget(
                 "memory",
@@ -435,6 +478,16 @@ def _branch_checkout_refusal(
     return None
 
 
+def _preflight_default_branch(target: BranchTarget) -> str | None:
+    """The repo default for the kept-line proof; ``None`` fails the proof closed."""
+    try:
+        if target.key == "code":
+            return repository_default_branch(target.repo)
+        return memory_repository_default_branch(target.repo)
+    except Exception:
+        return None
+
+
 def _cleanup_branch_preflight(
     target: BranchTarget,
     base: dict[str, object],
@@ -449,7 +502,29 @@ def _cleanup_branch_preflight(
         ],
     )
     if merge.returncode == 1:
-        return {**base, "reason": "not-merged-into-source", "target": target.source}
+        proof = _kept_line_branch_proof(
+            target.repo,
+            target.branch,
+            target.source,
+            _preflight_default_branch(target),
+        )
+        if proof is None:
+            return {**base, "reason": "not-merged-into-source", "target": target.source}
+        result = {
+            **base,
+            "deleted": False,
+            "would_delete": True,
+            "target": target.source,
+            "keptLine": proof[0],
+            "foundIn": proof[1],
+        }
+        if target.remote:
+            result["remote"] = _remote_branch_preflight(target.repo, target.branch)
+            remote = result["remote"]
+            if isinstance(remote, dict) and _blocked(remote, pending_key="would_delete"):
+                result["reason"] = f"remote: {remote.get('reason')}"
+                result.pop("would_delete", None)
+        return result
     if merge.returncode != 0:
         return {
             **base,

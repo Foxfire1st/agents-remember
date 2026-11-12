@@ -47,7 +47,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.13.15"
+          python-version: "3.14.8"
 
       - name: Prove the exact Python runtime
         run: |
@@ -137,7 +137,7 @@ jobs:
           print(f"dashboard bundle and fingerprint present in {wheel.name} and {sdist.name}")
           PY
 
-      - name: Install and start the wheel in a clean Python 3.13 environment
+      - name: Install and start the wheel in a clean Python 3.14 environment
         run: |
           wheel="$(find mcp/dist -maxdepth 1 -type f -name '*.whl' -print -quit)"
           test -n "$wheel"

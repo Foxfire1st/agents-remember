@@ -2,84 +2,93 @@ from __future__ import annotations
 
 import hashlib
 import re
+import subprocess
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from tempfile import TemporaryDirectory
+from typing import Any
 
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel import filesystem
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.onboarding_doc import (
-    ROUTE_OVERVIEW_DOC_TYPES,
-    has_no_impact_marker,
     markdown_table_cells,
-    meaningful_body,
-    meaningful_body_changed,
-    new_history_lines,
-    normalize_route,
-    onboarding_metadata_row,
-    table_metadata,
 )
 from agents_remember.kernel.route_index import build_route_indexes
+from agents_remember.models.knowledge_files.documents import dependent_document_paths
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
-    changed_worktree_paths,
-    commit_text_or_none,
-    committed_changed_paths,
     require_git,
-    run_git,
+    worktree_candidate_tree,
 )
 from agents_remember.worktrees.modules.models import (
-    PATH_SAMPLE_LIMIT,
     EntityFingerprintRefreshPlan,
     EntityFingerprintRequiredItem,
     EntityFingerprintRow,
     OnboardingRefreshPlan,
-    RouteOverviewBodyClassification,
-    RouteOverviewRefreshPlan,
-    SidecarBodyClassification,
-    VerifiedChange,
 )
-from agents_remember.worktrees.modules.onboarding_acceptance import (
-    OnboardingBodyGateEvidence,
-    apply_route_no_impact,
-    apply_sidecar_no_impact,
+from agents_remember.worktrees.modules.onboarding_trace import (
+    INCOMPLETE_CODE,
+    OnboardingTraceResult,
+    OnboardingTraceSides,
+    onboarding_trace_result,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 ENTITY_FINGERPRINT_ALGORITHM = "git-blob-set-v1"
+ENTITIES_CATALOG_NAME = "entities.md"
+ENTITY_EVIDENCE_CHECK = "entity-evidence"
+ENTITY_EVIDENCE_ABSENT = "entity-evidence-absent"
+_EVIDENCE_CLEARING = "re-point the row's evidence list to files the candidate holds"
+_FINGERPRINT_CLEARING = "run the l-01-agent-lifecycles Curator procedure, then rerun the closeout"
+
+
+def entities_catalog_path(context) -> Path:
+    """The repository entity catalog this context's closeout refreshes."""
+
+    return context.onboarding_root / ENTITIES_CATALOG_NAME
+
+
+def _tree_holds(repository: Path, tree: str, source_path: str) -> bool:
+    """Whether ``tree`` of ``repository`` holds ``source_path`` (MIK-R178 rule 1).
+
+    The check reads the tree by its id (``<tree>:<path>``), never ``HEAD``, so the candidate tree
+    is asked whatever the worktree or a later commit holds. A path Git cannot resolve is absent;
+    ``run_git`` itself reports a repository it cannot read, and the caller names that failure.
+    """
+
+    result = run_git(repository, ["rev-parse", "--verify", "--quiet", f"{tree}:{source_path}"])
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def _tree_paths(repository: Path, tree: str) -> frozenset[str]:
+    """Every path ``tree`` holds, read once, so a whole catalog is checked in one Git call.
+
+    An unreadable tree raises by name: it is reported as the step it belongs to, with the tree and
+    the repository, never as a silent "everything is absent".
+    """
+
+    result = run_git(repository, ["ls-tree", "-r", "-z", "--name-only", tree])
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"git ls-tree {tree} failed"
+        raise RuntimeError(
+            "the closeout's memory refresh cannot read the code candidate tree: step "
+            f"entity-fingerprint evidence check, tree {tree} in {repository.as_posix()} ({detail})"
+        )
+    return frozenset(name for name in result.stdout.split("\0") if name)
 
 
 def sidecar_onboarding_path(onboarding_root: Path, source_path: str) -> Path:
     return onboarding_root / f"{source_path}.md"
 
 
-def contract_memory_verified_commit(contract: WorktreeContract) -> str:
-    """The last memory commit closeout verified against, for body-gate baselines."""
-    return contract.memory_content_commit or contract.memory_base_commit
-
-
-def _changed_memory_paths(memory_root: Path, memory_verified_commit: str) -> set[str]:
-    """Memory-tree paths changed since the last verified memory commit.
-
-    Dirty paths plus the committed range, so sidecar work committed in the
-    memory worktree before closeout still counts as updated this task.
-    """
-    changed = set(changed_worktree_paths(memory_root))
-    if memory_verified_commit:
-        changed.update(
-            committed_changed_paths(memory_root, memory_verified_commit, memory_verified_commit)
-        )
-    return changed
-
-
-def _joined_sample(paths: list[str]) -> str:
-    """Comma-join capped at PATH_SAMPLE_LIMIT so gate errors never flood payloads."""
-    extra = len(paths) - PATH_SAMPLE_LIMIT
-    joined = ", ".join(paths[:PATH_SAMPLE_LIMIT])
-    return f"{joined}, ... (+{extra} more)" if extra > 0 else joined
-
-
 def onboarding_refresh_plan_for_context(
-    context, changed_paths: list[str], *, working_paths: list[str] | None = None
+    context,
+    changed_paths: list[str],
+    *,
+    working_paths: list[str] | None = None,
+    dependent_documents: frozenset[str] | None = None,
 ) -> OnboardingRefreshPlan:
     """Plan sidecar refreshes for changed sources, split by responsibility tier.
 
@@ -90,12 +99,25 @@ def onboarding_refresh_plan_for_context(
     so transported history cannot force whole-repository onboarding. ``None``
     keeps the strict legacy semantics: every changed path is treated as working.
     """
+    if dependent_documents is None:
+        memory_root = context.onboarding_root.parent
+        folder = filesystem.extended_path(memory_root / "knowledge/dependents")
+        dependent_documents = dependent_document_paths(
+            {
+                path.relative_to(
+                    filesystem.extended_path(memory_root)
+                ).as_posix(): path.read_bytes()
+                for path in folder.glob("*.json")
+            }
+        )
     working = set(changed_paths if working_paths is None else working_paths)
     required: list[dict[str, str]] = []
     missing: list[str] = []
     unsupported: list[str] = []
     unonboarded: list[str] = []
     for source_path in changed_paths:
+        if source_path in dependent_documents:
+            continue
         storage = resolver.resolve_storage_for_source(
             source_path, context.storage, context.code_repository_name
         )
@@ -124,390 +146,6 @@ def onboarding_refresh_plan_for_context(
 
 def normalized_table_cell(cell: str) -> str:
     return re.sub(r"[^a-z0-9]", "", cell.lower())
-
-
-def route_overview_metadata_refresh_plan_for_context(
-    context,
-    changed_paths: list[str],
-    *,
-    memory_tree: Path | None = None,
-    memory_verified_commit: str = "",
-) -> RouteOverviewRefreshPlan:
-    """Plan verification stamps for nearest governing and task-edited overviews.
-
-    A curator can repair a route whose source drift predates the leaf's current code
-    range (for example after a source-branch sync).  Such an overview is still part of
-    this closeout transaction even though none of ``changed_paths`` falls below its
-    route.  Include every route overview changed since the task's verified memory
-    baseline so the body gate can validate it and closeout can stamp it atomically.
-    Untouched ancestors outside that closed set must not receive verification stamps.
-    """
-    required: list[dict[str, str]] = []
-    missing_metadata: list[str] = []
-    tree = Path(memory_tree).resolve() if memory_tree is not None else None
-    changed_memory = (
-        _changed_memory_paths(tree, memory_verified_commit) if tree is not None else set()
-    )
-    overviews = []
-    for overview_path in sorted(context.onboarding_root.rglob("overview.md")):
-        if not filesystem.is_file(overview_path):
-            continue
-        metadata = table_metadata(overview_path)
-        if metadata.get("doc_type", "").strip("`") not in ROUTE_OVERVIEW_DOC_TYPES:
-            continue
-        source_route = normalize_route(metadata.get("sourceRoute", "."))
-        overviews.append((overview_path, metadata, source_route))
-    routes = [source_route for _, _, source_route in overviews]
-    governing_routes = {
-        route
-        for path in changed_paths
-        if (route := _nearest_governing_route(path, routes)) is not None
-    }
-    for overview_path, metadata, source_route in overviews:
-        changed_in_memory = False
-        if tree is not None:
-            try:
-                changed_in_memory = (
-                    overview_path.resolve().relative_to(tree).as_posix() in changed_memory
-                )
-            except ValueError:
-                changed_in_memory = False
-        if source_route not in governing_routes and not changed_in_memory:
-            continue
-        rel_path = overview_path.relative_to(context.onboarding_root).as_posix()
-        if "lastVerifiedCommitHash" not in metadata or "lastVerifiedCommitDate" not in metadata:
-            missing_metadata.append(rel_path)
-            continue
-        required.append(
-            {
-                "source_route": source_route,
-                "onboarding_file": overview_path.as_posix(),
-            }
-        )
-    return {
-        "required": required,
-        "missing_metadata": missing_metadata,
-    }
-
-
-def _nearest_governing_route(source_path: str, routes: list[str]) -> str | None:
-    """The longest route among routes that covers source_path; '.' covers all."""
-    candidates = [
-        route
-        for route in routes
-        if route in {".", source_path} or source_path.startswith(f"{route}/")
-    ]
-    if not candidates:
-        return None
-    return max(candidates, key=lambda route: (route != ".", len(route), route))
-
-
-def classify_route_overview_updates(
-    context,
-    plan: RouteOverviewRefreshPlan,
-    changed_paths: list[str],
-    *,
-    memory_tree: Path | None = None,
-    memory_verified_commit: str = "",
-) -> RouteOverviewBodyClassification:
-    """Classify matched route overviews by meaningful body and history changes.
-
-    Only overviews that are the **nearest governor** of at least one changed
-    source path are domain-evident and classified like sidecars (``stale`` /
-    ``untraced`` / ``attested_no_impact``, with ``No route impact:`` as the
-    marker). Overviews matched only as ancestors — including the repo-root
-    overview matched by happenstance — are reported under
-    ``stamped_without_body_review`` when their body was not reviewed this
-    cycle, and never gate closeout.
-    """
-    classification: RouteOverviewBodyClassification = {
-        "stale": [],
-        "untraced": [],
-        "attested_no_impact": [],
-        "stamped_without_body_review": [],
-    }
-    required = plan["required"]
-    if not required:
-        return classification
-    tree = memory_tree if memory_tree is not None else getattr(context, "memory_root", None)
-    if tree is None:
-        return classification
-    memory_root = Path(tree).resolve()
-    baseline_ref = memory_verified_commit or "HEAD"
-    changed_memory = _changed_memory_paths(memory_root, memory_verified_commit)
-    routes = [normalize_route(item["source_route"]) for item in required]
-    domain_routes = {
-        route
-        for route in (_nearest_governing_route(path, routes) for path in changed_paths)
-        if route is not None
-    }
-    changed_overviews: set[Path] = set()
-    for item in required:
-        overview_path = Path(item["onboarding_file"]).resolve()
-        try:
-            relative = overview_path.relative_to(memory_root).as_posix()
-        except ValueError:
-            continue
-        if relative in changed_memory:
-            changed_overviews.add(overview_path)
-    for item in required:
-        route = normalize_route(item["source_route"])
-        overview_path = Path(item["onboarding_file"]).resolve()
-        source_domain_evident = route in domain_routes
-        evidence: Literal["ancestor", "source", "task-edited"] = (
-            "source"
-            if source_domain_evident
-            else "task-edited"
-            if overview_path in changed_overviews
-            else "ancestor"
-        )
-        bucket = _route_overview_bucket(
-            overview_path,
-            memory_root=memory_root,
-            baseline_ref=baseline_ref,
-            changed_memory=changed_memory,
-            evidence=evidence,
-        )
-        if bucket is not None:
-            classification[bucket].append(route)
-    return classification
-
-
-def _overview_revision(
-    overview_path: Path,
-    *,
-    memory_root: Path,
-    baseline_ref: str,
-    changed_memory: set[str],
-) -> tuple[bool, list[str], bool] | None:
-    """Body change, added history, and citation-only status against the baseline.
-
-    ``None`` when the overview is outside the memory tree or absent from the baseline —
-    neither is a stale-overview signal, so those overviews drop out of the classification.
-    """
-    try:
-        relative = overview_path.relative_to(memory_root).as_posix()
-    except ValueError:
-        return None
-    baseline_text = commit_text_or_none(memory_root, baseline_ref, relative)
-    if baseline_text is None:
-        return None
-    current = filesystem.read_text(overview_path, encoding="utf-8")
-    body_changed = relative in changed_memory and meaningful_body_changed(baseline_text, current)
-    return (
-        body_changed,
-        new_history_lines(baseline_text, current),
-        body_changed and _citation_coordinates_only_changed(baseline_text, current),
-    )
-
-
-def _citation_coordinates_only_changed(old_text: str, new_text: str) -> bool:
-    """True when meaningful route prose is unchanged apart from citation line ranges.
-
-    The sanctioned citation fixer moves only the final source-range cell of reference
-    table rows.  Those generated coordinates do not need an Update History entry, but
-    they do need the document's verification stamp to advance with the code snapshot.
-    Normalising only complete ``path:line[-line]`` cells keeps substantive prose, claim,
-    anchor, path, and table-shape changes visible to the body gate.
-    """
-
-    def normalized(text: str) -> str:
-        lines: list[str] = []
-        for line in meaningful_body(text).splitlines():
-            cells = markdown_table_cells(line) if line.strip().startswith("|") else []
-            if not cells:
-                lines.append(line)
-                continue
-            references: list[str] = []
-            for reference in cells[-1].split(";"):
-                value = reference.strip()
-                matched = re.fullmatch(r"(.+):\d+(?:-\d+)?", value)
-                prefix = matched.group(1) if matched is not None else ""
-                references.append(
-                    f"{prefix}:<lines>"
-                    if matched is not None and ("/" in prefix or "." in prefix)
-                    else value
-                )
-            lines.append("\x1f".join([*cells[:-1], "; ".join(references)]))
-        return "\n".join(lines)
-
-    return normalized(old_text) == normalized(new_text)
-
-
-def _governing_overview_bucket(
-    body_changed: bool,
-    added_history: list[str],
-    *,
-    allow_citation_only: bool,
-    citation_only: bool,
-) -> str | None:
-    """The gating bucket for a nearest-governor overview; ``None`` once it is properly updated."""
-    if body_changed and added_history:
-        return None
-    if body_changed:
-        if allow_citation_only and citation_only:
-            return None
-        return "untraced"
-    if added_history and has_no_impact_marker(added_history):
-        return "attested_no_impact"
-    return "stale"
-
-
-def _route_overview_bucket(
-    overview_path: Path,
-    *,
-    memory_root: Path,
-    baseline_ref: str,
-    changed_memory: set[str],
-    evidence: Literal["ancestor", "source", "task-edited"],
-) -> str | None:
-    """Which classification bucket one matched route overview falls in, if any.
-
-    A source-matched or task-edited overview is classified like a sidecar; an
-    overview matched merely as an ancestor is reported when its body went unreviewed
-    and never gates. Task-edited citation-coordinate regeneration is accepted without
-    an invented history entry; substantive task edits are not.
-    """
-    revision = _overview_revision(
-        overview_path,
-        memory_root=memory_root,
-        baseline_ref=baseline_ref,
-        changed_memory=changed_memory,
-    )
-    if revision is None:
-        return None
-    body_changed, added_history, citation_only = revision
-    if evidence == "ancestor":
-        return None if body_changed else "stamped_without_body_review"
-    return _governing_overview_bucket(
-        body_changed,
-        added_history,
-        allow_citation_only=evidence == "task-edited",
-        citation_only=citation_only,
-    )
-
-
-def require_updated_route_overview_content(
-    context,
-    plan: RouteOverviewRefreshPlan,
-    changed_paths: list[str],
-    *,
-    body_gate: OnboardingBodyGateEvidence | None = None,
-) -> list[str]:
-    """Fail closeout when a domain-evident route overview lacks an honest update.
-
-    A route overview that directly governs a changed source path is the front
-    door for that change: stamping its verification header over an untouched
-    body silently presents stale route documentation as current. The overview
-    must therefore pair a meaningful body change with a new Update History
-    entry, or have an exact candidate-bound no-route-impact decision. Returns
-    the accepted routes so closeout payloads can surface them.
-    """
-    evidence = body_gate or OnboardingBodyGateEvidence()
-    classification = classify_route_overview_updates(
-        context,
-        plan,
-        changed_paths,
-        memory_tree=evidence.memory_tree,
-        memory_verified_commit=evidence.memory_verified_commit,
-    )
-    classification = apply_route_no_impact(classification, evidence.accepted_no_impact)
-    stale = classification["stale"]
-    untraced = classification["untraced"]
-    if stale or untraced:
-        details: list[str] = []
-        if stale:
-            details.append(
-                "the following governing route overviews have an unmodified or "
-                "metadata/history-only body: " + ", ".join(sorted(stale))
-            )
-        if untraced:
-            details.append(
-                "the following governing route overviews have a body update without a new "
-                "Update History entry: " + ", ".join(sorted(untraced))
-            )
-        raise RuntimeError(
-            "external-memory closeout requires updated route overview content for routes "
-            "whose governed sources changed; "
-            + "; ".join(details)
-            + ". Update each overview body through the c-05-create-or-update-onboarding-files "
-            "skill and record the change in its Update History, or publish an exact "
-            "candidate-bound no-route-impact judgment through curator_coherence. Advancing "
-            "lastVerifiedCommitHash on stale content is a prohibited metadata-only refresh."
-        )
-    return classification["attested_no_impact"]
-
-
-def validate_route_overview_refresh_plan_for_context(
-    context,
-    changed_paths: list[str],
-    *,
-    memory_tree: Path | None = None,
-    memory_verified_commit: str = "",
-    accepted_no_impact: frozenset[str] = frozenset(),
-) -> RouteOverviewRefreshPlan:
-    plan = route_overview_metadata_refresh_plan_for_context(
-        context,
-        changed_paths,
-        memory_tree=memory_tree,
-        memory_verified_commit=memory_verified_commit,
-    )
-    missing_metadata = plan["missing_metadata"]
-    if missing_metadata:
-        raise RuntimeError(
-            "external-memory closeout requires route overview verification metadata before memory commit; "
-            f"missing lastVerifiedCommitHash or lastVerifiedCommitDate in: {', '.join(missing_metadata)}. "
-            "Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
-        )
-    require_updated_route_overview_content(
-        context,
-        plan,
-        changed_paths,
-        body_gate=OnboardingBodyGateEvidence(
-            memory_tree=memory_tree,
-            memory_verified_commit=memory_verified_commit,
-            accepted_no_impact=accepted_no_impact,
-        ),
-    )
-    return plan
-
-
-def refresh_route_overview_metadata_for_context(
-    context,
-    change: VerifiedChange,
-    *,
-    memory_tree: Path | None = None,
-    memory_verified_commit: str = "",
-    accepted_no_impact: frozenset[str] = frozenset(),
-) -> list[dict[str, str]]:
-    verified_commit = change.commit
-    verified_date = change.commit_date
-    # Closeout owns a mechanical metadata commit.  Body review and curator
-    # judgments remain explicit operations outside this Git transaction.
-    _ = accepted_no_impact
-    plan = route_overview_metadata_refresh_plan_for_context(
-        context,
-        change.changed_paths,
-        memory_tree=memory_tree,
-        memory_verified_commit=memory_verified_commit,
-    )
-    refreshed: list[dict[str, str]] = []
-    for item in plan["required"]:
-        overview_path = Path(item["onboarding_file"])
-        text = filesystem.read_text(overview_path, encoding="utf-8")
-        text, hash_found = onboarding_metadata_row(
-            text, "lastVerifiedCommitHash", verified_commit, code=True
-        )
-        text, date_found = onboarding_metadata_row(text, "lastVerifiedCommitDate", verified_date)
-        if not hash_found or not date_found:
-            raise RuntimeError(
-                "external-memory closeout requires route overview verification metadata before memory commit; "
-                f"{overview_path.as_posix()} is missing lastVerifiedCommitHash or lastVerifiedCommitDate. "
-                "Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
-            )
-        filesystem.write_text(overview_path, text, encoding="utf-8")
-        refreshed.append(item)
-    return refreshed
 
 
 def refresh_route_indexes_for_context(context) -> dict[str, Any]:
@@ -564,7 +202,13 @@ def _fingerprint_row(line: str, index: int, header: dict[str, int]) -> EntityFin
 def parse_entity_fingerprint_rows(catalog_path: Path) -> list[EntityFingerprintRow]:
     if not filesystem.exists(catalog_path):
         return []
-    lines = filesystem.read_text(catalog_path, encoding="utf-8").splitlines()
+    return parse_entity_fingerprint_text(filesystem.read_text(catalog_path, encoding="utf-8"))
+
+
+def parse_entity_fingerprint_text(text: str) -> list[EntityFingerprintRow]:
+    """The catalog's fingerprint rows, read from text that need not be a file (MIK-R178 rule 3)."""
+
+    lines = text.splitlines()
     table = _fingerprint_table_header(lines)
     if table is None:
         return []
@@ -581,26 +225,44 @@ def parse_entity_fingerprint_rows(catalog_path: Path) -> list[EntityFingerprintR
     return rows
 
 
+def _row_is_edited(
+    entity: str, evidence_paths: list[str], base_evidence: Mapping[str, Sequence[str]] | None
+) -> bool:
+    """Whether the row is new, or its evidence list differs from its row at the memory base."""
+
+    if base_evidence is None:
+        return False
+    base = base_evidence.get(entity)
+    return base is None or sorted(base) != sorted(evidence_paths)
+
+
 def entity_fingerprint_refresh_plan_for_context(
-    context, changed_paths: list[str]
+    context,
+    changed_paths: list[str],
+    *,
+    base_evidence: Mapping[str, Sequence[str]] | None = None,
 ) -> EntityFingerprintRefreshPlan:
+    """The rows the closeout recomputes, and the rows it cannot recompute (MIK-R178 rule 3).
+
+    A row is in scope when its evidence touches a changed path, when its evidence list differs
+    from the same row at the leaf's memory base (``base_evidence``), or when the base holds no
+    such row. ``None`` keeps the changed-path rule alone, for a caller with no base to compare
+    against. A row in scope whose algorithm is not :data:`ENTITY_FINGERPRINT_ALGORITHM` is
+    ``unsupported`` rather than planned.
+    """
+
     changed = set(changed_paths)
-    catalog_path = context.onboarding_root / "entities.md"
+    catalog_path = entities_catalog_path(context)
     required: list[EntityFingerprintRequiredItem] = []
     unsupported: list[dict[str, str]] = []
     for row in parse_entity_fingerprint_rows(catalog_path):
+        entity = str(row["entity"])
         evidence_paths = list(row["evidence_paths"])
         affected_paths = sorted(changed.intersection(evidence_paths))
-        if not affected_paths:
+        if not affected_paths and not _row_is_edited(entity, evidence_paths, base_evidence):
             continue
-        entity = str(row["entity"])
         if row["algorithm"] != ENTITY_FINGERPRINT_ALGORITHM:
-            unsupported.append(
-                {
-                    "entity": entity,
-                    "algorithm": str(row["algorithm"]),
-                }
-            )
+            unsupported.append({"entity": entity, "algorithm": str(row["algorithm"])})
             continue
         required.append(
             {
@@ -616,31 +278,213 @@ def entity_fingerprint_refresh_plan_for_context(
     }
 
 
-def compute_git_blob_set_fingerprint(repo_root: Path, evidence_paths: list[str]) -> str:
+def entity_fingerprint_plan_problems(
+    context, plan: EntityFingerprintRefreshPlan, *, code_tree: str
+) -> list[str]:
+    """Every entity-row problem the closeout can know before the code commit (MIK-R178 rules 1-2).
+
+    One line per entity row, naming the catalog file, the row and every remedy that applies.
+    **Every row of the catalog is evidence-checked**, planned or not: a row whose evidence the
+    code candidate does not hold is a fault whether the refresh would recompute it or not, so a
+    leaf that deletes the only file a row cites is refused here rather than closing out with
+    broken evidence (L176-R1-F01). A row is also checked for the defects that stop a recompute --
+    an unsupported algorithm, a missing fingerprint value -- and those are reported **beside** its
+    absent paths, never instead of them (L176-R1-F03).
+    """
+
+    catalog_path = entities_catalog_path(context)
+    tree_paths = _tree_paths(context.code_repository_root, code_tree)
+    planned = {str(item["entity"]) for item in plan["required"]}
+    unsupported = {str(item["entity"]): str(item["algorithm"]) for item in plan["unsupported"]}
+    lines: list[str] = []
+    for row in parse_entity_fingerprint_rows(catalog_path):
+        entity = str(row["entity"])
+        details: list[str] = []
+        if entity in unsupported:
+            details.append(
+                f"uses the unsupported algorithm {unsupported[entity]!r}; set the row to "
+                f"{ENTITY_FINGERPRINT_ALGORITHM} and {_FINGERPRINT_CLEARING}"
+            )
+        if entity in planned and not str(row["fingerprint"]):
+            details.append(f"has no fingerprint value; {_FINGERPRINT_CLEARING}")
+        absent = sorted(
+            source_path for source_path in row["evidence_paths"] if source_path not in tree_paths
+        )
+        if absent:
+            details.append(
+                f"cites evidence paths the code candidate does not hold: {', '.join(absent)}; "
+                f"{_EVIDENCE_CLEARING}"
+            )
+        if details:
+            lines.append(f"{catalog_path.as_posix()} row {entity!r} " + "; ".join(details))
+    return lines
+
+
+def entity_fingerprint_plan_refusal(
+    context, plan: EntityFingerprintRefreshPlan, *, code_tree: str
+) -> str | None:
+    """The entity half of the closeout's candidate verdict, as one message (MIK-R178).
+
+    ``plan`` is the refresh the closeout will run and ``code_tree`` the accepted code candidate
+    tree, read by its id, so the answer depends on the code candidate and the memory worktree and
+    on nothing the closeout writes later. ``None`` when every row's evidence holds and the refresh
+    would commit every planned row.
+    """
+
+    lines = entity_fingerprint_plan_problems(context, plan, code_tree=code_tree)
+    if not lines:
+        return None
+    header = (
+        "external-memory closeout refuses this candidate before the code commit: the memory "
+        f"refresh cannot run from the code candidate tree {code_tree}"
+    )
+    return "\n".join([header, *(f"- {line}" for line in lines)])
+
+
+def route_index_refresh_problems(context) -> list[str]:
+    """The route-index refresh's deterministic refusals, asked from the two trees (MIK-R178 rule 1).
+
+    The refresh renders every route's cache from the code candidate and the memory worktree. An
+    input it cannot read -- a stale cache held as non-UTF-8 bytes, a route overview it cannot
+    render -- refuses the closeout *after* the code commit when nothing asks earlier
+    (L176-R1-F02). This asks the refresh's own planner, the same function, so the class cannot
+    drift from what the refresh does, and names the step, the offending path and the error rather
+    than a bare codec message.
+    """
+
+    try:
+        route_index_refresh_plan_for_context(context)
+    except (OSError, UnicodeError, RuntimeError) as error:
+        return [
+            "the route-index refresh cannot read its inputs: step route-index plan, "
+            f"{_unreadable_route_index(context.onboarding_root)}, code root "
+            f"{context.code_repository_root.as_posix()}, memory root "
+            f"{context.onboarding_root.as_posix()} ({type(error).__name__}: {error})"
+        ]
+    return []
+
+
+def _unreadable_route_index(onboarding_root: Path) -> str:
+    """The route cache the refresh cannot read, or a description of the inputs it was given."""
+
+    for path in sorted(onboarding_root.rglob("*.index.json")):
+        if not path.is_file():
+            continue
+        try:
+            path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as error:
+            return f"{path.as_posix()} ({type(error).__name__})"
+    return "the route-index inputs"
+
+
+def entity_evidence_at_base(onboarding_root: Path, commit: str) -> dict[str, list[str]] | None:
+    """Each entity row's evidence list at the leaf's memory base (MIK-R178 rule 3).
+
+    ``None`` when the caller names no base commit: no row is compared with a base, and only the
+    changed-path rule applies. ``{}`` when the base holds no catalog at all: every row of the
+    leaf's catalog is new there. A commit Git cannot read refuses by name, so an unreadable input
+    never reads as a new catalog.
+    """
+
+    if not commit:
+        return None
+    repository = onboarding_root.parent
+    try:
+        relative = (onboarding_root / ENTITIES_CATALOG_NAME).relative_to(repository).as_posix()
+    except ValueError:
+        return None
+    if not _tree_holds(repository, commit, relative):
+        return {}
+    result = run_git(repository, ["show", f"{commit}:{relative}"])
+    if result.returncode != 0:
+        raise RuntimeError(
+            "the closeout's memory refresh cannot read the entity catalog at the leaf's memory "
+            f"base: step entity-fingerprint base read, {relative} at commit {commit} "
+            f"({result.stderr.strip() or 'git show failed'})"
+        )
+    return {
+        str(row["entity"]): list(row["evidence_paths"])
+        for row in parse_entity_fingerprint_text(result.stdout)
+    }
+
+
+def compute_git_blob_set_fingerprint(
+    repo_root: Path, evidence_paths: list[str], *, tree: str | None = None
+) -> str:
+    """``git-blob-set-v1`` over ``evidence_paths`` at ``tree`` (``HEAD`` when no tree is named).
+
+    The closeout passes the code commit's tree, so the value is over the tree the leaf commits and
+    not whatever ``HEAD`` holds when the refresh runs (MIK-R178 rule 3).
+    """
+
+    reference = "HEAD" if tree is None else tree
     lines: list[str] = []
     for source_path in sorted(evidence_paths):
-        blob_hash = require_git(repo_root, ["rev-parse", f"HEAD:{source_path}"])
+        blob_hash = require_git(repo_root, ["rev-parse", f"{reference}:{source_path}"])
         lines.append(f"{source_path}\0{blob_hash}\n")
     digest = hashlib.sha256("".join(lines).encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
 
 
-def refresh_entity_fingerprints_for_context(
-    context, changed_paths: list[str]
-) -> list[dict[str, object]]:
-    plan = entity_fingerprint_refresh_plan_for_context(context, changed_paths)
-    unsupported = plan["unsupported"]
-    if unsupported:
-        details = ", ".join(f"{item['entity']} ({item['algorithm']})" for item in unsupported)
+def _commit_tree(repository: Path, commit: str) -> str:
+    """The tree of ``commit``, or a refusal naming the step, the commit and the repository."""
+
+    try:
+        return require_git(repository, ["rev-parse", "--verify", f"{commit}^{{tree}}"])
+    except (RuntimeError, subprocess.SubprocessError) as error:
         raise RuntimeError(
-            "external-memory closeout requires supported entity fingerprint rows before memory commit; "
-            f"unsupported rows: {details}. Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
-        )
+            "the closeout's memory refresh cannot read the code commit's tree: step "
+            f"entity-fingerprint refresh, commit {commit} in {repository.as_posix()} "
+            f"({type(error).__name__}: {error})"
+        ) from error
+
+
+def _row_fingerprint(
+    repository: Path,
+    item: EntityFingerprintRequiredItem,
+    *,
+    code_tree: str,
+    catalog_path: Path,
+) -> str:
+    """One row's value at the code commit's tree, or a refusal naming step, paths and tree."""
+
+    evidence_paths = list(item["evidence_paths"])
+    try:
+        return compute_git_blob_set_fingerprint(repository, evidence_paths, tree=code_tree)
+    except (RuntimeError, subprocess.SubprocessError) as error:
+        raise RuntimeError(
+            "the closeout's memory refresh failed while computing a git-blob-set-v1 value: step "
+            f"entity-fingerprint refresh, {catalog_path.as_posix()} row {item['entity']!r}, "
+            f"evidence paths {', '.join(sorted(evidence_paths))} at code tree {code_tree} "
+            f"({type(error).__name__}: {error})"
+        ) from error
+
+
+def refresh_entity_fingerprints_for_context(
+    context, changed_paths: list[str], *, code_commit: str, memory_base_commit: str = ""
+) -> list[dict[str, object]]:
+    """Recompute the entity fingerprints this leaf changed, over the code commit's own tree.
+
+    MIK-R178 rule 3: a row is recomputed when its evidence touches a changed path, when its
+    evidence list differs from the same row at the leaf's memory base (``memory_base_commit``),
+    and when the row is new. The value is ``git-blob-set-v1`` over the row's evidence set at the
+    tree of ``code_commit``. Rule 2: a row the candidate cannot support refuses here by name,
+    naming the step, the path and the tree it read, rather than with a bare Git message.
+    """
+
+    catalog_path = entities_catalog_path(context)
+    base_evidence = entity_evidence_at_base(context.onboarding_root, memory_base_commit)
+    plan = entity_fingerprint_refresh_plan_for_context(
+        context, changed_paths, base_evidence=base_evidence
+    )
+    code_tree = _commit_tree(context.code_repository_root, code_commit)
+    refusal = entity_fingerprint_plan_refusal(context, plan, code_tree=code_tree)
+    if refusal is not None:
+        raise RuntimeError(refusal)
     required = list(plan["required"])
     if not required:
         return []
 
-    catalog_path = Path(required[0]["onboarding_file"])
     lines = filesystem.read_text(catalog_path, encoding="utf-8").splitlines()
     refreshed: list[dict[str, object]] = []
     rows_by_entity = {
@@ -649,19 +493,18 @@ def refresh_entity_fingerprints_for_context(
     for item in required:
         entity = str(item["entity"])
         row = rows_by_entity[entity]
-        fingerprint = compute_git_blob_set_fingerprint(
-            context.code_repository_root, list(item["evidence_paths"])
+        fingerprint = _row_fingerprint(
+            context.code_repository_root, item, code_tree=code_tree, catalog_path=catalog_path
         )
         line_index = int(row["line_index"])
         old_fingerprint = str(row["fingerprint"])
-        if old_fingerprint:
-            lines[line_index] = lines[line_index].replace(old_fingerprint, fingerprint, 1)
-        else:
+        if not old_fingerprint:
             raise RuntimeError(
-                "external-memory closeout requires entity fingerprint values before memory commit; "
-                f"{catalog_path.as_posix()} row {entity!r} is missing a fingerprint. "
-                "Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
+                f"external-memory closeout requires entity fingerprint values before memory "
+                f"commit; {catalog_path.as_posix()} row {entity!r} is missing a fingerprint. "
+                "Run the l-01-agent-lifecycles Curator procedure, then rerun closeout."
             )
+        lines[line_index] = lines[line_index].replace(old_fingerprint, fingerprint, 1)
         refreshed.append(
             {
                 "entity": entity,
@@ -674,408 +517,257 @@ def refresh_entity_fingerprints_for_context(
     return refreshed
 
 
+def entity_evidence_paths(context) -> list[str]:
+    """Every evidence path the entity catalog names, in one sorted list (MIK-R178 rule 4)."""
+
+    paths = {
+        source_path
+        for row in parse_entity_fingerprint_rows(entities_catalog_path(context))
+        for source_path in row["evidence_paths"]
+    }
+    return sorted(paths)
+
+
+def entity_evidence_findings(
+    context, evidence_blobs: Mapping[str, str | None]
+) -> list[dict[str, str]]:
+    """Entity rows citing a path the code candidate does not hold (MIK-R178 rule 4).
+
+    ``evidence_blobs`` maps every evidence path of the catalog (:func:`entity_evidence_paths`) to
+    its blob at the leaf's code candidate, and a path the candidate lacks to ``None``. Each
+    finding names the catalog file, the entity row and the path, and is actionable: the curator
+    re-points the row's evidence list. A row with no evidence path reports nothing.
+    """
+
+    catalog_path = entities_catalog_path(context)
+    findings: list[dict[str, str]] = []
+    for row in parse_entity_fingerprint_rows(catalog_path):
+        entity = str(row["entity"])
+        for source_path in row["evidence_paths"]:
+            if evidence_blobs.get(source_path) is not None:
+                continue
+            findings.append(
+                {
+                    "check": ENTITY_EVIDENCE_CHECK,
+                    "code": ENTITY_EVIDENCE_ABSENT,
+                    "path": catalog_path.as_posix(),
+                    "message": (
+                        f"entity row {entity!r} cites evidence path {source_path!r} the code "
+                        f"candidate does not hold; {_EVIDENCE_CLEARING}"
+                    ),
+                }
+            )
+    return findings
+
+
+def entity_evidence_findings_for_candidate(context, code_worktree: Path) -> list[dict[str, str]]:
+    """MIK-R178 rule 4 over ``code_worktree``'s own candidate tree: never raises.
+
+    The curator's memory-quality check reads the leaf's code candidate -- the same capture the
+    closeout commits, uncommitted changes included -- so a row naming a path the leaf deletes or
+    renames is reported while the curator can still re-point it. A candidate Git cannot read is one
+    finding naming that input, so the check never lapses into silence.
+    """
+
+    paths = entity_evidence_paths(context)
+    if not paths:
+        return []
+    try:
+        blobs = _candidate_blobs(code_worktree, paths)
+    except Exception as error:  # an unreadable candidate is one finding, never a silent pass
+        return [
+            {
+                "check": ENTITY_EVIDENCE_CHECK,
+                "code": INCOMPLETE_CODE,
+                "path": "",
+                "message": (
+                    f"the entity evidence check cannot read the code candidate's blobs: {error}"
+                ),
+            }
+        ]
+    return entity_evidence_findings(context, blobs)
+
+
+def _candidate_blobs(code_worktree: Path, paths: Sequence[str]) -> dict[str, str | None]:
+    """Each path's blob at the worktree's candidate tree, ``None`` for a path it does not hold."""
+
+    with TemporaryDirectory(prefix="ar-entity-evidence-") as scratch:
+        tree = worktree_candidate_tree(code_worktree, Path(scratch) / "index")
+    blobs: dict[str, str | None] = {}
+    for source_path in paths:
+        result = run_git(
+            code_worktree, ["rev-parse", "--verify", "--quiet", f"{tree}:{source_path}"]
+        )
+        blobs[source_path] = result.stdout.strip() if result.returncode == 0 else None
+    return blobs
+
+
 def onboarding_refresh_plan(
     contract: WorktreeContract,
     changed_paths: list[str],
     *,
     working_paths: list[str] | None = None,
 ) -> OnboardingRefreshPlan:
+    from agents_remember.application.knowledge_worklist.leaf_completion import (  # noqa: PLC0415
+        leaf_onboarding_trace_sides,
+    )
+
+    sides = leaf_onboarding_trace_sides(contract)
+    documents = None
+    if sides is not None:
+        if sides.incomplete is not None:
+            raise RuntimeError(
+                f"the onboarding refresh cannot read its memory sides: {sides.incomplete}"
+            )
+        documents = dependent_document_paths(sides.base) | dependent_document_paths(sides.candidate)
     return onboarding_refresh_plan_for_context(
-        contract_context(contract), changed_paths, working_paths=working_paths
+        contract_context(contract),
+        changed_paths,
+        working_paths=working_paths,
+        dependent_documents=documents,
     )
 
 
 def entity_fingerprint_refresh_plan(
     contract: WorktreeContract, changed_paths: list[str]
 ) -> EntityFingerprintRefreshPlan:
-    return entity_fingerprint_refresh_plan_for_context(contract_context(contract), changed_paths)
+    """The closeout's own plan, compared with the catalog at the leaf's memory base."""
 
-
-def route_overview_metadata_refresh_plan(
-    contract: WorktreeContract, changed_paths: list[str]
-) -> RouteOverviewRefreshPlan:
-    return route_overview_metadata_refresh_plan_for_context(
-        contract_context(contract),
+    context = contract_context(contract)
+    return entity_fingerprint_refresh_plan_for_context(
+        context,
         changed_paths,
-        memory_tree=contract.memory_worktree,
-        memory_verified_commit=contract_memory_verified_commit(contract),
+        base_evidence=entity_evidence_at_base(context.onboarding_root, contract.memory_base_commit),
     )
 
 
-def validate_route_overview_refresh_plan(
-    contract: WorktreeContract,
-    changed_paths: list[str],
-    *,
-    accepted_no_impact: frozenset[str] = frozenset(),
-) -> RouteOverviewRefreshPlan:
-    return validate_route_overview_refresh_plan_for_context(
-        contract_context(contract),
-        changed_paths,
-        memory_tree=contract.memory_worktree,
-        memory_verified_commit=contract_memory_verified_commit(contract),
-        accepted_no_impact=accepted_no_impact,
-    )
-
-
-def classify_sidecar_updates(
-    context,
-    plan: OnboardingRefreshPlan,
-    *,
-    memory_tree: Path | None = None,
-    memory_verified_commit: str = "",
-) -> SidecarBodyClassification:
-    """Classify changed-source sidecars by meaningful body and history changes.
-
-    ``stale`` collects unchanged sidecars, metadata-only edits, and history-only
-    edits without the no-impact marker; ``untraced`` collects body edits that
-    lack a new Update History entry; ``attested_no_impact`` collects
-    history-only edits whose new entry carries the explicit
-    ``No content impact:`` marker. New sidecars absent from the memory tree's
-    HEAD pass without classification, and sidecars that do not resolve under
-    the memory tree are skipped rather than reported as false findings.
-    """
-    classification: SidecarBodyClassification = {
-        "stale": [],
-        "untraced": [],
-        "attested_no_impact": [],
-    }
-    required = plan["required"]
-    if not required:
-        return classification
-    tree = memory_tree if memory_tree is not None else getattr(context, "memory_root", None)
-    if tree is None:
-        return classification
-    memory_root = Path(tree).resolve()
-    baseline_ref = memory_verified_commit or "HEAD"
-    changed_memory = _changed_memory_paths(memory_root, memory_verified_commit)
-    for item in required:
-        onboarding_path = Path(item["onboarding_file"]).resolve()
-        try:
-            relative = onboarding_path.relative_to(memory_root).as_posix()
-        except ValueError:
-            continue
-        if relative not in changed_memory:
-            classification["stale"].append(item["source_path"])
-            continue
-        baseline_text = commit_text_or_none(memory_root, baseline_ref, relative)
-        if baseline_text is None:
-            continue
-        current = filesystem.read_text(onboarding_path, encoding="utf-8")
-        body_changed = meaningful_body_changed(baseline_text, current)
-        added_history = new_history_lines(baseline_text, current)
-        if body_changed and added_history:
-            continue
-        if body_changed:
-            classification["untraced"].append(item["source_path"])
-        elif added_history and has_no_impact_marker(added_history):
-            classification["attested_no_impact"].append(item["source_path"])
-        else:
-            classification["stale"].append(item["source_path"])
-    return classification
-
-
-def require_updated_sidecar_content(
-    context,
-    plan: OnboardingRefreshPlan,
-    *,
-    memory_tree: Path | None = None,
-    memory_verified_commit: str = "",
-    accepted_no_impact: frozenset[str] = frozenset(),
-) -> list[str]:
-    """Fail closeout when a changed source file's sidecar lacks an honest update.
-
-    Refreshing only verification metadata (or only the Update History) on an
-    unchanged sidecar body silently defeats the commit-hash-based drift check,
-    and a body edit without a new Update History entry loses traceability. A
-    changed source file's sidecar must therefore pair a meaningful body change
-    with a new history entry or have an exact candidate-bound no-content-impact
-    decision. Returns accepted source paths so closeout payloads can surface
-    them. The check is a no-op when no sidecar onboarding is required.
-    """
-
-    classification = classify_sidecar_updates(
-        context, plan, memory_tree=memory_tree, memory_verified_commit=memory_verified_commit
-    )
-    classification = apply_sidecar_no_impact(classification, accepted_no_impact)
-    stale = classification["stale"]
-    untraced = classification["untraced"]
-    if stale or untraced:
-        details: list[str] = []
-        if stale:
-            details.append(
-                "the following changed sources have an unmodified or metadata/history-only "
-                "sidecar body: " + _joined_sample(stale)
-            )
-        if untraced:
-            details.append(
-                "the following changed sources have a sidecar body update without a new "
-                "Update History entry: " + _joined_sample(untraced)
-            )
-        raise RuntimeError(
-            "external-memory closeout requires updated onboarding content for changed source "
-            "files, not only refreshed verification metadata; "
-            + "; ".join(details)
-            + ". Update each sidecar body through the c-05-create-or-update-onboarding-files "
-            "skill and record the change in its Update History, or publish an exact "
-            "candidate-bound no-content-impact judgment through curator_coherence. Advancing "
-            "lastVerifiedCommitHash on stale content is a prohibited metadata-only refresh."
-        )
-    return classification["attested_no_impact"]
-
-
-def validate_onboarding_refresh_plan_for_context(
+def _require_onboarded_sources(
     context,
     changed_paths: list[str],
+    working_paths: list[str] | None,
     *,
-    working_paths: list[str] | None = None,
-    body_gate: OnboardingBodyGateEvidence | None = None,
+    dependent_documents: frozenset[str],
 ) -> OnboardingRefreshPlan:
-    evidence = body_gate or OnboardingBodyGateEvidence()
-    plan = onboarding_refresh_plan_for_context(context, changed_paths, working_paths=working_paths)
-    missing = plan["missing"]
-    unsupported = plan["unsupported"]
-    if missing or unsupported:
-        details: list[str] = []
-        if missing:
-            details.append(f"missing sidecar onboarding for: {', '.join(missing)}")
-        if unsupported:
-            details.append(f"unsupported onboarding storage for: {', '.join(unsupported)}")
+    """Today's missing/unsupported sidecar refusal, shared by both gates unchanged."""
+    plan = onboarding_refresh_plan_for_context(
+        context,
+        changed_paths,
+        working_paths=working_paths,
+        dependent_documents=dependent_documents,
+    )
+    details: list[str] = []
+    if plan["missing"]:
+        details.append(f"missing sidecar onboarding for: {', '.join(plan['missing'])}")
+    if plan["unsupported"]:
+        details.append(f"unsupported onboarding storage for: {', '.join(plan['unsupported'])}")
+    if details:
         raise RuntimeError(
             "external-memory closeout requires current onboarding for changed source files before memory commit; "
             + "; ".join(details)
-            + ". Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
+            + ". Run the l-01-agent-lifecycles Curator procedure, then rerun closeout."
         )
-    require_updated_sidecar_content(
-        context,
-        plan,
-        memory_tree=evidence.memory_tree,
-        memory_verified_commit=evidence.memory_verified_commit,
-        accepted_no_impact=evidence.accepted_no_impact,
-    )
-    for item in plan["required"]:
-        onboarding_path = Path(item["onboarding_file"])
-        text = filesystem.read_text(onboarding_path, encoding="utf-8")
-        if "lastVerifiedCommitHash" not in text or "lastVerifiedCommitDate" not in text:
-            raise RuntimeError(
-                "external-memory closeout requires onboarding verification metadata before memory commit; "
-                f"{onboarding_path.as_posix()} is missing lastVerifiedCommitHash or lastVerifiedCommitDate. "
-                "Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
-            )
     return plan
 
 
-def validate_memory_refresh_attestations(
-    context,
-    changed_paths: list[str],
-    *,
-    working_paths: list[str] | None = None,
-    body_gate: OnboardingBodyGateEvidence | None = None,
-    route_body_gate: OnboardingBodyGateEvidence | None = None,
-) -> dict[str, list[str]]:
-    """Run the shared sidecar and route-body gates for one exact candidate.
+@dataclass(frozen=True)
+class OnboardingTraceInputs:
+    """What both gate entries read about a change, beside the memory sides (MIK-R53, MIK-R177).
 
-    Curator preparation and closeout must apply the same current-memory checks.  Keep
-    this as composition of the existing validators so neither caller can accidentally
-    publish a green result from only one of the two refresh surfaces.
+    ``code_blobs`` maps every changed source path to its blob at the code candidate (``None`` for a
+    deleted file). ``identical_changes`` is the leaf's worklist run's ``identicalChanges``: the gate
+    groups identical copies exactly as ``worklist_onboarding`` does, so an item a row answers in the
+    worklist is the item the gate raises. It carries no default, so no caller judges ungrouped
+    items where the worklist grouped identical copies. ``working_paths`` names the changed paths
+    that are uncommitted, which the missing-sidecar refusal reads; ``None`` keeps its strict legacy
+    meaning, every changed path treated as working.
     """
-    sidecar_evidence = body_gate or OnboardingBodyGateEvidence()
-    route_evidence = route_body_gate or sidecar_evidence
-    errors: list[str] = []
-    sidecar_plan: OnboardingRefreshPlan | None = None
-    sidecar_gate: SidecarBodyClassification = {
-        "stale": [],
-        "untraced": [],
-        "attested_no_impact": [],
-    }
-    try:
-        sidecar_plan = validate_onboarding_refresh_plan_for_context(
-            context,
-            changed_paths,
-            working_paths=working_paths,
-            body_gate=sidecar_evidence,
-        )
-        sidecar_gate = apply_sidecar_no_impact(
-            classify_sidecar_updates(
-                context,
-                sidecar_plan,
-                memory_tree=sidecar_evidence.memory_tree,
-                memory_verified_commit=sidecar_evidence.memory_verified_commit,
-            ),
-            sidecar_evidence.accepted_no_impact,
-        )
-    except RuntimeError as error:
-        errors.append(f"sidecar onboarding: {error}")
 
-    overview_gate: RouteOverviewBodyClassification = {
-        "stale": [],
-        "untraced": [],
-        "attested_no_impact": [],
-        "stamped_without_body_review": [],
-    }
-    try:
-        overview_plan = validate_route_overview_refresh_plan_for_context(
-            context,
-            changed_paths,
-            memory_tree=route_evidence.memory_tree,
-            memory_verified_commit=route_evidence.memory_verified_commit,
-            accepted_no_impact=route_evidence.accepted_no_impact,
-        )
-        overview_gate = apply_route_no_impact(
-            classify_route_overview_updates(
-                context,
-                overview_plan,
-                changed_paths,
-                memory_tree=route_evidence.memory_tree,
-                memory_verified_commit=route_evidence.memory_verified_commit,
-            ),
-            route_evidence.accepted_no_impact,
-        )
-    except RuntimeError as error:
-        errors.append(f"route overview: {error}")
-    if errors:
-        raise RuntimeError("external-memory refresh validation failed; " + "; ".join(errors))
-    return {
-        "attested_sidecars": sidecar_gate["attested_no_impact"],
-        "attested_overviews": overview_gate["attested_no_impact"],
-        "stamped_overviews": overview_gate["stamped_without_body_review"],
-        "unonboarded_paths": [] if sidecar_plan is None else sidecar_plan["unonboarded"],
-    }
+    code_blobs: Mapping[str, str | None]
+    identical_changes: Mapping[str, Sequence[str]]
+    working_paths: list[str] | None = None
 
 
-def validate_onboarding_refresh_plan(
-    contract: WorktreeContract,
-    changed_paths: list[str],
-    *,
-    working_paths: list[str] | None = None,
-    accepted_no_impact: frozenset[str] = frozenset(),
-) -> OnboardingRefreshPlan:
-    return validate_onboarding_refresh_plan_for_context(
-        contract_context(contract),
-        changed_paths,
-        working_paths=working_paths,
-        body_gate=OnboardingBodyGateEvidence(
-            memory_tree=contract.memory_worktree,
-            memory_verified_commit=contract_memory_verified_commit(contract),
-            accepted_no_impact=accepted_no_impact,
-        ),
-    )
+class IdenticalChangesUnreadable(ValueError):
+    """A worklist run's ``identicalChanges`` is not a group map (MIK-R177)."""
 
 
-def refresh_onboarding_metadata_for_context(
-    context,
-    change: VerifiedChange,
-    *,
-    memory_tree: Path | None = None,
-    memory_verified_commit: str = "",
-    accepted_no_impact: frozenset[str] = frozenset(),
-) -> list[dict[str, str]]:
-    verified_commit = change.commit
-    verified_date = change.commit_date
-    # Closeout stamps existing metadata; it does not certify onboarding content.
-    _ = memory_verified_commit, accepted_no_impact
-    plan = onboarding_refresh_plan_for_context(
-        context,
-        change.changed_paths,
-        working_paths=change.working_paths,
-    )
-    refreshed: list[dict[str, str]] = []
-    for item in plan["required"]:
-        onboarding_path = Path(item["onboarding_file"])
-        text = filesystem.read_text(onboarding_path, encoding="utf-8")
-        text, hash_found = onboarding_metadata_row(
-            text, "lastVerifiedCommitHash", verified_commit, code=True
-        )
-        text, date_found = onboarding_metadata_row(text, "lastVerifiedCommitDate", verified_date)
-        if not hash_found or not date_found:
-            raise RuntimeError(
-                "external-memory closeout requires onboarding verification metadata before memory commit; "
-                f"{onboarding_path.as_posix()} is missing lastVerifiedCommitHash or lastVerifiedCommitDate. "
-                "Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
+def identical_changes_from_run(document: Mapping[str, Any]) -> dict[str, list[str]]:
+    """The run's ``identicalChanges`` as ordered source lists, or a named refusal (MIK-R177).
+
+    The one reader both gate entries use. A complete run's groups are
+    ``{representative source path: [source path, ...]}``; an entry that is not a list of non-empty
+    source paths is a malformed grouping input and is refused by name. Nothing is dropped, coerced
+    or replaced by a singleton, so a malformed group can never shorten itself into an ungrouped
+    item. A genuine empty mapping stays empty, and each group keeps the run's order.
+    """
+
+    groups = document.get("identicalChanges")
+    if not isinstance(groups, Mapping):
+        raise IdenticalChangesUnreadable("the run names no identicalChanges mapping")
+    parsed: dict[str, list[str]] = {}
+    for representative, members in groups.items():
+        if not isinstance(representative, str) or not representative:
+            raise IdenticalChangesUnreadable(
+                f"an identicalChanges key is not a source path: {representative!r}"
             )
-        filesystem.write_text(onboarding_path, text, encoding="utf-8")
-        refreshed.append(item)
-    refreshed.extend(
-        _refresh_regenerated_documents(
-            context,
-            memory_tree=memory_tree,
-            verified_commit=verified_commit,
-            verified_date=verified_date,
-            already={item["onboarding_file"] for item in refreshed},
-        )
-    )
-    return refreshed
+        if not isinstance(members, (list, tuple)):
+            raise IdenticalChangesUnreadable(
+                f"identicalChanges[{representative!r}] is not a list of source paths: {members!r}"
+            )
+        if not all(isinstance(one, str) and one for one in members):
+            raise IdenticalChangesUnreadable(
+                f"identicalChanges[{representative!r}] holds a member that is not a source path: "
+                f"{list(members)!r}"
+            )
+        if not members:
+            raise IdenticalChangesUnreadable(
+                f"identicalChanges[{representative!r}] names no member"
+            )
+        if representative not in members:
+            raise IdenticalChangesUnreadable(
+                f"identicalChanges[{representative!r}] does not name its representative among its "
+                f"members: {list(members)!r}"
+            )
+        parsed[representative] = list(members)
+    return parsed
 
 
-def _refresh_regenerated_documents(
+def onboarding_trace_gate_for_context(
     context,
-    *,
-    memory_tree: Path | None,
-    verified_commit: str,
-    verified_date: str,
-    already: set[str],
-) -> list[dict[str, str]]:
-    """Stamp the task's regenerated citation documents to the new commit as well.
+    changed_paths: list[str],
+    sides: OnboardingTraceSides,
+    inputs: OnboardingTraceInputs,
+) -> tuple[OnboardingTraceResult, list[dict[str, str]]]:
+    """MIK-R30 on a converted tree, for the curator's memory-quality run: never raises.
 
-    The citation gate clears a changed claim by making its citation CURRENT (the fixer
-    regenerates the range against the working tree), so a document can be fully reviewed and
-    repaired without its own source file changing. Those documents are outside the
-    changed-source plan; stamping only the plan would leave their fresh ranges pinned to a
-    commit whose constructs no longer exist. Any onboarding document the task touched (memory
-    worktree diff) that carries verification metadata advances here, except route overviews and
-    entity catalogs, which have their own refresh passes.
+    Returns the gate's result and its repair findings: one per missing trace (rule 6), one per
+    unreadable input, and one for changed sources without onboarding (today's refusal, unchanged).
+    ``inputs`` carries the candidate's blobs and the worklist's identical-copy groups (MIK-R177).
     """
-    if memory_tree is None:
-        return []
-    onboarding_root = context.onboarding_root
-    refreshed: list[dict[str, str]] = []
-    status = run_git(memory_tree, ["status", "--porcelain"])
-    if status.returncode != 0:
-        return []
-    # Porcelain is "XY<space>path" and the leading column is significant: read raw stdout
-    # (a stripped runner would eat the first entry's leading space and drop that file).
-    for line in status.stdout.splitlines():
-        relative = line[3:]
-        if not relative.startswith("onboarding/"):
-            continue
-        relative = relative[len("onboarding/") :]
-        if (
-            not relative.endswith(".md")
-            or relative.endswith(("overview.md", "entities.md", "memory.md"))
-            or not (onboarding_root / relative).exists()
-        ):
-            continue
-        document = onboarding_root / relative
-        if document.as_posix() in already:
-            continue
-        text = filesystem.read_text(document, encoding="utf-8")
-        if "lastVerifiedCommitHash" not in text:
-            continue
-        text, hash_found = onboarding_metadata_row(
-            text, "lastVerifiedCommitHash", verified_commit, code=True
-        )
-        text, date_found = onboarding_metadata_row(text, "lastVerifiedCommitDate", verified_date)
-        if not hash_found or not date_found:
-            continue
-        filesystem.write_text(document, text, encoding="utf-8")
-        refreshed.append(
-            {
-                "source_path": "",
-                "onboarding_file": document.as_posix(),
-            }
-        )
-    return refreshed
-
-
-def refresh_onboarding_metadata(
-    contract: WorktreeContract,
-    change: VerifiedChange,
-    *,
-    accepted_no_impact: frozenset[str] = frozenset(),
-) -> list[dict[str, str]]:
-    return refresh_onboarding_metadata_for_context(
-        contract_context(contract),
-        change,
-        memory_tree=contract.memory_worktree,
-        memory_verified_commit=contract_memory_verified_commit(contract),
-        accepted_no_impact=accepted_no_impact,
+    result = onboarding_trace_result(
+        context,
+        changed_paths,
+        sides,
+        code_blobs=inputs.code_blobs,
+        source_groups=inputs.identical_changes,
     )
+    findings = result.repair_findings()
+    try:
+        documents = dependent_document_paths(sides.base) | dependent_document_paths(sides.candidate)
+        _require_onboarded_sources(
+            context,
+            changed_paths,
+            inputs.working_paths,
+            dependent_documents=documents,
+        )
+    except RuntimeError as error:
+        findings.insert(
+            0,
+            {
+                "check": "memory-refresh-attestations",
+                "code": "memory-refresh-attestation-failed",
+                "path": "",
+                "message": f"sidecar onboarding: {error}",
+            },
+        )
+    return result, findings

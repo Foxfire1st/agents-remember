@@ -3,16 +3,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, Final
 
+from agents_remember.application.census_artifacts import write_census_artifact
+from agents_remember.application.census_inputs import measured_census
+from agents_remember.application.knowledge_bootstrap_admission import (
+    BootstrapRefusal,
+    admit_bootstrap_context,
+)
+from agents_remember.application.memory_quality.converted_base import converted_check_base
 from agents_remember.application.memory_scope import (
     MemoryScope,
 )
 from agents_remember.application.memory_scope import (
     resolve_memory_scope as _memory_scope,
 )
+from agents_remember.application.published_intent import (
+    PublishedIntentUnavailable,
+    resolve_published_intent,
+)
+from agents_remember.application.runtime.startup import measuring_build_stamp
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.authority import require_repo, require_within_coordination
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_init import initialize_memory
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
@@ -20,45 +34,92 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.kernel.route_index import build_route_indexes
 from agents_remember.memory import baseline, carryover
+from agents_remember.memory.conversion import card_authoring
+from agents_remember.memory.knowledge_index import KnowledgeIndex
+from agents_remember.memory_quality import reference_state
+from agents_remember.memory_quality.converted_cards import card_sidecar_path
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
+    DriftSummaryOutput,
     run_drift_summary,
 )
-from agents_remember.memory_quality.style.citations import (
-    fixer,
-    migration,
-    range_resolution,
-    source_index,
+from agents_remember.models.knowledge_files.documents import ONBOARDING_ROOT
+from agents_remember.models.knowledge_files.records import RECORD_MODELS
+from agents_remember.models.lifecycles.curator_coherence import MAX_CURATOR_SOURCE_CANDIDATES
+from agents_remember.worktrees.cutover_lock import (
+    LEGACY_FORMAT_CODE,
+    is_legacy_format_refusal,
+    legacy_format_refusal,
 )
-from agents_remember.memory_quality.style.citations.resolution import Trees
+from agents_remember.worktrees.integration.configured_contract_authority import (
+    require_configured_contract_repositories,
+)
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
 )
+from agents_remember.worktrees.integration.integration_branch_repository import (
+    BranchAuthorityUnavailable,
+)
 from agents_remember.worktrees.worktree_contract import load_contract
+
+#: How many per-target census rows one tool answer carries; the full artifact is the CLI's file.
+CENSUS_TARGET_ROWS: Final = 200
 
 
 @dataclass(frozen=True)
 class CitationOperationScope:
-    """One owned memory document and the prevalidated source generation it uses.
-
-    An expected snapshot is an explicit frozen-wave lease, not a freshness detector. The
-    operator builds and validates once, freezes source, and passes the returned id to every
-    independent document operation. A source edit requires a new freeze/build; Git HEAD is
-    intentionally not consulted because it cannot represent dirty or untracked content.
-    """
+    """The converted cards one citation operation owns."""
 
     document: str | None = None
-    expected_snapshot: str | None = None
+    documents: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
-        self.validate()
+        # Structural shape only: both/empty/bound are refused here, before anything is read,
+        # for every operation. Whether the operation takes a list is the operation's own
+        # validation at its call (``allow_documents``): only ``citation_fix`` passes it.
+        self.validate(allow_documents=True)
 
-    def validate(self) -> None:
-        """Enforce the indivisible document-plus-generation frozen-wave contract."""
-        source_index.validate_operation_scope(
-            self.document,
-            self.expected_snapshot,
-            leased_index=False,
-        )
+    @property
+    def selected_documents(self) -> tuple[str, ...] | None:
+        """The named documents as one list, with ``document`` meaning a list of one.
+
+        None is the form without a document: every card of the worktree in one run.
+        """
+
+        if self.document is not None:
+            return (self.document,)
+        if self.documents is not None:
+            return self.documents
+        return None
+
+    def validate(self, *, allow_documents: bool = False) -> None:
+        """Refuse both selectors, empty or oversized lists, and lists outside citation_fix.
+
+        The document bound is the leaf's changed-card bound (MIK-R110 rule 2).
+        Validation happens before the memory tree is resolved.
+        """
+
+        if self.document is not None and self.documents is not None:
+            raise ValueError(
+                "citation_fix takes document or documents, not both: document names one "
+                "onboarding-relative file, documents names several in one call."
+            )
+        if self.documents is not None:
+            if not allow_documents:
+                raise ValueError(
+                    "documents names several cards in one call and only citation_fix takes "
+                    "it: name one document, or run citation_fix for the list."
+                )
+            if len(self.documents) == 0:
+                raise ValueError(
+                    "citation_fix with an empty documents list is refused and changes "
+                    "nothing: name at least one onboarding-relative file."
+                )
+            if len(self.documents) > MAX_CURATOR_SOURCE_CANDIDATES:
+                raise ValueError(
+                    f"citation_fix takes at most {MAX_CURATOR_SOURCE_CANDIDATES} documents in "
+                    f"one call (one leaf's changed files with cards); this call names "
+                    f"{len(self.documents)}. Split the wave across calls."
+                )
 
 
 DEFAULT_CITATION_OPERATION_SCOPE = CitationOperationScope()
@@ -72,10 +133,37 @@ def drift_check_tool(
     contract_path: str | None = None,
 ) -> dict[str, Any]:
     scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
+    # A drift read files no temp report (rule 6); the observer snapshot still applies and is
+    # a named open boundary, not part of this fix.
+    memory_root = scope.onboarding_root.parent
+    if memory_root.is_dir() and not reference_state.is_converted_memory(memory_root):
+        # MIK-R46 rules 1 and 2: drift on unconverted memory is status "error" with the one
+        # rule-2 message; it is not measured in the old format.
+        message = legacy_format_refusal(
+            memory_root,
+            operation="drift_check",
+            subject=f"the memory tree {memory_root.as_posix()}",
+        )
+        return {
+            "ok": False,
+            "operation": "drift_check",
+            "onboardingRoot": scope.onboarding_root.as_posix(),
+            "status": "error",
+            "error": message,
+        }
     packet = run_drift_summary(
         code_repository_root=scope.code_root,
         context=scope.context,
         detail_limit=detail_limit,
+        # A leaf that deleted a file carries that anchor as carried and stale, not as
+        # newly written: with a contract the check compares against the leaf's converted
+        # base, without one against the memory checkout's converted HEAD (MIK-R44 rule 4).
+        base=(
+            converted_check_base(scope, config.coordination_root)
+            if contract_path is not None
+            else None
+        ),
+        output=DriftSummaryOutput(write_report=False),
     )
     return {
         "ok": packet.get("status") == "checked",
@@ -85,7 +173,11 @@ def drift_check_tool(
     }
 
 
-def _refuse_official_memory(repo: RepositoryScope, scope: MemoryScope) -> None:
+def _refuse_official_memory(
+    config: McpRuntimeConfig,
+    repo: RepositoryScope,
+    scope: MemoryScope,
+) -> None:
     """The write guard: a citation rewrite happens in a LEAF or it does not happen.
 
     ``contract_path`` is mandatory rather than optional here, which is the whole guard --
@@ -99,7 +191,18 @@ def _refuse_official_memory(repo: RepositoryScope, scope: MemoryScope) -> None:
     citation fix rewrites ranges across thousands of rows, with no closeout reviewing the
     result. It refuses; it never falls back.
     """
-    official = repo.memory_root.resolve() if repo.memory_root is not None else None
+    # A task-scoped MCP config replaces ``repo.memory_root`` with the admitted leaf worktree.
+    # Resolve the official root from the original settings only after the existing contract
+    # authority owner has checked both repository lineage and the candidate worktree identity.
+    configured = (
+        require_configured_contract_repositories(
+            scope.contract,
+            config.config_path.as_posix(),
+        )
+        if scope.contract is not None
+        else repo
+    )
+    official = configured.memory_root.resolve() if configured.memory_root is not None else None
     target = scope.onboarding_root.resolve()
     if official is not None and (official == target or official in target.parents):
         raise AuthorityError(
@@ -120,8 +223,82 @@ def _leaf_memory_writer_scope(
     path = require_within_coordination(config, contract_path, "contract_path")
     contract = load_contract(path)
     scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
-    _refuse_official_memory(require_repo(config, repo_id), scope)
+    _refuse_official_memory(config, require_repo(config, repo_id), scope)
     require_ordinary_worktree(contract, operation=operation)
+    return scope
+
+
+#: The admission a pre-baseline fixer call carries (MIK-R45 rule 2): the existing fixer
+#: admitted on the configured memory root while that root has no attributed baseline.
+PRE_BASELINE_ADMISSION = "pre-baseline"
+
+
+def _memory_has_linked_worktrees(memory_root: Path) -> bool:
+    """Whether the memory repository owns linked worktrees, read fail-closed.
+
+    Before the first baseline no leaf can exist, because the memory repository has no
+    commit to start a worktree from. A linked worktree beside the main checkout therefore
+    means a leaf may depend on the root, and the pre-baseline admission does not apply.
+    An unreadable worktree list is not an empty one: it refuses the same way.
+    """
+
+    listed = run_git(memory_root, ["worktree", "list", "--porcelain"])
+    if listed.returncode != 0:
+        return True
+    entries = [line for line in listed.stdout.splitlines() if line.startswith("worktree ")]
+    return len(entries) != 1
+
+
+def _pre_baseline_official_scope(
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str,
+    operation: str,
+) -> MemoryScope:
+    """Admit one fixer call without a contract on the configured memory root (MIK-R45 rule 2).
+
+    All five conditions must hold: the repository is declared in the settings; the resolved
+    memory root is the declared one; the root holds ``knowledge/layout.json``;
+    ``has_adopted_baseline`` is false for it; and the memory repository has no linked
+    worktree, so no leaf depends on the root. Each way out names its missing condition and
+    the leaf route, and writes nothing. Once the baseline exists, the refusal says so.
+    """
+
+    repo = require_repo(config, repo_id)
+    if repo.memory_root is None:
+        raise AuthorityError(
+            f"{operation} without a leaf contract is refused: repo_id {repo_id!r} declares "
+            f"no external memory root, so no pre-baseline admission applies; it requires a "
+            f"leaf contract_path -- start or attach a worktree and pass its contract path"
+        )
+    scope = _memory_scope(config, repo_id=repo_id, contract_path=None)
+    if scope.onboarding_root.parent.resolve() != repo.memory_root.resolve():
+        raise AuthorityError(
+            f"{operation} without a leaf contract is refused: the resolved memory root "
+            f"({scope.onboarding_root.parent.as_posix()}) is not the declared one "
+            f"({repo.memory_root.as_posix()}), so no pre-baseline admission applies; it "
+            f"requires a leaf contract_path -- start or attach a worktree and pass its "
+            f"contract path"
+        )
+    if not reference_state.is_converted_memory(repo.memory_root):
+        raise AuthorityError(
+            f"{operation} without a leaf contract is refused: the configured memory root "
+            f"({repo.memory_root.as_posix()}) holds no knowledge/layout.json, so no "
+            f"pre-baseline admission applies -- {legacy_format_refusal(repo.memory_root, operation=operation, subject='this memory root')}"
+        )
+    if baseline.has_adopted_baseline(repo.memory_root):
+        raise AuthorityError(
+            f"{operation} without a leaf contract is refused: the repository already has an "
+            f"adopted memory baseline, so it requires a leaf contract_path -- start or "
+            f"attach a worktree and pass its contract path"
+        )
+    if _memory_has_linked_worktrees(repo.memory_root):
+        raise AuthorityError(
+            f"{operation} without a leaf contract is refused: the memory repository has "
+            f"linked worktrees (or its worktree list is unreadable), so a leaf may depend "
+            f"on the root and no pre-baseline admission applies; it requires a leaf "
+            f"contract_path -- start or attach a worktree and pass its contract path"
+        )
     return scope
 
 
@@ -139,116 +316,434 @@ def citation_check_tool(
     one document beside three tree-wide results under one ``ok``. Scope belongs where every
     check under it is scoped.
 
-    Read-only, so unlike the fix and migrate tools this does not refuse the official memory
+    Read-only, so unlike the fix tool this does not refuse the official memory
     repo -- reading it is legitimate; only writing it is not.
     """
     operation_scope.validate()
     scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
-    trees = Trees(
-        code_root=scope.code_root,
-        memory_root=scope.onboarding_root.parent,
-        cache_authority=scope.cache_authority,
-    )
+    memory_root = scope.onboarding_root.parent
+    if reference_state.is_converted_memory(memory_root):
+        # MIK-R24 rule 5: a converted tree's citations are its sidecar references; a stale one
+        # is reported (report-only), never a gate finding.
+        return {
+            "repoId": scope.repo_id,
+            **reference_state.check_references(memory_root, scope.code_root),
+        }
+    # MIK-R46 rule 1: the check refuses unconverted memory with the one rule-2 message,
+    # exactly as the fix does; read_ar_files is how such a tree is looked at.
     return {
         "repoId": scope.repo_id,
-        **range_resolution.check_onboarding_root(
-            scope.onboarding_root,
-            trees,
-            only=operation_scope.document,
-            expected_snapshot=operation_scope.expected_snapshot,
+        "ok": False,
+        "code": LEGACY_FORMAT_CODE,
+        "detail": legacy_format_refusal(
+            memory_root,
+            operation="citation_check",
+            subject=f"the memory tree {memory_root.as_posix()}",
         ),
     }
 
 
-def citation_source_index_build_tool(
+def citation_census_tool(
     config: McpRuntimeConfig,
     *,
     repo_id: str,
     contract_path: str,
+    artifact_path: str | None = None,
 ) -> dict[str, Any]:
-    """Build or validate the reusable source snapshot selected by a leaf contract."""
+    """Measure one leaf's code/test reference anchors at its exact pair (MIK-R198 rules 1-2).
+
+    Read-only for the memory tree, and separate from ``citation_check``: the check answers currentness
+    for a card, while the census classifies every target of the whole tree into the mechanical repairs
+    the shipped fixer may take (a blob-only move, a uniquely moved range) and the judgment cases it
+    must refuse, and names the cards a citation work order can carry.
+
+    The answer is bounded to ``CENSUS_TARGET_ROWS`` rows, but the complete population is never
+    discarded: the whole census is written to a named artifact -- ``artifact_path`` when the caller
+    names one inside the coordination root, otherwise ``temp/census/`` under it -- and the answer
+    carries that path, its digest, how many rows it returned and how many it omitted. A bounded answer
+    therefore always names the exact, retrievable complete artifact it is bounded from.
+    """
+
     scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
+    memory_root = scope.onboarding_root.parent
+    if not reference_state.is_converted_memory(memory_root):
+        return {
+            "repoId": scope.repo_id,
+            "ok": False,
+            "code": LEGACY_FORMAT_CODE,
+            "detail": legacy_format_refusal(
+                memory_root,
+                operation="citation_census",
+                subject=f"the memory tree {memory_root.as_posix()}",
+            ),
+        }
+    full, inputs = measured_census(memory_root, scope.code_root)
+    rows = full["targets"]
+    summary = {
+        key: value
+        for key, value in full.items()
+        if key not in {"targets", "sidecars", "inputIdentities"}
+    }
+    artifact = write_census_artifact(
+        config,
+        full,
+        artifact_path,
+        repo_id=repo_id,
+        inputs=inputs,
+    )
+    bounded = rows[:CENSUS_TARGET_ROWS]
     return {
         "repoId": scope.repo_id,
-        **source_index.build_repository_index(
-            Trees(
-                code_root=scope.code_root,
-                memory_root=scope.onboarding_root.parent,
-                cache_authority=scope.cache_authority,
-            )
-        ),
+        "onboardingRoot": scope.onboarding_root.as_posix(),
+        **summary,
+        "targets": bounded,
+        "targetsReturned": len(bounded),
+        "targetsOmitted": max(0, len(rows) - len(bounded)),
+        **artifact,
+        **measuring_build_stamp(),
     }
+
+
+def citation_note_revision_tool(  # noqa: PLR0913 -- a tool entry point: every argument is named, none derived
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str,
+    contract_path: str,
+    card: str,
+    reference: int,
+    note: str,
+    base_digest: str,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Revise one reference's note in place, keeping its targets and anchors (MIK-R198 rule 6a).
+
+    The re-authoring route through a citation table resolves a reference's targets again, so a Curator
+    who must change only a note has no admitted operation today. This is that operation, in the leaf's
+    memory worktree only: the reference identity is ``(sidecar path, references key [n])``, every target,
+    anchor and other reference stays byte-identical, no reference number is minted, and the leaf the
+    contract names is recorded as the author. A missing key, a base digest that is not the sidecar's
+    current bytes, an empty note and an absent card or sidecar are refused by name with nothing written.
+    """
+
+    try:
+        scope = _leaf_memory_writer_scope(
+            config,
+            repo_id=repo_id,
+            contract_path=contract_path,
+            operation="citation_note_revision",
+        )
+    except (AuthorityError, ValueError, RuntimeError) as error:
+        # A tool answers its refusal; it never leaves the transport to raise for a contract the
+        # caller named (MIK-R198 rule 6a, the product's refusal vocabulary).
+        return {
+            "repoId": repo_id,
+            "ok": False,
+            "operation": "citation_note_revision",
+            "status": "refused",
+            "code": "contract-refused",
+            "detail": f"citation_note_revision cannot read the leaf enclosure contract: {error}",
+            "nextAction": "citation_note_revision",
+            **measuring_build_stamp(),
+        }
+    memory_root = scope.onboarding_root.parent
+    if not reference_state.is_converted_memory(memory_root):
+        return {
+            "repoId": scope.repo_id,
+            "ok": False,
+            "status": "refused",
+            "code": LEGACY_FORMAT_CODE,
+            "detail": legacy_format_refusal(
+                memory_root,
+                operation="citation_note_revision",
+                subject=f"the memory tree {memory_root.as_posix()}",
+            ),
+            "nextAction": "citation_note_revision",
+            **measuring_build_stamp(),
+        }
+    try:
+        revision = card_authoring.revise_reference_note(
+            card_authoring.NoteRevision(
+                memory_root=memory_root,
+                card=card,
+                number=reference,
+                note=note,
+                base_digest=base_digest,
+                author=_repairing_leaf(scope),
+            ),
+            dry_run=dry_run,
+        )
+    except card_authoring.NoteRevisionRefused as refused:
+        return {
+            "repoId": scope.repo_id,
+            "ok": False,
+            "operation": "citation_note_revision",
+            "status": "refused",
+            "code": refused.code,
+            "detail": refused.detail,
+            "nextAction": "citation_note_revision",
+            **measuring_build_stamp(),
+        }
+    return {
+        "repoId": scope.repo_id,
+        "ok": True,
+        "operation": "citation_note_revision",
+        "onboardingRoot": scope.onboarding_root.as_posix(),
+        **revision,
+        **measuring_build_stamp(),
+    }
+
+
+def _repairing_leaf(scope: MemoryScope) -> str:
+    """The leaf a note revision is attributed to: the one the contract encloses.
+
+    A contract with no leaf identity names no repairing leaf, so the revision is refused by name
+    rather than attributed to nobody.
+    """
+
+    contract = scope.contract
+    return "" if contract is None else contract.leaf_id
 
 
 def citation_fix_tool(
     config: McpRuntimeConfig,
     *,
     repo_id: str,
-    contract_path: str,
+    contract_path: str | None = None,
     dry_run: bool = False,
     operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
 ) -> dict[str, Any]:
-    """Regenerate ranges in one leaf, optionally against an explicit frozen generation."""
-    operation_scope.validate()
+    """Regenerate converted references in one leaf's memory worktree.
+
+    ``documents`` names several cards for one call (MIK-R110 rule 2); each is
+    handled exactly as a call naming it alone handles it. Old-format memory
+    is refused before any authoring or reference repair.
+
+    Two admissions: a leaf enclosure contract (the ordinary write route), or no contract on
+    the configured memory root while that root has no attributed baseline (the pre-baseline
+    bootstrap admission, MIK-R45 rule 2). In every other case a call without a contract
+    refuses and names the leaf route.
+    """
+    operation_scope.validate(allow_documents=True)
+    if contract_path is None:
+        scope = _pre_baseline_official_scope(config, repo_id=repo_id, operation="citation_fix")
+        memory_root = scope.onboarding_root.parent
+        # The admission requires a converted root, so this always holds here.
+        assert reference_state.is_converted_memory(memory_root)
+        return {
+            "repoId": scope.repo_id,
+            "admission": PRE_BASELINE_ADMISSION,
+            **_converted_citation_fix(memory_root, scope.code_root, operation_scope, dry_run),
+            **measuring_build_stamp(),
+        }
     scope = _leaf_memory_writer_scope(
         config,
         repo_id=repo_id,
         contract_path=contract_path,
         operation="citation_fix",
     )
-    trees = Trees(
-        code_root=scope.code_root,
-        memory_root=scope.onboarding_root.parent,
-        cache_authority=scope.cache_authority,
-    )
+    memory_root = scope.onboarding_root.parent
+    if reference_state.is_converted_memory(memory_root):
+        full = _converted_citation_fix(memory_root, scope.code_root, operation_scope, dry_run)
+        return _citation_fix_result(
+            {
+                "repoId": scope.repo_id,
+                # MIK-R110 rule 1: the answer's locations name where the call wrote.
+                "onboardingRoot": scope.onboarding_root.as_posix(),
+                **full,
+                **_citation_fix_status(
+                    full,
+                    document_count=_citation_fix_document_count(memory_root, operation_scope, full),
+                ),
+            }
+        )
+    # MIK-R46 rule 1: the fix refuses unconverted memory with the one rule-2 message, in
+    # every mode -- the old-format write path is gone, and the old-format dry-run report
+    # with it; convert first, then repeat. The next action rides the whole result so the
+    # delivered answer validates against it.
     return {
         "repoId": scope.repo_id,
-        **fixer.fix_onboarding_root(
-            scope.onboarding_root,
-            trees,
-            dry_run=dry_run,
-            only=operation_scope.document,
-            expected_snapshot=operation_scope.expected_snapshot,
+        "ok": False,
+        "code": LEGACY_FORMAT_CODE,
+        "detail": legacy_format_refusal(
+            memory_root,
+            operation="citation_fix",
+            subject=f"the memory tree {memory_root.as_posix()}",
         ),
+        "nextAction": "citation_fix",
+        **measuring_build_stamp(),
     }
 
 
-def citation_migrate_tool(
-    config: McpRuntimeConfig,
-    *,
-    repo_id: str,
-    contract_path: str,
-    dry_run: bool = False,
-    operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
-) -> dict[str, Any]:
-    """Convert a memory tree to the anchored citation format, inside one leaf's worktree.
+def _citation_fix_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Name the recovery on a failed run beside its entries.
 
-    Same guard as ``citation_fix_tool`` and for a stronger reason: this rewrites the SHAPE of
-    every evidence table in the tree, which is not a diff any closeout could review if it
-    landed in a repository the session does not own.
+    MIK-R110 rule 1: a failed run is recovered by working the actionable
+    entries, then running the tool again.
     """
-    operation_scope.validate()
-    scope = _leaf_memory_writer_scope(
-        config,
-        repo_id=repo_id,
-        contract_path=contract_path,
-        operation="citation_migrate",
+
+    if not result.get("ok", False):
+        result["nextAction"] = "citation_fix"
+    return result
+
+
+def _citation_fix_document_count(
+    memory_root: Path, operation_scope: CitationOperationScope, full: dict[str, Any]
+) -> int:
+    """How many documents one ``citation_fix`` call covered (MIK-R110 rule 2).
+
+    The named selection, with ``document`` meaning a list of one; without a named
+    document, the documents the run scanned.
+    """
+
+    selected = operation_scope.selected_documents
+    if selected is not None:
+        return len(selected)
+    scanned = full.get("documentsScanned")
+    if isinstance(scanned, int):
+        return scanned
+    onboarding = memory_root / ONBOARDING_ROOT
+    return sum(
+        1
+        for path in onboarding.rglob("*.md")
+        if path.is_file() and not any(part.startswith(".") for part in path.parts)
     )
-    trees = Trees(
-        code_root=scope.code_root,
-        memory_root=scope.onboarding_root.parent,
-        cache_authority=scope.cache_authority,
-    )
+
+
+def _citation_fix_status(full: dict[str, Any], *, document_count: int) -> dict[str, Any]:
+    """One ``citation_fix`` result answered as a status (MIK-R110 rules 1-2).
+
+    The outcome, how many documents the call covered, and the counts: rewritten,
+    stale, unreadable, refused. The lists themselves stay in the whole result --
+    the answer keeps the first entries up to the list bound and the log names the
+    detail file holding the rest.
+    """
+
+    authoring = full.get("authoring")
+    refused = authoring.get("refused") if isinstance(authoring, dict) else None
     return {
-        "repoId": scope.repo_id,
-        **migration.migrate_onboarding_root(
-            scope.onboarding_root,
-            trees,
-            dry_run=dry_run,
-            only=operation_scope.document,
-            expected_snapshot=operation_scope.expected_snapshot,
-        ),
+        "documentCount": document_count,
+        "rewrittenCount": len(full.get("rewrittenSidecars") or []),
+        "staleCount": len(full.get("stale") or []),
+        "unreadableCount": len(full.get("unreadableSidecars") or []),
+        "refusedCount": len(refused or []),
     }
+
+
+def _converted_citation_fix(
+    memory_root: Path, code_root: Path, scope: CitationOperationScope, dry_run: bool
+) -> dict[str, Any]:
+    """``citation_fix`` on a converted tree: author the cards' citation rows into resolved sidecar
+    references (:mod:`...memory.conversion.card_authoring`), then re-record the mechanically moved
+    anchors (MIK-R24 rule 5); a stale anchor is left to the curator. With one document named, both
+    steps touch that card and its sidecar only. A refused card is written by neither stage:
+    its sidecar stays out of the mechanical re-recording as well (MIK-R45 failure behavior).
+
+    With ``documents`` (MIK-R110 rule 2) each named card is handled exactly as a call naming
+    it alone handles it -- author then re-record, one card at a time -- so the bytes on
+    disk are the same either way. A name that matches no card is a refusal of that card
+    and does not stop the others. A call with ``document`` behaves as today, including
+    its refusal of a name that matches nothing.
+    """
+
+    if scope.documents is None:
+        return _converted_single_citation_fix(memory_root, code_root, scope.document, dry_run)
+    merged_authoring: dict[str, Any] | None = None
+    merged_fixed: dict[str, Any] | None = None
+    for name in dict.fromkeys(scope.documents):
+        try:
+            authoring = card_authoring.author_card_references(
+                memory_root, code_root, only=name, dry_run=dry_run
+            )
+        except ValueError as error:
+            authoring = {
+                "dryRun": dry_run,
+                "authoredReferences": 0,
+                "reauthoredReferences": 0,
+                "removedReferences": 0,
+                "authoredCards": [],
+                "createdSidecars": [],
+                "unresolvedTargets": [],
+                "refused": [{"card": f"{ONBOARDING_ROOT}/{name}", "reason": str(error)}],
+            }
+            fixed = {
+                "ok": False,
+                "status": "converted",
+                "dryRun": dry_run,
+                "refreshedAnchors": 0,
+                "rewrittenSidecars": [],
+                "unreadableSidecars": [],
+                "stale": [],
+            }
+        else:
+            sidecar = card_sidecar_path(f"{ONBOARDING_ROOT}/{name}")
+            refused_sidecars = {
+                card_sidecar_path(entry["card"])
+                for entry in authoring["refused"]
+                if isinstance(entry, dict) and isinstance(entry.get("card"), str)
+            }
+            fixed = reference_state.fix_references(
+                memory_root,
+                code_root,
+                dry_run=dry_run,
+                only=sidecar,
+                exclude=refused_sidecars,
+            )
+        merged_authoring = (
+            authoring if merged_authoring is None else _merge_authoring(merged_authoring, authoring)
+        )
+        merged_fixed = fixed if merged_fixed is None else _merge_converted_fix(merged_fixed, fixed)
+    assert merged_authoring is not None and merged_fixed is not None
+    return {
+        **merged_fixed,
+        "ok": merged_fixed["ok"] and not merged_authoring["refused"],
+        "authoring": merged_authoring,
+    }
+
+
+def _merge_authoring(first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+    """Two per-card authoring reports as one call's report: summed counts, joined lists."""
+
+    merged = dict(first)
+    for key in ("authoredReferences", "reauthoredReferences", "removedReferences"):
+        merged[key] = int(first.get(key, 0)) + int(second.get(key, 0))
+    for key in ("authoredCards", "createdSidecars", "unresolvedTargets", "refused"):
+        merged[key] = list(first.get(key, [])) + list(second.get(key, []))
+    return merged
+
+
+def _merge_converted_fix(first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+    """Two per-card re-record reports as one call's report."""
+
+    return {
+        "ok": bool(first.get("ok")) and bool(second.get("ok")),
+        "status": "converted",
+        "dryRun": bool(first.get("dryRun")) and bool(second.get("dryRun")),
+        "refreshedAnchors": int(first.get("refreshedAnchors", 0))
+        + int(second.get("refreshedAnchors", 0)),
+        "rewrittenSidecars": list(first.get("rewrittenSidecars", []))
+        + list(second.get("rewrittenSidecars", [])),
+        "unreadableSidecars": list(first.get("unreadableSidecars", []))
+        + list(second.get("unreadableSidecars", [])),
+        "stale": list(first.get("stale", [])) + list(second.get("stale", [])),
+    }
+
+
+def _converted_single_citation_fix(
+    memory_root: Path, code_root: Path, document: str | None, dry_run: bool
+) -> dict[str, Any]:
+    authoring = card_authoring.author_card_references(
+        memory_root, code_root, only=document, dry_run=dry_run
+    )
+    sidecar = None if document is None else card_sidecar_path(f"{ONBOARDING_ROOT}/{document}")
+    refused_sidecars = {
+        card_sidecar_path(entry["card"])
+        for entry in authoring["refused"]
+        if isinstance(entry, dict) and isinstance(entry.get("card"), str)
+    }
+    fixed = reference_state.fix_references(
+        memory_root, code_root, dry_run=dry_run, only=sidecar, exclude=refused_sidecars
+    )
+    return {**fixed, "ok": fixed["ok"] and not authoring["refused"], "authoring": authoring}
 
 
 def route_index_refresh_tool(
@@ -259,10 +754,25 @@ def route_index_refresh_tool(
     contract_path: str | None = None,
 ) -> dict[str, Any]:
     if not dry_run and contract_path is None:
-        raise AuthorityError(
-            "route_index_refresh apply requires a leaf contract_path; the configured "
-            "official memory checkout is read-only outside a journaled landing"
+        scope = _pre_baseline_official_scope(
+            config, repo_id=repo_id, operation="route_index_refresh"
         )
+        result = build_route_indexes(
+            code_root=scope.code_root,
+            onboarding_root=scope.onboarding_root,
+            repository=scope.context.code_repository_name,
+            storage=scope.context.storage,
+            dry_run=dry_run,
+        )
+        return {
+            "ok": True,
+            "operation": "route_index_refresh",
+            "admission": PRE_BASELINE_ADMISSION,
+            "repoId": scope.repo_id,
+            "onboardingRoot": scope.onboarding_root.as_posix(),
+            "dryRun": dry_run,
+            **result.to_dict(),
+        }
     scope = (
         _leaf_memory_writer_scope(
             config,
@@ -273,6 +783,27 @@ def route_index_refresh_tool(
         if not dry_run and contract_path is not None
         else _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
     )
+    memory_root = scope.onboarding_root.parent
+    if (
+        not dry_run
+        and memory_root.is_dir()
+        and not reference_state.is_converted_memory(memory_root)
+    ):
+        # MIK-R46 rule 1: the apply refuses unconverted memory with the one rule-2 message;
+        # the preview (dry_run) still reports as today. Convert first, then repeat.
+        return {
+            "ok": False,
+            "operation": "route_index_refresh",
+            "repoId": scope.repo_id,
+            "code": LEGACY_FORMAT_CODE,
+            "detail": legacy_format_refusal(
+                memory_root,
+                operation="route_index_refresh",
+                subject=f"the memory tree {memory_root.as_posix()}",
+            ),
+            "onboardingRoot": scope.onboarding_root.as_posix(),
+            "dryRun": dry_run,
+        }
     result = build_route_indexes(
         code_root=scope.code_root,
         onboarding_root=scope.onboarding_root,
@@ -290,19 +821,108 @@ def route_index_refresh_tool(
     }
 
 
+# The foundation handover shared by the two knowledge-state reporting branches below.
+KNOWLEDGE_BOOTSTRAP_ROUTE = (
+    "report knowledge state {state!r}, then have the developer start the Architect, which runs "
+    "the knowledge foundation as a regular task with a Curator"
+)
+
+
 def memory_init_tool(
     config: McpRuntimeConfig,
     *,
     repo_id: str,
     dry_run: bool = False,
     initialize_git: bool = True,
+    initial_branch: str | None = None,
 ) -> dict[str, Any]:
-    return initialize_memory(
+    """Scaffold a repository's memory root, and report what its knowledge foundation is.
+
+    The scaffold this calls has never created knowledge storage, and that is correct: a memory root
+    is a *place*, while the knowledge dataset is an authored result no initializer may invent. What
+    was missing is the other half of that statement -- the initializer said nothing at all about
+    where knowledge will live, so "the normal memory initializer never creates knowledge storage"
+    read as "the product has no knowledge step" rather than as "the next step is the curator's
+    bootstrap". The ``knowledge`` block below is that half, and it is a **measurement**: the location
+    is the one the ordinary read route selects, its state is what a read of that location finds now
+    (``not-recorded``, ``recorded`` or ``unusable``), and a location whose context cannot be admitted
+    yet reports the admission's own refusal rather than a hopeful path.
+    """
+
+    result = initialize_memory(
         config,
         repo_id=repo_id,
         dry_run=dry_run,
         initialize_git=initialize_git,
+        initial_branch=initial_branch,
     )
+    result["knowledge"] = _knowledge_foundation_state(config, repo_id)
+    return result
+
+
+def _knowledge_foundation_state(config: McpRuntimeConfig, repo_id: str) -> dict[str, Any]:
+    """Where this repository's knowledge foundation lives, and what is there now.
+
+    The admission used here is the bootstrap's own, so the location a curator is told to populate is
+    the location the bootstrap publishes to, which is the location the ordinary read route selects.
+    Nothing here writes: an initializer that created knowledge would be inventing authored content,
+    and the whole point of the split is that it does not.
+    """
+
+    admitted = admit_bootstrap_context(config, repo_id)
+    if isinstance(admitted, BootstrapRefusal):
+        return {
+            "state": "context-not-admitted",
+            "datasetPath": None,
+            "code": admitted.code,
+            "detail": admitted.detail,
+            "nextAction": admitted.next_action,
+        }
+    resolved = resolve_published_intent(admitted.context)
+    if isinstance(resolved, PublishedIntentUnavailable):
+        return {
+            "state": resolved.state,
+            "datasetPath": resolved.dataset_path.as_posix(),
+            "code": resolved.code,
+            "detail": resolved.detail,
+            "nextAction": (
+                legacy_format_refusal(
+                    admitted.context.memory_root,
+                    operation="knowledge-bootstrap",
+                    subject="this memory root",
+                )
+                if resolved.code == LEGACY_FORMAT_CODE
+                else KNOWLEDGE_BOOTSTRAP_ROUTE.format(state=resolved.state)
+            ),
+        }
+    tree = resolved.memory_tree
+    assert tree is not None
+    with KnowledgeIndex(resolved.database_path, expected_key=tree.tree_key) as index:
+        has_records = any(index.record_ids(kind).value for kind in RECORD_MODELS)
+    state = (
+        "unusable"
+        if tree.index_state == "partial"
+        else "recorded"
+        if has_records
+        else "not-recorded"
+    )
+    return {
+        "state": state,
+        "datasetPath": resolved.database_path.as_posix(),
+        "code": "snapshot_unavailable" if state == "unusable" else None,
+        "detail": (
+            f"the memory tree {tree.tree_key} has a partial index: {tree.problems[:3]}"
+            if state == "unusable"
+            else f"text knowledge records at {admitted.context.memory_root} are indexed for memory tree {tree.tree_key}"
+            if has_records
+            else f"the complete memory tree {tree.tree_key} records no authored knowledge at {admitted.context.memory_root}"
+        ),
+        "nextAction": (
+            "repair the named knowledge files, then rebuild their derived index"
+            if state == "unusable"
+            else KNOWLEDGE_BOOTSTRAP_ROUTE.format(state=state)
+        ),
+    }
 
 
 @dataclass(frozen=True)
@@ -338,22 +958,18 @@ class CarryoverSelection:
     replace_existing: bool = False
 
 
-@dataclass(frozen=True)
-class CarryoverCommitMessages:
-    """The recovery-leaf onboarding commit message."""
-
-    memory: str = "Carry over landed branch memory"
-
-
-DEFAULT_CARRYOVER_MESSAGES = CarryoverCommitMessages()
-"""The standard carryover commit subjects, used when the caller supplies none."""
-
-
 def memory_baseline_status_tool(config: McpRuntimeConfig, *, repo_id: str) -> dict[str, Any]:
     repo = require_repo(config, repo_id)
     payload = baseline.baseline_status(_baseline_request(config, repo))
     return {
-        "ok": payload.get("state") not in {"blocked-drift", "unavailable"},
+        "ok": payload.get("state")
+        not in {
+            "blocked-drift",
+            "blocked-invalid",
+            "blocked-legacy-cards",
+            "unavailable",
+            "legacy-format",
+        },
         "operation": "memory_baseline_status",
         **payload,
     }
@@ -367,15 +983,63 @@ def memory_baseline_adopt_tool(
     branches: MemoryBranches = DEFAULT_MEMORY_BRANCHES,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    """Adopt the first memory baseline, or refuse in the envelope like its status sibling.
+
+    The sibling ``memory_baseline_status`` answers the same repository with
+    ``state: "ready"``-and-``ok``; a memory repository that has never recorded its
+    default-branch authority is an ordinary *precondition*, not a crash, so it is answered
+    with ``state``/``status``/``nextAction`` here rather than escaping as a traceback in which
+    the caller loses the whole envelope (`260918-TSIP` `T34`, owner `L6`).
+
+    The caught type is deliberately narrow. ``BranchAuthorityUnavailable`` means "the authority
+    this operation needs was never recorded", and its own message names the remedy. The other
+    ``RuntimeError``s on this path -- *memory baseline adoption is a bootstrap-only exception on
+    the checked-out repository-default branch*, *memory root does not exist* -- are refusals of
+    a state the caller must understand and change, and they keep raising: turning them into
+    refusals would hide a misuse behind an envelope. That boundary is what
+    ``test_memory_branch_authority.py::test_baseline_adoption_refuses_a_branch_the_memory_repository_does_not_record``
+    holds, and this is the narrow form that keeps it true.
+    """
+
     repo = require_repo(config, repo_id)
-    returncode, payload = baseline.baseline_adopt(
-        _baseline_request(config, repo),
-        accept_drift=accept_drift,
-        source_branch=branches.source_branch,
-        work_branch=branches.work_branch,
-        dry_run=dry_run,
-    )
+    try:
+        returncode, payload = baseline.baseline_adopt(
+            _baseline_request(config, repo),
+            accept_drift=accept_drift,
+            source_branch=branches.source_branch,
+            work_branch=branches.work_branch,
+            dry_run=dry_run,
+        )
+    except BranchAuthorityUnavailable as error:
+        return _baseline_adopt_refusal(repo, error)
     return {"ok": returncode == 0, "operation": "memory_baseline_adopt", **payload}
+
+
+def _baseline_adopt_refusal(repo, error: BranchAuthorityUnavailable) -> dict[str, Any]:
+    """The typed refusal for an adoption precondition the memory layer reports by raising."""
+
+    memory_root = Path(repo.memory_root).as_posix() if repo.memory_root is not None else ""
+    return {
+        "ok": False,
+        "operation": "memory_baseline_adopt",
+        "state": "refused",
+        "status": "memory-baseline-precondition-unavailable",
+        "detail": str(error).strip(),
+        "repoId": repo.repo_id,
+        "memoryRoot": memory_root,
+        "nextAction": (
+            "initialize the memory repository through memory_init (which records the "
+            "default-branch authority adoption requires), then rerun memory_baseline_adopt; "
+            "memory_baseline_status reports the same repository's state"
+        ),
+        "nextStep": {
+            "summary": (
+                "memory_baseline_adopt did not run: the memory repository is not ready for "
+                "adoption."
+            ),
+            "nextTool": "memory_init",
+        },
+    }
 
 
 def memory_carryover_plan_tool(
@@ -383,9 +1047,44 @@ def memory_carryover_plan_tool(
     selection: CarryoverSelection,
 ) -> dict[str, Any]:
     request = _carryover_request(config, selection)
+    carryover.require_converted_formats(
+        request.source_memory, request.target_memory, "memory_carryover_plan"
+    )
     carryover._require_carryover_authority(request, config)
     payload = carryover.build_plan_for_request(request)
     return {"ok": True, "operation": "memory_carryover_plan", **payload}
+
+
+def _carryover_legacy_refusal(
+    detail: str, *, operation: str = "memory_carryover_apply"
+) -> dict[str, Any]:
+    """The typed refusal for a carryover the rule-1 lock reports by raising.
+
+    The short message carries the refusal once for the answer guard; the full rule-2
+    text stays in the logged detail.
+    """
+
+    short = (
+        f"{operation} did not run: carryover memory is unconverted "
+        "(no knowledge/layout.json); convert it first."
+    )
+    return {
+        "ok": False,
+        "operation": operation,
+        "state": "refused",
+        "code": LEGACY_FORMAT_CODE,
+        "message": short,
+        "detail": detail.strip(),
+        "nextAction": (
+            "convert the unconverted memory first (agents-remember knowledge-convert "
+            f"MEMORY_ROOT --code CODE_REPOSITORY), then rerun {operation}; "
+            "memory_baseline_status reports the same repository's state"
+        ),
+        "nextStep": {
+            "summary": short,
+            "nextTool": "memory_baseline_status",
+        },
+    }
 
 
 def memory_carryover_apply_tool(
@@ -394,18 +1093,25 @@ def memory_carryover_apply_tool(
     *,
     intent_note: str,
     include_review_required: list[str] | None = None,
-    messages: CarryoverCommitMessages = DEFAULT_CARRYOVER_MESSAGES,
 ) -> dict[str, Any]:
-    payload = carryover._apply_carryover_for_request(
-        _carryover_request(config, selection),
-        authority=config,
-        options=carryover.CarryoverApplyOptions(
-            intent_note=intent_note,
-            include_review_required=include_review_required,
-            memory_commit_message=messages.memory,
-        ),
-    )
-    return {"ok": True, "operation": "memory_carryover_apply", **payload}
+    try:
+        payload = carryover._apply_carryover_for_request(
+            _carryover_request(config, selection),
+            authority=config,
+            options=carryover.CarryoverApplyOptions(
+                intent_note=intent_note,
+                include_review_required=include_review_required,
+            ),
+        )
+    except RuntimeError as error:
+        if not is_legacy_format_refusal(str(error)):
+            raise
+        return _carryover_legacy_refusal(str(error))
+    return {
+        "ok": payload.get("state") != "refused",
+        "operation": "memory_carryover_apply",
+        **payload,
+    }
 
 
 def _baseline_request(config: McpRuntimeConfig, repo: RepositoryScope) -> baseline.BaselineRequest:

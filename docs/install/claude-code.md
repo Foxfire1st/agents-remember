@@ -1,164 +1,144 @@
-# Install For Claude Code
+# Install for Claude Code
 
-Claude Code separates always-loaded project instructions from native skills.
+This page adds to the common install steps what holds for Claude Code only: how you register the
+tool server, which role agents the host starts on Claude Code, and which settings Claude Code needs.
 
-- Use a `SessionStart` hook to load the coordinator first-action directive.
-- Use `.claude/skills` or `~/.claude/skills` for Claude Code skills.
+## Install steps
 
-Official references:
+These are the five install steps. [Getting started](../getting-started.md) tells them in full, and
+the page [Install](README.md) names them for every harness.
 
-- [Claude Code settings](https://code.claude.com/docs/en/settings)
-- [Claude Code hooks reference](https://code.claude.com/docs/en/hooks)
-- [Claude Code MCP](https://code.claude.com/docs/en/mcp)
-- [Claude Code skills](https://code.claude.com/docs/en/skills)
-- [Claude Code memory and CLAUDE.md](https://code.claude.com/docs/en/memory)
+1. **Install the package.** Install the published package `agents-remember-mcp` with uv.
+2. **Write the settings file.** Create `~/.config/agents-remember/agents-remember-settings.json`. It
+   names the workspace root, the coordination root and your code repositories.
+3. **Register the tool server in your harness.**
+   [Register the tool server in Claude Code](#register-the-tool-server-in-claude-code) shows the file
+   and the form of the declaration.
+4. **Start the setup.** In a chat of Claude Code, ask the agent to make this call:
+   `role_start(role="bootstrap", request_id="<a new UUID>")`.
+   [Role agents on this harness](#role-agents-on-this-harness) says what the call does from
+   Claude Code.
+5. **Open the dashboard.** Open the address that the answer names, by default
+   `http://127.0.0.1:8765/`.
 
-## Root Starter Package
+## Register the tool server in Claude Code
 
-The repository includes a Claude Code starter package at `.claude/`. Copy that
-folder to your workspace root, then render the copied package. The
-`.claude/render-starter` script is a convenience: with a single `--repo` list
-such as `--repo my-app shared-lib`, it infers the workspace root from the copied
-`.claude/` folder, fills path and repository placeholders, writes the Python
-hook command/args, and validates that each requested repository exists. If you
-prefer not to run the renderer, make those same replacements by hand and verify
-that no placeholder tokens remain. Restart Claude Code once after rendering.
-Also copy `.claude/mcp/mcp.json` to `<workspace>/.mcp.json`; Claude Code will
-not detect the MCP registration if the file only lives under `.claude/mcp/`.
+Step 3 of the install steps is one command in Claude Code. Run it in a shell:
 
-The package contains:
-
-- `.claude/settings.json` - `SessionStart` hook registration.
-- `.claude/hooks/agents-remember-session-start.py` and `.md` - Python startup
-  hook that emits the directive as `additionalContext`.
-- `.claude/mcp/mcp.json` - MCP registration template to copy to root
-  `.mcp.json`.
-- `.claude/mcp/agents-remember-settings.json` - Agents Remember MCP authority
-  settings.
-- `.claude/skills/` - Agents Remember skills in Claude Code's project skill
-  root.
-
-After the restart, invoke:
-
-```text
-c-13-install-and-onboard
+```bash
+claude mcp add --scope user agents-remember -- agents-remember-mcp --config /home/<you>/.config/agents-remember/agents-remember-settings.json
 ```
 
-That skill runs or verifies `runtime_install()` and then handles memory,
-onboarding, and providers.
+`--config` takes an absolute path, so write your home folder in full instead of `~`.
 
-## Workspace Instructions
-
-Load the coordinator first-action directive with the starter package's
-`SessionStart` hook. This is the recommended setup for Claude Code, and the only
-one that reliably makes the directive authoritative.
-
-A `CLAUDE.md` import alone is not enough. Claude Code loads imported workspace
-instructions as project context tagged with a "this context may or may not be
-relevant" disclaimer, so the coordinator doctrine reads as optional and is easily
-skipped. The hook instead injects the directive as authoritative
-`additionalContext`.
-
-Claude Code itself does not require `jq` for hooks. The starter package uses a
-Python hook, and the renderer writes the local Python executable into
-`.claude/settings.json`.
-
-The starter package includes `.claude/hooks/agents-remember-session-start.md`
-with the directive text:
-
-```markdown
-**Agents Remember — session start.**
-
-If `AR_SPAWN_ROLE` is set, it must resolve to its canonical role file and arrive
-with the plane-injected hosted-session identity. An unresolvable role or an
-incomplete hosted identity fails closed; it never falls through to a pasted
-brief or ambient free chat. With valid hosted identity—or when the first user
-message is a role brief and no hosted identity was declared—the brief is the
-session start.
-
-Otherwise you are the developer-facing **free chat**: read
-`ar-coordination/AGENTS.md`; answer research inline, or for ordinary role-shaped work create/resolve the
-durable sprint and first leaf, compile the canonical architect brief, and call
-`dispatch_agent` once on that sprint document with role `architect`.
-```
-
-The directive is entry-only by design: a spawned role's session start is the
-role brief its orchestrating agent compiled, while free chat remains a launcher
-rather than a global role identity. An explicit developer-declared task-seat
-takeover instead targets the named role on its canonical task document. With no plane identity the call uses
-ambient target-document/role-altitude validation; later hosted dispatch uses
-plane identity and direct-child scope. Both pin the brief in one transaction,
-and a plane refusal never falls back to ambient.
-
-The starter package registers the hook in `.claude/settings.json`:
+Claude Code keeps a user-level registration in `~/.claude.json`, as the entry
+`mcpServers.agents-remember` with the keys `type`, `command`, `args` and `env`:
 
 ```json
 {
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "<PYTHON_EXECUTABLE>",
-            "args": [
-              "<PATH/TO/YOUR/PROJECTS_FOLDER>/.claude/hooks/agents-remember-session-start.py"
-            ]
-          }
-        ]
-      }
-    ]
+  "mcpServers": {
+    "agents-remember": {
+      "type": "stdio",
+      "command": "agents-remember-mcp",
+      "args": ["--config", "/home/<you>/.config/agents-remember/agents-remember-settings.json"],
+      "env": {}
+    }
   }
 }
 ```
 
-The hook reads the directive file and emits it as `additionalContext`, which
-Claude Code injects as authoritative session context. This is what makes the
-coordinator first action reliably run before any sibling-repo work.
-`$CLAUDE_PROJECT_DIR` resolves to the folder that holds `.claude`; an absolute
-path to the directive file works too.
+Claude Code knows the scopes `local`, `user` and `project` for a registration, and `local` is its
+default. Its vendor documents `user` as the scope that holds for all your projects; see
+[Claude Code: MCP](https://code.claude.com/docs/en/mcp). The file, the entry and the scopes were
+read on Claude Code 2.1.321; `claude mcp add --help` prints the scopes and the default.
 
-Claude Code snapshots `settings.json` hooks at session start, so restart after
-copying the package; confirm the directive appears as injected session context
-on the new session.
+The registration is the only change to Claude Code. The tool server serves its
+[skill](../concepts.md#skill), the instructions of the roles, as MCP resources. In its answer to
+the harness's `initialize` request it declares the MCP skills extension
+`io.modelcontextprotocol/skills`, through which a harness can list a served skill among its own
+skills. Claude Code 2.1.321 contains that extension. Whether it lists the served skill among its
+own skills is not verified. The setup needs no read of the skill: a role agent receives its part
+of the instructions with its first message.
 
-### Fallback Without The Hook
+## Role agents on this harness
 
-If you cannot run a hook, add the same import to a root `CLAUDE.md`:
+The host has a built-in [host provider](../concepts.md#host-provider) for Claude Code; its id is
+`claude`. Every role can run on Claude Code. You choose it for a role with `"harness": "claude"`
+under `orchestration.roles.<role>` in the user settings file,
+`~/.config/agents-remember/settings.json`. `<role>` is the id of a role, for example `worker`;
+[The keys of a role row](../reference/harnesses.md#the-keys-of-a-role-row) lists the ids. A
+`role_start` call chooses it with `agent="claude"`.
 
-```markdown
-# Workspace Agent Instructions
+Agents Remember asks for no minimum version of Claude Code. The host offers some models of its
+list only when Claude Code has at least the version that the list names for the model. A role
+with a model that the host does not offer is refused with `model_not_offered` (see
+[What this harness needs](#what-this-harness-needs)).
 
-Read and follow `ar-coordination/AGENTS.md` before working in any sibling project.
-Treat these rules as workspace instructions!
+The call of step 4, `role_start` with `role="bootstrap"`, starts the Bootstrap role agent on the
+harness of the chat that makes the call. Made in a Claude Code chat, it starts the Bootstrap role
+agent on Claude Code.
 
-@ar-coordination/AGENTS.md
-```
+## What this harness needs
 
-If `ar-coordination` is outside the workspace, point at the actual readable path.
+Each entry says what you see without the setting, the setting with its file and key, and who makes
+it. The entries were checked on Claude Code 2.1.321 with the host this build installs, unless an
+entry names another ground under "Checked".
 
-This loads the doctrine, but only as optional context. Expect noticeably weaker
-instruction following: the agent often will not read `ar-coordination/AGENTS.md`
-or resolve context unless you remind it at the start of each session. Treat this
-as a degraded fallback, not an equivalent to the hook.
+The keys of Agents Remember stand in the user settings file. That file can be read-only; the
+[settings reference](../reference/settings-json.md) shows the two commands that open and close it.
 
-## Skills
+- **A role agent asks before it uses a tool for the first time.** Without a
+  [permission mode](../concepts.md#permission-mode) in the user settings file, Agents Remember
+  starts Claude Code in the permission mode `default`, which the host labels "Always Ask". Only the
+  tool `server_info` of the tool server is approved beforehand.
+  - Setting: `orchestration.roles.<role>.mode` in the user settings file, for example `"auto"`. The
+    host offers `plan`, `default`, `acceptEdits`, `auto` and `bypassPermissions` for Claude Code.
+  - Who: you state the permission mode. Agents Remember sends it with the start. A repository's
+    settings file that states one is refused, and no start call accepts one.
+  - Checked: the start mode and the key, in the code of Agents Remember; the permission modes and
+    their labels, in the source of the host this build installs. The prompt itself was not
+    reproduced.
+- **A long-running role agent compacts its conversation earlier or later than you want.** To
+  compact, Claude Code continues the conversation from a summary of it. It compacts when the
+  conversation reaches a size in tokens: the smaller of the setting below and the model's largest
+  context window.
+  - Setting: `modelSettings.<model>.autoCompactWindow` in `~/.claude/settings.json`: a number of
+    tokens from 100000 to 1000000, or `"auto"`.
+  - Who: you. Agents Remember does not write the settings of Claude Code.
+  - Checked: the key, its range and the threshold, in the settings schema and the texts that
+    Claude Code 2.1.321 carries.
+- **A role agent lists the tools of Agents Remember once, under the name of its own tool server,
+  `agents-remember-task`.** Your registration names your tool server `agents-remember`, and the
+  start keeps the tools of that tool server out of the role agent. The whole result of
+  `role_start`, in the file that `log` names, then says `"secondCopyLoaded": false`.
+  - Setting: none. At each start, Agents Remember hands the host one denied-tool rule for that
+    agent, `mcp__agents-remember`, together with the rules that the entry `claude` of the host's
+    configuration `config.json`, in the [host's home](../host.md#where-it-lives-on-disk), already
+    denies. Your registration and your own chats stay as they are.
+  - Who: Agents Remember.
+- **A role's model is refused with `model_not_offered`.** Agents Remember refuses a model that the
+  host's list for Claude Code does not hold. The host offers the models of its own list and the
+  models that `~/.claude/settings.json` names, for example under `model`.
+  - Setting: `orchestration.roles.<role>.model` in the user settings file, with a model that the
+    role launcher of the [dashboard](../dashboard.md) lists. The version of the host comes with the
+    build of Agents Remember; you do not choose it.
+  - Who: you.
+  - Checked: the refusal, in the code of Agents Remember; the two sources of the list, in the
+    source of the host this build installs. No refused start was run.
+- **A role agent reports that a tool call was declined although nobody declined it.** A message
+  that reaches an agent on Claude Code while a call runs can stop that call. Claude Code then gives
+  the agent, as the result of the call, the words "The user doesn't want to proceed with this tool
+  use." Claude Code 2.1.321 adds that the call was stopped while it ran, that it may have run in
+  part or in full, and that no permission prompt was involved.
+  - Setting: none. Advice: check the effect of the call before the call is repeated.
+  - Who: nobody sets anything. Agents Remember ships no instruction for it.
+  - Checked: on a sandbox with Claude Code 2.1.321. The message `/compact`, sent into a turn in
+    which a shell call ran, stopped the call within four seconds, and the agent quoted these words
+    as the result. A call of a tool server and a message of another agent were not tried.
 
-Claude Code is a **direct** skill-folder scanner: it discovers a skill only when
-`SKILL.md` sits one level under the skill root, in a folder whose name matches the
-skill's lowercase `name`. The copied starter package already provides one flat
-folder per skill at `.claude/skills/<name>/SKILL.md`.
+## Related pages
 
-This produces, for example:
-
-```text
-.claude/skills/c-13-install-and-onboard/SKILL.md
-.claude/skills/w-02-light-task-workflow/SKILL.md
-```
-
-Keep the copied package flat: one folder per skill directly under
-`.claude/skills/`, named by the skill's lowercase frontmatter name. Claude Code
-discovers that layout without recursive scanning.
-
-Do not run `skills_install()` for first-run setup. It remains available for
-manual maintenance and non-package installs.
+- [Install](README.md): the common steps and the other harnesses.
+- [Getting started](../getting-started.md): the install steps in full.
+- [The host](../host.md): what the host itself needs.
+- [Roles and role agents](../roles.md): how role agents start and exchange messages.

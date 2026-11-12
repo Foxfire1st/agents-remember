@@ -16,10 +16,15 @@ from agents_remember.models.lifecycles.enclosure import (
     EnclosurePublicationState,
     LifecycleEnclosureLocator,
     LifecycleEnclosureManifest,
+    OutsideScratchRootRecord,
     TerminalCleanupOperation,
     TerminalEnclosurePredecessor,
 )
 from agents_remember.models.lifecycles.operation import LifecycleOperationKind
+from agents_remember.worktrees import outside_scratch
+from agents_remember.worktrees.integration.lifecycle import (
+    lifecycle_location_cache as location_cache,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_enclosure_terminal import (
     require_successor_generation,
     terminal_predecessor,
@@ -64,6 +69,13 @@ from agents_remember.worktrees.worktree_contract import (
 
 LIFECYCLE_DIRECTORY = ".lifecycle"
 ENCLOSURE_MANIFEST = "enclosure-manifest.json"
+
+#: How many resolved locations are kept. One entry per enclosure contract; beyond
+#: this the oldest entry leaves first and a counter says so (D2/D3).
+
+#: How many times one locator/manifest open+read retries a mid-read change (F14).
+#: The first consistent (before-fstat, bytes, after-fstat) triple wins; a file that
+#: keeps changing under the read fails closed instead of binding mixed bytes.
 
 _LOCATION_OWNERSHIP = StoreOwnership(
     store="lifecycle-enclosure-locator",
@@ -125,6 +137,7 @@ class EnclosurePublicationArtifacts:
     manifest_text: str
     contract_text: str
     reserved_locator: LifecycleEnclosureLocator
+    outside_scratch: outside_scratch.OutsideScratchRoot | None = None
 
     @property
     def manifest(self) -> LifecycleEnclosureManifest:
@@ -192,6 +205,7 @@ def prepare_enclosure_publication(
     if not intent:
         raise ValueError("enclosure publication requires a nonblank audit intent")
     contract = _contract_bound_to_publication_text(contract, contract_text)
+    outside_scratch_record = _outside_scratch_record(contract)
     root = contract.coordination_root.resolve(strict=False)
     contract_path = _confined_contract_path(root, contract.contract_path)
     worktree_group = contract.worktree_group.resolve(strict=False)
@@ -240,6 +254,11 @@ def prepare_enclosure_publication(
         lifecycleId=contract.lifecycle_id,
         bindingFingerprint=binding_fingerprint,
         predecessorTerminal=predecessor_terminal,
+        outsideScratch=(
+            None
+            if outside_scratch_record is None
+            else OutsideScratchRootRecord.model_validate(outside_scratch_record.manifest_payload())
+        ),
     )
     manifest_text = model_text(manifest)
     locator = LifecycleEnclosureLocator(
@@ -264,7 +283,40 @@ def prepare_enclosure_publication(
         manifest_text=manifest_text,
         contract_text=contract_text,
         reserved_locator=locator,
+        outside_scratch=outside_scratch_record,
     )
+
+
+def _outside_scratch_record(
+    contract: WorktreeContract,
+) -> outside_scratch.OutsideScratchRoot | None:
+    """The root this generation records, computed without touching the disk.
+
+    The record is durable authority, so it is decided here and written into the manifest before
+    the first byte of the enclosure exists; the directory itself is created only after the
+    publication is durable (``_materialise_outside_scratch``). A crash in between leaves a
+    recorded generation with no directory, which the next use recreates, instead of a directory
+    nobody recorded.
+    """
+
+    return outside_scratch.recorded_root(contract)
+
+
+def _materialise_outside_scratch(artifacts: EnclosurePublicationArtifacts) -> None:
+    """Create the recorded root, now that its record is published and cannot be lost."""
+
+    record = artifacts.outside_scratch
+    if record is None:
+        return
+    try:
+        outside_scratch.ensure_root(record)
+    except outside_scratch.OutsideScratchError as error:
+        raise _location_error(
+            "operation-location-outside-scratch-unavailable",
+            f"the enclosure's outside scratch root cannot be allocated: {error}",
+            contract_path=artifacts.contract_path,
+            observed={"root": record.root.as_posix(), "reason": str(error)},
+        ) from error
 
 
 def _contract_bound_to_publication_text(
@@ -309,17 +361,27 @@ def _prepare_start_generation(
     *,
     contract_text: str,
     predecessor_terminal: TerminalEnclosurePredecessor | None = None,
+    audit_intent: str | None = None,
 ) -> EnclosurePublicationArtifacts:
+    """Build one generation's artifacts, with the producer's own audit intent when it has one.
+
+    ``audit_intent`` is the manifest's durable statement of what published this generation, so a
+    producer whose transition is not a start (``task_reopen`` publishing a terminal series'
+    successor) states its own, and the start path keeps the two sentences it always wrote.
+    """
+
     successor = predecessor_terminal is not None
+    if audit_intent is None:
+        audit_intent = (
+            "worktree_start accepted this exact successor enclosure generation"
+            if successor
+            else "worktree_start accepted this exact enclosure binding"
+        )
     return prepare_enclosure_publication(
         contract,
         contract_text=contract_text,
         publication_kind="successor-enclosure" if successor else "new-enclosure",
-        audit_intent=(
-            "worktree_start accepted this exact successor enclosure generation"
-            if successor
-            else "worktree_start accepted this exact enclosure binding"
-        ),
+        audit_intent=audit_intent,
         predecessor_terminal=predecessor_terminal,
     )
 
@@ -343,6 +405,7 @@ def reserve_new_lifecycle_operation_location(
     *,
     contract_text: str,
     predecessor_contract: WorktreeContract | None = None,
+    audit_intent: str | None = None,
 ) -> LifecycleEnclosureLocator:
     """Reserve the exact initial or successor address before any long start work.
 
@@ -360,7 +423,7 @@ def reserve_new_lifecycle_operation_location(
         predecessor: TerminalEnclosurePredecessor | None = None
         current: LifecycleEnclosureLocator | None = None
         if presence == "file":
-            current = _read_locator(locator_path, contract.contract_path)
+            current, _, _ = _read_locator(locator_path, contract.contract_path)
             _validate_locator(
                 contract.coordination_root,
                 contract.contract_path.resolve(strict=False),
@@ -401,6 +464,7 @@ def reserve_new_lifecycle_operation_location(
             contract,
             contract_text=contract_text,
             predecessor_terminal=predecessor,
+            audit_intent=audit_intent,
         )
         if current is not None and current.state == "terminal-archived":
             if (
@@ -428,6 +492,7 @@ def reserve_new_lifecycle_operation_location(
                 locator,
             )
         _publish_successor_contract(artifacts, predecessor_contract)
+        _materialise_outside_scratch(artifacts)
         return locator
 
 
@@ -435,6 +500,7 @@ def resume_new_lifecycle_operation_location(
     contract: WorktreeContract,
     *,
     contract_text: str,
+    audit_intent: str | None = None,
 ) -> LifecycleOperationLocation:
     """Resume only the generation already recorded by the canonical reservation."""
 
@@ -452,7 +518,7 @@ def resume_new_lifecycle_operation_location(
                 "state": "missing",
             },
         )
-    current = _read_locator(locator_path, contract.contract_path)
+    current, _, _ = _read_locator(locator_path, contract.contract_path)
     _validate_locator(
         contract.coordination_root,
         contract.contract_path.resolve(strict=False),
@@ -472,6 +538,7 @@ def resume_new_lifecycle_operation_location(
         contract,
         contract_text=contract_text,
         predecessor_terminal=predecessor,
+        audit_intent=audit_intent,
     )
     return publish_enclosure_location(artifacts, contract_mode="publish")
 
@@ -495,13 +562,14 @@ def publish_enclosure_location(
             before_contract_proof()
         _publish_or_prove_contract(artifacts, mode=contract_mode)
         locator = _prove_contract(artifacts, locator)
-        manifest = _read_manifest(artifacts.manifest_path, artifacts.contract_path)
+        _materialise_outside_scratch(artifacts)
+        manifest, _, manifest_raw = _read_manifest(artifacts.manifest_path, artifacts.contract_path)
         _validate_manifest(
             artifacts.coordination_root,
-            artifacts.contract_path,
             locator,
             artifacts.manifest_path,
             manifest,
+            manifest_raw,
         )
         location = LifecycleOperationLocation(artifacts.locator_path, locator, manifest)
         if after_addressable is not None:
@@ -509,11 +577,23 @@ def publish_enclosure_location(
         return location
 
 
-def resolve_lifecycle_operation_location(
+#: The absent-observation default for :func:`_location_cache_put` (frozen: shared safely).
+
+
+def _resolve_lifecycle_operation_location(
     coordination_root: Path,
     contract_path: Path,
-) -> LifecycleOperationLocation:
-    """Resolve locator -> root manifest -> journals without scans or inference."""
+) -> tuple[
+    LifecycleOperationLocation,
+    location_cache._StatIdentity | None,
+    location_cache._StatIdentity | None,
+]:
+    """Resolve locator -> root manifest -> journals without scans or inference.
+
+    Returns the location with the stat identities of the locator and manifest bytes the
+    returned models were parsed from, sampled from the same opens (F14): a replacement or
+    deletion between the read and the cache fill can never bind old content to new stats.
+    """
 
     root = coordination_root.resolve(strict=False)
     confined = _confined_contract_path(root, contract_path)
@@ -525,10 +605,10 @@ def resolve_lifecycle_operation_location(
             contract_path=confined,
             observed={"locatorPath": locator_path.as_posix(), "state": "missing"},
         )
-    locator = _read_locator(locator_path, confined)
+    locator, locator_stat, _ = _read_locator(locator_path, confined)
     _validate_locator(root, confined, locator_path, locator)
     if locator.state in {"reserved", "manifest-proven"}:
-        raise _location_error(
+        interrupted = _location_error(
             "operation-location-publication-interrupted",
             "new enclosure addressability publication is incomplete",
             contract_path=confined,
@@ -538,8 +618,10 @@ def resolve_lifecycle_operation_location(
                 "publicationRequestId": locator.publicationRequestId,
             },
         )
+        interrupted.locator_stat_read = locator_stat
+        raise interrupted
     if locator.state == "terminal-archived":
-        raise _location_error(
+        archived = _location_error(
             "operation-location-terminal-archived",
             "the enclosure root was deliberately collected after terminal archive proof",
             contract_path=confined,
@@ -550,10 +632,16 @@ def resolve_lifecycle_operation_location(
                 "terminalReceiptPath": locator.terminalReceiptPath or "",
             },
         )
+        archived.locator_stat_read = locator_stat
+        raise archived
     manifest_path = Path(locator.manifestPath)
-    manifest = _read_manifest(manifest_path, confined)
-    _validate_manifest(root, confined, locator, manifest_path, manifest)
-    return LifecycleOperationLocation(locator_path, locator, manifest)
+    manifest, manifest_stat, manifest_raw = _read_manifest(manifest_path, confined)
+    _validate_manifest(root, locator, manifest_path, manifest, manifest_raw)
+    return (
+        LifecycleOperationLocation(locator_path, locator, manifest),
+        locator_stat,
+        manifest_stat,
+    )
 
 
 def inspect_lifecycle_operation_locator(
@@ -576,7 +664,7 @@ def inspect_lifecycle_operation_locator(
     if presence == "missing":
         return LifecycleLocatorObservation(path, "missing")
     try:
-        locator = _read_locator(path, confined)
+        locator, _, _ = _read_locator(path, confined)
         _validate_locator(coordination_root, confined, path, locator)
     except LifecycleOperationLocationError as error:
         return LifecycleLocatorObservation(
@@ -609,7 +697,7 @@ def publish_terminal_lifecycle_operation_location(
     archive = publication.archive_path.resolve(strict=False).as_posix()
     receipt = publication.receipt_path.resolve(strict=False).as_posix()
     with exclusive_access(locator_path, _LOCATION_OWNERSHIP):
-        current = _read_locator(locator_path, contract.contract_path)
+        current, _, _ = _read_locator(locator_path, contract.contract_path)
         _validate_locator(
             contract.coordination_root,
             contract.contract_path.resolve(strict=False),
@@ -662,7 +750,7 @@ def publish_terminal_lifecycle_operation_location(
             terminal,
         )
         _write_locator(locator_path, terminal)
-        observed = _read_locator(locator_path, contract.contract_path)
+        observed, _, _ = _read_locator(locator_path, contract.contract_path)
         if observed != terminal:
             raise LifecycleOperationLocationError(
                 "operation-location-terminal-publication-failed",
@@ -689,7 +777,7 @@ def require_terminal_lifecycle_predecessor(
             contract_path=contract.contract_path,
             observed={"locatorPath": locator_path.as_posix(), "state": "missing"},
         )
-    locator = _read_locator(locator_path, contract.contract_path)
+    locator, _, _ = _read_locator(locator_path, contract.contract_path)
     _validate_locator(
         contract.coordination_root,
         contract.contract_path.resolve(strict=False),
@@ -721,7 +809,7 @@ def require_matching_lifecycle_operation_location(
 ) -> LifecycleOperationLocation:
     """Resolve the locator and cross-check every readable immutable contract cell."""
 
-    location = resolve_lifecycle_operation_location(
+    location = location_cache.resolve_lifecycle_operation_location(
         contract.coordination_root,
         contract.contract_path,
     )
@@ -788,7 +876,7 @@ def _reserve_locator(
         )
         == "file"
     ):
-        current = _read_locator(artifacts.locator_path, artifacts.contract_path)
+        current, _, _ = _read_locator(artifacts.locator_path, artifacts.contract_path)
         if locator_binding(current) != locator_binding(artifacts.reserved_locator):
             raise location_conflict("locator binding", artifacts.reserved_locator, current)
         return current
@@ -814,7 +902,7 @@ def _publish_or_prove_manifest(artifacts: EnclosurePublicationArtifacts) -> None
     observed = _read_bytes(artifacts.manifest_path, "manifest", artifacts.contract_path)
     if observed != artifacts.manifest_text.encode("utf-8"):
         raise byte_conflict("manifest", artifacts.manifest_text.encode(), observed)
-    parsed = _read_manifest(artifacts.manifest_path, artifacts.contract_path)
+    parsed, _, _ = _read_manifest(artifacts.manifest_path, artifacts.contract_path)
     if parsed != artifacts.manifest:
         raise location_conflict("manifest binding", artifacts.manifest, parsed)
 
@@ -974,9 +1062,19 @@ def _publish_exact_text(
         raise byte_conflict(owner, expected, observed)
 
 
-def _read_locator(path: Path, contract_path: Path) -> LifecycleEnclosureLocator:
+def _read_locator(
+    path: Path, contract_path: Path
+) -> tuple[LifecycleEnclosureLocator, location_cache._StatIdentity, bytes]:
+    """The locator, the stat identity of the bytes parsed, and those bytes, from one open.
+
+    The bytes travel with the model so validation hashes exactly what was parsed (F14):
+    a replacement or deletion between the read and the check can never bind the old model
+    to newly settled operands.
+    """
+
     try:
-        return LifecycleEnclosureLocator.model_validate_json(path.read_text(encoding="utf-8"))
+        raw, identity = location_cache._read_consistent_bytes(path, contract_path, "locator")
+        return LifecycleEnclosureLocator.model_validate_json(raw), identity, raw
     except (OSError, UnicodeError, ValidationError) as exc:
         raise _location_error(
             "operation-location-invalid",
@@ -986,9 +1084,14 @@ def _read_locator(path: Path, contract_path: Path) -> LifecycleEnclosureLocator:
         ) from exc
 
 
-def _read_manifest(path: Path, contract_path: Path) -> LifecycleEnclosureManifest:
+def _read_manifest(
+    path: Path, contract_path: Path
+) -> tuple[LifecycleEnclosureManifest, location_cache._StatIdentity, bytes]:
+    """The manifest, the stat identity of the bytes parsed, and those bytes, from one open."""
+
     try:
-        return LifecycleEnclosureManifest.model_validate_json(path.read_text(encoding="utf-8"))
+        raw, identity = location_cache._read_consistent_bytes(path, contract_path, "manifest")
+        return LifecycleEnclosureManifest.model_validate_json(raw), identity, raw
     except (OSError, UnicodeError, ValidationError) as exc:
         status = (
             "operation-enclosure-root-missing"
@@ -1030,15 +1133,17 @@ def _validate_locator(
 
 def _validate_manifest(
     coordination_root: Path,
-    contract_path: Path,
     locator: LifecycleEnclosureLocator,
     manifest_path: Path,
     manifest: LifecycleEnclosureManifest,
+    manifest_raw: bytes,
 ) -> None:
     worktree_group = Path(manifest.worktreeGroup).resolve(strict=False)
     expected_manifest_path = lifecycle_enclosure_manifest_path(worktree_group)
     _require_confined_worktree_group(coordination_root, manifest.repository, worktree_group)
-    observed_manifest_sha = sha256_bytes(_read_bytes(manifest_path, "manifest", contract_path))
+    # The sha is taken over the bytes the manifest was parsed from (F14), never re-read:
+    # validation cannot bind the parsed model to a replacement file.
+    observed_manifest_sha = sha256_bytes(manifest_raw)
     derived_binding_fingerprint = sha256_payload(
         enclosure_binding_payload(
             EnclosureBindingIdentity.from_manifest(manifest),

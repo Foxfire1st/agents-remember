@@ -1,0 +1,1086 @@
+{
+  "schema": "ar-helper-wait-real-dispatches/v1",
+  "selection": "Eight actual latest69081fa6 Hermes CE05/CE06 launches. Native call/result events copied unchanged. Host raw fields/timeline entries are exact JSON-pointer selections, not complete reconstructed host records. No real re-entry retained.",
+  "rows": [
+    {
+      "attemptId": "9dc20264-fd93-4ad0-8153-e66f15c62f98",
+      "case": "CE05",
+      "run": "20261030-arm-old-hermes",
+      "harness": "hermes",
+      "sessionId": "4f155ad4-1add-4d10-9c89-9c6ba99b359e",
+      "ownerHostAgentId": "fce2c1ca-3304-4a72-a09d-6c0ccfb372e6",
+      "sourceAttempt": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-arm-old-hermes/hermes/CE05/9dc20264-fd93-4ad0-8153-e66f15c62f98/attempt.json",
+        "sizeBytes": 2788452,
+        "sha256": "d1910219854c3d027ea401da09d7145fb92bcaddcf85db4287b2a585375aeb61"
+      },
+      "selectedNativeEvents": [
+        {
+          "originalJsonPointer": "/capture/events/170",
+          "canonicalValueSha256": "9244189754886e4b1d2dc116b43e531d69f1613fbfae0bf5223fb19cfbb2ea5b",
+          "record": {
+            "kind": "tool_call",
+            "session_id": "4f155ad4-1add-4d10-9c89-9c6ba99b359e",
+            "sequence": 170,
+            "payload": {
+              "call_id": "call_de9bfbecdad24a57ba589571",
+              "name": "delegate_task",
+              "arguments": "{\"tasks\":[{\"context\":\"This is a disposable eval fixture. Code tree (read-only, git repo, one commit f71fa5f) at /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE05/trials/9dc20264-fd93-4ad0-8153-e66f15c62f98/project/projects/code. Memory worktree at /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE05/trials/9dc20264-fd93-4ad0-8153-e66f15c62f98/project/coordination/memory-repos/ar-code.\\n\\nYou wrote none of these memory files. Your verdict is review evidence only; you have no write authority here — report findings, change nothing.\\n\\nThe code tree contains exactly three source files: dashboard/src/cockpit/launcherDefaultsMemory.ts, dashboard/src/cockpit/launcherDefaultsMemory (no), dashboard/src/cockpit/roleLaunchModel.ts, dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts. Other paths cited by the memory tree's route overview do not exist in this cut code tree; do not treat that as your subject.\\n\\nCheck these memory files:\\n1. onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.md and its sidecar onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.json (newly authored card; no invariant records).\\n2. onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.md and .json (pre-existing card, claimed unchanged/no-impact).\\n3. knowledge/history/CE05-9dc20264-fd93-4ad0-8153-e66f15c62f98.json (two history rows: an `updated` row for the new card and a `no_impact` row for the existing card).\\n\\nApply MIK-R53 rule 5 fact-check criteria (criteria/onboarding-memory.md OM-2 at /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE05/trials/9dc20264-fd93-4ad0-8153-e66f15c62f98/serving-build/skills/l-01-agent-lifecycles/criteria/onboarding-memory.md if useful): statement by statement against the final code; each sidecar anchor's locator, blob and content identity; whether the no_impact row's reason is true of the current source; whether anything important about these files is left unsaid.\",\"goal\":\"Independently fact-check a newly authored onboarding card and two history rows against the source code, statement by statement. Report each statement as supported / unsupported / unverifiable, with the exact code line(s) that support or contradict it. For each sidecar reference, verify the locator names a construct that exists exactly once in the cited file and that the anchor's `blob` equals `git hash-object` of the file; report if you cannot verify the sha256 `content` hash instead of guessing. Name every blocking finding (a false or unsupported statement, a wrong anchor, a missing important fact) and every non-blocking observation. Your final answer must contain: a table of statement -> verdict -> evidence (path:line), an anchor table, and a short 'blocking findings' list (or 'none'). Do not modify any file.\",\"output_schema\":{\"properties\":{\"anchors\":{\"items\":{\"properties\":{\"reference\":{\"type\":\"string\"},\"verdict\":{\"type\":\"string\"}},\"type\":\"object\"},\"type\":\"array\"},\"blocking_findings\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"non_blocking_observations\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"statements\":{\"items\":{\"properties\":{\"evidence\":{\"type\":\"string\"},\"statement\":{\"type\":\"string\"},\"verdict\":{\"type\":\"string\"}},\"type\":\"object\"},\"type\":\"array\"},\"verdict\":{\"type\":\"string\"}},\"required\":[\"verdict\",\"statements\",\"anchors\",\"blocking_findings\"],\"type\":\"object\"}}]}",
+              "server": null
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE05/trials/9dc20264-fd93-4ad0-8153-e66f15c62f98/hermes/state.db",
+            "source_sha256": "1dc62a665493f63eef4860af1713edc8db3c500fdc0e41f0607e8c2a726cd896",
+            "native_timestamp": 1793378250.4985878
+          }
+        },
+        {
+          "originalJsonPointer": "/capture/events/172",
+          "canonicalValueSha256": "d9b3da06d2766dc804dd55a667e82baa2f2d3ccd1f91b749bcb90117b0bd205f",
+          "record": {
+            "kind": "tool_result",
+            "session_id": "4f155ad4-1add-4d10-9c89-9c6ba99b359e",
+            "sequence": 172,
+            "payload": {
+              "call_id": "call_de9bfbecdad24a57ba589571",
+              "name": "delegate_task",
+              "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_7e03260d\", \"goals\": [\"Independently fact-check a newly authored onboarding card and two history rows against the source code, statement by statement. Report each statement as supported / unsupported / unverifiable, with the exact code line(s) that support or contradict it. For each sidecar reference, verify the locator names a construct that exists exactly once in the cited file and that the anchor's `blob` equals `git hash-object` of the file; report if you cannot verify the sha256 `content` hash instead of guessing. Name every blocking finding (a false or unsupported statement, a wrong anchor, a missing important fact) and every non-blocking observation. Your final answer must contain: a table of statement -> verdict -> evidence (path:line), an anchor table, and a short 'blocking findings' list (or 'none'). Do not modify any file.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-3475dd93\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE05/trials/9dc20264-fd93-4ad0-8153-e66f15c62f98/hermes/cache/delegation/live/deleg_7e03260d/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE05/trials/9dc20264-fd93-4ad0-8153-e66f15c62f98/hermes/state.db",
+            "source_sha256": "1dc62a665493f63eef4860af1713edc8db3c500fdc0e41f0607e8c2a726cd896",
+            "native_timestamp": 1793378250.6379812
+          }
+        }
+      ],
+      "hostTurnEndedSelections": [
+        {
+          "rawRecordIndex": 116,
+          "originalWholeRecordCanonicalSha256": "6d83c319ecfcff28487344ba8dc6f81ebf89f3e8697713736ca13d767e6d7fbb",
+          "timelineTypeCounts": {
+            "user_message": 1,
+            "assistant_message": 2,
+            "tool_call": 50,
+            "reasoning": 41
+          },
+          "selectedTimelineIndices": [
+            78,
+            93
+          ],
+          "rawSelectedValues": [
+            {
+              "originalJsonPointer": "/capture/raw_records/116/observedAt",
+              "canonicalValueSha256": "e1fbadc1dfade411726e2669b4289567193844bb024c8d96de61cede0b302d24",
+              "record": "2026-10-30T16:39:21.951Z"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/116/native/type",
+              "canonicalValueSha256": "286b27e724f4c883d5b12222e55ff23c3ab03e42287151846275b4976e9ed89b",
+              "record": "agent.turn_ended"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/116/native/agent",
+              "canonicalValueSha256": "910ea5030a94a9e390c0526d3c73c0dcd887b0a8c3dbb432ee9a09e22d259e8e",
+              "record": {
+                "id": "fce2c1ca-3304-4a72-a09d-6c0ccfb372e6",
+                "workspaceId": "wks_69f4c26fa73bd726",
+                "parentAgentId": null,
+                "provider": "hermes",
+                "cwd": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE05/trials/9dc20264-fd93-4ad0-8153-e66f15c62f98/project",
+                "title": "Curator evaluation fixture"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/116/native/turnId",
+              "canonicalValueSha256": "3d8d30552482cedb1587912939a4b6b44c42417c60538c8594ab3dbcc7a71cc8",
+              "record": "d54ca880-52e6-4ba0-a04b-a0e86ad625e0"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/116/native/outcome",
+              "canonicalValueSha256": "7273b4e139d5a23749ea679f0d04a5e39052dbd7cb058cd067ea98641d835bfd",
+              "record": {
+                "kind": "completed"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/116/native/timeline/78",
+              "canonicalValueSha256": "6f0004857b3d1c83c6bc7a535019e6a2066633c31785bb4204d966f2e8e1b422",
+              "record": {
+                "type": "tool_call",
+                "callId": "tc-355f9f655ce8",
+                "name": "execute",
+                "detail": {
+                  "type": "shell",
+                  "command": "delegate_task: 1 tasks: Independently fact-check a newly auth...",
+                  "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_7e03260d\", \"goals\": [\"Independently fact-check a newly authored onboarding card and two history rows against the source code, statement by statement. Report each statement as supported / unsupported / unverifiable, with the exact code line(s) that support or contradict it. For each sidecar reference, verify the locator names a construct that exists exactly once in the cited file and that the anchor's `blob` equals `git hash-object` of the file; report if you cannot verify the sha256 `content` hash instead of guessing. Name every blocking finding (a false or unsupported statement, a wrong anchor, a missing important fact) and every non-blocking observation. Your final answer must contain: a table of statement -> verdict -> evidence (path:line), an anchor table, and a short 'blocking findings' list (or 'none'). Do not modify any file.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-3475dd93\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE05/trials/9dc20264-fd93-4ad0-8153-e66f15c62f98/hermes/cache/delegation/live/deleg_7e03260d/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+                },
+                "metadata": {
+                  "kind": "execute",
+                  "title": "delegate_task: 1 tasks: Independently fact-check a newly auth..."
+                },
+                "status": "completed",
+                "error": null
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/116/native/timeline/93",
+              "canonicalValueSha256": "5da378fa7937c6c0d731135d7b5a04104ea4c9e501530bd88cc300a70b207bca",
+              "record": {
+                "type": "assistant_message",
+                "text": "\n\nReport drafted at `reports/curator-report-CE05.md`; both queue items are written and read back. Waiting on the independent fact-check helper before I finalize its verdict and send the stage handover.",
+                "messageId": "a70b0f25-9eb9-44ca-81a1-b7a5afedacea"
+              }
+            }
+          ]
+        }
+      ],
+      "expectedHelperIds": [
+        "sa-0-3475dd93"
+      ],
+      "expectedDelegationId": "deleg_7e03260d"
+    },
+    {
+      "attemptId": "97d1b766-587f-4396-aa31-5fe12c90d6d7",
+      "case": "CE05",
+      "run": "20261030-arm-old-hermes",
+      "harness": "hermes",
+      "sessionId": "fd7af16b-ae84-4398-9b66-aec0688b7872",
+      "ownerHostAgentId": "36f9675c-f883-457d-b076-fb3dd68f6c36",
+      "sourceAttempt": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-arm-old-hermes/hermes/CE05/97d1b766-587f-4396-aa31-5fe12c90d6d7/attempt.json",
+        "sizeBytes": 3449801,
+        "sha256": "6362e204a584f7bfdceb3de9bb7774423cc2a86a72835278338798feb592ea38"
+      },
+      "selectedNativeEvents": [
+        {
+          "originalJsonPointer": "/capture/events/273",
+          "canonicalValueSha256": "015588b9324d4300ee6d6513b406431a9d64147e083fe42049ce23d274d22134",
+          "record": {
+            "kind": "tool_call",
+            "session_id": "fd7af16b-ae84-4398-9b66-aec0688b7872",
+            "sequence": 273,
+            "payload": {
+              "call_id": "call_5dae5398eff34585b0f93903",
+              "name": "delegate_task",
+              "arguments": "{\"tasks\":[{\"context\":\"Fixture root: /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE05/trials/97d1b766-587f-4396-aa31-5fe12c90d6d7/project\\n\\nCODE (read-only, final source under test):\\n- projects/code/dashboard/src/cockpit/launcherDefaultsMemory.ts\\n- projects/code/dashboard/src/cockpit/roleLaunchModel.ts (contains roleRequestKey, RoleDefaults, RoleDocumentScope, canonicalLauncherRole, isTasklessRole)\\n- projects/code/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts\\n\\nMEMORY (read-only for you):\\n- coordination/memory-repos/ar-code/onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.md  (newly authored card)\\n- coordination/memory-repos/ar-code/onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.json  (its sidecar, 5 references)\\n- coordination/memory-repos/ar-code/onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.md and .json  (pre-existing card + sidecar, unchanged)\\n- coordination/memory-repos/ar-code/knowledge/history/CE05-97d1b766-587f-4396-aa31-5fe12c90d6d7.json  (two judgment rows)\\n\\nThe curation pass just performed: authored the missing card for launcherDefaultsMemory.ts (it was absent from the starting memory tree), then recorded two history rows: row 1 subject onboarding:dashboard/src/cockpit/launcherDefaultsMemory.ts disposition updated; row 2 subject onboarding:dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts disposition no_impact (the claim: every clause the existing card states still holds against the current source and its single reference still resolves).\\n\\nYou may use shell reads (cat/sed/grep/git log/git show), but run no git write, no file creation inside projects/ or coordination/, and change nothing. Write nothing at all unless it is inside reports/scratch/.\",\"goal\":\"Fact-check a curation change statement by statement against the current source code and report any false or unsupported statement, mismatch, or important omission. You are the independent second reader: you wrote none of these files.\\n\\nFor each of these, compare every claim to the actual code and say TRUE / FALSE / UNSUPPORTED with the exact code line(s) that decide it:\\n1. Every sentence of the new card `onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.md` (purpose, all commentary paragraphs, and every `- ... [n]` evidence line).\\n2. Every `note` in `onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.json`, plus whether each anchor's `locator.kind: symbol` name exists exactly once in the named file, and whether each `blob` equals `git hash-object` of that file in projects/code.\\n3. Every sentence of the pre-existing card `onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.md` against `projects/code/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts` — is the card's account still accurate, and is its evidence line's note still truthful?\\n4. The two rows in `knowledge/history/CE05-97d1b766-587f-4396-aa31-5fe12c90d6d7.json`: does each `disposition` and `reason` match the code and the card state? In particular judge the `no_impact` row for useRoleLaunchProgress.ts: is it truthful, or does the card omit/contradict something material? And does the `updated` row's reason describe what was actually done (card absent before, five references now)?\\n5. Check that each row's `sources[].blob` equals `git hash-object` of that path in projects/code.\\n6. Name anything important about these three source files that neither card says and that a future maintainer would need (say plainly 'nothing material' if that is your judgment).\\n\\nFinish with: a verdict line 'FACT-CHECK: PASS' or 'FACT-CHECK: FINDINGS', then a numbered list of findings, each with file:line evidence and whether it is BLOCKING or MINOR. Exactness matters more than agreement; do not soften a false statement.\"}]}",
+              "server": null
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE05/trials/97d1b766-587f-4396-aa31-5fe12c90d6d7/hermes/state.db",
+            "source_sha256": "e67cc57ca8acace99d3834576724375f8ee97a45982de64afcbd2c268b6705d6",
+            "native_timestamp": 1793379594.3250625
+          }
+        },
+        {
+          "originalJsonPointer": "/capture/events/275",
+          "canonicalValueSha256": "42fe1ee195ae5aa03f35d37b511ed1f14c222aabfa0072a6352829c6e70015bd",
+          "record": {
+            "kind": "tool_result",
+            "session_id": "fd7af16b-ae84-4398-9b66-aec0688b7872",
+            "sequence": 275,
+            "payload": {
+              "call_id": "call_5dae5398eff34585b0f93903",
+              "name": "delegate_task",
+              "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_c156f0f6\", \"goals\": [\"Fact-check a curation change statement by statement against the current source code and report any false or unsupported statement, mismatch, or important omission. You are the independent second reader: you wrote none of these files.\\n\\nFor each of these, compare every claim to the actual code and say TRUE / FALSE / UNSUPPORTED with the exact code line(s) that decide it:\\n1. Every sentence of the new card `onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.md` (purpose, all commentary paragraphs, and every `- ... [n]` evidence line).\\n2. Every `note` in `onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.json`, plus whether each anchor's `locator.kind: symbol` name exists exactly once in the named file, and whether each `blob` equals `git hash-object` of that file in projects/code.\\n3. Every sentence of the pre-existing card `onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.md` against `projects/code/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts` — is the card's account still accurate, and is its evidence line's note still truthful?\\n4. The two rows in `knowledge/history/CE05-97d1b766-587f-4396-aa31-5fe12c90d6d7.json`: does each `disposition` and `reason` match the code and the card state? In particular judge the `no_impact` row for useRoleLaunchProgress.ts: is it truthful, or does the card omit/contradict something material? And does the `updated` row's reason describe what was actually done (card absent before, five references now)?\\n5. Check that each row's `sources[].blob` equals `git hash-object` of that path in projects/code.\\n6. Name anything important about these three source files that neither card says and that a future maintainer would need (say plainly 'nothing material' if that is your judgment).\\n\\nFinish with: a verdict line 'FACT-CHECK: PASS' or 'FACT-CHECK: FINDINGS', then a numbered list of findings, each with file:line evidence and whether it is BLOCKING or MINOR. Exactness matters more than agreement; do not soften a false statement.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-d6e55004\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE05/trials/97d1b766-587f-4396-aa31-5fe12c90d6d7/hermes/cache/delegation/live/deleg_c156f0f6/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE05/trials/97d1b766-587f-4396-aa31-5fe12c90d6d7/hermes/state.db",
+            "source_sha256": "e67cc57ca8acace99d3834576724375f8ee97a45982de64afcbd2c268b6705d6",
+            "native_timestamp": 1793379594.4270546
+          }
+        }
+      ],
+      "hostTurnEndedSelections": [
+        {
+          "rawRecordIndex": 146,
+          "originalWholeRecordCanonicalSha256": "d741a5010b6a077de4cb9f13073fd1eb37dc9126ccb7d99ef0235ab9d501a8d5",
+          "timelineTypeCounts": {
+            "user_message": 1,
+            "assistant_message": 4,
+            "tool_call": 75,
+            "reasoning": 41
+          },
+          "selectedTimelineIndices": [
+            115,
+            120
+          ],
+          "rawSelectedValues": [
+            {
+              "originalJsonPointer": "/capture/raw_records/146/observedAt",
+              "canonicalValueSha256": "4d28b0d8e6475a8fa7ed1730115cb378f9d3176982e9e6be467200e04bfa7e9f",
+              "record": "2026-10-30T17:01:18.425Z"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/146/native/type",
+              "canonicalValueSha256": "286b27e724f4c883d5b12222e55ff23c3ab03e42287151846275b4976e9ed89b",
+              "record": "agent.turn_ended"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/146/native/agent",
+              "canonicalValueSha256": "ac49efba83582835443b98c64f9dcda0f82a6ffedc931695cb2240a6ba0ad6b4",
+              "record": {
+                "id": "36f9675c-f883-457d-b076-fb3dd68f6c36",
+                "workspaceId": "wks_574f1b8b2207f0f3",
+                "parentAgentId": null,
+                "provider": "hermes",
+                "cwd": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE05/trials/97d1b766-587f-4396-aa31-5fe12c90d6d7/project",
+                "title": "Curator evaluation fixture"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/146/native/turnId",
+              "canonicalValueSha256": "e4325e6fbeb74db6339fb28973c0ce9fe51f8bb8c07bf7a914244ebe486ed730",
+              "record": "26a9f7de-ab5b-4d95-adad-6585aa6c2a27"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/146/native/outcome",
+              "canonicalValueSha256": "7273b4e139d5a23749ea679f0d04a5e39052dbd7cb058cd067ea98641d835bfd",
+              "record": {
+                "kind": "completed"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/146/native/timeline/115",
+              "canonicalValueSha256": "847cefea50d4ada13797920a05f0ef34807f9bf14006539c00117a27760fee22",
+              "record": {
+                "type": "tool_call",
+                "callId": "tc-ebf2e45fb1e4",
+                "name": "execute",
+                "detail": {
+                  "type": "shell",
+                  "command": "delegate_task: 1 tasks: Fact-check a curation change statemen...",
+                  "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_c156f0f6\", \"goals\": [\"Fact-check a curation change statement by statement against the current source code and report any false or unsupported statement, mismatch, or important omission. You are the independent second reader: you wrote none of these files.\\n\\nFor each of these, compare every claim to the actual code and say TRUE / FALSE / UNSUPPORTED with the exact code line(s) that decide it:\\n1. Every sentence of the new card `onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.md` (purpose, all commentary paragraphs, and every `- ... [n]` evidence line).\\n2. Every `note` in `onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.json`, plus whether each anchor's `locator.kind: symbol` name exists exactly once in the named file, and whether each `blob` equals `git hash-object` of that file in projects/code.\\n3. Every sentence of the pre-existing card `onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.md` against `projects/code/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts` — is the card's account still accurate, and is its evidence line's note still truthful?\\n4. The two rows in `knowledge/history/CE05-97d1b766-587f-4396-aa31-5fe12c90d6d7.json`: does each `disposition` and `reason` match the code and the card state? In particular judge the `no_impact` row for useRoleLaunchProgress.ts: is it truthful, or does the card omit/contradict something material? And does the `updated` row's reason describe what was actually done (card absent before, five references now)?\\n5. Check that each row's `sources[].blob` equals `git hash-object` of that path in projects/code.\\n6. Name anything important about these three source files that neither card says and that a future maintainer would need (say plainly 'nothing material' if that is your judgment).\\n\\nFinish with: a verdict line 'FACT-CHECK: PASS' or 'FACT-CHECK: FINDINGS', then a numbered list of findings, each with file:line evidence and whether it is BLOCKING or MINOR. Exactness matters more than agreement; do not soften a false statement.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-d6e55004\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE05/trials/97d1b766-587f-4396-aa31-5fe12c90d6d7/hermes/cache/delegation/live/deleg_c156f0f6/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+                },
+                "metadata": {
+                  "kind": "execute",
+                  "title": "delegate_task: 1 tasks: Fact-check a curation change statemen..."
+                },
+                "status": "completed",
+                "error": null
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/146/native/timeline/120",
+              "canonicalValueSha256": "db21cd05767f92c497b117eb85e902e0a3dfb2ce85bf4c914eefee9bf8aeea59",
+              "record": {
+                "type": "assistant_message",
+                "text": "\n\nReport drafted at `reports/ce05-curator-stage-report.md` (fact-check section pending). The second reader is running; I'll fold its verdict in, re-run the full check on the final tree, and deliver the handover.",
+                "messageId": "32fca881-f46a-41c7-a670-263caf8db627"
+              }
+            }
+          ]
+        }
+      ],
+      "expectedHelperIds": [
+        "sa-0-d6e55004"
+      ],
+      "expectedDelegationId": "deleg_c156f0f6"
+    },
+    {
+      "attemptId": "3c7ad304-9541-4ebf-b07c-b2b2eb264d15",
+      "case": "CE06",
+      "run": "20261030-arm-old-hermes",
+      "harness": "hermes",
+      "sessionId": "364e8810-e76b-4ff3-96c2-28c85098a02b",
+      "ownerHostAgentId": "570913e7-d790-4c3e-a222-220997c33ada",
+      "sourceAttempt": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-arm-old-hermes/hermes/CE06/3c7ad304-9541-4ebf-b07c-b2b2eb264d15/attempt.json",
+        "sizeBytes": 3230030,
+        "sha256": "9f363dce3f01b9a2e6683623411d223f54b7a4fbe4584a058c1e59f3525ed7be"
+      },
+      "selectedNativeEvents": [
+        {
+          "originalJsonPointer": "/capture/events/270",
+          "canonicalValueSha256": "d97a46e2537c1eae7a2e310f5f3f2d95b9b3c666bed34cc45bec21ce92abf8de",
+          "record": {
+            "kind": "tool_call",
+            "session_id": "364e8810-e76b-4ff3-96c2-28c85098a02b",
+            "sequence": 270,
+            "payload": {
+              "call_id": "call_960f8f744dc44386a28ffa28",
+              "name": "delegate_task",
+              "arguments": "{\"tasks\":[{\"context\":\"This is a disposable evaluation fixture. The project root is /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE06/trials/3c7ad304-9541-4ebf-b07c-b2b2eb264d15/project. Code worktree: projects/code (a git repo with one commit; only three source files exist: dashboard/src/cockpit/launcherDefaultsMemory.ts, dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts, dashboard/src/cockpit/roleLaunchModel.ts). Memory worktree: projects/memory (a symlink to coordination/memory-repos/ar-code).\\n\\nFiles to fact-check (read them with your file tools):\\n- projects/memory/onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.md (a NEW card) and its sidecar projects/memory/onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.json (3 numbered references with symbol anchors).\\n- projects/memory/onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.md and its sidecar .json (existing card; one line changed: the Governing Overview link went from ../overview.md to ../../overview.md).\\n- projects/memory/knowledge/history/CE06-3c7ad304-9541-4ebf-b07c-b2b2eb264d15.json (two new history rows authored for those two cards).\\n\\nYour job:\\n1. Every statement in launcherDefaultsMemory.ts.md: state by state, is it true of projects/code/dashboard/src/cockpit/launcherDefaultsMemory.ts? Check the named functions, what key is used, whether anything is persisted, whether entries survive a page close/reload, whether the card over-claims (e.g. claims about the launcher's display behaviour that the module itself does not implement), and whether the card omits something a future maintainer would need.\\n2. Its 3 reference notes: does each note describe exactly what the cited symbol anchor does? Do the anchors (symbol names) exist exactly once in that file?\\n3. useRoleLaunchProgress.ts.md: does every statement still match projects/code/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts (500 ms poll, phase mapping to 'Starting agent…' / 'Preparing workspace…', fallback label, abort on cleanup)? Does the new link ../../overview.md resolve to a file that exists from that card's directory?\\n4. The two history rows: does each row's disposition (both 'updated') and reason match what actually changed? Row 1 says the new card is the module's first card and its three symbol citations resolve. Row 2 says the card's statements and citation still match the hook, that its Governing Overview link pointed at a cockpit overview this memory tree does not hold, and that the link now names the governing dashboard/src/overview.md.\\n\\nReport: a list of concrete findings, each with file, line or quoted text, and why it is wrong or unsupported. If a statement is correct, do not enumerate it - only report the ones that fail or are ambiguous, plus a final line stating how many statements you checked in total. Do not propose stylistic rewrites; only factual accuracy.\",\"goal\":\"Perform a read-only independent fact-check of three onboarding memory artifacts against source code. Write nothing anywhere; report findings only as text.\",\"output_schema\":{\"properties\":{\"findings\":{\"items\":{\"properties\":{\"artifact\":{\"type\":\"string\"},\"detail\":{\"type\":\"string\"},\"quote\":{\"type\":\"string\"},\"severity\":{\"type\":\"string\"}},\"required\":[\"artifact\",\"quote\",\"detail\"],\"type\":\"object\"},\"type\":\"array\"},\"statements_checked\":{\"type\":\"integer\"},\"verdict\":{\"type\":\"string\"}},\"required\":[\"findings\",\"verdict\",\"statements_checked\"],\"type\":\"object\"}}]}",
+              "server": null
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE06/trials/3c7ad304-9541-4ebf-b07c-b2b2eb264d15/hermes/state.db",
+            "source_sha256": "fae583bb1ca8d598ec0211fe4eb92330bada0b9aaf6980cdb21b2cb17a6f4539",
+            "native_timestamp": 1793378385.2537954
+          }
+        },
+        {
+          "originalJsonPointer": "/capture/events/272",
+          "canonicalValueSha256": "8ffbd86e1b1ea55cc6c8fc7349e16cbde2b92e85a0f54a482c9b162fd8985781",
+          "record": {
+            "kind": "tool_result",
+            "session_id": "364e8810-e76b-4ff3-96c2-28c85098a02b",
+            "sequence": 272,
+            "payload": {
+              "call_id": "call_960f8f744dc44386a28ffa28",
+              "name": "delegate_task",
+              "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_d70adeca\", \"goals\": [\"Perform a read-only independent fact-check of three onboarding memory artifacts against source code. Write nothing anywhere; report findings only as text.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-266efc03\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE06/trials/3c7ad304-9541-4ebf-b07c-b2b2eb264d15/hermes/cache/delegation/live/deleg_d70adeca/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE06/trials/3c7ad304-9541-4ebf-b07c-b2b2eb264d15/hermes/state.db",
+            "source_sha256": "fae583bb1ca8d598ec0211fe4eb92330bada0b9aaf6980cdb21b2cb17a6f4539",
+            "native_timestamp": 1793378385.321035
+          }
+        }
+      ],
+      "hostTurnEndedSelections": [
+        {
+          "rawRecordIndex": 149,
+          "originalWholeRecordCanonicalSha256": "81337668fb0e0106e5126341e049f5d4500ebc42d75256ea22e48354967399f6",
+          "timelineTypeCounts": {
+            "user_message": 1,
+            "assistant_message": 2,
+            "tool_call": 73,
+            "reasoning": 47
+          },
+          "selectedTimelineIndices": [
+            118,
+            122
+          ],
+          "rawSelectedValues": [
+            {
+              "originalJsonPointer": "/capture/raw_records/149/observedAt",
+              "canonicalValueSha256": "68d235bf005d897d7a4aada9959ab5828d995f965e13e79f6b46605214956bce",
+              "record": "2026-10-30T16:40:58.480Z"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/149/native/type",
+              "canonicalValueSha256": "286b27e724f4c883d5b12222e55ff23c3ab03e42287151846275b4976e9ed89b",
+              "record": "agent.turn_ended"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/149/native/agent",
+              "canonicalValueSha256": "29179790a9fe02275dd048680bddff03e4c2735674d56416d0a75a8ea3b549c5",
+              "record": {
+                "id": "570913e7-d790-4c3e-a222-220997c33ada",
+                "workspaceId": "wks_1a128d19a5b48124",
+                "parentAgentId": null,
+                "provider": "hermes",
+                "cwd": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE06/trials/3c7ad304-9541-4ebf-b07c-b2b2eb264d15/project",
+                "title": "Curator evaluation fixture"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/149/native/turnId",
+              "canonicalValueSha256": "35b3123d26b60e5d1faa3d8800e74b78f2ef6cd7f5145df6fefb7e8d9d9715a3",
+              "record": "50ac957a-074d-4138-a7de-2adceebac441"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/149/native/outcome",
+              "canonicalValueSha256": "7273b4e139d5a23749ea679f0d04a5e39052dbd7cb058cd067ea98641d835bfd",
+              "record": {
+                "kind": "completed"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/149/native/timeline/118",
+              "canonicalValueSha256": "ed148df2fff7eacf57623ee80422d494c1702dfa8c6bbcfb678bdcc5287274c7",
+              "record": {
+                "type": "tool_call",
+                "callId": "tc-a3620eed4c12",
+                "name": "execute",
+                "detail": {
+                  "type": "shell",
+                  "command": "delegate_task: 1 tasks: Perform a read-only independent fact-...",
+                  "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_d70adeca\", \"goals\": [\"Perform a read-only independent fact-check of three onboarding memory artifacts against source code. Write nothing anywhere; report findings only as text.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-266efc03\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-old-hermes/hermes-CE06/trials/3c7ad304-9541-4ebf-b07c-b2b2eb264d15/hermes/cache/delegation/live/deleg_d70adeca/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+                },
+                "metadata": {
+                  "kind": "execute",
+                  "title": "delegate_task: 1 tasks: Perform a read-only independent fact-..."
+                },
+                "status": "completed",
+                "error": null
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/149/native/timeline/122",
+              "canonicalValueSha256": "d36da0c96b9f19572a8fd0442d80c305e2f5ef93aa83e9ded61b9d0f2c903d42",
+              "record": {
+                "type": "assistant_message",
+                "text": "\n\nQueue work is written (Q1 card+sidecar, Q2 trace row, Q3 escalated as pending); the independent second-reader pass is still running, and I'll fold its findings into the report and hand over once it returns.",
+                "messageId": "41ef3d91-6b5d-45da-aff3-6b181bf696fa"
+              }
+            }
+          ]
+        }
+      ],
+      "expectedHelperIds": [
+        "sa-0-266efc03"
+      ],
+      "expectedDelegationId": "deleg_d70adeca"
+    },
+    {
+      "attemptId": "c0c477de-1fea-44f3-8f4f-5066c11f7624",
+      "case": "CE05",
+      "run": "20261030-arm-new-hermes",
+      "harness": "hermes",
+      "sessionId": "beae529a-5b1b-43d8-92a7-efa76a2e4043",
+      "ownerHostAgentId": "f7816036-c280-440b-ad5e-eba05b2c7321",
+      "sourceAttempt": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-arm-new-hermes/hermes/CE05/c0c477de-1fea-44f3-8f4f-5066c11f7624/attempt.json",
+        "sizeBytes": 3366710,
+        "sha256": "05e09c3545a58627fc2f8da9f7afdee2e1571b6ea9227ef48719923de4775563"
+      },
+      "selectedNativeEvents": [
+        {
+          "originalJsonPointer": "/capture/events/286",
+          "canonicalValueSha256": "bdc091e903605fcf5f820ae0da874b3d5b37cb10f0962f57d4c4d905280fb519",
+          "record": {
+            "kind": "tool_call",
+            "session_id": "beae529a-5b1b-43d8-92a7-efa76a2e4043",
+            "sequence": 286,
+            "payload": {
+              "call_id": "chatcmpl-tool-869a897a3055acf9",
+              "name": "delegate_task",
+              "arguments": "{\"tasks\": [{\"context\": \"Fixture root: /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/c0c477de-1fea-44f3-8f4f-5066c11f7624/project\\n\\nCode (read-only): projects/code/dashboard/src/cockpit/launcherDefaultsMemory.ts, projects/code/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts, and projects/code/dashboard/src/cockpit/roleLaunchModel.ts (for roleRequestKey / canonicalLauncherRole / isTasklessRole / roleDocumentScope definitions).\\nMemory cards: projects/memory/onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.md (new) and projects/memory/onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.md (edited prose under '## Code Commentary').\\nSidecar for the new card: projects/memory/onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.json (anchors only; check that each anchor names the right symbol or line range).\\nHistory rows to check: projects/memory/knowledge/history/CE05-c0c477de-1fea-44f3-8f4f-5066c11f7624.json (two 'updated' rows; judge whether each reason describes the actual change and whether each subject path is right).\\n\\nRules: read-only; do not modify any file. You may run read-only git commands in projects/code (e.g. git hash-object) to confirm blob ids. Judge only what the files say; do not assume behavior from comments. Report every statement you find false, overstated or missing, with the file, the sentence, and the code lines that contradict it. If a statement is true, do not list it. If nothing is wrong, say so explicitly and list the statements you verified.\", \"goal\": \"Fact-check two onboarding cards against their source code, statement by statement, and report only discrepancies. Read the code files and the card files named in the context; do not write anything. For each sentence of each card, decide whether the current source supports it (actor, condition, quantifier, forbidden behavior, fallback behavior). Also check that each Evidence reference note in the card matches what its anchor (symbol or line range) actually shows. Output: a list of (card file, sentence or reference number, verdict supported/unsupported/overstated, the source lines that decide it). Be strict and concrete; quote line numbers.\"}]}",
+              "server": null
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/c0c477de-1fea-44f3-8f4f-5066c11f7624/hermes/state.db",
+            "source_sha256": "df121ad6a0833ca7bc99262ecc655bdabac5622a2b850e82a16154955f520c68",
+            "native_timestamp": 1793378177.1850007
+          }
+        },
+        {
+          "originalJsonPointer": "/capture/events/288",
+          "canonicalValueSha256": "981e89d81661a73e70180bc15b7456c2a75f29ba34ec6f9adb8fd6b432dafe55",
+          "record": {
+            "kind": "tool_result",
+            "session_id": "beae529a-5b1b-43d8-92a7-efa76a2e4043",
+            "sequence": 288,
+            "payload": {
+              "call_id": "chatcmpl-tool-869a897a3055acf9",
+              "name": "delegate_task",
+              "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_5f54e8fd\", \"goals\": [\"Fact-check two onboarding cards against their source code, statement by statement, and report only discrepancies. Read the code files and the card files named in the context; do not write anything. For each sentence of each card, decide whether the current source supports it (actor, condition, quantifier, forbidden behavior, fallback behavior). Also check that each Evidence reference note in the card matches what its anchor (symbol or line range) actually shows. Output: a list of (card file, sentence or reference number, verdict supported/unsupported/overstated, the source lines that decide it). Be strict and concrete; quote line numbers.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-f7ba3199\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/c0c477de-1fea-44f3-8f4f-5066c11f7624/hermes/cache/delegation/live/deleg_5f54e8fd/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/c0c477de-1fea-44f3-8f4f-5066c11f7624/hermes/state.db",
+            "source_sha256": "df121ad6a0833ca7bc99262ecc655bdabac5622a2b850e82a16154955f520c68",
+            "native_timestamp": 1793378177.3018808
+          }
+        }
+      ],
+      "hostTurnEndedSelections": [
+        {
+          "rawRecordIndex": 175,
+          "originalWholeRecordCanonicalSha256": "378ad2d7632be79a03fa3ee4e0d36e726a908c4f737063a04cc6db34a52b381f",
+          "timelineTypeCounts": {
+            "user_message": 1,
+            "assistant_message": 3,
+            "tool_call": 80,
+            "reasoning": 50
+          },
+          "selectedTimelineIndices": [
+            118,
+            133
+          ],
+          "rawSelectedValues": [
+            {
+              "originalJsonPointer": "/capture/raw_records/175/observedAt",
+              "canonicalValueSha256": "e2e36ac6d12d9ae8e45d251034cb1a7d30a04303fcbe4efaa274a16678312cc3",
+              "record": "2026-10-30T16:38:08.925Z"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/175/native/type",
+              "canonicalValueSha256": "286b27e724f4c883d5b12222e55ff23c3ab03e42287151846275b4976e9ed89b",
+              "record": "agent.turn_ended"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/175/native/agent",
+              "canonicalValueSha256": "accd267cf5b895272039af946a95b5c7f52412dcb0214e6cd3137aab7bb9923a",
+              "record": {
+                "id": "f7816036-c280-440b-ad5e-eba05b2c7321",
+                "workspaceId": "wks_07b0a0b3ccdffe3a",
+                "parentAgentId": null,
+                "provider": "hermes",
+                "cwd": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/c0c477de-1fea-44f3-8f4f-5066c11f7624/project",
+                "title": "Curator evaluation fixture"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/175/native/turnId",
+              "canonicalValueSha256": "de95d4747580a47136416ec062c9234e9aaebd026950b379d97cb730f12fc1e8",
+              "record": "b4989bba-6379-4a9a-9182-6aa70d73508a"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/175/native/outcome",
+              "canonicalValueSha256": "7273b4e139d5a23749ea679f0d04a5e39052dbd7cb058cd067ea98641d835bfd",
+              "record": {
+                "kind": "completed"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/175/native/timeline/118",
+              "canonicalValueSha256": "683e2ba9fb355452bc2319998f0a82edf0ce84f8083b48586f9df57273e70243",
+              "record": {
+                "type": "tool_call",
+                "callId": "tc-ba5f6e235413",
+                "name": "execute",
+                "detail": {
+                  "type": "shell",
+                  "command": "delegate_task: 1 tasks: Fact-check two onboarding cards again...",
+                  "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_5f54e8fd\", \"goals\": [\"Fact-check two onboarding cards against their source code, statement by statement, and report only discrepancies. Read the code files and the card files named in the context; do not write anything. For each sentence of each card, decide whether the current source supports it (actor, condition, quantifier, forbidden behavior, fallback behavior). Also check that each Evidence reference note in the card matches what its anchor (symbol or line range) actually shows. Output: a list of (card file, sentence or reference number, verdict supported/unsupported/overstated, the source lines that decide it). Be strict and concrete; quote line numbers.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-f7ba3199\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/c0c477de-1fea-44f3-8f4f-5066c11f7624/hermes/cache/delegation/live/deleg_5f54e8fd/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+                },
+                "metadata": {
+                  "kind": "execute",
+                  "title": "delegate_task: 1 tasks: Fact-check two onboarding cards again..."
+                },
+                "status": "completed",
+                "error": null
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/175/native/timeline/133",
+              "canonicalValueSha256": "65f37d698867de4959649d0533fbfa34ba42cc8e0f66e8ef5809a3e8f1e3d6bc",
+              "record": {
+                "type": "assistant_message",
+                "text": "\n\nQueue work is written and verified; I'm waiting on the delegated independent fact-check before sending the handover. Status: Q1 card+sidecar authored, Q2 card corrected, 2 history rows written, index refreshed, `git diff --check` clean; full MQC still fails on 348 pre-existing `stale:path-absent` findings in the route overview's sidecar, reported as blocked rather than repaired.",
+                "messageId": "c5717dc1-5ccc-4508-aeb8-8cb49020c655"
+              }
+            }
+          ]
+        }
+      ],
+      "expectedHelperIds": [
+        "sa-0-f7ba3199"
+      ],
+      "expectedDelegationId": "deleg_5f54e8fd"
+    },
+    {
+      "attemptId": "faf542e6-8c25-4672-b1cd-f388b8672f52",
+      "case": "CE05",
+      "run": "20261030-arm-new-hermes",
+      "harness": "hermes",
+      "sessionId": "2ad39915-b366-4867-9b9b-e3953c62ad6f",
+      "ownerHostAgentId": "19bee0a8-215c-4dc7-870a-6adf63fbe6d9",
+      "sourceAttempt": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-arm-new-hermes/hermes/CE05/faf542e6-8c25-4672-b1cd-f388b8672f52/attempt.json",
+        "sizeBytes": 2944198,
+        "sha256": "47649b34778ca21fb9cbc33885034bf624f1185b77c2ea62ddcd928a1ac48542"
+      },
+      "selectedNativeEvents": [
+        {
+          "originalJsonPointer": "/capture/events/284",
+          "canonicalValueSha256": "374ebca9269ac6a0fe3093679978113c5889d23ac9d460dbf8ab3e889a57e206",
+          "record": {
+            "kind": "tool_call",
+            "session_id": "2ad39915-b366-4867-9b9b-e3953c62ad6f",
+            "sequence": 284,
+            "payload": {
+              "call_id": "call_6051e0ba759042c3ab6767cc",
+              "name": "delegate_task",
+              "arguments": "{\"tasks\":[{\"context\":\"Disposable documentation fixture. Read-only fact-check; change nothing.\\n\\nFiles:\\n1. Card (memory repo): /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/faf542e6-8c25-4672-b1cd-f388b8672f52/project/coordination/memory-repos/ar-code/onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.md\\n2. Source it documents: /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/faf542e6-8c25-4672-b1cd-f388b8672f52/project/projects/code/dashboard/src/cockpit/launcherDefaultsMemory.ts\\n3. Its sidecar (references/anchors): /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/faf542e6-8c25-4672-b1cd-f388b8672f52/project/coordination/memory-repos/ar-code/onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.json\\n4. Second card examined unchanged: /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/faf542e6-8c25-4672-b1cd-f388b8672f52/project/coordination/memory-repos/ar-code/onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.md\\n5. Its source: /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/faf542e6-8c25-4672-b1cd-f388b8672f52/project/projects/code/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts\\n6. Its sidecar: /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/faf542e6-8c25-4672-b1cd-f388b8672f52/project/coordination/memory-repos/ar-code/onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.json\\n\\nCheck: (a) every factual sentence in card 1 against source 2 (actor, behaviour, quantifiers, conditions, exclusions, what is NOT claimed); (b) whether each sidecar 3 reference anchor names a locator that resolves in source 2 and whether its note matches the code; (c) every sentence of card 4 against source 5, and whether leaving card 4 unchanged is defensible or whether it now says something false or omits something materially important; (d) any statement in a card that the code does not support. Report each finding with the quoted card sentence, the quoted code line(s) with line numbers, and whether it is blocking or minor. Do not rewrite the files.\",\"goal\":\"Fact-check two onboarding cards against their source files, statement by statement, and report every unsupported or misleading claim. Do not edit any file.\"}]}",
+              "server": null
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/faf542e6-8c25-4672-b1cd-f388b8672f52/hermes/state.db",
+            "source_sha256": "14ae030e92c603aaf63b23dc06ed417a160de98078edfb0f4580eeaafac35aba",
+            "native_timestamp": 1793378991.5437841
+          }
+        },
+        {
+          "originalJsonPointer": "/capture/events/286",
+          "canonicalValueSha256": "a0e9c3f653286d8b3b0315ea49a3982092172671b0e7e27605c861aa913f16a0",
+          "record": {
+            "kind": "tool_result",
+            "session_id": "2ad39915-b366-4867-9b9b-e3953c62ad6f",
+            "sequence": 286,
+            "payload": {
+              "call_id": "call_6051e0ba759042c3ab6767cc",
+              "name": "delegate_task",
+              "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_248c3e49\", \"goals\": [\"Fact-check two onboarding cards against their source files, statement by statement, and report every unsupported or misleading claim. Do not edit any file.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-d46c0891\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/faf542e6-8c25-4672-b1cd-f388b8672f52/hermes/cache/delegation/live/deleg_248c3e49/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/faf542e6-8c25-4672-b1cd-f388b8672f52/hermes/state.db",
+            "source_sha256": "14ae030e92c603aaf63b23dc06ed417a160de98078edfb0f4580eeaafac35aba",
+            "native_timestamp": 1793378991.6239357
+          }
+        }
+      ],
+      "hostTurnEndedSelections": [
+        {
+          "rawRecordIndex": 152,
+          "originalWholeRecordCanonicalSha256": "56bf897cfb36b6177dece96878f666a10210f104453d0d70b5a134850ad22b6c",
+          "timelineTypeCounts": {
+            "user_message": 1,
+            "assistant_message": 2,
+            "tool_call": 78,
+            "reasoning": 43
+          },
+          "selectedTimelineIndices": [
+            117,
+            123
+          ],
+          "rawSelectedValues": [
+            {
+              "originalJsonPointer": "/capture/raw_records/152/observedAt",
+              "canonicalValueSha256": "19cdd857c92fafe556b56f87515cf626c4d7e2f8acf8ee7d67ab7139a66ebec2",
+              "record": "2026-10-30T16:51:11.319Z"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/152/native/type",
+              "canonicalValueSha256": "286b27e724f4c883d5b12222e55ff23c3ab03e42287151846275b4976e9ed89b",
+              "record": "agent.turn_ended"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/152/native/agent",
+              "canonicalValueSha256": "9e7f0123872a2c64455dfbd785809ada95210b8b620f315dcd4b2a9141cabc2a",
+              "record": {
+                "id": "19bee0a8-215c-4dc7-870a-6adf63fbe6d9",
+                "workspaceId": "wks_519dc9928905d8e6",
+                "parentAgentId": null,
+                "provider": "hermes",
+                "cwd": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/faf542e6-8c25-4672-b1cd-f388b8672f52/project",
+                "title": "Curator evaluation fixture"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/152/native/turnId",
+              "canonicalValueSha256": "f911baca8df761bb8c5448978f7ca36f4fdedeb1ebcaf782f016a37a37141681",
+              "record": "cedc465f-3c6f-42e7-b5cd-1313cf52b0d3"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/152/native/outcome",
+              "canonicalValueSha256": "7273b4e139d5a23749ea679f0d04a5e39052dbd7cb058cd067ea98641d835bfd",
+              "record": {
+                "kind": "completed"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/152/native/timeline/117",
+              "canonicalValueSha256": "50bd12efff7c8ecfa65f64a4bc61435df90b8f9a2732500275a074f20055d2b8",
+              "record": {
+                "type": "tool_call",
+                "callId": "tc-2e30d9cb7a58",
+                "name": "execute",
+                "detail": {
+                  "type": "shell",
+                  "command": "delegate_task: 1 tasks: Fact-check two onboarding cards again...",
+                  "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_248c3e49\", \"goals\": [\"Fact-check two onboarding cards against their source files, statement by statement, and report every unsupported or misleading claim. Do not edit any file.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-d46c0891\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/faf542e6-8c25-4672-b1cd-f388b8672f52/hermes/cache/delegation/live/deleg_248c3e49/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+                },
+                "metadata": {
+                  "kind": "execute",
+                  "title": "delegate_task: 1 tasks: Fact-check two onboarding cards again..."
+                },
+                "status": "completed",
+                "error": null
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/152/native/timeline/123",
+              "canonicalValueSha256": "7e32edb80a1cfd5d507c1ee3ebd4a183b22d39bc46ae22e83c9395702aebebd7",
+              "record": {
+                "type": "assistant_message",
+                "text": "\n\nReport drafted at `reports/curator-report-CE05.md`; Q1 card+sidecar and both trace rows are written and checked (MQC 348 pre-existing overview anchors, 0 new). Waiting on the independent fact-check child before I close §8 and send the handover.",
+                "messageId": "84701e40-d6e3-4ce5-bb9a-fa24eb13c1d0"
+              }
+            }
+          ]
+        }
+      ],
+      "expectedHelperIds": [
+        "sa-0-d46c0891"
+      ],
+      "expectedDelegationId": "deleg_248c3e49"
+    },
+    {
+      "attemptId": "b909eef2-1e86-4f67-86f6-83fee6cb7957",
+      "case": "CE05",
+      "run": "20261030-arm-new-hermes",
+      "harness": "hermes",
+      "sessionId": "48fda4e5-1fcd-4e68-89a9-9ad27ce7403e",
+      "ownerHostAgentId": "81dfb471-d51d-4573-855c-a06465f003be",
+      "sourceAttempt": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-arm-new-hermes/hermes/CE05/b909eef2-1e86-4f67-86f6-83fee6cb7957/attempt.json",
+        "sizeBytes": 3052455,
+        "sha256": "b6d874bbd8e2f6f1f9f487635e595b2b751fdeaa3c0f434e8fda5d2c9d6bb9b4"
+      },
+      "selectedNativeEvents": [
+        {
+          "originalJsonPointer": "/capture/events/274",
+          "canonicalValueSha256": "8c13ad8485b1467fcf90ec921e03ac5033eeadfc45a210ebde229568b0787503",
+          "record": {
+            "kind": "tool_call",
+            "session_id": "48fda4e5-1fcd-4e68-89a9-9ad27ce7403e",
+            "sequence": 274,
+            "payload": {
+              "call_id": "call_00_324uv7qdjnpe3d0vrlbbx8fo",
+              "name": "delegate_task",
+              "arguments": "{\"tasks\": [{\"context\": \"Fixture root: /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/b909eef2-1e86-4f67-86f6-83fee6cb7957/project\\nCode (read-only): projects/code\\ndashboard/src/cockpit/launcherDefaultsMemory.ts\\ndashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts\\ndashboard/src/cockpit/roleLaunchModel.ts\\nMemory tree (read-only): coordination/memory-repos/ar-code\\nChanged files:\\nonboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.md (new card)\\nonboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.json (new sidecar, 5 references)\\nknowledge/history/CE05-b909eef2-1e86-4f67-86f6-83fee6cb7957.json (two history rows)\\nonboarding/dashboard/src/overview.index.json (regenerated route index; not content)\\nUnchanged: onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.md and .json, onboarding/dashboard/src/overview.md and overview.json.\\n\\nThe task examined two queue items: a newly added per-scope launcher default memory module that had no card, and an existing progress-polling hook whose card was examined and recorded no_impact. The code tree is settled; the review is of memory text, not code.\\n\\nEvaluate:\\n1. Every statement in the new card's Purpose, Code Commentary and Evidence lines against the actual source of launcherDefaultsMemory.ts and roleLaunchModel.ts (especially roleRequestKey, RoleDefaults, RoleDocumentScope). Flag any false claim, overreach, missing important behavior, or unsupported absence claim.\\n2. Every evidence line's sidecar anchor: does the recorded locator (symbol or line_range) actually resolve to the bytes that carry the claim, and does the claim match those bytes?\\n3. The no_impact history row's reason: is it true against useRoleLaunchProgress.ts, and does the existing card text still hold sentence by sentence? If the card needed a change, say exactly which sentence and why.\\n4. The updated history row's reason: does it accurately describe what changed, without claiming work not done?\\n\\nReport as a short list of BLOCKING findings (a statement that is false, unsupported, or materially incomplete) and NOTE-level observations (wording precision only). If a claim is accurate, do not restate it at length. Do not propose style edits unless the meaning is affected.\", \"goal\": \"Independently fact-check a small, newly written onboarding card and two history rows against the leaf's final code. Read-only: do not create, edit, or delete any file anywhere, and do not run git commands that write. Return a findings list.\"}]}",
+              "server": null
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/b909eef2-1e86-4f67-86f6-83fee6cb7957/hermes/state.db",
+            "source_sha256": "fb39343add7b24fe623bbd78cd50edf817b25c51da4d45c27a47ee2186f3109d",
+            "native_timestamp": 1793379532.7050874
+          }
+        },
+        {
+          "originalJsonPointer": "/capture/events/276",
+          "canonicalValueSha256": "0124e508c7f7d31c1ddfc25b25da6c77baa282c3aa597f27f2d9bfc8e733adb9",
+          "record": {
+            "kind": "tool_result",
+            "session_id": "48fda4e5-1fcd-4e68-89a9-9ad27ce7403e",
+            "sequence": 276,
+            "payload": {
+              "call_id": "call_00_324uv7qdjnpe3d0vrlbbx8fo",
+              "name": "delegate_task",
+              "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_a37b7dce\", \"goals\": [\"Independently fact-check a small, newly written onboarding card and two history rows against the leaf's final code. Read-only: do not create, edit, or delete any file anywhere, and do not run git commands that write. Return a findings list.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-f526bd4f\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/b909eef2-1e86-4f67-86f6-83fee6cb7957/hermes/cache/delegation/live/deleg_a37b7dce/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/b909eef2-1e86-4f67-86f6-83fee6cb7957/hermes/state.db",
+            "source_sha256": "fb39343add7b24fe623bbd78cd50edf817b25c51da4d45c27a47ee2186f3109d",
+            "native_timestamp": 1793379532.8333015
+          }
+        }
+      ],
+      "hostTurnEndedSelections": [
+        {
+          "rawRecordIndex": 165,
+          "originalWholeRecordCanonicalSha256": "6ae63318347851631a5ff79554b9c3a6e7e3c171eb4749bd98d00258a52eda29",
+          "timelineTypeCounts": {
+            "user_message": 1,
+            "reasoning": 49,
+            "tool_call": 74,
+            "assistant_message": 1
+          },
+          "selectedTimelineIndices": [
+            113,
+            124
+          ],
+          "rawSelectedValues": [
+            {
+              "originalJsonPointer": "/capture/raw_records/165/observedAt",
+              "canonicalValueSha256": "0656a186b9366ff6ea679dd1bf02b5dd5425690c0d558316ce771bcf91e2eab3",
+              "record": "2026-10-30T16:59:32.641Z"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/165/native/type",
+              "canonicalValueSha256": "286b27e724f4c883d5b12222e55ff23c3ab03e42287151846275b4976e9ed89b",
+              "record": "agent.turn_ended"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/165/native/agent",
+              "canonicalValueSha256": "da3f2eb184d39284f44393b3babdf4e30c312b1503813681388c2d0cff595272",
+              "record": {
+                "id": "81dfb471-d51d-4573-855c-a06465f003be",
+                "workspaceId": "wks_3c078c6303cfb339",
+                "parentAgentId": null,
+                "provider": "hermes",
+                "cwd": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/b909eef2-1e86-4f67-86f6-83fee6cb7957/project",
+                "title": "Curator evaluation fixture"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/165/native/turnId",
+              "canonicalValueSha256": "f64ca4263f573f08ae66149548e144887b66ff94bb446bdece8fb26c5e1d5b8d",
+              "record": "408f7a9b-bc3e-4471-bfaa-77b30b915af3"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/165/native/outcome",
+              "canonicalValueSha256": "7273b4e139d5a23749ea679f0d04a5e39052dbd7cb058cd067ea98641d835bfd",
+              "record": {
+                "kind": "completed"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/165/native/timeline/113",
+              "canonicalValueSha256": "16b7bf6bc959896925a7aa60389a55faaebf054d13b4bc39917e953fefd2301b",
+              "record": {
+                "type": "tool_call",
+                "callId": "tc-7b0375938dd5",
+                "name": "execute",
+                "detail": {
+                  "type": "shell",
+                  "command": "delegate_task: 1 tasks: Independently fact-check a small, new...",
+                  "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_a37b7dce\", \"goals\": [\"Independently fact-check a small, newly written onboarding card and two history rows against the leaf's final code. Read-only: do not create, edit, or delete any file anywhere, and do not run git commands that write. Return a findings list.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-f526bd4f\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE05/trials/b909eef2-1e86-4f67-86f6-83fee6cb7957/hermes/cache/delegation/live/deleg_a37b7dce/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+                },
+                "metadata": {
+                  "kind": "execute",
+                  "title": "delegate_task: 1 tasks: Independently fact-check a small, new..."
+                },
+                "status": "completed",
+                "error": null
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/165/native/timeline/124",
+              "canonicalValueSha256": "4953d043e49c238a9b02bbf7f2d5d98b180c43b42fc37ca3d5f10b510cc8d974",
+              "record": {
+                "type": "assistant_message",
+                "text": "\n\nQueue work is written (new card + 5 resolved references, route index refreshed, two history rows); waiting on the read-only second-reader fact-check before I finalize the report and hand over.",
+                "messageId": "0e4c9294-165b-4116-a1e7-a3c414222fe6"
+              }
+            }
+          ]
+        }
+      ],
+      "expectedHelperIds": [
+        "sa-0-f526bd4f"
+      ],
+      "expectedDelegationId": "deleg_a37b7dce"
+    },
+    {
+      "attemptId": "052ae2a2-b6d6-468c-9c25-3e837d7f0a1e",
+      "case": "CE06",
+      "run": "20261030-arm-new-hermes",
+      "harness": "hermes",
+      "sessionId": "d65f5ad3-092e-49cb-a68b-8a850805a2b1",
+      "ownerHostAgentId": "87529c99-93c4-4b1b-af38-10d492a271c5",
+      "sourceAttempt": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-arm-new-hermes/hermes/CE06/052ae2a2-b6d6-468c-9c25-3e837d7f0a1e/attempt.json",
+        "sizeBytes": 3206742,
+        "sha256": "476540791499a205ed06aa36c278d2c5d27566cb4c0955b0ce5846be67055a38"
+      },
+      "selectedNativeEvents": [
+        {
+          "originalJsonPointer": "/capture/events/255",
+          "canonicalValueSha256": "bfc0fcc808495686fc0393f30b662c59e997c0a5085ff1fbe6a54660e43f0232",
+          "record": {
+            "kind": "tool_call",
+            "session_id": "d65f5ad3-092e-49cb-a68b-8a850805a2b1",
+            "sequence": 255,
+            "payload": {
+              "call_id": "call_f6e5b87bc73e48db894e1aa9",
+              "name": "delegate_task",
+              "arguments": "{\"tasks\":[{\"context\":\"This is a disposable evaluation fixture. Roots:\\nCODE ROOT (read-only): /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE06/trials/052ae2a2-b6d6-468c-9c25-3e837d7f0a1e/project/projects/code\\nMEMORY ROOT (read-only for you): /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE06/trials/052ae2a2-b6d6-468c-9c25-3e837d7f0a1e/project/coordination/memory-repos/ar-code\\nWRITE your report ONLY to: /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE06/trials/052ae2a2-b6d6-468c-9c25-3e837d7f0a1e/project/reports/scratch/fact-check-second-reader.md\\n\\nCHANGED ONBOARDING FILES to check (all inside the memory root):\\n1. onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.md (new card) and its sidecar onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.json (new sidecar: references 1-4 with anchors)\\n2. onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.md (refreshed card) and sidecar onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.json (reference 1 re-authored, reference 2 added)\\n3. knowledge/history/CE06-052ae2a2-b6d6-468c-9c25-3e837d7f0a1e.json (two 'updated' rows: ROW-405KFG and ROW-61W97P)\\n4. onboarding/dashboard/src/overview.index.json (regenerated route-index cache; machine-generated, check only that coveredFiles/coverageCounts agree with the actual cards present)\\n\\nSOURCE FILES the cards document (read them in full):\\n- dashboard/src/cockpit/launcherDefaultsMemory.ts\\n- dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts\\n- dashboard/src/cockpit/roleLaunchModel.ts (context for the scope key roleRequestKey)\\n\\nWHAT TO DO: for each card sentence, and each sidecar reference note/anchor, state whether it is true of that code at those line numbers; name concrete conforming, violating and boundary cases where you doubt a sentence. Check the two history rows' disposition, effect and reason against what actually changed in the cards (both cards genuinely changed; say whether 'updated' is the right disposition and whether each reason is accurate and complete). Say whether anything important about these two source files is left unsaid. Check that no statement in either card claims cross-session persistence, storage, or behaviour the code does not have (this matters: a pending requirement question asks whether remembered role defaults should survive closing the page; the card must describe only what the code does).\",\"goal\":\"Perform an independent, statement-by-statement fact-check of two onboarding cards, their sidecars and a history file, against the actual source code. Read-only: do NOT edit, create or delete any file inside the code root or the memory root. Produce one Markdown report file and a summary.\\n\\nFor each of these, check every statement against the code and report per-statement: TRUE / FALSE / UNSUPPORTED / AMBIGUOUS with the exact source line numbers as evidence:\\n- Card 1: onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.md\\n- Its sidecar references: onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.json (each reference note must match what the anchored symbol/lines actually do; each anchor's locator must point at the right line range or symbol)\\n- Card 2: onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.md\\n- Its sidecar references: onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.json\\n- History rows: knowledge/history/CE06-052ae2a2-b6d6-468c-9c25-3e837d7f0a1e.json — for each row, judge disposition ('updated' vs 'no_impact'), the reason's accuracy against what actually changed, and whether the row's `sources` blobs are the right source files.\\n- The route index cache onboarding/dashboard/src/overview.index.json — only check that its coverage counts agree with the cards that exist.\\n\\nAlso state explicitly: is anything important about these two source files missing from the cards?\\n\\nReport format: one section per card, one table of statements (quoted text | verdict | evidence line numbers | note), then a section for the history rows, then a 'blocking findings' list (empty if none) and a 'non-blocking observations' list.\\n\\nWrite the report to the exact path in the context. Your final answer must state: total statements checked, count of FALSE, count of UNSUPPORTED, and the blocking findings list.\",\"output_schema\":{\"properties\":{\"blockingFindings\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"falseCount\":{\"type\":\"integer\"},\"reportPath\":{\"type\":\"string\"},\"statementsChecked\":{\"type\":\"integer\"},\"unsupportedCount\":{\"type\":\"integer\"}},\"required\":[\"reportPath\",\"statementsChecked\",\"falseCount\",\"unsupportedCount\",\"blockingFindings\"],\"type\":\"object\"}}]}",
+              "server": null
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE06/trials/052ae2a2-b6d6-468c-9c25-3e837d7f0a1e/hermes/state.db",
+            "source_sha256": "4e4400fafc40f5e32fc2e1fe0b62a90e035445f38f7a0899458170945b08cb36",
+            "native_timestamp": 1793379073.5628912
+          }
+        },
+        {
+          "originalJsonPointer": "/capture/events/257",
+          "canonicalValueSha256": "991b82e025907a70083f563b8f82ad144fc73bada9df4562f4bd5df261fd83b4",
+          "record": {
+            "kind": "tool_result",
+            "session_id": "d65f5ad3-092e-49cb-a68b-8a850805a2b1",
+            "sequence": 257,
+            "payload": {
+              "call_id": "call_f6e5b87bc73e48db894e1aa9",
+              "name": "delegate_task",
+              "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_0bb83b51\", \"goals\": [\"Perform an independent, statement-by-statement fact-check of two onboarding cards, their sidecars and a history file, against the actual source code. Read-only: do NOT edit, create or delete any file inside the code root or the memory root. Produce one Markdown report file and a summary.\\n\\nFor each of these, check every statement against the code and report per-statement: TRUE / FALSE / UNSUPPORTED / AMBIGUOUS with the exact source line numbers as evidence:\\n- Card 1: onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.md\\n- Its sidecar references: onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.json (each reference note must match what the anchored symbol/lines actually do; each anchor's locator must point at the right line range or symbol)\\n- Card 2: onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.md\\n- Its sidecar references: onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.json\\n- History rows: knowledge/history/CE06-052ae2a2-b6d6-468c-9c25-3e837d7f0a1e.json — for each row, judge disposition ('updated' vs 'no_impact'), the reason's accuracy against what actually changed, and whether the row's `sources` blobs are the right source files.\\n- The route index cache onboarding/dashboard/src/overview.index.json — only check that its coverage counts agree with the cards that exist.\\n\\nAlso state explicitly: is anything important about these two source files missing from the cards?\\n\\nReport format: one section per card, one table of statements (quoted text | verdict | evidence line numbers | note), then a section for the history rows, then a 'blocking findings' list (empty if none) and a 'non-blocking observations' list.\\n\\nWrite the report to the exact path in the context. Your final answer must state: total statements checked, count of FALSE, count of UNSUPPORTED, and the blocking findings list.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-aa6df3e1\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE06/trials/052ae2a2-b6d6-468c-9c25-3e837d7f0a1e/hermes/cache/delegation/live/deleg_0bb83b51/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE06/trials/052ae2a2-b6d6-468c-9c25-3e837d7f0a1e/hermes/state.db",
+            "source_sha256": "4e4400fafc40f5e32fc2e1fe0b62a90e035445f38f7a0899458170945b08cb36",
+            "native_timestamp": 1793379073.905143
+          }
+        }
+      ],
+      "hostTurnEndedSelections": [
+        {
+          "rawRecordIndex": 156,
+          "originalWholeRecordCanonicalSha256": "e95fc357f9597d8b4974b79177f318aff2f4bbd4b150ba076c38e25ab9f05917",
+          "timelineTypeCounts": {
+            "user_message": 1,
+            "assistant_message": 5,
+            "tool_call": 68,
+            "reasoning": 46
+          },
+          "selectedTimelineIndices": [
+            110,
+            119
+          ],
+          "rawSelectedValues": [
+            {
+              "originalJsonPointer": "/capture/raw_records/156/observedAt",
+              "canonicalValueSha256": "a098136800a2e7bee21f90e716b510cddfda9b6a459a7ec42891af6455b03ea1",
+              "record": "2026-10-30T16:52:43.331Z"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/156/native/type",
+              "canonicalValueSha256": "286b27e724f4c883d5b12222e55ff23c3ab03e42287151846275b4976e9ed89b",
+              "record": "agent.turn_ended"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/156/native/agent",
+              "canonicalValueSha256": "202ec70b131e4b5afeed21062b275a71160ed462f708e7f7cac3761ae09e665d",
+              "record": {
+                "id": "87529c99-93c4-4b1b-af38-10d492a271c5",
+                "workspaceId": "wks_fb39f3d04413b293",
+                "parentAgentId": null,
+                "provider": "hermes",
+                "cwd": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE06/trials/052ae2a2-b6d6-468c-9c25-3e837d7f0a1e/project",
+                "title": "Curator evaluation fixture"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/156/native/turnId",
+              "canonicalValueSha256": "85b439202be60cae05e1f0e2fa412dcf8da0ffbd4e807a1ab96ec6a0a8822230",
+              "record": "27c80532-a3ac-4ef8-b0d0-2aff1227f444"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/156/native/outcome",
+              "canonicalValueSha256": "7273b4e139d5a23749ea679f0d04a5e39052dbd7cb058cd067ea98641d835bfd",
+              "record": {
+                "kind": "completed"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/156/native/timeline/110",
+              "canonicalValueSha256": "49dc2c27185fd26531311bce68933e1ab572e43988e7af548e011a98c537a37f",
+              "record": {
+                "type": "tool_call",
+                "callId": "tc-173b961d6103",
+                "name": "execute",
+                "detail": {
+                  "type": "shell",
+                  "command": "delegate_task: 1 tasks: Perform an independent, statement-by-...",
+                  "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_0bb83b51\", \"goals\": [\"Perform an independent, statement-by-statement fact-check of two onboarding cards, their sidecars and a history file, against the actual source code. Read-only: do NOT edit, create or delete any file inside the code root or the memory root. Produce one Markdown report file and a summary.\\n\\nFor each of these, check every statement against the code and report per-statement: TRUE / FALSE / UNSUPPORTED / AMBIGUOUS with the exact source line numbers as evidence:\\n- Card 1: onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.md\\n- Its sidecar references: onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.json (each reference note must match what the anchored symbol/lines actually do; each anchor's locator must point at the right line range or symbol)\\n- Card 2: onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.md\\n- Its sidecar references: onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.json\\n- History rows: knowledge/history/CE06-052ae2a2-b6d6-468c-9c25-3e837d7f0a1e.json — for each row, judge disposition ('updated' vs 'no_impact'), the reason's accuracy against what actually changed, and whether the row's `sources` blobs are the right source files.\\n- The route index cache onboarding/dashboard/src/overview.index.json — only check that its coverage counts agree with the cards that exist.\\n\\nAlso state explicitly: is anything important about these two source files missing from the cards?\\n\\nReport format: one section per card, one table of statements (quoted text | verdict | evidence line numbers | note), then a section for the history rows, then a 'blocking findings' list (empty if none) and a 'non-blocking observations' list.\\n\\nWrite the report to the exact path in the context. Your final answer must state: total statements checked, count of FALSE, count of UNSUPPORTED, and the blocking findings list.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-aa6df3e1\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE06/trials/052ae2a2-b6d6-468c-9c25-3e837d7f0a1e/hermes/cache/delegation/live/deleg_0bb83b51/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+                },
+                "metadata": {
+                  "kind": "execute",
+                  "title": "delegate_task: 1 tasks: Perform an independent, statement-by-..."
+                },
+                "status": "completed",
+                "error": null
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/156/native/timeline/119",
+              "canonicalValueSha256": "2cc970e8cd1e9671d1d450544047dc97fdfb7e6ebc389c2a506d47d4713ba231",
+              "record": {
+                "type": "assistant_message",
+                "text": "\n\nQ1 card + sidecar authored and Q2 card corrected through the real writer; Q3 asked and answered `pending`; report drafted at `reports/CE06-curation-stage-report.md`, with only the independent fact-check section left to fill when the second reader returns.",
+                "messageId": "39721695-9e02-4947-b866-0250a8258a6a"
+              }
+            }
+          ]
+        }
+      ],
+      "expectedHelperIds": [
+        "sa-0-aa6df3e1"
+      ],
+      "expectedDelegationId": "deleg_0bb83b51"
+    },
+    {
+      "attemptId": "54047c8f-8437-4e8c-a1c5-9cbed27f7bcd",
+      "case": "CE06",
+      "run": "20261030-arm-new-hermes",
+      "harness": "hermes",
+      "sessionId": "ec581ced-eaa5-4b16-9c32-dd8fab272f98",
+      "ownerHostAgentId": "d0dc18a1-3960-4b5d-b090-b6fde051b36e",
+      "sourceAttempt": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-arm-new-hermes/hermes/CE06/54047c8f-8437-4e8c-a1c5-9cbed27f7bcd/attempt.json",
+        "sizeBytes": 2516551,
+        "sha256": "23c31240a09e174d9f71a3e09ad36c3104811d205c8ee9964f891a94d5763234"
+      },
+      "selectedNativeEvents": [
+        {
+          "originalJsonPointer": "/capture/events/196",
+          "canonicalValueSha256": "33806ade0bf66ea835fd42e7924a9fdda7db999c9b4f134bcb707196cc131af3",
+          "record": {
+            "kind": "tool_call",
+            "session_id": "ec581ced-eaa5-4b16-9c32-dd8fab272f98",
+            "sequence": 196,
+            "payload": {
+              "call_id": "call_c10435ca475d458aa7dc1969",
+              "name": "delegate_task",
+              "arguments": "{\"tasks\":[{\"context\":\"Fixture root: /var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE06/trials/54047c8f-8437-4e8c-a1c5-9cbed27f7bcd/project\\n\\nRead these files with read_file:\\n- Source A: projects/code/dashboard/src/cockpit/launcherDefaultsMemory.ts\\n- Source B: projects/code/dashboard/src/cockpit/roleLaunchModel.ts (only for the RoleDefaults, RoleDocumentScope and roleRequestKey definitions the module imports)\\n- Source C: projects/code/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts\\n- Card A: coordination/memory-repos/ar-code/onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.md\\n- Sidecar A: coordination/memory-repos/ar-code/onboarding/dashboard/src/cockpit/launcherDefaultsMemory.ts.json\\n- Card C: coordination/memory-repos/ar-code/onboarding/dashboard/src/cockpit/role-launcher/useRoleLaunchProgress.ts.md\\n- History rows: coordination/memory-repos/ar-code/knowledge/history/CE06-54047c8f-8437-4e8c-a1c5-9cbed27f7bcd.json\\n\\nDo not edit any file. Do not run git commands that write. Report only. Be adversarial: your value is finding a sentence the bytes do not support, an anchor that points at the wrong construct, or an important fact the card omits.\",\"goal\":\"Perform a statement-by-statement fact-check of two onboarding cards and one history file against the source code, and report every unsupported or wrong statement, wrong anchor, and important omission. Context: a curator pass for a disposable fixture wrote a new onboarding card for dashboard/src/cockpit/launcherDefaultsMemory.ts and wrote two history rows. Your job is the independent second-reader fact-check (MIK-R53 rule 5): you wrote none of this material, so compare every statement to the actual code bytes. Report only; change nothing.\",\"output_schema\":{\"properties\":{\"anchors\":{\"items\":{\"properties\":{\"card\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"},\"reference\":{\"type\":\"string\"},\"verdict\":{\"type\":\"string\"}},\"required\":[\"card\",\"reference\",\"verdict\",\"note\"],\"type\":\"object\"},\"type\":\"array\"},\"code_findings\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"history_rows\":{\"items\":{\"properties\":{\"note\":{\"type\":\"string\"},\"row\":{\"type\":\"string\"},\"verdict\":{\"type\":\"string\"}},\"required\":[\"row\",\"verdict\",\"note\"],\"type\":\"object\"},\"type\":\"array\"},\"omissions\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"statements\":{\"items\":{\"properties\":{\"card\":{\"type\":\"string\"},\"quote\":{\"type\":\"string\"},\"verdict\":{\"type\":\"string\"},\"why\":{\"type\":\"string\"}},\"required\":[\"card\",\"quote\",\"verdict\",\"why\"],\"type\":\"object\"},\"type\":\"array\"},\"summary\":{\"type\":\"string\"},\"verdict\":{\"type\":\"string\"}},\"required\":[\"verdict\",\"summary\",\"statements\",\"anchors\",\"history_rows\",\"omissions\"],\"type\":\"object\"}}]}",
+              "server": null
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE06/trials/54047c8f-8437-4e8c-a1c5-9cbed27f7bcd/hermes/state.db",
+            "source_sha256": "19ff54e4037563175a8ae82541953108239a406b2472a0ea350f812626aa9d24",
+            "native_timestamp": 1793379712.9061766
+          }
+        },
+        {
+          "originalJsonPointer": "/capture/events/198",
+          "canonicalValueSha256": "d6b1b1bb3bd88fa68fd186f9c89815b43925f08653f8c968dc74344de04787b2",
+          "record": {
+            "kind": "tool_result",
+            "session_id": "ec581ced-eaa5-4b16-9c32-dd8fab272f98",
+            "sequence": 198,
+            "payload": {
+              "call_id": "call_c10435ca475d458aa7dc1969",
+              "name": "delegate_task",
+              "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_33441ab5\", \"goals\": [\"Perform a statement-by-statement fact-check of two onboarding cards and one history file against the source code, and report every unsupported or wrong statement, wrong anchor, and important omission. Context: a curator pass for a disposable fixture wrote a new onboarding card for dashboard/src/cockpit/launcherDefaultsMemory.ts and wrote two history rows. Your job is the independent second-reader fact-check (MIK-R53 rule 5): you wrote none of this material, so compare every statement to the actual code bytes. Report only; change nothing.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-7e06e110\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE06/trials/54047c8f-8437-4e8c-a1c5-9cbed27f7bcd/hermes/cache/delegation/live/deleg_33441ab5/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+            },
+            "source": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE06/trials/54047c8f-8437-4e8c-a1c5-9cbed27f7bcd/hermes/state.db",
+            "source_sha256": "19ff54e4037563175a8ae82541953108239a406b2472a0ea350f812626aa9d24",
+            "native_timestamp": 1793379713.069937
+          }
+        }
+      ],
+      "hostTurnEndedSelections": [
+        {
+          "rawRecordIndex": 120,
+          "originalWholeRecordCanonicalSha256": "13f617959ee618246cbb0be95c4fcd01e05d22bce041a00e6ac2b76fffebf3d6",
+          "timelineTypeCounts": {
+            "user_message": 1,
+            "assistant_message": 2,
+            "tool_call": 51,
+            "reasoning": 43
+          },
+          "selectedTimelineIndices": [
+            90,
+            96
+          ],
+          "rawSelectedValues": [
+            {
+              "originalJsonPointer": "/capture/raw_records/120/observedAt",
+              "canonicalValueSha256": "81f91bf679adade0f27bc2c285278f450e133e6f3d4933a646c4b576e8d402cc",
+              "record": "2026-10-30T17:02:41.158Z"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/120/native/type",
+              "canonicalValueSha256": "286b27e724f4c883d5b12222e55ff23c3ab03e42287151846275b4976e9ed89b",
+              "record": "agent.turn_ended"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/120/native/agent",
+              "canonicalValueSha256": "0a19843d01bb443a704d042346a9d3ec3cc0c15426bc7259cf654252e8be1e75",
+              "record": {
+                "id": "d0dc18a1-3960-4b5d-b090-b6fde051b36e",
+                "workspaceId": "wks_d169075485443a6b",
+                "parentAgentId": null,
+                "provider": "hermes",
+                "cwd": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE06/trials/54047c8f-8437-4e8c-a1c5-9cbed27f7bcd/project",
+                "title": "Curator evaluation fixture"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/120/native/turnId",
+              "canonicalValueSha256": "c9c981444a501f9044e98a4d65746b2c2df3a0f1dfb63236cfc5c116c2962603",
+              "record": "90b74786-5767-4642-a57e-1ccbcc540010"
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/120/native/outcome",
+              "canonicalValueSha256": "7273b4e139d5a23749ea679f0d04a5e39052dbd7cb058cd067ea98641d835bfd",
+              "record": {
+                "kind": "completed"
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/120/native/timeline/90",
+              "canonicalValueSha256": "d632b150a885855b3229883557e7e43c837dd1c562c0fa2a7fb70e3bfaf114f1",
+              "record": {
+                "type": "tool_call",
+                "callId": "tc-50e3d009052f",
+                "name": "execute",
+                "detail": {
+                  "type": "shell",
+                  "command": "delegate_task: 1 tasks: Perform a statement-by-statement fact...",
+                  "output": "{\"status\": \"dispatched\", \"mode\": \"background\", \"count\": 1, \"delegation_id\": \"deleg_33441ab5\", \"goals\": [\"Perform a statement-by-statement fact-check of two onboarding cards and one history file against the source code, and report every unsupported or wrong statement, wrong anchor, and important omission. Context: a curator pass for a disposable fixture wrote a new onboarding card for dashboard/src/cockpit/launcherDefaultsMemory.ts and wrote two history rows. Your job is the independent second-reader fact-check (MIK-R53 rule 5): you wrote none of this material, so compare every statement to the actual code bytes. Report only; change nothing.\"], \"note\": \"Subagent is running in the background; its full result re-enters the conversation as a new message when it finishes. Results are delivered only after you END YOUR TURN: do anything that does not depend on it, then stop with a one-line status. Do not poll its transcript or artifacts to wait for it.\", \"subagent_ids\": [\"sa-0-7e06e110\"], \"control_hint\": \"While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end one early.\", \"live_transcripts\": [\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-arm-new-hermes/hermes-CE06/trials/54047c8f-8437-4e8c-a1c5-9cbed27f7bcd/hermes/cache/delegation/live/deleg_33441ab5/task-0.log\"], \"live_transcripts_hint\": \"Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, one per task). Read or `tail -f` these paths at any time to watch a child work while it runs.\"}"
+                },
+                "metadata": {
+                  "kind": "execute",
+                  "title": "delegate_task: 1 tasks: Perform a statement-by-statement fact..."
+                },
+                "status": "completed",
+                "error": null
+              }
+            },
+            {
+              "originalJsonPointer": "/capture/raw_records/120/native/timeline/96",
+              "canonicalValueSha256": "e1a1338df99a0db44e30cc12661eb40fe935f9b207b064149f1591ca0ea308c0",
+              "record": {
+                "type": "assistant_message",
+                "text": "\n\nQ1/Q2 written and checked; Q3 held pending with its owner. Report drafted at `reports/CE06-curator-stage-report.md`; waiting on the delegated independent fact-check before I send the stage handover.",
+                "messageId": "bfe64bd2-444e-44f2-bc05-a4b456e8a0e8"
+              }
+            }
+          ]
+        }
+      ],
+      "expectedHelperIds": [
+        "sa-0-7e06e110"
+      ],
+      "expectedDelegationId": "deleg_33441ab5"
+    }
+  ]
+}

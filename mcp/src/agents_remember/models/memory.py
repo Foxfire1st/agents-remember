@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.models.base import FlexibleToolResponse, ToolResponse
+from agents_remember.models.core import ServingBuildPayload
 from agents_remember.models.drift import DriftStatus
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 
@@ -22,6 +23,17 @@ class DriftCheckResponse(ToolResponse):
     reportPath: str | None = None
     actionableSample: list[dict[str, Any]] | None = None
     error: str | None = None
+    # Converted-tree measurement (MIK-R44): the check measures the reference anchors of
+    # onboarding cards and the validity of the tree. Absent on legacy results.
+    basis: str | None = None
+    memoryRoot: str | None = None
+    codeRoot: str | None = None
+    sidecarCount: int | None = Field(default=None, ge=0)
+    states: dict[str, int] | None = None
+    violationCount: int | None = Field(default=None, ge=0)
+    violationSample: list[dict[str, Any]] | None = None
+    reportOnlyCount: int | None = Field(default=None, ge=0)
+    unreadableSidecars: list[str] | None = None
     # WHICH tree was measured. `repo_id` alone means the official memory repo and a
     # `contract_path` means a leaf's memory worktree, and nothing else in this response
     # distinguishes them -- a caller that got the wrong one could not tell.
@@ -33,9 +45,11 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     repoId: str | None = None
     onboardingRoot: str | None = None
     # Async run envelope: start admits background work and poll reads it by runId;
-    # the completed envelope carries the full result.
+    # the completed envelope carries the full result. MIK-R110 rule 4 answers the check
+    # outcome as passed, failed, or running (with the operation to poll).
     status: (
         Literal[
+            "passed",
             "started",
             "running",
             "completed",
@@ -72,10 +86,17 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     memoryRepairCount: int | None = Field(default=None, ge=0)
     missingOnboardingCount: int | None = Field(default=None, ge=0)
     staleRouteIndexCount: int | None = Field(default=None, ge=0)
+    invariantsWithoutProofCount: int | None = Field(default=None, ge=0)
+    routeIndexCacheBuild: dict[str, Any] | None = None
     sourceChangeCandidateCount: int | None = Field(default=None, ge=0)
     closeoutOwnedFindingCount: int | None = Field(default=None, ge=0)
     noteworthyFindingCount: int | None = Field(default=None, ge=0)
     scopeAuthority: Literal["official-diagnostic", "leaf-candidate"] | None = None
+    # WHICH RULER produced these counts (D-33). `memory_quality_check` executes a fixed serving
+    # build, which need not be the candidate's own code, and until this field existed a reader of
+    # a checklist could not tell the two apart. Declared rather than left to `extra="allow"`: what
+    # this package writes, this package declares.
+    servingBuild: ServingBuildPayload | None = None
     acceptanceEligible: bool | None = None
     contractPath: str | None = Field(default=None, max_length=8192)
     pairIdentity: MemoryCandidatePairIdentity | None = None
@@ -86,6 +107,18 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     observed: dict[str, Any] | None = Field(default=None, max_length=32)
     nextAction: str | None = Field(default=None, max_length=8192)
     nextArgs: dict[str, Any] | None = Field(default=None, max_length=32)
+    # MIK-R110 rule 4: the status answer. The count of findings by kind, the blocking
+    # findings (up to the list bound) with their total, and the files that hold the rest.
+    # Declared rather than left to `extra="allow"`: what this package writes, this
+    # package declares.
+    findingCountsByKind: dict[str, int] | None = None
+    blockingCount: int | None = Field(default=None, ge=0)
+    blocking: list[dict[str, Any]] | None = None
+    censusPath: str | None = Field(default=None, max_length=8192)
+    # R108 rule 4: the guard converts an over-long code to invalid-code with the
+    # original whole in the detail, so the bound stays off the model and the
+    # refusal keeps what the caller sent.
+    code: str | None = None
 
 
 class _MemoryQualityExecutionRequest(BaseModel):
@@ -132,6 +165,61 @@ class CitationFixResponse(FlexibleToolResponse):
     operation: Literal["citation_fix"] = "citation_fix"
     repoId: str | None = None
     dryRun: bool | None = None
+    # The same preview result may be delivered by a completed background run.
+    # Keep synchronous status vocabulary unchanged while declaring the run fields.
+    status: str | None = None
+    runId: str | None = None
+    # MIK-R110 rule 2: the status. How many documents the call covered, and the counts:
+    # rewritten, stale, unreadable, refused. The lists themselves stay in the whole
+    # result; the answer keeps the first entries up to the list bound.
+    documentCount: int | None = Field(default=None, ge=0)
+    rewrittenCount: int | None = Field(default=None, ge=0)
+    staleCount: int | None = Field(default=None, ge=0)
+    unreadableCount: int | None = Field(default=None, ge=0)
+    refusedCount: int | None = Field(default=None, ge=0)
+
+
+class CitationNoteRevisionResponse(FlexibleToolResponse):
+    """One reference's note revised in place: MIK-R198 rule 6a.
+
+    ``changed`` is false when the note already held the text given -- a revision that writes
+    nothing is still an answer, not a refusal. ``digestBefore``/``digestAfter`` are the
+    sidecar's bytes, so a caller can prove what it revised against.
+    """
+
+    operation: Literal["citation_note_revision"] = "citation_note_revision"
+    repoId: str | None = None
+    dryRun: bool | None = None
+    card: str | None = None
+    sidecar: str | None = None
+    reference: str | None = None
+    author: str | None = None
+    changed: bool | None = None
+    targetCount: int | None = Field(default=None, ge=0)
+    referenceCount: int | None = Field(default=None, ge=0)
+    digestBefore: str | None = None
+    digestAfter: str | None = None
+    code: str | None = None
+    detail: str | None = None
+
+
+class CitationMigrateResponse(FlexibleToolResponse):
+    """The superseded-format conversion: what it rewrote and what it would not.
+
+    ``declinedCount`` is the complete decline list, never a sample, and ``findingsRemaining``
+    is re-measured from the tree by the migration's own checker rather than reported from the
+    migration's arithmetic -- a migration that reports success off its own count is how this
+    format change went half-applied once already.
+    """
+
+    operation: Literal["citation_migrate"] = "citation_migrate"
+    repoId: str | None = None
+    dryRun: bool | None = None
+    onboardingRoot: str | None = None
+    supersededTables: int | None = Field(default=None, ge=0)
+    tablesConverted: int | None = Field(default=None, ge=0)
+    declinedCount: int | None = Field(default=None, ge=0)
+    findingsRemaining: int | None = Field(default=None, ge=0)
 
 
 class RouteIndexRefreshResponse(FlexibleToolResponse):

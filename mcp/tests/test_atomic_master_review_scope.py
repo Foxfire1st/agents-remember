@@ -7,6 +7,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.worktrees.route_review import RouteReviewError
 from agents_remember.worktrees.route_review_scope import (
@@ -16,12 +17,16 @@ from agents_remember.worktrees.route_review_scope import (
 from agents_remember.worktrees.worktree_contract import load_contract
 from test_closeout_queue import MASTER_A, MASTER_B, QueueFixture
 
+# MIK-R46 rule 8: the shared fixture builds converted memory, whose curator-evidence
+# publication recomputes the invariant gate -- explicit application composition.
+pytestmark = pytest.mark.usefixtures("worktree_services")
+
 
 class AtomicMasterReviewScopeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
-        self.fixture = QueueFixture(self.root, atomic_b=True, memory_mode="internal")
+        self.fixture = QueueFixture(self.root, atomic_b=True)
         self.leaf = self.fixture.contracts[MASTER_B]
         assert self.leaf.parent_contract_path is not None
         self.series = load_contract(self.leaf.parent_contract_path)
@@ -57,7 +62,7 @@ class AtomicMasterReviewScopeTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, "route-review-atomic-owner-invalid")
 
     def test_organizational_leaf_keeps_the_existing_leaf_review_boundary(self) -> None:
-        fixture = QueueFixture(self.root / "organizational", memory_mode="internal")
+        fixture = QueueFixture(self.root / "organizational")
         leaf = fixture.contracts[MASTER_A]
 
         status = require_current_route_review(leaf)

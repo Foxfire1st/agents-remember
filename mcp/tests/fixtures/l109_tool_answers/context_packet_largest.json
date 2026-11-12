@@ -1,0 +1,20 @@
+{
+ "contextPacketVersion": 3,
+ "log": "/world/coord/logs/mcp/ar-tools-2026-10-10/231720612442-context_packet-29177c3b.json",
+ "ok": true,
+ "pair": {
+  "code": "e928ebd33bdb93700173b317c701400073f2a59d",
+  "memory": "a953e395c1112743ee95681f6403330ec35466d5"
+ },
+ "roots": {
+  "code": "/world/coord/worktrees/repo-a/w-ar/w",
+  "enclosure": "/world/coord/worktrees/repo-a/w-ar",
+  "memory": "/world/coord/worktrees/repo-a/w-ar/memory-w",
+  "taskDocument": "/world/coord/tasks/repo-a/m/task.md"
+ },
+ "servingBuild": "076cc40e",
+ "task": {
+  "id": "L1",
+  "master": "m"
+ }
+}

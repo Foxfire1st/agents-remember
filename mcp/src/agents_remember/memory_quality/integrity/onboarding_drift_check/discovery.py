@@ -9,13 +9,8 @@ from agents_remember.kernel.coordination_context_resolver import (
     normalize_rel_path,
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
-    SIDECAR_DOC_TYPES,
     repo_root_placeholder,
 )
-
-
-def parse_table_metadata(path: Path) -> dict[str, str]:
-    return parse_table_metadata_text(path.read_text(encoding="utf-8"))
 
 
 def parse_table_metadata_text(text: str) -> dict[str, str]:
@@ -35,22 +30,6 @@ def parse_table_metadata_text(text: str) -> dict[str, str]:
             value = value[1:-1]
         metadata[key] = value
     return metadata
-
-
-def is_supported_sidecar_onboarding(path: Path) -> bool:
-    try:
-        metadata = parse_table_metadata(path)
-    except UnicodeDecodeError:
-        return False
-    return metadata.get("doc_type") in SIDECAR_DOC_TYPES
-
-
-def discover_onboarding_files(onboarding_root: Path) -> list[Path]:
-    return sorted(
-        path
-        for path in onboarding_root.rglob("*.md")
-        if path.is_file() and is_supported_sidecar_onboarding(path)
-    )
 
 
 def normalize_overview_route(source_route: str) -> str:

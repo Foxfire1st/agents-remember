@@ -11,6 +11,11 @@ from typing import Literal
 class LifecycleOperationLocationError(RuntimeError):
     """The sole locator-to-root authority could not be proven."""
 
+    #: The stat identity of the locator bytes an outcome was read from, sampled from the
+    #: same open (F14); ``None`` when the locator was absent or unread at the raise site.
+    #: Internal only -- never part of the observed error shape.
+    locator_stat_read: tuple[int, int, int] | None = None
+
     def __init__(
         self,
         status: str,

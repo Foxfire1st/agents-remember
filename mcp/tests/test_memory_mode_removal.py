@@ -1,0 +1,1105 @@
+"""The removed ``internal`` and ``disabled`` memory modes: refused by name, reported, never substituted.
+
+``internal`` memory -- a repo-sidecar root at ``<code-repository-root>/ar-memory`` -- was removed
+from the product. The supported set is ``external`` alone. ``disabled`` memory -- a task that
+runs with no memory at all -- was removed from the product with it (MIK-R50): a task in it
+can be neither closed out, synced, integrated nor landed, and where converted knowledge exists
+invariant work is mandatory (D5), so no task may opt out of memory. Three properties are pinned
+here, and each one names the failure it prevents:
+
+1. **Refused by name.** Every surface that used to accept the vocabulary answers with a typed
+   status carrying the removal, the supported set and the route out: ``internal`` keeps
+   ``memory-mode-unsupported``, and ``disabled`` is refused with ``memory-opt-out-refused``,
+   which names the true reason (converted knowledge where it exists, removal elsewhere) and
+   the known action. The failure this prevents is the silent substitution: a caller asking
+   for a removed mode and receiving ``external`` (or a default) without being told the mode
+   is gone -- and, for ``disabled``, answering with the ``internal`` text, which would blame
+   a memory root inside the code repository that was never the problem.
+2. **Reported, not migrated.** Existing state that records a removed mode -- a contract file,
+   a settings file, a memory root -- is named by its exact artifact and left byte-identical
+   on disk, except that a contract recording ``disabled`` stays readable where status, attach
+   and guarded abandon need it. The failure this prevents is a silent rewrite of a developer's
+   contract or the deletion of a memory root.
+3. **The supported set is untouched.** ``external`` still resolves, still writes and still
+   reads, in the application layer and through the CLI the developer actually types. The
+   failure this prevents is a removal that takes the working mode with it.
+
+Both sides of every comparison below come from different sources: the expected supported set is
+written out literally here, while the observed set is whatever the raising surface produced.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any, Literal, cast
+
+import pytest
+from agents_remember.application.coordination_tools import _topology
+from agents_remember.application.lifecycle.configured_contract_admission import (
+    ConfiguredContractRefused,
+    admit_configured_contract,
+    admit_configured_terminal_contract,
+)
+from agents_remember.application.lifecycle.direct_landing import (
+    _read_direct_contract,
+    direct_landing_tool,
+)
+from agents_remember.application.lifecycle.lifecycle_operation_location import (
+    configured_lifecycle_operation_location,
+)
+from agents_remember.application.task_docs.task_ref import TaskRef
+from agents_remember.application.task_docs.task_unstarted_evidence import _contract_fact
+from agents_remember.application.tool_answer_log import tool_call_context
+from agents_remember.application.worktree_status import worktree_status_packet
+from agents_remember.errors import MemoryModeUnsupportedError, MemoryOptOutRefusedError
+from agents_remember.kernel.coordination_context.paths import (
+    infer_topology_from_onboarding_root,
+    memory_roots_from_settings,
+)
+from agents_remember.kernel.coordination_context.resolver import detect_coordination_selection
+from agents_remember.kernel.direct_execution_grants import (
+    DirectExecutionGrant,
+    grant_path_for,
+    write_grant_file,
+)
+from agents_remember.kernel.memory_mode import (
+    REMOVED_MEMORY_MODES,
+    SUPPORTED_MEMORY_MODES,
+    SUPPORTED_TOPOLOGIES,
+    MemoryMode,
+    Topology,
+    require_supported_memory_mode,
+    require_supported_topology,
+)
+from agents_remember.kernel.primitives.runtime_config import default_memory_root, load_config
+from agents_remember.mcp.registration import worktrees as worktrees_registration
+from agents_remember.mcp.tools.worktree import worktree_status_payload
+from agents_remember.memory.baseline import _normalize_topology
+from agents_remember.memory_quality.integrity.check_missing_onboarding import (
+    main as check_missing_onboarding_main,
+)
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks import SubTaskRef, TaskDocument, write_task_doc
+from agents_remember.worktrees.direct_landing import DirectLandingRequest
+from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.cli import build_parser
+from agents_remember.worktrees.modules.start import start_result
+from agents_remember.worktrees.modules.startup.master_series_admission import (
+    memory_mode_for_repository,
+)
+from agents_remember.worktrees.task_leaf_binding import LeafTaskBinding
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    WorktreeContract,
+    default_contract,
+    default_series_contract,
+    load_contract,
+    write_contract,
+)
+from lifecycle_enclosure_test_support import (
+    publish_test_enclosure,
+    terminalize_test_enclosure,
+)
+from test_worktree_support import git, init_repo
+
+# The supported set, written here rather than imported, so a change to the vocabulary has to be
+# made in two places and this file cannot silently agree with a mistake.
+EXPECTED_MODES = ("external",)
+EXPECTED_TOPOLOGIES = ("external",)
+REMOVED_INTERNAL = "internal"
+REMOVED_DISABLED = "disabled"
+REMOVED = (REMOVED_INTERNAL, REMOVED_DISABLED)
+
+
+def _refusal(call) -> MemoryModeUnsupportedError:
+    with pytest.raises(MemoryModeUnsupportedError) as raised:
+        call()
+    return raised.value
+
+
+def _opt_out_refusal(call) -> MemoryOptOutRefusedError:
+    with pytest.raises(MemoryOptOutRefusedError) as raised:
+        call()
+    return raised.value
+
+
+def _assert_names_the_removal(error: MemoryModeUnsupportedError, *, removed: str) -> None:
+    """The refusal must be actionable, not just typed: removal, supported set, route out."""
+    assert error.status == "memory-mode-unsupported"
+    assert error.requested == removed
+    assert error.supported == EXPECTED_MODES
+    assert removed in error.detail
+    assert "removed" in error.detail
+    for mode in EXPECTED_MODES:
+        assert f"`{mode}`" in error.detail
+    assert "docs/guides/onboard-existing-repo.md" in error.detail
+    assert error.remedies
+
+
+def _assert_names_the_opt_out_refusal(error: MemoryOptOutRefusedError) -> None:
+    """The opt-out refusal names the true reason and the known action, never the other removal."""
+    assert error.status == "memory-opt-out-refused"
+    assert error.requested == REMOVED_DISABLED
+    assert error.supported == EXPECTED_MODES
+    assert REMOVED_DISABLED in error.detail
+    assert "removed" in error.detail
+    assert error.reason is not None
+    assert error.next_action is not None
+    # The `internal` text blames a memory root inside the code repository that was never here.
+    assert "inside the code repository" not in error.detail
+    assert "memory-mode-unsupported" not in error.detail
+
+
+# --------------------------------------------------------------------------------------
+# The vocabulary itself
+# --------------------------------------------------------------------------------------
+
+
+def test_the_declared_vocabulary_has_no_removed_member() -> None:
+    assert SUPPORTED_MEMORY_MODES == EXPECTED_MODES
+    assert SUPPORTED_TOPOLOGIES == EXPECTED_TOPOLOGIES
+    assert REMOVED_MEMORY_MODES == REMOVED
+    assert MemoryMode is not None and Topology is not None
+
+
+def test_require_supported_memory_mode_refuses_internal_first() -> None:
+    error = _refusal(lambda: require_supported_memory_mode(REMOVED_INTERNAL))
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
+    assert error.artifact is None
+
+
+def test_require_supported_memory_mode_refuses_disabled_as_an_opt_out() -> None:
+    error = _opt_out_refusal(lambda: require_supported_memory_mode(REMOVED_DISABLED))
+    _assert_names_the_opt_out_refusal(error)
+
+
+def test_require_supported_memory_mode_accepts_the_supported_set() -> None:
+    assert require_supported_memory_mode("external") == "external"
+    assert require_supported_topology("external") == "external"
+
+
+def test_require_supported_topology_refuses_disabled_as_an_opt_out() -> None:
+    error = _opt_out_refusal(lambda: require_supported_topology(REMOVED_DISABLED))
+    _assert_names_the_opt_out_refusal(error)
+
+
+def test_require_supported_topology_keeps_unknown_tokens_distinct_from_the_removal() -> None:
+    """An unknown token is invalid input, not a removed mode -- the two must not be conflated."""
+    with pytest.raises(ValueError) as raised:
+        require_supported_topology("sidecar")
+    assert not isinstance(raised.value, MemoryModeUnsupportedError)
+    assert not isinstance(raised.value, MemoryOptOutRefusedError)
+    assert "external" in str(raised.value)
+
+
+# --------------------------------------------------------------------------------------
+# Code surfaces that used to accept it
+# --------------------------------------------------------------------------------------
+
+
+def test_worktree_start_refuses_an_explicit_removed_memory_mode() -> None:
+    """The public start status, before any worktree or contract exists."""
+    result = start_result(
+        WorktreeArgs(
+            code_repository_name="repo-a",
+            code_repository_root=Path("/nonexistent/code"),
+            task_name="task",
+            worktree_name="leaf",
+            memory_mode=REMOVED_INTERNAL,
+        )
+    )
+    assert result.returncode == 2
+    assert result.payload["state"] == "memory-mode-unsupported"
+    assert result.payload["status"] == "memory-mode-unsupported"
+    assert result.payload["requested"] == REMOVED_INTERNAL
+    assert result.payload["supported"] == list(EXPECTED_MODES)
+    assert result.payload["remedies"]
+
+
+def test_worktree_start_refuses_a_disabled_memory_mode_as_an_opt_out() -> None:
+    """The same gate for the opt-out removal: its own status, never the internal text."""
+    result = start_result(
+        WorktreeArgs(
+            code_repository_name="repo-a",
+            code_repository_root=Path("/nonexistent/code"),
+            task_name="task",
+            worktree_name="leaf",
+            memory_mode=REMOVED_DISABLED,
+        )
+    )
+    assert result.returncode == 2
+    assert result.payload["state"] == "memory-opt-out-refused"
+    assert result.payload["status"] == "memory-opt-out-refused"
+    assert result.payload["requested"] == REMOVED_DISABLED
+    assert result.payload["supported"] == list(EXPECTED_MODES)
+    assert "memory-mode-unsupported" not in cast(str, result.payload["summary"])
+
+
+def test_worktree_start_refuses_a_removed_topology_argument() -> None:
+    result = start_result(
+        WorktreeArgs(
+            code_repository_name="repo-a",
+            code_repository_root=Path("/nonexistent/code"),
+            task_name="task",
+            worktree_name="leaf",
+            topology=REMOVED_INTERNAL,  # type: ignore[arg-type]
+        )
+    )
+    assert result.returncode == 2
+    assert result.payload["state"] == "memory-mode-unsupported"
+
+
+def test_resolver_refuses_a_requested_removed_topology() -> None:
+    error = _refusal(
+        lambda: detect_coordination_selection(
+            "repo-a",
+            Path("/nonexistent/code"),
+            requested_topology=REMOVED_INTERNAL,  # type: ignore[arg-type]
+        )
+    )
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
+
+
+def test_resolver_refuses_a_requested_disabled_topology_as_an_opt_out() -> None:
+    error = _opt_out_refusal(
+        lambda: detect_coordination_selection(
+            "repo-a",
+            Path("/nonexistent/code"),
+            requested_topology=REMOVED_DISABLED,  # type: ignore[arg-type]
+        )
+    )
+    _assert_names_the_opt_out_refusal(error)
+
+
+def test_resolver_reports_a_repository_that_still_carries_the_removed_root(tmp_path: Path) -> None:
+    """Existing layout: named by exact path and left on disk."""
+    code_repo = tmp_path / "code"
+    code_repo.mkdir()
+    legacy_root = code_repo / "ar-memory"
+    legacy_root.mkdir()
+    (legacy_root / "onboarding").mkdir()
+    coordination_root = tmp_path / "coordination"
+    (coordination_root / "memory-repos" / "ar-repo-a").mkdir(parents=True)
+
+    error = _refusal(
+        lambda: detect_coordination_selection(
+            "repo-a", code_repo, coordination_root_hint=coordination_root
+        )
+    )
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
+    assert error.artifact == legacy_root.resolve().as_posix()
+    assert legacy_root.is_dir(), "the removed memory root must be reported, never deleted"
+
+
+def test_settings_inside_the_removed_root_are_reported_by_their_own_path(tmp_path: Path) -> None:
+    settings_path = tmp_path / "code" / "ar-memory" / "system" / "settings.md"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text("# Settings\n", encoding="utf-8")
+
+    error = _refusal(lambda: memory_roots_from_settings(settings_path, "repo-a"))
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
+    assert error.artifact == settings_path.as_posix()
+    assert settings_path.is_file()
+
+
+def test_onboarding_root_inside_the_removed_root_is_reported(tmp_path: Path) -> None:
+    onboarding_root = tmp_path / "code" / "ar-memory" / "onboarding"
+    onboarding_root.mkdir(parents=True)
+
+    error = _refusal(lambda: infer_topology_from_onboarding_root(onboarding_root))
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
+    assert error.artifact == onboarding_root.as_posix()
+
+
+def test_configured_memory_root_refuses_the_removed_layout(tmp_path: Path) -> None:
+    code_repo = tmp_path / "code"
+    legacy_root = code_repo / "ar-memory"
+    legacy_root.mkdir(parents=True)
+
+    error = _refusal(lambda: default_memory_root(code_repo, tmp_path / "coordination", "repo-a"))
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
+    assert error.artifact == legacy_root.resolve().as_posix()
+    assert legacy_root.is_dir()
+
+
+def test_contract_vocabulary_derivation_refuses_the_removed_root(tmp_path: Path) -> None:
+    code_repo = tmp_path / "code"
+    legacy_root = code_repo / "ar-memory"
+    legacy_root.mkdir(parents=True)
+
+    error = _refusal(lambda: memory_mode_for_repository(code_repo, legacy_root))
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
+    assert error.artifact == legacy_root.resolve().as_posix()
+
+
+def test_resolve_context_tool_refuses_the_removed_topology() -> None:
+    error = _refusal(lambda: _topology(REMOVED_INTERNAL))
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
+    assert _topology(None) is None
+    assert _topology("external") == "external"
+
+
+def test_baseline_topology_flag_refuses_the_removed_topology() -> None:
+    error = _refusal(lambda: _normalize_topology(REMOVED_INTERNAL))
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
+    assert _normalize_topology(None) is None
+    assert _normalize_topology("external") == "external"
+
+
+def test_contract_writer_refuses_a_removed_memory_mode_request(tmp_path: Path) -> None:
+    """Nothing in this package may put the removed token on disk."""
+    error = _refusal(
+        lambda: default_contract(
+            ContractTask(
+                name="task",
+                repo_name="repo-a",
+                coordination_root=tmp_path / "coordination",
+                workflow_kind="light-task",
+                memory_mode=REMOVED_INTERNAL,
+            ),
+            leaf=LeafIdentity(worktree_name="leaf", leaf_id="leaf-1"),
+            code=RepoBranchPlan(
+                repo_path=tmp_path / "code",
+                source_branch="main",
+                work_branch="ar/leaf",
+                base_commit="a" * 40,
+            ),
+        )
+    )
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
+
+
+def test_contract_writers_refuse_a_disabled_request_as_an_opt_out(tmp_path: Path) -> None:
+    """Both factories refuse the opt-out before anything reaches the disk."""
+    task = ContractTask(
+        name="task",
+        repo_name="repo-a",
+        coordination_root=tmp_path / "coordination",
+        workflow_kind="light-task",
+        memory_mode=REMOVED_DISABLED,
+    )
+    code = RepoBranchPlan(
+        repo_path=tmp_path / "code",
+        source_branch="main",
+        work_branch="ar/leaf",
+        base_commit="a" * 40,
+    )
+    leaf_error = _opt_out_refusal(
+        lambda: default_contract(
+            task,
+            leaf=LeafIdentity(worktree_name="leaf", leaf_id="leaf-1"),
+            code=code,
+        )
+    )
+    _assert_names_the_opt_out_refusal(leaf_error)
+    series_error = _opt_out_refusal(
+        lambda: default_series_contract(task, code=code, task_root=tmp_path / "tasks")
+    )
+    _assert_names_the_opt_out_refusal(series_error)
+
+
+# --------------------------------------------------------------------------------------
+# Existing state is reported, never rewritten
+# --------------------------------------------------------------------------------------
+
+
+def _external_contract(root: Path):
+    code_repo = root / "code"
+    init_repo(code_repo, "main")
+    memory_repo = root / "memory"
+    init_repo(memory_repo, "main")
+    return default_contract(
+        ContractTask(
+            name="task",
+            repo_name="repo-a",
+            coordination_root=root / "coordination",
+            workflow_kind="light-task",
+            memory_mode="external",
+        ),
+        leaf=LeafIdentity(worktree_name="leaf", leaf_id="leaf-1"),
+        code=RepoBranchPlan(
+            repo_path=code_repo,
+            source_branch="main",
+            work_branch="ar/leaf",
+            base_commit="a" * 40,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=memory_repo,
+            source_branch="main",
+            work_branch="ar/leaf",
+            base_commit="b" * 40,
+        ),
+    )
+
+
+def test_a_contract_recording_the_removed_mode_is_reported_and_left_byte_identical(
+    tmp_path: Path,
+) -> None:
+    contract = _external_contract(tmp_path)
+    write_contract(contract.contract_path, contract)
+    text = contract.contract_path.read_text(encoding="utf-8")
+    assert "memory_mode: external" in text
+    contract.contract_path.write_text(
+        text.replace("memory_mode: external", "memory_mode: internal", 1), encoding="utf-8"
+    )
+    before = contract.contract_path.read_bytes()
+
+    error = _refusal(lambda: load_contract(contract.contract_path))
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
+    assert error.artifact == contract.contract_path.as_posix()
+    assert contract.contract_path.read_bytes() == before, "existing state must not be rewritten"
+
+
+def test_a_contract_recording_disabled_stays_readable_and_byte_identical(
+    tmp_path: Path,
+) -> None:
+    """The second removal reads the opposite way: status, attach and guarded abandon need it."""
+    contract = _external_contract(tmp_path)
+    write_contract(contract.contract_path, contract)
+    text = contract.contract_path.read_text(encoding="utf-8")
+    contract.contract_path.write_text(
+        text.replace("memory_mode: external", "memory_mode: disabled", 1), encoding="utf-8"
+    )
+    before = contract.contract_path.read_bytes()
+
+    loaded = load_contract(contract.contract_path)
+    assert loaded.memory_mode == "disabled"
+    assert loaded.unknown_cells == ()
+    assert contract.contract_path.read_bytes() == before, "existing state must not be rewritten"
+
+
+def test_a_removed_token_is_refused_while_an_unknown_token_still_degrades(tmp_path: Path) -> None:
+    """The reader's tolerance is unchanged for unknown tokens; only the removal is a refusal."""
+    contract = _external_contract(tmp_path)
+    write_contract(contract.contract_path, contract)
+    text = contract.contract_path.read_text(encoding="utf-8")
+    contract.contract_path.write_text(
+        text.replace("memory_mode: external", "memory_mode: hybrid", 1), encoding="utf-8"
+    )
+    loaded = load_contract(contract.contract_path)
+    assert loaded.memory_mode == "external"
+    assert loaded.unknown_cells
+
+
+# --------------------------------------------------------------------------------------
+# external is unregressed
+# --------------------------------------------------------------------------------------
+
+
+def test_external_selection_still_resolves(tmp_path: Path) -> None:
+    code_repo = tmp_path / "code"
+    code_repo.mkdir()
+    memory_root = tmp_path / "coordination" / "memory-repos" / "ar-repo-a"
+    memory_root.mkdir(parents=True)
+
+    selection = detect_coordination_selection(
+        "repo-a", code_repo, coordination_root_hint=tmp_path / "coordination"
+    )
+    assert selection.topology == "external"
+    assert selection.memory_root == memory_root.resolve()
+
+    requested = detect_coordination_selection(
+        "repo-a",
+        code_repo,
+        requested_topology="external",
+        coordination_root_hint=tmp_path / "coordination",
+    )
+    assert requested.topology == "external"
+
+
+def test_default_memory_root_is_the_external_root_when_no_removed_layout_exists(
+    tmp_path: Path,
+) -> None:
+    code_repo = tmp_path / "code"
+    code_repo.mkdir()
+    resolved = default_memory_root(code_repo, tmp_path / "coordination", "repo-a")
+    assert resolved == tmp_path / "coordination" / "memory-repos" / "ar-repo-a"
+
+
+def test_an_external_contract_round_trips(tmp_path: Path) -> None:
+    contract = _external_contract(tmp_path)
+    write_contract(contract.contract_path, contract)
+    loaded = load_contract(contract.contract_path)
+    assert loaded.memory_mode == "external"
+    assert loaded.memory_repo_path == contract.memory_repo_path
+    assert loaded.memory_worktree == contract.memory_worktree
+    assert loaded.ledger_path == contract.ledger_path
+    assert loaded.unknown_cells == ()
+    assert loaded.contract_path == contract.contract_path
+
+
+def test_cli_never_advertises_a_removed_member(capsys: pytest.CaptureFixture[str]) -> None:
+    """The documented call surface is the rendered help, so that is what is checked."""
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["start", "--help"])
+    help_text = capsys.readouterr().out
+    assert REMOVED_INTERNAL not in help_text
+    assert "external" in help_text
+    # `disabled` appears only as the named removal with its own refusal status.
+    assert "naming the removed `disabled` mode" in help_text
+    assert "memory-opt-out-refused" in help_text
+    # The removed choice is documented in prose but never offered as CLI syntax.
+    assert "{disabled-memory}" not in help_text
+
+
+def test_cli_parses_the_supported_set_and_hands_removed_tokens_to_their_typed_refusals() -> None:
+    supported = build_parser().parse_args(
+        ["start", "--worktree-name", "leaf", "--memory-mode", "external"]
+    )
+    assert supported.memory_mode == "external"
+
+    # Each removed token still parses here on purpose: argparse `choices` would reject it
+    # before the application could answer with its own typed status, and a bare
+    # "invalid choice" does not name the removal. The refusal is asserted where a
+    # developer actually meets it.
+    for token, state in (
+        (REMOVED_INTERNAL, "memory-mode-unsupported"),
+        (REMOVED_DISABLED, "memory-opt-out-refused"),
+    ):
+        parsed = build_parser().parse_args(
+            ["start", "--worktree-name", "leaf", "--memory-mode", token]
+        )
+        refused = start_result(
+            WorktreeArgs(
+                code_repository_name="repo-a",
+                code_repository_root=Path("/nonexistent/code"),
+                task_name="task",
+                worktree_name=parsed.worktree_name,
+                memory_mode=parsed.memory_mode,
+            )
+        )
+        assert refused.returncode == 2
+        assert refused.payload["state"] == state
+        assert refused.payload["status"] == state
+
+
+def test_the_start_tool_documentation_names_external_only_and_both_refusals(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The MCP docstring is a documented call surface, so it is checked as one."""
+    import inspect  # noqa: PLC0415 - one local import keeps the collector light
+
+    source = inspect.getsource(worktrees_registration)
+    assert "Reference: docs/reference/mcp-tools.md." in source
+    # The concise description points to the reference; the CLI help owns mode details.
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["start", "--help"])
+    documented = " ".join(capsys.readouterr().out.split())
+    assert "`external` is the only startable mode" in documented
+    with pytest.raises(MemoryModeUnsupportedError) as refused:
+        require_supported_memory_mode(REMOVED_INTERNAL)
+    assert refused.value.status == "memory-mode-unsupported"
+    assert "memory-opt-out-refused" in documented
+    assert "memory_mode is 'internal'" not in source
+    assert "memory_mode is 'external' or 'disabled'" not in source
+
+
+# --------------------------------------------------------------------------------------
+# L12R-1: the typed refusal must reach the operator on every contract-report surface
+# --------------------------------------------------------------------------------------
+#
+# Each surface below reads the contract inside `except (ContractError, OSError, UnicodeError,
+# ValueError)`, and `MemoryModeUnsupportedError` subclasses `ValueError` — so without an explicit
+# clause ahead of the generic one the operator is told only that the document is "unreadable or
+# invalid". These cases assert the published payload, not the raised error: the value the contract
+# records, the supported set and the migration route must all be visible.
+#
+# The fixture is the repository boundary these surfaces live on (a published enclosure over a real
+# code and memory repository), so the cases carry the integration marker.
+
+REPO_NAME = "repo-a"
+_LEAF_ID = "260698-l1"
+
+
+def _published_fixture(root: Path, *, rewrite_mode: bool = True) -> tuple[WorktreeContract, Path]:
+    """Publish one real enclosure, then make its contract record the removed mode.
+
+    ``rewrite_mode=False`` stops after publication, for a case that has to drive another
+    production step over the readable contract before the removed mode appears on disk.
+    """
+    workspace = root / "workspace"
+    code_repo = workspace / REPO_NAME
+    coordination_root = workspace / "ar-coordination"
+    memory_repo = coordination_root / "memory-repos" / f"ar-{REPO_NAME}"
+    base = init_repo(code_repo, "main")
+    memory_base = init_repo(memory_repo, "main")
+    git(code_repo, "branch", "super", "main")
+    git(code_repo, "branch", "ar/01-demo-leaf", "super")
+    contract = default_contract(
+        ContractTask(
+            name="260698_demo-series",
+            repo_name=REPO_NAME,
+            coordination_root=coordination_root,
+            workflow_kind="light-task",
+            memory_mode="external",
+        ),
+        leaf=LeafIdentity(worktree_name="01-demo-leaf", leaf_id=_LEAF_ID),
+        code=RepoBranchPlan(
+            repo_path=code_repo,
+            source_branch="super",
+            work_branch="ar/01-demo-leaf",
+            base_commit=base,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=memory_repo,
+            source_branch="main",
+            work_branch="ar/01-demo-leaf",
+            base_commit=memory_base,
+        ),
+    )
+    write_contract(contract.contract_path, contract)
+    location = publish_test_enclosure(contract, contract.contract_path.read_text(encoding="utf-8"))
+    if rewrite_mode:
+        remove_contract_mode(contract.contract_path, "external")
+    return contract, location.contract_path
+
+
+def remove_contract_mode(contract_path: Path, written: str) -> None:
+    """Rewrite one written cell to the removed mode, so the reader meets real existing state."""
+    text = contract_path.read_text(encoding="utf-8")
+    assert f"memory_mode: {written}" in text
+    contract_path.write_text(
+        text.replace(f"memory_mode: {written}", "memory_mode: internal", 1), encoding="utf-8"
+    )
+
+
+def _config(root: Path, contract: WorktreeContract):
+    path = root / "mcp-settings.json"
+    document: dict[str, object] = {
+        "version": 1,
+        "coordinationRoot": contract.coordination_root.as_posix(),
+        "workspaceRoot": (root / "workspace").as_posix(),
+        "repositories": {REPO_NAME: {}},
+        "providers": {},
+        "timeoutCaps": {"toolSeconds": 30, "providerSetupSeconds": 1800},
+        "benchmarksEnabled": False,
+    }
+    path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+    return load_config(path)
+
+
+def _grant_fixture_leaf(contract: WorktreeContract) -> TaskDocumentRef:
+    """Publish the fixture's canonical leaf and the grant it started with."""
+    task_root = contract.task_root
+    task_root.mkdir(parents=True, exist_ok=True)
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "TEST-DEMO-MASTER",
+                "slug": "260698_demo-series",
+                "title": "Demo series",
+                "kind": "master",
+                "status": "inProgress",
+                "repo": REPO_NAME,
+                "createdAt": "2026-10-06T00:00:00+00:00",
+                "executionNature": "atomic",
+                "subTasks": [
+                    SubTaskRef(
+                        number=_LEAF_ID,
+                        name="Demo leaf",
+                        file="01-demo-leaf.md",
+                        status="planning",
+                    ).model_dump(mode="json"),
+                ],
+            }
+        ),
+    )
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": _LEAF_ID,
+                "slug": "01-demo-leaf",
+                "title": "Demo leaf",
+                "kind": "subTask",
+                "status": "planning",
+                "repo": REPO_NAME,
+                "createdAt": "2026-10-06T00:00:00+00:00",
+                "objective": "Exercise the opt-out refusal.",
+                "requirements": ["The fixture leaf is refused at admission."],
+            }
+        ),
+    )
+    ref = TaskDocumentRef(repository=REPO_NAME, path="260698_demo-series/01-demo-leaf.json")
+    write_grant_file(
+        grant_path_for(contract.coordination_root, ref),
+        DirectExecutionGrant(
+            leaf=ref,
+            granted_by="architect",
+            granted_at="2026-10-06T00:00:00+00:00",
+            granter_agent_id="fixture",
+        ),
+    )
+    return ref
+
+
+def _assert_operator_payload(payload: Mapping[str, Any], *, artifact: str) -> None:
+    """The removal facts an operator needs, wherever the payload keeps them."""
+    assert payload["status"] == "memory-mode-unsupported"
+    assert payload["requested"] == REMOVED_INTERNAL
+    assert payload["supported"] == list(EXPECTED_MODES)
+    assert payload["remedies"]
+    assert artifact in str(payload["detail"])
+
+
+@pytest.mark.integration
+def test_worktree_status_packet_reports_the_removed_mode_to_the_operator(tmp_path: Path) -> None:
+    contract, contract_path = _published_fixture(tmp_path)
+    summary = worktree_status_packet(_config(tmp_path, contract), contract_path)
+
+    assert summary.state == "invalidContract"
+    assert summary.status == "memory-mode-unsupported"
+    assert summary.error is not None and contract_path.as_posix() in summary.error
+    evidence = summary.errorEvidence
+    assert evidence is not None
+    observed = cast("Mapping[str, Any]", evidence["observed"])
+    assert observed["requested"] == REMOVED_INTERNAL
+    assert observed["supported"] == list(EXPECTED_MODES)
+    assert observed["remedies"]
+
+
+@pytest.mark.integration
+def test_worktree_status_payload_reports_the_removed_mode_to_the_operator(tmp_path: Path) -> None:
+    """The assembled tool payload, not just the context packet's summary."""
+    contract, contract_path = _published_fixture(tmp_path)
+    config = _config(tmp_path, contract)
+    with tool_call_context("worktree_status", {}, config=config):
+        payload = worktree_status_payload(
+            config,
+            TaskRef(repo_id=REPO_NAME, contract_path=contract_path.as_posix()),
+        )
+    whole = json.loads(Path(payload["log"]).read_text(encoding="utf-8"))
+    assert payload["status"] == whole["status"]
+    _assert_operator_payload(whole, artifact=contract_path.as_posix())
+
+
+@pytest.mark.integration
+def test_configured_admission_reports_the_removed_mode_with_its_own_reason(tmp_path: Path) -> None:
+    contract, contract_path = _published_fixture(tmp_path)
+    refused = admit_configured_contract(_config(tmp_path, contract), contract_path.as_posix())
+
+    assert isinstance(refused, ConfiguredContractRefused)
+    assert refused.reason == "memory-mode-unsupported"
+    assert refused.status == "memory-mode-unsupported"
+    assert contract_path.as_posix() in refused.detail
+    assert refused.expected["supported"] == list(EXPECTED_MODES)
+    observed = cast("Mapping[str, Any]", refused.observed["observed"])
+    assert observed["requested"] == REMOVED_INTERNAL
+
+
+@pytest.mark.integration
+def test_terminal_admission_reports_the_removed_mode_on_a_surviving_contract(
+    tmp_path: Path,
+) -> None:
+    contract, contract_path = _published_fixture(tmp_path, rewrite_mode=False)
+    _, location = configured_lifecycle_operation_location(
+        _config(tmp_path, contract), contract_path
+    )
+    terminalize_test_enclosure(location)
+    # The mode is recorded after the archive: the archive itself reads the contract, and the
+    # state this case is about is the surviving contract of an already-terminal enclosure.
+    remove_contract_mode(contract_path, "external")
+
+    refused = admit_configured_terminal_contract(
+        _config(tmp_path, contract), contract_path.as_posix()
+    )
+    assert isinstance(refused, ConfiguredContractRefused)
+    assert refused.reason == "memory-mode-unsupported"
+    assert refused.status == "memory-mode-unsupported"
+    observed = cast("Mapping[str, Any]", refused.observed["observed"])
+    assert observed["requested"] == REMOVED_INTERNAL
+    assert observed["remedies"]
+
+
+@pytest.mark.integration
+def test_direct_landing_reports_the_removed_mode_to_the_operator(tmp_path: Path) -> None:
+    contract, contract_path = _published_fixture(tmp_path)
+    leaf_ref = _grant_fixture_leaf(contract)
+    payload = direct_landing_tool(
+        _config(tmp_path, contract),
+        DirectLandingRequest(
+            contract_path=contract_path.as_posix(),
+            code_commit="a" * 40,
+            leaf_task_document_ref=leaf_ref,
+        ),
+    )
+    _assert_operator_payload(payload, artifact=contract_path.as_posix())
+
+
+@pytest.mark.integration
+def test_the_direct_landing_reader_answers_with_the_refusal(tmp_path: Path) -> None:
+    """The deeper net behind admission: the ``:152`` catch itself, reached directly."""
+    contract, contract_path = _published_fixture(tmp_path)
+    config = _config(tmp_path, contract)
+
+    answer = _read_direct_contract(config, contract_path)
+    assert isinstance(answer, dict)
+    _assert_operator_payload(answer, artifact=contract_path.as_posix())
+
+
+@pytest.mark.integration
+def test_unstarted_evidence_reports_the_removed_mode_as_its_own_fact(tmp_path: Path) -> None:
+    contract, _contract_path = _published_fixture(tmp_path)
+    binding = LeafTaskBinding(
+        coordination_root=contract.coordination_root,
+        repo_id=REPO_NAME,
+        task_name="260698_demo-series",
+        task_root=contract.task_root,
+        parent_path=contract.task_root,
+        parent=cast("Any", None),
+        row=SubTaskRef(number=_LEAF_ID, name="leaf"),
+        leaf_json_path=contract.task_root / "leaf.json",
+        leaf_markdown_path=contract.task_root / "leaf.md",
+        leaf=None,
+        task_ref=cast("Any", None),
+    )
+    facts: list[dict[str, Any]] = []
+    severity: list[Literal["started", "ambiguous"]] = []
+
+    got, failure = _contract_fact(binding, facts, severity)
+
+    assert got is None
+    assert failure is not None
+    assert failure["state"] == "removed-mode"
+    assert failure["requested"] == REMOVED_INTERNAL
+    assert failure["supported"] == list(EXPECTED_MODES)
+    assert failure["remedies"]
+    assert severity == ["ambiguous"]
+    mode_facts = [fact for fact in facts if fact["kind"] == "memoryMode"]
+    assert mode_facts and mode_facts[-1]["state"] == "removed"
+
+
+@pytest.mark.integration
+def test_a_removed_mode_answer_never_claims_publication_was_lost(tmp_path: Path) -> None:
+    """The shared observation synthesises a publication-loss decision for any read failure.
+
+    Nothing was lost here -- the contract is present and readable -- so that synthesis must not
+    survive as the operator's reason on either worktree_status path.
+    """
+    contract, contract_path = _published_fixture(tmp_path)
+    config = _config(tmp_path, contract)
+
+    summary = worktree_status_packet(config, contract_path)
+    payload = worktree_status_payload(
+        config, TaskRef(repo_id=REPO_NAME, contract_path=contract_path.as_posix())
+    )
+
+    for answer in (summary.status, payload["status"], payload["state"]):
+        assert answer == "memory-mode-unsupported"
+
+
+# --------------------------------------------------------------------------------------
+# L12R-2: an unknown token is invalid input, not a removal
+# --------------------------------------------------------------------------------------
+
+
+def test_the_flag_narrowers_do_not_report_a_typo_as_a_removal() -> None:
+    """Contrast cases for the two CLI narrowers, against the shared helper's behaviour."""
+    assert _topology("external") == "external"
+    assert _normalize_topology("external") == "external"
+
+    for narrower in (_topology, _normalize_topology):
+        with pytest.raises(ValueError) as raised:
+            narrower("bogus")
+        assert not isinstance(raised.value, MemoryModeUnsupportedError), narrower.__name__
+        assert not isinstance(raised.value, MemoryOptOutRefusedError), narrower.__name__
+        assert "external" in str(raised.value)
+
+        with pytest.raises(MemoryModeUnsupportedError):
+            narrower(REMOVED_INTERNAL)
+
+        with pytest.raises(MemoryOptOutRefusedError):
+            narrower(REMOVED_DISABLED)
+
+
+# --------------------------------------------------------------------------------------
+# L12R-3: the instruction and documentation plane is guarded by a failing case
+# --------------------------------------------------------------------------------------
+#
+# The removal's strongest claim -- that nothing still *teaches* the mode -- had no executable
+# guard: a reverted canonical skill propagated to all nine generated copies left every generator
+# check green, and a wholesale revert of `docs/architecture.md` left the whole unit population
+# green. Each row below names phrases only the old doctrine used (which must be absent). A row
+# may pair them with a phrase the correction introduced (which must be present). A revert
+# therefore fails here, not only in review.
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+CORRECTED_SURFACES: tuple[tuple[str, tuple[str, ...], str | None], ...] = (
+    (
+        "docs/architecture.md",
+        (
+            "Internal memory is the default",
+            "my-app/ar-memory/",
+            "repo-local internal memory at `<repo>/ar-memory/`",
+        ),
+        None,
+    ),
+    (
+        "docs/concepts.md",
+        ("Internal memory is the default",),
+        None,
+    ),
+    (
+        "docs/getting-started.md",
+        (
+            "creates repo-local internal memory",
+            "the recommended default is repo-local internal memory",
+        ),
+        None,
+    ),
+    (
+        "docs/FAQ.md",
+        ("Most users should start with internal memory",),
+        None,
+    ),
+    (
+        "docs/reference/settings-json.md",
+        ("## Internal Memory Example",),
+        "## Memory Repo Example",
+    ),
+    (
+        "system/defaults/examples/memory-repo/settings.md",
+        ("- repo-local internal memory:",),
+        "was removed from the product",
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "forbidden", "required"),
+    CORRECTED_SURFACES,
+    ids=[row[0].rsplit("/", 2)[-1] + "@" + row[0].split("/")[0] for row in CORRECTED_SURFACES],
+)
+def test_the_instruction_and_documentation_plane_never_teaches_the_removed_default(
+    relative_path: str, forbidden: tuple[str, ...], required: str | None
+) -> None:
+    text = (_REPO_ROOT / relative_path).read_text(encoding="utf-8")
+    for phrase in forbidden:
+        assert phrase not in text, f"{relative_path} re-teaches the removed default: {phrase!r}"
+    if required is not None:
+        assert required in text, f"{relative_path} lost the corrected statement: {required!r}"
+
+
+# --------------------------------------------------------------------------------------
+# D-34: the two shapes an onboarding root legitimately takes
+# --------------------------------------------------------------------------------------
+
+
+def test_a_leaf_enclosures_memory_worktree_is_a_supported_onboarding_root(tmp_path: Path) -> None:
+    """`worktree_group_for` places a leaf's memory at worktrees/<repo>/<group>/memory-<name>.
+
+    That is the exact root the contract-scoped memory-quality route measures -- it takes the root
+    from the contract rather than from path inference -- so refusing it here refused a location the
+    product itself uses, and left a curator who wanted the module's own answer with no route but
+    the MCP tool (D-34).
+    """
+    onboarding_root = (
+        tmp_path
+        / "coordination/worktrees/repo-a/260915-demo-l1-ar/memory-260915-demo-l1/onboarding"
+    )
+    onboarding_root.mkdir(parents=True)
+
+    assert infer_topology_from_onboarding_root(onboarding_root) == "external"
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        # the `worktrees` segment is what makes the shape decidable, so a lookalike is not it
+        "coordination/not-worktrees/repo-a/group-ar/memory-leaf/onboarding",
+        # a leaf enclosure's CODE worktree has no `memory-` prefix
+        "coordination/worktrees/repo-a/group-ar/leaf/onboarding",
+        # an empty name after the prefix names nothing
+        "coordination/worktrees/repo-a/group-ar/memory-/onboarding",
+        # one segment short: this is not an enclosure at all
+        "coordination/worktrees/repo-a/memory-leaf/onboarding",
+    ],
+)
+def test_a_directory_that_merely_resembles_a_memory_worktree_is_refused(
+    tmp_path: Path, relative: str
+) -> None:
+    """Acceptance is decoded structurally, never guessed from a name."""
+    onboarding_root = tmp_path / relative
+    onboarding_root.mkdir(parents=True)
+
+    with pytest.raises(ValueError) as raised:
+        infer_topology_from_onboarding_root(onboarding_root)
+
+    assert raised.value.args[0].startswith("onboarding_root must point to a supported memory")
+
+
+def test_the_onboarding_root_refusal_names_both_shapes_and_the_root_received(
+    tmp_path: Path,
+) -> None:
+    """A refusal that names only the shape that does NOT work sends the caller in a circle."""
+    onboarding_root = tmp_path / "elsewhere/onboarding"
+    onboarding_root.mkdir(parents=True)
+
+    with pytest.raises(ValueError) as raised:
+        infer_topology_from_onboarding_root(onboarding_root)
+
+    detail = raised.value.args[0]
+    assert "memory-repos/ar-<code-repository-name>/onboarding" in detail
+    assert "worktrees/<code-repository-name>/<group>/memory-<worktree-name>/onboarding" in detail
+    assert onboarding_root.as_posix() in detail
+    assert "contract-scoped memory-quality route already measures" in detail
+
+
+def test_the_cli_measures_a_leaf_memory_worktree_and_refuses_an_unsupported_root(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The two answers must differ: one measures the requested tree, the other refuses by name.
+
+    Red before the fix: the worktree-shaped root raised out of the resolver, so a curator running
+    the module for a leaf got a traceback instead of the module's own answer, while the same check
+    inside `memory_quality_check` answered for that exact tree.
+    """
+    code_repository_root = tmp_path / "repo-a"
+    code_repository_root.mkdir()
+    init_repo(code_repository_root)
+    (code_repository_root / "src.py").write_text("VALUE = 1\n", encoding="utf-8")
+    git(code_repository_root, "add", "src.py")
+    git(code_repository_root, "commit", "-qm", "source")
+    official = tmp_path / "coordination/memory-repos/ar-repo-a"
+    (official / "system").mkdir(parents=True)
+    (official / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
+    (official / "onboarding").mkdir()
+    enclosure = tmp_path / "coordination/worktrees/repo-a/260915-demo-l1-ar/memory-260915-demo-l1"
+    (enclosure / "onboarding").mkdir(parents=True)
+
+    status = check_missing_onboarding_main(
+        [
+            "--code-repository-root",
+            str(code_repository_root),
+            "--onboarding-root",
+            str(enclosure / "onboarding"),
+            "--format",
+            "json",
+        ]
+    )
+    measured = json.loads(capsys.readouterr().out)
+    assert status == 0
+    assert measured["onboardingRoot"] == (enclosure / "onboarding").resolve().as_posix()
+    assert measured["onboardingRoot"] != (official / "onboarding").resolve().as_posix()
+
+    unsupported = tmp_path / "elsewhere/onboarding"
+    unsupported.mkdir(parents=True)
+    with pytest.raises(ValueError) as raised:
+        check_missing_onboarding_main(
+            [
+                "--code-repository-root",
+                str(code_repository_root),
+                "--onboarding-root",
+                str(unsupported),
+                "--format",
+                "json",
+            ]
+        )
+    assert unsupported.as_posix() in raised.value.args[0]
+    assert measured["onboardingRoot"] != unsupported.as_posix()

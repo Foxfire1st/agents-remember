@@ -1,96 +1,91 @@
 {
+  "buildCurrentness": {
+    "mode": "installed",
+    "state": "stale",
+    "loadedDigest": "81c934bd195c8eb4ce33235c6be5ea0ed51e2ad297c8718b53127aa3bb59f4a2",
+    "installedDigest": "294b1e88f7de6c48d276eaa6bc69473f36d14054477a9f95257a0873e5fe1b60",
+    "firstSeenAt": "2026-06-14T08:59:00+00:00",
+    "reason": "Installed Python files changed after this server started.",
+    "remedy": "Restart the dashboard."
+  },
+  "servingProcessId": 123,
   "activeWorktreeGroups": ["sim-group"],
   "analytics": {
-    "agentPickups": [
-      {
-        "ageSeconds": 50.0,
-        "agentId": "agent-worker-1",
-        "artifactPath": "/tmp/brief.md",
-        "attemptCount": 1,
-        "deliveredToSession": "session-7",
-        "deliveryState": "delivered",
-        "entryId": "entry-1",
-        "escalatedAt": "2026-06-14T09:04:00+00:00",
-        "gateId": "GATE-1",
-        "id": "pickup-1",
-        "lastAttemptAt": "2026-06-14T09:00:10+00:00",
-        "lifecycleId": "sim-replay-lifecycle",
-        "messageKind": "message",
-        "nextAttemptAt": "2026-06-14T09:05:10+00:00",
-        "ownerAgentId": "agent-worker-1",
-        "ownerLifecycleId": "sim-replay-lifecycle",
-        "ownerRole": "worker",
-        "ownerTaskDocumentRef": {
-          "path": "sim-master/SIM-1.json",
-          "repository": "sim-repo"
-        },
-        "recipientRole": "worker",
-        "senderAgentId": "agent-manager-1",
-        "senderRole": "manager",
-        "state": "check-chat",
-        "subjectTaskDocumentRef": {
-          "path": "sim-master/SIM-1.json",
-          "repository": "sim-repo"
-        },
-        "taskDocumentRef": {
-          "path": "sim-master/SIM-1.json",
-          "repository": "sim-repo"
-        },
-        "ttlSeconds": 900.0
-      }
-    ],
     "attentionQueue": [
       {
-        "detail": "approve the gate?",
-        "enclosure": "sim-enclosure",
-        "gateId": "GATE-1",
-        "id": "blocked-gate:sim-replay-lifecycle",
-        "kind": "blocked-gate",
-        "lane": "lifecycle",
-        "lifecycleId": "sim-replay-lifecycle",
-        "providerId": "grepai-memory",
-        "repoId": "agents-remember",
+        "id": "actionable-drift:agents-remember:main",
+        "kind": "actionable-drift",
         "severity": "warn",
-        "signalTs": "2026-06-14T09:00:35+00:00",
-        "title": "Gate \u2014 input needed",
-        "waitSeconds": 20
-      },
-      {
-        "id": "provider-down:codegraphcontext-code",
-        "kind": "provider-down",
         "lane": "repo",
-        "providerId": "codegraphcontext-code",
+        "title": "1 actionable drift in agents-remember",
+        "detail": "branch main · memory /memory/ar-agents-remember · report /tmp/drift-report.md · checked 2026-06-14T08:59:00+00:00",
+        "waitSeconds": 12.0,
         "repoId": "agents-remember",
-        "severity": "alarm",
-        "signalTs": "2026-06-14T08:56:00+00:00",
-        "title": "Code index is down",
-        "waitSeconds": 300
+        "actionableFingerprint": "d32d0daec29e1f08e6a7af97063c01f282c51f0d70a9267aba328776b219dba3",
+        "itemClass": "operational",
+        "dismissible": true
       },
       {
-        "detail": "the leaf landed; the enclosure is still on disk",
-        "enclosure": "sim-enclosure",
-        "id": "cleanup-pending:sim-group",
-        "kind": "cleanup-pending",
+        "id": "blocked-start:sim-group",
+        "kind": "blocked-start",
+        "severity": "warn",
         "lane": "worktree",
+        "title": "Worktree start blocked",
+        "detail": "Fixture prerequisite is unavailable",
+        "enclosure": "sim-group",
+        "itemClass": "operational",
+        "dismissible": true
+      },
+      {
+        "id": "permission-wait:agent-7",
+        "kind": "permission-wait",
+        "severity": "warn",
+        "lane": "agent",
+        "title": "Agent waits for permission",
+        "agentId": "agent-7",
+        "agentRole": "worker",
+        "promptId": "prompt-7",
+        "heldMessageId": "message-7",
+        "itemClass": "action",
+        "dismissible": true,
+        "waitSeconds": 45
+      },
+      {
+        "id": "task-landed:L190:occ-1",
+        "kind": "task-landed",
         "severity": "info",
-        "title": "Worktree awaiting cleanup",
-        "waitSeconds": 900
+        "lane": "task",
+        "title": "Leaf L190 landed",
+        "taskKey": "L190",
+        "taskReference": {
+          "path": "L190/task.json",
+          "repository": "agents-remember"
+        },
+        "occurrenceId": "occ-1",
+        "itemClass": "notice",
+        "dismissible": true
       }
     ],
     "driftSnapshots": [
       {
-        "actionableCount": 0,
+        "repository": "agents-remember",
         "branch": "main",
-        "checkedAt": "2026-06-14T08:59:00+00:00",
         "counts": {
-          "drifted": 0,
-          "ok": 300
+          "up to date": 299,
+          "drifted": 1,
+          "missing verification": 0,
+          "missing": 0,
+          "orphaned": 0,
+          "disabled": 0,
+          "unsupported": 0
         },
+        "actionableCount": 1,
+        "actionableFingerprint": "d32d0daec29e1f08e6a7af97063c01f282c51f0d70a9267aba328776b219dba3",
+        "checkedAt": "2026-06-14T08:59:00+00:00",
+        "sourceRoot": "/repos/agents-remember",
         "memoryRoot": "/memory/ar-agents-remember",
         "reportPath": "/tmp/drift-report.md",
-        "repository": "agents-remember",
-        "snapshotStaleSeconds": 12.0,
-        "sourceRoot": "/repos/agents-remember"
+        "snapshotStaleSeconds": 12.0
       }
     ],
     "engineProcesses": [
@@ -128,23 +123,19 @@
           "factState": "observed",
           "path": "/worktrees/agents-remember/sim-group"
         },
-        "completedPhases": ["worktree-add", "cgc-seed"],
-        "currentPhase": "grepai-clone",
         "edges": [
           {
-            "detail": "seeded from the worktree checkout",
-            "fromNode": "code-worktree",
-            "id": "cgc-seed",
-            "kind": "cgc-seed",
-            "label": "CGC seed",
+            "detail": "worktree copied from the code source",
+            "fromNode": "code-source",
+            "id": "code-worktree-add",
+            "kind": "worktree-add",
+            "label": "add code worktree",
             "state": "complete",
-            "toNode": "cgc-engine"
+            "toNode": "code-worktree"
           }
         ],
         "enclosure": "sim-enclosure",
-        "failedPhases": [],
         "health": "running",
-        "heartbeatAgeSeconds": 4.0,
         "humanReviewStatus": "pending",
         "id": "sim-enclosure",
         "integrationStatus": "not-started",
@@ -158,7 +149,7 @@
             "label": "origin/main",
             "lastAttemptAt": "2026-06-14T08:59:00+00:00",
             "observedAt": "2026-06-14T09:00:00+00:00",
-            "staleSeconds": 60.0,
+            "staleSeconds": 60,
             "state": "behind"
           },
           {
@@ -204,21 +195,10 @@
         "missingFacts": [],
         "nextAction": "worktree_sync",
         "phase": "worktree-started",
-        "providers": [
-          {
-            "factState": "observed",
-            "id": "codegraphcontext-code",
-            "role": "code",
-            "runtimeState": "nominal"
-          }
-        ],
         "repoName": "agents-remember",
-        "retryArgs": {
-          "group": "sim-group"
-        },
-        "seedFallback": false,
-        "setupState": "complete",
-        "sourceFiles": ["/tasks/sim/enclosures/sim/series-contract.md"],
+        "sourceFiles": [
+          "/tasks/sim/enclosures/sim/series-contract.md"
+        ],
         "sourceLineage": {
           "edges": [
             {
@@ -308,10 +288,8 @@
           "branch": "sim/SIM-2",
           "factState": "missing"
         },
-        "completedPhases": [],
         "edges": [],
         "enclosure": "disabled-memory-enclosure",
-        "failedPhases": [],
         "health": "nominal",
         "humanReviewStatus": "pending",
         "id": "disabled-memory-enclosure",
@@ -329,16 +307,7 @@
         },
         "missingFacts": ["memory-worktree"],
         "phase": "provider-setup",
-        "providers": [
-          {
-            "factState": "planned",
-            "id": "grepai-memory",
-            "role": "memory",
-            "runtimeState": "missing"
-          }
-        ],
         "repoName": "agents-remember",
-        "seedFallback": true,
         "sourceFiles": [],
         "sourceLineage": {
           "edges": [],
@@ -363,10 +332,8 @@
           "branch": "sim/SIM-3",
           "factState": "observed"
         },
-        "completedPhases": [],
         "edges": [],
         "enclosure": "blocked-enclosure",
-        "failedPhases": [],
         "health": "blocked",
         "humanReviewStatus": "pending-review",
         "id": "blocked-enclosure",
@@ -375,12 +342,10 @@
         "leafId": "sim-leaf-3",
         "ledgerRowCount": 0,
         "ledgerRows": [],
-        "memoryMode": "internal",
+        "memoryMode": "disabled",
         "missingFacts": [],
         "phase": "commit-approval-pending",
-        "providers": [],
         "repoName": "agents-remember",
-        "seedFallback": false,
         "sourceFiles": [],
         "sourceLineage": {
           "edges": [],
@@ -405,10 +370,8 @@
           "branch": "sim/SIM-4",
           "factState": "observed"
         },
-        "completedPhases": ["worktree-add"],
         "edges": [],
         "enclosure": "failed-enclosure",
-        "failedPhases": ["cgc-seed"],
         "health": "failed",
         "humanReviewStatus": "pending",
         "id": "failed-enclosure",
@@ -420,11 +383,9 @@
         "memoryMode": "external",
         "missingFacts": [],
         "phase": "provider-setup",
-        "providers": [],
         "repoName": "agents-remember",
-        "seedFallback": false,
         "sourceFiles": [],
-        "summary": "cgc seed failed",
+        "summary": "code worktree add failed",
         "taskId": "SIM-4",
         "taskName": "failed-setup",
         "worktreeGroup": "failed-group"
@@ -441,10 +402,8 @@
           "branch": "sim/SIM-5",
           "factState": "stale"
         },
-        "completedPhases": [],
         "edges": [],
         "enclosure": "stale-enclosure",
-        "failedPhases": [],
         "health": "stale",
         "humanReviewStatus": "pending",
         "id": "stale-enclosure",
@@ -456,11 +415,9 @@
         "memoryMode": "external",
         "missingFacts": [],
         "phase": "sync-needed",
-        "providers": [],
         "repoName": "agents-remember",
-        "seedFallback": false,
         "sourceFiles": [],
-        "summary": "setup heartbeat has not advanced",
+        "summary": "sync probe has not advanced",
         "taskId": "SIM-5",
         "taskName": "stale-heartbeat",
         "worktreeGroup": "stale-group"
@@ -477,10 +434,8 @@
           "branch": "sim/SIM-6",
           "factState": "observed"
         },
-        "completedPhases": [],
         "edges": [],
         "enclosure": "skipped-enclosure",
-        "failedPhases": [],
         "health": "skipped",
         "humanReviewStatus": "pending",
         "id": "skipped-enclosure",
@@ -492,11 +447,9 @@
         "memoryMode": "disabled",
         "missingFacts": [],
         "phase": "worktree-started",
-        "providers": [],
         "repoName": "agents-remember",
-        "seedFallback": false,
         "sourceFiles": [],
-        "summary": "provider setup skipped by contract",
+        "summary": "memory lane skipped by contract",
         "taskId": "SIM-6",
         "taskName": "skipped-setup",
         "worktreeGroup": "skipped-group"
@@ -511,10 +464,8 @@
         "codeWorktree": {
           "factState": "missing"
         },
-        "completedPhases": [],
         "edges": [],
         "enclosure": "unknown-enclosure",
-        "failedPhases": [],
         "health": "unknown",
         "humanReviewStatus": "pending",
         "id": "unknown-enclosure",
@@ -526,9 +477,7 @@
         "memoryMode": "external",
         "missingFacts": ["code-source", "code-worktree"],
         "phase": "unknown",
-        "providers": [],
         "repoName": "agents-remember",
-        "seedFallback": false,
         "sourceFiles": [],
         "summary": "no probe could run",
         "taskId": "SIM-7",
@@ -547,10 +496,8 @@
           "branch": "sim/SIM-8",
           "factState": "observed"
         },
-        "completedPhases": ["worktree-add", "cgc-seed", "grepai-clone"],
         "edges": [],
         "enclosure": "complete-enclosure",
-        "failedPhases": [],
         "health": "complete",
         "humanReviewStatus": "approved",
         "id": "complete-enclosure",
@@ -562,31 +509,12 @@
         "memoryMode": "external",
         "missingFacts": [],
         "phase": "completed",
-        "providers": [],
         "repoName": "agents-remember",
-        "seedFallback": false,
         "sourceFiles": [],
         "summary": "landed on origin/main",
         "taskId": "SIM-8",
         "taskName": "landed",
         "worktreeGroup": "complete-group"
-      }
-    ],
-    "expectationRows": [
-      {
-        "dueAt": "2026-06-14T09:30:00+00:00",
-        "id": "expect-1",
-        "kind": "review",
-        "note": "worker report on the contract guard",
-        "overdue": false,
-        "sourceId": "agent-manager-1",
-        "state": "pending",
-        "subjectAgentId": "agent-worker-1",
-        "subjectLifecycleId": "sim-replay-lifecycle",
-        "taskDocumentRef": {
-          "path": "sim-master/SIM-1.json",
-          "repository": "sim-repo"
-        }
       }
     ],
     "ledgers": [
@@ -616,494 +544,9 @@
         "sourceFilesInScope": 24
       }
     ],
-    "series": [
-      {
-        "ageSeconds": 960.0,
-        "createdAt": "2026-06-14T08:45:00+00:00",
-        "decisions": [
-          {
-            "at": "2026-06-14T08:46:00+00:00",
-            "decision": "derive the bucket fields from the vocabulary",
-            "rationale": "a hand-written bucket list is what dropped awaiting-developer"
-          }
-        ],
-        "discardedCount": 1,
-        "discardedSubTasks": [
-          {
-            "discardedAt": "2026-06-14T08:47:00+00:00",
-            "disposition": "discard-unstarted",
-            "file": "00-retired.md",
-            "name": "retired planning leaf",
-            "number": "0",
-            "proof": {
-              "childJson": {
-                "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
-                "size": 96,
-                "state": "present"
-              },
-              "childMarkdown": {
-                "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
-                "size": 128,
-                "state": "present"
-              },
-              "commitState": "absent",
-              "doorState": "absent",
-              "enclosureState": "absent",
-              "fingerprint": "4444444444444444444444444444444444444444444444444444444444444444",
-              "locatorState": "absent",
-              "operationState": "absent",
-              "reviewState": "absent",
-              "seatState": "absent",
-              "taskDocumentRef": {
-                "path": "00-retired.json",
-                "repository": "agents-remember"
-              },
-              "taskState": "planning-unstarted",
-              "version": "task-unstarted-evidence/v1"
-            },
-            "reason": "the planning branch was retired before execution",
-            "scope": "agents-remember"
-          }
-        ],
-        "docPath": "/tasks/sim/series.md",
-        "doneCount": 0,
-        "objective": "keep the mirror and the server one contract",
-        "repository": "agents-remember",
-        "sections": [
-          {
-            "body": "one vocabulary, one list",
-            "heading": "Shared decisions",
-            "kind": "freeform"
-          }
-        ],
-        "seriesId": "SIM",
-        "seriesTokenTotal": 1200,
-        "status": "in-progress",
-        "subTasks": [
-          {
-            "createdAt": "2026-06-14T08:50:00+00:00",
-            "file": "01.md",
-            "name": "contract guard",
-            "number": "1",
-            "scope": "agents-remember",
-            "status": "in-progress"
-          }
-        ],
-        "title": "sim series",
-        "totalCount": 1
-      }
-    ],
-    "setupProgress": [
-      {
-        "completedCount": 4,
-        "currentPhase": "grepai-clone",
-        "failedPhases": [],
-        "group": "sim-group",
-        "heartbeatAgeSeconds": 4.0,
-        "state": "complete"
-      }
-    ],
-    "setupSummaries": [
-      {
-        "action": "provider_setup",
-        "generatedAt": "2026-06-14T08:58:00+00:00",
-        "ok": true,
-        "ready": true,
-        "resultCounts": {
-          "configured": 2,
-          "failed": 0
-        },
-        "snapshotStaleSeconds": 180.0,
-        "state": "complete"
-      }
-    ],
-    "stalestSidecars": [
-      {
-        "ageSeconds": 3628800.0,
-        "lastVerifiedDate": "2026-05-02",
-        "onboardingFile": "/memory/ar-agents-remember/onboarding/observer/projection.md",
-        "repository": "agents-remember"
-      }
-    ],
-    "taskDocuments": [
-      {
-        "ageSeconds": 660.0,
-        "bodyRevision": "rev-3",
-        "codeExamples": [
-          {
-            "distinctChange": "type-level path diff",
-            "id": "ex-1",
-            "language": "ts",
-            "snippet": "type ServedOnlyPaths<Served, Mirror> = never;",
-            "title": "the excess-field walk",
-            "why": "a double cast defeated every structural check"
-          }
-        ],
-        "createdAt": "2026-06-14T08:50:00+00:00",
-        "currentStep": "step-2",
-        "decisions": [
-          {
-            "at": "2026-06-14T08:55:00+00:00",
-            "decision": "keep the fixture as the server stand-in",
-            "rationale": "schema codegen owns the TypeScript contract; this sampled fixture remains hand-maintained"
-          }
-        ],
-        "design": "two directions, both checked",
-        "discardedCount": 1,
-        "discardedSubTasks": [
-          {
-            "discardedAt": "2026-06-14T08:56:00+00:00",
-            "disposition": "discard-unstarted",
-            "file": "00-retired.md",
-            "name": "retired fixture leaf",
-            "number": "0",
-            "proof": {
-              "childJson": {
-                "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
-                "size": 96,
-                "state": "present"
-              },
-              "childMarkdown": {
-                "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
-                "size": 128,
-                "state": "present"
-              },
-              "commitState": "absent",
-              "doorState": "absent",
-              "enclosureState": "absent",
-              "fingerprint": "7777777777777777777777777777777777777777777777777777777777777777",
-              "locatorState": "absent",
-              "operationState": "absent",
-              "reviewState": "absent",
-              "seatState": "absent",
-              "taskDocumentRef": {
-                "path": "00-retired.json",
-                "repository": "agents-remember"
-              },
-              "taskState": "planning-unstarted",
-              "version": "task-unstarted-evidence/v1"
-            },
-            "reason": "the fixture branch was retired before execution",
-            "scope": "agents-remember"
-          }
-        ],
-        "docPath": "/tasks/sim/01.md",
-        "executionWaves": [],
-        "id": "SIM-1",
-        "kind": "subTask",
-        "lifecycleId": "sim-replay-lifecycle",
-        "masterLifecycleId": "sim-master-lifecycle",
-        "objective": "keep the mirror honest",
-        "openQuestions": ["which vocabularies still have no runtime tuple?"],
-        "orchestrates": [],
-        "references": ["mcp/src/agents_remember/observer/projection.py"],
-        "repository": "agents-remember",
-        "requirements": ["the guard fails when the server grows a field"],
-        "sections": [
-          {
-            "body": "the fixture is the server here",
-            "heading": "Notes",
-            "kind": "freeform"
-          }
-        ],
-        "seats": [],
-        "status": "in-progress",
-        "steps": [
-          {
-            "disposition": {
-              "kind": "intentionalSkip",
-              "lifecycleId": "sim-replay-lifecycle",
-              "reason": "the contract was already reviewed",
-              "recordedAt": "2026-06-14T08:52:00+00:00",
-              "recordedVia": "task_doc.skip_step"
-            },
-            "id": "step-1",
-            "status": "done",
-            "substeps": [
-              {
-                "disposition": {
-                  "kind": "intentionalSkip",
-                  "lifecycleId": "sim-replay-lifecycle",
-                  "reason": "the projection review already covered it",
-                  "recordedAt": "2026-06-14T08:53:00+00:00",
-                  "recordedVia": "task_doc.skip_step"
-                },
-                "id": "step-1a",
-                "status": "done",
-                "title": "read projection.py"
-              }
-            ],
-            "title": "read the contract"
-          },
-          {
-            "id": "step-2",
-            "status": "in-progress",
-            "substeps": [],
-            "title": "make the guard bite"
-          }
-        ],
-        "stepsDone": 2,
-        "stepsTotal": 3,
-        "subTasks": [
-          {
-            "file": "01.md",
-            "linkedLifecycleId": "sim-replay-lifecycle",
-            "name": "contract guard",
-            "number": "1",
-            "scope": "agents-remember",
-            "status": "in-progress"
-          }
-        ],
-        "title": "sim replay"
-      },
-      {
-        "bodyRevision": "sim-sprint-r1",
-        "codeExamples": [],
-        "createdAt": "2026-06-14T08:40:00+00:00",
-        "decisions": [],
-        "docPath": "/tasks/agents-remember/sim-sprint/task.json",
-        "executionGraph": {
-          "edges": [
-            {
-              "judgmentId": "J-sim-1",
-              "predecessor": {
-                "leafId": "SIM-A-L1",
-                "ref": {
-                  "path": "sim-master-a/task.json",
-                  "repository": "agents-remember"
-                }
-              },
-              "reason": "the shared framework must land first",
-              "successor": {
-                "leafId": "SIM-B-L1",
-                "ref": {
-                  "path": "sim-master-b/task.json",
-                  "repository": "agents-remember"
-                }
-              }
-            }
-          ],
-          "nodes": [
-            {
-              "kind": "segment",
-              "leafIds": ["SIM-A-L1"],
-              "ref": {
-                "path": "sim-master-a/task.json",
-                "repository": "agents-remember"
-              }
-            },
-            {
-              "kind": "segment",
-              "leafIds": ["SIM-B-L1"],
-              "ref": {
-                "path": "sim-master-b/task.json",
-                "repository": "agents-remember"
-              }
-            }
-          ]
-        },
-        "executionWaves": [
-          [
-            {
-              "kind": "segment",
-              "leafIds": ["SIM-A-L1"],
-              "ref": {
-                "path": "sim-master-a/task.json",
-                "repository": "agents-remember"
-              }
-            }
-          ],
-          [
-            {
-              "kind": "segment",
-              "leafIds": ["SIM-B-L1"],
-              "ref": {
-                "path": "sim-master-b/task.json",
-                "repository": "agents-remember"
-              }
-            }
-          ]
-        ],
-        "id": "SIM-SPRINT",
-        "kind": "master",
-        "objective": "derive execution waves from reasoned dependencies",
-        "openQuestions": [],
-        "orchestrates": ["sim-master-a", "sim-master-b"],
-        "references": [],
-        "repository": "agents-remember",
-        "requirements": [],
-        "seats": [
-          {
-            "identity": "agent-sim-orchestrator",
-            "label": "Sprint Orchestrator",
-            "role": "orchestrator",
-            "state": "active"
-          },
-          {
-            "label": "",
-            "role": "strategist",
-            "state": "planned"
-          }
-        ],
-        "sections": [],
-        "status": "planning",
-        "steps": [],
-        "stepsDone": 0,
-        "stepsTotal": 0,
-        "subTasks": [
-          {
-            "file": "",
-            "masterRef": {
-              "path": "sim-master-a/task.json",
-              "repository": "agents-remember"
-            },
-            "name": "parallel feature work",
-            "number": "1",
-            "scope": "",
-            "status": "inProgress"
-          },
-          {
-            "file": "",
-            "masterRef": {
-              "path": "sim-master-b/task.json",
-              "repository": "agents-remember"
-            },
-            "name": "atomic framework block",
-            "number": "2",
-            "scope": "",
-            "status": "planning"
-          }
-        ],
-        "title": "dependency-aware sprint",
-        "executionGraphView": {
-          "nodes": [
-            {
-              "nodeId": "agents-remember/sim-master-a/task.json#seg1",
-              "kind": "segment",
-              "masterRef": {
-                "repository": "agents-remember",
-                "path": "sim-master-a/task.json"
-              },
-              "masterTitle": "Sim Master A",
-              "leafIds": ["SIM-A-L1"],
-              "leafTitles": ["Shared framework"],
-              "waveIndex": 1,
-              "frontierState": "in-flight",
-              "executionNature": "organizational",
-              "predecessors": []
-            },
-            {
-              "nodeId": "agents-remember/sim-master-b/task.json#seg1",
-              "kind": "segment",
-              "masterRef": {
-                "repository": "agents-remember",
-                "path": "sim-master-b/task.json"
-              },
-              "masterTitle": "Sim Master B",
-              "leafIds": ["SIM-B-L1"],
-              "leafTitles": ["Dependent work"],
-              "waveIndex": 2,
-              "frontierState": "waiting",
-              "executionNature": "organizational",
-              "predecessors": [
-                {
-                  "predecessorRef": {
-                    "repository": "agents-remember",
-                    "path": "sim-master-a/task.json"
-                  },
-                  "predecessorTitle": "Sim Master A",
-                  "reason": "the shared framework must land first",
-                  "judgmentId": "J-sim-1"
-                }
-              ]
-            },
-            {
-              "nodeId": "agents-remember/sim-master-a/task.json#landed",
-              "kind": "segment",
-              "masterRef": {
-                "repository": "agents-remember",
-                "path": "sim-master-a/task.json"
-              },
-              "masterTitle": "Sim Master A",
-              "leafIds": ["SIM-A-L1"],
-              "leafTitles": ["Shared framework"],
-              "waveIndex": 1,
-              "frontierState": "landed",
-              "executionNature": "organizational",
-              "predecessors": []
-            },
-            {
-              "nodeId": "agents-remember/sim-master-b/task.json#lump",
-              "kind": "lump",
-              "masterRef": {
-                "repository": "agents-remember",
-                "path": "sim-master-b/task.json"
-              },
-              "masterTitle": "Sim Master B",
-              "leafIds": ["SIM-B-L1"],
-              "leafTitles": ["Dependent work"],
-              "waveIndex": 2,
-              "frontierState": "ready",
-              "executionNature": "atomic",
-              "predecessors": []
-            }
-          ]
-        }
-      },
-      {
-        "bodyRevision": "sim-master-a-r1",
-        "codeExamples": [],
-        "createdAt": "2026-06-14T08:41:00+00:00",
-        "decisions": [],
-        "docPath": "/tasks/agents-remember/sim-master-a/task.json",
-        "executionNature": "organizational",
-        "executionWaves": [],
-        "id": "SIM-MASTER-A",
-        "kind": "master",
-        "objective": "coordinate independently landable leaves",
-        "openQuestions": [],
-        "orchestrates": [],
-        "references": [],
-        "repository": "agents-remember",
-        "requirements": [],
-        "seats": [],
-        "sections": [],
-        "status": "planning",
-        "steps": [],
-        "stepsDone": 0,
-        "stepsTotal": 0,
-        "subTasks": [],
-        "title": "parallel feature work"
-      },
-      {
-        "bodyRevision": "sim-master-b-r1",
-        "codeExamples": [],
-        "createdAt": "2026-06-14T08:42:00+00:00",
-        "decisions": [],
-        "docPath": "/tasks/agents-remember/sim-master-b/task.json",
-        "executionNature": "atomic",
-        "executionWaves": [],
-        "id": "SIM-MASTER-B",
-        "kind": "master",
-        "objective": "land one indivisible dependency block",
-        "openQuestions": [],
-        "orchestrates": [],
-        "references": [],
-        "repository": "agents-remember",
-        "requirements": [],
-        "seats": [],
-        "sections": [],
-        "status": "planning",
-        "steps": [],
-        "stepsDone": 0,
-        "stepsTotal": 0,
-        "subTasks": [],
-        "title": "atomic framework block"
-      }
-    ],
     "toolReports": [
       {
-        "ageSeconds": 640.0,
+        "ageSeconds": 640,
         "label": "code quality",
         "path": "/tmp/code-quality.md",
         "tool": "code_quality"
@@ -1165,6 +608,161 @@
   ],
   "enclosures": [
     {
+      "enclosure": "sim-enclosure",
+      "enclosureId": "sim-enclosure",
+      "leafId": "sim-leaf",
+      "taskId": "SIM-1",
+      "taskName": "sim-replay",
+      "repoName": "agents-remember",
+      "taskRoot": "/tasks/sim",
+      "lifecycleId": "sim-replay-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "pending",
+      "closeoutStatus": "not-started",
+      "integrationStatus": "not-started",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
+      "lifecycleOperation": {
+        "schemaVersion": "lifecycle-operation-projection/v1",
+        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+        "identity": {
+          "operationKind": "closeout",
+          "contractPath": "sim-enclosure",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "fe7a931d26420bed78833ae0f0825ec9189df8e3846c13f63f5f3a4c8a239a75",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab"
+        },
+        "componentBindings": {
+          "result": "7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab",
+          "approval": "7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab",
+          "worker": "7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab",
+          "recommendedAction": "7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab",
+          "legalControls": ["7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab"]
+        },
+        "kind": "closeout",
+        "status": "failed",
+        "phase": "failed",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "heartbeatAt": "2026-08-12T12:00:10+00:00",
+        "finishedAt": "2026-08-12T12:00:12+00:00",
+        "elapsedSeconds": 12.0,
+        "currentCommand": "lifecycle stage: failed",
+        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
+        "taskIntent": {
+          "schema": "task-intent/v1",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "result": {
+          "reason": "fixture failure"
+        },
+        "failure": "fixture failure",
+        "guidance": "Fix the reported preflight failure, then restart this task operation.",
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "workerIdentitySha256": "92daae5d6056a7e2e41637cfa2da4c0a252cfe30bff5a219435aba94c814c856",
+          "observedAt": "2026-08-12T12:00:10+00:00",
+          "detail": "exact worker exit is proven"
+        },
+        "approval": {
+          "state": "claimed"
+        },
+        "recommendedAction": {
+          "action": "recover",
+          "tool": "worktree_operation_control",
+          "arguments": {
+            "contract_path": "sim-enclosure",
+            "operation_kind": "closeout",
+            "expected_generation": 1,
+            "intent_note": "<developer intent>",
+            "dry_run": false,
+            "action": "recover"
+          },
+          "summary": "Apply the sampled recover control.",
+          "mutating": true
+        },
+        "cancellable": false,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [
+          {
+            "action": "recover",
+            "generationEffect": "same",
+            "tool": "worktree_operation_control",
+            "arguments": {
+              "contract_path": "sim-enclosure",
+              "operation_kind": "closeout",
+              "expected_generation": 1,
+              "intent_note": "<developer intent>",
+              "dry_run": false,
+              "action": "recover"
+            },
+            "summary": "Apply the sampled recover control."
+          }
+        ],
+        "projectionEffects": [
+          {
+            "sprintTaskDocumentRef": {
+              "repository": "agents-remember",
+              "path": "sprint/task.json"
+            },
+            "queueExisted": true,
+            "priorRevision": 0,
+            "priorSourceFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "invalidation": {
+              "outcome": "persisted-empty",
+              "revision": 1
+            },
+            "rebuild": {
+              "outcome": "published",
+              "revision": 2,
+              "sourceFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "sourceClassification": "active",
+              "memberCount": 2,
+              "sourceProblems": []
+            },
+            "rebuiltRevision": 2
+          },
+          {
+            "sprintTaskDocumentRef": {
+              "repository": "agents-remember",
+              "path": "sprint/task.json"
+            },
+            "queueExisted": true,
+            "priorRevision": 2,
+            "priorSourceFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "invalidation": {
+              "outcome": "recovered-malformed",
+              "revision": 3,
+              "diagnostic": {
+                "kind": "projection",
+                "address": "/tasks/sim/series/task.json",
+                "state": "unreadable",
+                "errorType": "malformed-source",
+                "repairAction": "repair task truth before rebuilding"
+              }
+            },
+            "rebuild": {
+              "outcome": "source-unreadable",
+              "revision": 3,
+              "memberCount": 0,
+              "sourceProblems": [
+                {
+                  "kind": "task",
+                  "address": "/tasks/sim/series/task.json",
+                  "state": "invalid",
+                  "errorType": "malformed-source",
+                  "repairAction": "repair task truth before rebuilding"
+                }
+              ]
+            },
+            "nextAction": "repair task truth before rebuilding"
+          }
+        ]
+      },
       "actions": [
         {
           "action": "worktree_sync",
@@ -1172,794 +770,1979 @@
         },
         {
           "action": "worktree_integrate",
-          "disabledReason": "closeout has not run",
           "enabled": false,
+          "disabledReason": "closeout has not run",
           "nextSafeAction": "worktree_closeout_preview"
         }
-      ],
-      "cleanup": "pending",
-      "closeoutStatus": "not-started",
-      "codeWorktreeExists": true,
-      "enclosure": "sim-enclosure",
-      "enclosureId": "sim-enclosure",
-      "humanReviewStatus": "pending",
-      "integrationStatus": "not-started",
-      "leafId": "sim-leaf",
-      "lifecycleId": "sim-replay-lifecycle",
-      "lifecycleOperation": {
-        "approval": {
-          "state": "claimed"
-        },
-        "cancellable": false,
-        "componentBindings": {
-          "approval": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-          "legalControls": ["dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"],
-          "recommendedAction": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-          "result": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-          "worker": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-        },
-        "currentCommand": "quality: diff-coverage",
-        "elapsedSeconds": 12,
-        "failure": "fixture failure",
-        "finishedAt": "2026-08-12T12:00:12+00:00",
-        "generation": 1,
-        "guidance": "Fix the reported preflight failure, then restart this task operation.",
-        "heartbeatAt": "2026-08-12T12:00:10+00:00",
-        "identity": {
-          "candidateTupleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "contractPath": "/tasks/sim",
-          "generation": 1,
-          "identityDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-          "operationKind": "closeout",
-          "planIdentityDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "recordRevision": 1
-        },
-        "kind": "closeout",
-        "legalControls": [
-          {
-            "action": "recover"
-          }
-        ],
-        "meaningfulRevision": 1,
-        "phase": "failed",
-        "projectionEffects": [
-          {
-            "invalidation": {
-              "outcome": "persisted-empty",
-              "revision": 1
-            },
-            "nextAction": "the queue was rebuilt from current task truth",
-            "priorRevision": 0,
-            "priorSourceFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "queueExisted": true,
-            "rebuild": {
-              "memberCount": 2,
-              "outcome": "published",
-              "revision": 2,
-              "sourceClassification": "active",
-              "sourceFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-              "sourceProblems": []
-            },
-            "rebuiltRevision": 2,
-            "sprintTaskDocumentRef": {
-              "path": "sprint/task.json",
-              "repository": "agents-remember"
-            }
-          },
-          {
-            "invalidation": {
-              "diagnostic": {
-                "address": "/tasks/sim/series/task.json",
-                "errorType": "malformed-source",
-                "kind": "projection",
-                "repairAction": "repair task truth before rebuilding",
-                "state": "unreadable"
-              },
-              "outcome": "recovered-malformed",
-              "revision": 3
-            },
-            "nextAction": "repair task truth before rebuilding",
-            "priorRevision": 2,
-            "priorSourceFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-            "queueExisted": true,
-            "rebuild": {
-              "memberCount": 0,
-              "outcome": "source-unreadable",
-              "revision": 3,
-              "sourceProblems": [
-                {
-                  "address": "/tasks/sim/series/task.json",
-                  "errorType": "malformed-source",
-                  "kind": "task",
-                  "repairAction": "repair task truth before rebuilding",
-                  "state": "invalid"
-                }
-              ]
-            },
-            "sprintTaskDocumentRef": {
-              "path": "sprint/task.json",
-              "repository": "agents-remember"
-            }
-          }
-        ],
-        "recommendedAction": {
-          "action": "recover",
-          "arguments": {
-            "action": "recover",
-            "contract_path": "/tasks/sim",
-            "expected_generation": 1,
-            "operation_kind": "closeout"
-          },
-          "mutating": true,
-          "summary": "Apply the exact recover control.",
-          "tool": "worktree_operation_control"
-        },
-        "taskIntent": {
-          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "schema": "task-intent/v1"
-        },
-        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
-        "result": {
-          "reason": "fixture failure"
-        },
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "startedAt": "2026-08-12T12:00:00+00:00",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "failed",
-        "worker": {
-          "detail": "exact worker exit is proven",
-          "identityRetained": false,
-          "observedAt": "2026-08-12T12:00:10+00:00",
-          "state": "exited",
-          "workerIdentitySha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-        }
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
-      "taskId": "SIM-1",
-      "taskName": "sim-replay",
-      "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
+      ]
     },
     {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "running",
-      "codeWorktreeExists": true,
       "enclosure": "sim-op-queued",
       "enclosureId": "sim-op-queued",
-      "humanReviewStatus": "approved",
-      "integrationStatus": "not-started",
       "leafId": "sim-op-queued",
-      "lifecycleId": "sim-op-queued-lifecycle",
-      "lifecycleOperation": {
-        "cancellable": true,
-        "currentCommand": "queued",
-        "elapsedSeconds": 0,
-        "kind": "closeout",
-        "legalControls": [],
-        "phase": "queued",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "queued"
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
       "taskId": "SIM-OP-QUEUED",
       "taskName": "lifecycle-queued",
+      "repoName": "agents-remember",
       "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
+      "lifecycleId": "sim-op-queued-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved",
+      "closeoutStatus": "running",
+      "integrationStatus": "not-started",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
+      "lifecycleOperation": {
+        "schemaVersion": "lifecycle-operation-projection/v1",
+        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+        "identity": {
+          "operationKind": "closeout",
+          "contractPath": "sim-op-queued",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "0be82e48f26f53a27f76f21c58eb539503a1734a9360db63fbae7a503faffcd1",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "a3119b1285b75a0ea1d1f3507cc457448627800a3ec53f7c120a025b827a2bc2"
+        },
+        "componentBindings": {
+          "approval": "a3119b1285b75a0ea1d1f3507cc457448627800a3ec53f7c120a025b827a2bc2",
+          "worker": "a3119b1285b75a0ea1d1f3507cc457448627800a3ec53f7c120a025b827a2bc2",
+          "legalControls": ["a3119b1285b75a0ea1d1f3507cc457448627800a3ec53f7c120a025b827a2bc2"]
+        },
+        "kind": "closeout",
+        "status": "queued",
+        "phase": "queued",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "elapsedSeconds": 0.0,
+        "currentCommand": "lifecycle stage: queued",
+        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
+        "taskIntent": {
+          "schema": "task-intent/v1",
+          "digest": "0be82e48f26f53a27f76f21c58eb539503a1734a9360db63fbae7a503faffcd1"
+        },
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "observedAt": "2026-08-12T12:00:00+00:00",
+          "detail": "no live worker authority is retained"
+        },
+        "approval": {
+          "state": "unclaimed"
+        },
+        "cancellable": true,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [
+          {
+            "action": "cancel",
+            "generationEffect": "terminal-disposition",
+            "tool": "worktree_operation_control",
+            "arguments": {
+              "contract_path": "sim-op-queued",
+              "operation_kind": "closeout",
+              "expected_generation": 1,
+              "intent_note": "<developer intent>",
+              "dry_run": false,
+              "action": "cancel"
+            },
+            "summary": "Apply the sampled cancel control."
+          }
+        ],
+        "projectionEffects": []
+      },
+      "actions": []
     },
     {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "running",
-      "codeWorktreeExists": true,
       "enclosure": "sim-op-preflight",
       "enclosureId": "sim-op-preflight",
-      "humanReviewStatus": "approved",
-      "integrationStatus": "not-started",
       "leafId": "sim-op-preflight",
-      "lifecycleId": "sim-op-preflight-lifecycle",
-      "lifecycleOperation": {
-        "cancellable": true,
-        "currentCommand": "preflight",
-        "elapsedSeconds": 1,
-        "kind": "closeout",
-        "legalControls": [],
-        "phase": "preflight",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "running"
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
       "taskId": "SIM-OP-PREFLIGHT",
       "taskName": "lifecycle-preflight",
+      "repoName": "agents-remember",
       "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
+      "lifecycleId": "sim-op-preflight-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved",
+      "closeoutStatus": "running",
+      "integrationStatus": "not-started",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
+      "lifecycleOperation": {
+        "schemaVersion": "lifecycle-operation-projection/v1",
+        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+        "identity": {
+          "operationKind": "closeout",
+          "contractPath": "sim-op-preflight",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "45b581fa62d48d48038f68c84598edd6f3ed15d0d751059cf7e75203bca1f21b",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "022c44d824eb102397dd7975505ffa0230c0f09d234230d5d6d667bcecb6e8e1"
+        },
+        "componentBindings": {
+          "approval": "022c44d824eb102397dd7975505ffa0230c0f09d234230d5d6d667bcecb6e8e1",
+          "worker": "022c44d824eb102397dd7975505ffa0230c0f09d234230d5d6d667bcecb6e8e1",
+          "recommendedAction": "022c44d824eb102397dd7975505ffa0230c0f09d234230d5d6d667bcecb6e8e1",
+          "legalControls": ["022c44d824eb102397dd7975505ffa0230c0f09d234230d5d6d667bcecb6e8e1"]
+        },
+        "kind": "closeout",
+        "status": "running",
+        "phase": "preflight",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "elapsedSeconds": 1.0,
+        "currentCommand": "lifecycle stage: preflight",
+        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
+        "taskIntent": {
+          "schema": "task-intent/v1",
+          "digest": "45b581fa62d48d48038f68c84598edd6f3ed15d0d751059cf7e75203bca1f21b"
+        },
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "observedAt": "2026-08-12T12:00:00+00:00",
+          "detail": "no live worker authority is retained"
+        },
+        "approval": {
+          "state": "unclaimed"
+        },
+        "recommendedAction": {
+          "action": "observe",
+          "tool": "worktree_status",
+          "arguments": {
+            "contract_path": "sim-op-preflight"
+          },
+          "summary": "Observe this exact lifecycle generation for its next durable edge.",
+          "mutating": false
+        },
+        "cancellable": true,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [
+          {
+            "action": "cancel",
+            "generationEffect": "terminal-disposition",
+            "tool": "worktree_operation_control",
+            "arguments": {
+              "contract_path": "sim-op-preflight",
+              "operation_kind": "closeout",
+              "expected_generation": 1,
+              "intent_note": "<developer intent>",
+              "dry_run": false,
+              "action": "cancel"
+            },
+            "summary": "Apply the sampled cancel control."
+          }
+        ],
+        "projectionEffects": []
+      },
+      "actions": []
     },
     {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "running",
-      "codeWorktreeExists": true,
       "enclosure": "sim-op-memory-preflight",
       "enclosureId": "sim-op-memory-preflight",
-      "humanReviewStatus": "approved",
-      "integrationStatus": "not-started",
       "leafId": "sim-op-memory-preflight",
-      "lifecycleId": "sim-op-memory-preflight-lifecycle",
-      "lifecycleOperation": {
-        "cancellable": true,
-        "currentCommand": "memory preflight",
-        "elapsedSeconds": 2,
-        "kind": "closeout",
-        "legalControls": [],
-        "phase": "memory-preflight",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "running"
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
       "taskId": "SIM-OP-MEMORY-PREFLIGHT",
       "taskName": "lifecycle-memory-preflight",
+      "repoName": "agents-remember",
       "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
+      "lifecycleId": "sim-op-memory-preflight-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved",
+      "closeoutStatus": "running",
+      "integrationStatus": "not-started",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
+      "lifecycleOperation": {
+        "schemaVersion": "lifecycle-operation-projection/v1",
+        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+        "identity": {
+          "operationKind": "closeout",
+          "contractPath": "sim-op-memory-preflight",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "ab32b12da0317111d6cb9d76aa37728a01c3efd68a83964c24b12be42cc7e235",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "943056f531c1839f0d7b57778defa99a613dc3437f38725410a99bf6545e9a51"
+        },
+        "componentBindings": {
+          "approval": "943056f531c1839f0d7b57778defa99a613dc3437f38725410a99bf6545e9a51",
+          "worker": "943056f531c1839f0d7b57778defa99a613dc3437f38725410a99bf6545e9a51",
+          "recommendedAction": "943056f531c1839f0d7b57778defa99a613dc3437f38725410a99bf6545e9a51",
+          "legalControls": ["943056f531c1839f0d7b57778defa99a613dc3437f38725410a99bf6545e9a51"]
+        },
+        "kind": "closeout",
+        "status": "running",
+        "phase": "memory-preflight",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "elapsedSeconds": 2.0,
+        "currentCommand": "lifecycle stage: memory-preflight",
+        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
+        "taskIntent": {
+          "schema": "task-intent/v1",
+          "digest": "ab32b12da0317111d6cb9d76aa37728a01c3efd68a83964c24b12be42cc7e235"
+        },
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "observedAt": "2026-08-12T12:00:00+00:00",
+          "detail": "no live worker authority is retained"
+        },
+        "approval": {
+          "state": "unclaimed"
+        },
+        "recommendedAction": {
+          "action": "observe",
+          "tool": "worktree_status",
+          "arguments": {
+            "contract_path": "sim-op-memory-preflight"
+          },
+          "summary": "Observe this exact lifecycle generation for its next durable edge.",
+          "mutating": false
+        },
+        "cancellable": true,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [
+          {
+            "action": "cancel",
+            "generationEffect": "terminal-disposition",
+            "tool": "worktree_operation_control",
+            "arguments": {
+              "contract_path": "sim-op-memory-preflight",
+              "operation_kind": "closeout",
+              "expected_generation": 1,
+              "intent_note": "<developer intent>",
+              "dry_run": false,
+              "action": "cancel"
+            },
+            "summary": "Apply the sampled cancel control."
+          }
+        ],
+        "projectionEffects": []
+      },
+      "actions": []
     },
     {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "running",
-      "codeWorktreeExists": true,
       "enclosure": "sim-op-quality",
       "enclosureId": "sim-op-quality",
-      "humanReviewStatus": "approved",
-      "integrationStatus": "not-started",
       "leafId": "sim-op-quality",
-      "lifecycleId": "sim-op-quality-lifecycle",
-      "lifecycleOperation": {
-        "cancellable": true,
-        "currentCommand": "quality",
-        "elapsedSeconds": 3,
-        "kind": "closeout",
-        "legalControls": [],
-        "phase": "quality",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "running"
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
       "taskId": "SIM-OP-QUALITY",
       "taskName": "lifecycle-quality",
+      "repoName": "agents-remember",
       "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
+      "lifecycleId": "sim-op-quality-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved",
+      "closeoutStatus": "running",
+      "integrationStatus": "not-started",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
+      "lifecycleOperation": {
+        "schemaVersion": "lifecycle-operation-projection/v1",
+        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+        "identity": {
+          "operationKind": "closeout",
+          "contractPath": "sim-op-quality",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "1fe3355fb9fc56b1a31c065e6614beff26929d73d7f56916a0ef86d707d45b77",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "585ec4dc5b87c9c19a07e372f2ec9f9e05849e854b971a2bf36514431b0fa047"
+        },
+        "componentBindings": {
+          "approval": "585ec4dc5b87c9c19a07e372f2ec9f9e05849e854b971a2bf36514431b0fa047",
+          "worker": "585ec4dc5b87c9c19a07e372f2ec9f9e05849e854b971a2bf36514431b0fa047",
+          "recommendedAction": "585ec4dc5b87c9c19a07e372f2ec9f9e05849e854b971a2bf36514431b0fa047",
+          "legalControls": ["585ec4dc5b87c9c19a07e372f2ec9f9e05849e854b971a2bf36514431b0fa047"]
+        },
+        "kind": "closeout",
+        "status": "running",
+        "phase": "quality",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "elapsedSeconds": 3.0,
+        "currentCommand": "lifecycle stage: quality",
+        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
+        "taskIntent": {
+          "schema": "task-intent/v1",
+          "digest": "1fe3355fb9fc56b1a31c065e6614beff26929d73d7f56916a0ef86d707d45b77"
+        },
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "observedAt": "2026-08-12T12:00:00+00:00",
+          "detail": "no live worker authority is retained"
+        },
+        "approval": {
+          "state": "unclaimed"
+        },
+        "recommendedAction": {
+          "action": "observe",
+          "tool": "worktree_status",
+          "arguments": {
+            "contract_path": "sim-op-quality"
+          },
+          "summary": "Observe this exact lifecycle generation for its next durable edge.",
+          "mutating": false
+        },
+        "cancellable": true,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [
+          {
+            "action": "cancel",
+            "generationEffect": "terminal-disposition",
+            "tool": "worktree_operation_control",
+            "arguments": {
+              "contract_path": "sim-op-quality",
+              "operation_kind": "closeout",
+              "expected_generation": 1,
+              "intent_note": "<developer intent>",
+              "dry_run": false,
+              "action": "cancel"
+            },
+            "summary": "Apply the sampled cancel control."
+          }
+        ],
+        "projectionEffects": []
+      },
+      "actions": []
     },
     {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "running",
-      "codeWorktreeExists": true,
       "enclosure": "sim-op-approval-claim",
       "enclosureId": "sim-op-approval-claim",
-      "humanReviewStatus": "approved",
-      "integrationStatus": "not-started",
       "leafId": "sim-op-approval-claim",
-      "lifecycleId": "sim-op-approval-claim-lifecycle",
-      "lifecycleOperation": {
-        "cancellable": true,
-        "currentCommand": "approval claim",
-        "elapsedSeconds": 4,
-        "kind": "closeout",
-        "legalControls": [],
-        "phase": "approval-claim",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "running"
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
       "taskId": "SIM-OP-APPROVAL-CLAIM",
       "taskName": "lifecycle-approval-claim",
+      "repoName": "agents-remember",
       "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
+      "lifecycleId": "sim-op-approval-claim-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved",
+      "closeoutStatus": "running",
+      "integrationStatus": "not-started",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
+      "lifecycleOperation": {
+        "schemaVersion": "lifecycle-operation-projection/v1",
+        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+        "identity": {
+          "operationKind": "closeout",
+          "contractPath": "sim-op-approval-claim",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "a29af036598447113467fe10b711219a553112462a40ca5447b55673c6e62ea0",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "cb098248cdd4f5714c3ee9400d2dc2fa5f4ea54a15bb9c27c854a5c0f95f71ea"
+        },
+        "componentBindings": {
+          "approval": "cb098248cdd4f5714c3ee9400d2dc2fa5f4ea54a15bb9c27c854a5c0f95f71ea",
+          "worker": "cb098248cdd4f5714c3ee9400d2dc2fa5f4ea54a15bb9c27c854a5c0f95f71ea",
+          "recommendedAction": "cb098248cdd4f5714c3ee9400d2dc2fa5f4ea54a15bb9c27c854a5c0f95f71ea",
+          "legalControls": ["cb098248cdd4f5714c3ee9400d2dc2fa5f4ea54a15bb9c27c854a5c0f95f71ea"]
+        },
+        "kind": "closeout",
+        "status": "running",
+        "phase": "approval-claim",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "elapsedSeconds": 4.0,
+        "currentCommand": "lifecycle stage: approval-claim",
+        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
+        "taskIntent": {
+          "schema": "task-intent/v1",
+          "digest": "a29af036598447113467fe10b711219a553112462a40ca5447b55673c6e62ea0"
+        },
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "observedAt": "2026-08-12T12:00:00+00:00",
+          "detail": "no live worker authority is retained"
+        },
+        "approval": {
+          "state": "unclaimed"
+        },
+        "recommendedAction": {
+          "action": "observe",
+          "tool": "worktree_status",
+          "arguments": {
+            "contract_path": "sim-op-approval-claim"
+          },
+          "summary": "Observe this exact lifecycle generation for its next durable edge.",
+          "mutating": false
+        },
+        "cancellable": true,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [
+          {
+            "action": "cancel",
+            "generationEffect": "terminal-disposition",
+            "tool": "worktree_operation_control",
+            "arguments": {
+              "contract_path": "sim-op-approval-claim",
+              "operation_kind": "closeout",
+              "expected_generation": 1,
+              "intent_note": "<developer intent>",
+              "dry_run": false,
+              "action": "cancel"
+            },
+            "summary": "Apply the sampled cancel control."
+          }
+        ],
+        "projectionEffects": []
+      },
+      "actions": []
     },
     {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "input-required",
-      "codeWorktreeExists": true,
       "enclosure": "sim-op-recovering",
       "enclosureId": "sim-op-recovering",
-      "humanReviewStatus": "approved",
-      "integrationStatus": "not-started",
       "leafId": "sim-op-recovering",
-      "lifecycleId": "sim-op-recovering-lifecycle",
-      "lifecycleOperation": {
-        "cancellable": false,
-        "currentCommand": "recovering approval",
-        "elapsedSeconds": 5,
-        "kind": "closeout",
-        "legalControls": [],
-        "phase": "recovering-after-claim",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "input-required"
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
       "taskId": "SIM-OP-RECOVERING",
       "taskName": "lifecycle-recovering-after-claim",
+      "repoName": "agents-remember",
       "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
+      "lifecycleId": "sim-op-recovering-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved",
+      "closeoutStatus": "input-required",
+      "integrationStatus": "not-started",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
+      "lifecycleOperation": {
+        "schemaVersion": "lifecycle-operation-projection/v1",
+        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+        "identity": {
+          "operationKind": "closeout",
+          "contractPath": "sim-op-recovering",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "9463713b00dbb5b8e5229003e64823079a461585be5038f9e209a5aeb38ec0e1",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "12573f8dfe0a73aeb16f49ea0d0e8628f2e3aaee02dba83d2c9b97f965f1e54b"
+        },
+        "componentBindings": {
+          "result": "12573f8dfe0a73aeb16f49ea0d0e8628f2e3aaee02dba83d2c9b97f965f1e54b",
+          "approval": "12573f8dfe0a73aeb16f49ea0d0e8628f2e3aaee02dba83d2c9b97f965f1e54b",
+          "worker": "12573f8dfe0a73aeb16f49ea0d0e8628f2e3aaee02dba83d2c9b97f965f1e54b",
+          "legalControls": []
+        },
+        "kind": "closeout",
+        "status": "input-required",
+        "phase": "recovering-after-claim",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "elapsedSeconds": 5.0,
+        "currentCommand": "lifecycle stage: recovering-after-claim",
+        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
+        "taskIntent": {
+          "schema": "task-intent/v1",
+          "digest": "9463713b00dbb5b8e5229003e64823079a461585be5038f9e209a5aeb38ec0e1"
+        },
+        "result": {
+          "nextAction": "recover"
+        },
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "observedAt": "2026-08-12T12:00:00+00:00",
+          "detail": "no live worker authority is retained"
+        },
+        "approval": {
+          "state": "unclaimed"
+        },
+        "cancellable": false,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [],
+        "projectionEffects": []
+      },
+      "actions": []
     },
     {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "running",
-      "codeWorktreeExists": true,
       "enclosure": "sim-op-code-commit",
       "enclosureId": "sim-op-code-commit",
-      "humanReviewStatus": "approved",
-      "integrationStatus": "not-started",
       "leafId": "sim-op-code-commit",
-      "lifecycleId": "sim-op-code-commit-lifecycle",
-      "lifecycleOperation": {
-        "cancellable": false,
-        "currentCommand": "code commit",
-        "elapsedSeconds": 6,
-        "kind": "closeout",
-        "legalControls": [],
-        "phase": "code-commit",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "running"
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
       "taskId": "SIM-OP-CODE-COMMIT",
       "taskName": "lifecycle-code-commit",
+      "repoName": "agents-remember",
       "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
+      "lifecycleId": "sim-op-code-commit-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved",
+      "closeoutStatus": "running",
+      "integrationStatus": "not-started",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
+      "lifecycleOperation": {
+        "schemaVersion": "lifecycle-operation-projection/v1",
+        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+        "identity": {
+          "operationKind": "closeout",
+          "contractPath": "sim-op-code-commit",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "48145cec62e2959ba30262ce5bc3b67d6e47b7161d88725040399edd37b10153",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "df83b14c3debaa408c8cb33b5dfabe9d046b9ce31fb72a5423b320cf496c16fe"
+        },
+        "componentBindings": {
+          "approval": "df83b14c3debaa408c8cb33b5dfabe9d046b9ce31fb72a5423b320cf496c16fe",
+          "worker": "df83b14c3debaa408c8cb33b5dfabe9d046b9ce31fb72a5423b320cf496c16fe",
+          "recommendedAction": "df83b14c3debaa408c8cb33b5dfabe9d046b9ce31fb72a5423b320cf496c16fe",
+          "legalControls": []
+        },
+        "kind": "closeout",
+        "status": "running",
+        "phase": "code-commit",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "elapsedSeconds": 6.0,
+        "currentCommand": "lifecycle stage: code-commit",
+        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
+        "taskIntent": {
+          "schema": "task-intent/v1",
+          "digest": "48145cec62e2959ba30262ce5bc3b67d6e47b7161d88725040399edd37b10153"
+        },
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "observedAt": "2026-08-12T12:00:00+00:00",
+          "detail": "no live worker authority is retained"
+        },
+        "approval": {
+          "state": "unclaimed"
+        },
+        "recommendedAction": {
+          "action": "observe",
+          "tool": "worktree_status",
+          "arguments": {
+            "contract_path": "sim-op-code-commit"
+          },
+          "summary": "Observe this exact lifecycle generation for its next durable edge.",
+          "mutating": false
+        },
+        "cancellable": false,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [],
+        "projectionEffects": []
+      },
+      "actions": []
     },
     {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "running",
-      "codeWorktreeExists": true,
       "enclosure": "sim-op-memory-refresh",
       "enclosureId": "sim-op-memory-refresh",
-      "humanReviewStatus": "approved",
-      "integrationStatus": "not-started",
       "leafId": "sim-op-memory-refresh",
-      "lifecycleId": "sim-op-memory-refresh-lifecycle",
-      "lifecycleOperation": {
-        "cancellable": false,
-        "currentCommand": "memory refresh",
-        "elapsedSeconds": 7,
-        "kind": "closeout",
-        "legalControls": [],
-        "phase": "memory-refresh",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "running"
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
       "taskId": "SIM-OP-MEMORY-REFRESH",
       "taskName": "lifecycle-memory-refresh",
+      "repoName": "agents-remember",
       "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
+      "lifecycleId": "sim-op-memory-refresh-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved",
+      "closeoutStatus": "running",
+      "integrationStatus": "not-started",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
+      "lifecycleOperation": {
+        "schemaVersion": "lifecycle-operation-projection/v1",
+        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+        "identity": {
+          "operationKind": "closeout",
+          "contractPath": "sim-op-memory-refresh",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "84478b3ea00c14d220d63f50abbbec2defc96fa336b7d4211d17b12a8b16ec7d",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "fade008c49ef89e71d12fb73f13e82733167608091dd865412cd69a8adb85a37"
+        },
+        "componentBindings": {
+          "approval": "fade008c49ef89e71d12fb73f13e82733167608091dd865412cd69a8adb85a37",
+          "worker": "fade008c49ef89e71d12fb73f13e82733167608091dd865412cd69a8adb85a37",
+          "recommendedAction": "fade008c49ef89e71d12fb73f13e82733167608091dd865412cd69a8adb85a37",
+          "legalControls": []
+        },
+        "kind": "closeout",
+        "status": "running",
+        "phase": "memory-refresh",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "elapsedSeconds": 7.0,
+        "currentCommand": "lifecycle stage: memory-refresh",
+        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
+        "taskIntent": {
+          "schema": "task-intent/v1",
+          "digest": "84478b3ea00c14d220d63f50abbbec2defc96fa336b7d4211d17b12a8b16ec7d"
+        },
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "observedAt": "2026-08-12T12:00:00+00:00",
+          "detail": "no live worker authority is retained"
+        },
+        "approval": {
+          "state": "unclaimed"
+        },
+        "recommendedAction": {
+          "action": "observe",
+          "tool": "worktree_status",
+          "arguments": {
+            "contract_path": "sim-op-memory-refresh"
+          },
+          "summary": "Observe this exact lifecycle generation for its next durable edge.",
+          "mutating": false
+        },
+        "cancellable": false,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [],
+        "projectionEffects": []
+      },
+      "actions": []
     },
     {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "running",
-      "codeWorktreeExists": true,
       "enclosure": "sim-op-memory-commit",
       "enclosureId": "sim-op-memory-commit",
-      "humanReviewStatus": "approved",
-      "integrationStatus": "not-started",
       "leafId": "sim-op-memory-commit",
-      "lifecycleId": "sim-op-memory-commit-lifecycle",
-      "lifecycleOperation": {
-        "cancellable": false,
-        "currentCommand": "memory commit",
-        "elapsedSeconds": 8,
-        "kind": "closeout",
-        "legalControls": [],
-        "phase": "memory-commit",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "running"
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
       "taskId": "SIM-OP-MEMORY-COMMIT",
       "taskName": "lifecycle-memory-commit",
+      "repoName": "agents-remember",
       "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
+      "lifecycleId": "sim-op-memory-commit-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved",
+      "closeoutStatus": "running",
+      "integrationStatus": "not-started",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
+      "lifecycleOperation": {
+        "schemaVersion": "lifecycle-operation-projection/v1",
+        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+        "identity": {
+          "operationKind": "closeout",
+          "contractPath": "sim-op-memory-commit",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "b5da01e7b1ad207da128d009eccb580c0b5cb255112a75d0d3ca0fcb2c7af05e",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "2c1fd918a2e396e29b4723faf08fde02f6dad6e2901d227c6dfe21a66b7581f1"
+        },
+        "componentBindings": {
+          "approval": "2c1fd918a2e396e29b4723faf08fde02f6dad6e2901d227c6dfe21a66b7581f1",
+          "worker": "2c1fd918a2e396e29b4723faf08fde02f6dad6e2901d227c6dfe21a66b7581f1",
+          "recommendedAction": "2c1fd918a2e396e29b4723faf08fde02f6dad6e2901d227c6dfe21a66b7581f1",
+          "legalControls": []
+        },
+        "kind": "closeout",
+        "status": "running",
+        "phase": "memory-commit",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "elapsedSeconds": 8.0,
+        "currentCommand": "lifecycle stage: memory-commit",
+        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
+        "taskIntent": {
+          "schema": "task-intent/v1",
+          "digest": "b5da01e7b1ad207da128d009eccb580c0b5cb255112a75d0d3ca0fcb2c7af05e"
+        },
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "observedAt": "2026-08-12T12:00:00+00:00",
+          "detail": "no live worker authority is retained"
+        },
+        "approval": {
+          "state": "unclaimed"
+        },
+        "recommendedAction": {
+          "action": "observe",
+          "tool": "worktree_status",
+          "arguments": {
+            "contract_path": "sim-op-memory-commit"
+          },
+          "summary": "Observe this exact lifecycle generation for its next durable edge.",
+          "mutating": false
+        },
+        "cancellable": false,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [],
+        "projectionEffects": []
+      },
+      "actions": []
     },
     {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "completed",
-      "codeWorktreeExists": true,
       "enclosure": "sim-op-integration-replay",
       "enclosureId": "sim-op-integration-replay",
-      "humanReviewStatus": "approved",
-      "integrationStatus": "running",
       "leafId": "sim-op-integration-replay",
-      "lifecycleId": "sim-op-integration-replay-lifecycle",
-      "lifecycleOperation": {
-        "cancellable": true,
-        "currentCommand": "integration replay",
-        "elapsedSeconds": 10,
-        "kind": "integrate",
-        "legalControls": [],
-        "phase": "integration-replay",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "running"
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
       "taskId": "SIM-OP-INTEGRATION-REPLAY",
       "taskName": "lifecycle-integration-replay",
+      "repoName": "agents-remember",
       "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
+      "lifecycleId": "sim-op-integration-replay-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved",
+      "closeoutStatus": "completed",
+      "integrationStatus": "running",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
+      "lifecycleOperation": {
+        "schemaVersion": "lifecycle-operation-projection/v1",
+        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+        "identity": {
+          "operationKind": "integrate",
+          "contractPath": "sim-op-integration-replay",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "d10f0bef16a5dbcf35dfa65d8e4d6c199b5e2957772d33cdf2856aea3c8b9ead",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "1db0324d4f8f596f8b42146c2ed069a0981acfb80225f0cf0e6caaae4524c0a1"
+        },
+        "componentBindings": {
+          "approval": "1db0324d4f8f596f8b42146c2ed069a0981acfb80225f0cf0e6caaae4524c0a1",
+          "worker": "1db0324d4f8f596f8b42146c2ed069a0981acfb80225f0cf0e6caaae4524c0a1",
+          "recommendedAction": "1db0324d4f8f596f8b42146c2ed069a0981acfb80225f0cf0e6caaae4524c0a1",
+          "legalControls": ["1db0324d4f8f596f8b42146c2ed069a0981acfb80225f0cf0e6caaae4524c0a1"]
+        },
+        "kind": "integrate",
+        "status": "running",
+        "phase": "integration-replay",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "elapsedSeconds": 10.0,
+        "currentCommand": "lifecycle stage: integration-replay",
+        "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "observedAt": "2026-08-12T12:00:00+00:00",
+          "detail": "no live worker authority is retained"
+        },
+        "approval": {
+          "state": "unclaimed"
+        },
+        "recommendedAction": {
+          "action": "observe",
+          "tool": "worktree_status",
+          "arguments": {
+            "contract_path": "sim-op-integration-replay"
+          },
+          "summary": "Observe this exact lifecycle generation for its next durable edge.",
+          "mutating": false
+        },
+        "cancellable": true,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [
+          {
+            "action": "cancel",
+            "generationEffect": "terminal-disposition",
+            "tool": "worktree_operation_control",
+            "arguments": {
+              "contract_path": "sim-op-integration-replay",
+              "operation_kind": "integrate",
+              "expected_generation": 1,
+              "intent_note": "<developer intent>",
+              "dry_run": false,
+              "action": "cancel"
+            },
+            "summary": "Apply the sampled cancel control."
+          }
+        ],
+        "projectionEffects": []
+      },
+      "actions": []
     },
     {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "completed",
-      "codeWorktreeExists": true,
       "enclosure": "sim-op-integration-quality",
       "enclosureId": "sim-op-integration-quality",
-      "humanReviewStatus": "approved",
-      "integrationStatus": "running",
       "leafId": "sim-op-integration-quality",
-      "lifecycleId": "sim-op-integration-quality-lifecycle",
-      "lifecycleOperation": {
-        "cancellable": true,
-        "currentCommand": "integration quality",
-        "elapsedSeconds": 11,
-        "kind": "integrate",
-        "legalControls": [],
-        "phase": "integration-quality",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "running"
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
       "taskId": "SIM-OP-INTEGRATION-QUALITY",
       "taskName": "lifecycle-integration-quality",
+      "repoName": "agents-remember",
       "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
+      "lifecycleId": "sim-op-integration-quality-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved",
+      "closeoutStatus": "completed",
+      "integrationStatus": "running",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
+      "lifecycleOperation": {
+        "schemaVersion": "lifecycle-operation-projection/v1",
+        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+        "identity": {
+          "operationKind": "integrate",
+          "contractPath": "sim-op-integration-quality",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "aaac29b18ec39e825beb0d1ce7caa151e322cd4caf125bf437cc08f957e77eb9",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "2bb81ddf11e811c8cba043a62604662580cb673e6b3c98cc095c874c2f63afdd"
+        },
+        "componentBindings": {
+          "approval": "2bb81ddf11e811c8cba043a62604662580cb673e6b3c98cc095c874c2f63afdd",
+          "worker": "2bb81ddf11e811c8cba043a62604662580cb673e6b3c98cc095c874c2f63afdd",
+          "recommendedAction": "2bb81ddf11e811c8cba043a62604662580cb673e6b3c98cc095c874c2f63afdd",
+          "legalControls": ["2bb81ddf11e811c8cba043a62604662580cb673e6b3c98cc095c874c2f63afdd"]
+        },
+        "kind": "integrate",
+        "status": "running",
+        "phase": "integration-quality",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "elapsedSeconds": 11.0,
+        "currentCommand": "lifecycle stage: integration-quality",
+        "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "observedAt": "2026-08-12T12:00:00+00:00",
+          "detail": "no live worker authority is retained"
+        },
+        "approval": {
+          "state": "unclaimed"
+        },
+        "recommendedAction": {
+          "action": "observe",
+          "tool": "worktree_status",
+          "arguments": {
+            "contract_path": "sim-op-integration-quality"
+          },
+          "summary": "Observe this exact lifecycle generation for its next durable edge.",
+          "mutating": false
+        },
+        "cancellable": true,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [
+          {
+            "action": "cancel",
+            "generationEffect": "terminal-disposition",
+            "tool": "worktree_operation_control",
+            "arguments": {
+              "contract_path": "sim-op-integration-quality",
+              "operation_kind": "integrate",
+              "expected_generation": 1,
+              "intent_note": "<developer intent>",
+              "dry_run": false,
+              "action": "cancel"
+            },
+            "summary": "Apply the sampled cancel control."
+          }
+        ],
+        "projectionEffects": []
+      },
+      "actions": []
     },
     {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "completed",
-      "codeWorktreeExists": true,
       "enclosure": "sim-op-source-merge",
       "enclosureId": "sim-op-source-merge",
-      "humanReviewStatus": "approved",
-      "integrationStatus": "running",
       "leafId": "sim-op-source-merge",
-      "lifecycleId": "sim-op-source-merge-lifecycle",
-      "lifecycleOperation": {
-        "cancellable": false,
-        "currentCommand": "source merge",
-        "elapsedSeconds": 12,
-        "kind": "integrate",
-        "legalControls": [],
-        "phase": "source-merge",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "running"
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
       "taskId": "SIM-OP-SOURCE-MERGE",
       "taskName": "lifecycle-source-merge",
+      "repoName": "agents-remember",
       "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
+      "lifecycleId": "sim-op-source-merge-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved",
+      "closeoutStatus": "completed",
+      "integrationStatus": "running",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
+      "lifecycleOperation": {
+        "schemaVersion": "lifecycle-operation-projection/v1",
+        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+        "identity": {
+          "operationKind": "integrate",
+          "contractPath": "sim-op-source-merge",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "6dac65639a0810b851fbf9b67dccc8b6dff9cf1db131a9b9af4e315a972af5ac",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "aa60f57bb2941ceb966500df4956a2e2481f7bcdf26e6555ad0bcce637fe64d5"
+        },
+        "componentBindings": {
+          "approval": "aa60f57bb2941ceb966500df4956a2e2481f7bcdf26e6555ad0bcce637fe64d5",
+          "worker": "aa60f57bb2941ceb966500df4956a2e2481f7bcdf26e6555ad0bcce637fe64d5",
+          "recommendedAction": "aa60f57bb2941ceb966500df4956a2e2481f7bcdf26e6555ad0bcce637fe64d5",
+          "legalControls": []
+        },
+        "kind": "integrate",
+        "status": "running",
+        "phase": "source-merge",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "elapsedSeconds": 12.0,
+        "currentCommand": "lifecycle stage: source-merge",
+        "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "observedAt": "2026-08-12T12:00:00+00:00",
+          "detail": "no live worker authority is retained"
+        },
+        "approval": {
+          "state": "unclaimed"
+        },
+        "recommendedAction": {
+          "action": "observe",
+          "tool": "worktree_status",
+          "arguments": {
+            "contract_path": "sim-op-source-merge"
+          },
+          "summary": "Observe this exact lifecycle generation for its next durable edge.",
+          "mutating": false
+        },
+        "cancellable": false,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [],
+        "projectionEffects": []
+      },
+      "actions": []
     },
     {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "completed",
-      "codeWorktreeExists": true,
       "enclosure": "sim-op-contract-finalization",
       "enclosureId": "sim-op-contract-finalization",
-      "humanReviewStatus": "approved",
-      "integrationStatus": "input-required",
       "leafId": "sim-op-contract-finalization",
-      "lifecycleId": "sim-op-contract-finalization-lifecycle",
-      "lifecycleOperation": {
-        "cancellable": false,
-        "currentCommand": "contract finalization",
-        "elapsedSeconds": 13,
-        "kind": "integrate",
-        "legalControls": [],
-        "phase": "contract-finalization",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "input-required"
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
       "taskId": "SIM-OP-CONTRACT-FINALIZATION",
       "taskName": "lifecycle-contract-finalization",
+      "repoName": "agents-remember",
       "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
+      "lifecycleId": "sim-op-contract-finalization-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved",
+      "closeoutStatus": "completed",
+      "integrationStatus": "input-required",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
+      "lifecycleOperation": {
+        "schemaVersion": "lifecycle-operation-projection/v1",
+        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+        "identity": {
+          "operationKind": "integrate",
+          "contractPath": "sim-op-contract-finalization",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "c32543095e8bcc0b2cefaca997e58ce8f42d6502674a06b1c9ed1db36fe8e965",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "6338f3c418af0bd1be1d78e81cc6e57e4fd85171b89405d6ff0daf7446307861"
+        },
+        "componentBindings": {
+          "result": "6338f3c418af0bd1be1d78e81cc6e57e4fd85171b89405d6ff0daf7446307861",
+          "approval": "6338f3c418af0bd1be1d78e81cc6e57e4fd85171b89405d6ff0daf7446307861",
+          "worker": "6338f3c418af0bd1be1d78e81cc6e57e4fd85171b89405d6ff0daf7446307861",
+          "legalControls": []
+        },
+        "kind": "integrate",
+        "status": "input-required",
+        "phase": "contract-finalization",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "elapsedSeconds": 13.0,
+        "currentCommand": "lifecycle stage: contract-finalization",
+        "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
+        "result": {
+          "nextAction": "recover"
+        },
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "observedAt": "2026-08-12T12:00:00+00:00",
+          "detail": "no live worker authority is retained"
+        },
+        "approval": {
+          "state": "unclaimed"
+        },
+        "cancellable": false,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [],
+        "projectionEffects": []
+      },
+      "actions": []
     },
     {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "completed",
-      "codeWorktreeExists": true,
       "enclosure": "sim-op-completed",
       "enclosureId": "sim-op-completed",
-      "humanReviewStatus": "approved",
-      "integrationStatus": "completed",
       "leafId": "sim-op-completed",
-      "lifecycleId": "sim-op-completed-lifecycle",
-      "lifecycleOperation": {
-        "cancellable": false,
-        "currentCommand": "completed",
-        "elapsedSeconds": 14,
-        "kind": "integrate",
-        "legalControls": [],
-        "phase": "completed",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "completed"
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
       "taskId": "SIM-OP-COMPLETED",
       "taskName": "lifecycle-completed",
+      "repoName": "agents-remember",
       "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
-    },
-    {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "completed",
-      "codeWorktreeExists": true,
-      "enclosure": "sim-op-cancelled",
-      "enclosureId": "sim-op-cancelled",
+      "lifecycleId": "sim-op-completed-lifecycle",
+      "worktreeGroup": "sim-group",
       "humanReviewStatus": "approved",
-      "integrationStatus": "cancelled",
-      "leafId": "sim-op-cancelled",
-      "lifecycleId": "sim-op-cancelled-lifecycle",
+      "closeoutStatus": "completed",
+      "integrationStatus": "completed",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
       "lifecycleOperation": {
-        "cancellable": false,
-        "currentCommand": "cancelled",
-        "elapsedSeconds": 15,
-        "kind": "integrate",
-        "legalControls": [],
-        "phase": "cancelled",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
         "schemaVersion": "lifecycle-operation-projection/v1",
         "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "cancelled"
+        "identity": {
+          "operationKind": "integrate",
+          "contractPath": "sim-op-completed",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "cded0461cb629a76527bc757680b7a52a172dde615b74d33b0186f84f014b1c4",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "4a82f605665599ff631768af2b535bc1e44de3df9fe2afd7903a1e2fdf599283"
+        },
+        "componentBindings": {
+          "approval": "4a82f605665599ff631768af2b535bc1e44de3df9fe2afd7903a1e2fdf599283",
+          "worker": "4a82f605665599ff631768af2b535bc1e44de3df9fe2afd7903a1e2fdf599283",
+          "recommendedAction": "4a82f605665599ff631768af2b535bc1e44de3df9fe2afd7903a1e2fdf599283",
+          "legalControls": []
+        },
+        "kind": "integrate",
+        "status": "completed",
+        "phase": "completed",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "finishedAt": "2026-08-12T12:00:14+00:00",
+        "elapsedSeconds": 14.0,
+        "currentCommand": "lifecycle stage: completed",
+        "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "observedAt": "2026-08-12T12:00:14+00:00",
+          "detail": "no live worker authority is retained"
+        },
+        "approval": {
+          "state": "unclaimed"
+        },
+        "recommendedAction": {
+          "action": "observe",
+          "tool": "worktree_status",
+          "arguments": {
+            "contract_path": "sim-op-completed"
+          },
+          "summary": "Observe this exact lifecycle generation for its next durable edge.",
+          "mutating": false
+        },
+        "cancellable": false,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [],
+        "projectionEffects": []
       },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-cancelled",
+      "enclosureId": "sim-op-cancelled",
+      "leafId": "sim-op-cancelled",
       "taskId": "SIM-OP-CANCELLED",
       "taskName": "lifecycle-cancelled",
+      "repoName": "agents-remember",
       "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
+      "lifecycleId": "sim-op-cancelled-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved",
+      "closeoutStatus": "completed",
+      "integrationStatus": "cancelled",
+      "cleanup": "pending",
+      "codeWorktreeExists": true,
+      "memoryWorktreeExists": true,
+      "lifecycleOperation": {
+        "schemaVersion": "lifecycle-operation-projection/v1",
+        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+        "identity": {
+          "operationKind": "integrate",
+          "contractPath": "sim-op-cancelled",
+          "generation": 1,
+          "recordRevision": 1,
+          "candidateTupleDigest": "bbf20098998087177489c0b983518ebad074a53e9590d0e3954cfdac1486616a",
+          "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identityDigest": "9b526ee22c636111f290e0aca97b60e4665aea45018baa1c484a2a6d1c19bea4"
+        },
+        "componentBindings": {
+          "approval": "9b526ee22c636111f290e0aca97b60e4665aea45018baa1c484a2a6d1c19bea4",
+          "worker": "9b526ee22c636111f290e0aca97b60e4665aea45018baa1c484a2a6d1c19bea4",
+          "legalControls": []
+        },
+        "kind": "integrate",
+        "status": "cancelled",
+        "phase": "cancelled",
+        "startedAt": "2026-08-12T12:00:00+00:00",
+        "finishedAt": "2026-08-12T12:00:15+00:00",
+        "elapsedSeconds": 15.0,
+        "currentCommand": "lifecycle stage: cancelled",
+        "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
+        "worker": {
+          "state": "exited",
+          "identityRetained": false,
+          "observedAt": "2026-08-12T12:00:15+00:00",
+          "detail": "no live worker authority is retained"
+        },
+        "approval": {
+          "state": "unclaimed"
+        },
+        "cancellable": false,
+        "generation": 1,
+        "meaningfulRevision": 1,
+        "legalControls": [],
+        "projectionEffects": []
+      },
+      "actions": []
     }
   ],
   "generatedAt": "2026-06-14T09:01:00+00:00",
-  "lifecycles": [
-    {
-      "actions": [
-        {
-          "action": "resume",
-          "enabled": true
-        },
-        {
-          "action": "end",
-          "disabledReason": "a gate is open",
-          "enabled": false,
-          "nextSafeAction": "gate_decide"
-        }
-      ],
-      "ask": {
-        "question": "approve the gate?"
-      },
-      "enclosure": "sim-enclosure",
-      "fleeting": false,
-      "gate": {
-        "decisions": ["approve", "revise"],
-        "evidenceRefs": [
-          {
-            "kind": "task-doc",
-            "path": "/tasks/sim/01.md"
-          }
-        ],
-        "id": "GATE-1",
-        "kind": "plan-approval",
-        "packet": {
-          "summary": "approve the gate?"
-        },
-        "state": "open",
-        "ts": "2026-06-14T09:00:35+00:00"
-      },
-      "id": "sim-replay-lifecycle",
-      "inferred": false,
-      "lastEventTs": "2026-06-14T09:00:40+00:00",
-      "phase": "build",
-      "repoId": "agents-remember",
-      "scope": "agents-remember",
-      "staleSeconds": 20.0,
-      "startedAt": "2026-06-14T09:00:00+00:00",
-      "state": "blocked",
-      "stateEnteredAt": "2026-06-14T09:00:35+00:00",
-      "tokenSeries": [
-        {
-          "cumulative": 1200,
-          "ts": "2026-06-14T09:00:30+00:00"
-        }
-      ],
-      "tokens": 1200
-    },
-    {
-      "actions": [],
-      "fleeting": true,
-      "id": "fleeting-001",
-      "inferred": false,
-      "lastEventTs": "2026-06-14T09:00:55+00:00",
-      "phase": "reframe-research",
-      "startedAt": "2026-06-14T09:00:50+00:00",
-      "state": "running",
-      "stateEnteredAt": "2026-06-14T09:00:50+00:00",
-      "tokenSeries": [],
-      "tokens": 0
-    },
-    {
-      "actions": [],
-      "fleeting": false,
-      "id": "paused-002",
-      "inferred": true,
-      "lastEventTs": "2026-06-14T08:52:00+00:00",
-      "phase": "request",
-      "staleSeconds": 540.0,
-      "startedAt": "2026-06-14T08:40:00+00:00",
-      "state": "paused",
-      "stateEnteredAt": "2026-06-14T08:52:00+00:00",
-      "tokenSeries": [],
-      "tokens": 300
-    },
-    {
-      "actions": [],
-      "fleeting": false,
-      "id": "awaiting-003",
-      "inferred": false,
-      "lastEventTs": "2026-06-14T08:58:00+00:00",
-      "phase": "trust-checkpoint",
-      "startedAt": "2026-06-14T08:30:00+00:00",
-      "state": "awaiting-developer",
-      "stateEnteredAt": "2026-06-14T08:58:00+00:00",
-      "tokenSeries": [],
-      "tokens": 450
-    },
-    {
-      "actions": [],
-      "fleeting": false,
-      "gate": {
-        "decidedBy": "developer",
-        "decidedVia": "dashboard",
-        "decisions": ["approve"],
-        "evidenceRefs": [
-          {
-            "kind": "task-doc",
-            "path": "/tasks/sim/00.md"
-          }
-        ],
-        "id": "GATE-0",
-        "kind": "design-approval",
-        "packet": {
-          "summary": "approve the design?"
-        },
-        "state": "decided",
-        "ts": "2026-06-14T08:09:00+00:00"
-      },
-      "id": "completed-004",
-      "inferred": false,
-      "lastEventTs": "2026-06-14T08:10:00+00:00",
-      "phase": "decide",
-      "startedAt": "2026-06-14T07:00:00+00:00",
-      "state": "completed",
-      "stateEnteredAt": "2026-06-14T08:10:00+00:00",
-      "tokenSeries": [],
-      "tokens": 800
-    },
-    {
-      "actions": [],
-      "fleeting": true,
-      "id": "abandoned-005",
-      "inferred": true,
-      "lastEventTs": "2026-06-14T06:04:00+00:00",
-      "phase": "close",
-      "startedAt": "2026-06-14T06:00:00+00:00",
-      "state": "abandoned",
-      "stateEnteredAt": "2026-06-14T06:04:00+00:00",
-      "tokenSeries": [],
-      "tokens": 50
-    }
-  ],
   "metrics": {
-    "awaitingDeveloperCount": 1,
-    "blockedCount": 1,
-    "lifecycleCount": 6,
-    "pausedCount": 1,
-    "runningCount": 1,
-    "stalenessHistogram": {
-      "aging": 2,
-      "fresh": 10
-    },
-    "totalTokens": 2800
+    "ignoredHostAgents": 0
   },
-  "providers": [
+  "taskCounts": {
+    "planned": 3,
+    "started": 2,
+    "aborted": 0,
+    "completed": 0,
+    "works": 1,
+    "waiting": 1,
+    "paused": 0,
+    "unknown": 0
+  },
+  "tasks": [
     {
-      "id": "codegraphcontext-code",
-      "indexingState": "indexed",
-      "ok": true,
-      "repoId": "agents-remember",
-      "role": "code",
-      "scope": "workspace",
-      "state": "ready",
-      "watcherUp": true
+      "stage": "started",
+      "activity": "waiting",
+      "eventAt": "2026-06-14T09:00:00+00:00",
+      "waitingSeats": [
+        {
+          "agentId": "0f0c1d2e-0000-4000-8000-0000000000aa",
+          "role": "manager",
+          "waitsFor": [
+            "subagent",
+            "background"
+          ],
+          "since": "2026-06-14T09:00:00Z",
+          "checkDueAt": "2026-06-14T09:03:00Z",
+          "detail": "sim replay, pid 4242, log /var/tmp/sim/replay.log, ends about 09:20"
+        }
+      ],
+      "reference": {
+        "repository": "agents-remember",
+        "path": "sim/task.json"
+      },
+      "id": "SIM",
+      "title": "sim series",
+      "stepsDone": 0,
+      "stepsTotal": 0,
+      "summary": {
+        "kind": "master",
+        "form": "master",
+        "type": "",
+        "statusNoteTruncated": false,
+        "headerNotes": [],
+        "bodyRevision": "",
+        "createdAt": "2026-06-14T08:45:00+00:00",
+        "ageSeconds": 960.0,
+        "steps": [],
+        "objective": "keep the mirror and the server one contract",
+        "requirements": [],
+        "codeExamples": [],
+        "decisions": [
+          {
+            "at": "2026-06-14T08:46:00+00:00",
+            "decision": "derive the bucket fields from the vocabulary",
+            "rationale": "a hand-written bucket list is what dropped awaiting-developer",
+            "product_record": false
+          }
+        ],
+        "openQuestions": [],
+        "references": [],
+        "discardedCount": 1,
+        "discardedSubTasks": [
+          {
+            "number": "0",
+            "name": "retired planning leaf",
+            "file": "00-retired.md",
+            "scope": "agents-remember",
+            "disposition": "discard-unstarted",
+            "reason": "the planning branch was retired before execution",
+            "discardedAt": "2026-06-14T08:47:00+00:00",
+            "proof": {
+              "version": "task-unstarted-evidence/v1",
+              "taskDocumentRef": {
+                "repository": "agents-remember",
+                "path": "00-retired.json"
+              },
+              "taskState": "planning-unstarted",
+              "enclosureState": "absent",
+              "locatorState": "absent",
+              "doorState": "absent",
+              "operationState": "absent",
+              "seatState": "absent",
+              "reviewState": "absent",
+              "commitState": "absent",
+              "childJson": {
+                "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+                "size": 96,
+                "state": "present"
+              },
+              "childMarkdown": {
+                "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+                "size": 128,
+                "state": "present"
+              },
+              "fingerprint": "4444444444444444444444444444444444444444444444444444444444444444"
+            }
+          }
+        ],
+        "sections": [
+          {
+            "kind": "freeform",
+            "heading": "Shared decisions",
+            "body": "one vocabulary, one list"
+          }
+        ],
+        "orchestrates": [],
+        "seats": [],
+        "executionWaves": []
+      },
+      "worktrees": [],
+      "children": ["agents-remember/sim/01.json"],
+      "counts": {
+        "planned": 0,
+        "started": 1,
+        "aborted": 0,
+        "completed": 0,
+        "works": 1,
+        "waiting": 0,
+        "paused": 0,
+        "unknown": 0
+      },
+      "disagreements": [
+        {
+          "kind": "names-another-master",
+          "record": {
+            "repository": "agents-remember",
+            "path": "sim/09_moved.json"
+          },
+          "row": "SIM-L9",
+          "recordMaster": {
+            "repository": "agents-remember",
+            "path": "sim-master-a/task.json"
+          }
+        },
+        {
+          "kind": "listed-twice",
+          "record": {
+            "repository": "agents-remember",
+            "path": "sim/10_twice.json"
+          },
+          "row": "SIM-L10",
+          "parent": "agents-remember/sim-master-b/task.json"
+        },
+        {
+          "kind": "unresolvable-master",
+          "record": {
+            "repository": "agents-remember",
+            "path": "sim/11_lost.json"
+          },
+          "row": "SIM-L11",
+          "masterLiteral": "../../elsewhere/task.md"
+        }
+      ],
+      "key": "agents-remember/sim/task.json"
     },
     {
-      "id": "grepai-memory",
-      "indexingState": "indexed",
-      "ok": true,
-      "role": "memory",
-      "scope": "worktree",
-      "snapshotStaleSeconds": 3.5,
-      "state": "ready",
-      "watcherUp": true,
-      "worktreeGroup": "sim-group"
+      "stage": "started",
+      "activity": "works",
+      "eventAt": "2026-06-14T09:01:00+00:00",
+      "reference": {
+        "repository": "agents-remember",
+        "path": "sim/01.json"
+      },
+      "id": "SIM-1",
+      "scope": "Exercise [task details](notes/sample.md).",
+      "title": "sim replay",
+      "stepsDone": 2,
+      "stepsTotal": 3,
+      "summary": {
+        "kind": "subTask",
+        "form": "task",
+        "type": "SubTask (simulation replay)",
+        "statusNote": "replay is mid-step; the second step is still open",
+        "statusNoteTruncated": false,
+        "headerNotes": [
+          {
+            "label": "Stage",
+            "value": "simulation replay"
+          }
+        ],
+        "headerNotesTotal": 1,
+        "reviewState": {
+          "round": 1,
+          "pending": false,
+          "additionalRounds": 0,
+          "findings": [
+            {
+              "findingId": "SIM-F1",
+              "description": "replay finding still open",
+              "open": true,
+              "descriptionTruncated": false
+            }
+          ],
+          "totalFindings": 1,
+          "openFindings": 1,
+          "developerApproval": "replay approved by the developer"
+        },
+        "currentStep": "step-2",
+        "bodyRevision": "rev-3",
+        "createdAt": "2026-06-14T08:50:00+00:00",
+        "ageSeconds": 660.0,
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "read the contract",
+            "status": "done",
+            "disposition": {
+              "kind": "intentionalSkip",
+              "reason": "the contract was already reviewed",
+              "recordedAt": "2026-06-14T08:52:00+00:00",
+              "recordedVia": "task_doc.skip_step",
+              "lifecycleId": "sim-replay-lifecycle"
+            },
+            "substeps": [
+              {
+                "id": "step-1a",
+                "title": "read projection.py",
+                "status": "done",
+                "disposition": {
+                  "kind": "intentionalSkip",
+                  "reason": "the projection review already covered it",
+                  "recordedAt": "2026-06-14T08:53:00+00:00",
+                  "recordedVia": "task_doc.skip_step",
+                  "lifecycleId": "sim-replay-lifecycle"
+                },
+                "note": "first substep prose"
+              }
+            ],
+            "outcome": "the reviewed contract",
+            "note": "first step prose",
+            "outcomeTruncated": false,
+            "noteTruncated": false
+          },
+          {
+            "id": "step-2",
+            "title": "make the guard bite",
+            "status": "in-progress",
+            "substeps": [],
+            "outcomeTruncated": false,
+            "noteTruncated": false
+          }
+        ],
+        "objective": "keep the mirror honest",
+        "requirements": ["the guard fails when the server grows a field"],
+        "design": "two directions, both checked",
+        "codeExamples": [
+          {
+            "id": "ex-1",
+            "title": "the excess-field walk",
+            "distinctChange": "type-level path diff",
+            "why": "a double cast defeated every structural check",
+            "language": "ts",
+            "snippet": "type ServedOnlyPaths<Served, Mirror> = never;"
+          }
+        ],
+        "decisions": [
+          {
+            "at": "2026-06-14T08:55:00+00:00",
+            "decision": "keep the fixture as the server stand-in",
+            "rationale": "schema codegen owns the TypeScript contract; this sampled fixture remains hand-maintained",
+            "product_record": false
+          }
+        ],
+        "openQuestions": ["which vocabularies still have no runtime tuple?"],
+        "references": ["mcp/src/agents_remember/observer/projection.py"],
+        "discardedCount": 1,
+        "discardedSubTasks": [
+          {
+            "number": "0",
+            "name": "retired fixture leaf",
+            "file": "00-retired.md",
+            "scope": "agents-remember",
+            "disposition": "discard-unstarted",
+            "reason": "the fixture branch was retired before execution",
+            "discardedAt": "2026-06-14T08:56:00+00:00",
+            "proof": {
+              "version": "task-unstarted-evidence/v1",
+              "taskDocumentRef": {
+                "repository": "agents-remember",
+                "path": "00-retired.json"
+              },
+              "taskState": "planning-unstarted",
+              "enclosureState": "absent",
+              "locatorState": "absent",
+              "doorState": "absent",
+              "operationState": "absent",
+              "seatState": "absent",
+              "reviewState": "absent",
+              "commitState": "absent",
+              "childJson": {
+                "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                "size": 96,
+                "state": "present"
+              },
+              "childMarkdown": {
+                "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                "size": 128,
+                "state": "present"
+              },
+              "fingerprint": "7777777777777777777777777777777777777777777777777777777777777777"
+            }
+          }
+        ],
+        "sections": [
+          {
+            "kind": "freeform",
+            "heading": "Notes",
+            "body": "the fixture is the server here"
+          }
+        ],
+        "orchestrates": [],
+        "seats": [],
+        "executionWaves": [],
+        "directGrant": {
+          "grantedBy": "developer",
+          "grantedAt": "2026-06-14T09:00:00+00:00"
+        },
+        "nonGoals": "This simulated document does not exercise a live coordinator.",
+        "acceptance": "The sampled contract remains type checked.",
+        "completedAt": "2026-06-14T08:50:00+00:00",
+        "waitsFor": ["SIM-2"],
+        "waitsForTasks": [
+          {
+            "id": "SIM-2",
+            "title": "Simulated prerequisite",
+            "reference": {
+              "repository": "agents-remember",
+              "path": "sim/02.json"
+            },
+            "gone": false
+          },
+          {
+            "id": "gone",
+            "title": "Removed prerequisite",
+            "gone": true
+          }
+        ],
+        "neededByTasks": [
+          {
+            "id": "SIM-3",
+            "title": "Simulated dependent",
+            "reference": {
+              "repository": "agents-remember",
+              "path": "sim/03.json"
+            },
+            "gone": false
+          }
+        ]
+      },
+      "parent": "agents-remember/sim/task.json",
+      "worktrees": [
+        {
+          "enclosure": "/fixture/tasks/agents-remember/sim/enclosures/sim-1/series-contract.md",
+          "enclosureId": "sim-bound-enclosure",
+          "leafId": "SIM-1",
+          "taskId": "SIM",
+          "taskName": "sim",
+          "repoName": "agents-remember",
+          "taskRoot": "/fixture/tasks/agents-remember/sim",
+          "lifecycleId": "sim-replay-lifecycle",
+          "worktreeGroup": "/fixture/worktrees/sim-1",
+          "humanReviewStatus": "pending",
+          "closeoutStatus": "not-started",
+          "integrationStatus": "not-started",
+          "cleanup": "pending",
+          "codeWorktreeExists": true,
+          "memoryWorktreeExists": true,
+          "lifecycleOperation": {
+            "schemaVersion": "lifecycle-operation-projection/v1",
+            "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
+            "identity": {
+              "operationKind": "closeout",
+              "contractPath": "/fixture/tasks/agents-remember/sim/enclosures/sim-1/series-contract.md",
+              "generation": 1,
+              "recordRevision": 1,
+              "candidateTupleDigest": "fe7a931d26420bed78833ae0f0825ec9189df8e3846c13f63f5f3a4c8a239a75",
+              "planIdentityDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+              "identityDigest": "9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa"
+            },
+            "componentBindings": {
+              "result": "9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa",
+              "approval": "9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa",
+              "worker": "9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa",
+              "recommendedAction": "9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa",
+              "legalControls": ["9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa"]
+            },
+            "kind": "closeout",
+            "status": "failed",
+            "phase": "failed",
+            "startedAt": "2026-08-12T12:00:00+00:00",
+            "heartbeatAt": "2026-08-12T12:00:10+00:00",
+            "finishedAt": "2026-08-12T12:00:12+00:00",
+            "elapsedSeconds": 12.0,
+            "currentCommand": "lifecycle stage: failed",
+            "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
+            "taskIntent": {
+              "schema": "task-intent/v1",
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "result": {
+              "reason": "fixture failure"
+            },
+            "failure": "fixture failure",
+            "guidance": "Fix the reported preflight failure, then restart this task operation.",
+            "worker": {
+              "state": "exited",
+              "identityRetained": false,
+              "workerIdentitySha256": "92daae5d6056a7e2e41637cfa2da4c0a252cfe30bff5a219435aba94c814c856",
+              "observedAt": "2026-08-12T12:00:10+00:00",
+              "detail": "exact worker exit is proven"
+            },
+            "approval": {
+              "state": "claimed"
+            },
+            "recommendedAction": {
+              "action": "recover",
+              "tool": "worktree_operation_control",
+              "arguments": {
+                "contract_path": "/fixture/tasks/agents-remember/sim/enclosures/sim-1/series-contract.md",
+                "operation_kind": "closeout",
+                "expected_generation": 1,
+                "intent_note": "<developer intent>",
+                "dry_run": false,
+                "action": "recover"
+              },
+              "summary": "Apply the sampled recover control.",
+              "mutating": true
+            },
+            "cancellable": false,
+            "generation": 1,
+            "meaningfulRevision": 1,
+            "legalControls": [
+              {
+                "action": "recover",
+                "generationEffect": "same",
+                "tool": "worktree_operation_control",
+                "arguments": {
+                  "contract_path": "/fixture/tasks/agents-remember/sim/enclosures/sim-1/series-contract.md",
+                  "operation_kind": "closeout",
+                  "expected_generation": 1,
+                  "intent_note": "<developer intent>",
+                  "dry_run": false,
+                  "action": "recover"
+                },
+                "summary": "Apply the sampled recover control."
+              }
+            ],
+            "projectionEffects": [
+              {
+                "sprintTaskDocumentRef": {
+                  "repository": "agents-remember",
+                  "path": "sprint/task.json"
+                },
+                "queueExisted": true,
+                "priorRevision": 0,
+                "priorSourceFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "invalidation": {
+                  "outcome": "persisted-empty",
+                  "revision": 1
+                },
+                "rebuild": {
+                  "outcome": "published",
+                  "revision": 2,
+                  "sourceFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                  "sourceClassification": "active",
+                  "memberCount": 2,
+                  "sourceProblems": []
+                },
+                "rebuiltRevision": 2
+              },
+              {
+                "sprintTaskDocumentRef": {
+                  "repository": "agents-remember",
+                  "path": "sprint/task.json"
+                },
+                "queueExisted": true,
+                "priorRevision": 2,
+                "priorSourceFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "invalidation": {
+                  "outcome": "recovered-malformed",
+                  "revision": 3,
+                  "diagnostic": {
+                    "kind": "projection",
+                    "address": "/tasks/sim/series/task.json",
+                    "state": "unreadable",
+                    "errorType": "malformed-source",
+                    "repairAction": "repair task truth before rebuilding"
+                  }
+                },
+                "rebuild": {
+                  "outcome": "source-unreadable",
+                  "revision": 3,
+                  "memberCount": 0,
+                  "sourceProblems": [
+                    {
+                      "kind": "task",
+                      "address": "/tasks/sim/series/task.json",
+                      "state": "invalid",
+                      "errorType": "malformed-source",
+                      "repairAction": "repair task truth before rebuilding"
+                    }
+                  ]
+                },
+                "nextAction": "repair task truth before rebuilding"
+              }
+            ]
+          },
+          "actions": [
+            {
+              "action": "worktree_sync",
+              "enabled": true
+            },
+            {
+              "action": "worktree_integrate",
+              "enabled": false,
+              "disabledReason": "closeout has not run",
+              "nextSafeAction": "worktree_closeout_preview"
+            }
+          ]
+        }
+      ],
+      "children": [],
+      "counts": {
+        "planned": 0,
+        "started": 0,
+        "aborted": 0,
+        "completed": 0,
+        "works": 0,
+        "waiting": 0,
+        "paused": 0,
+        "unknown": 0
+      },
+      "key": "agents-remember/sim/01.json"
+    },
+    {
+      "stage": "planned",
+      "reference": {
+        "repository": "agents-remember",
+        "path": "sim-sprint/task.json"
+      },
+      "id": "SIM-SPRINT",
+      "title": "dependency-aware sprint",
+      "stepsDone": 0,
+      "stepsTotal": 0,
+      "summary": {
+        "kind": "master",
+        "form": "sprint",
+        "type": "Orchestration (simulation)",
+        "integrationBranch": "ar/sim-sprint",
+        "statusNote": "sprint replay holds two masters",
+        "statusNoteTruncated": false,
+        "headerNotes": [
+          {
+            "label": "Stage",
+            "value": "simulation replay"
+          }
+        ],
+        "headerNotesTotal": 1,
+        "bodyRevision": "sim-sprint-r1",
+        "createdAt": "2026-06-14T08:40:00+00:00",
+        "steps": [],
+        "objective": "derive execution waves from reasoned dependencies",
+        "requirements": [],
+        "codeExamples": [],
+        "decisions": [],
+        "openQuestions": [],
+        "references": [],
+        "sections": [],
+        "orchestrates": ["sim-master-a", "sim-master-b"],
+        "seats": [
+          {
+            "role": "orchestrator",
+            "label": "Sprint Orchestrator",
+            "identity": "agent-sim-orchestrator",
+            "state": "active"
+          }
+        ],
+        "executionGraph": {
+          "nodes": [
+            {
+              "kind": "segment",
+              "ref": {
+                "repository": "agents-remember",
+                "path": "sim-master-a/task.json"
+              },
+              "leafIds": ["SIM-A-L1"]
+            },
+            {
+              "kind": "segment",
+              "ref": {
+                "repository": "agents-remember",
+                "path": "sim-master-b/task.json"
+              },
+              "leafIds": ["SIM-B-L1"]
+            }
+          ],
+          "edges": [
+            {
+              "predecessor": {
+                "ref": {
+                  "repository": "agents-remember",
+                  "path": "sim-master-a/task.json"
+                },
+                "leafId": "SIM-A-L1"
+              },
+              "successor": {
+                "ref": {
+                  "repository": "agents-remember",
+                  "path": "sim-master-b/task.json"
+                },
+                "leafId": "SIM-B-L1"
+              },
+              "reason": "the shared framework must land first",
+              "judgmentId": "J-sim-1"
+            }
+          ]
+        },
+        "executionWaves": [
+          [
+            {
+              "kind": "segment",
+              "ref": {
+                "repository": "agents-remember",
+                "path": "sim-master-a/task.json"
+              },
+              "leafIds": ["SIM-A-L1"]
+            }
+          ],
+          [
+            {
+              "kind": "segment",
+              "ref": {
+                "repository": "agents-remember",
+                "path": "sim-master-b/task.json"
+              },
+              "leafIds": ["SIM-B-L1"]
+            }
+          ]
+        ],
+        "executionGraphView": {
+          "nodes": [
+            {
+              "nodeId": "agents-remember/sim-master-a/task.json#seg1",
+              "kind": "segment",
+              "masterRef": {
+                "repository": "agents-remember",
+                "path": "sim-master-a/task.json"
+              },
+              "masterTitle": "Sim Master A",
+              "leafIds": ["SIM-A-L1"],
+              "leafTitles": ["Shared framework"],
+              "waveIndex": 1,
+              "frontierState": "in-flight",
+              "cycle": false,
+              "executionNature": "organizational",
+              "predecessors": []
+            },
+            {
+              "nodeId": "agents-remember/sim-master-b/task.json#seg1",
+              "kind": "segment",
+              "masterRef": {
+                "repository": "agents-remember",
+                "path": "sim-master-b/task.json"
+              },
+              "masterTitle": "Sim Master B",
+              "leafIds": ["SIM-B-L1"],
+              "leafTitles": ["Dependent work"],
+              "waveIndex": 2,
+              "frontierState": "waiting",
+              "executionNature": "organizational",
+              "predecessors": [
+                {
+                  "predecessorRef": {
+                    "repository": "agents-remember",
+                    "path": "sim-master-a/task.json"
+                  },
+                  "predecessorTitle": "Sim Master A",
+                  "reason": "the shared framework must land first",
+                  "judgmentId": "J-sim-1"
+                }
+              ]
+            },
+            {
+              "nodeId": "agents-remember/sim-master-a/task.json#landed",
+              "kind": "segment",
+              "masterRef": {
+                "repository": "agents-remember",
+                "path": "sim-master-a/task.json"
+              },
+              "masterTitle": "Sim Master A",
+              "leafIds": ["SIM-A-L1"],
+              "leafTitles": ["Shared framework"],
+              "waveIndex": 1,
+              "frontierState": "landed",
+              "executionNature": "organizational",
+              "predecessors": []
+            },
+            {
+              "nodeId": "agents-remember/sim-master-b/task.json#lump",
+              "kind": "lump",
+              "masterRef": {
+                "repository": "agents-remember",
+                "path": "sim-master-b/task.json"
+              },
+              "masterTitle": "Sim Master B",
+              "leafIds": ["SIM-B-L1"],
+              "leafTitles": ["Dependent work"],
+              "waveIndex": 2,
+              "frontierState": "ready",
+              "executionNature": "atomic",
+              "predecessors": []
+            }
+          ]
+        }
+      },
+      "worktrees": [],
+      "children": [
+        "agents-remember/sim-master-a/task.json",
+        "agents-remember/sim-master-b/task.json"
+      ],
+      "counts": {
+        "planned": 2,
+        "started": 0,
+        "aborted": 0,
+        "completed": 0,
+        "works": 0,
+        "waiting": 0,
+        "paused": 0,
+        "unknown": 0
+      },
+      "key": "agents-remember/sim-sprint/task.json"
+    },
+    {
+      "stage": "planned",
+      "reference": {
+        "repository": "agents-remember",
+        "path": "sim-master-a/task.json"
+      },
+      "id": "SIM-MASTER-A",
+      "title": "parallel feature work",
+      "stepsDone": 0,
+      "stepsTotal": 0,
+      "summary": {
+        "kind": "master",
+        "form": "master",
+        "type": "Feature (simulation)",
+        "statusNoteTruncated": false,
+        "headerNotes": [
+          {
+            "label": "Stage",
+            "value": "simulation replay"
+          }
+        ],
+        "headerNotesTotal": 1,
+        "bodyRevision": "sim-master-a-r1",
+        "createdAt": "2026-06-14T08:41:00+00:00",
+        "steps": [],
+        "objective": "coordinate independently landable leaves",
+        "requirements": [],
+        "codeExamples": [],
+        "decisions": [],
+        "openQuestions": [],
+        "references": [],
+        "sections": [],
+        "orchestrates": [],
+        "seats": [],
+        "executionNature": "organizational",
+        "executionWaves": []
+      },
+      "parent": "agents-remember/sim-sprint/task.json",
+      "worktrees": [],
+      "children": [],
+      "counts": {
+        "planned": 0,
+        "started": 0,
+        "aborted": 0,
+        "completed": 0,
+        "works": 0,
+        "waiting": 0,
+        "paused": 0,
+        "unknown": 0
+      },
+      "key": "agents-remember/sim-master-a/task.json"
+    },
+    {
+      "stage": "planned",
+      "reference": {
+        "repository": "agents-remember",
+        "path": "sim-master-b/task.json"
+      },
+      "id": "SIM-MASTER-B",
+      "title": "atomic framework block",
+      "stepsDone": 0,
+      "stepsTotal": 0,
+      "summary": {
+        "kind": "master",
+        "form": "master",
+        "type": "Atomic (simulation)",
+        "statusNoteTruncated": false,
+        "headerNotes": [
+          {
+            "label": "Stage",
+            "value": "simulation replay"
+          }
+        ],
+        "headerNotesTotal": 1,
+        "bodyRevision": "sim-master-b-r1",
+        "createdAt": "2026-06-14T08:42:00+00:00",
+        "steps": [],
+        "objective": "land one indivisible dependency block",
+        "requirements": [],
+        "codeExamples": [],
+        "decisions": [],
+        "openQuestions": [],
+        "references": [],
+        "sections": [],
+        "orchestrates": [],
+        "seats": [],
+        "executionNature": "atomic",
+        "executionWaves": []
+      },
+      "parent": "agents-remember/sim-sprint/task.json",
+      "worktrees": [],
+      "children": [],
+      "counts": {
+        "planned": 0,
+        "started": 0,
+        "aborted": 0,
+        "completed": 0,
+        "works": 0,
+        "waiting": 0,
+        "paused": 0,
+        "unknown": 0
+      },
+      "key": "agents-remember/sim-master-b/task.json"
     }
   ],
-  "version": 1
+  "version": 1,
+  "checkoutBinding": {
+    "state": "disposable-coordination-root",
+    "worktree": "/worktrees/agents-remember/sim-leaf",
+    "coordinationRoot": "/worktrees/agents-remember/sim-worktree/dev-ar-coordination",
+    "configuredRoot": "/configured/coordination",
+    "remedy": "run the installed command for the configured root, or declare the test mode for scratch work; --config does not change the binding"
+  },
+  "watcherHealth": {
+    "downSince": 1781427657.0,
+    "running": false
+  }
 }

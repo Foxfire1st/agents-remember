@@ -2,11 +2,11 @@ import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DetailPanel } from './DetailPanel';
-import { seedTaskDocuments, stubNotes, taskDoc } from './test-utils';
+import { seedTaskEntries, stubNotes, taskEntry, taskSummary, taskReference } from './test-utils';
 
 const REPO = 'agents-remember';
 const MASTER = '260831_closeout-certification-reform';
-const DOC_PATH = `/tasks/${REPO}/${MASTER}/23_registered-task-local-requirement-root-navigation.json`;
+const DOC_PATH = `${REPO}/${MASTER}/23_registered-task-local-requirement-root-navigation.json`;
 const DOCUMENT = `${MASTER}/23_registered-task-local-requirement-root-navigation.json`;
 const PACKET = 'CCR-R23-v1-registered-task-local-requirement-root-navigation.md';
 
@@ -19,25 +19,32 @@ const requirement = {
 };
 
 function seedRequirementTask() {
-  const doc = taskDoc({
+  const doc = taskEntry({
+    stage: 'started',
+    stepsDone: 0,
+    stepsTotal: 0,
+    activity: 'works',
+    reference: taskReference(DOC_PATH),
     id: '260831-CCR-L23',
-    lifecycleId: undefined,
-    kind: 'subTask',
     title: 'Register the requirements artifact root',
-    repository: REPO,
-    docPath: DOC_PATH,
-    objective: [
-      `[R23 packet](requirements/${PACKET})`,
-      `[missing packet](requirements/missing.md)`,
-      '[external](https://example.com/spec)',
-      '[section](#proof)',
-    ].join(' · '),
-    references: [
-      `requirements/${PACKET} (canonical packet)`,
-      `notes/requirements/${PACKET} (explicit Series note collision)`,
-    ],
+    summary: taskSummary({
+      type: '',
+      createdAt: '2026-06-20T09:00:00+00:00',
+      form: 'task',
+      kind: 'subTask',
+      objective: [
+        `[R23 packet](requirements/${PACKET})`,
+        `[missing packet](requirements/missing.md)`,
+        '[external](https://example.com/spec)',
+        '[section](#proof)',
+      ].join(' · '),
+      references: [
+        `requirements/${PACKET} (canonical packet)`,
+        `notes/requirements/${PACKET} (explicit Series note collision)`,
+      ],
+    }),
   });
-  seedTaskDocuments([doc]);
+  seedTaskEntries([doc]);
   stubNotes(
     [{ name: PACKET, path: `requirements/${PACKET}`, size: 10, language: 'markdown' }],
     'note body',

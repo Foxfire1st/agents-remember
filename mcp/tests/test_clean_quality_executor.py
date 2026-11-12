@@ -15,13 +15,7 @@ from agents_remember.certification.repository_profiles.execution import (
     AdmittedRepositoryProfileExecution,
     admit_repository_profile_execution,
 )
-from agents_remember.certification.repository_profiles.models import (
-    ProfileMode,
-    RepositoryProfilePlan,
-)
-from agents_remember.certification.repository_profiles.source_selection.git import (
-    observe_candidate_source_selection,
-)
+from agents_remember.certification.repository_profiles.models import ProfileMode
 from agents_remember.worktrees.modules.quality import clean_executor as clean_quality_executor
 from agents_remember.worktrees.modules.quality import (
     dagger_authority as authority_module,
@@ -34,7 +28,6 @@ from repository_profile_test_support import (
     AGENTS_REMEMBER_PROFILE_REFERENCE,
     agents_remember_profile_execution,
     install_agents_remember_profile,
-    write_source_selection_artifacts,
 )
 
 CANDIDATE_TREE = "c" * 40
@@ -95,8 +88,6 @@ def publish_reports(
     execution = profile_execution or agents_remember_profile_execution(
         candidate_tree=candidate_tree
     )
-    if source.is_dir():
-        write_source_selection_artifacts(source, execution.plan)
     return clean_quality_executor._publish_reports(
         source,
         destination,
@@ -165,7 +156,6 @@ class CleanQualityExecutorTests(unittest.TestCase):
             purpose="closeout",
             mode="targeted",
             candidate_identity=candidate,
-            source_selection=observe_candidate_source_selection(source, candidate, "HEAD"),
         )
         self.assertEqual(manifest["profilePlan"], expected.plan.model_dump(mode="json"))
         self.assertEqual(manifest["profile"]["sourceSha256"], expected.admitted.source_sha256)
@@ -191,17 +181,6 @@ class CleanQualityExecutorTests(unittest.TestCase):
                 json.loads(proof.read_text(encoding="utf-8"))["schema"],
                 "ar-python-runtime-proof/v1",
             )
-        selection = clean_quality_executor.published_report_path(
-            group / "reports", "source-selection/ambient-role.json"
-        )
-        decision = json.loads(selection.read_bytes())
-        self.assertEqual(decision["applicability"]["status"], "not-applicable")
-        self.assertEqual(decision["selectedPaths"], [])
-        self.assertEqual(
-            decision["sourceSelection"]["changedPaths"], ["created.txt", "tracked.txt"]
-        )
-        self.assertEqual(decision["sourceSelection"], manifest["profilePlan"]["sourceSelection"])
-        self.assertFalse((sandbox / "export/ambient-role-chat-e2e").exists())
 
     def test_exact_staged_candidate_is_passed_to_one_pinned_dagger_pipeline(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
@@ -233,30 +212,6 @@ class CleanQualityExecutorTests(unittest.TestCase):
                 (export / "python-venv-runtime.json").write_text(
                     '{"schema":"ar-python-runtime-proof/v1"}\n', encoding="utf-8"
                 )
-                admission = json.loads((cwd.parent / "manifest.json").read_bytes())
-                plan = RepositoryProfilePlan.model_validate(admission["profilePlan"])
-                decisions = write_source_selection_artifacts(export, plan)
-                self.assertEqual(len(decisions), 1)
-                if decisions[0].applicability.status == "not-applicable":
-                    return subprocess.CompletedProcess(command, 0, stdout="exported\n", stderr="")
-                e2e = export / "ambient-role-chat-e2e"
-                e2e.mkdir()
-                (e2e / "summary.json").write_text(
-                    '{"schema":"ar-ambient-role-chat-e2e-summary/v1","status":"passed"}\n',
-                    encoding="utf-8",
-                )
-                for run in (1, 2):
-                    (e2e / f"run-{run}.json").write_text(
-                        json.dumps(
-                            {
-                                "schema": "ar-ambient-role-chat-e2e-run/v1",
-                                "status": "passed",
-                                "run": run,
-                            }
-                        )
-                        + "\n",
-                        encoding="utf-8",
-                    )
                 return subprocess.CompletedProcess(command, 0, stdout="exported\n", stderr="")
 
             result = run_clean_quality(
@@ -283,21 +238,6 @@ class CleanQualityExecutorTests(unittest.TestCase):
                 authority=_test_authority(),
             )
             self.assertFalse((sandbox / "obsolete").exists())
-            e2e_summary = clean_quality_executor.published_report_path(
-                group / "reports", "ambient-role-chat-e2e/summary.json"
-            )
-            self.assertEqual(json.loads(e2e_summary.read_bytes())["status"], "passed")
-            for run in (1, 2):
-                proof = clean_quality_executor.published_report_path(
-                    group / "reports", f"ambient-role-chat-e2e/run-{run}.json"
-                )
-                self.assertEqual(json.loads(proof.read_bytes())["run"], run)
-            decision = clean_quality_executor.published_report_path(
-                group / "reports", "source-selection/ambient-role.json"
-            )
-            self.assertEqual(
-                json.loads(decision.read_bytes())["applicability"]["status"], "applicable"
-            )
 
     def test_exported_failure_is_the_authoritative_pipeline_exit(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
@@ -381,9 +321,9 @@ class CleanQualityExecutorTests(unittest.TestCase):
             )
 
             (export / "closeout-operation.json").unlink()
-            nested = export / "ambient-role-chat-e2e"
+            nested = export / "rail-evidence"
             nested.mkdir()
-            (nested / "run-3.json").write_text("forged", encoding="utf-8")
+            (nested / "undeclared-rail@1.0.0.log").write_text("forged", encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "unexpected report files"):
                 publish_reports(export, reports)
             self.assertEqual(

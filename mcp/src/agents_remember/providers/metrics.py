@@ -72,10 +72,10 @@ PROVIDER_METRICS_OWNERSHIP = StoreOwnership(
         "provider-setup thread (providers/provider_setup.py _record_index_state). Compaction "
         "belongs to the dashboard because the reclaim is a step of that same sampling loop -- "
         "it is the only thing that knows the log just grew -- and because the MCP process has "
-        "no reason to remove a row it does not read. NOT the operator-inbox exception: that "
-        "store earned compaction_owner=None because BOTH processes must physically remove "
-        "rows and neither removal can travel to the other process without the decision it "
-        "implements. Nothing in the MCP process removes a metrics row at all, so a single "
+        "no reason to remove a row it does not read. compaction_owner=None is for a store "
+        "whose rows BOTH processes must physically remove, where neither removal can travel "
+        "to the other process without the decision it implements; that is not this one. "
+        "Nothing in the MCP process removes a metrics row at all, so a single "
         "owner is available here and is therefore required. The owner is enforced "
         "structurally rather than by a runtime predicate: compact() has exactly one caller and "
         "it is inside the dashboard's loop."
@@ -204,7 +204,7 @@ def _parse_row(text: str) -> dict[str, Any] | None:
       re-derives the whole state machine from a ROLLING WINDOW OF LIVE SAMPLES every 30s and
       consumes nothing; a row lost to a torn line costs at most one tick's accuracy and the next
       sample corrects it. That is the same self-correcting category the contract already accepts
-      for attention-dismissals and agent-notifier cooldowns, and it is a structural property of the
+      for attention-dismissals, and it is a structural property of the
       consumer, not the "it is only telemetry" hand-wave.
     * NOTHING THIS RETURNS IS EVER WRITTEN BACK. :meth:`ProviderMetricsStore.compact` reclaims
       from a RAW byte tail (:func:`_tail_lines`) and drops rows by age alone, so a row this

@@ -1,11 +1,7 @@
-"""Managed citation source-index namespace, leases, and terminal fencing.
+"""Retained exact-leaf cache authority and terminal fencing.
 
-The namespace is keyed by the exact contract/code/memory triple.  Its control
-directory is persistent: one lock plus one bounded state record per triple, rewritten
-across lifecycles rather than leaking one marker per lifecycle.  Ordinary operations
-take only their leaf lock plus a brief admission-root lock, so a terminal fence for one
-leaf never serializes its neighbours.
-"""
+Cleanup holds one terminal reservation through contract publication, quarantines
+the namespace before mutation, and restores it on a pre-commit failure."""
 
 from __future__ import annotations
 
@@ -19,14 +15,16 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, Literal, Protocol
+from typing import TYPE_CHECKING, BinaryIO, Literal, Protocol
 from uuid import uuid4
 
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.atomic_write import atomic_replace, atomic_write_text
 from agents_remember.worktrees.worktree_contract import load_contract
 
-MANAGED_NAMESPACE_LIMIT = 4
+if TYPE_CHECKING:
+    from agents_remember.worktrees.services import TerminalCommit
+
 LOCK_TIMEOUT_SECONDS = 30.0
 MANAGED_ROOT_RELATIVE = Path("temp/citation-source-index/managed")
 ROOT_LOCK_NAME = "managed.lock"
@@ -64,15 +62,6 @@ class ManagedCacheAuthority:
     @property
     def control_state(self) -> Path:
         return self.control_dir / "state.json"
-
-    def validate_roots(self, code_root: Path, memory_root: Path) -> None:
-        code = code_root.resolve()
-        memory = memory_root.resolve()
-        if code != self.code_root or memory != self.memory_root:
-            raise CitationCacheError(
-                "managed citation cache authority belongs to different code/memory roots: "
-                f"authority=({self.code_root}, {self.memory_root}), request=({code}, {memory})"
-            )
 
 
 @dataclass(frozen=True)
@@ -189,73 +178,6 @@ def contract_cache_authority(contract: ContractCacheFacts) -> ManagedCacheAuthor
     )
 
 
-def open_shared_namespace(
-    authority: ManagedCacheAuthority,
-    *,
-    create: bool,
-) -> BinaryIO:
-    """Open one persistent same-leaf lease and perform brief root-locked admission."""
-    root = authority.managed_root
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    handle = _control_handle(authority)
-    try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        state = _read_control_state(authority)
-        transition = _acquisition_transition(authority, state)
-        with _root_lock(root, exclusive=True):
-            namespace = authority.namespace
-            if not namespace.exists():
-                if not create:
-                    raise CitationCacheError(
-                        f"managed citation cache namespace {authority.namespace_id} is not published"
-                    )
-                occupants = _namespace_ids(root)
-                if len(occupants) >= MANAGED_NAMESPACE_LIMIT:
-                    raise CitationCacheError(
-                        "managed citation cache capacity is full; active namespaces are "
-                        f"{occupants}. Complete worktree cleanup or abandon for an inactive leaf "
-                        "before admitting another namespace; no active leaf was evicted"
-                    )
-                namespace.mkdir(mode=0o700)
-            elif not namespace.is_dir() or namespace.is_symlink():
-                raise CitationCacheError(
-                    f"managed citation cache namespace is not a directory: {namespace}"
-                )
-        if transition is not None:
-            _write_control_state(authority, transition)
-        fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
-        return handle
-    except BaseException:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        handle.close()
-        raise
-
-
-def open_index_lock(
-    authority: ManagedCacheAuthority | None,
-    slot: Path,
-    lock: Path,
-    *,
-    create: bool,
-) -> BinaryIO:
-    if authority is not None:
-        return open_shared_namespace(authority, create=create)
-    if create:
-        slot.mkdir(parents=True, exist_ok=True, mode=0o700)
-    handle = lock.open("a+b" if create else "r+b")
-    fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
-    return handle
-
-
-def lock_exclusive(authority: ManagedCacheAuthority | None, handle: BinaryIO) -> None:
-    if authority is not None:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        _validate_active_state(authority, _read_control_state(authority))
-        return
-    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-
-
 @dataclass
 class TerminalNamespaceGuard:
     """One exact-leaf terminal reservation held through mutation and publication."""
@@ -283,11 +205,12 @@ class TerminalNamespaceGuard:
         outcome: Literal["completed", "abandoned"],
         publish: Callable[[], None],
         rollback_publish: Callable[[], None],
+        commit: TerminalCommit | None = None,
     ) -> dict[str, object]:
         if self.completed:
             raise CitationCacheError("terminal citation cache guard was already completed")
         if self.authority is None:
-            return self._complete_without_namespace(publish, rollback_publish)
+            return self._complete_without_namespace(publish, rollback_publish, commit)
         authority = self.authority
         result: dict[str, object] = {
             "namespace": authority.namespace_id,
@@ -295,6 +218,7 @@ class TerminalNamespaceGuard:
             "removed": False,
         }
         self._quarantine_live_namespace(authority, result)
+        retired: Path | None = None
         try:
             retired = self._commit_terminal_boundary(
                 authority,
@@ -302,7 +226,14 @@ class TerminalNamespaceGuard:
                 publish=publish,
                 result=result,
             )
+            if commit is not None:
+                commit.publish()
         except BaseException as error:
+            if commit is not None and commit.committed:
+                self.completed = True
+                raise
+            if retired is not None:
+                self.tombstone = retired
             self._rollback_precommit(authority, rollback_publish, error)
             raise
         # The terminal contract, persistent fence state, and non-live retired identity are
@@ -310,16 +241,46 @@ class TerminalNamespaceGuard:
         # rmtree can damage only retired garbage and can never be rolled back into service.
         self.completed = True
         self._cleanup_retired_namespace(retired, result)
+        self._confirm_lease_released(authority, result)
         return result
+
+    def _confirm_lease_released(
+        self,
+        authority: ManagedCacheAuthority,
+        result: dict[str, object],
+    ) -> None:
+        """Confirm the reservation is gone, and name the attempt when it is not.
+
+        ``_cleanup_retired_namespace`` normally leaves nothing behind, so this is a no-op on
+        the ordinary path. It is NOT a second reclaim: this call still holds ``authority``'s
+        own exclusive lease through :func:`terminal_namespace_guard`, so reclaiming here would
+        take a lock this process already holds. What it does is make a FAILED unlink visible --
+        a retired tree that could not be removed would otherwise keep occupying the cache with
+        nothing in the payload saying so, which is the silent-full state this module grew the
+        reclamation pass to end.
+        """
+        still_there = authority.namespace.exists() or any(
+            path.name.startswith(f".{authority.namespace_id}.")
+            for path in authority.managed_root.iterdir()
+        )
+        if still_there:
+            result["lease_still_reserved"] = True
+            result["lease_release_owner"] = "the next admission pass will reclaim this namespace"
 
     def _complete_without_namespace(
         self,
         publish: Callable[[], None],
         rollback_publish: Callable[[], None],
+        commit: TerminalCommit | None = None,
     ) -> dict[str, object]:
         try:
             publish()
+            if commit is not None:
+                commit.publish()
         except BaseException as error:
+            if commit is not None and commit.committed:
+                self.completed = True
+                raise
             try:
                 rollback_publish()
             except BaseException as rollback_error:
@@ -446,6 +407,7 @@ def terminal_namespace_guard(
     contract: ContractCacheFacts,
     *,
     requested_contract_path: Path,
+    completed_contract_with_remains: bool = False,
 ) -> Iterator[TerminalNamespaceGuard]:
     """Reserve one exact contract namespace before any terminal mutation."""
     requested = requested_contract_path.resolve()
@@ -468,7 +430,11 @@ def terminal_namespace_guard(
         )
     guard = TerminalNamespaceGuard(authority, handle, _read_control_state(authority))
     try:
-        _validate_terminal_contract(authority, guard.previous_state)
+        _validate_terminal_contract(
+            authority,
+            guard.previous_state,
+            completed_contract_with_remains=completed_contract_with_remains,
+        )
         yield guard
     finally:
         if guard.tombstone is not None:
@@ -477,92 +443,11 @@ def terminal_namespace_guard(
         handle.close()
 
 
-def reclaim_managed_namespace(
-    authority: ManagedCacheAuthority,
-    *,
-    dry_run: bool,
-) -> dict[str, object]:
-    """Compatibility reclamation for non-contract direct callers.
-
-    Lifecycle commands use :func:`terminal_namespace_guard`; this helper deliberately
-    remains a one-shot exact deletion for direct callers that have no contract lifecycle.
-    """
-    handle = _control_handle(authority)
-    if not _exclusive_before_deadline(handle):
-        handle.close()
-        return _lease_timeout(authority)
-    try:
-        if not authority.namespace.exists():
-            return _absent_result(authority)
-        if dry_run:
-            return {**_base_result(authority), "would_remove": True}
-        tombstone = authority.managed_root / (
-            f".{authority.namespace_id}.reclaim.{os.getpid()}.{uuid4().hex}"
-        )
-        with _root_lock(authority.managed_root, exclusive=True):
-            atomic_replace(authority.namespace, tombstone)
-            _remove_tree(tombstone)
-        return {**_base_result(authority), "removed": True}
-    finally:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        handle.close()
-
-
-def _acquisition_transition(
-    authority: ManagedCacheAuthority,
-    state: CacheControlState | None,
-) -> CacheControlState | None:
-    if authority.lifecycle_id is None:
-        if state is not None:
-            raise CitationCacheError(
-                "unbound managed citation cache authority cannot cross a lifecycle fence"
-            )
-        return None
-    if not authority.lifecycle_id:
-        if state is not None:
-            raise CitationCacheError(
-                "legacy managed citation cache authority cannot cross a lifecycle fence"
-            )
-        _require_current_legacy_active_contract(authority)
-        return None
-    lifecycle = _required_lifecycle(authority)
-    if state is None:
-        _require_current_active_contract(authority)
-        return CacheControlState(lifecycle, "active")
-    if state.phase == "active":
-        if state.lifecycle_id != lifecycle:
-            raise CitationCacheError(
-                "managed citation cache authority is stale for the active lifecycle: "
-                f"authority={lifecycle}, active={state.lifecycle_id}"
-            )
-        return None
-    if state.lifecycle_id == lifecycle:
-        raise CitationCacheError(
-            f"managed citation cache lifecycle {lifecycle} is terminal ({state.outcome})"
-        )
-    _require_current_active_contract(authority)
-    return CacheControlState(lifecycle, "active")
-
-
-def _validate_active_state(
-    authority: ManagedCacheAuthority,
-    state: CacheControlState | None,
-) -> None:
-    if authority.lifecycle_id is None and state is None:
-        return
-    if authority.lifecycle_id == "" and state is None:
-        _require_current_legacy_active_contract(authority)
-        return
-    lifecycle = _required_lifecycle(authority)
-    if state is None or state.phase != "active" or state.lifecycle_id != lifecycle:
-        raise CitationCacheError(
-            f"managed citation cache lifecycle {lifecycle} lost active authority"
-        )
-
-
 def _validate_terminal_contract(
     authority: ManagedCacheAuthority,
     state: CacheControlState | None,
+    *,
+    completed_contract_with_remains: bool = False,
 ) -> None:
     current = _current_contract(authority)
     lifecycle = _required_lifecycle(authority)
@@ -572,6 +457,14 @@ def _validate_terminal_contract(
             f"authority={lifecycle}, current={current.lifecycle_id or '<empty>'}"
         )
     if current.cleanup in TERMINAL_CLEANUP_STATES:
+        if state is None and completed_contract_with_remains:
+            # MIK-R82 rule 5, completed contract with remains: the contract says
+            # the cleanup is completed while folder/branches still exist, and the
+            # cache holds no state for the lifecycle, so there is no cache of
+            # this leaf to protect. The cleanup records the terminal state for
+            # the lifecycle on completion and goes on. Any held state (active or
+            # terminal, same or other lifecycle) keeps the refusal below.
+            return
         if state is None or state.phase != "terminal" or state.lifecycle_id != lifecycle:
             raise CitationCacheError(
                 "terminal contract has no matching persistent citation cache fence state"
@@ -581,32 +474,6 @@ def _validate_terminal_contract(
         raise CitationCacheError(
             "terminal citation cache authority does not own the active lifecycle: "
             f"authority={lifecycle}, active={state.lifecycle_id}"
-        )
-
-
-def _require_current_active_contract(authority: ManagedCacheAuthority) -> None:
-    current = _current_contract(authority)
-    lifecycle = _required_lifecycle(authority)
-    if current.lifecycle_id != lifecycle:
-        raise CitationCacheError(
-            "managed citation cache authority is stale for the current contract: "
-            f"authority={lifecycle}, current={current.lifecycle_id or '<empty>'}"
-        )
-    if current.cleanup in TERMINAL_CLEANUP_STATES:
-        raise CitationCacheError(
-            f"managed citation cache lifecycle {lifecycle} is terminal ({current.cleanup})"
-        )
-
-
-def _require_current_legacy_active_contract(authority: ManagedCacheAuthority) -> None:
-    current = _current_contract(authority)
-    if current.lifecycle_id:
-        raise CitationCacheError(
-            "legacy managed citation cache authority is stale for a lifecycle-bound contract"
-        )
-    if current.cleanup in TERMINAL_CLEANUP_STATES:
-        raise CitationCacheError(
-            "legacy managed citation cache authority cannot open a terminal contract"
         )
 
 
@@ -699,24 +566,6 @@ def _exclusive_before_deadline(handle: BinaryIO) -> bool:
         time.sleep(0.05)
 
 
-def _namespace_ids(root: Path) -> list[str]:
-    occupants: set[str] = set()
-    for path in root.iterdir():
-        if not path.is_dir() or path.is_symlink():
-            continue
-        if not path.name.startswith("."):
-            occupants.add(path.name)
-            continue
-        namespace, separator, _suffix = path.name[1:].partition(".terminal.")
-        if (
-            separator
-            and len(namespace) == 64
-            and all(character in "0123456789abcdef" for character in namespace)
-        ):
-            occupants.add(namespace)
-    return sorted(occupants)
-
-
 @contextmanager
 def _root_lock(root: Path, *, exclusive: bool) -> Iterator[BinaryIO]:
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -735,22 +584,6 @@ def _try_exclusive(handle: BinaryIO) -> bool:
     except BlockingIOError:
         return False
     return True
-
-
-def _base_result(authority: ManagedCacheAuthority) -> dict[str, object]:
-    return {
-        "namespace": authority.namespace_id,
-        "path": authority.namespace.as_posix(),
-        "removed": False,
-    }
-
-
-def _absent_result(authority: ManagedCacheAuthority) -> dict[str, object]:
-    return {**_base_result(authority), "reason": "already-absent"}
-
-
-def _lease_timeout(authority: ManagedCacheAuthority) -> dict[str, object]:
-    return {**_base_result(authority), "reason": "live-lease-timeout"}
 
 
 def _remove_tree(path: Path) -> None:

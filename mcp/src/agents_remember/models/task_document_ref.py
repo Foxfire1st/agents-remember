@@ -7,7 +7,7 @@ session, lifecycle, adapter, and vendor ids remain separate control-plane correl
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -16,13 +16,14 @@ MAX_TASK_DOCUMENT_PATH_LENGTH = 4096
 
 
 class TaskDocumentRef(BaseModel):
-    """One JSON-primary task document under ``tasks/<repository>``.
+    """Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root."""
 
-    ``path`` is coordination-root-relative *inside* the repository task root.  Keeping
-    the root out of the value makes the reference stable when the same coordination
-    tree is mounted at another absolute location, while ``repository`` prevents two
-    repositories with the same task-folder layout from colliding.
-    """
+    # Design rationale (not published in input schemas; kept short for callers
+    # per Parent ruling 0a408a8a): ``path`` is coordination-root-relative
+    # *inside* the repository task root. Keeping the root out of the value
+    # makes the reference stable when the same coordination tree is mounted at
+    # another absolute location, while ``repository`` prevents two
+    # repositories with the same task-folder layout from colliding.
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -66,3 +67,20 @@ class TaskDocumentRef(BaseModel):
         """Opaque comparison/debug key; never an agent-facing replacement identity."""
 
         return f"{self.repository}/{self.path}"
+
+
+class TaskScopedReaderContext(BaseModel):
+    """The exact task and canonical enclosure asserted by one reader call."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    task_document_ref: TaskDocumentRef
+    contract_path: str
+
+    @field_validator("contract_path")
+    @classmethod
+    def _contract_path_is_absolute_posix(cls, value: str) -> str:
+        path = Path(value)
+        if not value or not path.is_absolute() or path.as_posix() != value or ".." in path.parts:
+            raise ValueError("contract_path must be one normalized absolute POSIX path")
+        return value

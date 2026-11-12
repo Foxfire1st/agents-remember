@@ -25,7 +25,7 @@ from agents_remember.kernel.coordination_context.models import (
     StorageRule,
     StorageSettings,
 )
-from agents_remember.kernel.coordination_context.paths import clean_scalar, default_storage_mode
+from agents_remember.kernel.coordination_context.paths import clean_scalar
 
 RuleListName = Literal["includes", "excludes", "include_file_types", "exclude_file_types"]
 EligibilitySection = Literal["include", "exclude"]
@@ -33,14 +33,12 @@ EligibilitySection = Literal["include", "exclude"]
 
 def parse_settings_block(
     block: str,
-    topology: Literal["internal", "external"],
 ) -> tuple[StorageSettings | None, CrossRepoSettings, bool]:
-    return _MarkdownSettingsParser(topology).parse(block)
+    return _MarkdownSettingsParser().parse(block)
 
 
 @dataclass
 class _MarkdownSettingsParser:
-    topology: Literal["internal", "external"]
     settings: StorageSettings = field(init=False)
     cross_repo: CrossRepoSettings = field(default_factory=CrossRepoSettings)
     in_onboarding: bool = False
@@ -62,8 +60,7 @@ class _MarkdownSettingsParser:
     saw_cross_repo: bool = False
 
     def __post_init__(self) -> None:
-        mode = default_storage_mode(self.topology)
-        self.settings = StorageSettings(mode=mode, default=mode)
+        self.settings = StorageSettings()
 
     def parse(self, block: str) -> tuple[StorageSettings | None, CrossRepoSettings, bool]:
         for raw_line in block.splitlines():

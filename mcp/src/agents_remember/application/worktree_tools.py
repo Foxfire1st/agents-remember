@@ -2,14 +2,26 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
-from agents_remember.application.completion_cleanup import auto_complete_seats
+from agents_remember.application.review_external_git_movement import (
+    external_git_movement_result_block,
+)
+from agents_remember.application.review_final_output_receipt import (
+    attach_closeout_receipt,
+    attach_integration_receipt,
+    attach_prepared_selection,
+)
+from agents_remember.application.review_sync_rebinding import rebinding_result_block
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_status import project_contract_status
-from agents_remember.errors import TaskIntentError
 from agents_remember.kernel.authority import require_repo, require_within_coordination
+from agents_remember.kernel.direct_execution_grants import (
+    DirectGrantError,
+    read_grant,
+)
 from agents_remember.kernel.primitives.runtime_config import (
     DEFAULT_PROVIDER_SETUP_SECONDS,
     McpRuntimeConfig,
@@ -25,10 +37,8 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationKind,
     LifecycleOperationProjection,
 )
-from agents_remember.models.lifecycles.responses import TerminalState
-from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction
-from agents_remember.observer.ambient import AmbientLifecycle, ambient
-from agents_remember.observer.save_gate import coerce_save_decision
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionInput
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.providers.lifecycle.log_capture import summarize_command_logs
 from agents_remember.providers.settings import write_lifecycle_settings
@@ -77,12 +87,10 @@ from .lifecycle.lifecycle_control_authority import (
     LifecycleCallerError,
     completed_disposition_authorized,
     require_completed_disposition_authority,
-    resolve_lifecycle_caller,
 )
 from .lifecycle.lifecycle_operation_location import (
     LifecycleOperationPublicAddress,
     configured_lifecycle_operation_location,
-    unreadable_operation_refusal,
 )
 from .worktree_tool_requests import (
     DEFAULT_START_EXECUTION,
@@ -99,6 +107,92 @@ from .worktree_tool_requests import (
     TaskIdentity,
 )
 
+_START_ELIGIBILITY: dict[str, object] = {
+    "requiresCheck": "not-performed",
+    "detail": (
+        "worktree_start does not read or verify the plan's Requires lines; the addressed leaf's "
+        "declared dependencies are the owning seat's check, so confirm they are landed before "
+        "building on this base"
+    ),
+}
+"""What this tool did *not* check, stated where a caller reads the result.
+
+D-17 measured the gap: a leaf previewed as ``would-start`` while a requirement its packet declares
+as a dependency was unlanded, so a session that trusted the tool could create an enclosure whose
+base lacks what the leaf builds on. Nothing in the leaf document carries the ``Requires`` set in a
+machine-readable form (it lives in the plan document's prose), so the tool cannot verify it; what it
+can do is stop implying that eligibility is part of what it checked. This notice is additive on
+every start result and on the lifecycle refusal.
+"""
+
+
+def _direct_leaf_start_refusal(
+    config: McpRuntimeConfig, identity: TaskIdentity
+) -> dict[str, Any] | None:
+    """Refuse ``worktree_start`` for a direct leaf: it gets no enclosure (MIK-R94 rule 12).
+
+    ``None`` for series starts, for leaves that cannot be resolved, and for
+    leaves without a grant. A grant that cannot be read refuses: a leaf is
+    never taken as direct without a readable grant.
+    """
+    if not identity.leaf_id:
+        return None
+    task_root = (
+        Path(config.coordination_root) / "tasks" / identity.repo_id / (identity.task_name or "")
+    )
+    ref = _started_leaf_ref(task_root, identity.repo_id, identity.task_name, identity.leaf_id)
+    if ref is None:
+        return None
+    try:
+        grant = read_grant(Path(config.coordination_root), ref)
+    except DirectGrantError as error:
+        grant = None
+        unreadable = error.detail
+    else:
+        unreadable = ""
+    if grant is None and not unreadable:
+        return None
+    if unreadable:
+        summary = f"worktree_start for {ref.repository}:{ref.path} is refused: {unreadable}"
+    elif grant is not None:
+        summary = (
+            f"worktree_start for {ref.repository}:{ref.path} is refused: the leaf is direct "
+            f"({grant.describe()}). A direct leaf has no enclosure of its own; start its "
+            "roles with role_start on the same leaf, which gives them the checkouts of "
+            "the master's branch."
+        )
+    else:
+        return None
+    return {
+        "ok": False,
+        "state": "direct-leaf-no-enclosure",
+        "summary": summary,
+        "detail": summary,
+        "eligibility": dict(_START_ELIGIBILITY),
+    }
+
+
+def _started_leaf_ref(
+    task_root: Path, repo_id: str, task_name: str | None, leaf_id: str
+) -> TaskDocumentRef | None:
+    """The canonical reference of a leaf addressed by task name and leaf id."""
+    if not task_name or not task_root.is_dir():
+        return None
+    for candidate in sorted(task_root.glob("*.json")):
+        if candidate.name == "task.json":
+            continue
+        try:
+            payload = json.loads(candidate.read_bytes().decode("utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (
+            isinstance(payload, dict)
+            and payload.get("kind") == "subTask"
+            and payload.get("id") == leaf_id
+        ):
+            return TaskDocumentRef(repository=repo_id, path=f"{task_name}/{candidate.name}")
+    return None
+
 
 def worktree_start_tool(
     config: McpRuntimeConfig,
@@ -108,35 +202,18 @@ def worktree_start_tool(
     execution: StartExecution = DEFAULT_START_EXECUTION,
 ) -> dict[str, Any]:
     repo = require_repo(config, identity.repo_id)
-    amb = ambient()
-    if amb is not None and amb.current is not None and not amb.current.fleeting:
-        return {
-            "ok": False,
-            "state": "lifecycle-switch-required",
-            "summary": (
-                "worktree_start refuses to repoint the active persistent lifecycle; switch "
-                "away from it to a fresh fleeting lifecycle, then retry worktree_start"
-            ),
-            "nextOperation": "switch_task_lifecycle",
-            "nextTool": "switch_lifecycle",
-            "nextArgs": {},
-            "nextStep": {
-                "summary": "Switch to a fresh fleeting lifecycle, then retry worktree_start.",
-                "nextOperation": "switch_task_lifecycle",
-                "nextTool": "switch_lifecycle",
-                "nextArgs": {},
-            },
-        }
-    # worktree_start promotes the active lifecycle to persistent (design §1.3); with
-    # no active lifecycle, mint a fresh anchor so the contract always carries one.
-    lifecycle_id = amb.current.id if amb is not None and amb.current is not None else new_ulid()
+    direct_refusal = _direct_leaf_start_refusal(config, identity)
+    if direct_refusal is not None:
+        return direct_refusal
+    # Stable contract/event scope identity; no session owns a worktree.
+    lifecycle_id = new_ulid()
     # Containment R1 (260707-HFX-L1): the on-disk authority file — not the boot
     # snapshot — decides whether provider setup may launch. An empty (or
     # unreadable: fail-closed) live providers map skips setup outright; the
     # worktree itself is still created. Launch runs on the LIVE providers map.
     authority = None if execution.skip_provider_setup else reload_provider_authority(config)
     settings_path = (
-        write_lifecycle_settings(authority.apply(config))
+        write_lifecycle_settings()
         if authority is not None and authority.providers and authority.error is None
         else None
     )
@@ -193,7 +270,7 @@ def worktree_start_tool(
             if authority.error is not None:
                 veto["error"] = authority.error
             result["providersAuthority"] = veto
-        _attribute_start(amb, result, identity.repo_id)
+        result["eligibility"] = dict(_START_ELIGIBILITY)
         return result
     finally:
         if settings_path is not None and not _settings_owned_by_background(result):
@@ -221,56 +298,9 @@ def summarized_worktree_start_tool(
     )
 
 
-def _attribute_start(amb: AmbientLifecycle | None, result: dict[str, Any], repo_id: str) -> None:
-    """Promote the active lifecycle into the freshly started worktree (design §1.3).
-
-    Only a clean ``started`` result attributes: the contract now anchors the
-    lifecycle. An active lifecycle is promoted in place; with none active the
-    minted contract id is adopted as a fresh persistent lifecycle. Re-attaching to
-    an existing contract is ``worktree_attach``'s job, not start's.
-    """
-    if amb is None or result.get("state") != "started":
-        return
-    enclosure = result.get("enclosure_path") or result.get("contract_path")
-    if not isinstance(enclosure, str):
-        return
-    if amb.current is not None:
-        amb.promote(enclosure=enclosure, repo_id=repo_id, scope=repo_id)
-        return
-    lifecycle_id = result.get("lifecycle_id")
-    if isinstance(lifecycle_id, str) and lifecycle_id:
-        amb.attach(lifecycle_id, enclosure=enclosure, repo_id=repo_id)
-
-
-def _attribute_attach(
-    amb: AmbientLifecycle | None, result: dict[str, Any], repo_id: str, on_unsaved: str | None
-) -> None:
-    """Resume the contract's lifecycle on ``worktree_attach`` (design §1.3 table).
-
-    ``attach`` adopts when none is active, no-ops on the same id, auto-pauses a
-    persistent current, and routes an unsaved fleeting through the save gate --
-    raising ``SaveGateRequired`` when ``on_unsaved`` was not supplied, so unsaved
-    work is never dropped silently (the read-only attach already returned).
-    """
-    if amb is None or result.get("state") != "attached":
-        return
-    lifecycle_id = result.get("lifecycle_id")
-    enclosure = result.get("enclosure_path") or result.get("contract_path")
-    if not isinstance(lifecycle_id, str) or not lifecycle_id or not isinstance(enclosure, str):
-        return
-    decision = coerce_save_decision(on_unsaved) if on_unsaved else None
-    amb.attach(lifecycle_id, enclosure=enclosure, repo_id=repo_id, on_unsaved=decision)
-
-
-def worktree_attach_tool(
-    config: McpRuntimeConfig,
-    task: TaskRef,
-    *,
-    on_unsaved: str | None = None,
-) -> dict[str, Any]:
+def worktree_attach_tool(config: McpRuntimeConfig, task: TaskRef) -> dict[str, Any]:
     args = _task_ref_namespace(config, task)
     result = _worktree_result("worktree_attach", git_worktree_manager.attach_result(args))
-    _attribute_attach(ambient(), result, task.repo_id, on_unsaved)
     return result
 
 
@@ -321,19 +351,24 @@ def worktree_sync_tool(
     *,
     contract_path: str,
     memory_sync_choice: MemorySyncChoice | None = None,
-    resolution_action: SyncResolutionAction | None = None,
+    resolution: SyncResolutionInput | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    configured = admit_configured_contract(config, contract_path)
+    configured = admit_configured_contract(config, contract_path, operation="worktree_sync")
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(configured, operation="worktree_sync")
     args = git_worktree_manager.WorktreeArgs(
         contract_path=configured.contract_path,
         memory_sync_choice=memory_sync_choice,
-        resolution_action=resolution_action,
+        sync_source=resolution.source if resolution is not None else None,
+        resolution_action=resolution.action if resolution is not None else None,
         dry_run=dry_run,
     )
-    return _worktree_result("worktree_sync", git_worktree_manager.sync_result(args))
+    payload = _worktree_result("worktree_sync", git_worktree_manager.sync_result(args))
+    # The sync has already finished its Git work and written its contract by this point, so the
+    # rebinding measures what it resolved and never participates in the transaction's admission
+    # (ICR-R22@v1): a sync that cannot be measured is returned unchanged, carrying the reason.
+    return rebinding_result_block(configured.contract, payload)
 
 
 def worktree_closeout_preview_tool(
@@ -389,7 +424,7 @@ def worktree_integrate_tool(
     ``RuntimeError("code integration source moved")``.
     """
 
-    configured = admit_configured_contract(config, contract_path)
+    configured = admit_configured_contract(config, contract_path, operation="worktree_integrate")
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(
             configured,
@@ -410,15 +445,13 @@ def worktree_integrate_tool(
         "worktree_integrate",
         git_worktree_manager.integrate_result(args, configured.contract),
     )
-    if result["ok"] and not dry_run and config.retirement.auto_land_on_integration:
-        result.update(
-            auto_complete_seats(
-                config,
-                confined_contract,
-                reason="auto-close: leaf integrated into master",
-                edge="leaf-integration",
-            )
-        )
+    if result.get("ok") and not dry_run:
+        result = attach_integration_receipt(result, configured.contract)
+    if result.get("ok"):
+        # The raw-Git identity boundary is stated on this result too (ICR-R23@v1), for the landing
+        # preview as well as the landing: an attached measurement, never a gate -- it refuses nothing
+        # and the integration's own admission has already run by here.
+        result = external_git_movement_result_block(configured.contract, result)
     return result
 
 
@@ -444,7 +477,9 @@ def worktree_checkpoint_landing_tool(
     enclosure for the work that continues.
     """
 
-    configured = admit_configured_contract(config, contract_path)
+    configured = admit_configured_contract(
+        config, contract_path, operation="worktree_checkpoint_landing"
+    )
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(
             configured,
@@ -482,7 +517,7 @@ def worktree_pause_tool(
     and publishing one are two operations, and reaching for the stop must never publish.
     """
 
-    configured = admit_configured_contract(config, contract_path)
+    configured = admit_configured_contract(config, contract_path, operation="worktree_pause")
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(configured, operation="worktree_pause")
     args = git_worktree_manager.WorktreeArgs(
@@ -511,7 +546,9 @@ def worktree_record_landing_tool(
     that landed nowhere.
     """
 
-    configured = admit_configured_contract(config, contract_path)
+    configured = admit_configured_contract(
+        config, contract_path, operation="worktree_record_landing"
+    )
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(
             configured,
@@ -538,10 +575,12 @@ def worktree_operation_control_tool(
     invalid = _operation_control_request_refusal(request)
     if invalid is not None:
         return invalid
-    configured = admit_configured_contract(config, request.contract_path)
+    configured = admit_configured_contract(
+        config, request.contract_path, operation="worktree_operation_control"
+    )
     if isinstance(configured, ConfiguredContractRefused):
-        return _configured_control_refusal(config, request, configured)
-    caller_result = _resolve_control_caller(config, configured.contract, request)
+        return _configured_control_refusal(request, configured)
+    caller_result = _resolve_control_caller(configured.contract, request)
     if isinstance(caller_result, dict):
         return caller_result
     caller, disposition_authorized = caller_result
@@ -586,21 +625,9 @@ def _operation_control_request_refusal(
 
 
 def _configured_control_refusal(
-    config: McpRuntimeConfig,
     request: OperationControlRequest,
     configured: ConfiguredContractRefused,
 ) -> dict[str, Any]:
-    if configured.reason in {"authority-invalid", "contract-unreadable"}:
-        try:
-            resolve_lifecycle_caller(config, request.caller)
-        except LifecycleCallerError as exc:
-            return {
-                "ok": False,
-                "operation": "worktree_operation_control",
-                "state": "refused",
-                "status": exc.status,
-                "detail": exc.detail,
-            }
     return project_configured_contract_refusal(
         configured,
         operation="worktree_operation_control",
@@ -613,12 +640,11 @@ def _configured_control_refusal(
 
 
 def _resolve_control_caller(
-    config: McpRuntimeConfig,
     contract: WorktreeContract,
     request: OperationControlRequest,
 ) -> tuple[DeclaredCaller | None, bool] | dict[str, Any]:
     try:
-        caller = resolve_lifecycle_caller(config, request.caller)
+        caller = request.caller
         if request.action in {"retire", "supersede"}:
             require_completed_disposition_authority(contract, caller)
         return caller, completed_disposition_authorized(contract, caller)
@@ -730,43 +756,6 @@ def _journal_read_refusal(
     }
 
 
-def _start_operation_refusal(
-    config: McpRuntimeConfig,
-    contract_path: Path,
-    address: LifecycleOperationPublicAddress,
-    error: Exception,
-) -> dict[str, Any]:
-    """Translate one start/admission failure without duplicating route classifiers."""
-
-    if isinstance(error, CloseoutInputError):
-        return _closeout_input_refusal(address.operation, error)
-    if isinstance(error, TaskIntentError):
-        return {
-            "ok": False,
-            "operation": address.operation,
-            "state": "refused",
-            "status": error.status,
-            "detail": error.detail,
-            "nextAction": error.next_action,
-        }
-    if isinstance(error, LifecycleControlError):
-        return {
-            "ok": False,
-            "operation": address.operation,
-            "state": "refused",
-            "status": error.status,
-            "detail": error.detail,
-            **error.response_fields(
-                contract_path=contract_path.as_posix(),
-                kind=address.kind,
-                generation=address.generation or 0,
-            ),
-        }
-    if isinstance(error, LifecycleOperationReadError):
-        return _journal_read_refusal(address.operation, address.kind, error)
-    return unreadable_operation_refusal(config, contract_path, address, error)
-
-
 def _gate_policy_snapshot(config: McpRuntimeConfig) -> list[GatePolicyRuleSnapshot]:
     return [
         GatePolicyRuleSnapshot(
@@ -802,7 +791,9 @@ def worktree_cleanup_tool(
     dry_run: bool = False,
     teardown_providers: bool = True,
 ) -> dict[str, Any]:
-    configured = admit_configured_terminal_contract(config, contract_path)
+    configured = admit_configured_terminal_contract(
+        config, contract_path, operation="worktree_cleanup"
+    )
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(configured, operation="worktree_cleanup")
     args = git_worktree_manager.WorktreeArgs(
@@ -821,7 +812,15 @@ def worktree_abandon_tool(
     dry_run: bool = False,
     force: bool = False,
 ) -> dict[str, Any]:
-    configured = admit_configured_terminal_contract(config, contract_path)
+    configured = admit_configured_terminal_contract(
+        config,
+        contract_path,
+        # Abandon admits a contract whose only disagreement with the configured
+        # authority is the removed mode (MIK-R50 R3b) and writes its terminal
+        # state. Everything else about abandon is unchanged.
+        allow_disabled_memory=True,
+        operation="worktree_abandon",
+    )
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(configured, operation="worktree_abandon")
     args = git_worktree_manager.WorktreeArgs(
@@ -831,25 +830,7 @@ def worktree_abandon_tool(
         force=force,
     )
     result = _worktree_result("worktree_abandon", git_worktree_manager.abandon_result(args))
-    # End the ambient lifecycle when it anchors the abandoned worktree — the owner-written
-    # lifecycle.ended (L11). A lifecycle whose owner is gone (e.g. the server restarted) is
-    # terminalized by the reader instead: the reducer projects `abandoned` from the
-    # contract's cleanup field, honoring the store's single-writer invariant.
-    if not dry_run and result.get("state") == "abandoned":
-        end_ambient_lifecycle_if_anchored(
-            str(result.get("lifecycle_id") or ""), outcome="abandoned"
-        )
     return result
-
-
-def end_ambient_lifecycle_if_anchored(lifecycle_id: str, *, outcome: TerminalState) -> None:
-    """End the process-owned ambient when one task transition retires its anchor."""
-    amb = ambient()
-    if not lifecycle_id or amb is None:
-        return
-    current = amb.current
-    if current is not None and current.id == lifecycle_id:
-        amb.end(outcome)
 
 
 def lifecycle_finalize_task_tool(
@@ -874,15 +855,6 @@ def lifecycle_finalize_task_tool(
         teardown_providers=teardown_providers,
     )
     result = _worktree_result("lifecycle_finalize_task", git_worktree_manager.finalize_result(args))
-    if result["ok"] and not dry_run and config.retirement.auto_land_on_finalize:
-        result.update(
-            auto_complete_seats(
-                config,
-                confined_contract,
-                reason="auto-close: master finalized into super",
-                edge="master-finalization",
-            )
-        )
     return result
 
 
@@ -923,6 +895,7 @@ def _worktree_closeout(
         config,
         contract_path,
         require_candidate_identity=False,
+        operation=operation,
     )
     address = LifecycleOperationPublicAddress(operation, "closeout")
     if isinstance(configured, ConfiguredContractRefused):
@@ -953,7 +926,19 @@ def _worktree_closeout(
         gate_policy=config.orchestration.gate_policy,
     )
     result = git_worktree_manager.closeout_result(args, configured.contract)
-    return _worktree_result(operation, result)
+    payload = _worktree_result(operation, result)
+    # The raw-Git identity boundary is stated beside the receipt on both closeout results (ICR-R23@v1):
+    # the preview says what the leaf's declared identities look like right now, and the applied result
+    # says it about the work it just committed. It is an attached statement and never a gate -- the
+    # closeout door's own source-lineage checks remain the only checks on the transaction, and this
+    # block returns the payload unchanged when it cannot measure.
+    if operation == "worktree_closeout_preview":
+        return external_git_movement_result_block(
+            configured.contract, attach_prepared_selection(payload, configured.contract)
+        )
+    return external_git_movement_result_block(
+        configured.contract, attach_closeout_receipt(payload, configured.contract)
+    )
 
 
 def _normalize_worktree_closeout(

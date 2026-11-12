@@ -1,0 +1,1000 @@
+// The word-level intent diff, drawn (MIK-R35, adopting ICR-R35@v1). `wordDiff.ts` decides what is
+// marked; this module renders it inside the decluttered statement and guarantee structure of
+// MIK-R31 rule 3, which it keeps: identical wording once, one-sided statements as labelled prose.
+//
+// * One passage per changed field (rule 1): the statement, the applicability and the guarantee as
+//   prose with removed and added words marked in place; conditions and exclusions as their aligned
+//   lists (rule 1a), each paired item as its own passage.
+// * Inline or side by side (rule 4): one browser-local preference (`intentDiffPreference.ts`),
+//   inline by default. A rewrite (above REWRITE_RATIO) is shown side by side and says why.
+// * Whitespace only (rule 3): the after text once, labelled, with both exact texts disclosed.
+// * One side (rule 5): the present text as labelled prose with the R06 known-absent indication; a
+//   side that could not be read is named as such, never as known absent. No diff is drawn against
+//   an absent or unavailable side.
+// * Accessibility (rule 7): a removal is struck and an addition underlined, and each carries
+//   visually hidden `removed:` / `added:` text, so the marks never depend on colour.
+//
+// Tree comparisons are word-diffed by text bytes rather than revision identities.
+import {
+  Fragment,
+  createContext,
+  useContext,
+  useId,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
+
+import { css } from '../../../styled-system/css';
+import type {
+  ReviewFamilyContextEntry,
+  ReviewFamilyGuarantee,
+  ReviewFamilyRevisionContext,
+  ReviewKnowledgePane,
+  ReviewPayload,
+  ReviewRevisionSelection,
+  ReviewSideContent,
+} from '../../data/review';
+import { guaranteeComparison } from '../../data/review';
+import { treeComparisonNumber } from '../../data/reviewTrees';
+import { proseLayoutStore, useProseLayout, type ProseLayout } from './intentDiffPreference';
+import { KnowledgeStatements } from './KnowledgeStatements';
+import type { DiffMode as DiffLayout } from '../changeset/DiffPane';
+import {
+  guaranteeRevisionLabels,
+  revisionMeta,
+  type AuthoredWording,
+  type WordingComparison,
+  type WordingField,
+} from './statementWording';
+import {
+  REWRITE_RATIO,
+  describeWhitespace,
+  isWhitespace,
+  textDiff,
+  visibleWhitespace,
+  type DiffPart,
+  type TextDiff,
+} from './wordDiff';
+import {
+  COARSE_NOTE,
+  UNPAIRED_NOTE,
+  preparePassage,
+  passageHasWords,
+  type PreparedPassage,
+  type PreparedListRow,
+} from './intent-passage/model';
+
+const muted = css({ color: 'muted', fontSize: '0.78rem', margin: '0.35rem 0' });
+// The mockup's statement type (styles.css `.statement`: 0.83rem, line height 1.7; d9a1ec8f item 6).
+const prose = css({
+  fontSize: '0.83rem',
+  whiteSpace: 'pre-wrap',
+  overflowWrap: 'anywhere',
+  lineHeight: '1.7',
+  margin: '0.2rem 0',
+});
+const srOnly = css({
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  overflow: 'hidden',
+  clipPath: 'inset(50%)',
+  whiteSpace: 'nowrap',
+});
+// The fills are DiffPane's own removal and addition colours; the line is what tells them apart.
+const removedMark = css({
+  color: 'inherit',
+  textDecorationLine: 'line-through',
+  textDecorationThickness: '1px',
+  background: '#5a2525aa',
+  borderRadius: '2px',
+  padding: '0 0.1rem',
+});
+const addedMark = css({
+  color: 'inherit',
+  textDecorationLine: 'underline',
+  textDecorationThickness: '1px',
+  background: '#255a25aa',
+  borderRadius: '2px',
+  padding: '0 0.1rem',
+});
+const glyphs = css({ color: 'muted' });
+const sideLabel = css({
+  color: 'cyan',
+  fontSize: '0.68rem',
+  letterSpacing: '0.1em',
+  textTransform: 'uppercase',
+  margin: '0.3rem 0 0',
+});
+const pair = css({
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(min(16rem, 100%), 1fr))',
+  gap: '0.4rem 1rem',
+  minWidth: 0,
+});
+const controls = css({ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' });
+// The statement's header line: what changed, and the wording-layout switch at its end.
+const statementHead = css({
+  display: 'flex',
+  alignItems: 'baseline',
+  justifyContent: 'space-between',
+  gap: '0.3rem 1rem',
+  flexWrap: 'wrap',
+});
+const items = css({
+  paddingLeft: '1.1rem',
+  margin: '0.3rem 0',
+  display: 'grid',
+  gap: '0.25rem',
+  '& > li': { minWidth: 0 },
+});
+// One list item per line (ruling d9a1ec8f item 7, revised; MIK-R86 v2 rule 19's one line per item):
+// its word-diff marks on the line, its overflow ellipsized. The line is the item's button: opened, it
+// wraps to show the item in full, in place. The full text is in the page in both states.
+const itemLine = css({
+  display: 'block',
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  cursor: 'pointer',
+  '&[aria-expanded="true"]': { whiteSpace: 'normal', overflow: 'visible', overflowWrap: 'anywhere' },
+  '&[aria-expanded="true"] [data-half]': { whiteSpace: 'normal', overflow: 'visible' },
+  // A rewrite's reason (MIK-R35 rule 4): a short visible word on the closed line, its full sentence
+  // announced; the opened line shows the sentence.
+  '& [data-reason-full]': {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+  },
+  '&[aria-expanded="true"] [data-reason-full]': {
+    position: 'static',
+    width: 'auto',
+    height: 'auto',
+    overflow: 'visible',
+    clipPath: 'none',
+    whiteSpace: 'normal',
+  },
+  '&[aria-expanded="true"] [data-reason-short]': { display: 'none' },
+  _focusVisible: { outlineWidth: '1px', outlineStyle: 'solid', outlineColor: 'amber', outlineOffset: '2px' },
+});
+// Side by side on one line: two halves, before | after, each ellipsized on its own (MIK-R35 rule 4).
+const halves = css({ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '1rem', minWidth: 0 });
+const half = css({ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
+const halfLabel = css({ color: 'cyan', fontSize: '0.68rem', letterSpacing: '0.1em', textTransform: 'uppercase', marginRight: '0.4rem' });
+const tag = css({
+  border: '1px solid var(--grid)',
+  color: 'muted',
+  borderRadius: '2px',
+  padding: '0 0.35rem',
+  fontSize: '0.7rem',
+  marginLeft: '0.4rem',
+  whiteSpace: 'nowrap',
+});
+// The landed guarantee block's card (FamilyReviewCenter), so a changed guarantee reads in place.
+const card = css({
+  borderWidth: '1px',
+  borderStyle: 'solid',
+  borderColor: 'grid',
+  borderRadius: '3px',
+  padding: '0.5rem 0.6rem',
+  background: 'bg',
+  minWidth: '0',
+});
+const exact = css({ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: '0.8rem' });
+const linkButton = css({
+  background: 'transparent',
+  border: 'none',
+  color: 'amber',
+  cursor: 'pointer',
+  font: 'inherit',
+  padding: '0',
+  textDecoration: 'underline',
+});
+
+// The review center and family navigator share their measured comparison scope.
+// One recorded revision can carry different text bytes on its two sides.
+const TreeComparison = createContext(false);
+
+export function TreeComparisonScope({ tree, children }: { tree: boolean; children: ReactNode }) {
+  return <TreeComparison.Provider value={tree}>{children}</TreeComparison.Provider>;
+}
+
+export function IntentWordDiffScope({
+  payload,
+  children,
+}: {
+  payload: ReviewPayload;
+  children: ReactNode;
+}) {
+  return (
+    <TreeComparisonScope tree={treeComparisonNumber(payload.limitations) !== undefined}>
+      {children}
+    </TreeComparisonScope>
+  );
+}
+
+export const useTreeComparison = (): boolean => useContext(TreeComparison);
+
+function ProseLayoutControl() {
+  const layout = useProseLayout();
+  const id = useId();
+  return (
+    <div className={controls} data-testid="intent-diff-layout-control">
+      <label className={muted} htmlFor={id}>
+        Wording layout
+      </label>
+      <select
+        id={id}
+        data-testid="intent-diff-layout"
+        value={layout}
+        onChange={(event) =>
+          proseLayoutStore
+            .getState()
+            .setLayout(event.target.value === 'side-by-side' ? 'side-by-side' : 'inline')
+        }
+      >
+        <option value="inline">Inline</option>
+        <option value="side-by-side">Side by side</option>
+      </select>
+    </div>
+  );
+}
+
+// A removed or added run: struck or underlined, with its visually hidden announcement. A whitespace
+// run is drawn as visible glyphs (hidden from assistive technology) and announced in words, with a
+// closing space so the announcement never runs into the next word.
+function Mark({ part }: { part: DiffPart }) {
+  const Tag = part.kind === 'removed' ? 'del' : 'ins';
+  const space = isWhitespace(part.text);
+  return (
+    <Tag className={part.kind === 'removed' ? removedMark : addedMark} data-part={part.kind}>
+      <span
+        className={srOnly}
+      >{` ${part.kind}: ${space ? `${describeWhitespace(part.text)} ` : ''}`}</span>
+      {space ? (
+        <span aria-hidden="true" className={glyphs}>
+          {visibleWhitespace(part.text)}
+        </span>
+      ) : (
+        part.text
+      )}
+    </Tag>
+  );
+}
+
+function Prose({
+  parts,
+  testid,
+  side,
+}: {
+  parts: DiffPart[];
+  testid: string;
+  side?: 'before' | 'after';
+}) {
+  return (
+    <p className={prose} data-testid={testid} data-side={side}>
+      {parts.map((part, index) =>
+        part.kind === 'same' ? (
+          <Fragment key={index}>{part.text}</Fragment>
+        ) : (
+          <Mark key={index} part={part} />
+        ),
+      )}
+    </p>
+  );
+}
+
+function SideBySide({ parts }: { parts: DiffPart[] }) {
+  return (
+    <div className={pair} data-testid="intent-diff-side-by-side">
+      <div>
+        <p className={sideLabel}>Before</p>
+        <Prose
+          parts={parts.filter((part) => part.kind !== 'added')}
+          testid="intent-diff-before"
+          side="before"
+        />
+      </div>
+      <div>
+        <p className={sideLabel}>After</p>
+        <Prose
+          parts={parts.filter((part) => part.kind !== 'removed')}
+          testid="intent-diff-after"
+          side="after"
+        />
+      </div>
+    </div>
+  );
+}
+
+function WhitespaceOnly({
+  before,
+  after,
+  field,
+}: {
+  before: string;
+  after: string;
+  field: string;
+}) {
+  return (
+    <div data-review-content="wording" data-testid="intent-diff-whitespace-only" data-field={field}>
+      <p className={muted} data-testid="intent-diff-whitespace-label">
+        whitespace-only change
+      </p>
+      <p className={prose} data-testid="intent-diff-whitespace-text">
+        {after}
+      </p>
+      <div data-review-content="diff">
+        <p>Both exact texts, whitespace made visible</p>
+        <p className={sideLabel}>Before</p>
+        <pre className={exact} data-testid="intent-diff-exact-before">
+          {visibleWhitespace(before)}
+        </pre>
+        <p className={sideLabel}>After</p>
+        <pre className={exact} data-testid="intent-diff-exact-after">
+          {visibleWhitespace(after)}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
+type WordsDiff = Extract<TextDiff, { kind: 'words' }>;
+
+function rewriteReason(diff: WordsDiff): string {
+  const percent = Math.round(diff.ratio * 100);
+  return (
+    `Mostly rewritten: ${diff.changedWords} of ${diff.longerWords} words changed (${percent}%), ` +
+    `above the ${REWRITE_RATIO * 100}% rewrite ratio, so it is shown side by side.`
+  );
+}
+
+// One changed text field as one passage. Its layout is the reader's preference, except that a
+// rewrite is shown side by side until the reader asks for this passage inline.
+interface TextPassageProps {
+  before: string;
+  after: string;
+  field: string;
+  diff?: TextDiff;
+  offerLayout?: boolean;
+}
+
+export function IntentTextPassage(props: TextPassageProps) {
+  const { before, after, diff: prepared } = props;
+  const diff = useMemo(() => prepared ?? textDiff(before, after), [before, after, prepared]);
+  return <TextPassageBody {...props} diff={diff} />;
+}
+
+// A changed list item on its line (d9a1ec8f item 7): inline, its marks in place; side by side, its
+// two halves (MIK-R35 rule 4), each with its own marks. A whitespace change keeps both exact texts.
+function LinePassage({
+  before,
+  after,
+  field,
+  diff,
+  layout,
+  reason,
+}: {
+  before: string;
+  after: string;
+  field: string;
+  diff: TextDiff;
+  layout: ProseLayout;
+  reason?: string;
+}) {
+  if (diff.kind === 'identical')
+    return (
+      <span data-review-content="wording" data-testid="intent-diff-identical" data-field={field}>
+        {after}
+      </span>
+    );
+  if (diff.kind === 'whitespace_only')
+    return (
+      <span data-review-content="wording" data-testid="intent-diff-whitespace-only" data-field={field}>
+        {after} <span className={tag}>whitespace-only change</span> before:{' '}
+        <span className={glyphs}>{visibleWhitespace(before)}</span> after:{' '}
+        <span className={glyphs}>{visibleWhitespace(after)}</span>
+      </span>
+    );
+  if (layout === 'inline')
+    return (
+      <span data-review-content="wording" data-testid="intent-diff" data-field={field} data-layout="inline">
+        <LineParts parts={diff.parts} />
+      </span>
+    );
+  return (
+    <span className={halves} data-review-content="wording" data-testid="intent-diff" data-field={field} data-layout="side-by-side">
+      <span className={half} data-half="" data-testid="intent-diff-before" data-side="before">
+        {reason ? <RewriteReason reason={reason} /> : null}
+        <span className={halfLabel}>Before</span>
+        <LineParts parts={diff.parts.filter((part) => part.kind !== 'added')} />
+      </span>
+      <span className={half} data-half="" data-testid="intent-diff-after" data-side="after">
+        <span className={halfLabel}>After</span>
+        <LineParts parts={diff.parts.filter((part) => part.kind !== 'removed')} />
+      </span>
+    </span>
+  );
+}
+
+function LineParts({ parts }: { parts: DiffPart[] }) {
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.kind === 'same' ? <Fragment key={index}>{part.text}</Fragment> : <Mark key={index} part={part} />,
+      )}
+    </>
+  );
+}
+
+// Why a rewritten item is side by side, on its line: a short word while closed, the sentence opened.
+function RewriteReason({ reason }: { reason: string }) {
+  return (
+    <span className={tag} data-testid="intent-diff-rewrite" title={reason}>
+      <span data-reason-short="" aria-hidden="true">
+        rewritten
+      </span>
+      <span data-reason-full="">{reason}</span>
+    </span>
+  );
+}
+
+// A paired list item: its line in the reader's layout, or side by side for a rewrite until the
+// reader asks for it inline (MIK-R35 rule 4). The offer stands beside the opened line, outside it.
+function ChangedItem({
+  row,
+  field,
+  open,
+  onToggle,
+}: {
+  row: Extract<PreparedListRow, { kind: 'changed' }>;
+  field: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const diff = useMemo(() => row.diff ?? textDiff(row.beforeText, row.afterText), [row]);
+  const preferred = useProseLayout();
+  const [inline, setInline] = useState(false);
+  const fallback = diff.kind === 'words' && diff.rewrite && preferred === 'inline' && !inline;
+  return (
+    <>
+      <ItemLine open={open} onToggle={onToggle}>
+        <LinePassage
+          before={row.beforeText}
+          after={row.afterText}
+          field={`${field}.${row.after + 1}`}
+          diff={diff}
+          layout={fallback ? 'side-by-side' : preferred}
+          reason={fallback && diff.kind === 'words' ? rewriteReason(diff) : undefined}
+        />
+      </ItemLine>
+      {open && fallback ? (
+        <button type="button" className={linkButton} onClick={() => setInline(true)}>
+          Show inline
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+function TextPassageBody({
+  before,
+  after,
+  field,
+  diff,
+  offerLayout,
+}: TextPassageProps & { diff: TextDiff }) {
+  const preferred = useProseLayout();
+  const identity = `${before}\u0000${after}`;
+  const [inlineFor, setInlineFor] = useState<string | null>(null);
+  if (diff.kind === 'identical')
+    return (
+      <p
+        className={prose}
+        data-review-content="wording"
+        data-testid="intent-diff-identical"
+        data-field={field}
+      >
+        {after}
+      </p>
+    );
+  if (diff.kind === 'whitespace_only')
+    return <WhitespaceOnly before={before} after={after} field={field} />;
+  const fallback = diff.rewrite && preferred === 'inline' && inlineFor !== identity;
+  const layout: ProseLayout = fallback ? 'side-by-side' : preferred;
+  return (
+    <div
+      data-review-content="wording"
+      data-testid="intent-diff"
+      data-field={field}
+      data-layout={layout}
+    >
+      {offerLayout ? <ProseLayoutControl /> : null}
+      {fallback ? (
+        <p className={muted} data-testid="intent-diff-rewrite">
+          {rewriteReason(diff)}{' '}
+          <button type="button" className={linkButton} onClick={() => setInlineFor(identity)}>
+            Show inline
+          </button>
+        </p>
+      ) : null}
+      {diff.coarse ? (
+        <p className={muted} data-testid="intent-diff-coarse">
+          {COARSE_NOTE}
+        </p>
+      ) : null}
+      {layout === 'inline' ? (
+        <Prose parts={diff.parts} testid="intent-diff-inline" />
+      ) : (
+        <SideBySide parts={diff.parts} />
+      )}
+    </div>
+  );
+}
+
+// One unpaired, unchanged or moved item's content on its line: as it reads, with its mark and its tag.
+function ItemContent({ row }: { row: Exclude<PreparedListRow, { kind: 'changed' }> }) {
+  if (row.kind === 'unchanged') return <>{row.text}</>;
+  if (row.kind === 'moved')
+    return (
+      <>
+        {row.text}{' '}
+        <span className={tag}>
+          moved from item {row.before + 1} to item {row.after + 1}
+        </span>
+      </>
+    );
+  return (
+    <>
+      <Mark part={{ kind: row.kind, text: row.text }} />
+      <span className={tag} aria-hidden="true">
+        {row.kind} item
+      </span>
+    </>
+  );
+}
+
+// An item's one line, which is its button: a click, Enter or Space opens it in full, in place.
+function ItemLine({ open, onToggle, children }: { open: boolean; onToggle: () => void; children: ReactNode }) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-expanded={open}
+      className={itemLine}
+      data-testid="intent-item-line"
+      onClick={onToggle}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        event.stopPropagation();
+        onToggle();
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function ListItem({
+  row,
+  field,
+  noteId,
+  open,
+  onToggle,
+}: {
+  row: PreparedListRow;
+  field: string;
+  noteId?: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  if (row.kind === 'changed')
+    return (
+      <li data-item="changed">
+        <ChangedItem row={row} field={field} open={open} onToggle={onToggle} />
+      </li>
+    );
+  const marked = row.kind === 'added' || row.kind === 'removed';
+  return (
+    <li data-item={row.kind} aria-describedby={marked ? noteId : undefined}>
+      <ItemLine open={open} onToggle={onToggle}>
+        <ItemContent row={row} />
+      </ItemLine>
+    </li>
+  );
+}
+
+// An ordered list (conditions, exclusions) aligned by exact item text (rule 1a), one line per item;
+// each line opens on its own (d9a1ec8f item 7).
+function ListPassage({ rows, field }: { rows: PreparedListRow[]; field: string }) {
+  const id = useId();
+  const [open, setOpen] = useState<ReadonlySet<number>>(() => new Set());
+  const toggle = (index: number) =>
+    setOpen((shown) => {
+      const next = new Set(shown);
+      if (!next.delete(index)) next.add(index);
+      return next;
+    });
+  const coarse = rows.some((row) => 'note' in row && row.note === 'cell_limit');
+  const unpaired = rows.some((row) => 'note' in row && row.note === 'unpaired_gap');
+  return (
+    <>
+      {coarse ? (
+        <p id={`${id}-cell_limit`} className={muted} data-testid="intent-diff-coarse">
+          {COARSE_NOTE}
+        </p>
+      ) : null}
+      {unpaired ? (
+        <p id={`${id}-unpaired_gap`} className={muted}>
+          {UNPAIRED_NOTE}
+        </p>
+      ) : null}
+      <ul
+        className={items}
+        data-review-content="wording"
+        data-testid="intent-diff-list"
+        data-field={field}
+      >
+        {rows.map((row, index) => (
+          <ListItem
+            key={index}
+            row={row}
+            field={field}
+            noteId={'note' in row && row.note ? `${id}-${row.note}` : undefined}
+            open={open.has(index)}
+            onToggle={() => toggle(index)}
+          />
+        ))}
+      </ul>
+    </>
+  );
+}
+
+// The R06 indication beside a one-sided text: a known absence, or a side that could not be read.
+function OneSidedLine({
+  present,
+  known,
+  otherState,
+  otherDetail,
+}: {
+  present: 'before' | 'after';
+  known: boolean;
+  otherState?: string;
+  otherDetail?: string;
+}) {
+  const other = present === 'after' ? 'before' : 'after';
+  const text = known
+    ? present === 'after'
+      ? 'added in after — before: known absent'
+      : 'removed in after — after: known absent'
+    : `recorded on the ${present} side only — ${other}: ${otherState}, not known absent` +
+      (otherDetail ? ` (${otherDetail})` : '');
+  return (
+    <p
+      className={muted}
+      data-review-content="reason"
+      data-testid="intent-one-sided"
+      data-known={String(known)}
+    >
+      {text}
+    </p>
+  );
+}
+
+// An added or removed statement (MIK-R31 rule 3's labelled prose) with its R06 indication.
+function OneSidedStatement({
+  before,
+  after,
+  added,
+  layout,
+}: {
+  before: ReviewSideContent;
+  after: ReviewSideContent;
+  added: boolean;
+  layout: DiffLayout;
+}) {
+  const [present, other] = added ? [after, before] : [before, after];
+  if (present.state !== 'present')
+    return <KnowledgeStatements before={before} after={after} mode={layout} />;
+  return (
+    <>
+      <OneSidedLine
+        present={added ? 'after' : 'before'}
+        known={other.state === 'absent'}
+        otherState={other.state}
+        otherDetail={other.detail}
+      />
+      <p
+        className={prose}
+        data-review-content="wording"
+        data-testid="review-center-statement-prose"
+      >
+        {present.text}
+      </p>
+    </>
+  );
+}
+
+const FIELD_TITLES: Record<WordingField, string> = {
+  statement: 'Statement',
+  applicability: 'Applicability',
+  conditions: 'Conditions',
+  exclusions: 'Exclusions',
+};
+
+// One changed non-statement field. A null value is the record's known absence of the field; a list
+// the comparison only reported joined (`projected`) is shown as reported, since its items are not
+// known here and aligning the joined text would invent a list structure.
+function ListFieldBody({
+  before,
+  after,
+  field,
+  projected,
+  passage,
+}: {
+  before: string[];
+  after: string[];
+  field: WordingField;
+  projected: boolean;
+  passage?: PreparedPassage;
+}) {
+  return projected ? (
+    <p className={muted} data-testid="intent-field-projected">
+      before: {before.join('; ') || 'none'} · after: {after.join('; ') || 'none'}
+    </p>
+  ) : (
+    <ListPassage rows={passage?.kind === 'list' ? passage.rows : []} field={field} />
+  );
+}
+
+function FieldBody({
+  field,
+  before,
+  after,
+  projected,
+  passage,
+}: {
+  field: WordingField;
+  before: AuthoredWording[WordingField];
+  after: AuthoredWording[WordingField];
+  projected: boolean;
+  passage?: PreparedPassage;
+}) {
+  if (Array.isArray(before) && Array.isArray(after))
+    return (
+      <ListFieldBody
+        before={before}
+        after={after}
+        field={field}
+        projected={projected}
+        passage={passage}
+      />
+    );
+  if (typeof before === 'string' && typeof after === 'string')
+    return (
+      <IntentTextPassage
+        before={before}
+        after={after}
+        field={field}
+        diff={passage?.kind === 'text' ? passage.diff : undefined}
+      />
+    );
+  const added = typeof after === 'string';
+  return (
+    <>
+      <OneSidedLine present={added ? 'after' : 'before'} known />
+      <p className={prose}>{String(added ? after : before)}</p>
+    </>
+  );
+}
+
+function StatementText({
+  before,
+  after,
+  changed,
+  layout,
+  diff,
+}: {
+  before: ReviewSideContent;
+  after: ReviewSideContent;
+  changed: boolean;
+  layout: DiffLayout;
+  diff?: TextDiff;
+}) {
+  // No word diff is drawn against a side that is not present; each side keeps its own state line.
+  if (before.state !== 'present' || after.state !== 'present')
+    return <KnowledgeStatements before={before} after={after} mode={layout} />;
+  return changed ? (
+    <IntentTextPassage
+      before={before.text ?? ''}
+      after={after.text ?? ''}
+      field="statement"
+      diff={diff}
+    />
+  ) : (
+    <p className={prose} data-review-content="wording" data-testid="review-center-statement-prose">
+      {before.text}
+    </p>
+  );
+}
+
+// The statement's label with the wording-layout switch on its line; the switch alone without a label.
+function StatementHead({ header, control }: { header?: ReactNode; control: boolean }) {
+  if (!header) return control ? <ProseLayoutControl /> : null;
+  return (
+    <div className={statementHead}>
+      {header}
+      {control ? <ProseLayoutControl /> : null}
+    </div>
+  );
+}
+
+// The statement area of a tree comparison's selected invariant. Ambiguous and unresolved selections
+// never reach here: the landed body says that no diff is available. `header` is the statement's label:
+// the wording-layout switch stands on its line (MIK-R89 v2 rule 1, amended 9dde2b09; MIK-R35 rule 4).
+export function IntentStatementBody({
+  header,
+  knowledge,
+  selection,
+  wording,
+  sides,
+  projected,
+  layout,
+}: {
+  header?: ReactNode;
+  knowledge: ReviewKnowledgePane;
+  selection: ReviewRevisionSelection;
+  wording: WordingComparison;
+  sides: { before: AuthoredWording; after: AuthoredWording };
+  projected: WordingField[];
+  layout: DiffLayout;
+}) {
+  const { before_statement: before, after_statement: after } = knowledge;
+  const prepared = useMemo(() => {
+    const fields = wording.kind === 'changed' ? wording.fields : [];
+    return new Map(
+      fields.map((field) => [
+        field,
+        field === 'statement'
+          ? before.state === 'present' && after.state === 'present'
+            ? preparePassage(before.text ?? '', after.text ?? '')
+            : undefined
+          : preparePassage(sides.before[field], sides.after[field], projected.includes(field)),
+      ]),
+    );
+  }, [wording, before, after, sides, projected]);
+  if (selection.state === 'added' || selection.state === 'removed')
+    return (
+      <>
+        {header}
+        <OneSidedStatement
+          before={before}
+          after={after}
+          added={selection.state === 'added'}
+          layout={layout}
+        />
+      </>
+    );
+  const changed = wording.kind === 'changed' ? wording.fields : [];
+  const others = changed.filter((field) => field !== 'statement');
+  const passages = [...prepared.values()].some(passageHasWords);
+  const statement = prepared.get('statement');
+  return (
+    <>
+      <StatementHead header={header} control={passages} />
+      <StatementText
+        before={before}
+        after={after}
+        changed={changed.includes('statement')}
+        layout={layout}
+        diff={statement?.kind === 'text' ? statement.diff : undefined}
+      />
+      {others.length ? (
+        <div data-testid="review-center-changed-fields">
+          {others.map((field) => (
+            <section key={field} data-field={field} data-testid="intent-field-change">
+              <p className={sideLabel}>{FIELD_TITLES[field]}</p>
+              <FieldBody
+                field={field}
+                before={sides.before[field]}
+                after={sides.after[field]}
+                projected={projected.includes(field)}
+                passage={prepared.get(field)}
+              />
+            </section>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+// The guarantee's changed text, or `null` when the landed rendering answers (identical text, one
+// side, none). Two sides at the same revision whose text differs are compared by their bytes too
+// (a text record's revision increments only when its meaning changes, MIK-R21).
+export function guaranteeTextChange(
+  entry: ReviewFamilyContextEntry,
+): { before: ReviewFamilyGuarantee; after: ReviewFamilyGuarantee } | null {
+  const { guarantee: before } = entry.before;
+  const { guarantee: after } = entry.after;
+  if (!before || !after || before.joint_guarantee === after.joint_guarantee) return null;
+  return { before, after };
+}
+
+// The center details' guarantee fact: the landed comparison kind, except that on a tree comparison one
+// revision whose two texts differ is never called `unchanged_revision` (review R1 F2).
+export function guaranteeFact(entry: ReviewFamilyContextEntry): string {
+  const kind = guaranteeComparison(entry).kind;
+  return kind === 'unchanged_revision' && guaranteeTextChange(entry)
+    ? 'same_revision_text_changed'
+    : kind;
+}
+
+// A changed guarantee: its label and its word-diffed text. The revision ids are Technical details'
+// (MIK-R89 v2 rule 6, amended 9dde2b09).
+export function GuaranteeTextChange({
+  before,
+  after,
+}: {
+  before: ReviewFamilyGuarantee;
+  after: ReviewFamilyGuarantee;
+}) {
+  const same = before.revision_id === after.revision_id;
+  const labels: [string, string] = same
+    ? [before.display_version, after.display_version]
+    : guaranteeRevisionLabels(before, after);
+  return (
+    <div
+      data-review-content="wording"
+      data-testid="review-center-guarantee-changed"
+      data-word-diff="true"
+    >
+      <p className={muted} data-testid="review-center-guarantee-label">
+        Changed guarantee · {revisionMeta(...labels)}
+        {same ? ' · the same revision on both sides; its text differs' : ''}
+      </p>
+      <div className={card}>
+        <p className={sideLabel}>Joint guarantee</p>
+        <IntentTextPassage
+          before={before.joint_guarantee}
+          after={after.joint_guarantee}
+          field="guarantee"
+          offerLayout
+        />
+      </div>
+    </div>
+  );
+}
+
+// The label of a guarantee recorded on one side only, with its R06 indication.
+export function OneSidedGuaranteeLabel({
+  side,
+  other,
+}: {
+  side: 'before' | 'after';
+  other: ReviewFamilyRevisionContext;
+}) {
+  const known = other.state === 'not_recorded';
+  const heading = !known
+    ? 'Guarantee recorded on one side only'
+    : side === 'after'
+      ? 'Added guarantee'
+      : 'Removed guarantee';
+  return (
+    <>
+      <p className={muted}>{heading}</p>
+      <OneSidedLine
+        present={side}
+        known={known}
+        otherState={other.state}
+        otherDetail={other.detail}
+      />
+    </>
+  );
+}

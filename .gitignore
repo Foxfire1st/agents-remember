@@ -38,3 +38,9 @@ mcp/tests/fixtures/sim-rich/
 # unignored is staged and committed rather than merely ignored by ruff.
 .dmypy.json
 .mypy_cache/
+
+# AR leaf evidence and tooling scratch — never a deliverable. The closeout derives its candidate
+# tree with `git add -A`, so anything unignored under temp/ is staged and committed with the code;
+# leaf reports, probes, captures, mutation logs and verdicts are evidence, not deliverables, and
+# six earlier leaf closeouts landed 52 of them before this rule existed.
+temp/

@@ -7,6 +7,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
+from agents_remember.application.knowledge_writer.memory_state import Owner
+from agents_remember.application.knowledge_writer.writer import WriteRequest
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -23,6 +25,9 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
+)
+from agents_remember.worktrees.modules.landing_commit_check import (
+    message_with_commit_check_trailer,
 )
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -42,7 +47,9 @@ from closeout_input_test_support import (
 )
 from repository_profile_test_support import AGENTS_REMEMBER_PROFILE_REFERENCE
 from selected_lifecycle_test_support import selected_closeout_operation_input
+from test_closeout_queue import _ensure_fixture_services
 from test_source_lineage import _fixture, _git
+from writer_worklist_test_support import write_knowledge
 
 
 def _closed_external_leaf_worktrees(
@@ -61,15 +68,63 @@ def _closed_external_leaf_worktrees(
     _git(fixture.code_repo, "worktree", "add", code_worktree.as_posix(), "leaf")
     _git(memory_repo, "worktree", "add", memory_worktree.as_posix(), "leaf")
     (memory_worktree / "onboarding").mkdir()
+    # The coherence publication gates on converted memory (MIK-R46 rule 1), so the
+    # closed candidate carries the layout marker exactly as a converted leaf would.
+    (memory_worktree / "knowledge").mkdir(exist_ok=True)
+    (memory_worktree / "knowledge" / "layout.json").write_text(
+        '{\n  "conversion": "1",\n  "schema": "ar-memory-layout/v2"\n}\n', encoding="utf-8"
+    )
     (code_worktree / "candidate.txt").write_text("candidate\n", encoding="utf-8")
     _git(code_worktree, "add", "candidate.txt")
-    _git(code_worktree, "commit", "-m", "closed code")
+    # MIK-R152: a closed leaf's commits carry the pass fact exactly as a product
+    # landing writes it, so the integration reads the fact instead of re-running
+    # the check. No hook is configured in the fixture: the fact says hook=none.
+    _git(
+        code_worktree,
+        "commit",
+        "-m",
+        message_with_commit_check_trailer(
+            code_worktree, "closed code", _git(code_worktree, "write-tree")
+        ),
+    )
     code_commit = _git(code_worktree, "rev-parse", "HEAD")
     (memory_worktree / "candidate.md").write_text("# Candidate\n", encoding="utf-8")
     prepare_memory_cache(memory_worktree)
+    # A converted leaf covers its code change the way a real leaf does (MIK-R30):
+    # the candidate hunk would otherwise fail the coherence gate it now reaches.
+    covered = write_knowledge(
+        WriteRequest(
+            memory_root=memory_worktree,
+            code_root=code_worktree,
+            owner=Owner(
+                task=fixture.leaf_contract.task_id,
+                kind="leaf",
+                id=fixture.leaf_contract.leaf_id or "?",
+            ),
+            handoff_path="handoff.json",
+            document={
+                "history": [
+                    {
+                        "subject": "onboarding:candidate.txt",
+                        "disposition": "no_impact",
+                        "reason": "The fixture leaf's code change carries no invariant.",
+                    }
+                ]
+            },
+            commit=True,
+        )
+    )
+    assert covered.state == "written", covered.render()
     _git(memory_worktree, "add", "-A")
     _git(
-        memory_worktree, "commit", "-m", render_memory_content_message("closed memory", code_commit)
+        memory_worktree,
+        "commit",
+        "-m",
+        message_with_commit_check_trailer(
+            memory_worktree,
+            render_memory_content_message("closed memory", code_commit),
+            _git(memory_worktree, "write-tree"),
+        ),
     )
     memory_commit = _git(memory_worktree, "rev-parse", "HEAD")
     refresh_memory_cache(memory_worktree, repo_name=fixture.leaf_contract.repo_name)
@@ -96,6 +151,7 @@ def _publish_completed_closeout_fixture(
 ) -> WorktreeContract:
     """Attach integration evidence after valid admission, optionally varying its final target."""
 
+    _ensure_fixture_services()
     input_factory = (
         selected_closeout_operation_input if closed.kind == "leaf" else closeout_operation_input
     )
@@ -126,18 +182,15 @@ def _publish_completed_closeout_fixture(
     return load_contract(finalized.contract_path)
 
 
-def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
+def _authority_fixture(root: Path, *, external_memory: bool = True) -> Any:
     fixture: Any = _fixture(
         root,
-        external_memory=external_memory,
         publish_locations=False,
         selected_profile=True,
     )
     configured_code = root / "repo"
     configured_code.symlink_to(fixture.code_repo, target_is_directory=True)
-    memory_mode = "external" if external_memory else "internal"
-    if not external_memory:
-        (configured_code / "ar-memory").mkdir()
+    memory_mode = "external"
     if fixture.leaf_contract.memory_repo_path is not None:
         configured_memory = fixture.coordination / "memory-repos" / "ar-repo"
         configured_memory.parent.mkdir(parents=True, exist_ok=True)
@@ -163,33 +216,30 @@ def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
     task_root = fixture.coordination / "tasks" / "repo"
     for repo in filter(None, (fixture.code_repo, fixture.leaf_contract.memory_repo_path)):
         _git(repo, "branch", "ar/atomic-two", "super")
-    if external_memory:
-        memory_repo = fixture.leaf_contract.memory_repo_path
-        assert memory_repo is not None
-        code_head = _git(fixture.code_repo, "rev-parse", "ar/master")
-        _git(memory_repo, "switch", "ar/master")
-        (memory_repo / "base.md").write_text("# Base memory\n", encoding="utf-8")
-        prepare_memory_cache(memory_repo)
-        _git(memory_repo, "add", "-A")
-        _git(
-            memory_repo,
-            "commit",
-            "-m",
-            render_memory_content_message("base memory content", code_head),
-        )
-        refresh_memory_cache(memory_repo, repo_name="repo")
-        _git(memory_repo, "branch", "-f", "leaf", "ar/master")
-        _git(memory_repo, "branch", "-f", "super", "ar/master")
-        _git(memory_repo, "switch", "super")
+    memory_repo = fixture.leaf_contract.memory_repo_path
+    assert memory_repo is not None
+    code_head = _git(fixture.code_repo, "rev-parse", "ar/master")
+    _git(memory_repo, "switch", "ar/master")
+    (memory_repo / "base.md").write_text("# Base memory\n", encoding="utf-8")
+    prepare_memory_cache(memory_repo)
+    _git(memory_repo, "add", "-A")
+    _git(
+        memory_repo,
+        "commit",
+        "-m",
+        render_memory_content_message("base memory content", code_head),
+    )
+    refresh_memory_cache(memory_repo, repo_name="repo")
+    _git(memory_repo, "branch", "-f", "leaf", "ar/master")
+    _git(memory_repo, "branch", "-f", "super", "ar/master")
+    _git(memory_repo, "switch", "super")
     master_contract = replace(
         fixture.master_contract,
         memory_mode=memory_mode,
         code_work_branch="ar/master",
-        memory_work_branch=("ar/master" if external_memory else ""),
+        memory_work_branch="ar/master",
         memory_base_commit=(
             _git(cast(Path, fixture.leaf_contract.memory_repo_path), "rev-parse", "ar/master")
-            if external_memory
-            else ""
         ),
     )
     write_contract(master_contract.contract_path, master_contract)
@@ -205,11 +255,9 @@ def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
         fixture.leaf_contract,
         memory_mode=memory_mode,
         code_source_branch="ar/master",
-        memory_source_branch=("ar/master" if external_memory else ""),
+        memory_source_branch="ar/master",
         memory_base_commit=(
             _git(cast(Path, fixture.leaf_contract.memory_repo_path), "rev-parse", "ar/master")
-            if external_memory
-            else ""
         ),
     )
     write_contract(fixture.leaf_contract.contract_path, fixture.leaf_contract)
@@ -258,6 +306,7 @@ def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
         _git(repo, "update-ref", "refs/remotes/origin/main", _git(repo, "rev-parse", "main"))
         _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     memory_repo = fixture.leaf_contract.memory_repo_path
+    assert memory_repo is not None
     sibling = default_series_contract(
         ContractTask(
             "atomic-two",
@@ -272,15 +321,11 @@ def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
             "ar/atomic-two",
             _git(fixture.code_repo, "rev-parse", "super"),
         ),
-        memory=(
-            RepoBranchPlan(
-                memory_repo,
-                "super",
-                "ar/atomic-two",
-                _git(memory_repo, "rev-parse", "super"),
-            )
-            if memory_repo is not None
-            else None
+        memory=RepoBranchPlan(
+            memory_repo,
+            "super",
+            "ar/atomic-two",
+            _git(memory_repo, "rev-parse", "super"),
         ),
         task_root=task_root / "atomic-two",
     )

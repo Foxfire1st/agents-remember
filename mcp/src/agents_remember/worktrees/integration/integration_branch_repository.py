@@ -4,7 +4,26 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.git_command import run_git
+
+
+class BranchAuthorityUnavailable(AgentsRememberError):
+    """A repository's default-branch authority was never RECORDED.
+
+    This is a CONDITION, not a crash: the repository exists and simply does not yet carry the
+    authority a branch mutation requires, and the error's own message names the remedy
+    (``memory_init`` records it; ``origin/HEAD`` supplies it for a code repository). It is a
+    typed member of the product's error family so a caller can answer it in the response
+    envelope instead of letting it escape as a traceback in which the caller loses
+    ``ok``/``status``/``nextAction`` -- the class `260918-TSIP` `T34` recorded, measured on
+    ``memory_baseline_adopt``.
+
+    Deliberately NOT this class: a recorded authority that is malformed, or that names a ref
+    which does not resolve. Those are refusals of a state a caller must understand and change
+    rather than an absence a sibling tool already reports, and they keep raising -- widening
+    this type to cover them would move the boundary the authority tests hold.
+    """
 
 
 def canonical_local_branch(repository: Path, branch: str) -> str:
@@ -41,7 +60,7 @@ def repository_default_branch(repository: Path) -> str:
 
     branch = _remote_repository_default_branch(repository)
     if branch is None:
-        raise RuntimeError(
+        raise BranchAuthorityUnavailable(
             f"repository default-branch authority is unavailable for {repository}; "
             "configure origin/HEAD before task branch mutation"
         )
@@ -49,7 +68,14 @@ def repository_default_branch(repository: Path) -> str:
 
 
 def memory_repository_default_branch(repository: Path) -> str:
-    """Return remote authority, or memory_init's exact existing local default."""
+    """Return remote authority, or memory_init's exact existing local default.
+
+    The local default is whatever ``memory_init`` recorded, validated against itself:
+    the recorded name must resolve to a real local branch. It is deliberately **not**
+    compared to a fixed name — the memory repository is founded on the code branch the
+    developer chose, and a name comparison here would refuse every repository whose
+    memory is founded on anything but ``main``.
+    """
 
     remote = _remote_repository_default_branch(repository)
     if remote is not None:
@@ -60,15 +86,15 @@ def memory_repository_default_branch(repository: Path) -> str:
     )
     branch = local.stdout.strip()
     if local.returncode != 0 or not branch:
-        raise RuntimeError(
+        raise BranchAuthorityUnavailable(
             f"memory repository default-branch authority is unavailable for {repository}; "
             "initialize it through memory_init before task branch mutation"
         )
     normalized = branch.removeprefix("refs/heads/")
-    if normalized != "main":
+    if not normalized:
         raise RuntimeError(
-            f"memory repository local default-branch authority does not match memory_init "
-            f"for {repository}: {branch!r}"
+            f"memory repository local default-branch authority is malformed for {repository}: "
+            f"{branch!r}"
         )
     verified = run_git(repository, ["rev-parse", "--verify", f"refs/heads/{normalized}"])
     if verified.returncode != 0:

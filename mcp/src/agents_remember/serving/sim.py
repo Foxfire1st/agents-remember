@@ -29,7 +29,6 @@ from typing import TYPE_CHECKING
 from agents_remember.errors import AgentsRememberError
 from agents_remember.observer.store import EventStore
 from agents_remember.serving.projections.paths import observer_logs_root, observer_root
-from agents_remember.serving.projections.projection_store import read_lifecycle_logs
 
 if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
@@ -64,9 +63,8 @@ def parse_sim_speed(value: str) -> float:
 
 
 def load_fixture(fixture_dir: Path) -> list[Event]:
-    """Every recorded lifecycle event under ``<fixture>/logs/observer``, sorted by timestamp."""
-    logs = read_lifecycle_logs(observer_logs_root(fixture_dir))
-    events = [event for log in logs for event in log]
+    """Every recorded workspace event under ``<fixture>/logs/observer``, sorted by timestamp."""
+    events = EventStore(observer_logs_root(fixture_dir)).read()
     events.sort(key=_event_ts)
     return events
 
@@ -124,11 +122,10 @@ class SimSetup:
 
 def _materialize_surfaces(fixture_dir: Path, root: Path) -> None:
     """Copy the fixture's structural surfaces into the fresh sim root so the projector reads them
-    like a live coordination root: worktree contracts (-> enclosures + synthesized paused
-    lifecycles), JSON task documents (the task content), provider current-state, memory ledgers,
-    and persisted drift snapshots. The observer *event logs*
-    (``logs/observer/{lifecycles,workspace}``) are excluded -- the feeder is their sole writer,
-    replaying them over sim time, so copying them too would double-apply and defeat the replay.
+    like a live coordination root: worktree contracts, task documents, provider state, memory ledgers,
+    and persisted drift snapshots. Copied observer workspace logs are removed: the feeder
+    replays workspace events over sim time, so copying them too would double-apply them.
+    Copied lifecycle gate logs are also removed from the fresh simulation; they are not replayed.
     """
     shutil.copytree(fixture_dir, root, dirs_exist_ok=True)
     observer = observer_logs_root(root)

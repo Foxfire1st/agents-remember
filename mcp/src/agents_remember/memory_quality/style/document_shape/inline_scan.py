@@ -27,7 +27,6 @@ __all__ = [
     "code_span_ranges",
     "enclosing_span_end",
     "fence_delimiter",
-    "split_row",
     "unfenced_lines",
 ]
 
@@ -60,8 +59,8 @@ def code_span_ranges(line: str) -> list[tuple[int, int]]:
     """Half-open ``(start, end)`` ranges covering each code span, delimiters included.
 
     An opening run is matched to the next run of EQUAL length, per CommonMark, which is
-    what makes a multi-backtick span such as ```` ``ariaLabel={`x`}`` ```` -- present in
-    ``onboarding/dashboard/src/panels/RailChat.tsx.md`` -- one span rather than three. A run with no
+    what makes a multi-backtick span such as ```` ``ariaLabel={`x`}`` ```` one span
+    rather than three. A run with no
     equal-length partner later in the line is literal text and opens nothing.
     """
     runs = backtick_runs(line)
@@ -119,7 +118,12 @@ def cell_spans(line: str) -> list[tuple[int, int]]:
     Offsets rather than text, because a row is EDITED here as well as read: the citation
     fixer replaces one cell and must leave every other character of the row alone.
     """
-    boundaries = cell_boundaries(line)
+    return cell_spans_from_boundaries(line, cell_boundaries(line))
+
+
+def cell_spans_from_boundaries(line: str, boundaries: list[int]) -> list[tuple[int, int]]:
+    """Cell offsets using an already scanned line, preserving optional outer pipes."""
+
     if not boundaries:
         return [(0, len(line))]
     spans: list[tuple[int, int]] = []
@@ -133,8 +137,3 @@ def cell_spans(line: str) -> list[tuple[int, int]]:
     if spans and not line[spans[-1][0] : spans[-1][1]].strip():
         spans = spans[:-1]
     return spans
-
-
-def split_row(line: str) -> list[str]:
-    """The cells of a table row, stripped."""
-    return [line[start:end].strip() for start, end in cell_spans(line)]

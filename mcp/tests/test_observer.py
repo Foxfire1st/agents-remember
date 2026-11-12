@@ -35,40 +35,41 @@ class EventStoreTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._dir.cleanup()
 
-    def _event(self, lifecycle_id: str | None, kind: str = "tool.completed", **data: Any) -> Event:
+    def _event(self, scope_key: str | None, kind: str = "tool.completed", **data: Any) -> Event:
         return Event(
             id=new_ulid(),
             ts=now_iso(),
             kind=kind,
             trust="observed",
             actor="model",
-            lifecycleId=lifecycle_id,
+            scopeKey=scope_key,
             data=data,
         )
 
-    def test_append_routes_per_lifecycle(self) -> None:
+    def test_scope_key_stays_in_the_workspace_river(self) -> None:
         self.store.append(self._event("L1"))
-        self.assertTrue((self.root / "lifecycles" / "L1" / "events.jsonl").exists())
+        self.assertTrue((self.root / "workspace" / "events.jsonl").exists())
+        self.assertFalse((self.root / "lifecycles").exists())
 
-    def test_workspace_log_for_lifecycleless_events(self) -> None:
-        self.store.append(self._event(None, kind="span.heartbeat"))
+    def test_workspace_log_for_unbound_events(self) -> None:
+        self.store.append(self._event(None))
         self.assertTrue((self.root / "workspace" / "events.jsonl").exists())
 
     def test_round_trip_through_store(self) -> None:
         started = Event(
             id=new_ulid(),
             ts=now_iso(),
-            kind="lifecycle.started",
+            kind="tool.completed",
             trust="declared",
             actor="model",
-            lifecycleId="L1",
-            data={"phase": "request", "fleeting": True},
+            scopeKey="repo:master/task.json",
+            data={"tool": "worktree_start", "ok": True},
         )
         self.store.append(started)
         self.store.append(self._event("L1"))
-        events = self.store.read("L1")
+        events = self.store.read()
         self.assertEqual(len(events), 2)
-        # The self-contained lifecycle.started replays from its log alone.
+        # The facts-only event and its task scope replay from the workspace log alone.
         self.assertEqual(events[0], started)
 
 

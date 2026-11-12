@@ -24,6 +24,7 @@ False-positive boundaries:
 from __future__ import annotations
 
 import importlib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cache
 from pathlib import PurePosixPath
@@ -31,6 +32,7 @@ from pathlib import PurePosixPath
 from tree_sitter import Language, Node, Parser
 
 from agents_remember.errors import GrammarUnavailableError
+from agents_remember.memory_quality.style.citations import test_case_ranges, test_cases
 
 PYTHON = "python"
 TYPESCRIPT = "typescript"
@@ -117,18 +119,22 @@ SCRIPT_LEAVES = frozenset({"identifier", "shorthand_property_identifier_pattern"
 SCRIPT_DEFAULTED = frozenset({"assignment_pattern", "object_assignment_pattern"})
 SCRIPT_WRAPPERS = frozenset({"ambient_declaration", "export_statement"})
 
-Spans = dict[str, list[tuple[int, int]]]
-
 
 @dataclass(frozen=True)
-class CallLiteral:
-    """One direct quoted argument, its syntax identity, and its call's line extent."""
+class Binding:
+    """One name a construct binds: its extent, and the line the declaration itself begins on.
 
-    text: str
-    start: int
-    end: int
-    argument_start_byte: int
-    argument_end_byte: int
+    The two differ for a decorated Python definition. ``_widened`` grows the construct outwards
+    through ``decorated_definition`` so its extent covers the decorator, which is what makes a
+    range projected from that extent quote the whole construct. The declaration the name belongs
+    to, however, begins on the ``def``/``class`` line BELOW the decorator -- so a citation that
+    starts at exactly the declaration's own lines must be read as current for it rather than as
+    one line short of it.
+    """
+
+    span: tuple[int, int]
+    declaration: int
+    test_case: bool = False
 
 
 def grammar_of(path: str) -> str | None:
@@ -185,34 +191,6 @@ def typescript_anchor_identifier(text: str) -> str | None:
     return None
 
 
-def call_argument_literals(path: str, lines: list[str]) -> tuple[CallLiteral, ...]:
-    """Every direct string argument and the call it belongs to, in document order."""
-    grammar = grammar_of(path)
-    if grammar not in {TYPESCRIPT, TSX, JAVASCRIPT}:
-        return ()
-    tree = Parser(language(grammar)).parse("\n".join(lines).encode("utf-8"))
-    found: list[CallLiteral] = []
-    for node in _walk(tree.root_node):
-        if node.type not in {"string", "template_string"} or node.parent is None:
-            continue
-        arguments = node.parent
-        call = arguments.parent
-        if arguments.type != "arguments" or call is None or call.type != "call_expression":
-            continue
-        text = "" if node.text is None else node.text.decode("utf-8", errors="replace")
-        start, end = _span(call)
-        found.append(
-            CallLiteral(
-                text=text,
-                start=start,
-                end=end,
-                argument_start_byte=node.start_byte,
-                argument_end_byte=node.end_byte,
-            )
-        )
-    return tuple(found)
-
-
 @cache
 def language(grammar: str) -> Language:
     """The loaded grammar, built once. A failure to load is fatal, never a fallback."""
@@ -228,13 +206,14 @@ def language(grammar: str) -> Language:
         ) from error
 
 
-def definitions(path: str, lines: list[str]) -> Spans:
-    """Every name ``path`` binds, and the line span of the construct that binds it.
+def bindings(path: str, lines: Sequence[str]) -> dict[str, list[Binding]]:
+    """Every name ``path`` binds, with both its widened extent and its declaration line.
 
-    A language with no grammar binds nothing, which drops the file to occurrence matching
-    -- the stated ceiling, not a parse failure. A construct CONTAINING a syntax error is
-    skipped while its file's sound constructs are kept, so a file written for another
-    dialect degrades to occurrence matching for the broken part alone.
+    One walk answers both, so a caller needing the declaration line does not re-parse the file.
+    The declaration line is the first line of the UNWIDENED construct: for a decorated
+    definition that is the ``def``/``class`` line, and for every other construct -- including an
+    exported TypeScript declaration, whose ``export`` keyword shares the declaration's own first
+    line -- it is the extent's start.
     """
     grammar = grammar_of(path)
     if grammar is None:
@@ -245,15 +224,49 @@ def definitions(path: str, lines: list[str]) -> Spans:
     tree = Parser(language(grammar)).parse("\n".join(lines).encode("utf-8"))
     reader = _python_names if grammar == PYTHON else _script_names
     wrappers = PYTHON_WRAPPERS if grammar == PYTHON else SCRIPT_WRAPPERS
-    found: Spans = {}
+    test_file = grammar != PYTHON and test_cases.is_test_file(path)
+    found: dict[str, list[Binding]] = {}
     for node in _walk(tree.root_node):
         names = [] if node.has_error else reader(node)
+        cases = test_cases.case_names(node) if test_file else ()
+        names.extend(cases)
         if not names:
             continue
-        span = _span(_widened(node, wrappers))
+        binding = Binding(
+            span=_span(_widened(node, wrappers)), declaration=_span(node)[0], test_case=bool(cases)
+        )
         for name in names:
-            found.setdefault(name, []).append(span)
+            found.setdefault(name, []).append(binding)
     return found
+
+
+def test_case_refusal(path: str, lines: Sequence[str], name: str) -> str | None:
+    """Diagnostic for an unresolved test-case proof; other files keep symbol diagnostics."""
+    grammar = grammar_of(path)
+    if grammar not in {TYPESCRIPT, TSX, JAVASCRIPT} or not test_cases.is_test_file(path):
+        return None
+    tree = Parser(language(grammar)).parse("\n".join(lines).encode("utf-8"))
+    return test_cases.refusal(_walk(tree.root_node), path, name)
+
+
+def test_case_range(
+    path: str,
+    lines: Sequence[str],
+    start: int,
+    end: int,
+    reaches: test_case_ranges.Reaches | None = None,
+) -> test_case_ranges.CaseExtent | str:
+    """The one test case a line-range proof names, or why these lines are none (MIK-R194 rule 2).
+
+    A range is admitted only in a JavaScript or TypeScript ``.test.``/``.spec.`` file, only when it
+    is exactly one case's extent, and only when no ``path::title`` reaches that case. The extent is
+    measured as every other extent in this module is, on a parse of the candidate bytes.
+    """
+    grammar = grammar_of(path)
+    if grammar not in {TYPESCRIPT, TSX, JAVASCRIPT} or not test_cases.is_test_file(path):
+        return test_case_ranges.not_a_case_file(path, start, end)
+    tree = Parser(language(grammar)).parse("\n".join(lines).encode("utf-8"))
+    return test_case_ranges.case_at(path, _walk(tree.root_node), start, end, reaches)
 
 
 def _walk(root: Node) -> list[Node]:
@@ -280,10 +293,8 @@ def _widened(node: Node, wrappers: frozenset[str]) -> Node:
 
 
 def _span(node: Node) -> tuple[int, int]:
-    """The one-based line range ``node`` occupies."""
-    start = node.start_point[0] + 1
-    row, column = node.end_point
-    return start, max(start, row if column == 0 else row + 1)
+    """The one-based line range ``node`` occupies (one rule: :func:`test_cases.span_of`)."""
+    return test_cases.span_of(node)
 
 
 def _text(node: Node | None) -> list[str]:

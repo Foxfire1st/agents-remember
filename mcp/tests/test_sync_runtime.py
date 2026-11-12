@@ -50,7 +50,7 @@ class SyncRuntimeTests(unittest.TestCase):
         sync_runtime = load_sync_runtime()
 
         labels = {target.label for target in sync_runtime.TARGETS}
-        self.assertEqual(labels, {"agents-md-files", "benchmarks", "providers", "system"})
+        self.assertEqual(labels, {"benchmarks", "providers", "system"})
 
         for target in sync_runtime.TARGETS:
             target_path = target.path.as_posix()
@@ -59,6 +59,40 @@ class SyncRuntimeTests(unittest.TestCase):
             self.assertNotIn("/.codex/", target_path)
             self.assertNotIn("/.cursor/", target_path)
             self.assertNotIn("/.github-vscode/", target_path)
+
+    def test_a_missing_canonical_source_is_never_reported_in_sync(self) -> None:
+        """An empty comparison is not evidence of a synced tree.
+
+        With both sides absent the digest maps compare equal, so before this guard a caller who
+        pointed the generator at the wrong root read five green rows for nothing — measured by an
+        independent reviewer whose drift harness did exactly that.
+        """
+
+        sync_runtime = load_sync_runtime()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            diff = sync_runtime.diff_target(
+                sync_runtime.RuntimeTarget("fixture", root / "absent", root / "also-absent")
+            )
+            self.assertTrue(diff.source_missing)
+            self.assertFalse(diff.in_sync)
+            self.assertEqual(diff.missing, ())
+            self.assertEqual(diff.extra, ())
+            self.assertEqual(diff.changed, ())
+
+            # The same tree, present on both sides and equal, is still in sync.
+            source = root / "source"
+            target = root / "target"
+            source.mkdir()
+            target.mkdir()
+            (source / "asset.md").write_text("# Asset\n", encoding="utf-8")
+            (target / "asset.md").write_text("# Asset\n", encoding="utf-8")
+            self.assertTrue(
+                sync_runtime.diff_target(
+                    sync_runtime.RuntimeTarget("fixture", source, target)
+                ).in_sync
+            )
 
 
 if __name__ == "__main__":

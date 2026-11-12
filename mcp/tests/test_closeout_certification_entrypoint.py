@@ -38,7 +38,7 @@ from repository_profile_test_support import (
     FixtureRepository,
     install_fixture_profile,
 )
-from test_closeout_queue import MASTER_A, QueueFixture, _leaf
+from test_closeout_queue import MASTER_A, QueueFixture, _leaf, cover_fixture_code_changes
 from test_worktree_support import git
 
 
@@ -49,7 +49,7 @@ def _fixture(
     profile_reference: Path = AGENTS_REMEMBER_PROFILE_REFERENCE,
     candidate_file: tuple[str, str] | None = None,
 ) -> QueueFixture:
-    fixture = QueueFixture(root, memory_mode="internal")
+    fixture = QueueFixture(root)
     contract = fixture.contracts[MASTER_A]
     installed = install_fixture_profile(contract.code_worktree, contract.repo_name, profile)
     declared = RepositoryCertificationProfile.model_validate_json(installed.read_bytes())
@@ -80,6 +80,18 @@ def _fixture(
     if candidate_file is not None:
         name, contents = candidate_file
         (contract.code_worktree / name).write_text(contents, encoding="utf-8")
+    # MIK-R46 rule 8: this world is converted, so the gate judges the candidate.
+    # Cover the profile install and the candidate file the way a real leaf covers
+    # its own changes, before the review declares the door.
+    profile_path = (
+        contract.code_worktree / profile_reference
+        if profile_reference != AGENTS_REMEMBER_PROFILE_REFERENCE
+        else installed
+    )
+    covered = [profile_path.relative_to(contract.code_worktree).as_posix()]
+    if candidate_file is not None:
+        covered.append(candidate_file[0])
+    cover_fixture_code_changes(contract, *covered)
     _review_and_declare(fixture)
     return fixture
 

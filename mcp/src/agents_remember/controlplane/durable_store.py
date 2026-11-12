@@ -12,12 +12,11 @@ Contract:
 
 Read policy is part of each store's authority contract:
 
-- Gate, expectation-row, and operator-inbox stores read strictly because malformed or
-  skipped records could change whether an approval or mutation is permitted. Their
-  rewrites must use strict input.
-- Attention-dismissal, orchestration-nudge, and agent-notifier-cooldown stores read
-  tolerantly for projection availability. Their rewrites may permanently drop malformed
-  rows, which is acceptable only while those rows carry no mutation authority.
+- The gate store reads strictly because malformed or skipped records could change
+  whether an approval or mutation is permitted. Its rewrites must use strict input.
+- The attention-dismissal store reads tolerantly for projection availability. Its
+  rewrites may permanently drop malformed rows, which is acceptable only while those
+  rows carry no mutation authority.
 
 Before using a tolerant log to suppress or permit a mutation, move its read/rewrite path
 to strict validation in the same change.
@@ -25,19 +24,19 @@ to strict validation in the same change.
 
 from __future__ import annotations
 
-import json
 import os
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from agents_remember.errors import LockCapabilityError
 from agents_remember.kernel import file_lock
 from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.kernel.own_writes import OWN_WRITES
 from agents_remember.kernel.primitives import checkout_coordination
 
 DURABLE_STORE_CONTRACT = "ar-durable-store/1.0"
@@ -138,7 +137,7 @@ class StoreOwnership:
         return role is None or self.compaction_owner is None or role == self.compaction_owner
 
 
-# Ownership register for all six stores. Writer and compaction roles are advisory daemon checks;
+# Ownership register. Writer and compaction roles are advisory daemon checks;
 # every store takes its log lock unconditionally.
 
 GATE_OWNERSHIP = StoreOwnership(
@@ -146,24 +145,11 @@ GATE_OWNERSHIP = StoreOwnership(
     writers=("mcp", "dashboard", "lifecycle-operation"),
     compaction_owner="mcp",
     rationale=(
-        "The MCP process mints, decides, applies and deletes gates (application/gate_tools.py, "
-        "worktrees/modules/closeout.py), so it owns reclamation. The dashboard appends too -- "
-        "serving/hosted_interactions.py raises and resolves agent-question gates for "
-        "adapter-owned sessions -- so the rewrite is serialized against it. Compaction used to "
+        "The landing chain evaluates and claims gates in the MCP process "
+        "(worktrees/modules/closeout.py), so that process owns reclamation, and the rewrite "
+        "is serialized against every append. Compaction used to "
         "run on the dashboard's 30s projection tick, which owned nothing here; that is the "
         "reclaim pass this ownership moved."
-    ),
-)
-
-EXPECTATION_ROW_OWNERSHIP = StoreOwnership(
-    store="expectation-rows",
-    writers=("mcp", "dashboard"),
-    compaction_owner="dashboard",
-    rationale=(
-        "The agent-notifier sweep (serving/agent_notifier.py) is the only reclamation pass this log has "
-        "and it needs the folded snapshot it produces, so the dashboard owns compaction. Every "
-        "dispatch surface appends, and half of them are MCP tools (gate open, inbox post), so "
-        "the rewrite is serialized against those appends."
     ),
 )
 
@@ -176,55 +162,12 @@ ATTENTION_DISMISSAL_OWNERSHIP = StoreOwnership(
         "on the projection pass (observer/projection_store.py); nothing in the MCP process "
         "touches this log. This store has no plain append -- both of its writes are whole-file "
         "rewrites -- so check_declared_writer is called from BOTH of them (dismiss and "
-        "prune_lifecycles) rather than from a single append, which is what keeps the "
+        "reconcile) rather than from a single append, which is what keeps the "
         "single-writer claim checkable inside the daemons. "
         "Locked all the same -- a dismissal is a whole-file read-modify-write, so the "
         "HTTP dismiss route and the projection sweep are themselves a lost-update pair, and a "
         "draft that left this log unlocked on the strength of single-writer measured 31.45% "
         "loss."
-    ),
-)
-
-OPERATOR_INBOX_OWNERSHIP = StoreOwnership(
-    store="operator-inbox",
-    writers=("mcp", "dashboard"),
-    compaction_owner=None,
-    rationale=(
-        "THE DECLARED EXCEPTION (leaf 260731-EFA-L5 R2). This is the one store that genuinely "
-        "cannot be given a single compaction owner: both processes must physically remove rows, "
-        "not merely append them. The MCP deletes the inbox rows tied to a cancelled gate "
-        "(application/gate_tools.py delete_by_gate) at the moment the gate is cancelled, while the "
-        "dashboard's agent-notifier sweep must resolve and compact under one held lock "
-        "(reconcile_and_compact) so that a consume which won the lock stays terminal. Neither "
-        "can be moved to the other process without moving the decision it implements. It is "
-        "therefore the one log where the lock is the whole mechanism rather than the backstop "
-        "behind an owner -- which is what it already was before this leaf, and why its "
-        "pre-existing flock was the right call kept rather than a habit inherited."
-    ),
-)
-
-ORCHESTRATION_NUDGE_OWNERSHIP = StoreOwnership(
-    store="orchestration-nudges",
-    writers=("mcp", "dashboard"),
-    compaction_owner="dashboard",
-    rationale=(
-        "Appended by the MCP nudge tool and by the agent-notifier sweep. No production reclaim pass "
-        "exists yet; replace_records is the store's declared rewrite entry point, and the "
-        "agent-notifier is the only sweep that could ever drive it, so the dashboard is named owner "
-        "now rather than left to be decided by whoever writes the reclaim pass."
-    ),
-)
-
-AGENT_NOTIFIER_SIGNAL_OWNERSHIP = StoreOwnership(
-    # Retained legacy store identity during the rename window (lock derivation + error text);
-    # removal rides the cooldown-log schema migration.
-    store="supervisor-signals",
-    writers=("dashboard",),
-    compaction_owner="dashboard",
-    rationale=(
-        "Single writer: the agent-notifier sweep is the only thing that appends a signal and the "
-        "only thing that compacts the cooldown log. Locked all the same, for the same reason as "
-        "attention-dismissals -- the claim is about today's callers, the lock is about the file."
     ),
 )
 
@@ -256,8 +199,7 @@ def schema_version_supported(value: str) -> bool:
 class DurableRecord(BaseModel):
     """The fields and validation every record written through this contract shares.
 
-    ``extra="forbid"`` is inherited rather than repeated per store (all six already declared
-    it), and ``schemaVersion`` is validated on the way in, which is what gives the two read
+    ``extra="forbid"`` is inherited rather than repeated per store, and ``schemaVersion`` is validated on the way in, which is what gives the two read
     policies their behaviour for free: an unknown major raises ``ValidationError``, so a strict
     reader fails loudly and a tolerant reader skips the row, with no version check written into
     either of them.
@@ -277,43 +219,6 @@ class DurableRecord(BaseModel):
                 f"the record says something this code cannot be trusted to read."
             )
         return value
-
-
-def migrate_jsonl_records[RecordT: BaseModel](
-    log_path: Path,
-    ownership: StoreOwnership,
-    model: type[RecordT],
-    transform: Callable[[dict[str, Any]], dict[str, Any]],
-) -> int:
-    """Apply one explicit schema migration under the log's existing lock.
-
-    The transform receives each raw JSON object before current-schema validation. The whole log
-    is validated before one atomic replacement, so a failed row leaves the original file intact.
-    Re-running after migration is a no-op; this is a bounded migration, not a parallel reader.
-    """
-
-    ownership.check_declared_writer()
-    with exclusive_access(log_path, ownership):
-        source = [line for line in read_log_text(log_path).splitlines() if line.strip()]
-        if not source:
-            return 0
-        changed = 0
-        records: list[RecordT] = []
-        for line in source:
-            raw = json.loads(line)
-            if not isinstance(raw, dict):
-                raise ValueError(f"{ownership.store}: durable record is not a JSON object")
-            migrated = transform(raw)
-            if migrated != raw:
-                changed += 1
-            records.append(model.model_validate(migrated))
-        if changed:
-            rewrite_lines(
-                log_path,
-                [record.model_dump_json(by_alias=True, exclude_none=True) for record in records],
-                ownership,
-            )
-        return changed
 
 
 @contextmanager
@@ -346,10 +251,8 @@ def exclusive_access(log_path: Path, ownership: StoreOwnership) -> Iterator[None
     ONE ORDER ACROSS STORES, TOO: no thread may hold one store's lock --
     mutex, RLock, or flock -- while acquiring another store's lock. Evidence a transaction
     needs from a second store is gathered BEFORE entering this one, or the side effect runs
-    AFTER leaving it; never nested. The two nestings this rule now forbids were each locally
-    documented (the liveness sweep's catalog batch across the synchronizer's inbox/gate locks;
-    the agent-notifier's inbox transaction across a catalog read) and their unexamined composition
-    deadlocked the serving daemon in production on 2026-08-05 -- an ABBA no single store's own
+    AFTER leaving it; never nested. Two such nestings, each locally documented, deadlocked
+    the serving daemon in production on 2026-08-05 -- an ABBA no single store's own
     ordering rule could see, because each store's order was internally correct.
     """
     checkout_coordination.require_durable_write_target(log_path)
@@ -388,44 +291,61 @@ def read_log_text(log_path: Path) -> str:
     return log_path.read_text(encoding="utf-8")
 
 
-def append_line(log_path: Path, line: str) -> None:
+def append_line(log_path: Path, line: str, *, note_own: bool = False) -> None:
     """Append one record. The caller holds :func:`exclusive_access`; this only writes.
 
     ``fsync`` before the handle closes: an append-only log whose last records are still in the
     page cache is not durable across a host loss, and every store here exists to survive exactly
     the restart that a durable timer would not.
+
+    With ``note_own``, the append's own descriptor identity is recorded while the caller's
+    lock is still held (F07): no lock-respecting writer can land between the commit and
+    the note, so the entry binds this transaction's bytes, never a later append's.
     """
-    _prepare_append_target(log_path)
-    with log_path.open("a", encoding="utf-8") as handle:
-        handle.write(line + "\n")
-        handle.flush()
-        os.fsync(handle.fileno())
+    append_lines(log_path, [line], note_own=note_own)
 
 
-def append_lines(log_path: Path, lines: list[str]) -> None:
+def append_lines(log_path: Path, lines: list[str], *, note_own: bool = False) -> None:
     """Append several records with one flush while the caller holds the store lock.
 
     A transition batch is one durability unit: either every validated snapshot reaches the
     append before the single fsync, or the caller raises before writing any of them. This avoids
     turning a bounded sweep into one full log fold and one disk blocker per row.
+
+    With ``note_own``, the batch's own descriptor identity is recorded while the caller's
+    lock is still held (F07), exactly like :func:`append_line`.
     """
     if not lines:
         return
-    _prepare_append_target(log_path)
-    with log_path.open("a", encoding="utf-8") as handle:
-        handle.write("".join(f"{line}\n" for line in lines))
-        handle.flush()
-        os.fsync(handle.fileno())
+    operation = OWN_WRITES.announcing(os.fspath(log_path)) if note_own else nullcontext()
+    with operation as announcement:
+        _prepare_append_target(log_path)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write("".join(f"{line}\n" for line in lines))
+            handle.flush()
+            # A writer ignoring the store lock can append between flush and fstat.
+            # That missed watch event is recovered by the projector's bounded healing
+            # pass; this identity capture serializes only lock-respecting writers.
+            written = os.fstat(handle.fileno())
+            os.fsync(handle.fileno())
+            if note_own:
+                OWN_WRITES.note_written_identity(
+                    os.fspath(log_path), written, announcement=announcement
+                )
 
 
-def rewrite_lines(log_path: Path, lines: list[str], ownership: StoreOwnership) -> None:
+def rewrite_lines(
+    log_path: Path, lines: list[str], ownership: StoreOwnership, *, note_own: bool = False
+) -> None:
     """Rewrite a locked log through the shared atomic-publish owner.
 
     The caller must already hold this log's exclusive store lock. An empty record set writes
     an empty file and never unlinks the destination.
+
+    With ``note_own``, the rewrite's own transaction identity is recorded (F07).
     """
     _require_rewrite_access(log_path, ownership.store)
-    atomic_write_text(log_path, "".join(f"{line}\n" for line in lines))
+    atomic_write_text(log_path, "".join(f"{line}\n" for line in lines), note_own=note_own)
 
 
 def _prepare_append_target(log_path: Path) -> None:
