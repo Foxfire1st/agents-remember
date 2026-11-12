@@ -82,8 +82,14 @@ class _NoManagedCitationCache:
     is a double, and it is the same value production yields.
     """
 
-    def guard(self, contract: WorktreeContract, *, requested_contract_path: Path):
-        del contract, requested_contract_path
+    def guard(
+        self,
+        contract: WorktreeContract,
+        *,
+        requested_contract_path: Path,
+        completed_contract_with_remains: bool = False,
+    ):
+        del contract, requested_contract_path, completed_contract_with_remains
         return nullcontext(TerminalNamespaceGuard(None, None, None))
 
 
@@ -109,7 +115,7 @@ def _landed_leaf_config(tmp_path: Path, contract: WorktreeContract):
 
     config = _public_config(tmp_path, contract)
     applied = worktree_tools.worktree_integrate_tool(
-        replace(config, retirement=replace(config.retirement, auto_land_on_integration=True)),
+        config,
         contract_path=contract.contract_path.as_posix(),
         strategy="ff-only",
         dry_run=False,

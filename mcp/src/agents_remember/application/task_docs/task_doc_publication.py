@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 
+from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.closeout.projection import TaskDocProjectionEffect
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -19,9 +21,12 @@ from agents_remember.tasks import (
     write_task_docs,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.tasks.master_sync import folder_master_json_path
+from agents_remember.tasks.store import restore_task_doc_sources, write_task_doc_batch
 from agents_remember.worktrees.queue.closeout_projection_publication import (
     preview_closeout_projection_effect,
 )
+from agents_remember.worktrees.task_document_copies import refresh_task_document_copies
 from agents_remember.worktrees.task_fact_publication import (
     publish_task_fact_mutation,
 )
@@ -29,6 +34,31 @@ from agents_remember.worktrees.task_fact_publication import (
 from .task_doc_graph_titles import require_single_graph_document
 from .task_doc_queue_scope import TaskDocScopeChange, resolve_projection_scope_union
 from .task_doc_route_review import TaskDocError
+
+_publication_active: ContextVar[bool] = ContextVar("task_doc_publication_active", default=False)
+
+
+def _task_repository_root(coordination_root: Path, repo_id: str) -> Path:
+    repository = TaskDocumentRef(repository=repo_id, path="task.json").repository
+    return coordination_root / "tasks" / repository
+
+
+def run_task_doc_call(
+    coordination_root: Path,
+    repo_id: str,
+    invoke: Callable[[], dict],
+) -> dict:
+    """Serialize source preparation with publication; nested writes cannot commit."""
+    if _publication_active.get():
+        return {
+            "ok": False,
+            "code": "task-document-publication-in-progress",
+            "error": "a publication of task documents is already in progress in this call",
+        }
+    with exclusive_file_lock(
+        _task_repository_root(coordination_root, repo_id), "task document publication"
+    ):
+        return invoke()
 
 
 class TaskDocPublicationConflict(TaskDocError):
@@ -56,7 +86,7 @@ class TaskDocPublication:
     task_root: Path
     original: TaskDocument | None
     candidate: TaskDocument
-    documents: list[TaskDocument]
+    documents: list[tuple[Path, TaskDocument]]
     source_snapshots: tuple[TaskDocSourceSnapshot, ...]
     publisher: Callable[[], list[tuple[Path, Path]]] | None = None
 
@@ -103,8 +133,7 @@ def publish_prepared_task_documents(
     overrides = _prepared_task_doc_overrides(
         coordination_root,
         target_repo_id,
-        task_root,
-        documents,
+        [(task_root, doc) for doc in documents],
     )
     transaction = TaskDocPublicationTransaction(
         coordination_root=coordination_root,
@@ -130,17 +159,50 @@ def publish_prepared_task_documents(
 def publish_task_doc_transaction_and_refresh(
     transaction: TaskDocPublicationTransaction,
 ) -> TaskDocPublicationResult:
+    """Exclude other writers across validation, publication, copy refresh and rollback."""
+    if _publication_active.get():
+        raise TaskDocError("a publication of task documents is already in progress in this call")
+    with exclusive_file_lock(
+        _task_repository_root(transaction.coordination_root, transaction.target_repo_id),
+        "task document publication",
+    ):
+        token = _publication_active.set(True)
+        try:
+            return _publish_task_doc_transaction_and_refresh(transaction)
+        finally:
+            _publication_active.reset(token)
+
+
+def _publish_task_doc_transaction_and_refresh(
+    transaction: TaskDocPublicationTransaction,
+) -> TaskDocPublicationResult:
     """Commit task truth and invalidate every scope under CAS, then rebuild independently."""
+
+    def publication() -> list[tuple[Path, Path]]:
+        written = transaction.publisher()
+        try:
+            refresh_task_document_copies(
+                transaction.coordination_root, transaction.target_repo_id, written
+            )
+        except BaseException as publish_error:
+            try:
+                restore_task_doc_sources(transaction.source_snapshots)
+            except BaseException as rollback_error:
+                raise RuntimeError(
+                    f"task document publication and source rollback both failed: {rollback_error}"
+                ) from publish_error
+            raise
+        return written
 
     published = publish_task_fact_mutation(
         transaction.coordination_root,
-        validate=lambda: require_task_doc_sources_current(transaction.source_snapshots),
+        validate=lambda: validate_task_doc_transaction(transaction),
         projection_scopes=lambda: resolve_projection_scope_union(
             transaction.coordination_root,
             transaction.target_repo_id,
             transaction.scope_changes,
         ),
-        publication=transaction.publisher,
+        publication=publication,
     )
     return TaskDocPublicationResult(published.result, published.projection_effects)
 
@@ -178,7 +240,7 @@ def task_doc_publication_transaction(
 ) -> TaskDocPublicationTransaction:
     """Build the sole exact transaction for one ordinary/remove task-doc candidate."""
 
-    graph_document = require_single_graph_document(context.documents)
+    graph_document = require_single_graph_document([doc for _root, doc in context.documents])
     graph = graph_document.executionGraph if graph_document is not None else None
     overrides = _task_doc_publication_overrides(context)
     return TaskDocPublicationTransaction(
@@ -193,8 +255,7 @@ def task_doc_publication_transaction(
         ),
         publisher=context.publisher
         or (
-            lambda: write_task_docs(
-                context.task_root,
+            lambda: write_task_doc_batch(
                 context.documents,
                 graph_titles=(
                     read_graph_titles(context.task_root.parents[1], graph)
@@ -250,6 +311,23 @@ def validate_task_doc_transaction(transaction: TaskDocPublicationTransaction) ->
 
     def validate() -> None:
         require_task_doc_sources_current(transaction.source_snapshots)
+        topology = TaskDocumentTopology(transaction.coordination_root)
+        overrides = {change.ref: change.candidate for change in transaction.scope_changes}
+        for change in transaction.scope_changes:
+            if change.candidate.kind != "subTask" or change.candidate.master:
+                continue
+            parent = folder_master_json_path(
+                topology.path_for_ref(change.ref).parent, change.candidate
+            )
+            if parent is None:
+                raise TaskDocError("Sub-task publication requires a master.")
+            master = topology.resolve(
+                topology.canonical_ref(change.ref.repository, parent), overrides
+            ).document
+            if master.kind != "master" or not any(
+                row.number == change.candidate.id for row in master.subTasks
+            ):
+                raise TaskDocError("Sub-task publication requires a master.")
         resolve_projection_scope_union(
             transaction.coordination_root,
             transaction.target_repo_id,
@@ -285,7 +363,6 @@ def _task_doc_publication_overrides(
     return _prepared_task_doc_overrides(
         context.config.coordination_root,
         context.target_repo_id,
-        context.task_root,
         context.documents,
     )
 
@@ -293,12 +370,11 @@ def _task_doc_publication_overrides(
 def _prepared_task_doc_overrides(
     coordination_root: Path,
     target_repo_id: str,
-    task_root: Path,
-    documents: list[TaskDocument],
+    documents: list[tuple[Path, TaskDocument]],
 ) -> dict[TaskDocumentRef, TaskDocument]:
     root = (coordination_root / "tasks" / target_repo_id).resolve(strict=False)
     overrides: dict[TaskDocumentRef, TaskDocument] = {}
-    for document in documents:
+    for task_root, document in documents:
         path = json_path_for(task_root, document).resolve(strict=False)
         if not path.is_relative_to(root):
             raise TaskDocError(f"task document publication escapes tasks root: {path}")

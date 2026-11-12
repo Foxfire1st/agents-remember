@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
+
+from agents_remember_test_support.testing.catalog_canonical import parse_catalog
+from agents_remember_test_support.testing.evidence_governance import LIFECYCLE_CATALOG_PATH
+from agents_remember_test_support.testing.evidence_lifecycle import EvidenceLifecycleError
 
 
 def changed_catalog_consumers(before: str, after: str) -> frozenset[Path] | None:
@@ -11,10 +14,12 @@ def changed_catalog_consumers(before: str, after: str) -> frozenset[Path] | None
 
     Only explicit consumer-list changes can be narrowed. Schema, scope, contract,
     artifact additions/removals and lifecycle policy changes retain global invalidation.
-    Invalid TOML raises instead of being treated as an empty dependency declaration.
+    Invalid TOML raises ``EvidenceLifecycleError`` instead of being treated as an empty dependency
+    declaration; the refusal names the catalog and says what to do, as every reader's does.
     """
-    old = tomllib.loads(before)
-    new = tomllib.loads(after)
+    base = f"{LIFECYCLE_CATALOG_PATH} at the base revision"
+    old = parse_catalog("evidence catalog", base, before, EvidenceLifecycleError)
+    new = parse_catalog("evidence catalog", LIFECYCLE_CATALOG_PATH, after, EvidenceLifecycleError)
     old_artifacts = old.pop("artifact", [])
     new_artifacts = new.pop("artifact", [])
     if (

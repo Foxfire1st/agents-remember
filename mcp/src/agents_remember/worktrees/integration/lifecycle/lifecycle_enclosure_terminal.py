@@ -21,6 +21,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
     location_path_presence,
     read_location_bytes,
 )
+from agents_remember.worktrees.reopen_reset import _reopened_contract
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
     ContractError,
@@ -29,7 +30,7 @@ from agents_remember.worktrees.worktree_contract import (
     parse_contract_text,
 )
 
-TerminalCleanupContractState = Literal["archive-ready", "cleanup-completed"]
+TerminalCleanupContractState = Literal["archive-ready", "cleanup-completed", "reopen-reset"]
 
 
 @dataclass(frozen=True)
@@ -233,6 +234,15 @@ def terminal_cleanup_contract_authority(
         state: TerminalCleanupContractState = "archive-ready"
     elif current_contract == completed_contract:
         state = "cleanup-completed"
+    elif completed_contract.cleanup == "completed" and current_contract == _reopened_contract(
+        completed_contract
+    ):
+        # A reopen resets the collected generation's own contract and restarts the task under
+        # the same id: the archived bytes stay the authority, and the reset is the sanctioned
+        # successor this generation's archive authorizes (``restartable_predecessor_contract``).
+        # Without this arm a reopened leaf's status read as hand tampering -- the exact
+        # transition ``task_reopen`` publishes -- so neither role start could seat it.
+        state = "reopen-reset"
     else:
         raise LifecycleOperationLocationError(
             "terminal-archive-contract-mismatch",
@@ -241,7 +251,7 @@ def terminal_cleanup_contract_authority(
                 "contractPath": archive.contractPath,
                 "acceptedContractSha256": archive.contractSha256,
                 "acceptedCleanupOperation": archive.cleanupOperation,
-                "allowedStates": ["archive-ready", "cleanup-completed"],
+                "allowedStates": ["archive-ready", "cleanup-completed", "reopen-reset"],
             },
             observed={
                 "contractPath": current_contract.contract_path.resolve(strict=False).as_posix(),

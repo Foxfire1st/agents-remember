@@ -20,7 +20,7 @@ carries the complete applicable remediation.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +39,16 @@ class Row:
     index: int
     line: str
     cells: list[str]
+
+    has_divider: bool | None = field(default=None, compare=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.has_divider is None:
+            object.__setattr__(
+                self,
+                "has_divider",
+                bool(inline_scan.cell_boundaries(self.line) if "|" in self.line else []),
+            )
 
 
 def check_onboarding_root(onboarding_root: Path) -> dict[str, Any]:
@@ -61,9 +71,15 @@ def check_file(path: Path, onboarding_root: Path) -> list[QualityFinding]:
 
 
 def rows_of(unfenced: list[tuple[int, str]]) -> list[Row]:
-    return [
-        Row(index=index, line=line, cells=inline_scan.split_row(line)) for index, line in unfenced
-    ]
+    rows: list[Row] = []
+    for index, line in unfenced:
+        boundaries = inline_scan.cell_boundaries(line) if "|" in line else []
+        cells = [
+            line[start:end].strip()
+            for start, end in inline_scan.cell_spans_from_boundaries(line, boundaries)
+        ]
+        rows.append(Row(index=index, line=line, cells=cells, has_divider=bool(boundaries)))
+    return rows
 
 
 def tables(unfenced: list[tuple[int, str]]) -> list[tuple[Row, list[Row]]]:
@@ -89,7 +105,7 @@ def tables(unfenced: list[tuple[int, str]]) -> list[tuple[Row, list[Row]]]:
 def starts_table(header: Row, delimiter: Row) -> bool:
     if delimiter.index != header.index + 1:
         return False
-    if not inline_scan.cell_boundaries(header.line):
+    if not header.has_divider:
         return False
     if len(delimiter.cells) != len(header.cells) or not delimiter.cells:
         return False
@@ -104,7 +120,7 @@ def read_body(rows: list[Row], start: int) -> tuple[list[Row], int]:
         row = rows[position]
         if row.index != previous_index + 1:
             break
-        if not row.line.strip() or not inline_scan.cell_boundaries(row.line):
+        if not row.line.strip() or not row.has_divider:
             break
         body.append(row)
         previous_index = row.index

@@ -1,0 +1,183 @@
+"""Run every registered rule over one candidate tree (MIK-R22).
+
+* :func:`validate_tree` is the validator itself: every rule of the registry, over K_C, against its
+  comparison bases and its paired code tree. The writer (MIK-R12) calls it over the tree it produces,
+  and the curator's command calls it over a working tree.
+* :func:`validation_applies` is rule 8's applicability: a commit route validates whenever K_B or K_C
+  -- every parent, at a merge -- has the layout marker. Unconverted trees are out of scope.
+* :func:`require_valid_commit` is what a commit route calls before it commits memory: nothing when
+  the commit is out of scope, the report when it passes, and :class:`KnowledgeValidationError` --
+  listing every refusing violation -- when it does not. It has no parameter that skips a rule.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+
+from agents_remember.memory_quality.knowledge_validator import (
+    rules_admission as _rules_admission,  # noqa: F401  # registers MIK-R27's admission rules
+)
+from agents_remember.memory_quality.knowledge_validator import (
+    rules_census as _rules_census,  # noqa: F401  # registers MIK-R20's census rules (rule 9)
+)
+from agents_remember.memory_quality.knowledge_validator import (
+    rules_decisions as _rules_decisions,  # noqa: F401  # registers MIK-R13's decision content rules
+)
+from agents_remember.memory_quality.knowledge_validator import (
+    rules_history as _rules_history,  # noqa: F401  # registers MIK-R09's open history row rule
+)
+from agents_remember.memory_quality.knowledge_validator import (
+    rules_link_targets as _rules_link_targets,  # noqa: F401  # registers MIK-R54's link path rule
+)
+from agents_remember.memory_quality.knowledge_validator import (
+    rules_overviews as _rules_overviews,  # noqa: F401  # registers MIK-R80's overview order rules
+)
+from agents_remember.memory_quality.knowledge_validator import (
+    rules_reconsideration as _rules_reconsideration,  # noqa: F401  # registers MIK-R14's link guard
+)
+from agents_remember.memory_quality.knowledge_validator import (
+    rules_reference_anchors as _rules_reference_anchors,  # noqa: F401  # registers MIK-R198 rule 5
+)
+from agents_remember.memory_quality.knowledge_validator import (
+    rules_references as _rules_references,  # noqa: F401  # registers MIK-R22 rules 3, 5, 6
+)
+from agents_remember.memory_quality.knowledge_validator import (
+    rules_routes as _rules_routes,  # noqa: F401  # registers MIK-R04's family route rules
+)
+from agents_remember.memory_quality.knowledge_validator import (
+    rules_structure as _rules_structure,  # noqa: F401  # registers MIK-R22 rules 1, 2, 4, 6, 7
+)
+from agents_remember.memory_quality.knowledge_validator.parsed import parse_tree
+from agents_remember.memory_quality.knowledge_validator.registry import (
+    Finding,
+    ValidationContext,
+    ValidationRule,
+    debt_reports_at,
+    merge_reports_at,
+    registered_rules,
+)
+from agents_remember.memory_quality.knowledge_validator.report import (
+    KnowledgeValidationError,
+    ValidationReport,
+    Violation,
+)
+from agents_remember.memory_quality.knowledge_validator.trees import CodeTree, KnowledgeTree
+
+
+@dataclass(frozen=True)
+class LeafCommit:
+    """A commit that publishes a leaf, with the history files of the commit(s) it sits on.
+
+    ``frozen`` trees are not comparison bases (a leaf's base is its parent line's tip); only their
+    closed history files count: each is frozen like one closed in a base (L37 ruling B).
+    """
+
+    frozen: tuple[KnowledgeTree, ...] = ()
+
+
+def _reports_at_route(rule: ValidationRule, context: ValidationContext, finding: Finding) -> bool:
+    """Whether ``rule``'s ``finding`` is reported instead of refused at this route (MIK-R53 rule 10).
+
+    A ``merge_reports`` rule reports only at a sync merge (and at a standalone conversion, which
+    authors the tree). A ``migration_debt`` rule reports a finding a comparison base already
+    holds while the migration is not complete; a new finding refuses at once, and every finding
+    refuses once the migration is complete. Every other rule refuses.
+    """
+
+    if rule.merge_reports:
+        return merge_reports_at(context) and (not rule.merge_requires_carried or finding.carried)
+    if rule.migration_debt:
+        return debt_reports_at(context, carried=finding.carried)
+    return False
+
+
+def validate_tree(  # noqa: PLR0913 -- conversion_debt names the converted check's no-base route
+    candidate: KnowledgeTree,
+    *,
+    bases: Sequence[KnowledgeTree] = (),
+    code: CodeTree | None = None,
+    conversion: bool = False,
+    conversion_debt: bool = False,
+    leaf_publication: bool | LeafCommit = False,
+) -> ValidationReport:
+    """Validate ``candidate`` with every registered rule.
+
+    ``bases`` are the comparison bases of rule 6: K_B at a commit route, every parent at a merge,
+    none for a writer or a curator run with no base (then every anchor is checked for path
+    existence). ``code`` is the paired code tree; it is required unless ``conversion`` is set, which
+    is a standalone conversion's run: it carries anchors and authors none, so none is checked for
+    path existence. ``leaf_publication`` marks a commit that publishes a leaf: the history-row rule
+    then reads every history file not closed in a base, whatever its own flag (MIK-R09). A
+    :class:`LeafCommit` says the same and also hands in the history files of the commit the
+    candidate sits on, when that commit is not a base: a file closed there is frozen like one
+    closed in a base (a leaf that continues after its closeout).
+    """
+
+    if code is None and not conversion:
+        raise ValueError("anchor path existence needs the paired code tree")
+    if conversion and (bases or code is not None or leaf_publication):
+        combined = sorted(
+            part
+            for part, present in (
+                ("bases", bool(bases)),
+                ("code", code is not None),
+                ("publication", bool(leaf_publication)),
+            )
+            if present
+        )
+        raise ValueError(
+            "a standalone conversion carries no comparison base, paired code tree or leaf "
+            f"publication, but this run combines conversion with {', '.join(combined)} "
+            "(MIK-R53 rule 10)"
+        )
+    context = ValidationContext(
+        candidate=candidate,
+        parsed=parse_tree(candidate),
+        bases=tuple(bases),
+        code=code,
+        conversion=conversion,
+        conversion_debt=conversion_debt,
+        leaf_publication=bool(leaf_publication),
+        frozen=leaf_publication.frozen if isinstance(leaf_publication, LeafCommit) else (),
+    )
+    violations = [
+        Violation(
+            path=finding.path,
+            field=finding.field,
+            rule=rule.id,
+            message=finding.message,
+            report_only=_reports_at_route(rule, context, finding),
+        )
+        for rule in registered_rules()
+        for finding in rule.check(context)
+    ]
+    return ValidationReport(candidate=candidate.label, violations=tuple(sorted(violations)))
+
+
+def validation_applies(candidate: KnowledgeTree, bases: Sequence[KnowledgeTree]) -> bool:
+    """Rule 8: a commit is validated when its candidate or any base has the layout marker."""
+
+    return candidate.converted or any(base.converted for base in bases)
+
+
+def require_valid_commit(
+    candidate: KnowledgeTree,
+    *,
+    bases: Sequence[KnowledgeTree],
+    code: CodeTree,
+    leaf_publication: bool | LeafCommit = False,
+) -> ValidationReport | None:
+    """Validate a memory commit's candidate at a commit route, refusing on any violation.
+
+    Returns ``None`` when neither the candidate nor any base is converted (rule 8), and the report
+    when the candidate passes (report-only findings included). Raises
+    :class:`KnowledgeValidationError` naming every refusing violation otherwise.
+    """
+
+    if not validation_applies(candidate, bases):
+        return None
+    report = validate_tree(candidate, bases=bases, code=code, leaf_publication=leaf_publication)
+    if not report.ok:
+        raise KnowledgeValidationError(report)
+    return report

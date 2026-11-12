@@ -20,13 +20,12 @@ was traced, and the union of 20 values is: the ``NextTool`` and ``RecoveryTool``
 refusals; the ``task_unstarted_evidence`` ``RecoveryRoute`` tools; and the remaining direct
 literals in ``worktrees/modules/{integrate,start}.py``, ``worktrees/task_leaf_binding.py``,
 ``application/worktree_tools.py``, ``application/next_step.py`` and ``models/base.py``.
-Every one is in ``PUBLIC_TOOLS`` except ``session_retire``, which cannot reach the field
-this file protects (see the boundary case at the end).
+Every one is in ``PUBLIC_TOOLS``.
 
 THE RULE IS PER SURFACE, DELIBERATELY. The worktree surface's rule is "a next move names a
 registered *public* tool", because those values are advertised guidance an agent is meant to
 act on and the roster is the already-enforced authority for what the agent can call. The
-``task_doc`` surface may name a non-public tool, which is why the invariant lives on
+``task_doc`` surface carries no such rule, which is why the invariant lives on
 ``WorktreeCommandResponse`` and not on a shared envelope. That difference is intentional;
 it is not an inconsistency to flatten.
 """
@@ -54,7 +53,6 @@ from agents_remember.models.lifecycles.enclosure import (
     TerminalWorktreeAbandonArguments,
     TerminalWorktreeCleanupArguments,
 )
-from agents_remember.models.task_doc import TaskDocResponse
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.models.worktree import WorktreeStatusResponse
 from agents_remember.worktrees.integration.terminal_enclosure_archive import (
@@ -250,37 +248,3 @@ def test_next_tool_must_name_a_registered_public_tool() -> None:
     with pytest.raises(ValidationError) as refused:
         WorktreeStatusResponse.model_validate({"ok": True, "nextTool": "not_a_tool"})
     assert "not in PUBLIC_TOOLS" in str(refused.value)
-
-
-def test_the_worktree_surface_refuses_a_registered_but_non_public_tool() -> None:
-    """``session_retire`` is registered but deliberately non-public, and it is not this surface's.
-
-    It is emitted as a ``nextTool`` only by ``task_unstarted_evidence._record_recovery_route``,
-    and it reaches the wire only through the ``task_doc`` payload (``task_doc_discard``) and
-    its nested ``discardEvidence``. ``TaskDocResponse`` is not a ``WorktreeCommandResponse``,
-    so the worktree invariant never sees it. Do not widen ``PUBLIC_TOOLS`` to admit a
-    non-public tool, and do not special-case it here.
-    """
-
-    assert "session_retire" in TOOL_RESPONSE_MODELS
-    assert "session_retire" not in PUBLIC_TOOLS
-
-    with pytest.raises(ValidationError) as refused:
-        WorktreeStatusResponse.model_validate({"ok": True, "nextTool": "session_retire"})
-    assert "not in PUBLIC_TOOLS" in str(refused.value)
-
-    # The other surface genuinely may name it, which is what makes the rule per-surface.
-    doc = TaskDocResponse.model_validate(
-        {
-            "ok": True,
-            "operation": "remove_subtask",
-            "taskId": "260698-L1",
-            "slug": "01_demo-leaf",
-            "kind": "subTask",
-            "status": "inProgress",
-            "docPath": "/tmp/01_demo-leaf.json",
-            "renderedPath": "/tmp/01_demo-leaf.md",
-            "nextTool": "session_retire",
-        }
-    )
-    assert doc.nextTool == "session_retire"

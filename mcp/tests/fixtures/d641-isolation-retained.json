@@ -1,0 +1,127 @@
+{
+  "schema": "retained-d641-isolation-witness/v1",
+  "rows": [
+    {
+      "case": "CE08",
+      "attempt": "5370da32-4693-44cf-8492-aa4837891369",
+      "bindingSource": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE08/5370da32-4693-44cf-8492-aa4837891369/native-binding.json",
+        "sha256": "57344428f1ca3e1202034f1148be8b981192c5306515e3f9bb6450dbccc5d5a2"
+      },
+      "binding": {
+        "nativeHomes": {
+          "codex": "/home/test/.local/state/agents-remember/codex-home",
+          "hermes": "/home/test/.hermes"
+        },
+        "projectRoot": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-hermes/hermes-CE08/trials/5370da32-4693-44cf-8492-aa4837891369/project",
+        "toolBuild": "sha256:c670641bdcdd253c60ea6b7fa543e54f3c7175e02b1a0fd53df941ee9cd730e3"
+      },
+      "captureSource": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE08/5370da32-4693-44cf-8492-aa4837891369/attempt.json",
+        "sha256": "0e3eb98c563091075d8a5289089465e21b240ac3cc46ac23733eb9d7561389d3"
+      },
+      "call": {
+        "kind": "tool_call",
+        "session_id": "537d7b8e-0388-4d4f-84c1-8568b5691065",
+        "sequence": 377,
+        "payload": {
+          "call_id": "call_00_19uk8lal8bjp4vthdgdzu3d3",
+          "name": "skill_manage",
+          "arguments": "{\"operations\": [{\"action\": \"patch\", \"name\": \"citation-sidecar-repair\", \"new_string\": \"- A live table re-author removes the table from the Markdown: the fixer restores the\\n  reference's plain `- <note> [n]` bullet, so inspecting the live diff shows your table\\n  gone and one stray blank line where it stood. That is the successful shape, not a\\n  failed write — confirm it in the sidecar's target list, then delete the leftover blank\\n  line (curator-owned card prose) and re-dry-run: zero authored, reauthored and removed\\n  references with `stale: []` is the settled pair. Never re-add the table to \\\"restore\\\"\\n  the edit; a second row re-authoring the same number refuses the card.\\n- To drop a binding the source no longer supports, delete its numbered bullet\", \"old_string\": \"- To drop a binding the source no longer supports, delete its numbered bullet\"}]}",
+          "server": null
+        },
+        "source": "/home/test/.hermes/state.db",
+        "source_sha256": "96eed99338862a0b55230e53b9aec35aa53e0f9666c9692f8ab01cde88b28307",
+        "native_timestamp": 1793325451.4555953
+      },
+      "results": [
+        {
+          "kind": "tool_result",
+          "session_id": "537d7b8e-0388-4d4f-84c1-8568b5691065",
+          "sequence": 379,
+          "payload": {
+            "call_id": "call_00_19uk8lal8bjp4vthdgdzu3d3",
+            "name": "skill_manage",
+            "output": "{\"success\": true, \"operations_applied\": 1, \"results\": [{\"name\": \"citation-sidecar-repair\", \"action\": \"patch\", \"file_path\": null, \"success\": true}]}"
+          },
+          "source": "/home/test/.hermes/state.db",
+          "source_sha256": "96eed99338862a0b55230e53b9aec35aa53e0f9666c9692f8ab01cde88b28307",
+          "native_timestamp": 1793325451.5410247
+        }
+      ]
+    },
+    {
+      "case": "CE02",
+      "attempt": "80281145-912e-4e4a-b3cb-b2892ad7eb48",
+      "bindingSource": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE02/80281145-912e-4e4a-b3cb-b2892ad7eb48/native-binding.json",
+        "sha256": "d06429d602124e4ec3ec30e7479b955998163edf5dacfcecf8f909f2a5a571e2"
+      },
+      "binding": {
+        "nativeHomes": {
+          "codex": "/home/test/.local/state/agents-remember/codex-home",
+          "hermes": "/home/test/.hermes"
+        },
+        "projectRoot": "/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-hermes/hermes-CE02/trials/80281145-912e-4e4a-b3cb-b2892ad7eb48/project",
+        "toolBuild": "sha256:c670641bdcdd253c60ea6b7fa543e54f3c7175e02b1a0fd53df941ee9cd730e3"
+      },
+      "captureSource": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE02/80281145-912e-4e4a-b3cb-b2892ad7eb48/attempt.json",
+        "sha256": "60098e1d2f328ec9926c631e187b5a386b5783f29dd1026a0e668ac43ae54899"
+      },
+      "call": {
+        "kind": "tool_call",
+        "session_id": "758b2898-353f-495b-a1b2-62af9a679284",
+        "sequence": 296,
+        "payload": {
+          "call_id": "call_00_ueb59st707pz67x6tcdgyydy",
+          "name": "write_file",
+          "arguments": "{\"content\": \"\\\"\\\"\\\"Apply this pass's sidecar repairs to the memory tree, in canonical JSON formatting.\\n\\nWrites only the two sidecars whose references cite paths the paired code tree does not hold:\\n\\n* grepai/setup.py.json  references.2 -- an `unresolved` target naming a card that does not\\n  exist becomes the code that owns the claim (the lifecycle facade and `grepai_docker_mode`);\\n* grepai/isolated.py.json references.3 -- the two identity-helper anchors name\\n  `kernel/primitives/identity.py`, absent from the paired tree, and become the call sites\\n  inside isolated.py that use those helpers;\\n* grepai/isolated.py.json references.4 -- the three dashboard topology anchors name\\n  `dashboard/src/topology/model.ts`, absent from the paired tree, and are dropped; the two\\n  in-file anchors that remain carry the claim.\\n\\nAnchors are computed, never typed: each is resolved at the paired code tree C with the shipped\\nwriter's own CodeSnapshot, so `blob` is the tree entry's blob and `content` the sha256 of the\\nexact bytes the locator names.\\n\\\"\\\"\\\"\\n\\nfrom __future__ import annotations\\n\\nimport json\\nfrom pathlib import Path\\nfrom typing import Any\\n\\nfrom agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot\\nfrom agents_remember.models.knowledge_files.canonical import canonical_text\\n\\nTRIAL = Path(\\n    \\\"/var/tmp/mik-run3/architect/eval-sandbox/20261030-old-text-hermes/\\\"\\n    \\\"hermes-CE02/trials/80281145-912e-4e4a-b3cb-b2892ad7eb48\\\"\\n)\\nCODE = TRIAL / \\\"project/projects/code\\\"\\nMEMORY = TRIAL / \\\"project/coordination/memory-repos/ar-code\\\"\\nONBOARDING = MEMORY / \\\"onboarding/mcp/src/agents_remember/providers\\\"\\n\\nGREPAI_SETUP_JSON = ONBOARDING / \\\"grepai/setup.py.json\\\"\\nGREPAI_ISOLATED_JSON = ONBOARDING / \\\"grepai/isolated.py.json\\\"\\n\\nLIFECYCLE_CORE = \\\"mcp/src/agents_remember/providers/grepai/lifecycle/core.py\\\"\\nLIFECYCLE_FACADE = \\\"mcp/src/agents_remember/providers/grepai/lifecycle/__init__.py\\\"\\nOWN_SOURCE = \\\"mcp/src/agents_remember/providers/grepai/isolated.py\\\"\\n\\n\\ndef target(snapshot: CodeSnapshot, path: str, locator: dict[str, Any], owner: str) -> dict:\\n    \\\"\\\"\\\"One `code` target, its anchor resolved at C (path recorded only when it is another file).\\\"\\\"\\\"\\n    anchor = snapshot.resolve(path, locator)\\n    document: dict[str, Any] = {\\n        \\\"blob\\\": anchor.blob,\\n        \\\"content\\\": anchor.content,\\n        \\\"locator\\\": locator,\\n    }\\n    if path != owner:\\n        document[\\\"path\\\"] = path\\n    return {\\\"anchor\\\": document, \\\"kind\\\": \\\"code\\\"}\\n\\n\\ndef main() -> None:\\n    snapshot = CodeSnapshot.capture(CODE)\\n    print(f\\\"code tree C = {snapshot.tree}\\\")\\n\\n    setup = json.loads(GREPAI_SETUP_JSON.read_text(encoding=\\\"utf-8\\\"))\\n    owner = setup[\\\"path\\\"]\\n    setup[\\\"references\\\"][\\\"2\\\"] = {\\n        \\\"note\\\": (\\n            \\\"Docker-owned GrepAI lifecycle behavior lives in the GrepAI lifecycle modules.\\\\n\\\\n\\\"\\n            \\\"Anchor: `grepai_docker_mode`, `agents_remember.providers.grepai.lifecycle`\\\"\\n        ),\\n        \\\"targets\\\": [\\n            target(snapshot, LIFECYCLE_CORE, {\\\"kind\\\": \\\"symbol\\\", \\\"name\\\": \\\"grepai_docker_mode\\\"}, owner),\\n            target(snapshot, LIFECYCLE_FACADE, {\\\"kind\\\": \\\"file\\\"}, owner),\\n        ],\\n    }\\n\\n    isolated = json.loads(GREPAI_ISOLATED_JSON.read_text(encoding=\\\"utf-8\\\"))\\n    isolated[\\\"references\\\"][\\\"3\\\"] = {\\n        \\\"note\\\": (\\n            \\\"The worktree instance id and the ownership labels this file writes are derived by the \\\"\\n            \\\"shared identity helpers at these call sites; the file derives no identity of its own.\\\\n\\\\n\\\"\\n            \\\"Anchor: `isolated_grepai_settings`, `_isolated_grepai_base_fields`\\\"\\n        ),\\n        \\\"targets\\\": [\\n            target(\\n                snapshot,\\n                OWN_SOURCE,\\n                {\\\"kind\\\": \\\"symbol\\\", \\\"name\\\": \\\"isolated_grepai_settings\\\"},\\n                owner,\\n            ),\\n            target(\\n                snapshot,\\n                OWN_SOURCE,\\n                {\\\"kind\\\": \\\"symbol\\\", \\\"name\\\": \\\"_isolated_grepai_base_fields\\\"},\\n                owner,\\n            ),\\n        ],\\n    }\\n    isolated[\\\"references\\\"][\\\"4\\\"] = {\\n        \\\"note\\\": (\\n            \\\"Aggregate GrepAI settings and project roots remain internal data: the payload carries \\\"\\n            \\\"the one `grepai-memory` provider block under the discovery-only/source-proof policy, \\\"\\n            \\\"and the roots list is rewritten in place. The settings add no topology node of their own.\\\\n\\\\n\\\"\\n            \\\"Anchor: `_isolated_settings_payload`, `_isolated_grepai_roots`\\\"\\n        ),\\n        \\\"targets\\\": [\\n            target(\\n                snapshot,\\n                OWN_SOURCE,\\n                {\\\"kind\\\": \\\"symbol\\\", \\\"name\\\": \\\"_isolated_settings_payload\\\"},\\n                owner,\\n            ),\\n            target(\\n                snapshot,\\n                OWN_SOURCE,\\n                {\\\"kind\\\": \\\"symbol\\\", \\\"name\\\": \\\"_isolated_grepai_roots\\\"},\\n                owner,\\n            ),\\n        ],\\n    }\\n\\n    for path, document in ((GREPAI_SETUP_JSON, setup), (GREPAI_ISOLATED_JSON, isolated)):\\n        text = canonical_text(document)\\n        path.write_text(text, encoding=\\\"utf-8\\\")\\n        print(f\\\"wrote {path.relative_to(MEMORY)} ({len(text)} bytes)\\\")\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    main()\\n\", \"path\": \"reports/scratch/apply_sidecar_repairs.py\"}",
+          "server": null
+        },
+        "source": "/home/test/.hermes/state.db",
+        "source_sha256": "e0ad640d6f51f17c1c3dbd55d68429c97dd1960b0fa08635904d82f1df2fe062",
+        "native_timestamp": 1793324845.3157969
+      },
+      "results": [
+        {
+          "kind": "tool_result",
+          "session_id": "758b2898-353f-495b-a1b2-62af9a679284",
+          "sequence": 298,
+          "payload": {
+            "call_id": "call_00_ueb59st707pz67x6tcdgyydy",
+            "name": "write_file",
+            "output": "{\"bytes_written\": 5079, \"dirs_created\": true, \"verified\": true, \"lint\": {\"status\": \"ok\", \"output\": \"\"}, \"resolved_path\": \"/var/tmp/mik-run3/architect/eval-code/d9e92fe7/mcp/src/agents_remember/reports/scratch/apply_sidecar_repairs.py\", \"files_modified\": [\"/var/tmp/mik-run3/architect/eval-code/d9e92fe7/mcp/src/agents_remember/reports/scratch/apply_sidecar_repairs.py\"]}"
+          },
+          "source": "/home/test/.hermes/state.db",
+          "source_sha256": "e0ad640d6f51f17c1c3dbd55d68429c97dd1960b0fa08635904d82f1df2fe062",
+          "native_timestamp": 1793324845.4086094
+        }
+      ]
+    }
+  ],
+  "modelResolution": {
+    "isolated": {
+      "source": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-c1-hermes/hermes/CE08/0fa3c9ff-406a-446a-8155-016b3e0f4beb/attempt.json",
+      "sourceSha256": "35db1aa74ae38d4858307015b6f719e0edb1c106002c12648bce37d47fcf0e6a",
+      "session": {
+        "id": "2d2e67ec-957e-4da4-af3f-3a49f1e97eb7",
+        "source": "acp",
+        "model": "",
+        "api_call_count": 0
+      },
+      "requestedModel": "opencode-go:deepseek-v4.1-flash"
+    },
+    "oldHome": {
+      "source": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261029-old-text/hermes/CE08/7f0bf6c2-478c-4b62-a2d8-47f7e6730fab/attempt.json",
+      "sourceSha256": "36d41893b210c0197da346dc5f21b3c905c6c94c5413ebcd4cfc4cd5487e7c9a",
+      "session": {
+        "id": "d38d3f07-c785-4b38-855a-b4b16203743a",
+        "source": "acp",
+        "model": "deepseek-v4.1-flash",
+        "api_call_count": 89
+      },
+      "requestedModel": "opencode-go:deepseek-v4.1-flash"
+    }
+  }
+}

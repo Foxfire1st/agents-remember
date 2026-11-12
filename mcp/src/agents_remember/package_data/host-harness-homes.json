@@ -1,0 +1,27 @@
+{
+  "claude": {
+    "variables": ["CLAUDE_CONFIG_DIR"],
+    "sources": ["https://code.claude.com/docs/en/settings"]
+  },
+  "codex": {
+    "variables": ["CODEX_HOME", "CODEX_SQLITE_HOME"],
+    "sources": ["https://learn.chatgpt.com/docs/environments/network-file-systems"]
+  },
+  "eve": {
+    "variables": [],
+    "sources": ["https://github.com/vercel/eve/blob/main/packages/eve/README.md", "scripts/pnt_sandbox/eve-acp-launcher.mjs"],
+    "storage": "The provider command selects the application directory with --app; sessions use that directory rather than an inherited harness-home variable."
+  },
+  "pi": {
+    "variables": ["PI_CODING_AGENT_DIR"],
+    "sources": ["https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/configuration.md"]
+  },
+  "hermes": {
+    "variables": ["HERMES_HOME"],
+    "sources": ["https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/profiles.md"]
+  },
+  "opencode": {
+    "variables": ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "OPENCODE_CONFIG_DIR", "OPENCODE_DB"],
+    "sources": ["https://opencode.ai/docs/config/", "https://opencode.ai/docs/troubleshooting/"]
+  }
+}

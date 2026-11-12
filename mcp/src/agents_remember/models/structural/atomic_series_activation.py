@@ -14,7 +14,14 @@ AtomicSeriesObservedState = Literal["vacant", "unreadable", "reconciling", "acti
 
 
 class AtomicSeriesActivationRecord(BaseModel):
-    """The one replace-in-place activation snapshot for a canonical series contract."""
+    """The one replace-in-place activation snapshot for a canonical series contract.
+
+    ``pausedAt`` is the explicit-pause discriminator (MIK-R200 rule 4). A release that comes
+    from ``worktree_pause`` records the moment the developer stopped the master; a release from
+    sync cancellation or terminal cleanup leaves it absent. Vacancy alone is therefore never
+    read as a pause: only a record that names the pause time suppresses a stall, and the next
+    selection of this contract writes a record without it.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -25,6 +32,7 @@ class AtomicSeriesActivationRecord(BaseModel):
     state: AtomicSeriesActivationState
     revision: int = Field(ge=1)
     selectedAt: str = Field(min_length=1, max_length=128)
+    pausedAt: str | None = Field(default=None, max_length=128)
 
 
 class AtomicSeriesActivationArchiveEvidence(BaseModel):

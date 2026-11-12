@@ -1,209 +1,140 @@
-# Core — Seat Authority (shared by every role)
+# Core — Role authority
 
-The rules in this file apply to every seat in this skill. It is authored once and composed into a
-capsule; a role file states its own seat's side of a rule and never restates the whole of it.
+This file is an authoring reference for people and agents maintaining role instructions. Its shared duties reach started roles through `core/every-role.md`, beside the selected role and operation capsule.
 
-## One lifecycle per agent type
+## One lifecycle per role
 
-Lifecycle and job are one entity. Every agent type runs its **own self-contained lifecycle**; this
-skill is the single roof over all of them. No role is defined by reference to another role's
-lifecycle, and no role reads another role's file to learn its own obligations.
+A role's lifecycle and its job are one entity. Each role runs its own self-contained lifecycle under this skill. Its supplied role, operation and delivered details state its duties. A started role does not load another role's file to invent its own duties.
 
-Authority in this system is **structural, never textual**: a seat's task document plus its role
-name is its address, and the control plane — not a prompt, a chat claim, or a runtime occupant id —
-owns occupant identity, readiness, and the pinned initial brief.
+Authority comes from the structure recorded by Agents Remember, not from text in a prompt. A seat's task document and role name form its address. When `role_start` starts the seat, Agents Remember records which agent holds it; a chat claim cannot assign that authority.
 
-## Seat binding
+A role already working on a sprint, master or leaf does not become Bootstrap to repair its context. Before retrieving its context again, it reads [context retrieval](../reference/knowledge/commands.md#use-related-workflow-tools) for `context_packet`. If setup is missing, it reports that fact and stops.
+
+## Bind the seat to its document
 
 | Altitude | Canonical document | Ordinary occupants |
 | --- | --- | --- |
-| Sprint | the sprint (`kind:"master"`) document | architect · orchestrator · strategist · designer · plan reviewer · super-exit reviewer |
-| Master | the master document | manager · master-exit reviewer |
-| Leaf | the leaf document | worker · curator · leaf route reviewer |
-| Portfolio artifact | none — a notes draft only | strategist's draft before adoption |
+| Projects | None: the start names no document. The sprint document holds the developer's request, and the developer names it to the Architect in the dashboard. | Architect |
+| Sprint | The sprint document | Orchestrator; Investigator when its selected concern binds the sprint |
+| Master | The master document | Manager; Investigator when its selected concern binds the master |
+| Leaf | The hosting leaf document | Worker, Curator and every Reviewer. The Reviewer's intake selects the candidate and seam; its hosting leaf and unstartable seams follow the [Reviewer seam selection](../roles/reviewer.md#bind-the-seam-and-catalogs) and [coordination ownership](../operations/coordination.md#choose-the-coordination-owner). |
 
-- The session↔seat association is the catalog binding made at dispatch: **canonical task document
-  plus role**. It is not lifecycle adoption. Different roles may coexist on one document; only a
-  second live occupant of the same `(task document, role)` seat collides.
-- A spawned role runs its **own** lifecycle when it runs one; it never adopts its spawner's. A
-  spawned role that never touches a mutating AR tool simply never instantiates a lifecycle — that
-  is the designed shape, not a gap.
-- The plane stamps a reviewer's canonical parent document + role at dispatch; it never derives the
-  parent from an occupant id.
-- **A seat that WEARS a hat runs that hat's file as its own.** Hat-collapse is sanctioned only for
-  the owner/developer-facing architect seat in solo or flat runs (see `roles/architect.md`). A
-  spawned role seat never wears another role's hat and never becomes a different role in place.
+A task-bound seat is its canonical document plus role. A second live occupant of the same seat collides. Architect starts name no document. Bootstrap is the distinct parentless, taskless setup entry. An Investigator takes its supplied taskless, sprint or master concern, never a leaf. Other starts carry the exact references their role requires.
 
-## Role-seat immutability (dashboard-owned sessions)
+A started agent's parent is the agent that called `role_start`. A role started from the dashboard or by a chat without a role has no parent.
 
-When the dashboard owns a session, its role is fixed for the session lifetime.
+A spawned seat keeps its role. Architect direct coordination is available only when the developer chooses it. It grants no Worker, Reviewer or Curator execution, and permits paired closeout only where the existing closeout procedure authorizes it.
 
-- A pasted brief for another role is **refused**, not absorbed: the seat escalates the mismatch to
-  its owner through the inbox instead of silently rerouting itself.
-- Roles expand **horizontally** by dispatching new, individually addressable role seats
-  (`dispatch_agent` with the target's canonical document and role). A role seat is never a
-  harness-native sub-agent of another role seat.
-- Sub-agents drill **vertically** inside one seat's context for read/search/report work only — and
-  only where that role's own file permits it. Orchestration seats never use them at all.
-- Sessions not owned by the dashboard follow their host harness's ordinary rules.
+## Keep dashboard-owned roles fixed
 
-## Dispatch is one structural transaction
+A dashboard-owned session keeps its role for the session's lifetime.
+If it receives a pasted brief for another role, it refuses that brief and sends the mismatch to its parent with `role_message`; without a parent, it reports the mismatch in its own chat. It does not change roles silently.
 
-Every launcher or role that dispatches a hosted role calls `dispatch_agent` **once** with the
-target's real task document, role, and one complete brief. The control plane then:
+Additional role work uses new, individually addressable role agents, started with `role_start` and the required canonical task references. A role seat is never another role seat's harness-native sub-agent.
 
-1. selects caller kind from process identity, and either authorizes the plane seat's direct-child
-   relationship or validates the ambient launcher's target document and role altitude;
-2. resolves source lineage from that canonical task document **before** process creation — an
-   organizational leaf requires super → leaf, while an atomic path requires super → master → leaf,
-   for code and external memory when enabled; a manager's admission proves its nature-appropriate
-   source edge before it can read or dispatch;
-3. creates and binds the child using settings-owned launch knobs only when every applicable edge is
-   current;
-4. proves readiness privately;
-5. persists exactly one internally exact-pinned initial dispatch brief before delivery;
-6. returns only structural status (`dispatched` or `dispatch-queued`) and delivery state.
+Harness sub-agents work inside their owning seat's assignment, with its permissions and working folder. The seat organizes their work, verifies and credits it, and performs every boundary act itself. Helpers hold no Agents Remember seat, start no role and cannot provide independent review of their author.
 
-`dispatch_agent` has **two disjoint caller kinds**; the public request is identical and caller kind
-comes only from process context:
+Sessions that the dashboard does not own follow their host harness's ordinary rules.
 
-| Caller kind | Recognition | Authority | Forbidden shortcut |
-| --- | --- | --- | --- |
-| Plane-hosted seat | Plane-injected hosted identity is present | Current seat plus direct-child scope policy | Treating a plane authorization failure as ambient |
-| Ambient launcher | Plane-injected hosted identity is absent | Canonical target-document resolution plus target role-altitude validation; there is no parent seat | Fabricating caller identity or using ambient mode as an in-hierarchy escape |
+## Start and configure a role agent
 
-A stale, invalid, mismatched, unbound, or unauthorized plane identity remains a plane refusal and
-never falls back to ambient.
+Start another role with `role_start` once, naming the role, a chosen request identifier and its exact required task references. To reconcile an uncertain result, use the same identifier and selection for the same start. `role_start_set` is not the stage-start route.
 
-Consuming a dispatch result:
+Keep the per-start override route. After a start with overrides, the starter checks and sets the seat's mode and features. If the seat differs from the resolved choices, record a product issue rather than remove the overrides.
 
-- `dispatched` and `dispatch-queued` both mean **the brief is durable**. Never send a second brief,
-  duplicate it, or respawn merely because delivery is pending; a queued brief follows the ordinary
-  notifier retry path.
-- Never request, retain, paste, or reconcile a runtime occupant id, session id, lifecycle id, branch
-  name, or commit id. The model never receives the spawned occupant's runtime id and never calls
-  readiness, exact inbox, attach, or raw retire operations.
-- `source-lineage-stale` / `source-lineage-unavailable` means **no child process was created**. Use
-  the refusal's ordered, contract-addressed `worktree_sync` recovery, resolve any retained
-  mechanically derivable merge conflict through the advertised continuation, then dispatch the same
-  document + role again. Escalate only when the conflicting changes encode a semantic truth that
-  current requirements and evidence cannot resolve.
-- Repetition after an advertised recovery is idempotent: it reconciles the canonical seat and
-  pinned brief instead of creating a duplicate. Never clear a viable existing occupant or its
-  durable queued brief merely to make a retry look fresh.
-- Settings are the sole developer-controlled spend surface: callers declare document, role, brief,
-  and an optional label — never harness/model/effort or direct launch controls.
+The agent that started a seat retires the agent in it with `retire_child`; the tool refuses any other caller.
 
-## Developer-declared task-seat takeover
+## Handle a developer-declared takeover
 
-When the developer says *"you are the orchestrator/manager/worker for task X"* (or equivalent),
-that is a **task-seat takeover**, not a loose role hint. Before analysis, profile checks, dispatch,
-or implementation, resolve the named task document and converge on that role's canonical seat at
-its canonical altitude (table above; a reviewer binds the leaf, master, or sprint document its
-exact review seam adjudicates).
+When the developer says “you are the orchestrator/manager/worker for task X,” or gives an equivalent instruction, it is a task-seat takeover. Before analysis, profile checks, a start or implementation, resolve the named task document and that role's canonical seat and altitude. A Reviewer starts on its hosting leaf and reviews the candidate and seam named in its intake.
 
-1. Resolve the canonical JSON-primary task document and the role being claimed.
-2. Compile the role's complete canonical brief and call `dispatch_agent` once with that document,
-   role, and brief.
-3. Optionally call `rename_self(label=...)` once the hosted role chat is active.
-4. Verify Operations and Chats show the expected `(taskDocumentRef, role)` row before continuing.
+1. Resolve the canonical task document, whose source is JavaScript Object Notation (JSON), and the role being claimed.
+2. Call `role_start` once for that role and its canonical selection. An Architect start names no document: the sprint document holds the request, and the developer names it in the dashboard.
+3. Tell the developer that the agent is in the dashboard.
 
-An identity-free developer chat uses ambient-launcher mode: it does not submit caller identity,
-call a terminal attach/session primitive, or read, request, paste, or retain a
-session/lifecycle/agent id. Takeover never means manually replacing a live incumbent; only the
-lifecycle-owned transaction may retire one generation that it has positively proved failed. If
-`dispatch_agent` cannot establish the document+role binding, record the structural blocker and ask
-for the missing document or role authority — never improvise an exact-id attachment.
+A chat without a role makes the same call. Takeover never replaces a live incumbent: a start without a binding takes no replacement. If `role_start` refuses the selection, report the missing document or role. Do not improvise another way to attach.
 
-## Escalation ladder
+## Escalate questions through the parent chain
 
-**worker → manager → orchestrator → architect → developer.** A system-specialist escalates to the
-orchestrator. **No rung is skipped, ever.** Each role file states only its own rung.
+The escalation chain is Worker → Manager → Orchestrator → Architect → developer. An Investigator escalates to the parent that started it, or asks the developer when it has no parent. Never skip a rung. Each role file states only its own rung.
 
-A question is developer-worthy when it is a **high-blast-radius truth** — answered wrong it means
-big rewrites later (architecture direction, security posture, doctrine contradictions, irreversible
-data/branch operations, where agent settings live). Such a question escalates **immediately** to
-the architect relay, regardless of any loop's round count. Presentation-grade choices (2px vs 3px)
-never do: the owning seat rules and logs.
+Escalate a factual question immediately when a wrong answer could cause major rewrites. Examples include architecture direction, security posture, contradictory doctrine, irreversible data or branch operations, and where agent settings belong. Send it through the Architect's relay regardless of a loop's round count.
 
-## Developer clarification triage
+The owning seat decides and records presentation choices, such as two pixels versus three pixels; these do not go to the developer.
 
-When the developer clarifies a rule, boundary, or desired behavior during an active task, decide
-whether it is **current implementation** or **future queue** before writing only a note. Read the
-active queue first: the current leaf, parent/master, neighboring leaves, decision log, open
-questions, and in-flight branch state. The question is not whether a note is useful; it is whether
-the developer is effectively steering the work already in hand.
+## Classify a clarification before recording it
 
-- **Current implementation** — it names the same task/leaf/master, resolves a defect exposed by the
-  current work, or improves the same doctrine or code path. A small change that plainly fits the
-  current diff is a strong signal for immediate implementation even when the developer phrases it as
-  "maybe". Extend the current task surface/decision log enough to make the added scope visible, and
-  implement it now.
-- **Future queue** — it names a later release, a separate subsystem, a large scope jump, work whose
-  correctness depends on another unfinished master, or a change that would reorder already-running
-  leaves. Record it in the right durable queue or ask the owning seat to plan it later.
-- If the intent is genuinely ambiguous after reading the queue, ask the developer directly. Do not
-  silently downgrade a close/current/small change into future speak, and do not silently expand the
-  active leaf when the fit is unclear.
+When the developer clarifies a rule, boundary or desired behavior during active work, first decide whether it affects current implementation or future work. Read the active queue: the current leaf, parent/master, neighboring leaves, decision log, open questions and in-flight branch state. Determine whether the developer is steering the work already in hand before treating the clarification as only a note.
 
-## Delegated series authority
+- Current implementation names the current task, resolves its exposed defect, or improves the same intended doctrine or code path. Make the scope visible in the task record. A proposed restriction or changed promise still needs the developer's approval before it becomes a requirement.
+- Future work names a later release, separate subsystem, large scope change, work dependent on another unfinished master, or a change that would reorder running leaves. Record it in the appropriate durable queue or ask the owning seat to plan it later.
+- If the fit remains unclear after reading the queue, ask the parent with `role_message` on `agents-remember-task`; without a parent, ask in your own chat. Do not silently defer an in-scope change or expand the active leaf.
 
-Once the developer accepts an orchestrated series/portfolio plan, that acceptance is **standing
-authority** for the owning seats to execute the subordinate edges in that series. Managers govern
-their workers, leaf readiness, and released leaf closeouts. The orchestrator governs managers, the
-portfolio queue, organizational leaf → super releases, atomic master → super handovers, and the
-same closeout/finalize/cleanup mechanics when it wears a manager or worker hat in a flat/direct
-run. These edges do **not** stop for a new developer approval merely because a commit, lifecycle
-finalization, cleanup, or integration command is next: the owner runs the transaction preview,
-records the accepted-series authority in the intent note or decision log, and continues.
+## Exercise delegated series authority
 
-This does not weaken the ladder. Developer approval is still required for the final completed super
-integration branch / PR-carryover gate, for any human-pinned gate that is actually raised
-(`integration-approval`, `push-approval`, `cleanup-approval`), for scope changes beyond the accepted
-plan, for unresolved transaction conflicts or scope blockers, and for quo-vadis decisions.
-Owner-never-self-approves means verdicts and delegated gates need the configured distinct decider;
-it does not force a developer hand-off for mechanical closeout of in-scope work.
+Acceptance of a series plan authorizes its owners to execute the subordinate steps. Managers own leaf readiness, gate acceptance and leaf closeouts. Orchestrators own the portfolio and delegated master coordination. An Architect coordinates directly only when the developer chose that arrangement.
 
-## Minimal decision-item relay
+For an authorized mechanical transaction, preview it, record the standing authority and continue. Do not request a new approval merely because the next step is integration or finalization.
 
-The ARCHITECT/ORCHESTRATOR split rides the existing operator inbox. No queue schema or dashboard
-reform is part of it.
+The parent chain still applies. The developer must approve:
 
-- A backend seat posts **one** `messageKind: decision-item` row at a time to the architect, stating
-  what is being decided, the options, the consequences, and the durable evidence refs.
-- The architect presents one item at the developer's pace, records the ruling in the durable task
-  surface (`openQuestions` / decision logs, with notes for analysis), and returns one
-  `messageKind: decision-ruling` row to the backend seat.
-- If the item is underspecified, the architect sends a single clarification row back instead of
-  guessing. The backend does not open a second item until the active item has a durable ruling or
-  clarification state.
+- The final completed super integration branch / pull-request carryover gate.
+- Any human-pinned gate that is actually raised: `integration-approval`, `push-approval` or `cleanup-approval`.
+- Scope changes beyond the accepted plan.
+- Unresolved transaction conflicts or scope blockers.
+- High-impact questions about direction, such as a direction contradiction between masters.
 
-## Notify-and-stop is safe by design
+An owner never approves its own verdict. Verdicts and delegated gates need the configured distinct decision-maker. This does not require a developer handoff for the mechanical closeout of work within scope.
 
-Ending a turn on `lifecycle_turn_end_notification` — or simply stopping once your artifact is
-written and nothing is pending — is **never a liveness gap**. Silence is supervised: the HFX2-L2
-agent-notifier sweep evaluates seat-state facts on its own mechanical tick and relays them to owners
-(turn-ended/completed state-signals, compound-idle, non-reaction residue); owners interpret and act.
-The timed escalation ladder is retired — there is no renudge, skip-level, or respawn machinery in
-the relay.
+## Relay a decision item
 
-**Watcher ban (uniform-mechanism ruling 2026-07-07):** no role watches, polls, nudges, or
-timer-loops on its own initiative — that is a banned seat-local watcher, and there is no per-seat
-variance. Every role's own liveness duty inverts to *passive*: you will be woken with your pending
-signals; process and ack every item before ending your turn again.
+Before relaying a developer question or answer, read [developer questions](../operations/orientation.md#ask-for-a-developer-decision) for the reporting route and [relayed answers](../operations/orientation.md#recognize-a-relayed-developer-answer) for attribution and quoted words.
 
-## Change authority
+Send a developer question to the parent with `role_message`. Name the decision, what is held, the recommendation and its evidence, then continue independent work. A role with no parent, including a Manager, asks in its own chat.
 
-- **Doctrine and instruction text** is owned by the seats the terminal host's routing gives it to;
-  a seat never rewrites its own role file or another role's file to resolve a disagreement.
-- **Requirements** are owned by the architecture seat that compiled them; a claimed contradiction
-  or overconstraint is diagnosed and proposed, never self-approved, and never silently rewritten.
-- **Git code/memory transactions** are closeout/integration work owned by the owning seat. They
-  publish only the explicitly authorized code and prepared memory commits/merges. Closeout and
-  integration do **not** launch automatic code-quality, full-suite, or independent-review
-  operations; full code quality, full tests, and independent review run only after an explicit
-  developer request. Curation is never deferred that way: the curator runs the complete
-  memory-quality operation as part of curation, and closeout and integration carry that result as a
-  prerequisite instead of rerunning it. Worker targeted checks and the curator's complete onboarding
-  result remain truthful handoff evidence — failed or not-run checks are reported and never
-  relabeled as full green.
+The Architect presents one item at the developer's pace. It records the ruling on the durable task surface (`openQuestions` or decision logs), keeps analysis in notes and returns the answer with `role_message`.
+If the item is underspecified, the Architect asks its sender once instead of guessing.
+
+## Hand over work and wait for messages
+
+A silent turn end is not an artifact handover. The host treats a Worker, Reviewer or Curator as silent when it supplies no handoff, block or declared helper or background wait. After 60 seconds, each of the first two consecutive silent ends wakes that seat; from the third, the host sends its parent a marked line. Other roles ordinarily give the parent their end line. Permission waits and host-held helper states keep their own boundaries.
+
+No role watches, polls, nudges or runs a timer loop on its own initiative. This ban has no per-seat exception. Roles wait passively for messages and answer a waking message before ending the turn again.
+
+Architect, Orchestrator, Manager: After receiving a report, check whether its sender is still in a turn. If it ended with unfinished authorized work and no valid named wait or stop, send a continuation at once.
+
+Collect helpers and continue ordinary work. Use the helper-wait procedure declared by your launch; otherwise preserve the harness's native collection within the turn. If your harness offers helpers (sub-agents), they run on your own seat's model unless the developer names another. On any harness, end a turn that waits for your helpers with `WAITING FOR SUBAGENTS:` and each helper's progress, and a turn that waits for a process you started with `WAITING FOR BACKGROUND:` and, for each process, what it is, its process id or log file and when it should end; `check in <N> minutes` (1 to 30, default 3) sets the host's check. Answer the host's progress check in your own chat; a wake by your harness continues your own work. Collect completed work, then declare another wait or continue. While waiting, send no parent progress message with `role_message` on `agents-remember-task` and create no watcher, polling loop or second wake mechanism.
+
+A held receipt means queued eventual delivery, possibly many turns later. Never resend it. Count a handover as taken only when the recipient's reply, report or intake names the exact object and shows the requested work or its start. Open every supplied recipient artifact before you call one absent. Withdraw a superseded held message with `withdraw_held_message_id`. A receiver does not poll.
+
+## Compare sandbox evidence
+
+In a sandbox run's report, name the sandbox's host, plug-in and build versions; treat a difference from the developer's installation as a finding.
+
+## Change instructions and publish within authority
+
+Change doctrine and instruction text only through a task. A seat never rewrites its own or another role's file to resolve a disagreement.
+
+The architecture seat that compiled a requirement owns it. Diagnose and propose a correction to a contradiction or overconstraint; never approve or silently rewrite it yourself.
+
+Authorized closeout and integration publish only their approved code and prepared memory pair. Run the focused checks the change touches and report failed and unrun checks truthfully. Full code quality and full-suite tests require an explicit task or developer request. Curation still runs complete memory quality, and closeout carries that result without rerunning it.
+
+Pushing to the sprint line, opening pull requests and releasing belong to the developer unless explicitly delegated. Never force a refused push. Using `--no-verify` requires the developer's word for that occasion. Send the failure through your parent to the developer.
+
+For a correct-input refusal of a covered write (`task_doc` edits (including an admitted task retirement or folder movement), `knowledge_write`, `citation_fix`, `citation_note_revision` and `curator_coherence` publication), follow [correct-write recovery](../reference/refused-write.md) for the same tool and input class before applying a stop. If no admitted route works, record the refusal, tell the owner, then make that write openly by hand and log it; never keep a blanket ban on writing it by hand. Read, check, validation and sync refusals, starts, other product guards and commit gates retain their stops.
+
+A role's capsule ceiling is its entry in `current_capsule_ceilings_words` of the [current budget record](../capsule-budgets-current.json), with the developer decision that set it; read the complete entry before you state it. Only the developer sets or raises a ceiling.
+
+## Remove scratch paths safely
+
+Avoid forced recursive removal through a shell variable. Use a fresh folder or an approved literal path.
+
+Run a harness command only in the supplied scratch roots, never with a worktree as its working folder. Some harnesses create files in the folder they run in; remove any that appear by literal path.
+
+## Stop a process or operate on the live host
+
+Stop or signal a process only by a checked process identifier (PID) or the sandbox's own PID file. Rebuild the dashboard after a frontend change (`scripts/sync-dashboard.py`) only when the developer or the Architect assigns it.
+
+A host restart or seat reload is done only when the developer or the Architect assigns it, by the procedure the assignment names; if it names none, report that to whoever assigned it instead of choosing a command.
+
+These are the only admitted changes on the developer's live host.

@@ -8,19 +8,25 @@ import os
 import stat
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    model_serializer,
+    model_validator,
+)
 
 from agents_remember.kernel.atomic_write import (
     atomic_replace,
     atomic_write_bytes,
     atomic_write_text,
 )
-from agents_remember.models.knowledge.merge import AuthoredReconciliation
 from agents_remember.models.worktree import (
     MemorySyncChoice,
-    SyncKnowledgeConflict,
     SyncOperationProjection,
     SyncOperationState,
     SyncPhase,
@@ -38,6 +44,11 @@ SyncSideState = Literal[
 # parks its WIP before the carry and must return it. ``restore-conflict`` means the parked
 # candidate could not be reapplied onto the carried result and still needs its resolver.
 SyncWipState = Literal["", "parked", "restore-conflict", "restored"]
+
+# A journal written before MIK-R26 still carries the database merge's conflict and its
+# authored decisions. A non-empty survivor is kept on read (MIK-R61 rule 6): continuing
+# such a sync refuses, while empty values are dropped, as leaf L26 builds it.
+_RETIRED_SIDE_KEYS = ("knowledgeConflict", "knowledgeReconciliations")
 
 
 class SyncSideRecord(BaseModel):
@@ -61,24 +72,108 @@ class SyncSideRecord(BaseModel):
     temporary: bool = False
     resultHead: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     conflictFiles: tuple[str, ...] = ()
-    # The engine's own explanation for a conflicted knowledge dataset this side retained. It is
-    # journaled rather than only returned, because the agent reads it again on every later call:
-    # a resumed sync re-projects this side's state from the journal, and the diagnosis has to be
-    # there for that projection to say what to reconcile instead of only which file is unresolved.
-    knowledgeConflict: SyncKnowledgeConflict | None = None
-    # Every authored decision this side's retained knowledge merge has already accepted, in the
-    # order they were accepted. They travel together into the next attempt because a decision
-    # that settled one conflict has to still hold when the merge goes on to the next one: with
-    # only the newest decision carried, a two-conflict merge alternates between the same two
-    # rows forever and re-offers a decision that has already been made and already had its
-    # effect. Cleared with the conflict it belongs to.
-    knowledgeReconciliations: tuple[AuthoredReconciliation, ...] = ()
+    #: Named repair debt a sync merge reported rather than refused (MIK-R198 rule 7): the rule IDs the
+    #: validator carried as report-only findings at this side's two-base validation.
+    repairDebt: tuple[str, ...] = ()
+    # The operation-created tree and index at a retained stop: path fingerprints captured
+    # when a merge or parked-candidate reapply is retained (or a staged memory merge is
+    # refused), so a cancel can tell owned output from later bytes. Each value is
+    # "<worktree-sha256>:<index-sha256>" ("absent"/"unreadable" where no bytes exist);
+    # the index half hashes `git ls-files -s` output, stages included. Never rewritten
+    # after capture: an agent edit must read as later work, never as a new reference.
+    retainedTreeDigests: dict[str, str] = {}
+    # A database conflict in flight is not dropped silently (MIK-R61 rule 6). A journal
+    # written before MIK-R26 still holds the database merge's conflict and its authored
+    # decisions; the shapes are legacy-opaque, so both stay unparsed. A non-empty survivor
+    # refuses a continued sync -- the sync was started by a build that merged the knowledge
+    # database, and cancelling works -- while empty values are dropped on read.
+    knowledgeConflict: Any = None
+    knowledgeReconciliations: Any = None
+    # A crossing sync's durable report (MIK-R24 rule 8): the item-level conflicts, with each side's
+    # value, and the cards taken from each side. The resolution payload names it and summarises it.
+    crossingReport: str = Field(default="", max_length=4096)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _retain_nonempty_knowledge_keys(cls, data: Any) -> Any:
+        """Keep a pre-MIK-R26 journal's database conflict where it still holds bytes.
+
+        Knowledge is text in Git and merges structurally, so no side records a database conflict or
+        an authored decision any more. A journal written before that still holds
+        ``knowledgeConflict`` and ``knowledgeReconciliations`` on each side; a non-empty
+        survivor is kept so a continued sync refuses instead of continuing as if there were
+        none (MIK-R61 rule 6), while empty values are dropped on read, as leaf L26 builds it.
+        """
+
+        if isinstance(data, dict):
+            return {
+                key: value for key, value in data.items() if key not in _RETIRED_SIDE_KEYS or value
+            }
+        return data
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_optional_state(self, handler: SerializerFunctionWrapHandler) -> Any:
+        """Write ``crossingReport`` and the retired knowledge keys only when they hold bytes.
+
+        An ordinary journal keeps the exact shape the installed (pre-MIK-R24) runtime reads;
+        a pre-MIK-R26 journal whose retired keys are empty round-trips to the dropped shape.
+        """
+
+        data = handler(self)
+        if isinstance(data, dict):
+            if not self.crossingReport:
+                data.pop("crossingReport", None)
+            if not self.omissionReport:
+                data.pop("omissionReport", None)
+            if not self.omittedItems:
+                data.pop("omittedItems", None)
+            for key in _RETIRED_SIDE_KEYS:
+                if not getattr(self, key, None):
+                    data.pop(key, None)
+        return data
+
     # The exact parked candidate: its stash identity is journaled with the transaction, so
     # a crash mid-carry can always return the WIP it parked.
     wipState: SyncWipState = ""
     wipStash: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     wipPaths: tuple[str, ...] = ()
     wipPathCount: int = Field(default=0, ge=0)
+    # A continue that found parked authoring the resolved tree lacks names its full report
+    # here: the answer, the next resolution guidance and the review advice read the same
+    # fact. A continue that settles the side clears both.
+    omissionReport: str = Field(default="", max_length=4096)
+    omittedItems: int = Field(default=0, ge=0)
+
+
+#: How many violations a journaled validator refusal keeps inline; the total is journaled
+#: alongside, so a longer refusal still reports its full count.
+VALIDATION_REFUSAL_INLINE_LIMIT = 50
+
+
+class SyncValidationViolation(BaseModel):
+    """One violation the knowledge validator named, as the journal keeps it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    path: str = Field(min_length=1, max_length=4096)
+    rule: str = Field(min_length=1, max_length=256)
+    message: str = Field(min_length=1, max_length=8192)
+
+
+class SyncValidationRefusal(BaseModel):
+    """A validator refusal as journaled state (MIK-R61 rule 5).
+
+    The violations are the validator's own per-path, per-rule entries in order;
+    at most the inline limit is kept, and ``total`` is the validator's own
+    count, which can exceed what is inline.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["staged-merge", "fast-forward"]
+    violations: tuple[SyncValidationViolation, ...] = ()
+    total: int = Field(ge=0)
+    reportedAt: str = Field(min_length=1, max_length=128)
 
 
 class SyncOperationRecord(BaseModel):
@@ -95,8 +190,20 @@ class SyncOperationRecord(BaseModel):
     memoryBaseFrom: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     phase: SyncPhase
     memorySyncChoice: MemorySyncChoice | None = None
+    # The sync source this generation was admitted with. "" is the contract's own
+    # source line; "repository-default" pulls each repository's default branch, whose resolved name
+    # and pinned tip each side records, and keeps the contract's base pair. The contract's own
+    # source branches at admission are kept so a resume can tell a retargeted contract.
+    syncSource: Literal["", "repository-default"] = ""
+    codeSourceFrom: str = Field(default="", max_length=4096)
+    memorySourceFrom: str = Field(default="", max_length=4096)
     code: SyncSideRecord
     memory: SyncSideRecord | None = None
+    # A validator refusal is a journaled state (MIK-R61 rule 5): when the validator refuses
+    # a staged merge or a fast-forward, the refusal is journaled here with its violations.
+    # A continued sync validates again and clears this when the tree passes; journals
+    # without the field read as before.
+    validationRefusal: SyncValidationRefusal | None = None
     createdAt: str = Field(min_length=1, max_length=128)
     updatedAt: str = Field(min_length=1, max_length=128)
 
@@ -177,6 +284,12 @@ def sync_side_refs(contract_path: Path, side: SyncSide) -> tuple[str, str]:
 
 def sync_side_base_ref(contract_path: Path, side: SyncSide) -> str:
     return f"{sync_ref_prefix(contract_path)}/{side}/base"
+
+
+def sync_side_default_source_prefix(contract_path: Path, side: SyncSide) -> str:
+    """Where a default-source sync pins its resolved branch: the ref name carries the branch."""
+
+    return f"{sync_ref_prefix(contract_path)}/{side}/default-source/"
 
 
 def operation_stamp() -> str:
@@ -495,8 +608,12 @@ def _active_sync_projection(
         identityMismatch=identity_mismatch,
         side=side,
         conflictFiles=side_record.conflictFiles if side_record is not None else (),
-        knowledgeConflict=side_record.knowledgeConflict if side_record is not None else None,
         summary=summary,
+        validationRefusal=(
+            record.validationRefusal.model_dump(mode="json")
+            if record.validationRefusal is not None
+            else None
+        ),
         nextArgs=(
             {
                 "contract_path": executable_address,

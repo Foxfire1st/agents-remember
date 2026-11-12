@@ -1,106 +1,85 @@
-# Install For Cursor
+# Install for Cursor
 
-Cursor supports native Agent Skills, project rules, project hooks, and
-project-local MCP configuration.
+This page adds to the common install steps what holds for Cursor only: how you register the tool
+server, and that the host starts no role agent on Cursor. The call of step 4 from a Cursor chat
+is therefore refused until it names another harness;
+[Role agents on this harness](#role-agents-on-this-harness) tells how. The registration is told as
+documented by the vendor and was not tried with Cursor.
 
-Official references:
+## Install steps
 
-- [Cursor Rules](https://cursor.com/docs/rules.md)
-- [Cursor Hooks](https://cursor.com/docs/hooks.md)
-- [Cursor MCP](https://cursor.com/docs/mcp.md)
-- [Cursor Agent Skills](https://cursor.com/docs/skills.md)
+These are the five install steps. [Getting started](../getting-started.md) tells them in full, and
+the page [Install](README.md) names them for every harness.
 
-## Root Starter Package
+1. **Install the package.** Install the published package `agents-remember-mcp` with uv.
+2. **Write the settings file.** Create `~/.config/agents-remember/agents-remember-settings.json`. It
+   names the workspace root, the coordination root and your code repositories.
+3. **Register the tool server in your harness.**
+   [Register the tool server in Cursor](#register-the-tool-server-in-cursor) shows the file
+   and the form of the declaration.
+4. **Start the setup.** In a chat of Cursor, ask the agent to make this call:
+   `role_start(role="bootstrap", request_id="<a new UUID>")`.
+   [Role agents on this harness](#role-agents-on-this-harness) says what the call does from
+   Cursor.
+5. **Open the dashboard.** Open the address that the answer names, by default
+   `http://127.0.0.1:8765/`.
 
-The repository includes a Cursor starter package at `.cursor/`. Copy that folder
-to your workspace root, then render the copied package. The
-`.cursor/render-starter` script is a convenience: with a single `--repo` list
-such as `--repo my-app shared-lib`, it infers the workspace root from the copied
-`.cursor/` folder, fills path and repository placeholders, writes the Python
-hook command, and validates that each requested repository exists before you open
-or restart the workspace in Cursor once. If you prefer not to run the renderer,
-make those same replacements by hand and verify that no placeholder tokens
-remain.
+## Register the tool server in Cursor
 
-The package contains:
-
-- `.cursor/rules/agents-remember.mdc` - always-applied first-action instruction.
-- `.cursor/hooks.json` and `.cursor/hooks/agents-remember-session-start.py` -
-  project `sessionStart` hook that injects the same startup directive.
-- `.cursor/mcp.json` - project-local Cursor MCP registration.
-- `.cursor/mcp/agents-remember-settings.json` - Agents Remember MCP authority
-  settings.
-- `.cursor/skills/` - Agents Remember skills for Cursor Agent.
-
-After the restart, invoke:
-
-```text
-c-13-install-and-onboard
-```
-
-That skill runs or verifies `runtime_install()` and then handles memory,
-onboarding, and providers.
-
-## Persistent Instructions
-
-Use the packaged Cursor project rule. Do not overwrite a repository's root
-`AGENTS.md` just to wire Agents Remember; root `AGENTS.md` is project-specific.
-
-The starter package includes `.cursor/rules/agents-remember.mdc`:
-
-```markdown
----
-description: Agents Remember memory system conventions
-alwaysApply: true
----
-
-Read and follow `ar-coordination/AGENTS.md` before working in any sibling project.
-Treat these rules as workspace instructions!
-
-@ar-coordination/AGENTS.md
-```
-
-Use an absolute path when `ar-coordination` is outside the workspace.
-
-Cursor also supports project hooks. The starter package uses a `sessionStart`
-hook to inject the startup directive, but the always-applied project rule remains
-the dependable instruction surface because Cursor documents `sessionStart` as
-fire-and-forget.
-
-## MCP
-
-Cursor project MCP config lives at `.cursor/mcp.json`.
+Step 3 of the install steps is one entry in the MCP configuration of Cursor. As documented by the
+vendor, Cursor reads MCP servers from the key `mcpServers` of a file `mcp.json`. The file is
+`~/.cursor/mcp.json` for all your projects, or `.cursor/mcp.json` in one project. See
+[Cursor: MCP](https://cursor.com/docs/mcp.md).
 
 ```json
 {
   "mcpServers": {
     "agents-remember": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": [
-        "--refresh-package",
-        "agents-remember-mcp",
-        "agents-remember-mcp@latest",
-        "--config",
-        "<PATH/TO/YOUR/PROJECTS_FOLDER>/.cursor/mcp/agents-remember-settings.json"
-      ]
+      "command": "agents-remember-mcp",
+      "args": ["--config", "/home/<you>/.config/agents-remember/agents-remember-settings.json"]
     }
   }
 }
 ```
 
-## Runtime And Skills
+`--config` takes an absolute path, so write your home folder in full instead of `~`.
 
-After the restart, the copied `c-13-install-and-onboard` skill runs or verifies:
+The registration is the only change to Cursor.
+
+## Role agents on this harness
+
+The host starts no role agent on Cursor: it has no [host provider](../concepts.md#host-provider)
+for Cursor. Use Cursor as the chat that calls the tools. The role agents run on a harness the host
+can start. Once the host runs, `agents-remember paseo status --config <settings file>` lists those
+harnesses under `providers`, each with `available`.
+
+The call of step 4, `role_start` with `role="bootstrap"`, starts the Bootstrap role agent on the
+harness of the chat that makes the call. Agents Remember compares the client name that the calling
+harness sends in its MCP `initialize` request with the ids and the labels of the host providers.
+The host has no host provider for Cursor, so the call from a Cursor chat finds none.
+
+A first call still prepares the coordination root and installs and starts the host. The call then
+starts no agent and is refused. The answer says "This host cannot be given the caller's own
+harness", names after "It can run:" the harnesses the host knows, and ends with "Name one with
+`agent` on this call, or install that harness's CLI and retry." The host starts a role agent only
+on a harness whose program is installed on the machine, for example Claude Code; install one first
+if none is. Repeat the call and name one of the listed harnesses that is installed, for example:
 
 ```text
-runtime_install()
+role_start(role="bootstrap", agent="claude", request_id="<a new UUID>")
 ```
 
-Cursor loads skills from `.agents/skills`, `.cursor/skills`, `~/.agents/skills`,
-and `~/.cursor/skills`; it also supports Claude and Codex compatibility folders.
-The copied starter package already provides the Agents Remember skills in
-`.cursor/skills/`.
+The refusal is read from the code of Agents Remember. The client name that Cursor sends was not
+read.
 
-Do not run `skills_install()` for first-run setup. It remains available for
-manual maintenance and non-package installs.
+## What this harness needs
+
+This section has no entry. No role agent runs on Cursor, and the registration above is the only
+change to Cursor.
+
+## Related pages
+
+- [Install](README.md): the common steps and the other harnesses.
+- [Getting started](../getting-started.md): the install steps in full.
+- [The host](../host.md): what the host itself needs.
+- [Roles and role agents](../roles.md): how role agents start and exchange messages.

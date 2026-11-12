@@ -8,10 +8,11 @@ from pydantic import Field
 
 from agents_remember.kernel.git_facts import RepoState
 from agents_remember.kernel.git_freshness import FreshnessState
+from agents_remember.kernel.memory_mode import ReadableMemoryMode
 from agents_remember.models.base import StrictResponseModel, ToolResponse
 from agents_remember.models.drift import DriftSummary
 from agents_remember.models.providers import ProviderSummary
-from agents_remember.models.worktree import MemoryMode, WorktreeSummary
+from agents_remember.models.worktree import WorktreeSummary
 
 
 class RepoSummary(StrictResponseModel):
@@ -78,10 +79,9 @@ class CrossRepoSummary(StrictResponseModel):
 
 class MemorySummary(StrictResponseModel):
     # `CoordinationContext.memory_mode` -- which is `WorktreeContract.memory_mode` whenever a
-    # contract is in scope -- has always been able to be `disabled`, and `WorktreeSummary`
-    # below in the same response declares it. This field was the only copy that did not, so
-    # one packet could pass `memoryMode="disabled"` and fail `memory.mode` on the same value.
-    mode: MemoryMode
+    # contract is in scope -- is `external` for every started task, and still reads the legacy
+    # `disabled` a contract on disk may carry, as `WorktreeSummary` in the same response does.
+    mode: ReadableMemoryMode
     storage: StorageSummary
     crossRepo: CrossRepoSummary = Field(default_factory=CrossRepoSummary)
 
@@ -122,3 +122,46 @@ class ContextPacketV2(ToolResponse):
     drift: DriftSummary
     freshness: FreshnessSummary = Field(default_factory=FreshnessSummary)
     diagnostics: ContextDiagnosticsHint = Field(default_factory=ContextDiagnosticsHint)
+
+
+class SlimRoots(StrictResponseModel):
+    """Where the caller works: the roots it opens (MIK-R109 rule 4)."""
+
+    code: str
+    memory: str
+    enclosure: str | None = None
+    taskDocument: str | None = None
+
+
+class SlimTask(StrictResponseModel):
+    """The task: its ID and its master (MIK-R109 rule 4)."""
+
+    id: str
+    master: str
+
+
+class SlimPair(StrictResponseModel):
+    """The pair identity as its two commits (MIK-R109 rule 4)."""
+
+    code: str
+    memory: str
+
+
+class SlimContextPacket(ToolResponse):
+    """``context_packet`` as one agent answers it (MIK-R109 rule 4).
+
+    The whole result stays whole behind the answer's log (MIK-R108 rule 5);
+    what leaves the server for an agent is where the caller works and what
+    needs action: the roots, the task, one line per state that needs action
+    (and none when nothing does), the serving build as its commit, and the
+    pair identity as its two commits. An ordinary answer is under 600 tokens.
+    """
+
+    operation: Literal["context_packet"] = "context_packet"
+    contextPacketVersion: Literal[3] = 3
+    ok: bool
+    roots: SlimRoots
+    task: SlimTask | None = None
+    actions: list[str] | None = None
+    servingBuild: str | None = None
+    pair: SlimPair | None = None

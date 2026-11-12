@@ -1,142 +1,126 @@
-# Core — Completion Truth And Handoff Acceptance (one home — this file owns the truth boundary)
+# Core — Completion and handoff acceptance
 
-**Terminal truth is mechanical; acceptance is the owner's.** A canonical terminal/finalizer outcome
-of `completed` means only that the provider turn ended normally. It does **not** attest that the
-required artifact exists, is current, or satisfies its requirement — a subordinate can violate its
-artifact obligation and still produce mechanical `completed` truth. A terminal `interrupted` outcome
-remains an interruption, not a completed handoff. Role files state their own seat's side of this
-boundary; they do not restate the whole of it.
+This authoring reference defines the difference between a completed turn, a delivered artifact and acceptance by its owner. Authors and reviewers use it to preserve that distinction in each role's instructions.
 
-- **The relay derives and delivers the state signal.** The lifecycle-owned relay reads turn truth,
-  derives that mechanical seat-state fact, and delivers it to the structurally current owner. It
-  never opens, parses, or evaluates a report, verdict, coherence record, expectation row, or
-  acceptance envelope, and it never nudges a seat on its own judgment about an artifact.
-- **The owner alone validates.** On wake, the current owner opens the required artifact, candidate
-  identity, evidence, and acceptance envelope and validates them **before advancing lifecycle
-  state**. For a leaf handoff that owner is the manager.
-- **An artifact defect is owner-detected.** A missing, malformed, or stale artifact is a handoff
-  defect the owner finds after wake; it nudges, rejects, replaces, or escalates under existing
-  doctrine instead of waiting for an imaginary notifier artifact check. If terminal truth is
-  unavailable, observer health identifies that runtime failure.
-- **The artifact obligation is unchanged.** Worker, reviewer, and curator still write their durable
-  handoff artifact before intentionally ending a successful handoff turn. Once that artifact exists
-  and the turn ends, the subordinate needs no second model-authored completion post.
-- **Nothing here moves authority.** This file states the boundary that already holds; it changes no
-  approval of requirements, plans, commits, or integration.
+## Separate completed execution from accepted work
 
-## Which artifact each seat hands over, and who validates
+A canonical terminal or finalizer outcome of `completed` means only that the provider turn ended normally. It does not establish that the required artifact exists, is current or satisfies its requirement. An agent can violate its artifact duty while its turn still ends as `completed`. An `interrupted` outcome remains an interruption, not a completed handoff.
+
+Role files state their own seat's part of this boundary without restating the whole rule.
+This file changes no approval of requirements, plans, commits or integration.
+
+## Keep relay and gate-owner duties separate
+
+The host reads that a turn ended and derives the mechanical seat-state signal. It delivers one line to the structurally current owner waiting for that agent, carrying the ended agent's last line. The relay never opens, parses or evaluates reports, verdicts, coherence records or acceptance envelopes. It never nudges a seat based on its own judgment of an artifact.
+
+A silent leaf seat is first sent back under the host's turn-end rules. A line sent to the parent is not a report inspection. The relay neither validates artifact content nor invents a gate decision.
+
+On wake, the current gate owner opens and validates the required artifact, candidate identity, evidence and acceptance envelope before advancing lifecycle state. The Manager owns a leaf gate. Worker, Reviewer and Curator handovers go directly between those peers: the recipient checks the exact object and requested work, while the Manager retains gate acceptance. Take closeout trees by filename from the highest-numbered memory PASS and landing-check verdict, never from a message.
+
+The owner detects a missing, malformed or stale handoff artifact after wake. Under the existing rules, it nudges, rejects, replaces or escalates instead of waiting for the relay to check the artifact.
+
+## Write and send the handoff artifact
+
+Worker, Reviewer and Curator write their durable handoff artifact before ending a successful handoff turn. They then send it with `role_message` to the waiting agent. A filed artifact wakes nobody by itself. Name the finished object and its evidence file. A finished turn or a filed report alone does not notify it.
 
 | Seat | Durable handoff artifact | Validated by |
 | --- | --- | --- |
-| worker | the turn report + the leaf Requirement Attempt Journal records | the owning manager |
-| reviewer | the verdict artifact | the decider of the gate the verdict attaches to |
-| curator | the structured coherence record and its generated projection | the owning manager |
-| strategist | the orchestration-task draft | the architect (who rules it) |
-| designer | the task_doc + the designer-limits note | the architect |
-| system-specialist | the investigation report | the orchestrator |
-| manager | the master-handover packet | the orchestrator |
-| orchestrator | the super-exit packet and demo notes | the architect |
+| Worker | Turn report and leaf Requirement Attempt Journal records | Reviewer for code; Manager for the gate |
+| Reviewer | Verdict artifact | Decision-maker for the gate to which the verdict belongs |
+| Curator | Structured coherence record and its generated projection | Reviewer for memory; Manager for the gate |
+| Investigator | Investigation report | Parent that started it, or the developer |
+| Manager | Master-handover packet and owned records | Named coordination recipient; without a parent, the developer |
+| Orchestrator | Super-exit packet and demo notes | Architect who owns the developer conversation |
 
-A seat writes its artifact **before** ending a successful handoff turn, then ends. It does not
-author a second, model-written completion row, and it does not carry the decider's or the owner's
-runtime identity.
+Every seat writes its artifact before ending a successful handoff turn, then ends. It authors no second, model-written completion row and carries neither the decision-maker's nor the owner's runtime identity.
 
-## Acceptance is per stable ID and version, never aggregate
+## Bind acceptance to one requirement revision
 
-Before dispatch, the owner projects the leaf's one owned primary revision — with its stable ID +
-version, approved packet, and durable corpus-ruling citation — plus separately labelled
-dependency/preservation context into the builder brief. Adjacent context is verified as a constraint
-and cannot be claimed closed by this leaf.
+Before dispatch, the owner puts the leaf's one owned primary revision in the builder brief: stable identifier, version, approved packet and durable approval record citation: the requirement manifest's entry with its `state` set to `approved`, its `approval` and `sha256` content hash, and the manifest's hash for the whole requirement corpus. It lists dependency and preservation context separately. Adjacent context is checked as a constraint; the leaf cannot claim to close it.
 
-The builder's handoff contains **one** acceptance block for the owned primary revision:
+The builder's handoff contains one acceptance block for that primary revision:
 
-1. status: exactly `satisfied`, `blocked`, or `approved-change`;
-2. delivery/implementation rationale explaining what was delivered and why it satisfies the
-   requirement;
-3. delivery/implementation citations — code uses file path + symbol; non-code work uses the
-   deliverable path + section/anchor appropriate to that artifact;
-4. verification rationale explaining what behavior the evidence demonstrates and **which failure it
-   would catch**;
-5. test/verification citations using file path + test symbol, executable node, report section, or
-   other exact verification anchor appropriate to the evidence;
-6. the exact command and result, or a durable evidence reference that contains them.
+1. Status: exactly `satisfied`, `blocked` or `approved-change`.
+2. Delivery or implementation rationale: what was delivered and why it satisfies the requirement.
+3. Delivery or implementation citations. For code, use the file path and symbol. For other work, use the deliverable path and an appropriate section or anchor.
+4. Verification rationale: the behavior demonstrated by the evidence and the failure it would catch.
+5. Verification citations: file path and test symbol, executable node, report section or another exact anchor appropriate to the evidence.
+6. Exact command and result, or a durable evidence reference containing both.
 
-A `blocked` or `approved-change` block also explains why the original requirement cannot be
-delivered unchanged, describes the changed delivery when one exists, and cites the durable developer
-approval/ruling. A new blocker may be reported while approval is pending, but that block is
-explicitly incomplete and cannot pass review. **`satisfied` is invalid when any required rationale,
-citation, or exact evidence is absent.** General prose or an aggregate "requirements addressed"
-claim is not an acceptance envelope.
+A `blocked` or `approved-change` block also explains why the original requirement cannot be delivered unchanged. It describes the changed delivery, when one exists, and cites the durable developer approval or ruling. A new blocker may be reported while approval is pending; that block is explicitly incomplete and cannot pass review.
 
-The independent reviewer inspects the owned primary packet revision and the cited artifacts itself
-and adjudicates that exact manifestation as `accepted` or `rejected`, with its own rationale.
-Missing rationale, an unapproved packet revision, missing or wrong-class evidence, or invalid
-citations forces rejection of that requirement; the overall verdict cannot pass while any
-requirement is rejected. An accurately reported `blocked` row may be accepted as a truthful
-handoff, but it still requires a BLOCK recommendation until the requirement is delivered or becomes
-an approved change.
+A `satisfied` claim is invalid when any required rationale, citation or exact evidence is missing. General prose or an aggregate “requirements addressed” claim is not an acceptance envelope.
 
-## Requirement revisions and delivery attempts are separate axes
+## Independently judge the exact manifestation
 
-The canonical `ID@version` states semantic intent and changes only through explicit developer
-approval. A leaf-local attempt ID states what one exact candidate was handed to independent review
-for one leaf manifestation of that revision.
+The independent Reviewer inspects the primary packet revision and cited artifacts itself. It judges that exact manifestation as `accepted` or `rejected` and supplies its own rationale.
 
-- The builder advances that ID **only** when handing a candidate to review, or when a reviewer
-  rejection requires a successor handoff.
-- Internal implementation, test, and evidence reruns do **not** mint attempts. Preserve them
-  separately as experimental protocol events with the candidate identity, command, result, failure
-  cause, repair, and expected proof for the next run.
-- Before review handoff, the builder appends an immutable worker attempt record to the leaf's
-  detailed journal. It binds the revision, manifestation, predecessor and carried findings when
-  present, exact candidate tree/commit or appropriate non-code digest/anchors, and its own
-  requirement-specific status, rationale, citations, findings, failure class, and a
-  content-addressed reference to immutable expanded evidence. The frozen expanded artifact carries
-  shared definitions and complete command results; do not duplicate the complete master acceptance
-  envelope or experimental-run body inside every attempt.
-- Validate the complete record before append. Append plus exact-candidate review handoff is one
-  logical formal-attempt boundary. A malformed pre-handoff row is preserved, receives an
-  append-only `non-attempt-correction`/void reference, and consumes no attempt ID; the corrected row
-  uses that same next ID at handoff. A malformed handed-off row is already a formal attempt: the
-  independent reviewer rejects it, and the worker may append a successor only at the next review
-  handoff. The worker never self-rejects or silently replaces either row.
-- The independent reviewer appends a separate reviewer record against that exact attempt and exact
-  candidate after inspecting the artifacts itself. It chooses `accepted` or `rejected`, supplies its
-  own rationale/citations, and classifies every rejection finding as exactly one of
-  `implementation defect`, `evidence gap`, `requirement contradiction/overconstraint`, `test/tool
-  defect`, or `external blocker`. It never modifies the worker record, and acceptance never floats
-  to a later candidate.
-- Rejection closes that attempt; a repair appends a successor citing the predecessor and listed
-  findings. Accepted attempts stay closed. During successor verification, an outside-list
-  regression, changed route, or changed requirement goes directly to the developer; it does not add
-  a finding, reopen a resolved item, or reset the review. Same-reviewer verification and shrinking
-  findings stay in force; an architect takeover continues the same attempt lineage.
-- A requirement contradiction/overconstraint is rejected and routed through the architect for
-  developer-approved revision; builders and reviewers may propose a revision but never rewrite or
-  approve one.
+Missing rationale, an unapproved packet revision, missing evidence, evidence of the wrong class or invalid citations requires rejection. The overall verdict cannot pass while a requirement is rejected.
 
-## The master-level summary is disposable
+An accurately reported `blocked` row may be accepted as a truthful handoff. It still requires a `BLOCK` recommendation until the requirement is delivered or becomes an approved change.
 
-The detailed per-leaf worker and reviewer records are authority. A master maintains a rebuildable
-summary linking those records and showing attempts, rejection history, current state, and dominant
-open failure class per requirement manifestation. The summary is a disposable observation only: it
-is never a requirement contract, lifecycle/closeout gate, queue authority, or task-authoring lock.
-Missing or stale summary state is rebuilt from leaf journals and cannot block work.
+## Keep requirement revisions and attempts distinct
 
-## The durable-evidence promotion hold point (a separate concern)
+The canonical `ID@version` identifies semantic intent and changes only through explicit developer approval. A leaf-local attempt identifier records the exact candidate handed to independent review for one manifestation of that revision.
 
-For each newly created or retained fixture, recording, generator, shared support file, or migration
-proof, the handoff records either:
+The builder advances the attempt identifier only when handing a candidate to review, or when Reviewer rejection requires a successor handoff.
+Internal implementation, test and evidence reruns do not create attempts. Record those runs separately as experimental protocol events: candidate identity, command, result, failure cause, repair and expected proof for the next run.
 
-1. the registered stable contract identity, real owner, executable evidence node, and exact
-   consumers; or
-2. the expiry date, executable replacement/removal event, owner, and compatibility consequence.
+### Append the builder's immutable record
 
-For example, a retained provider frame may graduate to
-`contract:codex-agent-wire-version-matrix`; a migration comparison expiring on `2026-09-30` must
-name an exact `node:...::test_replacement` and removal event. "Useful later" is neither option. A
-missing or contradictory catalog row is implementation work, never a review note or tool blocker.
+Before review handoff, the builder appends an immutable Worker attempt record to the leaf's detailed journal. It binds:
 
-This hold point is **independent of requirement acceptance**: a valid stable-contract-or-expiry
-disposition cannot fill a missing requirement rationale or verification proof, and a satisfied
-requirement cannot waive missing lifecycle metadata for durable evidence.
+- The revision and manifestation.
+- The predecessor and carried findings, when present.
+- The exact candidate tree or commit, or suitable non-code digest and anchors.
+- Its requirement-specific status, rationale, citations, findings and failure class.
+- A content-addressed reference to immutable expanded evidence.
+
+The frozen expanded artifact carries shared definitions and complete command results. Do not duplicate the complete master acceptance envelope or experimental-run body in every attempt.
+
+Validate the complete record before appending it. Append and exact-candidate review handoff form one logical formal-attempt boundary.
+
+Preserve a malformed record that has not been handed over, and append a `non-attempt-correction`/void reference. It consumes no attempt identifier: the corrected record uses the same next identifier at handoff.
+
+A malformed record already handed over is a formal attempt. The independent Reviewer rejects it; the Worker may append a successor only at the next review handoff. The Worker never rejects its own record or silently replaces either kind of record.
+
+### Append the independent review record
+
+After inspecting the artifacts itself, the independent Reviewer appends its own record against the exact attempt and candidate. It chooses `accepted` or `rejected`, gives its own rationale and citations, and assigns each rejection finding exactly one class:
+
+- `implementation defect`
+- `evidence gap`
+- `requirement contradiction/overconstraint`
+- `test/tool defect`
+- `external blocker`
+
+The Reviewer never modifies the Worker record. Acceptance never carries forward to a later candidate.
+
+### Preserve closed attempts and sealed findings
+
+Rejection closes the attempt. A repair appends a successor citing its predecessor and sealed findings. Accepted attempts also remain closed.
+
+Use the two sanctioned routes for adding a finding after the list is sealed, defined in the [review operation's Boundaries](../operations/review.md#boundaries). Send all other observations outside the findings list and changed promises through the parent to the developer; do not add or reopen findings or reset review. The same-Reviewer and shrinking-list rules remain, subject to those defined routes.
+
+Reject a requirement contradiction or overconstraint and route it through the Architect for a developer-approved revision. Builders and Reviewers may propose a revision; they never rewrite or approve one themselves.
+
+## Keep the master summary rebuildable
+
+The detailed Worker and Reviewer records for each leaf are authoritative. The master keeps a summary linking them and showing attempts, rejection history, current state and the dominant open failure class for each requirement manifestation.
+
+This summary is a disposable observation, not a requirement contract, lifecycle or closeout gate, queue authority or task-authoring lock. Rebuild it from leaf journals when missing or stale; it never blocks work.
+
+## Record how retained evidence will be maintained
+
+For each new or retained fixture, recording, generator, shared support file or migration proof, the handoff records one of these sets:
+
+1. Registered stable contract identity, real owner, executable evidence node and exact consumers.
+2. Expiry date, executable replacement or removal event, owner and compatibility consequence.
+
+For example, a retained provider frame may become part of a named wire-version-matrix contract. A migration comparison with an expiry date must name an exact `node:...::test_replacement` and removal event. “Useful later” satisfies neither option.
+
+Missing or contradictory catalog metadata requires implementation work. It is never just a review note or tool blocker.
+
+This obligation is independent of requirement acceptance. Valid contract or expiry information cannot replace requirement rationale or verification proof. A satisfied requirement cannot waive missing lifecycle metadata for durable evidence.
+
+Worker, Reviewer, Curator: At the end of each round, pack that round's bulk evidence (captures, logs, generated packages) into one archive in your report folder, with a manifest of its files and hashes, and keep loose only the archive, its manifest and the files the next step reads.

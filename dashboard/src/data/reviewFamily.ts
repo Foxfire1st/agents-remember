@@ -29,7 +29,7 @@ export type ReviewFamilySideState = "recorded" | "not_recorded" | "not_resolved"
 
 export type ReviewFamilyEntryState = "recorded" | "partial" | "unresolved" | "unavailable";
 
-// The one key that joins a member context to the evidence and assessment owners' own collections.
+// The key joining a member context to its recorded source and relationship collections.
 // It is a value rather than prose because joining on a display label or a path would be inventing
 // the association.
 export const FAMILY_CONTEXT_JOIN_KEY = "invariant_revision_id";
@@ -127,8 +127,9 @@ export interface ReviewReadCounts {
 }
 
 // The read owner's own window of one family revision's recorded scope, stated as its page.
-// `complete` is the owner's own `enumeration_complete`: a truncated roster carries the cursor that
-// reaches the rest, and the server refuses the two facts disagreeing.
+// `complete` means the end of enumeration, not that this page holds every member. The whole
+// selection was returned when primary_items_returned equals primary_items_total. A truncated
+// roster carries the owner's cursor, and the server refuses contradictory remainder facts.
 export interface ReviewFamilyRosterPage {
   scope: string[];
   state: "first_page" | "continued";
@@ -159,10 +160,20 @@ export interface ReviewFamilyRevisionContext {
 // statement pane. Both consume the recorded pair or explicit non-pair; neither selects a head.
 export type ReviewRevisionSelectionState =
   | "compared"
-  | "ambiguous"
   | "unresolved"
   | "added"
   | "removed";
+
+// Who wrote one selected revision, as its tree's history files record it (`revision_selection.py`):
+// `recorded` names the owners whose changed row wrote it, `introduced` the record's origin for
+// revision 1; `not_recorded` and `unavailable` name no owner and say why in `detail`.
+export type ReviewRevisionWriterState = "recorded" | "introduced" | "not_recorded" | "unavailable";
+
+export interface ReviewRevisionWriter {
+  state: ReviewRevisionWriterState;
+  owners: string[];
+  detail: string;
+}
 
 export interface ReviewRevisionSelection {
   record_kind: "invariant" | "family";
@@ -170,11 +181,67 @@ export interface ReviewRevisionSelection {
   state: ReviewRevisionSelectionState;
   before_revision_id?: string;
   after_revision_id?: string;
+  // Each selected revision's own display version (`r3`), as `revision_selection.py` carries it.
+  before_display_version?: string;
+  after_display_version?: string;
   before_heads: string[];
   after_heads: string[];
   before_retained: string[];
   after_retained: string[];
   statement: string;
+  // The selected revisions' writers; absent where a side selects none or none was read (a family
+  // context's own selections).
+  before_writer?: ReviewRevisionWriter;
+  after_writer?: ReviewRevisionWriter;
+}
+
+// The change facts of a tree comparison (MIK-R33), mirroring `models/knowledge/review_change_kinds.py`.
+// The server computes every fact for the members a page returned; a rendering orders, counts and
+// traverses by them and never recomputes one.
+export type ReviewChangeKind = "intent" | "implementation" | "membership" | "unknown" | "unchanged";
+export type ReviewChangeFact = "established" | "not_established" | "unknown";
+export type ReviewChangeMark =
+  | "intent"
+  | "implementation"
+  | "membership"
+  | "text_differs"
+  | "test"
+  | "unknown";
+
+// One member occurrence: one invariant under one family. `member_id` is the roster's membership
+// identity, the same on both sides, so both revision rows of a revised member read these facts.
+// `text_differs` is an `intent` resting on one revision whose text differs between the sides;
+// `unknown_reasons` says why each unknown fact is unknown, and is non-empty exactly when one is.
+export interface ReviewMemberChange {
+  member_id: string;
+  invariant?: string;
+  authored_position?: number;
+  intent: ReviewChangeFact;
+  implementation: ReviewChangeFact;
+  membership: ReviewChangeFact;
+  proof: boolean;
+  text_differs: boolean;
+  // An entry of the member in a changed file supplies no range there: `unknown` is marked whatever
+  // else holds (ICR-R32 rule 1).
+  range_unresolved: boolean;
+  primary: ReviewChangeKind;
+  marks: ReviewChangeMark[];
+  evidence: string[];
+  // Why the change kind is not fully known (`intent`, `implementation`, an unresolved range), and why
+  // the membership is unknown: kept apart, so neither reads as the other.
+  unknown_reasons: string[];
+  membership_reasons: string[];
+}
+
+// The family's own row (its guarantee's fact) and its returned member occurrences. `members_total`
+// is the deduplicated union of the family's members on either side; absent when it could not be read.
+export interface ReviewFamilyChanges {
+  family?: string;
+  guarantee: "intent" | "unchanged" | "unknown";
+  guarantee_detail: string;
+  members_total?: number;
+  members: ReviewMemberChange[];
+  detail?: string;
 }
 
 export interface ReviewFamilyContextEntry {
@@ -189,15 +256,12 @@ export interface ReviewFamilyContextEntry {
   candidates: ReviewFamilyGuarantee[];
   state: ReviewFamilyEntryState;
   detail: string;
+  change_kinds?: ReviewFamilyChanges;
 }
 
 export interface ReviewFamilyContextReferences {
   relationship_union: string;
   source_inventory: string;
-  evidence_links: string;
-  observations: string;
-  assessments: string;
-  applicability: string;
   join_key: string;
   detail: string;
 }
@@ -229,10 +293,8 @@ export interface FamilyMemberRow {
 }
 
 // Why a family context could not name one selected revision, in the server's own vocabulary. It is a
-// distinct answer from "no members": a lineage this context could not reduce to a head is not a
-// roster that came back empty.
+// distinct answer from "no members": an unreadable selection is not an empty roster.
 export const UNRESOLVED_SELECTION_STATES: ReviewRevisionSelectionState[] = [
-  "ambiguous",
   "unresolved",
 ];
 

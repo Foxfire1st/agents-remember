@@ -20,9 +20,9 @@ The work is split so each part can be understood and tested alone:
   to the admitted policy.
 
 What this module owns is the seal: the semantic digest and the diagnostic manifest.
-The digest covers the admitted facts and the bytes that were composed, and nothing
-else — no timestamp, no unselected source, no refusal text — so two runs over the
-same admission and the same files are the same capsule.
+The digest covers the admitted facts, the bytes that were composed and the declared
+every-role digest's revision. Other unselected sources, timestamps and refusal text
+stay outside it, so two runs over the same admission and files are the same capsule.
 """
 
 from __future__ import annotations
@@ -30,6 +30,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from agents_remember.errors import CapsuleCompilationError
+from agents_remember.models.role_capsules.audiences import select_operation_audience
+from agents_remember.models.role_capsules.contracts import (
+    CapsuleContractMarker,
+    read_contract_markers,
+    strip_contract_markers,
+)
+from agents_remember.models.role_capsules.details import compile_detail_references
 from agents_remember.models.role_capsules.diagnostics import (
     CapsuleConflictRecord,
     CapsuleManifest,
@@ -58,7 +65,10 @@ from agents_remember.models.role_capsules.sources import (
     instruction_identity,
     skills_declared_identity,
 )
-from agents_remember.models.role_capsules.statuses import STATUS_TASK_CONTEXT_DIGEST_MISMATCH
+from agents_remember.models.role_capsules.statuses import (
+    STATUS_MISSING_REQUIRED_INSTRUCTION,
+    STATUS_TASK_CONTEXT_DIGEST_MISMATCH,
+)
 from agents_remember.models.role_capsules.tools import narrow_tool_requests
 from agents_remember.models.role_capsules.types import (
     SUPERSEDE_DUPLICATE_IDENTITY,
@@ -111,6 +121,7 @@ def compile_role_capsule(
         identities,
         scope.declared(binding),
     )
+    every_role = _every_role_source(parsed, scope, by_path)
     resolved = resolve_instructions(
         gather_candidates(scope.declared(binding), by_path, identities),
         binding.overrides,
@@ -118,11 +129,42 @@ def compile_role_capsule(
         identities,
         _preferred_paths(identities, selection, binding),
     )
-    blocks = tuple(item.block() for item in resolved)
+    operation = parsed.operations[binding.operation]
+    selected_blocks: list[CapsuleInstructionBlock] = []
+    contract_markers: list[CapsuleContractMarker] = []
+    for item in resolved:
+        block = item.block()
+        if item.composition_root in ("role", "operation"):
+            contract_markers.extend(
+                read_contract_markers(
+                    block, parsed.role_order, scope.role, source_text=item.source.text()
+                )
+            )
+        if item.composition_root == "operation":
+            block = select_operation_audience(
+                block,
+                operation.audience,
+                operation.applies_to_roles,
+                scope.role,
+                source_text=item.source.text(),
+            )
+        selected_blocks.append(strip_contract_markers(block))
+    blocks = tuple(selected_blocks)
     task_context = verified_task_context(binding, projection)
     tools = narrow_tool_requests(_declared_tools(scope), binding)
     skills = skill_references(scope, parsed, by_path)
+    details = compile_detail_references(blocks, parsed.detail_references, by_path, scope.role)
     digest = semantic_digest(binding, blocks, task_context, tools, skills)
+    if every_role is not None:
+        digest = compute_semantic_digest(digest + f"\ncore:every-role\t{every_role.revision}")
+    if details:
+        digest = compute_semantic_digest(
+            digest
+            + "\n"
+            + "\n".join(
+                f"detail\t{entry.source_path}\t{entry.revision}\t{entry.step}" for entry in details
+            )
+        )
     return CapsuleCompilationResult(
         capsule=CapsuleCapsule(
             instruction_units=tuple(
@@ -134,15 +176,40 @@ def compile_role_capsule(
             requested_tools=tools,
             semantic_digest=digest,
             binding=binding,
+            detail_references=details,
+            contract_markers=tuple(contract_markers),
         ),
         manifest=compiled_manifest(
             scope,
             binding,
             digest=digest,
             identities=tuple(block.identity for block in blocks),
-            records=source_records(resolved, by_path, parsed, selection),
+            records=source_records(resolved, by_path, parsed, selection, every_role=every_role),
         ),
     )
+
+
+def _every_role_source(
+    parsed: CapsuleCompositionManifest,
+    scope: CapsuleScope,
+    by_path: Mapping[str, CapsuleSource],
+) -> CapsuleSource | None:
+    """The declared digest is required for a role but never composed into its blocks."""
+
+    entry = parsed.core.get("every-role")
+    if scope.role_entry is None or entry is None:
+        return None
+    source = by_path.get(entry.source)
+    if source is None:
+        raise CapsuleCompilationError(
+            status=STATUS_MISSING_REQUIRED_INSTRUCTION,
+            detail=(
+                f"declared digest core:every-role at {entry.source!r} was not admitted, "
+                "so no content-addressed revision exists for it"
+            ),
+            next_action="admit the every-role source declared by the composition manifest",
+        )
+    return source
 
 
 # --------------------------------------------------------------------------------------
@@ -253,7 +320,9 @@ def semantic_digest(
     # in the manifest) and must not change the capsule.
     lines.append("specializations\t" + ",".join(_selected_specializations(blocks)))
     lines += [
-        f"block\t{block.composition_root}\t{block.identity}\t{block.revision}" for block in blocks
+        f"block\t{block.composition_root}\t{block.identity}\t{block.revision}\t"
+        f"{compute_content_digest(block.content.encode('utf-8'))}"
+        for block in blocks
     ]
     lines += [f"tool\t{request.tool_id}" for request in tools]
     lines += [
@@ -299,6 +368,8 @@ def source_records(
     by_path: Mapping[str, CapsuleSource],
     parsed: CapsuleCompositionManifest,
     selection: CapsuleSourceSelection,
+    *,
+    every_role: CapsuleSource | None = None,
 ) -> tuple[CapsuleSourceRecord, ...]:
     """Every source the compilation considered or the metadata declared, with its story.
 
@@ -341,6 +412,20 @@ def source_records(
             )
             for source in item.collapsed
         ]
+    if every_role is not None:
+        records.append(
+            CapsuleSourceRecord(
+                identity="core:every-role",
+                composition_root="core",
+                path=every_role.path,
+                revision=every_role.revision,
+                selected=False,
+                selection_reason=(
+                    "admitted as the shared role digest's sealed revision, "
+                    "not as a composed instruction block"
+                ),
+            )
+        )
     for name, entry in sorted(parsed.skills.items()):
         source = by_path.get(entry.source)
         if source is None:

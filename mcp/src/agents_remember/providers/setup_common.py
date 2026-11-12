@@ -79,6 +79,17 @@ def provider_settings(settings: dict[str, Any], provider_id: str) -> dict[str, A
 
 
 def provider_enabled(settings: dict[str, Any], provider_id: str) -> bool:
+    # MIK-R112 F02: the two retired providers never count as enabled, however
+    # the settings read. This is the single choke every product install/prepare/
+    # watcher path shares -- install_enabled_providers, prepare_enabled_providers
+    # (install/prepare/seed), _watcher_results (start/status) and the worktree
+    # start preflight all consult selected_provider_enabled/provider_enabled, so
+    # with old keys enabled in authority settings the setup still performs zero
+    # CGC/GrepAI install/start/watch. The explicitly required old-watcher stop
+    # lives in install/provider_watchers.py and is not gated here. Non-provider
+    # callers never consult these helpers.
+    if provider_id in ("codegraphcontext-code", "grepai-memory"):
+        return False
     provider = context_providers(settings).get(provider_id)
     return isinstance(provider, dict) and provider.get("enabled") is True
 

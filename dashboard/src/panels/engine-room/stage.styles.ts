@@ -1,5 +1,5 @@
-// Engine Room SVG-stage tokens: the two-world scene, branch nodes, podracer engine gauges, the warp
-// coupler, wires, and lane flags. Static layout only — all canvas motion is GSAP + Motion.
+// Engine Room SVG-stage tokens: the two-world scene, branch nodes, the warp coupler, and lane flags.
+// Static layout only — all canvas motion is GSAP + Motion.
 import { css, cva } from "../../../styled-system/css";
 
 export const sceneSvg = css({
@@ -74,118 +74,6 @@ export const prunedNode = css({
   fill: "oklch(0.18 0.02 25)",
   strokeDasharray: "3 3",
   opacity: "0.8",
-});
-
-// Podracer engine gauge — outer column coloured by runtime; the charge fill shows the settled
-// (nominal) energy level. The center-out boot-fill GROWTH is G2 (this is the static end-state).
-export const engineGaugeOut = cva({
-  // 5o/05o — constant GOLD bezel, FLAT (no glow): the body charge carries runtime state, not the frame, so the
-  // gold frame stays a quiet structural outline. FAULT is the one exception that re-colours the frame red (+ a
-  // red glow) so a down engine is unmistakable. Matches the engine-room visual-language spec (docs/design/engine-room).
-  base: {
-    fill: "token(colors.bg)",
-    stroke: "token(colors.amber)",
-    strokeWidth: "2",
-    opacity: "0.95",
-  },
-  variants: {
-    runtimeState: {
-      nominal: {}, // gold bezel
-      configured: { opacity: "0.5" }, // materialised but drained: dim bezel
-      indexing: {}, // gold bezel (the cyan body shows it's charging)
-      // down = FAULT → frame goes red + a red glow + a GENTLE breathe (data-fx='fault', ~1.7s sine; never a strobe).
-      down: { stroke: "token(colors.alarm)", filter: "drop-shadow(0 0 5px token(colors.alarm))" },
-      missing: { stroke: "token(colors.alarm)", strokeDasharray: "5 4", opacity: "0.65" },
-      unknown: { strokeDasharray: "4 3", opacity: "0.55" },
-    },
-  },
-});
-
-// Reindex reroute (t9c, seedFallback) — an AMBER center-out pulse (a fallback, NOT the red fault). GSAP
-// (data-fx='reindex') drives the scaleY/opacity pulse; under !animate it rests at this charged amber bar.
-export const engineReindexCharge = css({
-  fill: "token(colors.amber)",
-  opacity: "0.85",
-  transformBox: "fill-box",
-  transformOrigin: "center",
-});
-
-// The reindex OUTER stays amber (warning) so a rerouting engine reads amber-on-amber, not green-nominal.
-export const engineReindexOut = css({
-  fill: "token(colors.bg)",
-  stroke: "token(colors.amber)",
-  strokeWidth: "1.5",
-  opacity: "0.95",
-});
-
-// The boot-fill charge rect. transform-box/origin make the scaleY grow CENTER-OUT (not bottom-up); the
-// recipe carries only the static FILL as colour-as-state (cyan charging → mint "went green" → amber/alarm).
-// Motion (EnclosureCanvas chargeMotion) owns the animated scaleY (the boot-fill growth) + opacity, so CSS
-// and Motion never write the same property. Under !animate the rect mounts at the runtime end-state.
-export const engineCharge = cva({
-  base: { transformBox: "fill-box", transformOrigin: "center" },
-  variants: {
-    runtimeState: {
-      // 5o glow pass — the charged body glows its state colour so the engine reads as powered, not flat.
-      nominal: { fill: "token(colors.mint)", filter: "drop-shadow(0 0 4px token(colors.mint))" }, // healthy green
-      configured: { fill: "token(colors.cyan)" }, // materialised, drained (dim) — no glow
-      indexing: { fill: "token(colors.cyan)", filter: "drop-shadow(0 0 4px token(colors.cyan))" }, // charging cyan
-      down: { fill: "token(colors.alarm)", filter: "drop-shadow(0 0 5px token(colors.alarm))" },
-      missing: { fill: "token(colors.alarm)" },
-      unknown: { fill: "token(colors.dormant)" },
-    },
-  },
-});
-
-export const engineDiv = css({ stroke: "token(colors.bg)", strokeWidth: "2", opacity: "0.85" });
-export const engineGaugeLabel = css({
-  fill: "token(colors.ink)",
-  fontSize: "12px",
-  letterSpacing: "0.1em",
-  fontWeight: "600",
-});
-
-// Podracer gauge detail (ported 1:1 from podstage.html .e-spine / .e-petal): a faint centre spine
-// plus the fanned flank petals — the fine lines that read each unit as an engine, not a bar. The
-// spine is constant; the petals follow the engine's runtime colour so they stay state-honest.
-export const engineSpine = css({ stroke: "token(colors.amber)", strokeWidth: "0.8", opacity: "0.28" });
-export const enginePetal = cva({
-  // 05o — petals are now constant GOLD line-art, matching the always-amber `engineSpine`: they read the engine
-  // as a podracer, they do not carry runtime state (the body charge + bezel do). Only PRESENCE varies by state
-  // (an off/unknown engine fans no petals), so the colour is amber throughout and opacity is the state axis.
-  base: { strokeWidth: "1.4", strokeLinecap: "round", stroke: "token(colors.amber)" },
-  variants: {
-    runtimeState: {
-      nominal: { opacity: "0.6" },
-      configured: { opacity: "0" }, // off → no petals
-      indexing: { opacity: "0.6" },
-      down: { opacity: "0.6" },
-      missing: { opacity: "0" },
-      unknown: { opacity: "0" },
-    },
-  },
-});
-
-// Official-line provider→branch wiring (podstage.html .wire): the workspace CGC/GrepAI feeding the
-// official code/memory nodes. Structural truth, present whenever the official engines exist.
-export const officialWire = css({
-  fill: "none",
-  stroke: "token(colors.amber)",
-  strokeWidth: "2",
-  opacity: "0.8",
-  strokeLinecap: "round",
-});
-
-// The worktree engine→branch wiring (mirror of officialWire) — but Motion (EnclosureCanvas) owns its
-// opacity: it fades in when the engine materialises (B3) and out when the engine powers down (D5). So this
-// variant carries NO opacity — a className `opacity` shadows Motion's animated value under initial=false
-// (the inline animated value and the class fight, and the class wins on a static frame), which is exactly
-// what left the wires dangling on the worktree side when no engine was present.
-export const worktreeWire = css({
-  fill: "none",
-  stroke: "token(colors.amber)",
-  strokeWidth: "2",
-  strokeLinecap: "round",
 });
 
 // Canopy housing (podstage.html .canopy): the decorative HUD frame — a double bevel rim, the four L

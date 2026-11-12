@@ -26,6 +26,7 @@ from agents_remember.application.review_candidate_resolution import (
     refusal,
 )
 from agents_remember.application.review_committed_leaf import closed_leaf_dataset_refusal
+from agents_remember.application.review_legacy_comparison import knowledge_unavailable_refusal
 from agents_remember.models.knowledge.review import ReviewRefusal
 
 __all__ = ["absent_pair_refusal", "pair_preflight_refusal"]
@@ -35,7 +36,8 @@ def pair_preflight_refusal(resolved: ReviewCandidateResolution) -> ReviewRefusal
     """The first refusal the resolved pair earns as a whole, or ``None`` when both halves read."""
 
     return (
-        closed_leaf_dataset_refusal(resolved)
+        knowledge_unavailable_refusal(resolved)
+        or closed_leaf_dataset_refusal(resolved)
         or absent_pair_refusal(resolved)
         or unreadable_half_refusal(resolved.baseline_database, resolved.candidate_database)
         or candidate_receipt_refusal(resolved)
@@ -63,9 +65,8 @@ def absent_pair_refusal(resolved: ReviewCandidateResolution) -> ReviewRefusal | 
             "other dataset"
         ),
         next_action=(
-            "author the candidate's knowledge in the leaf's disposable knowledge root, and place the "
-            "dataset it forks from in the baseline half if this leaf has one; the surface substitutes "
-            "no other dataset"
+            "restore the named recorded memory tree or rebuild its derived index, then reopen the "
+            "review; no current memory tree is substituted"
         ),
         offending_input=database.name,
     )

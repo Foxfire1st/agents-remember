@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import time
 from unittest import mock
 
 import pytest
@@ -14,15 +13,16 @@ from agents_remember.worktrees.integration.lifecycle.worker.child_processes impo
 from agents_remember.worktrees.integration.lifecycle.worker.termination import (
     require_linux_worker_runtime,
 )
+from agents_remember_test_support.testing.waits import wait_until
 
 
 def test_retained_worker_child_is_reaped_by_its_owner() -> None:
     process = subprocess.Popen([sys.executable, "-c", "pass"])
     retain_detached_worker_child(process)
 
-    deadline = time.monotonic() + 5
-    while process.returncode is None and time.monotonic() < deadline:
-        time.sleep(0.01)
+    wait_until(
+        lambda: process.returncode is not None, "the retained child to be reaped by its owner"
+    )
 
     assert process.returncode == 0
     with pytest.raises(ChildProcessError):

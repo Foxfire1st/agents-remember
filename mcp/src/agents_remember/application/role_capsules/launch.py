@@ -1,9 +1,5 @@
 """Compile the capsule one launch must supply, through the compiler every seat already uses.
 
-This is the module the severed chain was missing. Until it existed, the compiler (L2), the admission
-and MCP surface (L4), the Codex carrier (L5) and the eve carrier (L7) were each individually proven
-and no production launch point supplied a capsule to anything.
-
 **One compiler, one routing rule.** Nothing here re-implements selection. A task-attached seat goes
 through :func:`~agents_remember.application.skill_resources.compile_task_capsule` — the same
 operation the registered MCP tool answers — and a seat with no task document goes through
@@ -15,11 +11,12 @@ routed source set built by the same manifest rule
 **What a task-attached seat's admission is.** The task document the launch already holds is resolved
 by the task layer, and the enclosure that admits it is resolved through the control plane's own
 worktree-contract reader — a leaf document by its leaf id, any other document by its task's own
-series contract. The repository root comes from the MCP configuration's registered repository for
-the repository the document itself declares; nothing is taken from the caller's string.
+series contract. The contract supplies the canonical repository root; the registered MCP entry
+proves that the document's repository is authorized, while its scoped worktree path remains the
+code root for MCP tool access.
 
 **What a free agent's admission is, and the one convention this module had to define.** A free agent
-(a role, no task document — ``bootstrap`` is admitted to that class by ``TASKLESS_SEAT_ROLES``) has
+(a role, no task document — ``bootstrap`` is one) has
 no task plane at all: no document to digest, no revision to pin, no projection to carry. The frozen
 :class:`~agents_remember.models.role_capsules.types.CapsuleAdmittedFacts` has no typed absence for
 it (all four identity fields are non-blank strings), so the absence is minted **once, here**, by
@@ -27,10 +24,9 @@ it (all four identity fields are non-blank strings), so the absence is minted **
 deliberately does not parse as a task reference and whose digest covers the seat admission the
 launch actually performed. Nothing else in the tree can produce that value.
 
-**The carriers are the ones the master already built.** Codex's is
-:func:`~agents_remember.serving.capsule_delivery.capsule_delivery_from` over the compilation result;
-eve's is the carrier L7 materializes plus the two environment references its loader reads. A launch
-sets the carrier for the harness it is about to start; the other stays empty.
+**The value a launch carries.**
+:func:`~agents_remember.serving.capsule_delivery.capsule_delivery_from` copies the compilation
+result into the one value every launch reads, whatever agent the host starts.
 """
 
 from __future__ import annotations
@@ -39,10 +35,6 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.application.eve_capsule import (
-    EveBindingRequest,
-    materialize_eve_binding,
-)
 from agents_remember.application.role_capsules.compilation import compile_admitted_capsule
 from agents_remember.application.skill_resources import (
     CapsuleCompileOutcome,
@@ -53,11 +45,12 @@ from agents_remember.application.skill_resources import (
     routed_admission_for,
     shipped_composition_corpus,
 )
-from agents_remember.errors import CapsuleCompilationError, HarnessControlError
+from agents_remember.errors import CapsuleCompilationError
 from agents_remember.kernel.coordination_context.models import EnclosureSelector
 from agents_remember.kernel.git_facts import read_git_facts
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_capsules.manifest import parse_composition_manifest
+from agents_remember.models.role_capsules.selection import narrow_operation
 from agents_remember.models.role_capsules.types import (
     CapsuleAdmittedFacts,
     CapsuleBinding,
@@ -66,7 +59,8 @@ from agents_remember.models.role_capsules.types import (
     CapsuleRoleSeat,
     compute_content_digest,
 )
-from agents_remember.models.role_capsules.vocabulary import CAPSULE_ROLES
+from agents_remember.models.role_capsules.vocabulary import CAPSULE_ROLES, CapsuleOperation
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.capsule_delivery import capsule_delivery_from
 from agents_remember.serving.launch_capsule import (
@@ -76,7 +70,11 @@ from agents_remember.serving.launch_capsule import (
     LaunchCapsuleRequest,
     refused_launch_capsule,
 )
-from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
+from agents_remember.tasks.document_refs import (
+    ResolvedTaskDocument,
+    TaskDocumentRefError,
+    TaskDocumentTopology,
+)
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
@@ -96,25 +94,20 @@ A free agent is not admitted onto a branch the way a worktree-bound seat is, and
 better than refusing to start the one seat whose job is to set a repository up.
 """
 
-EVE_CARRIER_ROOT = ("runtime", "eve-carriers")
-"""Where a launch's eve carrier is written, under the coordination root.
-
-Outside every workspace by construction, which is what L7's carrier requires: the runtime's own
-file tools are confined to the workspace, so the instructions it applies are not a file the model
-can rewrite.
-"""
-
 
 @dataclass(frozen=True, slots=True)
 class AdmittedTaskSeat:
     """One task-attached seat, resolved once from the launch's own admitted document.
 
     The five facts every carrier needs — the role, the document reference, the enclosure selector,
-    the repository root and the document's own repository name — are resolved together, because
-    resolving them apart is how two carriers end up binding to two different enclosures.
+    the contract-declared canonical repository root and the document's own repository name — are
+    resolved together, because resolving them apart is how two carriers end up binding to different
+    repositories or enclosures. The configured repository path can be a scoped leaf worktree and is
+    not the repository identity.
     """
 
     role: str
+    operation: CapsuleOperation
     reference: TaskDocumentRef
     selector: EnclosureSelector
     contract_path: Path
@@ -189,6 +182,33 @@ class FreeAgentSeatAdmission:
         return CapsuleAdmittedFacts(
             task_reference=self.task_reference,
             task_document_digest=self.digest(),
+            seat=CapsuleRoleSeat(role=self.role, altitude=self.altitude),  # type: ignore[arg-type]
+            repository_id=self.repository_id,
+            work_branch=self.work_branch,
+            tool_policy=tool_policy,  # type: ignore[arg-type]
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectTaskSeatAdmission:
+    """A real sprint/master task admitted at the configured Projects workspace."""
+
+    role: str
+    reference: TaskDocumentRef
+    altitude: str
+    repository_id: str
+    work_branch: str
+    task_document_digest: CapsuleDigest
+
+    def __post_init__(self) -> None:
+        for name in ("role", "altitude", "repository_id", "work_branch"):
+            if not getattr(self, name).strip():
+                raise ValueError(f"a project-task admission requires a non-blank {name}")
+
+    def admitted_facts(self, *, tool_policy: object) -> CapsuleAdmittedFacts:
+        return CapsuleAdmittedFacts(
+            task_reference=self.reference.key,
+            task_document_digest=self.task_document_digest,
             seat=CapsuleRoleSeat(role=self.role, altitude=self.altitude),  # type: ignore[arg-type]
             repository_id=self.repository_id,
             work_branch=self.work_branch,
@@ -271,15 +291,17 @@ def _contains(parent: Path, child: Path) -> bool:
 
 
 def compile_launch_capsule(
-    config: McpRuntimeConfig, request: LaunchCapsuleRequest
+    config: McpRuntimeConfig,
+    request: LaunchCapsuleRequest,
+    *,
+    operation: str | None = None,
 ) -> LaunchCapsule:
     """Compile the capsule one launch will supply, or refuse it by name.
 
-    Called by the launch points through the serving tier's :data:`LaunchCapsuleResolver` port, so a
-    serving-rank route can decide and record its instruction mode without importing this tier.
+    Called by the role launch before it builds its launch request.
     """
 
-    role = (request.role or "").strip()
+    role = canonical_role((request.role or "").strip())
     if role not in CAPSULE_ROLES:
         return refused_launch_capsule(
             request.role,
@@ -289,13 +311,20 @@ def compile_launch_capsule(
                 f"({', '.join(CAPSULE_ROLES)}), so no capsule can be compiled for it"
             ),
         )
+    try:
+        selected_operation = narrow_operation(LAUNCH_OPERATION if operation is None else operation)
+    except CapsuleCompilationError as error:
+        return refused_launch_capsule(role, error.status, error.render())
     if request.task_document_ref is None:
-        return _compile_free_agent(config, request, role)
-    return _compile_admitted_task(config, request, role)
+        return _compile_free_agent(config, request, role, selected_operation)
+    return _compile_admitted_task(config, request, role, selected_operation)
 
 
 def _compile_admitted_task(
-    config: McpRuntimeConfig, request: LaunchCapsuleRequest, role: str
+    config: McpRuntimeConfig,
+    request: LaunchCapsuleRequest,
+    role: str,
+    operation: CapsuleOperation,
 ) -> LaunchCapsule:
     """The task-attached path: the launch's own admitted document, compiled and carried."""
 
@@ -306,125 +335,157 @@ def _compile_admitted_task(
         resolved = topology.resolve(ref)
     except TaskDocumentRefError as error:
         return refused_launch_capsule(role, "task-binding-unresolved", str(error))
-    document = resolved.document
-    repository_root = _registered_repository_root(config, document.repo)
-    if repository_root is None:
-        return refused_launch_capsule(
-            role,
-            "repository-not-registered",
-            (
-                f"the admitted task document {ref.key} declares repository {document.repo!r}, which "
-                "this server's configuration does not register; the capsule's admitted repository "
-                "and work branch cannot be resolved"
-            ),
-        )
-    leaf_id = document.id if document.kind == "subTask" else None
-    contract_path = _enclosure_contract(config, document.repo, ref.path, leaf_id)
-    if contract_path is None:
-        return refused_launch_capsule(
-            role,
-            "enclosure-not-found",
-            (
-                f"the admitted task document {ref.key} has no worktree enclosure under "
-                f"{_task_root_of(ref.path)!r}; the capsule's admitted work branch cannot be resolved. "
-                "Run worktree_start for this leaf (or admit the task's own series contract) and "
-                "dispatch again"
-            ),
-        )
-    selector = EnclosureSelector(contract_path=contract_path)
-    seat = AdmittedTaskSeat(
-        role=role,
-        reference=ref,
-        selector=selector,
-        contract_path=contract_path,
-        repository_root=repository_root,
-        document_repository=document.repo,
-    )
-    if (request.harness or "").strip() == "eve":
-        return _compile_eve_task(config, seat)
+    admission = _admit_task_document(config, request, role, operation, resolved)
+    if isinstance(admission, LaunchCapsule):
+        return admission
     outcome = compile_task_capsule(
         config,
         CapsuleCompileRequest(
-            enclosure=selector,
+            enclosure=admission.selector,
             task_path=ref.path,
-            operation=LAUNCH_OPERATION,
+            operation=operation,
             role=role,
-            code_repository_root=repository_root,
         ),
     )
     if not outcome.ok:
         return _refusal(role, outcome)
-    result = outcome.result
-    assert result is not None  # outcome.ok
-    return _capsule_launch(role, result)
-
-
-def _compile_eve_task(config: McpRuntimeConfig, seat: AdmittedTaskSeat) -> LaunchCapsule:
-    """The eve carrier: the launch environment that names the compiled capsule.
-
-    The carrier is materialized by L7's produce side — the same materializer its runtime verifies —
-    so this path compiles nothing itself and adds no second carrier format.
-    """
-
-    report_root, memory_root = _admitted_surfaces(seat.contract_path)
-    try:
-        bound = materialize_eve_binding(
-            config,
-            EveBindingRequest(
-                enclosure=seat.selector,
-                task_path=seat.reference.path,
-                role=seat.role,
-                operation=LAUNCH_OPERATION,
-                carrier_directory=_carrier_directory(config, seat.role, seat.reference.path),
-                code_repository_root=seat.repository_root,
-                report_root=report_root,
-                memory_root=memory_root,
-            ),
-        )
-    except HarnessControlError as error:
-        return refused_launch_capsule(seat.role, "eve-carrier-refused", str(error))
-    result = bound.compilation.result
-    if (
-        result is None
-    ):  # pragma: no cover - materialize_eve_binding refuses rather than returning this
-        return refused_launch_capsule(
-            seat.role,
-            "capsule-compilation-incomplete",
-            "the eve carrier was built from no capsule",
-        )
+    compilation = outcome.compilation
+    assert compilation is not None  # outcome.ok
+    assert compilation.result is not None  # a compilation that carries a result
     return _capsule_launch(
-        seat.role,
-        result,
-        eve_env=dict(bound.env),
-        carrier=bound.carrier_path,
-        # Read back out of the carrier the runtime will re-verify: the launch runs in the workspace
-        # the artifact itself admits, so the session's cwd and the carrier's AR_WORKSPACE_ROOT are
-        # one value rather than two that have to agree.
-        session_workspace=Path(bound.carrier.workspace.root),
+        role,
+        compilation.result,
+        shared_block=compilation.shared_block,
     )
 
 
-def _compile_free_agent(
-    config: McpRuntimeConfig, request: LaunchCapsuleRequest, role: str
-) -> LaunchCapsule:
-    """The free-agent path: a seat with no task document still receives its compiled capsule."""
-
-    if (request.harness or "").strip() == "eve":
+def _admit_task_document(
+    config: McpRuntimeConfig,
+    request: LaunchCapsuleRequest,
+    role: str,
+    operation: CapsuleOperation,
+    resolved: ResolvedTaskDocument,
+) -> AdmittedTaskSeat | LaunchCapsule:
+    document = resolved.document
+    if _registered_repository_root(config, document.repo) is None:
         return refused_launch_capsule(
             role,
-            "eve-carrier-requires-admitted-worktree",
+            "repository-not-registered",
             (
-                "the eve carrier binds a runtime to the admitted git worktree of a task enclosure, "
-                "and a taskless seat has none; an eve free agent therefore has no verified "
-                "instruction channel. Owner: the final verification leaf, with the eve carrier "
-                "producer (L7)"
+                f"the admitted task document {resolved.ref.key} declares repository {document.repo!r}, "
+                "which this server's configuration does not register; the capsule's admitted "
+                "repository and work branch cannot be resolved"
             ),
         )
-    admission = free_agent_seat_admission(config, role=role, workspace_root=request.workspace_root)
-    policy = admitted_tool_policy(config)
+    leaf_id = document.id if document.kind == "subTask" else None
+    contract_path = _enclosure_contract(config, document.repo, resolved.ref.path, leaf_id)
+    if contract_path is None:
+        return _compile_without_task_enclosure(config, request, role, operation, resolved)
+    try:
+        contract = load_contract(contract_path)
+    except (ContractError, OSError) as error:
+        return refused_launch_capsule(
+            role,
+            "enclosure-contract-unavailable",
+            f"the admitted enclosure contract could not be read: {error}",
+        )
+    if contract.repo_name != document.repo:
+        return refused_launch_capsule(
+            role,
+            "enclosure-repository-mismatch",
+            (
+                f"task document repository {document.repo!r} does not match the admitted "
+                f"contract repository {contract.repo_name!r}"
+            ),
+        )
+    return AdmittedTaskSeat(
+        role=role,
+        operation=operation,
+        reference=resolved.ref,
+        selector=EnclosureSelector(contract_path=contract_path),
+        contract_path=contract_path,
+        repository_root=contract.code_repo_path,
+        document_repository=document.repo,
+    )
+
+
+def _compile_without_task_enclosure(
+    config: McpRuntimeConfig,
+    request: LaunchCapsuleRequest,
+    role: str,
+    operation: CapsuleOperation,
+    resolved: ResolvedTaskDocument,
+) -> LaunchCapsule:
+    if request.allow_project_task_binding:
+        return _compile_project_task(config, request, role, operation, resolved)
+    ref = resolved.ref
+    return refused_launch_capsule(
+        role,
+        "enclosure-not-found",
+        (
+            f"the admitted task document {ref.key} has no worktree enclosure under "
+            f"{_task_root_of(ref.path)!r}; the capsule's admitted work branch cannot be resolved. "
+            "Run worktree_start for this leaf (or admit the task's own series contract) and "
+            "dispatch again"
+        ),
+    )
+
+
+def _compile_project_task(
+    config: McpRuntimeConfig,
+    request: LaunchCapsuleRequest,
+    role: str,
+    operation: CapsuleOperation,
+    resolved: ResolvedTaskDocument,
+) -> LaunchCapsule:
+    """Compile the existing role capsule for a real sprint/master opened at Projects scope.
+
+    The task document remains the seat identity and supplies the admitted content digest. Projects
+    is the execution workspace, so no task branch or enclosure is invented for this admission.
+    """
+    expected_altitude = (
+        TaskDocumentTopology(config.coordination_root).altitude(resolved.ref)
+        if role == "investigator"
+        else {"orchestrator": "sprint", "manager": "master"}.get(role)
+    )
+    if (
+        expected_altitude not in {"sprint", "master"}
+        or request.workspace_root.resolve() != config.workspace_root.resolve()
+        or resolved.document.kind != "master"
+    ):
+        return refused_launch_capsule(
+            role,
+            "project-task-binding-invalid",
+            "Projects-scope task binding is limited to canonical sprint/master Investigator, orchestrator/sprint and manager/master launches.",
+        )
+    try:
+        altitude = TaskDocumentTopology(config.coordination_root).validate_role(resolved.ref, role)
+    except TaskDocumentRefError as error:
+        return refused_launch_capsule(role, error.status, str(error))
+    if altitude != expected_altitude:
+        return refused_launch_capsule(
+            role,
+            "project-task-altitude-invalid",
+            f"role {role!r} requires {expected_altitude} altitude, got {altitude!r}",
+        )
+    task_json = json.dumps(
+        resolved.document.model_dump(mode="json", by_alias=True, exclude_none=True),
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    _, work_branch = workspace_identity(config, request.workspace_root)
+    admission = ProjectTaskSeatAdmission(
+        role=role,
+        reference=resolved.ref,
+        altitude=altitude,
+        repository_id=resolved.ref.repository,
+        work_branch=work_branch,
+        task_document_digest=compute_content_digest(task_json),
+    )
     binding = CapsuleBinding(
-        operation=LAUNCH_OPERATION,  # type: ignore[arg-type]
-        admitted=admission.admitted_facts(tool_policy=policy),
+        operation=operation,
+        admitted=admission.admitted_facts(tool_policy=admitted_tool_policy(config)),
     )
     with shipped_composition_corpus() as (root, manifest):
         manifest_bytes = (root / manifest).read_bytes()
@@ -433,7 +494,7 @@ def _compile_free_agent(
                 root,
                 manifest,
                 manifest_bytes,
-                CapsuleSeatAddress(role=role, operation=LAUNCH_OPERATION),
+                CapsuleSeatAddress(role=role, operation=operation),
             )
         except CapsuleCompilationError as error:
             return refused_launch_capsule(role, error.status, error.render())
@@ -444,47 +505,59 @@ def _compile_free_agent(
             getattr(outcome.error, "status", "capsule-compilation-refused"),
             outcome.render_explanation(),
         )
-    return _capsule_launch(role, outcome.result)
+    return _capsule_launch(role, outcome.result, shared_block=outcome.shared_block)
+
+
+def _compile_free_agent(
+    config: McpRuntimeConfig,
+    request: LaunchCapsuleRequest,
+    role: str,
+    operation: CapsuleOperation,
+) -> LaunchCapsule:
+    """The free-agent path: a seat with no task document still receives its compiled capsule."""
+
+    admission = free_agent_seat_admission(
+        config,
+        role=role,
+        operation=operation,
+        workspace_root=request.workspace_root,
+    )
+    policy = admitted_tool_policy(config)
+    binding = CapsuleBinding(
+        operation=operation,
+        admitted=admission.admitted_facts(tool_policy=policy),
+    )
+    with shipped_composition_corpus() as (root, manifest):
+        manifest_bytes = (root / manifest).read_bytes()
+        try:
+            routed = routed_admission_for(
+                root,
+                manifest,
+                manifest_bytes,
+                CapsuleSeatAddress(role=role, operation=operation),
+            )
+        except CapsuleCompilationError as error:
+            return refused_launch_capsule(role, error.status, error.render())
+        outcome = compile_admitted_capsule(binding, routed)
+    if outcome.result is None:
+        return refused_launch_capsule(
+            role,
+            getattr(outcome.error, "status", "capsule-compilation-refused"),
+            outcome.render_explanation(),
+        )
+    return _capsule_launch(role, outcome.result, shared_block=outcome.shared_block)
 
 
 def _capsule_launch(
-    role: str,
-    result: CapsuleCompilationResult,
-    *,
-    eve_env: dict[str, str] | None = None,
-    carrier: Path | None = None,
-    session_workspace: Path | None = None,
+    role: str, result: CapsuleCompilationResult, *, shared_block: str | None = None
 ) -> LaunchCapsule:
-    """The delivered value: the carrier for this launch plus its per-run record."""
+    """The delivered value: the carrier for this launch, with the block a source may provide."""
 
-    capsule = result.capsule
-    rendered = result.render_instructions()
-    report: dict[str, object] = {
-        "mode": LaunchCapsuleMode.CAPSULE.value,
-        "role": role,
-        "operation": capsule.binding.operation,
-        "semanticDigest": capsule.semantic_digest,
-        "taskReference": capsule.binding.admitted.task_reference,
-        "instructionCount": len(capsule.instruction_units),
-        "instructionBytes": len(rendered.encode("utf-8")),
-    }
-    if carrier is not None:
-        report["eveCarrier"] = str(carrier)
-    if session_workspace is not None:
-        report["sessionWorkspace"] = str(session_workspace)
-    if eve_env:
-        return LaunchCapsule(
-            mode=LaunchCapsuleMode.CAPSULE,
-            role=role,
-            eve_env=dict(eve_env),
-            session_workspace=session_workspace,
-            report=report,
-        )
     return LaunchCapsule(
         mode=LaunchCapsuleMode.CAPSULE,
         role=role,
-        codex_delivery=capsule_delivery_from(result),
-        report=report,
+        delivery=capsule_delivery_from(result),
+        shared_block=shared_block,
     )
 
 
@@ -495,28 +568,6 @@ def _refusal(role: str, outcome: CapsuleCompileOutcome) -> LaunchCapsule:
         "capsule-not-compiled" if refusal is None else refusal.status,
         outcome.explanation(),
     )
-
-
-def _admitted_surfaces(contract_path: Path) -> tuple[Path | None, Path | None]:
-    """The enclosure's own report and memory surfaces, for the carrier's write scopes.
-
-    Read out of the contract the enclosure lookup already resolved — the worktree group's ``reports``
-    directory and the contract's memory worktree — so a carrier declares the surfaces that exist
-    rather than the surfaces this module would have liked. A surface that is absent stays ``None``,
-    and the carrier's own role authority table then decides whether that role needed it.
-    """
-
-    try:
-        contract = load_contract(contract_path)
-    except (ContractError, OSError):  # pragma: no cover - the compiler refuses this path already
-        return None, None
-    # The report surface is the enclosure's own artifact boundary, not a caller's directory: a leaf
-    # that has not produced a report yet does not have the directory, and a carrier for a role
-    # admitted to write there must still be buildable. Creating it is the launch claiming the
-    # surface the contract already declared for it.
-    report_root = contract.worktree_group / "reports"
-    report_root.mkdir(parents=True, exist_ok=True)
-    return report_root, contract.memory_worktree
 
 
 def _enclosure_contract(
@@ -556,16 +607,7 @@ def _task_root_of(task_path: str) -> str:
     return head
 
 
-def _carrier_directory(config: McpRuntimeConfig, role: str, task_path: str) -> Path:
-    """Where this seat's eve carrier is written: per seat, outside every workspace."""
-
-    slug = task_path.replace("/", "-").removesuffix(".json")
-    root = config.coordination_root.joinpath(*EVE_CARRIER_ROOT)
-    return root / f"{role}-{slug}"
-
-
 __all__ = [
-    "EVE_CARRIER_ROOT",
     "FREE_AGENT_TASK_REFERENCE_PREFIX",
     "UNVERSIONED_WORK_BRANCH",
     "AdmittedTaskSeat",

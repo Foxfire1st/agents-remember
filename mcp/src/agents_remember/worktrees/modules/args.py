@@ -20,11 +20,10 @@ from agents_remember.kernel.primitives.gate_policy import (
     GatePolicy,
 )
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
-from agents_remember.models.knowledge.merge import AuthoredReconciliation
 from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecoveryCommits,
 )
-from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction
+from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction, SyncSource
 from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
 
 if TYPE_CHECKING:
@@ -56,10 +55,8 @@ class WorktreeArgs:
     memory_choice: str | None = None
     stale_base_choice: str | None = None
     memory_sync_choice: MemorySyncChoice | None = None
+    sync_source: SyncSource | None = None
     resolution_action: SyncResolutionAction | None = None
-    # The authored decision one ``resolution_action='reconcile'`` call carries: exactly one conflict
-    # the knowledge merge refused, and which side's authored value is the reconciled one.
-    knowledge_resolution: AuthoredReconciliation | None = None
     custom_instruction: str | None = None
     lifecycle_id: str = ""
 
@@ -94,6 +91,9 @@ class WorktreeArgs:
     operation_key: str = ""
     operation_generation: int = 0
     candidate_tree: str | None = None
+    # The code head observed just before ``candidate_tree`` was read from the worktree; the code
+    # commit's only parent. ``None`` when the tree was supplied without one.
+    candidate_head: str | None = None
     approval_claimed: bool = False
     recovery_commits: LifecycleOperationRecoveryCommits | None = None
     integration_certification_owner: IntegrationCertificationOwner | None = None

@@ -1,11 +1,11 @@
 """Worktree tools for the landing half of a task: close out, integrate, reclaim."""
 
+from importlib import import_module
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from agents_remember.application.lifecycle.direct_landing import DirectLandingRequest
-from agents_remember.application.worktree_tools import (
+from agents_remember.application.worktree_tool_requests import (
     CloseoutApproval,
     CloseoutCommitMessages,
     LandedCommits,
@@ -20,18 +20,9 @@ from agents_remember.models.lifecycles.operation_kinds import (
     LifecycleControlAction,
     LifecycleOperationKind,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
-from ..tools import (
-    direct_landing_payload,
-    worktree_abandon_payload,
-    worktree_checkpoint_landing_payload,
-    worktree_cleanup_payload,
-    worktree_closeout_apply_payload,
-    worktree_closeout_preview_payload,
-    worktree_integrate_payload,
-    worktree_operation_control_payload,
-    worktree_record_landing_payload,
-)
+from .lazy import tools
 
 
 def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -46,47 +37,54 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
     @server.tool()
     def direct_landing(
         contract_path: str,
-        code_commit: str,
+        leaf_task_document_ref: TaskDocumentRef,
         *,
+        code_commit: str | None = None,
+        code_commit_message: str | None = None,
         memory_commit_message: str | None = None,
         intent_note: str = "",
         candidate_tree: str | None = None,
         dry_run: bool = False,
+        leaf_id: str | None = None,
     ) -> dict[str, Any]:
-        """Verify one series code commit and durably serialize its memory + ledger writes.
-
-        The direct landing is the branch-addressed counterpart of the worktree closeout
-        commit phase for a sanctioned leaf implemented without a leaf worktree enclosure.
-        It is not ordinary master/series closeout or master-to-parent integration, and
-        those routes never require directExecutionEnabled. Direct landing binds the
-        task-root series contract (series-contract.md), verifies the exact code commit is
-        the current series branch HEAD, commits external-memory content, and prepends the
-        code-to-memory ledger row with the same ledger semantics as the worktree path.
-        Message intent is normalized before lane authority. Apply persists one synchronous
-        direct-landing lifecycle generation before memory or ledger mutation, records Git
-        intent/proof per leg, and resumes the exact generation through the task-addressed
-        recover control after interruption. A transient landing lock and the closeout queue are
-        never recovery evidence. Policy-gated:
-        directExecutionEnabled must be set in the MCP
-        authority settings. The code commit is verified, never created. Pass
-        candidate_tree (the exact candidate tree admitted by the closeout journal) to keep
-        a moved branch from being committed after admission.
-        The memory_commit_message must be explicit and
-        nonblank only when its contract-derived leg is enabled; typed not-applicable
-        legs may omit the corresponding message. The verified-existing code commit has
-        no code-message input.
-        MUTATING (attributed memory content commit); preview with dry_run=true."""
-        return direct_landing_payload(
+        """Land one verified series code commit with its memory content through a durable direct-
+        landing generation, recovering through worktree_operation_control. States: landed,
+        would-land, refused. Answers the state, what blocks and the next call; the whole result
+        is in the log file. Reference: docs/reference/mcp-tools.md."""
+        return tools.direct_landing_payload(
             config,
-            DirectLandingRequest(
+            import_module(
+                "agents_remember.application.lifecycle.direct_landing"
+            ).DirectLandingRequest(
                 contract_path=contract_path,
                 code_commit=code_commit,
+                leaf_task_document_ref=leaf_task_document_ref,
+                code_commit_message=code_commit_message,
                 memory_commit_message=memory_commit_message,
                 intent_note=intent_note,
                 candidate_tree=candidate_tree,
                 dry_run=dry_run,
+                leaf_id=leaf_id,
             ),
         )
+
+    @server.tool()
+    def direct_execution_grant(
+        task_document_ref: TaskDocumentRef,
+        action: str,
+    ) -> dict[str, Any]:
+        """Give, take back, or reclaim direct-execution grants, as an architect.
+
+        A leaf runs directly on its master's branch only while a grant for
+        it exists, and only a caller bound to the architect role may call
+        this. ``action`` is ``give``, ``revoke`` or ``reclaim``; giving a
+        grant that exists, or taking back one that does not, changes nothing
+        and says so. Reclaim takes back one task's grants that no leaf still
+        requires. The grant is read at the moment of every call.
+        MUTATING (grant record only).
+        Reference: docs/reference/mcp-tools.md.
+        """
+        return tools.direct_execution_grant_payload(config, task_document_ref, action)
 
 
 def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -97,13 +95,13 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         code_commit_message: str | None = None,
         memory_commit_message: str | None = None,
     ) -> dict[str, Any]:
-        """Non-mutating preview of the bounded closeout Git transaction.
-
-        The preview reports the admitted candidate, source refs, external-memory refreshes,
-        and exact code, memory, and ledger writes. Every enabled commit leg requires its
-        explicit, nonblank message; typed not-applicable legs may be omitted.
-        """
-        return worktree_closeout_preview_payload(
+        """Preview a worktree closeout without mutating: the count of changed code paths and
+        proposed commits with subjects up to the list bound, and what blocks (states:
+        would-closeout, blocked, closeout-gate-blocked). A preview is a read; the whole result
+        is in the log file. On converted memory, the invariant gate judges the exact candidate
+        trees; knowledge-gate-refused carries its findings.
+        Reference: docs/reference/mcp-tools.md."""
+        return tools.worktree_closeout_preview_payload(
             config,
             contract_path,
             CloseoutCommitMessages(
@@ -122,19 +120,13 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         dry_run: bool = False,
         corrective_dispositions: list[RedCatalogDisposition] | None = None,
     ) -> dict[str, Any]:
-        """Start or observe an approved task-bound worktree closeout. A mutating call
-        returns promptly with queued/running/current-phase state; the plane-owned worker
-        survives this MCP request and server process, and worktree_status observes it by
-        task context without a job id. The worker validates the admitted candidate and
-        source refs, commits code, refreshes and commits external memory, prepends the
-        exact code-to-memory ledger mapping, and finalizes the contract. Git mutation
-        journals preserve recovery at each irreversible boundary. MUTATING and commit-gated:
-        preview and approval precede apply. Requires intent_note.
-        Every contract-enabled commit leg requires its explicit, nonblank message; typed
-        not-applicable legs may be omitted.
-        Repeat the same task input to observe/recover it; conflicting input refuses. Queue
-        invalidation or absence does not affect the accepted journal generation."""
-        return worktree_closeout_apply_payload(
+        """Apply an approved worktree closeout and return promptly. States: closed, blocked,
+        closeout-gate-blocked. Answers the state reached and the next call; the whole result
+        is in the log file. Delivered-against-reviewed names
+        same, different, or no review recorded. Poll worktree_status for progress. On converted
+        memory, the invariant gate judges the exact candidate trees; knowledge-gate-refused
+        carries its findings. Reference: docs/reference/mcp-tools.md."""
+        return tools.worktree_closeout_apply_payload(
             config,
             contract_path,
             CloseoutCommitMessages(
@@ -154,15 +146,13 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         strategy: IntegrateStrategy = "ff-only",
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Start or observe task-bound landing onto its source branch (strategy 'ff-only'
-        or 'replay'). A mutating call returns promptly; worktree_status projects the durable
-        phase and result without exposing operation identity. Integration validates the
-        admitted source refs and atomically merges the prepared code and memory refs while
-        recording the resulting pair. MUTATING: moves branch refs; preview with dry_run=true.
-        Repeat the same task input to
-        observe/recover it; conflicting input refuses. Protected-ref serialization applies only to
-        the addressed landing and never blocks task-document authoring."""
-        return worktree_integrate_payload(
+        """Land a task onto its target branch, ff-only or replay. Answers the state (integrated,
+        would-integrate, blocked, handover-gate-blocked), the commit, and cleanup with its
+        arguments as the next call.
+        A refusal names the unfinished step and the call that finishes it. Delivered-against-
+        reviewed names same, different, or no review recorded. Reference:
+        docs/reference/mcp-tools.md."""
+        return tools.worktree_integrate_payload(
             config,
             contract_path,
             strategy=strategy,
@@ -176,22 +166,8 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         strategy: IntegrateStrategy = "ff-only",
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Partially PUBLISH an UNFINISHED atomic master: land its accumulated line into its super
-        branch and keep the master open. This is a publication, not a pause -- the master's
-        committed code and memory refs move onto the protected source branch, where every other
-        master sees them, and an explicitly requested developer approval is required. It exists
-        because worktree_integrate refuses a partial master: that route proves a finished unit
-        (task document Completed, one landed enclosure per canonical leaf, and a completed
-        closeout), which an open master does not have. This route captures the master's own
-        committed refs instead -- the live series code work branch tip and the live memory work
-        branch tip -- proves the existing ledger maps the code ref, and lands exactly those. It
-        shares the final route's whole preflight and ref move, records the integration cell as
-        'checkpointed' rather than 'completed', retires nothing and runs no cleanup, so the
-        master's worktrees, branches and enclosure survive for the work that continues. Pausing a
-        master is a separate matter and is NOT this call: stopping its work publishes nothing,
-        moves no ref, and leaves its branch, worktrees and enclosure private. MUTATING: moves
-        branch refs; preview with dry_run=true."""
-        return worktree_checkpoint_landing_payload(
+        """PUBLISH the finished leaves of an unfinished series master; this call is not a pause. Pausing is a separate matter and is NOT this call: use worktree_pause to stop a master. States: checkpointed, would-checkpoint, blocked, handover-gate-blocked. Answers the state reached and the next call. Reference: docs/reference/mcp-tools.md."""
+        return tools.worktree_checkpoint_landing_payload(
             config,
             contract_path,
             strategy=strategy,
@@ -206,14 +182,10 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         landed_memory_content_commit: str = "",
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Record that this task's code landed through a pull request, so its contract stops
-        reading as never-integrated. Use this as the PR tail's recording step, after the merge and
-        after the protected branch is pulled locally: pass the commit the pull request landed.
-        It shares one contract write with worktree_integrate, so the terminal integration cell has
-        a single definition on both routes; nothing is inferred afterwards, because inferring would
-        mean querying GitHub and this cell gates branch retirement. It refuses a commit that is not
-        reachable from a landing target. MUTATING (contract only); preview with dry_run=true."""
-        return worktree_record_landing_payload(
+        """Record a commit the landing target already holds. States: recorded, already-recorded, would-record, blocked. Answers the state reached; a refusal
+        names the commit that is missing or elsewhere and what to do. Reference:
+        docs/reference/mcp-tools.md."""
+        return tools.worktree_record_landing_payload(
             config,
             contract_path,
             landed=LandedCommits(
@@ -239,14 +211,10 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         dry_run: bool = False,
         caller: DeclaredCaller | None = None,
     ) -> dict[str, Any]:
-        """Retry, recover, resume, cancel, retire, or supersede one task generation.
-
-        The handler is addressed by canonical contract, operation kind, and public generation;
-        it never accepts an operation key or process id. Same-generation retry/recover preserves
-        immutable input. Cancellation proves worker exit and unchanged Git state first. Every
-        advertised action is revalidated against live journal, contract, and ref evidence.
-        Preview with dry_run=true."""
-        return worktree_operation_control_payload(
+        """Retry, recover, resume, cancel, retire or supersede one closeout, integrate or direct-
+        direct-landing generation. States: refused, or the controlled generation's status. Answers the state reached and the next call;
+        the log file. Reference: docs/reference/mcp-tools.md."""
+        return tools.worktree_operation_control_payload(
             config,
             OperationControlRequest(
                 contract_path=contract_path,
@@ -270,13 +238,11 @@ def _register_reclamation_command_tools(server: FastMCP, config: McpRuntimeConfi
     def worktree_cleanup(
         *, contract_path: str, dry_run: bool = False, teardown_providers: bool = True
     ) -> dict[str, Any]:
-        """Archive and read back one terminal generation's canonical enclosure manifest/journal/
-        history, publish its external terminal receipt, then remove the task's worktrees, merged
-        task branches, reports, and enclosure root after integration. Active or ambiguous evidence
-        and missing/unreadable/mismatched archive proof refuse deletion. MUTATING and destructive —
-        run only after worktree_integrate. Preview with dry_run=true. teardown_providers=true
-        (default) also reclaims the worktree's isolated provider stack."""
-        return worktree_cleanup_payload(
+        """Archive lifecycle evidence, then remove worktrees, merged branches, reports, logs and
+        the enclosure root once integrated. States: cleanup-completed, already-clean, would-cleanup,
+        blocked, provider-setup-running. Answers the state reached; a dry run with
+        blockers answers a blocked state. Reference: docs/reference/mcp-tools.md."""
+        return tools.worktree_cleanup_payload(
             config, contract_path, dry_run=dry_run, teardown_providers=teardown_providers
         )
 
@@ -284,12 +250,6 @@ def _register_reclamation_command_tools(server: FastMCP, config: McpRuntimeConfi
     def worktree_abandon(
         *, contract_path: str, dry_run: bool = False, force: bool = False
     ) -> dict[str, Any]:
-        """Abandon a worktree-backed task WITHOUT integrating it. First prove that the enclosure
-        has no live or ambiguous operation, archive and read back canonical enclosure evidence,
-        and publish the external terminal receipt; only then reclaim providers, worktrees, task
-        branches, reports, and the enclosure root. Active or ambiguous evidence is never
-        collectable. MUTATING and
-        destructive. Without force it refuses dirty worktrees and unmerged branches (reporting the
-        commits); force=true discards them only under the same contract-derived terminal authority.
-        Preview with dry_run=true."""
-        return worktree_abandon_payload(config, contract_path, dry_run=dry_run, force=force)
+        """Abandon a worktree task without integrating, preserving terminal archive proof. States: abandoned, would-abandon, abandon-blocked, blocked. Answers the state reached
+        and the next call. Reference: docs/reference/mcp-tools.md."""
+        return tools.worktree_abandon_payload(config, contract_path, dry_run=dry_run, force=force)

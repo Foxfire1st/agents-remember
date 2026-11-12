@@ -1,14 +1,12 @@
 // When the task entry's Intent review counts are re-validated.
 //
-// No signal the dashboard receives moves when a leaf's knowledge is generated or published: the
-// candidate and the published dataset live under the worktree group and the memory root, which the
-// change watcher deliberately excludes, and no projection field or delta carries a knowledge fact. The
-// entry therefore re-validates at the points where the developer looks at it again, so a displayed
-// count is never older than the developer's last navigation to it:
+// The mounted live reviewer subscribes to its exact memory target through the existing state SSE.
+// A changed input revision revalidates its shared entry alongside the selected review. Closed and
+// recorded reviews do not watch. Navigation and explicit refresh remain revalidation points:
 //
 //   * the task detail is shown again (a view switch back to Operations, or the reviewer takeover
 //     closing back to the entry) -- `shown` turning true;
-//   * the reviewer's own refresh runs -- `revalidate()`, called by the refresh control;
+//   * the reviewer's refresh or matching memory event runs -- `revalidate()`;
 //   * the task detail is opened on a task -- the entry mounts, or its task props change, and reads.
 //
 // The show transition is derived during render rather than in an effect, so a task change and the

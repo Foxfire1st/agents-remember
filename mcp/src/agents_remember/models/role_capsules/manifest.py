@@ -20,6 +20,10 @@ from dataclasses import dataclass
 from typing import cast
 
 from agents_remember.errors import CapsuleManifestError
+from agents_remember.models.role_capsules.details import (
+    CapsuleDetailDeclaration,
+    parse_detail_declarations,
+)
 from agents_remember.models.role_capsules.types import (
     CAPSULE_COMPOSITION_ORDER,
     CapsuleCompositionRoot,
@@ -57,6 +61,7 @@ class CapsuleOperationEntry:
     source: str
     purpose: str
     applies_to_roles: tuple[str, ...]
+    audience: str = "all"
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +139,7 @@ class CapsuleCompositionManifest:
     launcher: CapsuleLauncherEntry
     specializations: Mapping[str, CapsuleSpecializationEntry]
     skills: Mapping[str, CapsuleSkillEntry]
+    detail_references: tuple[CapsuleDetailDeclaration, ...] = ()
 
     def skill_entry(self, skill: str) -> CapsuleSkillEntry:
         """The declared skill ``skill``, refusing a name the manifest never declared."""
@@ -211,6 +217,7 @@ def parse_composition_manifest(payload: bytes) -> CapsuleCompositionManifest:
         launcher=launcher,
         specializations=specializations,
         skills=skills,
+        detail_references=parse_detail_declarations(document),
     )
 
 
@@ -296,6 +303,7 @@ def _parse_operations(document: Mapping[str, object]) -> Mapping[str, CapsuleOpe
             source=_require_str(body, "source", f"operations.{name}"),
             purpose=_require_str(body, "purpose", f"operations.{name}"),
             applies_to_roles=applies,
+            audience=_require_str(body, "audience", f"operations.{name}"),
         )
     return entries
 

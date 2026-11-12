@@ -9,8 +9,7 @@ run root is read or written.
 This entry point deliberately runs on the host rather than inside the Dagger graph. The packet
 carries a **clean environment** requirement, not a Dagger-graph requirement: the fixtures are
 created from nothing under the run root and no machine-local state is consulted, which is what
-the certification would have bought here. The existing ``run.py`` entry point keeps its own
-Dagger admission for the ambient role-chat scenario and is not modified by this module.
+the certification would have bought here.
 """
 
 from __future__ import annotations
@@ -21,13 +20,16 @@ import sys
 import tempfile
 from pathlib import Path
 
-HARNESS_DIR = Path(__file__).resolve().parent
+HARNESS_DIR = Path(__file__).resolve().parent.parent
 # Strings, not Path objects: a non-str ``sys.path`` entry is silently ignored by the importer.
 if HARNESS_DIR.as_posix() not in sys.path:
     sys.path.insert(0, HARNESS_DIR.as_posix())
 
-from fresh_user_scenario import environment_facts, run_fresh_user_acceptance  # noqa: E402
-from reporting import write_json  # noqa: E402
+from e2e_harness.fresh_user_scenario import (  # noqa: E402
+    environment_facts,
+    run_fresh_user_acceptance,
+)
+from e2e_harness.reporting import write_json  # noqa: E402
 
 REPORT_DIRECTORY = "fresh-user-acceptance"
 

@@ -10,6 +10,10 @@ from typing import TypedDict
 PATH_SAMPLE_LIMIT = 30
 
 
+class CommitPublicationRefusal(RuntimeError):
+    """The commit was not published: the admitted branch, its tip or the worktree state differs."""
+
+
 @dataclass(frozen=True)
 class WorktreeCommandResult:
     returncode: int
@@ -63,29 +67,6 @@ class RouteOverviewRefreshPlan(TypedDict):
 
     required: list[dict[str, str]]
     missing_metadata: list[str]
-
-
-class SidecarBodyClassification(TypedDict):
-    """Body/history classification of changed-source sidecars in the memory tree."""
-
-    stale: list[str]
-    untraced: list[str]
-    attested_no_impact: list[str]
-
-
-class RouteOverviewBodyClassification(TypedDict):
-    """Body/history classification of route overviews matched by changed paths.
-
-    Routes that are the nearest governor of a changed source path are
-    domain-evident and classify as stale / untraced / attested_no_impact like
-    sidecars; overviews matched only as ancestors are reported under
-    ``stamped_without_body_review`` instead of gating closeout.
-    """
-
-    stale: list[str]
-    untraced: list[str]
-    attested_no_impact: list[str]
-    stamped_without_body_review: list[str]
 
 
 class EntityFingerprintRow(TypedDict):

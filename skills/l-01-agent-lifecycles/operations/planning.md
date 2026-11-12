@@ -1,95 +1,79 @@
+<!-- ar:roles all -->
 # Operation — Planning
 
-**What it covers:** everything that decides *what* will be built before anything is built —
-reframing, evidence-backed design, requirement compilation, portfolio topology, and plan review.
+Planning roles use the developer's outcome and applicable current knowledge to shape a bounded plan. This operation defines requirement preparation, alignment and approval before task execution.
 
-**When it is selected:** the developer is shaping intent or scope; a requirement corpus must be
-compiled; a portfolio needs sequencing; or a plan needs its requested independent review.
+## Prepare requirements and recover approval
 
-## Who carries it, and their job
+For new scope, assign a stable requirement identifier and version, with one canonical packet per independently falsifiable obligation. Before grouping primary and additional same-topic packets, read [Plan a topic merge or propose a split](../reference/coordination/shared/requirement-design.md#plan-a-topic-merge-or-propose-a-split) for the grouping and split rules. List obligations from other topics as dependencies or preservation constraints.
 
-| Role | Its job in this operation |
-| --- | --- |
-| architect | owns the design conversation and the drawing board; compiles and gets approval for the requirement corpus; rules plan-review verdicts |
-| designer | the same drawing-board method as its own job when the architect pulls the hat or a separate chair exists |
-| strategist | the sprint plan and scope — the orchestration task draft, with its shown work |
-| orchestrator | keeps the portfolio coherent at runtime, adopts a ruled plan into durable task form, and decides ordinary readiness/reprioritization itself |
+Obtain developer approval before creating the task topology.
 
-## Required inputs
+For existing approved work, recover and honor the recorded approval without asking again. A task document projects approved scope; it does not replace the requirement packet.
 
-- Intent and scope, established through the task-collaboration doctrine in `tasks/AGENTS.md` —
-  applied, not paraphrased.
-- The evidence model for the work: external/domain documentation, repo-internal sources,
-  cross-repo/system-boundary facts, and executable validation. Gathered through the
-  `c-04-retrieval-strategy-router` strategies, not ad-hoc reads.
-- For the strategist: **refs to durable portfolio state, never pasted state** — task-doc paths,
-  series contracts, notes folders, the route-index root, and trust facts compiled by the architect
-  (initial pass) or supplied by the orchestrator through the architect (runtime reshape).
-- For the plan reviewer: the complete agreed plan scope, the standing `../criteria/plan-review.md`
-  catalog, and the required routes/lenses.
+<!-- ar:roles architect -->
+## Cross-packet alignment sweep
 
-## Normal workflow
+An open leaf belongs to the same master, is not retired, and has a status other than `Completed` or `abandoned`. A new leaf is released by its first role start. A revised packet for a started leaf is released when registered and handed to its seats.
 
-1. **Reframe before planning** on non-trivial, ambiguous, risky, architectural, or taxonomy-heavy
-   work: surface request · deeper objective · highest-leverage framing · assumptions · boundaries ·
-   invariants · truth gaps. A reframing that materially changes scope, intent, or sequencing is
-   **played back and waits for confirmation**; a pure clarification may be presented and continued.
-2. **Make the evidence plan visible** before or alongside the plan, and give reviewable examples for
-   each distinct change when code or structure is in scope.
-3. **Compile the requirement corpus** — every independently falsifiable obligation as its own stable
-   ID + version with one canonical, version-addressed packet — and **stop for developer approval**
-   before any task topology exists. The contract is in `../core/loop.md`.
-4. **Project topology from the corpus.** A master summarizes a thematic goal and carries filtered ID
-   + version + packet links; each leaf owns exactly one primary requirement revision. A proposed
-   leaf that would close two independently falsifiable requirements is split.
-5. **Sequence by evidence, not by habit.** Existing surfaces map against the authoritative route map;
-   new surfaces map by declaration (parent route + intended shape). Dependency meaning, execution
-   nature, blast radius, and priority are **judgments that must show their work as citations**.
-6. **Choose the topology explicitly.** Adopt an explicit `executionGraph` when dependency-aware
-   scheduling is justified, or explicitly adopt the graph-less atomic-sequential default. Planning
-   is mandatory; a persisted graph is not. **Never manufacture an edge to make a plan look
-   explicit.**
-7. **Review the plan when review is requested** — baseline seals the complete issue list; successors
-   verify only that list. The mode contract is in `../operations/review.md`.
-8. **Adopt the ruled plan into durable task form**, with a decision-log entry naming its source.
+Before releasing a new packet or revision into a master with other open leaves:
 
-## Authority gates
+1. Have a reader other than the drafter compare it with every open leaf's packet in both directions.
+2. Ask whether the new text contradicts an open packet, makes one stale, or is contradicted by one. Check counts, paths, leaf identifiers, order and premises.
+3. Complete the sweep before the new leaf's intent-review question, "go, or review first?" Repeat it before the go for a packet revised during review.
+4. Record the reader's report, including a result with no findings.
 
-- **The requirement-approval gate is hard**: while it is open, an architect may create only the
-  planning wrapper and its `requirements/` corpus. No sprint, master, or leaf task document exists
-  before the corpus is approved.
-- **The strategist pass runs only on the developer's explicit yes.** It is proposed, never auto-run,
-  and settings cannot auto-run it. A sanctioned skip makes the orchestrator responsible for
-  authoring and adopting the same reasoned plan and explicit topology choice — never an unreasoned
-  default.
-- **Solo / the short root is the developer's call**, proposed as a question when the work looks tiny
-  and never self-decided.
-- **The strategist is a reader, not a mutator**: it drafts a durable notes artifact, mutates no task
-  doc, raises no gate, and touches no git.
-- **A requirement change** increments its version under the same stable ID, cites durable developer
-  approval, invalidates the affected acceptance state, and rebriefs affected leaves before work
-  resumes.
+Fix a stale fact within the promise by the usual packet revision: draft and register the older packet's amendment and update its leaf task document. An amendment beyond the developer's words goes to the developer first.
 
-## Failure handling
+Before assigning an issue to another open leaf, follow [Complete the plan and preserve its boundaries](#complete-the-plan-and-preserve-its-boundaries) for the originating-leaf default and charter exception.
+<!-- ar:roles all -->
 
-- **A direction contradiction between masters is quo-vadis** and goes straight to the architect at
-  the first drawing board — flagged unmistakably at the top of the coherence findings. In a
-  successor round it is an outside-list observation for developer decision, never a new finding.
-- **A leaf too thin to plan** — able to name neither existing surfaces nor the parent anchoring of
-  its additions — becomes an explicit **"unplannable as scoped"** finding, never a silent guess.
-  (This fires only on that exact condition; a greenfield surface with a nameable parent is
-  plannable.)
-- **A changed plan surface that cannot be verified against the sealed baseline** returns to the
-  developer; it does not open a new review cycle.
-- **An out-of-sprint master** waits for the next sprint unless the architect explicitly changes
-  scope.
+## Establish ownership and prepared context
 
-## Handoff / exit
+Before delegating coordination, read [Choose the coordination owner](coordination.md#choose-the-coordination-owner) for the Architect's first Manager or Orchestrator and the developer-chosen direct-coordination exception.
 
-- The architect's exit: an approved requirement corpus, then created task topology, with rulings
-  recorded durably and returned to the backend seat that needs them.
-- The strategist's exit: the orchestration-task draft at the brief's notes path, citing its shown
-  work; the architect rules it and the orchestrator adopts it.
-- The designer's exit: the `task_doc` plus the declared master-scoped limits note, handed into the
-  portfolio.
-- The plan reviewer's exit: a verdict artifact in the shape of `../templates/verdict.md`.
+<!-- ar:roles all -->
+Keep one explicit owner per task and preserve started agents' identifiers. Do not fabricate a sprint, master or agent identity for a taskless project role.
+
+Before any seat starts, give the task document a Prepared context: records with identifiers and state; code with files, lines and unattributed callers; and notes on traps met.
+
+<!-- ar:roles architect -->
+## Prepare knowledge effects and intent review
+
+When a packet names an effect on a recorded invariant or family, declare it in `expectedKnowledgeEffects` through `task_doc` on `agents-remember-task` before implementation. A packet that names no such effect declares nothing. Do not accept a knowledge detector or report without a closeout gate and precise triggers.
+
+After creating a new leaf's task document and before any start, ask the developer once: "go, or review first?" You may add a one-line suggestion. Explain that up-front review uses planned comparison with no task workspace and creates the explainer workspace on first Explain.
+
+Record `review-first` or `go` with `agreedRevision` in `intentReview` through `task_doc` on `agents-remember-task`. The state is `intent-review-open` until `go`.
+
+Before a packet's cold read, read its governing cards, families and invariants, every knowledge answer through its last page, and the code they leave unattributed. Put that list in the leaf task document's Prepared context before any seat starts.
+
+## Plan the packet’s own curation
+
+A packet adding a row kind, disposition, writer field or gate must explain in the rule itself how its own curation completes on the installed build. That build lacks the new behavior until the leaf lands. Prove the new behavior only on fixtures and scratch copies.
+
+## Deliver a direct-coordination review intake
+
+<!-- ar:gives leaf-review-intake to reviewer: mode, task-and-purpose, seam, requirement-set, tools-file -->
+Only under developer-chosen direct coordination, start a leaf Reviewer on the reviewed leaf with its sprint and master. Send its intake as your first `role_message` on `agents-remember-task` to the returned agent identifier. Include the review mode, canonical task and review purpose, seam, exact requirement set with identifiers, versions, packets and the durable [approval record](../core/every-role.md#requirements-and-limits), and resolved `system/tools.md`.
+
+Plan-review and super-exit have no startable Reviewer seat. Take either review to the developer yourself, with the sprint-level Reviewer idea.
+
+## Report a costly small repair
+
+When one small item has taken about an hour, or a second repair round or freeze, tell the developer that day: the hours, the item, and a proposal to carry or bound it. Only polish that is no defect may be dropped.
+<!-- ar:roles all -->
+
+## Complete the plan and preserve its boundaries
+
+Name the deliverables, code, memory and report roots, dependencies, evidence class, requested independent review, curation needs and publication authority.
+
+Send a requirement contradiction, a premise that changes a requirement's promise, scope expansion or a high-impact unresolved decision to the developer before affected work proceeds. Replan only through the owner, preserving unaffected requirement versions. Keep issues in their originating leaf unless another open leaf's charter already covers them.
+
+Call a user-interface fix working only after seeing it work on the developer's installation. Otherwise report it as landed but not yet verified there.
+
+Before acting on a denied or unanswered harness request, read [Honor harness permission decisions](orientation.md#honor-harness-permission-decisions) for the waiting, denial and non-bypass rules.
+
+### Handle delivery receipts
+
+Before responding to a full-store refusal, read [Handle a full-store refusal](../reference/message-handover.md#handle-a-full-store-refusal) for the pending handover, single retry and second-refusal report.

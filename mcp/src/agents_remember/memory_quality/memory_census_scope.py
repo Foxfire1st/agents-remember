@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -75,10 +76,19 @@ class MemoryCensusScope:
     working_changes: tuple[MemoryCensusPathChange, ...]
     committed_changes: tuple[MemoryCensusPathChange, ...]
     memory_changes: tuple[MemoryCensusPathChange, ...]
+    memory_comparison_tree: str
+    """What the memory candidate is compared with: ``memory_baseline_commit`` itself, or the tree of
+    its conversion when the candidate is converted and the baseline is not (MIK-R24 rule 7)."""
 
     def to_payload(self) -> dict[str, object]:
         """Stable JSON-ready facts bound alongside the complete census artifact."""
+        compared = (
+            {}
+            if self.memory_comparison_tree == self.memory_baseline_commit
+            else {"memoryComparisonTree": self.memory_comparison_tree}
+        )
         return {
+            **compared,
             "pairIdentity": self.pair_identity.model_dump(mode="json"),
             "codeInput": self.code_input.model_dump(mode="json"),
             "memoryCandidateTree": self.memory_candidate_tree,
@@ -104,8 +114,20 @@ class MemoryCensusScope:
         return _paths(self.memory_changes)
 
 
+MemoryComparison = Callable[[Path, str, str], str]
+"""``(memory repository, baseline commit, candidate tree) -> comparison tree-ish``: the census's
+comparison base. The application binds the converted base (MIK-R24 rule 7); this layer cannot."""
+
+
+def _baseline_itself(_repository: Path, baseline: str, _candidate: str) -> str:
+    return baseline
+
+
 def capture_memory_census_scope(
-    contract: WorktreeContract, *, code_input: MemoryCensusCodeInput | None = None
+    contract: WorktreeContract,
+    *,
+    code_input: MemoryCensusCodeInput | None = None,
+    comparison: MemoryComparison = _baseline_itself,
 ) -> MemoryCensusScope:
     """Capture all structurally eligible paths without adopting historical debt."""
 
@@ -122,7 +144,8 @@ def capture_memory_census_scope(
     memory_root = Path(pair.memoryRoot)
     baseline = _memory_baseline(contract, memory_root)
     memory_tree = _memory_tree(contract, memory_root)
-    memory = _diff(memory_root, baseline, memory_tree)
+    compared = comparison(memory_root, baseline, memory_tree)
+    memory = _diff(memory_root, compared, memory_tree)
     if resolve_memory_candidate_pair(contract) != pair:
         raise RuntimeError("census pair changed during scope capture")
     _require_code_input(contract, pair, source)
@@ -137,6 +160,7 @@ def capture_memory_census_scope(
         working,
         committed,
         memory,
+        compared,
     )
 
 
@@ -298,5 +322,6 @@ __all__ = [
     "MemoryCensusCodeInput",
     "MemoryCensusPathChange",
     "MemoryCensusScope",
+    "MemoryComparison",
     "capture_memory_census_scope",
 ]

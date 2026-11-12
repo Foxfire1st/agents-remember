@@ -1,0 +1,245 @@
+{
+  "schema": "l57-current-public-route-captures/v1",
+  "producer": "L57 current public FastAPI routes and actual serving_collaborators",
+  "normalization": "none; raw response.content unchanged",
+  "scenario": "Historical L34 seeds and exact retained setup_leaf edits, CURRENT native conversion; NOT original-byte-identical converted memory world",
+  "content_tree_comparison": {
+    "2": {
+      "code_base": {
+        "actual": "5bd13699c90fc19c67165faba99022381dd6ce98",
+        "historical": "5bd13699c90fc19c67165faba99022381dd6ce98",
+        "content_tree_equal": true
+      },
+      "code_candidate": {
+        "actual": "db68db54906acc5661a3ac7813d75a340ba7cbdc",
+        "historical": "db68db54906acc5661a3ac7813d75a340ba7cbdc",
+        "content_tree_equal": true
+      },
+      "memory_base": {
+        "actual": "12b510c61dc76327368173d5220a51bada5f4a7e",
+        "historical": "12b510c61dc76327368173d5220a51bada5f4a7e",
+        "content_tree_equal": true
+      },
+      "memory_candidate": {
+        "actual": "48e359488c2ae9d5c1021229842a01e2b882adf7",
+        "historical": "48e359488c2ae9d5c1021229842a01e2b882adf7",
+        "content_tree_equal": true
+      }
+    },
+    "3": {
+      "code_base": {
+        "actual": "5bd13699c90fc19c67165faba99022381dd6ce98",
+        "historical": "5bd13699c90fc19c67165faba99022381dd6ce98",
+        "content_tree_equal": true
+      },
+      "code_candidate": {
+        "actual": "db68db54906acc5661a3ac7813d75a340ba7cbdc",
+        "historical": "db68db54906acc5661a3ac7813d75a340ba7cbdc",
+        "content_tree_equal": true
+      },
+      "memory_base": {
+        "actual": "12b510c61dc76327368173d5220a51bada5f4a7e",
+        "historical": "12b510c61dc76327368173d5220a51bada5f4a7e",
+        "content_tree_equal": true
+      },
+      "memory_candidate": {
+        "actual": "e524f6c1485b4bd276cb8350960c6672dbc620d8",
+        "historical": "e524f6c1485b4bd276cb8350960c6672dbc620d8",
+        "content_tree_equal": true
+      }
+    }
+  },
+  "actual_hunk_keys": [
+    "124:1:124:1",
+    "210:1:209:0"
+  ],
+  "source_root": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57",
+  "source_files": {
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/application/knowledge_review.py": "9aab83a43c586477131ed5c1c7de0b2e799bfc4416af17893f8422a95d94541a",
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/application/review_family_context.py": "e239dff9c924955bb3fbf20ccfa06573d5f559d94533f632d172cb79369297ce",
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/application/review_unexplained_lane.py": "635dbf01b3bb66c367e06a12ad10157b42b62e52bcf27ef01540edaa53a9ec04",
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/serving/review.py": "c41738f81b60c273721bf14a04af95d9bca272d6ebc182d266d9cde456f242de",
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/serving/review_trees.py": "17b99f2e3d4db2cbed1017cdb738551f19704d3aa657a8c1071930a7f8f360cf",
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/models/knowledge/review.py": "d507c4c87bbdff521874d3517a392a16cc3b76081aec4d334fa4c82e1ba6e3b0"
+  },
+  "source_hashes_verified": 1254,
+  "full_manifest": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/family-unknown-presence-fix/publication-needed.json",
+  "full_manifest_sha256": "ccac300c0b38e026bd25b181fd28fecb03e01b5065cb568022e3c8dcf99e3763",
+  "prior_metadata": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/family-unknown-presence-fix/parent-publication/markerUnknown.capture-provenance.json.prior",
+  "prior_layout_note": "markerReturn.cards was formerly filed under markerUnknown; current metadata groups exact response destinations by prefix. All twelve old cases are preserved and archived.",
+  "fixtures": [
+    {
+      "file": "src/panels/review/markerUnknown.task.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34"
+      },
+      "status": 200,
+      "seconds": 4.699,
+      "bytes": 12973,
+      "sha256": "4e512a8c78532ae2dc4650d8e06ef9c2ac4ad16225e341c5e0e797a1ede9e76b",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/family-unknown-presence-fix/raw/markerUnknown.task.captured.json",
+      "model_validation": "KnowledgeReviewResult:PASS"
+    },
+    {
+      "file": "src/panels/review/markerUnknown.lane.captured.json",
+      "route": "GET /api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34",
+        "comparison": 3,
+        "lane": "files"
+      },
+      "status": 200,
+      "seconds": 0.095,
+      "bytes": 3758,
+      "sha256": "d99afc7bdf0e118564ce36b1060799fcb267cd97e9a6b23393ce1f39990b3e30",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/family-unknown-presence-fix/raw/markerUnknown.lane.captured.json",
+      "model_validation": "ReviewTreesResult:PASS"
+    },
+    {
+      "file": "src/panels/review/markerUnknown.file.captured.json",
+      "route": "GET /api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34",
+        "comparison": 3,
+        "file": "mcp/src/agents_remember/serving/notes.py"
+      },
+      "status": 200,
+      "seconds": 0.08,
+      "bytes": 8799,
+      "sha256": "434dd5650ea53427b6e3b602cb2ffc0629a6169d3389ecb096a66d898422abf0",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/family-unknown-presence-fix/raw/markerUnknown.file.captured.json",
+      "model_validation": "ReviewTreesResult:PASS"
+    },
+    {
+      "file": "src/panels/review/markerUnknown.source.captured.json",
+      "route": "GET /api/review/intent/source-content",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34",
+        "path": "mcp/src/agents_remember/serving/notes.py",
+        "beforeCodeTreeId": "59daf5055eb1ceffba89170be64ac85cabf860f4",
+        "afterCodeTreeId": "db68db54906acc5661a3ac7813d75a340ba7cbdc"
+      },
+      "status": 200,
+      "seconds": 0.642,
+      "bytes": 29019,
+      "sha256": "1a390d44bb6b20a35ac4cb5b6a067bc976eb5d8559beda1b777e59a533cb1b6f",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/family-unknown-presence-fix/raw/markerUnknown.source.captured.json",
+      "model_validation": "ReviewSourceContentResult:PASS"
+    },
+    {
+      "file": "src/panels/review/markerUnknown.memberUnknown.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34",
+        "selectorKind": "invariant",
+        "selectorId": "c7c5be49-164f-56e0-923d-fb5f5259d80c"
+      },
+      "status": 200,
+      "seconds": 2.158,
+      "bytes": 67854,
+      "sha256": "148d449793c715a723d088e9568c34e29d352603d3b1ab0f099f31a67d657263",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/family-unknown-presence-fix/raw/markerUnknown.memberUnknown.captured.json",
+      "model_validation": "KnowledgeReviewResult:PASS"
+    },
+    {
+      "file": "src/panels/review/markerUnknown.noFamily.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34",
+        "selectorKind": "invariant",
+        "selectorId": "4ec11f34-62de-5d3e-a036-756e10ae7859"
+      },
+      "status": 200,
+      "seconds": 1.891,
+      "bytes": 24898,
+      "sha256": "80abc5599691bd91aa9e6ca6e9716fc6a2d712623bd57fcec8691a7d8f99f0f1",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/family-unknown-presence-fix/raw/markerUnknown.noFamily.captured.json",
+      "model_validation": "KnowledgeReviewResult:PASS"
+    },
+    {
+      "file": "src/panels/review/markerUnknown.entries.captured.json",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/marker-extra-current/markerUnknown.entries.captured.json",
+      "route": "GET /api/review/intent/entries",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34"
+      },
+      "status": 200,
+      "seconds": 1.4684368199959863,
+      "bytes": 14145,
+      "sha256": "9501a09771387c56ca209ac9ec3c7fc39f270cd4c018f6b4ef058ad18dc75f99",
+      "model_validation": "ReviewEntryListResult:PASS",
+      "state": "entries"
+    },
+    {
+      "file": "src/panels/review/markerUnknown.family.captured.json",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/marker-extra-current/markerUnknown.family.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34",
+        "selectorKind": "family",
+        "selectorId": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea"
+      },
+      "status": 200,
+      "seconds": 2.1336697149963584,
+      "bytes": 60760,
+      "sha256": "2080ecc261478dbbeed7feaf7eec9ac7e567022094127522b021c1543c5847c6",
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "state": "review"
+    },
+    {
+      "file": "src/panels/review/markerUnknown.trees.captured.json",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/marker-extra-current/markerUnknown.trees.captured.json",
+      "route": "GET /api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34",
+        "comparison": 3
+      },
+      "status": 200,
+      "seconds": 6.922312451002654,
+      "bytes": 64429,
+      "sha256": "da5a3ffe1317ec13a0e05e1a427dc177a89b9aa89270423a1046feda7843118d",
+      "model_validation": "ReviewTreesResult:PASS",
+      "state": "trees"
+    },
+    {
+      "file": "src/panels/review/markerUnknown.cards.captured.json",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/marker-extra-current/markerUnknown.cards.captured.json",
+      "route": "GET /api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34",
+        "comparison": 3,
+        "invariants": "c7c5be49-164f-56e0-923d-fb5f5259d80c"
+      },
+      "status": 200,
+      "seconds": 0.059926457004621625,
+      "bytes": 8381,
+      "sha256": "7030d125856ac50d49963233fa27d9055090d1a3c55d5d59bced54802a865996",
+      "model_validation": "ReviewTreesResult:PASS",
+      "state": "trees"
+    }
+  ],
+  "extra_current_requests_receipt": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/marker-extra-current/receipt.json",
+  "extra_receipt_sha256": "d76e778a2afa46d32fbcad6a46442fc9ff31bddc3bd8d91334086b2c1a378b97",
+  "extra_requests_note": "Actual partial-family catalogue/family/leaf/card questions, plus retained complete comparison2 leaf-wide facts; no synthetic unavailable-family roster."
+}

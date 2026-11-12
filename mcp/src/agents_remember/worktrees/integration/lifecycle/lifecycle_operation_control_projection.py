@@ -22,9 +22,14 @@ from agents_remember.worktrees.integration.integration_operation_decision import
     IntegrationOperationObservation,
     classify_integration_operation,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_errors import (
+    LifecycleControlError,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     closeout_contract_sha256,
+    completed_direct_owner,
     operation_state_fingerprint,
+    retired_direct_record,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     located_lifecycle_operation_store,
@@ -39,7 +44,7 @@ from agents_remember.worktrees.integration.lifecycle.worker.termination import (
     worker_exit_unproven,
 )
 from agents_remember.worktrees.integration.mutation_evidence import closeout_requires_recovery
-from agents_remember.worktrees.modules.git import branch_commit, is_ancestor, require_git
+from agents_remember.worktrees.modules.git import branch_commit, require_git
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -63,6 +68,11 @@ def legal_operation_controls(
     context = context or LifecycleControlProjectionContext()
     base = _control_arguments(contract, record, context.caller)
     publication = record.doorPublication
+    if record.operationKind == "direct-landing" and publication is not None:
+        # A stored record of the earlier shape, which carries a door
+        # publication, is offered no control (ruling e55c0093 point 5); no
+        # writer can produce such a record, and reading one is no error.
+        return []
     if publication is not None and publication.state == "intent":
         pending = _pending_door_control(
             record,
@@ -119,7 +129,31 @@ def _without_legacy_generation_reuse(
         record.taskIntent, TaskIntentIdentity
     ):
         return controls
+    if (
+        record.operationKind == "direct-landing"
+        and _direct_generation_bound(record)
+        and record.doorPublication is None
+    ):
+        # A current direct-landing generation binds its leaf on its own
+        # input; only a legacy generation without that binding reuses
+        # recover/retry unsafely (F04). A direct landing is admitted by its
+        # own request and never carries a task intent; its recover is a real
+        # control (MIK-R143 rule 3b). A record of the earlier shape, which
+        # carries a door publication, keeps the strip: it is offered no
+        # recover and no retry (ruling e55c0093 point 5). Only a closeout
+        # without an intent keeps today's treatment.
+        return controls
     return [control for control in controls if control["action"] not in {"recover", "retry"}]
+
+
+def _direct_generation_bound(record: LifecycleOperationRecord) -> bool:
+    """Whether a direct-landing generation carries its leaf binding."""
+
+    operation_input = record.input
+    return (
+        isinstance(operation_input, DirectLandingOperationInput)
+        and operation_input.leafTaskDocumentRef is not None
+    )
 
 
 def _evidence_controls(
@@ -364,57 +398,41 @@ def _completed_direct_controls(
     *,
     allow_completed_disposition: bool,
 ) -> list[dict[str, Any]]:
-    if _is_exact_direct_successor(record):
-        return [_direct_successor_control(contract, record)]
-    if (_is_exact_direct_owner(record), allow_completed_disposition) != (True, True):
+    # Retire is case (a): the owner's disposition of a completed direct
+    # landing. Supersede is case (b) and never applies: a direct landing
+    # claims no door, so there is nothing to supersede (ruling e55c0093).
+    if not allow_completed_disposition:
         return []
-    return _completed_direct_owner_controls(contract, record, base)
+    if retired_direct_record(record):
+        # The check re-answers an already retired generation before any other
+        # guard, so the offer does the same (ruling e55c0093 point 6).
+        return [_control("retire", base, "Retire this completed direct generation for audit.")]
+    if not completed_direct_owner(record):
+        return []
+    if contract.integration_status == "completed" or _integration_claim_active(contract):
+        # The check refuses integrated or claim-held contracts for the same
+        # record; the offer agrees with it (rule 3a, finding L143-CODE-R1-F01).
+        return []
+    return [_control("retire", base, "Retire this completed direct generation for audit.")]
 
 
-def _is_exact_direct_successor(
-    record: LifecycleOperationRecord,
-) -> bool:
-    publication = record.doorPublication
-    observed = (
-        record.generationDisposition,
-        publication.state if publication is not None else None,
-        publication.generation.disposition if publication is not None else None,
-    )
-    return observed == ("superseded", "proven", "waiting")
-
-
-def _is_exact_direct_owner(
-    record: LifecycleOperationRecord,
-) -> bool:
-    publication = record.doorPublication
-    if publication is None:
-        return False
-    observed = (
-        record.generationDisposition,
-        publication.state,
-        publication.generation.disposition,
-        publication.generation.operationFingerprint,
-        publication.generation.claimedOperationKey,
-    )
-    expected = (
-        "active",
-        "proven",
-        "claimed",
-        record.fingerprint,
-        record.operationKey,
-    )
-    return observed == expected
-
-
-def _completed_direct_owner_controls(
+def direct_supersede_refusal(
     contract: WorktreeContract,
     record: LifecycleOperationRecord,
-    base: dict[str, object],
-) -> list[dict[str, Any]]:
-    controls = [_control("retire", base, "Retire this completed direct generation for audit.")]
-    if _direct_code_candidate_advanced(contract, record):
-        controls.append(_supersede_control(record, base))
-    return controls
+) -> LifecycleControlError:
+    """Refuse a supersede of a direct landing in words that say so and name
+    the next step: a new ``direct_landing`` call (ruling e55c0093 point 3)."""
+
+    successor = _direct_successor_control(contract, record)
+    return LifecycleControlError(
+        "lifecycle-direct-supersede-unavailable",
+        "a direct landing is admitted by its own request and claims no door, "
+        "so there is nothing to supersede; start a new direct_landing call "
+        "for new code",
+        next_action="direct-landing",
+        next_tool="direct_landing",
+        next_args=successor["arguments"],
+    )
 
 
 def _completed_closeout_controls(
@@ -493,21 +511,6 @@ def _supersede_control(
         }
     )
     return control
-
-
-def _direct_code_candidate_advanced(
-    contract: WorktreeContract,
-    record: LifecycleOperationRecord,
-) -> bool:
-    operation_input = record.input
-    if not isinstance(operation_input, DirectLandingOperationInput):
-        return False
-    current = branch_commit(contract.code_repo_path, contract.code_work_branch)
-    return current != operation_input.codeCommit and is_ancestor(
-        contract.code_repo_path,
-        operation_input.codeCommit,
-        current,
-    )
 
 
 def _control(action: str, base: dict[str, object], summary: str) -> dict[str, Any]:

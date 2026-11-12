@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from contextlib import suppress
 from dataclasses import dataclass
@@ -12,11 +13,29 @@ from typing import Any
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.primitives.drift_snapshot import drift_snapshot_path
 from agents_remember.kernel.primitives.observer_paths import DRIFT_SNAPSHOT_SCHEMA
-from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
+from agents_remember.memory_quality.converted_check import (
+    KnowledgeBasePort,
+    converted_knowledge_check,
+)
+from agents_remember.memory_quality.integrity.onboarding_drift_check.git_ops import (
+    current_branch_name,
+)
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
-    ACTIONABLE_CLASSIFICATIONS,
     DriftSummaryPacket,
 )
+from agents_remember.memory_quality.integrity.onboarding_drift_check.report import (
+    resolve_report_path,
+)
+from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTreeReadError
+from agents_remember.memory_quality.reference_anchors import REFERENCE_ANCHOR_RULE
+from agents_remember.memory_quality.reference_state import (
+    STALE_REFERENCE_CHECK,
+    is_converted_memory,
+)
+from agents_remember.worktrees.cutover_lock import legacy_format_refusal
+
+#: The converted-tree result names what it measured (MIK-R44 rule 2).
+CONVERTED_BASIS = "converted-references"
 
 
 @dataclass(frozen=True)
@@ -38,33 +57,104 @@ def run_drift_summary(
     context: Any,
     detail_limit: int = 10,
     output: DriftSummaryOutput | None = None,
+    base: KnowledgeBasePort | None = None,
 ) -> DriftSummaryPacket:
-    if not context.onboarding_root.exists():
+    memory_root = Path(getattr(context, "memory_root", None) or context.onboarding_root.parent)
+    if is_converted_memory(memory_root):
+        onboarding = Path(context.onboarding_root)
+        if onboarding.exists() and not onboarding.is_dir():
+            return {
+                "status": "error",
+                "error": f"onboarding root is not a readable directory: {context.onboarding_root}",
+            }
+        return _run_converted_summary(
+            code_repository_root=code_repository_root,
+            context=context,
+            detail_limit=detail_limit,
+            base=base,
+            output=output,
+        )
+
+    return {
+        "status": "error",
+        "error": legacy_format_refusal(
+            memory_root, operation="the drift check", subject=f"memory root {memory_root}"
+        ),
+    }
+
+
+def _violation_sample(finding: dict[str, Any]) -> dict[str, Any]:
+    """The refusing validator finding as the converted result samples it (MIK-R44 rule 2)."""
+
+    return {
+        "path": finding.get("path"),
+        "field": finding.get("field"),
+        "rule": finding.get("rule"),
+        "message": finding.get("message"),
+    }
+
+
+def _run_converted_summary(
+    *,
+    code_repository_root: Path,
+    context: Any,
+    detail_limit: int,
+    base: KnowledgeBasePort | None,
+    output: DriftSummaryOutput | None = None,
+) -> DriftSummaryPacket:
+    """Build the drift summary from `converted_knowledge_check` and nothing else.
+
+    The legacy classification is never called for a converted tree (MIK-R44 rule 1):
+    a converted card has no metadata table, so legacy discovery would answer an
+    unread "checked, 0" instead of measuring the tree's reference anchors. The
+    landing report is likewise not computed here: this summary surfaces stale
+    anchors and validator findings only, and the landing census belongs to the
+    quality check that carries the leaf's admitted base.
+    """
+
+    memory_root = Path(getattr(context, "memory_root", None) or context.onboarding_root.parent)
+    output = output or DriftSummaryOutput()
+    try:
+        result = converted_knowledge_check(
+            memory_root, code_repository_root, base=base, include_landing=False
+        )
+    except (KnowledgeTreeReadError, ValueError, OSError) as error:
         return {
             "status": "error",
-            "error": f"onboarding root does not exist: {context.onboarding_root}",
+            "error": f"converted drift measurement failed for {memory_root}: {error}",
         }
-
-    rows = [
-        row
-        for path in drift.discover_onboarding_files(context.onboarding_root)
-        for row in drift.classify_sidecar_onboarding_units(
-            path,
-            code_repository_root,
-            context.onboarding_root,
-            context.storage,
-        )
+    states = result["referenceStates"]
+    current = int(states.get("current", 0))
+    stale = int(states.get("stale", 0))
+    # MIK-R198 rule 5 refuses a stale reference anchor at every publication route and in the full
+    # quality run. This summary is the curator's repair view, not a publication: it reports the same
+    # anchors as actionable drift rows (the documented "staleness never blocks by itself"), and keeps
+    # counting the other refusing findings as violations.
+    drift_rows = list(result.get("referenceDriftRows") or [])
+    refusals = [
+        finding for finding in result["findings"] if finding.get("rule") != REFERENCE_ANCHOR_RULE
     ]
-    rows.extend(
-        drift.classify_inline_source(path, code_repository_root)
-        for path in drift.discover_inline_onboarding_sources(
-            code_repository_root,
-            context.storage,
-        )
-    )
-    rows.sort(key=lambda row: (row.source_file, row.onboarding_file))
-    output = output or DriftSummaryOutput()
-    report_path = output.report_path or drift.resolve_report_path(
+    report_only = result["reportOnlyFindings"]
+    stale_findings = [
+        *drift_rows,
+        *[finding for finding in report_only if finding.get("check") == STALE_REFERENCE_CHECK],
+    ]
+    packet: DriftSummaryPacket = {
+        "status": "checked",
+        "basis": CONVERTED_BASIS,
+        "memoryRoot": memory_root.resolve().as_posix(),
+        "codeRoot": code_repository_root.resolve().as_posix(),
+        "sidecarCount": int(result["sidecarCount"]),
+        "count": current + stale,
+        "states": {"current": current, "stale": stale},
+        "actionableCount": stale,
+        "actionableSample": stale_findings[:detail_limit],
+        "violationCount": len(refusals),
+        "violationSample": [_violation_sample(finding) for finding in refusals[:detail_limit]],
+        "reportOnlyCount": len(report_only) + len(drift_rows),
+        "unreadableSidecars": list(result["unreadableSidecars"]),
+    }
+    report_path = output.report_path or resolve_report_path(
         None,
         context.coordination_root,
         context.temp_root,
@@ -72,72 +162,85 @@ def run_drift_summary(
         context.memory_root,
     )
     if output.write_report:
-        drift.write_markdown_report(
-            rows,
-            report_path,
+        _write_converted_report(packet, report_path)
+        _write_converted_snapshot(
             code_repository_root,
-            context.onboarding_root,
+            context,
+            packet,
+            actionable_fingerprint=(
+                _actionable_fingerprint(stale_findings)
+                if not result["unreadableSidecars"]
+                else None
+            ),
+            report_path=report_path,
         )
-    _write_drift_snapshot(code_repository_root, context, rows, report_path=report_path)
-    serialized_rows = [_row_to_dict(row, context.onboarding_root) for row in rows]
-    packet = summarize_rows(
-        serialized_rows,
-        report_path=report_path.as_posix(),
-        detail_limit=detail_limit,
-    )
+        packet["reportPath"] = report_path.as_posix()
     if output.include_rows:
-        packet["rows"] = serialized_rows
+        packet["rows"] = [*stale_findings, *refusals]
     return packet
 
 
-def summarize_rows(
-    rows: list[dict[str, Any]],
-    *,
-    report_path: str = "",
-    detail_limit: int = 10,
-) -> DriftSummaryPacket:
-    actionable = [
-        row for row in rows if str(row.get("classification", "")) in ACTIONABLE_CLASSIFICATIONS
+def _write_converted_report(packet: DriftSummaryPacket, report_path: Path) -> None:
+    """Render the converted Markdown drift report from the same measured result."""
+
+    states = packet.get("states", {})
+    lines = [
+        "# Onboarding drift (converted references)",
+        "",
+        f"basis: {packet.get('basis')}",
+        f"memory root: {packet.get('memoryRoot')}",
+        f"code root: {packet.get('codeRoot')}",
+        f"sidecars read: {packet.get('sidecarCount')}",
+        f"anchors observed: {packet.get('count')}",
+        f"current: {states.get('current', 0)}, stale: {states.get('stale', 0)}",
+        f"validator violations (refusing): {packet.get('violationCount')}",
+        f"validator findings (report-only): {packet.get('reportOnlyCount')}",
+        "",
     ]
-    return {
-        "status": "checked",
-        "count": len(rows),
-        "actionableCount": len(actionable),
-        "reportPath": report_path,
-        "actionableSample": actionable[:detail_limit],
-    }
+    actionable = packet.get("actionableSample", [])
+    lines.append(f"## Stale anchors ({packet.get('actionableCount')})")
+    if not actionable and packet.get("actionableCount"):
+        lines.append(f"_showing 0 of {packet.get('actionableCount')} (detail limit)_")
+    for entry in actionable:
+        lines.append(
+            f"- {entry.get('path')}: {entry.get('field')}: "
+            f"target {entry.get('target')} is {entry.get('state')}"
+        )
+    if packet.get("actionableCount", 0) > len(actionable):
+        lines.append(f"_showing {len(actionable)} of {packet.get('actionableCount')}_")
+    lines.append("")
+    violations = packet.get("violationSample", [])
+    lines.append(f"## Validator violations ({packet.get('violationCount')})")
+    for entry in violations:
+        lines.append(f"- {entry.get('path')}: {entry.get('field')}: {entry.get('rule')}")
+        lines.append(f"  {entry.get('message')}")
+    if packet.get("violationCount", 0) > len(violations):
+        lines.append(f"_showing {len(violations)} of {packet.get('violationCount')}_")
+    lines.append("")
+    unreadable = packet.get("unreadableSidecars", [])
+    if unreadable:
+        lines.append("## Unreadable sidecars")
+        lines.extend(f"- {path}" for path in unreadable)
+        lines.append("")
+    atomic_write_text(report_path, "\n".join(lines))
 
 
-def _row_to_dict(row: Any, onboarding_root: Path) -> dict[str, Any]:
-    return {
-        "onboarding_file": drift.rel(row.onboarding_file, onboarding_root),
-        "storage_mode": row.storage_mode,
-        "source_file": row.source_file,
-        "repository": row.repository,
-        "last_verified_hash": row.last_verified_hash,
-        "last_verified_date": row.last_verified_date,
-        "classification": row.classification,
-        "trust": row.trust,
-        "affected_sections": row.affected_sections,
-        "note": row.note,
-    }
-
-
-def _write_drift_snapshot(
+def _write_converted_snapshot(
     code_repository_root: Path,
     context: Any,
-    rows: list[Any],
+    packet: DriftSummaryPacket,
     *,
+    actionable_fingerprint: str | None,
     report_path: Path | None = None,
 ) -> None:
-    """Persist the drift result as a durable JSON snapshot for the observer (slice 3b, b1).
+    """Persist the converted drift result as the observer snapshot, from the same result.
 
-    Best-effort: the dashboard snapshot must never fail the drift run that produced
-    it, so write errors are swallowed. The reducer reads this snapshot with a
-    staleness age instead of re-classifying drift (which is git-per-sidecar).
+    The snapshot's `counts` are `current`, `stale` and `violation`, and its
+    `actionableCount` is the stale-anchor count (MIK-R44 rule 6).
     """
-    branch = drift.current_branch_name(code_repository_root)
-    classification_counts = drift.counts(rows)
+
+    states = packet.get("states", {})
+    branch = current_branch_name(code_repository_root)
     payload = {
         "schema": DRIFT_SNAPSHOT_SCHEMA,
         "repository": code_repository_root.name,
@@ -145,14 +248,19 @@ def _write_drift_snapshot(
         "checkedAt": datetime.now(UTC).isoformat(),
         "sourceRoot": code_repository_root.resolve().as_posix(),
         "memoryRoot": Path(context.memory_root).resolve().as_posix(),
+        "basis": CONVERTED_BASIS,
         **({"reportPath": report_path.as_posix()} if report_path is not None else {}),
-        "counts": classification_counts,
-        "actionableCount": sum(
-            count
-            for name, count in classification_counts.items()
-            if name in ACTIONABLE_CLASSIFICATIONS
-        ),
-        "rows": [_row_to_dict(row, context.onboarding_root) for row in rows],
+        "counts": {
+            "current": states.get("current", 0),
+            "stale": states.get("stale", 0),
+            "violation": packet.get("violationCount", 0),
+        },
+        "actionableCount": packet.get("actionableCount", 0),
+        "actionableFingerprint": actionable_fingerprint,
+        "rows": [
+            *packet.get("actionableSample", []),
+            *packet.get("violationSample", []),
+        ],
     }
     snapshot_path = drift_snapshot_path(
         context.coordination_root,
@@ -163,3 +271,12 @@ def _write_drift_snapshot(
     # that produced it.
     with suppress(OSError):
         atomic_write_text(snapshot_path, json.dumps(payload, indent=2, default=str) + "\n")
+
+
+def _actionable_fingerprint(findings: list[dict[str, Any]]) -> str:
+    """One order-independent identity of complete findings, never a sampled view or clock."""
+    canonical_rows = sorted(
+        json.dumps(finding, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        for finding in findings
+    )
+    return hashlib.sha256(("[" + ",".join(canonical_rows) + "]").encode()).hexdigest()

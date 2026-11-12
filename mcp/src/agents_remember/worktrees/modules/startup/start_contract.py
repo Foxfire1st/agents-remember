@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from agents_remember.controlplane.durable_store import StoreOwnership, exclusive_access
+from agents_remember.controlplane.durable_store import StoreOwnership
+from agents_remember.errors import MemoryOptOutRefusedError
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import GitRunnerOptions
 from agents_remember.tasks import TaskDocument, read_task_doc
@@ -18,13 +19,10 @@ from agents_remember.tasks.leaf_doc import (
     LeafLifecycleRestampPlan,
     plan_leaf_doc_lifecycle_restamp,
 )
-from agents_remember.worktrees.activation.atomic_series_activation_transaction import (
-    atomic_series_activation_input_refusal,
-    reconcile_selected_series_under_authority,
-)
+from agents_remember.worktrees import outside_scratch
+from agents_remember.worktrees.disabled_memory import opt_out_result_fields, subject_for_contract
 from agents_remember.worktrees.integration.integration_branch_authority import (
     ProposedWorkBranches,
-    integration_surfaces,
     repository_default_branch,
     require_proposed_work_branches,
 )
@@ -46,6 +44,8 @@ from agents_remember.worktrees.modules.startup.leaf_ref_start import (
     invalid_contract_request_result,
     invalid_leaf_ref_result,
     resolve_start_leaf_doc_id,
+    start_input_edge_refusal,
+    start_parent_input_refusal,
 )
 from agents_remember.worktrees.modules.startup.master_series_admission import (
     MasterSeriesContractAdmissionError,
@@ -53,13 +53,14 @@ from agents_remember.worktrees.modules.startup.master_series_admission import (
     _master_series_admission_refusal,
     memory_mode_for_repository,
 )
+from agents_remember.worktrees.modules.startup.start_plan import StartContractPlan
 from agents_remember.worktrees.scheduling_mode import (
     TERMINAL_SERIES_CLEANUP,
     commanded_sprint_masters,
     effective_execution_nature,
 )
-from agents_remember.worktrees.sync_source_refresh import fetch_source_upstreams
 from agents_remember.worktrees.task_resolver import (
+    TaskResolutionError,
     leaf_enclosure_path,
     resolve_active_task_root,
     series_contract_path,
@@ -76,6 +77,8 @@ from agents_remember.worktrees.worktree_contract import (
     default_series_contract,
     load_contract,
 )
+
+from .series_contract_activation import activate_master_series
 
 MASTER_SERIES_BOOTSTRAP_OWNERSHIP = StoreOwnership(
     store="master-series-bootstrap",
@@ -219,87 +222,11 @@ def ensure_master_series_contract(
     activation_args: WorktreeArgs | None = None,
     leaf_admission_operation: str | None = None,
 ) -> WorktreeContract | WorktreeCommandResult:
-    """Return or create the plane-owned contract for one canonical master document.
-
-    The orchestrator must be able to create the manager seat before that manager starts the
-    first leaf.  Contract and integration-branch identity therefore belong to the structural
-    plane, not to the first worker request.  First-leaf start calls this same owner so both
-    entry points remain one operation rather than competing bootstrap implementations.
-
-    Contract presence proves durable work exists; it does not own scheduling.  Once
-    this operation has recovered or created the requested contract, it publishes that
-    contract's own activation as reconciling (no other master's record is touched),
-    syncs its pinned source pair, and publishes it active before returning
-    implementation authority.
-    """
-
-    _require_commanded_atomic_master(spec)
-    if dry_run:
-        try:
-            candidate = _bootstrap_preflight_contract(spec)
-        except MasterSeriesContractAdmissionError as error:
-            return _master_series_admission_refusal(
-                spec,
-                error,
-                operation=leaf_admission_operation or "worktree_start",
-            )
-        return candidate
-
-    # Observe the journal -> task-bound-contract handoff under the same per-master
-    # mutex that publishes it.  Without this read lock a concurrent loser can see
-    # "no contract" before publication and "no journal" after retirement, then
-    # misclassify the winner's protected branch as an orphan.
-    with exclusive_access(
-        _master_series_bootstrap_lock_target(spec), MASTER_SERIES_BOOTSTRAP_OWNERSHIP
-    ):
-        try:
-            preflight = _bootstrap_preflight_contract(spec)
-        except MasterSeriesContractAdmissionError as error:
-            return _master_series_admission_refusal(
-                spec,
-                error,
-                operation=leaf_admission_operation or "worktree_start",
-            )
-    invalid = atomic_series_activation_input_refusal(preflight, activation_args)
-    if invalid is not None:
-        return invalid
-    # Fetch is best-effort evidence and may touch remote-tracking refs, so it happens
-    # before repository integration authority is held.  The sync transaction derives
-    # and pins the exact local source commits again inside that authority.
-    fetch = fetch_source_upstreams(preflight)
-
-    # Manager dispatch and first-leaf start are two public entries into one bootstrap.  Hold the
-    # same host-local/process-local lock across the second existence check, both branch creations,
-    # and contract publication.  A concurrent loser therefore adopts the winner's completed edge;
-    # it can never enter rollback and delete the winner's contract.
-    _require_commanded_atomic_master(spec)
-    # Store locks never nest: finish the per-master bootstrap journal transaction
-    # before reading or writing the per-contract activation store.
-    with exclusive_access(
-        _master_series_bootstrap_lock_target(spec), MASTER_SERIES_BOOTSTRAP_OWNERSHIP
-    ):
-        recovering = _recover_master_series_bootstrap(spec)
-        if recovering is not None:
-            contract = recovering
-        else:
-            try:
-                existing = _existing_master_series_contract(spec)
-            except MasterSeriesContractAdmissionError as error:
-                return _master_series_admission_refusal(
-                    spec,
-                    error,
-                    operation=leaf_admission_operation or "worktree_start",
-                )
-            if existing is not None:
-                contract = existing
-            else:
-                contract = _new_master_series_contract(spec)
-                integration_surfaces(contract)
-                _publish_master_series_contract(spec, contract)
-    return reconcile_selected_series_under_authority(
-        contract,
+    return activate_master_series(
+        spec,
+        dry_run=dry_run,
         activation_args=activation_args,
-        fetch=fetch,
+        leaf_admission_operation=leaf_admission_operation,
     )
 
 
@@ -473,7 +400,11 @@ def _recover_master_series_bootstrap(
     contract = _contract_from_bootstrap_record(spec, record)
     if contract.contract_path.is_file():
         existing = load_contract(contract.contract_path)
-        if existing != contract:
+        # The journal is still here, so the retirement was interrupted after the publication
+        # landed. That publication pinned this generation's outside scratch record (MIK-R207
+        # rule 1), so the published bytes are this same contract *with* the record it wrote --
+        # accepting only the bare rebuild would refuse the retry's own work and lose the root.
+        if existing not in (contract, outside_scratch.with_root_record(contract)):
             raise RuntimeError(
                 "series bootstrap contract was published with different task or repository facts"
             )
@@ -571,6 +502,13 @@ def _finish_master_series_bootstrap(
             ),
             authority=_BOOTSTRAP_REF_AUTHORITY,
         )
+    # MIK-R207 rule 1: the generation records and allocates its outside scratch root as part
+    # of the exact text this publication pins. The record is applied before the retry comparison,
+    # because a retry finds the contract this same publication already wrote: comparing the
+    # un-augmented contract against the published one would refuse its own work after an
+    # interruption between the publication and the journal's retirement, and the record it
+    # carries is the one this retry must reuse rather than compute again.
+    contract = outside_scratch.with_root_record(contract)
     if contract.contract_path.is_file():
         existing = load_contract(contract.contract_path)
         if existing != contract:
@@ -739,6 +677,62 @@ def _declared_integration_source_branch(context, task_root: Path) -> str:
     return branch
 
 
+def _tombstone_successor_series(
+    context, args: WorktreeArgs, task_root: Path, configured_memory: Path | None
+) -> WorktreeContract | None:
+    """Admit a restart-after-abandon under its still-disabled parent series.
+
+    MIK-R50 rule 3 plus the abandon-terminal-state ruling: the restart at the
+    address of an abandoned (or reopened) tombstone, requesting no memory
+    directive, is that tombstone's authorized successor — the live disabled
+    parent series admits it instead of refusing the new-master escape
+    (L50-CODE-R1-F01 keeps refusing genuinely new leaves, which have no
+    tombstone). No mode conversion is built and the series file is untouched;
+    only this start's parent resolution uses the admitted series.
+    Returns None when this is not such a restart (normal admission applies).
+    """
+    if args.memory_mode is not None or args.memory_choice is not None or args.topology is not None:
+        return None
+    try:
+        leaf_id = resolve_start_leaf_doc_id(context, args)
+        leaf_path = leaf_enclosure_path(task_root, leaf_id)
+        tombstone = load_contract(leaf_path) if leaf_path.exists() else None
+        series_path = series_contract_path(task_root)
+        series = load_contract(series_path) if series_path.exists() else None
+    except (
+        AssertionError,
+        LeafRefResolutionError,
+        TaskResolutionError,
+        ContractError,
+        OSError,
+    ):
+        return None
+    if tombstone is None or tombstone.cleanup not in ("abandoned", "reopened"):
+        return None
+    if (
+        series is None
+        or series.kind != "series"
+        or series.cleanup in TERMINAL_SERIES_CLEANUP
+        or series.memory_mode == "external"
+    ):
+        # Missing/non-series/terminal series fall through to normal admission;
+        # an external series needs no bypass.
+        return None
+    # The series must be the live disabled parent of this lane: same code
+    # repo, same configured memory root, same task root — mode excepted.
+    try:
+        same_lane = (
+            series.code_repo_path.resolve() == context.code_repository_root.resolve()
+            and configured_memory is not None
+            and series.memory_repo_path is not None
+            and series.memory_repo_path.resolve() == configured_memory.resolve()
+            and series.task_root.resolve() == task_root.resolve()
+        )
+    except OSError:
+        return None
+    return series if same_lane else None
+
+
 def _parent_series_contract(
     context, args: WorktreeArgs, memory_mode: str
 ) -> WorktreeContract | WorktreeCommandResult | None:
@@ -776,6 +770,9 @@ def _parent_series_contract(
             "choose a distinct worktree_name or work_branch"
         )
     configured_memory = _start_memory_repo(context, memory_mode)
+    tombstone_series = _tombstone_successor_series(context, args, task_root, configured_memory)
+    if tombstone_series is not None:
+        return tombstone_series
     series = ensure_master_series_contract(
         MasterSeriesContractSpec(
             coordination_root=context.coordination_root,
@@ -818,7 +815,7 @@ def _commanding_sprint_document(context, task_root: Path) -> TaskDocument | None
         return None
 
 
-def build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | WorktreeCommandResult:
+def build_start_contract(context, args: WorktreeArgs) -> StartContractPlan | WorktreeCommandResult:
     """The contract a start would create, or the refusal that says why it cannot.
 
     Both are returned rather than raised, because `worktree_start`'s handler has no `except`
@@ -836,6 +833,19 @@ def build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | Work
         return _build_start_contract(context, args)
     except LeafRefResolutionError as exc:
         return invalid_leaf_ref_result(exc)
+    except MemoryOptOutRefusedError as exc:
+        # A direct caller that names the removed mode meets the same opt-out
+        # refusal the top of ``worktree_start`` answers (MIK-R50): the mode, the
+        # reason and the action, never the internal text or invalid-request.
+        fields = exc.response_fields()
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": fields["status"],
+                "summary": fields["detail"],
+                **fields,
+            },
+        )
     except ContractError as exc:
         return invalid_contract_request_result(exc)
 
@@ -965,6 +975,33 @@ def _existing_master_series_admission_refusal(
     try:
         _existing_master_series_contract(spec)
     except MasterSeriesContractAdmissionError as error:
+        if (
+            error.existing_contract is not None
+            and error.existing_contract.memory_mode != "external"
+        ):
+            # A restart-after-abandon at a tombstone address is that tombstone's
+            # authorized successor: the live disabled parent admits it (MIK-R50
+            # rule 3 + abandon-terminal-state ruling). Genuinely new leaves have
+            # no tombstone and keep the refusal below.
+            if _tombstone_successor_series(context, args, task_root, memory_repo) is not None:
+                return None
+            # Under a master whose series contract carries the removed mode, a
+            # leaf start is refused with the series and the new-master way out
+            # (MIK-R50 R3f) -- never "correct the named edge". This packet builds
+            # no conversion of a contract from disabled to external.
+            fields = opt_out_result_fields(
+                subject_for_contract(error.existing_contract),
+                "atomic leaf start",
+                "series",
+            )
+            return WorktreeCommandResult(
+                2,
+                {
+                    "state": fields["status"],
+                    "summary": fields["detail"],
+                    **fields,
+                },
+            )
         return _master_series_admission_refusal(
             spec,
             error,
@@ -973,7 +1010,7 @@ def _existing_master_series_admission_refusal(
     return None
 
 
-def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | WorktreeCommandResult:
+def _build_start_contract(context, args: WorktreeArgs) -> StartContractPlan | WorktreeCommandResult:
     assert args.task_name is not None
     assert args.worktree_name is not None
     leaf_id = resolve_start_leaf_doc_id(context, args)
@@ -987,9 +1024,15 @@ def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | Wor
     if restamp_block is not None:
         return restamp_block
     repo = context.code_repository_root
-    memory_mode = args.memory_mode or context.memory_mode
+    # A start that names no mode uses ``external`` (MIK-R50): it never takes
+    # ``disabled`` from an abandoned or reopened contract at the leaf's address,
+    # and never from the master's series contract.
+    memory_mode = args.memory_mode or "external"
     memory_repo = _start_memory_repo(context, memory_mode)
     work_branch = args.work_branch or f"ar/{args.worktree_name}"
+    parent_refusal = start_parent_input_refusal(context, args, task_root)
+    if parent_refusal is not None:
+        return parent_refusal
     admission_refusal = _existing_master_series_admission_refusal(
         context,
         args,
@@ -1010,6 +1053,23 @@ def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | Wor
             memory_work_branch=_external_memory_value(memory_mode, work_branch),
         )
     )
+    source_refusal = None
+    if args.source_branch:
+        # Preview is read-only: validate the caller's source before bootstrap
+        # can publish a parent contract, activation or either protected ref.
+        preview_parent = _parent_series_contract(context, replace(args, dry_run=True), memory_mode)
+        if isinstance(preview_parent, WorktreeCommandResult):
+            source_refusal = preview_parent
+        else:
+            expected_source = _start_source_branch(
+                context, replace(args, source_branch=None), task_root, preview_parent, repo
+            )
+            if args.source_branch.removeprefix("refs/heads/") != expected_source:
+                source_refusal = start_input_edge_refusal(
+                    context, args, "source_branch", expected_source
+                )
+    if source_refusal is not None:
+        return source_refusal
     parent_series = _parent_series_contract(context, args, memory_mode)
     if isinstance(parent_series, WorktreeCommandResult):
         # The requested series remains reconciling or its admission evidence refused.
@@ -1023,7 +1083,7 @@ def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | Wor
         args,
         parent_series,
     )
-    return default_contract(
+    contract = default_contract(
         ContractTask(
             name=args.task_name,
             repo_name=context.code_repository_name,
@@ -1049,3 +1109,4 @@ def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | Wor
             base_commit=memory_base,
         ),
     )
+    return StartContractPlan(contract, parent_series if args.dry_run else None)

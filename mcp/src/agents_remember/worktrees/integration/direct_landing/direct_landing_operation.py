@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import Any
 
 from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
 from agents_remember.models.lifecycles.mutation_evidence import (
@@ -14,10 +15,15 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
     LifecycleOperationRecoveryCommits,
 )
+from agents_remember.worktrees.attention_terminal_notices import (
+    begin_direct_landed_notice,
+    confirm_notice,
+)
 from agents_remember.worktrees.integration.closeout.recovery_projection import (
     derive_closeout_recovery_commits,
 )
 from agents_remember.worktrees.integration.direct_landing.direct_landing_recovery_state import (
+    UNPUBLISHED_REFUSAL,
     classify_direct_landing_recovery,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_candidate import (
@@ -37,6 +43,7 @@ from agents_remember.worktrees.integration.mutation_evidence import (
     initial_closeout_mutation_evidence,
     reconcile_closeout_mutations,
 )
+from agents_remember.worktrees.knowledge_gate import settle_direct_closing
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -90,6 +97,24 @@ class DirectLandingRuntime:
 
     def finish(self, result: dict[str, object]) -> LifecycleOperationRecord:
         stamp = _stamp()
+        # MIK-R200 rule 5 and F05: a completed direct-landing generation is one native occurrence
+        # of the leaf this generation was admitted for. The series contract is only the enclosure
+        # that publishes it, so the subject comes from the immutable accepted input's
+        # leafTaskDocumentRef -- the reference the route proved belongs to this series -- and never
+        # from the contract's own (master) task document. The intent is taken before the completion
+        # row and confirmed after it, so a recovery neither loses nor doubles it.
+        admitted = (
+            self.record.input
+            if isinstance(self.record.input, DirectLandingOperationInput)
+            else None
+        )
+        occurrence = begin_direct_landed_notice(
+            self.contract,
+            leaf_reference=admitted.leafTaskDocumentRef if admitted is not None else None,
+            code_commit=str(result.get("codeCommit") or ""),
+            operation_key=self.record.operationKey,
+            generation=self.record.generation,
+        )
         self.record = self.store.update(
             lambda record: record.model_copy(
                 update={
@@ -104,6 +129,59 @@ class DirectLandingRuntime:
                 }
             )
         )
+        confirm_notice(self.contract, occurrence)
+        return self.record
+
+    def cancel_unpublished(self, *, status: str, detail: str) -> LifecycleOperationRecord:
+        """Cancel this generation after a refusal that published nothing; restore its kept closing.
+
+        The caller has proven that no ref moved (the refusal came before the commit was published,
+        or before a publication was begun). The memory attempt is therefore recorded as unchanged,
+        which is what lets the journal accept the cancellation; the history file and the ignore
+        rule the generation had prepared go back through its receipt; and the result names the
+        cancellation as its own (``cancelledBy``), so the next request, the same one included,
+        starts a fresh generation (:func:`cancelled_unpublished`).
+        """
+
+        stamp = _stamp()
+
+        def unchanged(record: LifecycleOperationRecord) -> LifecycleOperationRecord:
+            mutations = {
+                leg: (
+                    evidence.model_copy(
+                        update={"state": "reconciled-unchanged", "observed": evidence.before}
+                    )
+                    if evidence.state == "mutation-intent"
+                    else evidence
+                )
+                for leg, evidence in record.mutationEvidence.items()
+            }
+            return record.model_copy(update={"heartbeatAt": stamp, "mutationEvidence": mutations})
+
+        def cancelled(record: LifecycleOperationRecord) -> LifecycleOperationRecord:
+            return record.model_copy(
+                update={
+                    "status": "cancelled",
+                    "phase": "cancelled",
+                    "finishedAt": stamp,
+                    "heartbeatAt": stamp,
+                    "cancelRequested": True,
+                    "generationDisposition": "cancelled",
+                    "currentCommand": "direct landing cancelled after a refused publication",
+                    "failure": f"{status}: {detail}",
+                    "result": {
+                        "state": status,
+                        "cancelledBy": UNPUBLISHED_REFUSAL,
+                        "nextAction": "direct-landing",
+                    },
+                    "guidance": "Nothing was published and the preparations were restored; "
+                    "repeat the direct landing once the cause is gone.",
+                }
+            )
+
+        self.store.update(unchanged)
+        self.record = self.store.update(cancelled)
+        settle_direct_closing(self.contract, current=self.record.fingerprint, state="cancelled")
         return self.record
 
     def require_input(
@@ -152,6 +230,42 @@ class DirectLandingRuntime:
 
 def direct_landing_store(contract: WorktreeContract) -> LifecycleOperationStore:
     return located_lifecycle_operation_store(contract, "direct-landing")
+
+
+def _leaf_mismatch(operation_input: DirectLandingOperationInput, leaf_ref: Any) -> bool:
+    """Whether the stored generation belongs to another leaf (or cannot be told)."""
+
+    try:
+        return bool(operation_input.leafTaskDocumentRef != leaf_ref)
+    except Exception:
+        return True
+
+
+def direct_pair_proof(contract: WorktreeContract, leaf_ref: Any) -> bool | None:
+    """Whether this leaf's pair is proven landed (F05/F09).
+
+    ``True`` when the contract's direct-landing journal holds a completed
+    generation for exactly this leaf whose result names both the code and the
+    memory commit. ``False`` when a generation for this leaf exists but is
+    incomplete, failed, or completed without the pair. ``None`` when no
+    generation for this leaf exists or the journal cannot be read -- then the
+    caller falls back to document/checkout evidence instead of guessing.
+    """
+
+    try:
+        record = direct_landing_store(contract).read()
+    except Exception:
+        return None
+    if (
+        record is None
+        or not isinstance(record.input, DirectLandingOperationInput)
+        or _leaf_mismatch(record.input, leaf_ref)
+    ):
+        return None
+    if record.status != "completed":
+        return False
+    result = record.result if isinstance(record.result, dict) else {}
+    return bool(result.get("codeCommit") and result.get("memoryContentCommit"))
 
 
 def direct_landing_record(

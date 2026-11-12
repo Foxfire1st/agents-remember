@@ -24,10 +24,7 @@ Expected provider setup and lifecycle command shapes:
 ```bash
 # MCP tools
 runtime_install(dry_run=true, include_benchmarks=false, install_provider_deps=true)
-context_packet(repo_id="<repoId>", include_providers=true)
-
-# GrepAI memory provider query after MCP install/status
-grepai_search(query="<query>", dry_run=false)
+context_packet(repo_id="<repoId>")
 ```
 
 Manual provider debugging should run through source/package-owned tooling with
@@ -86,6 +83,6 @@ layer.
 
 ## Notes
 
-Agents should resolve the target repository with the `c-08-ar-coordination-context-resolver` skill before choosing task,
+Agents should resolve the target repository through `context_packet` using the [tool reference](skill://agents-remember/skills/l-01-agent-lifecycles/reference/knowledge/commands.md) before choosing task,
 worktree, memory, or validation paths. Prefer memory-layer tool instructions
 when a command is repository-specific.

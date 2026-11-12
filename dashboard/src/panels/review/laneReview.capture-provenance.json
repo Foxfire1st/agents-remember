@@ -1,0 +1,98 @@
+{
+  "captured_at": "2026-09-30T11:17:05+00:00",
+  "producer": "260928-MIK-L32 worker, notes/reports/260928-MIK-L32-evidence/capture_ui_fixtures.py",
+  "command": "PYTHONPATH=<L32 worktree>/mcp/src <mcp venv python> capture_ui_fixtures.py <L32 worktree>/dashboard <this file>",
+  "route": "create_app(config, collaborators=serving_collaborators(config)) over fastapi TestClient",
+  "source_tree": "260928-mik-l32 worktree (base b54d1b0331f67454bcf245a7a338b04900181c3c, with this leaf's uncommitted changes)",
+  "scratch": "/tmp/mik-l32-real: --shared clones of the live code and memory repositories (setup_scratch.sh); memory 58d016cb converted with the worktree's knowledge-convert and committed as scratch main with Code-Commit b54d1b03; leaf 260928-MIK-L32 (setup_leaf.py setup, then curate): review_comparison_retention.py edited inside _side_binding with a helper appended and its entries re-recorded at the candidate blob, review_source_admission.py edited in _not_listed (entries recorded at an older blob by the conversion), a new module, CONTRIBUTING.md and a new binary file with no entry, review_family_rosters.py made executable, and a test body edited with a SCRATCH-AUTHORED proof PRF-7Q3M5K at the candidate blob",
+  "comparison": 2,
+  "attempts": "one capture per body; each body is the first answer",
+  "fixtures": [
+    {
+      "file": "src/panels/review/laneReview.summary.captured.json",
+      "route": "GET /api/review/intent/summary",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L32"
+      },
+      "status": 200,
+      "seconds": 1.8,
+      "sha256": "267ad4fa47022f6e3e79d18a5b8a04048bf9920f594a36163d1580f5f5023629",
+      "bytes": 579
+    },
+    {
+      "file": "src/panels/review/laneReview.task.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L32"
+      },
+      "status": 200,
+      "seconds": 4.77,
+      "sha256": "889d5ee7e98517157c0186cbd9603620b072a47ac0b8276406c43a0be876ec3e",
+      "bytes": 16922
+    },
+    {
+      "file": "src/panels/review/laneReview.trees.captured.json",
+      "route": "GET /api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L32",
+        "comparison": 2
+      },
+      "status": 200,
+      "seconds": 6.01,
+      "sha256": "058ef19395cf4c753d9ae43e6ca1df40aba246c56f2ff5bc41b179a816a306b3",
+      "bytes": 86687
+    },
+    {
+      "file": "src/panels/review/laneReview.lane.captured.json",
+      "route": "GET /api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L32",
+        "comparison": 2,
+        "lane": "files"
+      },
+      "status": 200,
+      "seconds": 0.07,
+      "sha256": "fdd58f79873ac0bd37cc18d5e05d31f28c39cb32f3bc9eac073762178d1d6916",
+      "bytes": 6595
+    },
+    {
+      "file": "src/panels/review/laneReview.file.captured.json",
+      "route": "GET /api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L32",
+        "comparison": 2,
+        "file": "mcp/src/agents_remember/application/review_comparison_retention.py"
+      },
+      "status": 200,
+      "seconds": 0.06,
+      "sha256": "4c77398db1c215e0cdb43e0e185f75ede2950159bc8d5d67f9fdc033d8f1260d",
+      "bytes": 5098
+    },
+    {
+      "file": "src/panels/review/laneReview.source.captured.json",
+      "route": "GET /api/review/intent/source-content",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L32",
+        "path": "mcp/src/agents_remember/application/review_comparison_retention.py",
+        "beforeCodeTreeId": "b54d1b0331f67454bcf245a7a338b04900181c3c",
+        "afterCodeTreeId": "7e5ea079ee32e37ebab0fad49b38afd4d21497bc"
+      },
+      "status": 200,
+      "seconds": 2.95,
+      "sha256": "5e94293dd1aeb0dd605a81da8231896d3cae21fd3309375e9729dd15bffe456f",
+      "bytes": 53371
+    }
+  ]
+}

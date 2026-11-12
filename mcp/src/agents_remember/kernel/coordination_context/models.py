@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Protocol, TypedDict
 
 from agents_remember.errors import AgentsRememberError
-from agents_remember.kernel.memory_mode import MemoryMode, Topology
+from agents_remember.kernel.memory_mode import ReadableMemoryMode, Topology
 
 
 class MissingMemoryError(AgentsRememberError):
@@ -24,8 +24,8 @@ class MissingMemoryError(AgentsRememberError):
             "Agents Remember memory is missing for "
             f"{code_repository_name!r}. Checked external memory at {external_memory.as_posix()} "
             f"using coordination root {coordination_root.as_posix()}. "
-            "Memory setup is not a message's job to prescribe: the c-00-initialize-memory-repo "
-            "skill owns creating or repairing this root, and the c-03-repo-bootstrap skill owns "
+            "Memory setup is not a message's job to prescribe: the memory initialization guide "
+            "(docs/guides/onboard-existing-repo.md) owns creating or repairing this root; repository "
             "generating onboarding content under it."
         )
 
@@ -53,6 +53,22 @@ class StorageSettings:
     mode: str = DEFAULT_STORAGE_MODE
     default: str = DEFAULT_STORAGE_MODE
     path_rules: list[StorageRule] = field(default_factory=list)
+
+
+LANDING_WORKFLOW_LOCAL = "local"
+LANDING_WORKFLOW_PULL_REQUEST = "pull-request"
+LANDING_WORKFLOWS = (LANDING_WORKFLOW_LOCAL, LANDING_WORKFLOW_PULL_REQUEST)
+"""The landing workflows a repository's memory settings may choose (MIK-R202@v2 rule 13).
+
+``local`` is today's behavior and the value a missing key means: the integration moves the master
+line and the Manager pushes it. ``pull-request`` publishes each leaf landing as a merged pull
+request, and the master chain proof admits that one merge and nothing else.
+"""
+
+
+@dataclass
+class LandingSettings:
+    workflow: str = LANDING_WORKFLOW_LOCAL
 
 
 @dataclass
@@ -204,11 +220,12 @@ class CoordinationContext:
     storage: StorageSettings
     path_rules: list[StorageRule]
     cross_repo: CrossRepoSettings
-    # From the worktree contract whenever one is in scope: `resolver.build_coordination_context`
-    # (resolver.py line 284) reads `contract.memory_mode` straight into this field, falling back
+    # From the worktree contract whenever one is in scope: `build_coordination_context` in
+    # `resolver.py` reads `contract.memory_mode` straight into this field, falling back
     # to `_memory_mode(roots.topology)` only when there is no contract. So the vocabulary is the
-    # contract's, and this alias is the one declaration rather than a second copy of the pair.
-    memory_mode: MemoryMode
+    # contract's readable one (a legacy `disabled` contract still reports itself), and this
+    # alias is the one declaration rather than a second copy of the pair.
+    memory_mode: ReadableMemoryMode
     contract_path: Path | None = None
     worktree_group: Path | None = None
     code_worktree: Path | None = None

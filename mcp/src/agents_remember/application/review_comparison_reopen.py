@@ -41,8 +41,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-import apsw
-
 from agents_remember.application.review_comparison_generation import (
     COMPARISON_MANIFEST_NAME,
     TYPED_ABSENCE_STATES,
@@ -50,7 +48,6 @@ from agents_remember.application.review_comparison_generation import (
     ComparisonGenerationManifest,
     ComparisonGenerationRef,
     ComparisonHistoryDeletion,
-    ComparisonKnowledgeBinding,
     ComparisonSourceBinding,
     KnowledgeSide,
     generation_directories,
@@ -71,7 +68,6 @@ from agents_remember.application.review_sync_rebinding import (
     rebinding_names_the_generation,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.models.knowledge.review import ReviewRefusal
@@ -145,6 +141,7 @@ class ComparisonKnowledgeChannel:
         "missing",
         "corrupt",
         "unavailable-history",
+        "legacy-unavailable",
     ]
     identity: SnapshotIdentity | None
     path: Path | None
@@ -167,7 +164,7 @@ class ComparisonReopen:
 
     ``available`` means every channel that was expected to resolve did; a channel recording a typed
     absence is *not* an unavailability, because nothing was ever claimed to be there. ``unavailable``
-    means at least one expected channel did not resolve, and ``unavailable_channels()`` names which,
+    means at least one expected channel did not resolve, and each channel's own ``state`` names which,
     so a consumer can keep the channels that did resolve instead of discarding the generation.
 
     ``final_output`` is the fourth kind of channel and the newest: what normal closeout and integration
@@ -206,23 +203,6 @@ class ComparisonReopen:
         """Whether this reopen resolved every channel that was expected to resolve."""
 
         return self.state == "available"
-
-    def unavailable_channels(self) -> tuple[str, ...]:
-        """Return the exact channels that did not resolve, in the order they are reported."""
-
-        failed = [
-            f"{channel.side}:{channel.state}"
-            for channel in self.knowledge
-            if channel.state in {"missing", "corrupt", "unavailable-history"}
-        ]
-        failed.extend(
-            f"evidence:{channel.relative_path}:{channel.state}"
-            for channel in self.evidence
-            if channel.state != "available"
-        )
-        if self.source is not None and self.source.state != "available":
-            failed.insert(0, f"source:{self.source.state}")
-        return tuple(failed)
 
 
 def reopen_comparison_generation(
@@ -376,7 +356,11 @@ def _measured_rebinding(
     """
 
     read = read_review_sync_rebinding(task_root, leaf_id, manifest.generation_id)
-    if read.rebinding is None or rebinding_names_the_generation(read, manifest) is not None:
+    if (
+        read.state == "legacy-limit"
+        or read.rebinding is None
+        or rebinding_names_the_generation(read, manifest) is not None
+    ):
         return read
     return replace(
         read,
@@ -563,83 +547,13 @@ def _knowledge_channel(
                 f"within {deleted.cleanup_scope}: {deleted.reason}"
             ),
         )
-    return _measure_snapshot(side, path, binding)
-
-
-def _measure_snapshot(
-    side: KnowledgeSide, path: Path, binding: ComparisonKnowledgeBinding
-) -> ComparisonKnowledgeChannel:
-    """Read one retained snapshot back and compare it against the dataset it was frozen as."""
-
-    artifact = binding.artifact
-    assert artifact is not None and binding.identity is not None
-    if not path.is_file():
-        return ComparisonKnowledgeChannel(
-            side=side,
-            state="missing",
-            identity=None,
-            path=path,
-            detail=(
-                f"the {side} snapshot recorded at {path} is not present, and no deletion of it was "
-                "recorded; a missing expected dataset is unavailable, not absent history"
-            ),
-        )
-    observed = _observed_snapshot(path)
-    if observed is None:
-        return ComparisonKnowledgeChannel(
-            side=side,
-            state="corrupt",
-            identity=None,
-            path=path,
-            detail=(
-                f"the {side} snapshot at {path} is not readable as a dataset of this code, so it is "
-                "not the dataset this generation froze"
-            ),
-        )
-    return _compare_snapshot(side, path, observed, binding)
-
-
-def _compare_snapshot(
-    side: KnowledgeSide,
-    path: Path,
-    observed: SnapshotIdentity,
-    binding: ComparisonKnowledgeBinding,
-) -> ComparisonKnowledgeChannel:
-    """The channel for a readable snapshot, or the corrupt state naming what disagrees."""
-
-    recorded = binding.identity
-    assert recorded is not None
-    if observed != recorded:
-        return ComparisonKnowledgeChannel(
-            side=side,
-            state="corrupt",
-            identity=observed,
-            path=path,
-            detail=(
-                f"the {side} snapshot at {path} holds {observed.logical_digest}, while this "
-                f"generation froze {recorded.logical_digest}; the bytes are not the dataset that "
-                "was retained"
-            ),
-        )
     return ComparisonKnowledgeChannel(
         side=side,
-        state="available",
-        identity=observed,
+        state="legacy-unavailable",
+        identity=None,
         path=path,
-        detail=(
-            f"the {side} snapshot reads back as the dataset this generation froze "
-            f"({observed.logical_digest})"
-        ),
+        detail="this historical comparison retained a canonical dataset; retirement preserves its source and evidence identities but no longer reads that dataset",
     )
-
-
-def _observed_snapshot(path: Path) -> SnapshotIdentity | None:
-    """One snapshot file's own logical identity, or ``None`` when it is not a dataset."""
-
-    try:
-        return dataset_identity(path)
-    except (KnowledgeStorageError, apsw.Error, OSError):
-        return None
 
 
 def _evidence_channel(

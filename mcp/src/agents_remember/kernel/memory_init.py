@@ -12,6 +12,27 @@ from agents_remember.kernel.primitives.runtime_config import (
 
 DEFAULT_BRANCH_CONFIG_KEY = "agents-remember.defaultBranch"
 
+# The layout marker (MIK-R21 rule 1, MIK-R24 rule 9): a new memory repository is created in the
+# text format. The bytes are the canonical formatting of
+# ``{"schema": "ar-memory-layout/v2", "conversion": "1"}`` (``models.knowledge_files``), spelled
+# here because the kernel ranks below the models; a test pins them to the formatter's output.
+LAYOUT_MARKER_RELATIVE = ("knowledge", "layout.json")
+LAYOUT_MARKER_TEXT = '{\n  "conversion": "1",\n  "schema": "ar-memory-layout/v2"\n}\n'
+LEGACY_DATABASE_NAME = "knowledge.sqlite"
+
+
+def _holds_legacy_memory(memory_root: Path) -> bool:
+    """Whether an existing memory root already holds unconverted content.
+
+    Such a root is converted by the conversion command or a crossing sync, never marked: writing
+    the marker beside legacy cards would make the old format be read as the new one.
+    """
+
+    if (memory_root / LEGACY_DATABASE_NAME).exists():
+        return True
+    onboarding = memory_root / "onboarding"
+    return onboarding.is_dir() and any(path.is_file() for path in onboarding.rglob("*.md"))
+
 
 def _normalize_initial_branch(value: str) -> str:
     """One explicit local branch name, or a refusal naming the value.
@@ -227,7 +248,7 @@ def initialize_memory(
             f"coordination root {config.coordination_root.as_posix()} does not exist or is not "
             f"a directory, so repo_id {repo_id!r} has no workspace to initialize memory in; "
             "run runtime_install to create the coordinator scaffold first (the "
-            "c-13-install-and-onboard skill owns that sequence)"
+            "install and onboarding guide in docs/getting-started.md owns that sequence)"
         )
 
     resolved_branch, branch_source = _resolved_initial_branch(repo.path, initial_branch)
@@ -244,6 +265,19 @@ def initialize_memory(
         memory_root / "system" / "tools.md": f"# {repo_id} Memory Tools\n",
         memory_root / "system" / "sources.md": f"# {repo_id} Sources\n",
     }
+    marker = memory_root.joinpath(*LAYOUT_MARKER_RELATIVE)
+    if marker.exists():
+        layout = "present"
+    elif _holds_legacy_memory(memory_root):
+        layout = "unconverted-existing-memory"
+    elif (memory_root / ".git").exists():
+        # An existing repository is repaired, never re-founded: it crosses into the text format
+        # through the conversion or a crossing sync, not by an initializer writing its marker.
+        layout = "existing-repository-unchanged"
+    else:
+        layout = "created"
+        paths.append(marker.parent)
+        files[marker] = LAYOUT_MARKER_TEXT
 
     created_dirs = _create_missing_dirs([memory_root], dry_run=dry_run)
     git = _git_init_result(
@@ -262,13 +296,15 @@ def initialize_memory(
             "initialBranchSource": branch_source,
             "createdDirs": created_dirs,
             "createdFiles": [],
+            # Nothing was written, so a marker this run would have created was not (L24 nit).
+            "layoutMarker": "not-created" if layout == "created" else layout,
             "git": git,
         }
 
     created_dirs.extend(_create_missing_dirs(paths[1:], dry_run=dry_run))
     created_files = _create_missing_files(files, dry_run=dry_run)
 
-    return {
+    result: dict[str, Any] = {
         "ok": True,
         "operation": "memory_init",
         "repoId": repo_id,
@@ -278,5 +314,15 @@ def initialize_memory(
         "initialBranchSource": branch_source,
         "createdDirs": created_dirs,
         "createdFiles": created_files,
+        "layoutMarker": layout,
         "git": git,
     }
+    if layout == "unconverted-existing-memory":
+        # The initializer never marks legacy content (marking it would read the old format as
+        # the new one); the root converts first (MIK-R46 rule 6).
+        result["nextStep"] = (
+            "this memory root is unconverted (no knowledge/layout.json): convert first with "
+            "`agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY` "
+            "(MIK-R46 rule 6)"
+        )
+    return result

@@ -203,8 +203,8 @@ def apply_gate(gate: GateRecord, *, now: str, operation_key: str | None = None) 
 def reopen_gate(gate: GateRecord, *, now: str) -> GateRecord:
     """A new snapshot returning a decided gate to open after its decision could not be applied.
 
-    The adapter-interaction channel (``hosted_interactions``) consumes a decision by returning
-    its note to the pending vendor interaction; when that respond fails, the decision was never
+    Where a decision is consumed by returning its note to a pending interaction and that
+    respond fails, the decision was never
     consumable, so the gate goes back to open -- decision attribution cleared -- and awaits a
     fresh decision instead of staying decided-not-applied forever. The decided record stays in
     the append-only log, so the failed attempt remains auditable history.

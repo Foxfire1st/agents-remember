@@ -9,17 +9,21 @@ from unittest import mock
 
 from agents_remember.tasks import (
     ReviewState,
+    TaskDocument,
     read_task_doc,
     write_task_doc,
 )
 from agents_remember.worktrees import reopen as reopen_module
+from agents_remember.worktrees.integration.lifecycle.lifecycle_location_cache import (
+    resolve_lifecycle_operation_location,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     inspect_lifecycle_operation_locator,
-    resolve_lifecycle_operation_location,
 )
 from agents_remember.worktrees.modules.git import branch_commit, branch_exists
 from agents_remember.worktrees.modules.startup.series_attach import series_attach_result
-from agents_remember.worktrees.reopen import SERIES_REOPEN_AUDIT_INTENT, reopen_task
+from agents_remember.worktrees.reopen import reopen_task
+from agents_remember.worktrees.reopen_series import SERIES_REOPEN_AUDIT_INTENT
 from agents_remember.worktrees.scheduling_mode import TERMINAL_SERIES_CLEANUP
 from agents_remember.worktrees.worktree_contract import (
     load_contract,
@@ -102,6 +106,118 @@ class ReopenResetTests(unittest.TestCase):
 
             self.assertEqual((result.returncode, result.payload["state"]), (2, "blocked"))
             self.assertIn("contract locked", str(result.payload["summary"]))
+            self.assertEqual({path: path.read_bytes() for path in paths}, before)
+
+    def test_a_leaf_naming_no_master_resets_the_row_its_folder_master_lists(self) -> None:
+        """MIK-R38: reopen resolves an unnamed leaf's master by the master sync's rule."""
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = _completed_leaf_contract(Path(tmp))
+            _leaf_doc(contract.task_root, master=None)
+            master_path = _master_doc(contract.task_root)
+
+            result = reopen_task(contract.contract_path)
+
+            self.assertEqual(result.returncode, 0, result.payload)
+            self.assertEqual(
+                cast("dict[str, object]", result.payload["doc"])["masterIndex"], "reset"
+            )
+            self.assertEqual(read_task_doc(master_path).subTasks[0].status, "planning")
+
+    def test_a_light_leaf_that_is_the_folder_task_json_is_not_its_own_master(self) -> None:
+        """MIK-R38: only a ``subTask`` has a folder master, so a light ``task.json`` has none.
+
+        The old fallback resolved this document to itself and refused it as "not a master". The
+        reset planner is exercised directly because ``reopen_task``'s integration-branch preflight
+        already refuses a leaf contract whose folder has no master, before this planner runs.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = _completed_leaf_contract(Path(tmp))
+            light = TaskDocument.model_validate(
+                {
+                    "id": "260698-L1",
+                    "slug": "task",
+                    "title": "L1 — Demo leaf",
+                    "kind": "light",
+                    "status": "Completed",
+                    "repo": "repo-a",
+                    "createdAt": "2026-07-01T10:00",
+                    "lifecycleId": "LC-OLD",
+                    "steps": [{"id": "S1", "title": "do the thing", "status": "done"}],
+                }
+            )
+            doc_path, _ = write_task_doc(contract.task_root, light)
+            self.assertEqual(doc_path.name, "task.json")
+
+            planned = reopen_module._plan_master_index_reset(contract, doc_path, light)
+
+            self.assertEqual(planned, (None, "no-master"))
+
+    def test_a_leaf_the_store_would_write_elsewhere_is_refused_before_any_write(self) -> None:
+        """Review R1 finding 1: a hand-made ``light`` leaf would be written over ``task.json``.
+
+        ``01_demo-leaf.json`` below is a ``light`` document listed by the folder master. The store
+        writes a ``light`` document as ``task.json``, so resetting it would replace the master.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = _completed_leaf_contract(Path(tmp))
+            master_path = _master_doc(contract.task_root)
+            light = TaskDocument.model_validate(
+                {
+                    "id": "260698-L1",
+                    "slug": "01_demo-leaf",
+                    "title": "L1 — Demo leaf",
+                    "kind": "light",
+                    "status": "Completed",
+                    "repo": "repo-a",
+                    "createdAt": "2026-07-01T10:00",
+                    "lifecycleId": "LC-OLD",
+                    "steps": [{"id": "S1", "title": "do the thing", "status": "done"}],
+                }
+            )
+            doc_path = contract.task_root / "01_demo-leaf.json"
+            doc_path.write_text(light.model_dump_json(by_alias=True), encoding="utf-8")
+            paths = (contract.contract_path, doc_path, master_path, master_path.with_suffix(".md"))
+            before = {path: path.read_bytes() for path in paths}
+
+            result = reopen_task(contract.contract_path)
+
+            self.assertEqual((result.returncode, result.payload["state"]), (2, "blocked"))
+            blockers = cast("list[str]", result.payload["blockers"])
+            self.assertIn(f"would be rewritten to {master_path}", blockers[0])
+            self.assertEqual({path: path.read_bytes() for path in paths}, before)
+
+    def test_a_named_master_the_store_would_write_elsewhere_is_refused(self) -> None:
+        """Parent guard: a hand-made master ``other.json`` is written as the folder's ``task.json``.
+
+        Resetting its row would replace the series master, so reopen refuses before any write. A
+        master at ``task.json`` reopens as ``test_resets_contract_doc_and_master_index`` shows.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = _completed_leaf_contract(Path(tmp))
+            series_path = _master_doc(contract.task_root)
+            data = read_task_doc(series_path).model_dump(by_alias=True)
+            data.update(id="260698_OTHER", slug="other")
+            other_path = contract.task_root / "other.json"
+            other_path.write_text(
+                TaskDocument.model_validate(data).model_dump_json(by_alias=True), encoding="utf-8"
+            )
+            doc_path = _leaf_doc(contract.task_root, master="other.md")
+            paths = (
+                contract.contract_path,
+                doc_path,
+                other_path,
+                series_path,
+                series_path.with_suffix(".md"),
+            )
+            before = {path: path.read_bytes() for path in paths}
+
+            result = reopen_task(contract.contract_path)
+
+            self.assertEqual((result.returncode, result.payload["state"]), (2, "blocked"))
+            blockers = cast("list[str]", result.payload["blockers"])
+            self.assertIn(
+                f"{other_path.resolve()} would be rewritten to {series_path.resolve()}", blockers[0]
+            )
             self.assertEqual({path: path.read_bytes() for path in paths}, before)
 
 
@@ -242,6 +358,16 @@ class SeriesReopenTests(unittest.TestCase):
         git(contract.code_repo_path, "checkout", "-q", contract.code_work_branch)
         landed = commit_file(contract.code_repo_path, "landed.txt", "landed\n", "Land the work")
         git(contract.code_repo_path, "checkout", "-q", contract.code_source_branch)
+        # The converted series has two legs: the memory branch carries its own
+        # landed work exactly as the code branch does, so the resume advances
+        # it instead of refusing an unprovable re-cut.
+        memory_repo = contract.memory_repo_path
+        self.assertIsNotNone(memory_repo)
+        assert memory_repo is not None
+        git(memory_repo, "branch", contract.memory_work_branch)
+        git(memory_repo, "checkout", "-q", contract.memory_work_branch)
+        commit_file(memory_repo, "landed.txt", "landed\n", "Land the memory work")
+        git(memory_repo, "checkout", "-q", contract.memory_source_branch)
         write_contract(contract.contract_path, reopen_module._reopened_contract(contract))
         self.assertEqual(load_contract(contract.contract_path).cleanup, "reopened")
 
@@ -310,12 +436,26 @@ class SeriesReopenTests(unittest.TestCase):
 
         self.assertEqual((result.returncode, result.payload["state"]), (0, "reopened"))
         self.assertEqual(result.payload["mode"], "publish")
+        # The converted external series has two legs: the live code branch
+        # advances with its landed work while the retired memory branch is
+        # re-cut at its source tip.
+        refs = cast("list[dict[str, object]]", result.payload["seriesRefs"])
+        by_side = {str(ref["side"]): ref for ref in refs}
+        self.assertEqual(sorted(by_side), ["code", "memory"])
         self.assertEqual(
-            [
-                recut["action"]
-                for recut in cast("list[dict[str, object]]", result.payload["seriesRefs"])
-            ],
-            ["advance"],
+            [by_side["code"]["action"], by_side["memory"]["action"]],
+            ["advance", "re-cut"],
+        )
+        self.assertEqual(by_side["code"]["branch"], contract.code_work_branch)
+        self.assertEqual(by_side["code"]["tip"], landed)
+        self.assertEqual(by_side["memory"]["branch"], contract.memory_work_branch)
+        memory_repo = contract.memory_repo_path
+        self.assertIsNotNone(memory_repo)
+        assert memory_repo is not None
+        self.assertEqual(
+            by_side["memory"]["tip"],
+            branch_commit(memory_repo, contract.memory_source_branch),
+            "the retired memory branch is re-cut at the recorded source tip",
         )
         self.assertEqual(
             branch_commit(contract.code_repo_path, contract.code_work_branch),

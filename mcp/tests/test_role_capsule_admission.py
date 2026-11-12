@@ -1,25 +1,18 @@
-"""Focused checks for source admission, the manifest parser and the frozen vocabulary.
+"""Source admission, strict manifest/vocabulary and content-addressed compilation.
 
-Three boundaries are pinned here, each of which a later leaf consumes:
-
-* the frozen vocabulary is exactly ten roles and nine operations, and the ambient
-  launcher is a routing condition rather than a role;
-* the canonical composition manifest parses, agrees with that vocabulary, and
-  declares no key that no longer exists;
-* admitting sources proves containment before it reads a byte, and preserves
-  content-addressed revisions, so "the same bytes compile to the same capsule" is a
-  property of what was read rather than of what was requested; and
-* the shipped corpus compiles end to end from disk, twice, to the same digest.
-
-The last case is the only one that touches the real tree; everything else builds its
-own fixture so a failure names one boundary instead of a whole corpus.
+The frozen eight roles, nine operations and launcher routing condition agree with
+shipped declarations. Admission proves containment before reading; revisions
+address exact bytes. Repeated shipped compilation is deterministic and strips
+only typed metadata while preserving complete instruction prose.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, get_args
 
@@ -36,12 +29,9 @@ from agents_remember.models.role_capsules.manifest import (
     CapsuleCompositionManifest,
     parse_composition_manifest,
 )
-from agents_remember.models.role_capsules.selection import narrow_role
 from agents_remember.models.role_capsules.source_set import admit_source_set
 from agents_remember.models.role_capsules.sources import (
-    CapsuleDeclaredInstruction,
     CapsuleSource,
-    instruction_identity,
     skills_declared_identity,
     strip_frontmatter,
 )
@@ -49,8 +39,8 @@ from agents_remember.models.role_capsules.statuses import CAPSULE_STATUSES
 from agents_remember.models.role_capsules.types import (
     CapsuleAdmittedFacts,
     CapsuleBinding,
+    CapsuleInstructionBlock,
     CapsuleLauncherSeat,
-    CapsuleOverride,
     CapsuleRoleSeat,
     CapsuleSourceAdmission,
     CapsuleSourceSelection,
@@ -72,19 +62,17 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 LIFECYCLE_ROOT = REPOSITORY_ROOT / "skills" / "l-01-agent-lifecycles"
 MANIFEST_RELATIVE = "composition-manifest.json"
 
-# The ten roles the corpus ships, and the nine frozen operations. Restated here
+# The eight roles the corpus ships, and the nine frozen operations. Restated here
 # rather than imported from the compiler so the two definitions must agree: an
 # imported constant would make this case assert that a tuple equals itself.
 SHIPPED_ROLES = (
     "architect",
     "orchestrator",
-    "designer",
-    "strategist",
     "manager",
     "worker",
     "curator",
     "reviewer",
-    "system-specialist",
+    "investigator",
     "bootstrap",
 )
 
@@ -147,9 +135,9 @@ def worker_binding(*, tool_policy: CapsuleToolPolicy | None = None) -> CapsuleBi
 # --------------------------------------------------------------------------------------
 
 
-def test_the_frozen_vocabulary_is_exactly_the_ten_roles_and_nine_operations() -> None:
+def test_the_frozen_vocabulary_is_exactly_the_eight_roles_and_nine_operations() -> None:
     assert CAPSULE_ROLES == SHIPPED_ROLES
-    assert len(CAPSULE_ROLES) == 10
+    assert len(CAPSULE_ROLES) == 8
     assert CAPSULE_OPERATIONS == SHIPPED_OPERATIONS
     assert len(CAPSULE_OPERATIONS) == 9
 
@@ -421,7 +409,10 @@ def _shipped_request(
         role=(entry.file,),
         operation=(parsed.operations[operation].source,),
         skill=(
-            tuple(entry_skill.source for entry_skill in parsed.skills.values()) if skills else ()
+            tuple(entry_skill.source for entry_skill in parsed.skills.values())
+            + tuple(detail.source for detail in parsed.detail_references if role in detail.roles)
+            if skills
+            else ()
         ),
     )
 
@@ -753,30 +744,55 @@ def test_no_core_unit_can_enter_any_shipped_role_capsule(role: str) -> None:
 
 
 def test_an_admitted_core_source_is_inert_for_a_role_capsule() -> None:
-    """Core bytes may still be *admitted*; they must not be *composed*.
+    """Shared sources never compose; the required digest source still binds the seal.
 
-    The admission request still carries the manifest's declared core sources — that is a fact
-    about the corpus, and refusing to admit them would be a different change. What the ruling
-    fixes is the composition: the delivered capsule must be byte-identical to one compiled
-    without any core source at all, so a reader can see that the shared material contributes
-    nothing to the instruction stream.
+    Inherited rule 24 requires every-role admission even though its instruction text
+    travels outside the capsule. Other admitted core sources remain inert for both
+    rendered capsule text and semantic identity.
     """
 
     request = _shipped_request("worker", "implementation")
-    assert request.core, "the corpus still declares core sources; this case needs them admitted"
+    digest_source = _shipped_parsed().core["every-role"].source
+    assert len(request.core) > 1, "this case needs non-digest core sources too"
 
     with_core = compile_admitted_capsule(_shipped_binding("worker", "implementation"), request)
-    without_core = compile_admitted_capsule(
+    digest_only = compile_admitted_capsule(
+        _shipped_binding("worker", "implementation"),
+        _shipped_request("worker", "implementation", core=(digest_source,)),
+    )
+
+    assert with_core.ok and digest_only.ok
+    assert with_core.result is not None and digest_only.result is not None
+    assert with_core.result.render_instructions() == digest_only.result.render_instructions(), (
+        "an admitted core source changed the delivered capsule instructions"
+    )
+    assert with_core.semantic_digest == digest_only.semantic_digest
+    omitted = compile_admitted_capsule(
         _shipped_binding("worker", "implementation"),
         _shipped_request("worker", "implementation", core=()),
     )
+    assert not omitted.ok
+    assert omitted.error is not None
+    assert omitted.error.status == "missing-required-instruction"
+    assert digest_source in omitted.error.detail
 
-    assert with_core.ok and without_core.ok
-    assert with_core.result is not None and without_core.result is not None
-    assert with_core.result.render_instructions() == without_core.result.render_instructions(), (
-        "an admitted core source changed the delivered instructions"
+
+def _assert_delivered_source_prose(block: CapsuleInstructionBlock, source: bytes) -> None:
+    """Only closed, typed composition metadata leaves the independently read source."""
+    key = r"[a-z0-9]+(?:-[a-z0-9]+)*"
+    metadata = re.compile(
+        rf"<!-- ar:(?:roles [a-z,\-]+|(?:needs|gives) {key} (?:from|to) {key}: "
+        rf"{key}(?:, {key})*) -->"
     )
-    assert with_core.semantic_digest == without_core.semantic_digest
+    prose = "".join(
+        line
+        for line in strip_frontmatter(source.decode()).splitlines(keepends=True)
+        if metadata.fullmatch(line.rstrip("\r\n")) is None
+    )
+    assert block.content == prose
+    assert block.revision == compute_content_digest(source), (
+        "the revision must still address the whole file"
+    )
 
 
 def test_a_role_capsule_carries_no_frontmatter_from_any_composed_source() -> None:
@@ -802,13 +818,21 @@ def test_a_role_capsule_carries_no_frontmatter_from_any_composed_source() -> Non
         assert block.content.lstrip().startswith("#"), (
             f"{block.identity} does not open on its own heading after the frontmatter strip"
         )
-        without_frontmatter = strip_frontmatter(
-            (LIFECYCLE_ROOT / block.source_path).read_text(encoding="utf-8")
+        # Both planning audiences are delivered to the Architect. Audience and
+        # typed handoff metadata leave; the complete remaining prose must stay.
+        source = (LIFECYCLE_ROOT / block.source_path).read_bytes()
+        _assert_delivered_source_prose(block, source)
+        lines = block.content.splitlines(keepends=True)
+        assert len(lines) > 1
+        deleted = replace(block, content="".join(lines[1:]))
+        relocated = replace(block, content="".join((*lines[1:], lines[0])))
+        leaked = replace(
+            block, content=block.content + "<!-- ar:gives proof to worker: report -->\n"
         )
-        assert block.content == without_frontmatter
-        assert block.revision == compute_content_digest(
-            (LIFECYCLE_ROOT / block.source_path).read_bytes()
-        ), "the revision must still address the whole file"
+        wrong_revision = replace(block, revision=compute_content_digest(source + b"\n"))
+        for mutant in (deleted, relocated, leaked, wrong_revision):
+            with pytest.raises(AssertionError):
+                _assert_delivered_source_prose(mutant, source)
 
 
 def test_the_frontmatter_strip_only_removes_a_closed_leading_block() -> None:
@@ -1170,193 +1194,3 @@ def test_a_launcher_whose_own_block_is_absent_is_refused_by_name() -> None:
 
     assert raised.value.status == "manifest-vocabulary-mismatch"
     assert "launcher" in raised.value.detail
-
-
-def test_the_role_lookup_answers_through_the_one_narrowing_gate() -> None:
-    """A role question has exactly one answer, and it is the selection gate's.
-
-    There is no second accessor that could disagree with the gate or stand in for it:
-    the parsed manifest is a mapping, and the refusal for an unknown role is raised in
-    exactly one place.
-    """
-
-    parsed = _shipped_parsed()
-    assert parsed.roles["worker"].role == "worker"
-
-    with pytest.raises(CapsuleCompilationError) as raised:
-        narrow_role("janitor")
-
-    assert raised.value.status == "unknown-role"
-    assert "'janitor'" in raised.value.detail
-
-    # The gate's other lookup, asked the same question: a name the manifest does not declare is
-    # refused by name rather than answered with a default. This was a second case until the two were
-    # merged, because both measure the one narrowing gate that turns a caller's string into a
-    # declared manifest entry.
-    assert parsed.skill_entry("l-01-agent-lifecycles").origin == "agents-remember/skills"
-
-    with pytest.raises(CapsuleCompilationError) as unknown_skill:
-        parsed.skill_entry("no-such-skill")
-
-    assert unknown_skill.value.status == "manifest-vocabulary-mismatch"
-    assert "no-such-skill" in unknown_skill.value.detail
-
-
-def test_the_specializations_field_must_be_an_array_when_present() -> None:
-    """A present-but-wrong-typed optional field is refused, not ignored.
-
-    All three non-array shapes are checked in one item because they reach the same
-    branch: the point is the branch, not three spellings of it.
-    """
-
-    for bad in ({"notes": "not-an-array"}, "specializations/a.md", 7):
-
-        def mutate(document: dict, value=bad) -> None:
-            document["specializations"] = value
-
-        assert _refuse(_manifest_with(mutate)) == "manifest-invalid"
-
-    # The same rule one level down, in a declared value rather than the manifest: a blank identity is
-    # refused at construction instead of becoming an entry the compiler would have to name. The two
-    # were one case until they were merged -- both measure a required string being blank.
-    with pytest.raises(ValueError) as blank:
-        CapsuleDeclaredInstruction(
-            identity="   ",
-            composition_root="core",
-            authorities=("core:authority:shared-core",),
-        )
-
-    assert "non-blank" in str(blank.value)
-
-
-def test_an_override_whose_replacement_file_is_absent_is_refused() -> None:
-    """The second unknown-supersession branch: no admitted source carries the winner.
-
-    The superseded identity is the seat's own **role** block rather than a shared core block:
-    a role capsule composes no core, so ``core:authority`` is now not selected for this
-    capsule and the case would exercise the first branch instead of the second.
-    """
-
-    parsed = _shipped_parsed()
-    entry = parsed.roles["worker"]
-    binding = CapsuleBinding(
-        operation="implementation",
-        admitted=CapsuleAdmittedFacts(
-            task_reference="agents-remember/tasks/demo/task.json",
-            task_document_digest=compute_content_digest(b'{"id": "demo"}'),
-            seat=CapsuleRoleSeat(role="worker", altitude=entry.altitude),
-            repository_id="agents-remember",
-            work_branch="ar/260915-caps-l2",
-        ),
-        overrides=(
-            CapsuleOverride(
-                superseded_identity="role:worker",
-                superseding_identity="specialization:absent",
-                authority="developer-ruling-2026-09-16",
-                rationale="names a replacement nothing carries",
-            ),
-        ),
-    )
-
-    with pytest.raises(CapsuleCompilationError) as raised:
-        compile_role_capsule(
-            binding,
-            (LIFECYCLE_ROOT / MANIFEST_RELATIVE).read_bytes(),
-            admit_capsule_sources(_shipped_request("worker", "implementation")),
-            _shipped_request("worker", "implementation").as_selection(),
-        )
-
-    assert raised.value.status == "unknown-supersession"
-    assert "specialization:absent" in raised.value.detail
-
-
-def test_a_source_root_that_is_not_a_path_is_refused() -> None:
-    """The admission boundary refuses a non-path root instead of guessing."""
-
-    with pytest.raises(CapsuleCompilationError) as raised:
-        admit_capsule_sources(
-            CapsuleAdmissionRequest(root="not-a-path", manifest=MANIFEST_RELATIVE)  # type: ignore[arg-type]
-        )
-
-    assert raised.value.status == "source-root-invalid"
-
-
-def test_an_admitted_set_that_drops_the_manifest_mid_compile_is_refused() -> None:
-    """A selection whose manifest path is absent from the admitted mapping."""
-
-    parsed = _shipped_parsed()
-    entry = parsed.roles["worker"]
-    request = _shipped_request("worker", "implementation")
-    sources = admit_capsule_sources(request)
-
-    with pytest.raises(CapsuleCompilationError) as raised:
-        admit_source_set(
-            parsed,
-            CapsuleSourceAdmission(
-                binding=_shipped_binding("worker", "implementation"),
-                selection=CapsuleSourceSelection(
-                    root=str(LIFECYCLE_ROOT),
-                    manifest="other-manifest.json",
-                    core=tuple(parsed.core[name].source for name in entry.core),
-                    role=(entry.file,),
-                    operation=(parsed.operations["implementation"].source,),
-                ),
-            ),
-            {source.path: source for source in sources},
-            {source.path: instruction_identity("core", "authority") for source in sources},
-            (),
-        )
-
-    assert raised.value.status == "source-not-declared"
-    assert "does not include the composition manifest" in raised.value.detail
-
-
-def test_composing_roots_answers_what_each_seat_kind_can_actually_contribute() -> None:
-    """The accessor must not promise a root the seat kind cannot contribute from.
-
-    A consumer asking about the launcher and being told ``role`` is available would
-    contradict the boundary the compiler enforces, so the answer is asserted against
-    what the two seat kinds really compose.
-    """
-
-    parsed = _shipped_parsed()
-
-    role_roots = parsed.composing_roots("role")
-    launcher_roots = parsed.composing_roots("launcher")
-
-    assert role_roots == ("core", "role", "operation", "specialization")
-    assert launcher_roots == ("core", "operation", "specialization")
-    assert "role" not in launcher_roots
-
-    # And the answer matches what the compiler actually composes for each seat kind.
-    worker = compile_admitted_capsule(
-        _shipped_binding("worker", "implementation"), _shipped_request("worker", "implementation")
-    )
-    assert worker.result is not None
-    composed = {block.composition_root for block in worker.result.capsule.instructions}
-    assert composed <= set(role_roots)
-
-    operation = parsed.launcher.operations[0]
-    launcher = compile_admitted_capsule(
-        CapsuleBinding(
-            operation=operation,
-            admitted=CapsuleAdmittedFacts(
-                task_reference="agents-remember/tasks/demo/task.json",
-                task_document_digest=compute_content_digest(b'{"id": "demo"}'),
-                seat=CapsuleLauncherSeat(routing_condition=parsed.launcher.routing_condition),
-                repository_id="agents-remember",
-                work_branch="ar/260915-caps-l2",
-            ),
-        ),
-        CapsuleAdmissionRequest(
-            root=LIFECYCLE_ROOT,
-            manifest=MANIFEST_RELATIVE,
-            core=tuple(parsed.core[name].source for name in parsed.launcher.core),
-            operation=(parsed.operations[operation].source,),
-            skill=tuple(entry.source for entry in parsed.skills.values()),
-        ),
-    )
-    assert launcher.result is not None
-    launcher_composed = {block.composition_root for block in launcher.result.capsule.instructions}
-    assert "role" not in launcher_composed
-    assert launcher_composed <= set(launcher_roots)

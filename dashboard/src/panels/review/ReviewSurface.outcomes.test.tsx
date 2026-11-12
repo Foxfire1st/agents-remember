@@ -21,20 +21,26 @@
 // comparison already on screen. Every refusal case below fails against that surface, and so does the
 // retained-generation case.
 
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ReviewFailure, ReviewPayload, ReviewResult } from "../../data/review";
 import { type ReviewRead, ReviewOutcomeRegion } from "./ReviewOutcome";
 import { ReviewSurface } from "./ReviewSurface";
 
-// Comparison-focused cases isolate the catalogue. The normal catalogue-to-review journey is
-// exercised through both real readers in ReviewSurface.navigation.test.tsx.
-vi.mock("../../data/useReviewCatalogue", () => ({
+// Comparison-focused cases isolate the catalogue, which lists nothing here. The normal
+// catalogue-to-review journey is exercised through both real readers in
+// ReviewSurface.navigation.test.tsx. A selected subject the page draws no section for is read all the
+// same, and its answer or failure stands at the head of the reading column (MIK-R89 v2 rule 2).
+vi.mock("../../data/useReviewCatalogue", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../data/useReviewCatalogue")>();
+  return {
+    ...actual,
   useReviewCatalogue: () => ({
     loading: false, entries: [], empty: true, stale: false, facts: "test", refresh: () => undefined,
   }),
-}));
+  };
+});
 
 const REPO = "agents-remember";
 const MASTER = "260921_complete-code-and-intent-review";
@@ -130,9 +136,6 @@ function taskContextPayload(): ReviewPayload {
       after_conditions: [],
       revision_groups: [],
       field_changes: [],
-      authored_effects: [],
-      signals: [],
-      assessments: [],
       unresolved: [],
       selection_state: "task_context",
       selection_detail:
@@ -166,15 +169,7 @@ function taskContextPayload(): ReviewPayload {
       attributed_changed_paths: [],
       unresolved: [],
     },
-    evidence: {
-      evidence_state: "none_recorded",
-      assessment_state: "unassessed",
-      evidence_links: [],
-      observations: [],
-      assessments: [],
-      source_inspection_available: true,
-      unresolved: [],
-    },
+    judgment: { state: "none", detail: "This leaf recorded no judgment about this record", rows: [], proofs: [] },
     staleness: {
       state: "not_compared",
       statement:
@@ -309,14 +304,13 @@ describe("the review surface's read states", () => {
     // The owner named an offending input, so it stays on screen after the reader changes the
     // question: the refusal's whole actionable content survives the click.
     expect(note.textContent).toContain("offending input: knowledge-candidate.sqlite");
-    const inventory = view.getByTestId("review-inventory");
-    expect(inventory.dataset.inventoryState).toBe("measured");
-    expect(inventory.textContent).toContain("6 changed files");
-    const rows = view.getAllByTestId("review-inventory-entry").map((row) => row.textContent ?? "");
-    expect(rows.some((row) => row.includes("src/retry_interval.py") && row.includes("added"))).toBe(true);
-    expect(rows.some((row) => row.includes("src/synchronization.py") && row.includes("deleted"))).toBe(
-      true,
-    );
+    expect(view.getByTestId("review-scope-record").textContent).toContain("6 changed files");
+    // R86 moves the measured file population to the change-set page. The refusal's whole
+    // actionable content remains visible beside its source count and All changes destination.
+    expect(view.queryByTestId("review-source-explorer")).toBeNull();
+    expect(view.queryByTestId("review-inventory-entry")).toBeNull();
+    expect(view.getAllByRole("button", { name: /^All changes/ }).length).toBeGreaterThan(0);
+    expect(note.closest("details")).toBeNull();
   });
 
   it("says known empty for a measured empty answer and never for a failure", async () => {
@@ -326,7 +320,7 @@ describe("the review surface's read states", () => {
 
     const note = await view.findByTestId("review-known-empty");
     expect(note.dataset.reviewState).toBe("known-empty");
-    expect(view.getByTestId("review-inventory").textContent).toContain("0 changed files");
+    expect(view.getByTestId("review-scope-record").textContent).toContain("0 changed files");
     expect(view.queryByTestId("review-refusal")).toBeNull();
     expect(view.queryByTestId("review-failure")).toBeNull();
   });
@@ -378,7 +372,7 @@ describe("the review surface's read states", () => {
 
     await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(view.queryByTestId("review-failure")).toBeNull());
-    expect(view.getByTestId("review-inventory").textContent).toContain("6 changed files");
+    expect(view.getByTestId("review-scope-record").textContent).toContain("6 changed files");
     expect(view.queryByTestId("review-known-empty")).toBeNull();
   });
 
@@ -433,7 +427,7 @@ describe("the review surface's read states", () => {
 
     const view = mountSubject();
     await waitFor(() =>
-      expect(view.getByTestId("review-inventory").textContent).toContain("6 changed files"),
+      expect(view.getByTestId("review-scope-record").textContent).toContain("6 changed files"),
     );
 
     view.rerender(
@@ -457,11 +451,27 @@ describe("the review surface's read states", () => {
     expect(failure.closest('[data-testid="review-reading-problem"]')?.getAttribute("data-problem-subject")).toBe(
       "invariant:a-different-subject",
     );
-    expect(view.getByTestId("review-inventory").textContent).toContain("6 changed files");
+    // The catalogue lists nothing, so the page draws no section for B: its failure stands at the
+    // head of the reading column, under B's own heading, and is visible there.
+    const head = failure.closest('[data-testid="review-selected-subject"]');
+    expect(head?.getAttribute("data-subject")).toBe("invariant:a-different-subject");
+    expect(head?.closest('[data-testid="review-center-column"]')).not.toBeNull();
+    expect(failure.closest("details")).toBeNull();
+    expect(view.getByTestId("review-scope-record").textContent).toContain("6 changed files");
     expect(view.queryByTestId("review-center")).toBeNull();
     expect(view.queryByTestId("review-retained-generation")).toBeNull();
     expect(view.queryByTestId("review-known-empty")).toBeNull();
     expect(view.queryByTestId("review-surface")?.getAttribute("data-comparison")).toBeNull();
+  });
+
+  it("shows a sectionless subject's answer with its staleness sentence at the head of the reading column", async () => {
+    serving(200, reviewed(subjectPayload("1".repeat(64), true)));
+    const view = mountSubject();
+    const head = await view.findByTestId("review-selected-subject");
+    expect(head.dataset.subject).toBe(`invariant:${SUBJECT}`);
+    const stale = await within(head).findByTestId("review-stale");
+    expect(stale.textContent).toContain("Candidate changed — open a new comparison");
+    expect(stale.closest("details")).toBeNull();
   });
 });
 
@@ -570,6 +580,12 @@ function subjectPayload(binding: string, stale = false): ReviewPayload {
   };
 }
 
+// The page reads more than the review (the canvas frame of the comparison on screen, among others);
+// the cases below count and index the review reads only.
+const isReviewRead = (url: unknown) => new URL(String(url), "http://localhost").pathname === "/api/review/intent";
+const reviewReads = (fetchFn: { mock: { calls: unknown[][] } }) =>
+  fetchFn.mock.calls.map(([url]) => String(url)).filter(isReviewRead);
+
 function servedJson(url: string): unknown {
   if (url.includes("previousBindingDigest")) return reviewed(subjectPayload("2".repeat(64), true));
   return reviewed(subjectPayload("1".repeat(64)));
@@ -584,14 +600,14 @@ describe("the review surface's refresh control and read race (ICR-R17)", () => {
     await waitFor(() =>
       expect(view.getByTestId("review-surface").dataset.comparison).toBe("1".repeat(64)),
     );
-    const first = String(fetchFn.mock.calls[0][0]);
+    const first = reviewReads(fetchFn)[0];
     expect(first).not.toContain("previousBindingDigest");
     expect(view.queryByTestId("review-generation-notice")).toBeNull();
 
     fireEvent.click(view.getByTestId("review-refresh"));
 
-    await waitFor(() => expect(fetchFn.mock.calls).toHaveLength(2));
-    const second = String(fetchFn.mock.calls[1][0]);
+    await waitFor(() => expect(reviewReads(fetchFn)).toHaveLength(2));
+    const second = reviewReads(fetchFn)[1];
     // The whole question is repeated -- the same task context, the same subject, the same record --
     // and the identity the reader was looking at travels as the comparison this read replaces.
     for (const part of [`repo=${REPO}`, `master=${MASTER}`, `leaf=${LEAF}`, "selectorId=" + SUBJECT]) {
@@ -619,7 +635,9 @@ describe("the review surface's refresh control and read race (ICR-R17)", () => {
     );
     // The server's own staleness statement is rendered beside it, so the reader sees both the
     // compared identities and the rule that disabled submission against the moved one.
-    expect(view.getByTestId("review-stale").textContent).toContain("previous input");
+    const stale = view.getByTestId("review-stale");
+    expect(stale.textContent).toBe("Candidate changed — open a new comparison");
+    expect(stale.closest("details")).toBeNull();
   });
 
   it("keeps the labelled old comparison and its error when the refresh fails", async () => {
@@ -715,7 +733,7 @@ describe("the review surface's refresh control and read race (ICR-R17)", () => {
     // client invented the publication. The key is now checked at BOTH sites.
     const seen: string[] = [];
     const fetchFn = vi.fn(async (url: string) => {
-      seen.push(url);
+      if (isReviewRead(url)) seen.push(url);
       if (url.includes("previousBindingDigest")) {
         return response(200, reviewed(subjectPayload("f".repeat(64), true)));
       }
@@ -758,7 +776,7 @@ describe("the review surface's refresh control and read race (ICR-R17)", () => {
     );
     // Exactly two reads, and the B read carried nothing -- the server never made this claim, so the
     // surface must not render one.
-    expect(seen.filter((url) => url.startsWith("/api/review/intent"))).toHaveLength(2);
+    expect(seen).toHaveLength(2);
     expect(String(seen[1])).toContain("selectorId=subject-b");
     expect(String(seen[1])).not.toContain("previousBindingDigest");
     await act(async () => {
@@ -777,7 +795,7 @@ describe("the review surface's refresh control and read race (ICR-R17)", () => {
     // screen is the one it was displayed under.
     const seen: string[] = [];
     const fetchFn = vi.fn(async (url: string) => {
-      seen.push(url);
+      if (isReviewRead(url)) seen.push(url);
       if (url.includes("previousBindingDigest")) {
         return response(200, reviewed(subjectPayload("2".repeat(64), true)));
       }
@@ -801,7 +819,7 @@ describe("the review surface's refresh control and read race (ICR-R17)", () => {
 
     // (c) The refresh of the displayed subject DOES carry its identity -- that is the whole point.
     fireEvent.click(view.getByTestId("review-refresh"));
-    await waitFor(() => expect(fetchFn.mock.calls).toHaveLength(2));
+    await waitFor(() => expect(seen).toHaveLength(2));
     expect(String(seen[1])).toContain(`selectorId=subject-a`);
     expect(String(seen[1])).toContain(`previousBindingDigest=${"1".repeat(64)}`);
     await view.findByTestId("review-generation-notice");
@@ -818,7 +836,7 @@ describe("the review surface's refresh control and read race (ICR-R17)", () => {
         onBack={vi.fn()}
       />,
     );
-    await waitFor(() => expect(fetchFn.mock.calls).toHaveLength(3));
+    await waitFor(() => expect(seen).toHaveLength(3));
     const third = String(seen[2]);
     expect(third).toContain("selectorId=subject-b");
     expect(third).not.toContain("previousBindingDigest");
@@ -835,7 +853,7 @@ describe("the review surface's refresh control and read race (ICR-R17)", () => {
     // stale against a live identity is exactly the false statement this guards.
     const seen: string[] = [];
     const fetchFn = vi.fn(async (url: string) => {
-      seen.push(url);
+      if (isReviewRead(url)) seen.push(url);
       if (url.includes("previousBindingDigest")) {
         return response(200, reviewed(subjectPayload("2".repeat(64), true)));
       }
@@ -857,7 +875,7 @@ describe("the review surface's refresh control and read race (ICR-R17)", () => {
       expect(view.getByTestId("review-surface").dataset.comparison).toBe("1".repeat(64)),
     );
     fireEvent.click(view.getByTestId("review-refresh"));
-    await waitFor(() => expect(fetchFn.mock.calls).toHaveLength(2));
+    await waitFor(() => expect(seen).toHaveLength(2));
     expect(String(seen[1])).toContain(`previousBindingDigest=${"1".repeat(64)}`);
 
     // The same subject read from the leaf's own record instead: a different question, nothing carried.
@@ -872,7 +890,7 @@ describe("the review surface's refresh control and read race (ICR-R17)", () => {
         onBack={vi.fn()}
       />,
     );
-    await waitFor(() => expect(fetchFn.mock.calls).toHaveLength(3));
+    await waitFor(() => expect(seen).toHaveLength(3));
     const recorded = String(seen[2]);
     expect(recorded).toContain("history=recorded");
     expect(recorded).not.toContain("previousBindingDigest");
@@ -890,7 +908,7 @@ describe("the review surface's refresh control and read race (ICR-R17)", () => {
         onBack={vi.fn()}
       />,
     );
-    await waitFor(() => expect(fetchFn.mock.calls).toHaveLength(4));
+    await waitFor(() => expect(seen).toHaveLength(4));
     const live = String(seen[3]);
     expect(live).not.toContain("history=");
     expect(live).not.toContain("previousBindingDigest");

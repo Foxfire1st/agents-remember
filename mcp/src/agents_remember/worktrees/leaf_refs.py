@@ -7,13 +7,12 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from difflib import get_close_matches
 from pathlib import Path
-from typing import get_args
+from typing import Literal, get_args
 
-from agents_remember.models.terminal import LeafRefStatus
 from agents_remember.tasks import TASK_DOCUMENT_SCHEMA, TaskDocument, read_task_doc
+from agents_remember.tasks.task_paths import iter_task_documents
 from agents_remember.worktrees.task_resolver import (
     ARCHIVE_DIR,
-    ENCLOSURES_DIR,
     TaskResolutionError,
     is_archived_path,
     leaf_enclosure_path,
@@ -22,6 +21,8 @@ from agents_remember.worktrees.task_resolver import (
 )
 
 LEAF_REF_EXPECTED_FORM = "<repo>/<master-folder>/<doc-id>"
+
+LeafRefStatus = Literal["leaf-ref-not-found", "leaf-ref-ambiguous"]
 
 VALID_LEAF_REF_STATUSES: frozenset[LeafRefStatus] = frozenset(get_args(LeafRefStatus))
 
@@ -280,8 +281,8 @@ def _active_task_roots(
     if not repo_task_root.is_dir():
         return []
     roots: list[Path] = []
-    for path in sorted(repo_task_root.rglob("task.json")):
-        if is_archived_path(path) or ENCLOSURES_DIR in path.parts:
+    for path in iter_task_documents(repo_task_root):
+        if is_archived_path(path):
             continue
         roots.append(path.parent)
     return roots

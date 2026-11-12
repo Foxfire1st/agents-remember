@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.models.worktree import SyncSide
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.git import branch_commit, head_commit, is_ancestor
-from agents_remember.worktrees.modules.guidance import contract_next_args, recovery_guidance
+from agents_remember.worktrees.modules.git import head_commit, is_ancestor
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.services import WorktreeServicesUnboundError, worktree_services
+from agents_remember.worktrees.sync_source_strategy import (
+    source_strategy,
+    sync_log_entry,
+    target_code_base,
+    target_memory_base,
+)
 from agents_remember.worktrees.sync_transaction_authority import (
     authority_refs_exist,
     command_result,
@@ -23,22 +30,35 @@ from agents_remember.worktrees.sync_transaction_authority import (
     require_parked_wip_settled,
     restore_cancelled_wip,
     side_locations,
-    side_payload,
     sync_contract_kind,
-    target_memory_base,
     update_record,
 )
+from agents_remember.worktrees.sync_transaction_completion import completed_sync_result
 from agents_remember.worktrees.sync_transaction_git import (
+    CancelSaveError,
+    CancelTreeAssessment,
+    SavedUnprovenState,
     SyncGitProofError,
+    assess_retained_tree,
+    assess_stash_tree,
     delete_pinned_ref,
-    discard_conflicted_wip_reapply,
+    discard_owned_reapply,
+    discard_saved_unproven,
+    drop_parked_wip,
     ensure_temporary_worktree,
     exact_created_head,
     merge_head,
     read_ref,
+    read_saved_unproven_state,
     remove_temporary_worktree,
     rollback_side,
+    save_unproven_state,
     side_branch_head,
+)
+from agents_remember.worktrees.sync_transaction_parking import _adopt_orphaned_park
+from agents_remember.worktrees.sync_transaction_sources import (
+    delete_default_source_refs,
+    recovered_source_strategy,
 )
 from agents_remember.worktrees.sync_transaction_state import (
     SyncJournalReadError,
@@ -52,6 +72,8 @@ from agents_remember.worktrees.sync_transaction_state import (
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 
+logger = logging.getLogger(__name__)
+
 
 def finalize_sync(
     contract: WorktreeContract,
@@ -63,97 +85,55 @@ def finalize_sync(
     require_finalizable_contract(current, record)
     _require_completed_branches(record)
     require_parked_wip_settled(record)
-    memory_to = target_memory_base(record)
-    if (
-        current.code_base_commit != record.code.sourceCommit
-        or current.memory_base_commit != memory_to
-    ):
-        entry = {
-            "at": operation_stamp(),
-            "codeBaseFrom": record.codeBaseFrom,
-            "codeBaseTo": record.code.sourceCommit,
-            "memoryBaseFrom": record.memoryBaseFrom,
-            "memoryBaseTo": memory_to,
-            "code": record.code.plan,
-            "memory": record.memory.plan if record.memory is not None else "no-external-memory",
-        }
+    if not source_strategy(record.syncSource).finalized(current, record):
         current = replace(
             current,
-            code_base_commit=record.code.sourceCommit,
-            memory_base_commit=memory_to,
-            sync_log=(*current.sync_log, entry),
+            code_base_commit=target_code_base(record),
+            memory_base_commit=target_memory_base(record),
+            sync_log=(*current.sync_log, {"at": operation_stamp(), **sync_log_entry(record)}),
         )
         write_contract(current.contract_path, current)
     # Publish the terminal transaction before deleting its recovery authority. A crash at
     # any later cut leaves a terminal record whose residue cleanup is strictly idempotent.
     record = update_record(store, record, phase="completed")
+    _retire_restored_stashes(record)
     remove_temporary_worktrees(record)
     delete_authority(record)
-    return completed_sync_result(current, record, fetch)
+    return with_recomputed_worklist(completed_sync_result(current, record, fetch), current)
 
 
-def completed_sync_result(
-    contract: WorktreeContract,
-    record: SyncOperationRecord,
-    fetch: dict[str, object],
+def with_recomputed_worklist(
+    result: WorktreeCommandResult, contract: WorktreeContract
 ) -> WorktreeCommandResult:
-    """Reconstruct the exact successful-pass result, including moved-again state."""
+    """Attach the recomputed worklist's summary to a completed sync's result, where one applies.
 
-    current = reload_contract(contract)
-    memory_to = target_memory_base(record)
-    if (
-        current.code_base_commit != record.code.sourceCommit
-        or current.memory_base_commit != memory_to
-    ):
-        raise SyncGitProofError(
-            "completed sync journal does not match the contract's finalized base pair"
-        )
-    latest_code = branch_commit(current.code_repo_path, current.code_source_branch)
-    latest_memory = (
-        branch_commit(current.memory_repo_path, current.memory_source_branch)
-        if current.memory_mode == "external" and current.memory_repo_path is not None
-        else ""
-    )
-    moved_again = latest_code != record.code.sourceCommit or (
-        record.memory is not None and latest_memory != record.memory.sourceCommit
-    )
-    memory_skipped = record.memory is not None and record.memory.plan == "skip"
-    state = (
-        "sync-pass-completed-memory-skipped"
-        if memory_skipped
-        else "sync-pass-completed-source-moved-again"
-        if moved_again
-        else "synced"
-    )
-    return WorktreeCommandResult(
-        0,
-        {
-            "state": state,
-            "summary": (
-                "The code sync pass completed, but memory was explicitly skipped and the "
-                "recorded pair is not current. Run merge-memory before paired activation."
-                if memory_skipped
-                else "The admitted sync pass completed, but the source moved again; run the "
-                "next contract-addressed sync before resuming work."
-                if moved_again
-                else "The worktree base pair now matches the admitted official line."
-            ),
-            "code": side_payload(record.code),
-            "memory": side_payload(record.memory),
-            "codeBaseCommit": record.code.sourceCommit,
-            "memoryBaseCommit": memory_to,
-            "fetch": fetch,
-            **(
-                recovery_guidance(
-                    "sync_source_lineage",
-                    tool="worktree_sync",
-                    args=contract_next_args(current, dry_run=True),
-                )
-                if moved_again or memory_skipped
-                else {}
-            ),
-        },
-    )
+    Used by the finalization and by the ``continue`` replay of a completed generation, so both
+    report the worklist of the base pair the sync wrote. The result is otherwise untouched.
+    """
+
+    worklist = recompute_knowledge_worklist(contract)
+    if worklist is not None:
+        result.payload["knowledgeWorklist"] = worklist
+    return result
+
+
+def recompute_knowledge_worklist(contract: WorktreeContract) -> dict[str, object] | None:
+    """MIK-R08 rule 8: a completed managed sync recomputes the leaf's worklist.
+
+    The sync moved the base pair, so B and K_B moved with it. The bound port computes and persists
+    the worklist and returns its summary; with no port bound (or no worklist applicable, every
+    unconverted leaf) the sync result is exactly what it was. It runs after the completed journal is
+    published, so nothing it does may fail the sync: any failure here -- reading the contract, the
+    port itself -- leaves the summary out and the completed result as it was.
+    """
+
+    try:
+        port = worktree_services().knowledge_worklist
+        return None if port is None else port.recompute(reload_contract(contract))
+    except WorktreeServicesUnboundError:
+        return None
+    except Exception:  # a worklist failure never fails a completed sync (MIK-R08 rule 8)
+        return None
 
 
 def cancel_sync(
@@ -162,11 +142,24 @@ def cancel_sync(
     record: SyncOperationRecord,
     fetch: dict[str, object],
 ) -> WorktreeCommandResult:
+    _cancelled_contract(reload_contract(contract), record)
+    assessments = _precheck_cancel_sides(record)
+    # MIK-R61 rule 12: no way out is manual. Later work the transaction does not
+    # own is saved first exactly like unproven state then the cancel completes,
+    # naming the saved files and digests; the cancel never refuses over bytes
+    # no stash and no commit holds.
+    assessments = _assessments_saving_later_work(assessments)
+    saved, stopped = _recover_and_save_cancel_state(contract, record, assessments, fetch)
+    if stopped is not None:
+        return stopped
     record = update_record(store, record, phase="cancelling")
     for side in (record.memory, record.code):
         if side is not None:
-            if side.wipState == "restore-conflict":
-                discard_conflicted_wip_reapply(side)
+            assessment = assessments.get(side.side)
+            if assessment is not None and (
+                assessment.needs_discard or side.wipState == "restore-conflict"
+            ):
+                discard_owned_reapply(side, assessment.owned_untracked)
             if side.plan in {"already-current", "skip"}:
                 if side_branch_head(side) != side.preSyncHead:
                     raise SyncGitProofError(
@@ -178,15 +171,230 @@ def cancel_sync(
         record = restore_cancelled_wip(store, record)
     except SyncGitProofError as error:
         return manual_repair_result("sync-cancel-wip-restore-failed", str(error), record, fetch)
-    require_contract_bases_unchanged(reload_contract(contract), record)
+    current = reload_contract(contract)
+    restored = _cancelled_contract(current, record)
+    if restored != current:
+        write_contract(current.contract_path, restored)
+    require_contract_bases_unchanged(restored, record)
     remove_temporary_worktrees(record)
     record = update_record(store, record, phase="cancelled")
+    _retire_restored_stashes(record)
     delete_authority(record)
     return command_result(
         0,
         "sync-cancelled",
-        "The exact sync transaction was cancelled and every participating branch was restored.",
+        _cancelled_summary(saved, assessments),
         fetch,
+    )
+
+
+def _recover_and_save_cancel_state(
+    contract: WorktreeContract,
+    record: SyncOperationRecord,
+    assessments: dict[str, CancelTreeAssessment],
+    fetch: dict[str, object],
+) -> tuple[dict[str, SavedUnprovenState], WorktreeCommandResult | None]:
+    try:
+        saved = read_saved_unproven_state(
+            contract.worktree_group / "scratch",
+            record.generation,
+            [side for side in (record.code, record.memory) if side is not None],
+        )
+    except CancelSaveError as error:
+        return {}, _refuse_cancel_for_unsaved_state(contract, record, fetch, error)
+    if not any(assessment.unproven_paths for assessment in assessments.values()):
+        return saved, None
+    newly_saved, stopped = _save_and_discard_unproven(contract, record, assessments, fetch)
+    if stopped is not None:
+        return saved, stopped
+    for name, state in newly_saved.items():
+        prior = saved.get(name)
+        saved[name] = replace(state, files=(*prior.files, *state.files)) if prior else state
+    return saved, None
+
+
+def _cancelled_contract(
+    contract: WorktreeContract, record: SyncOperationRecord
+) -> WorktreeContract:
+    """Undo only this unfinished generation's own atomic contract finalization.
+
+    A kill after write_contract but before the completed journal leaves this
+    exact tail. Prove its pair and journaled heads before any cancel mutation;
+    removing it is repeatable even if the cancel dies before its terminal write.
+    The source strategy says what the finalization moved and how its ownership is proven.
+    """
+    strategy = source_strategy(record.syncSource)
+    if strategy.finalization_absent(contract, record):
+        return contract
+    require_finalizable_contract(contract, record)
+    return strategy.without_finalization(contract, record)
+
+
+def _assessments_saving_later_work(
+    assessments: dict[str, CancelTreeAssessment],
+) -> dict[str, CancelTreeAssessment]:
+    """Fold later work into the save set: the cancel saves it first, never refuses it.
+
+    The saved whole-tree patches already capture every byte the worktree holds,
+    so a later path joins the named save list and the discard that follows may
+    clear it; the cancelled summary names what was saved with its digests.
+    """
+
+    merged: dict[str, CancelTreeAssessment] = {}
+    for name, assessment in assessments.items():
+        if not assessment.later_work:
+            merged[name] = assessment
+            continue
+        if assessment.merge_fault:
+            logger.error("sync cancel saves first over merge fault: %s", assessment.merge_fault)
+        merged[name] = replace(
+            assessment,
+            unproven_paths=tuple(
+                sorted(set(assessment.unproven_paths) | set(assessment.later_work))
+            ),
+        )
+    return merged
+
+
+def _save_and_discard_unproven(
+    contract: WorktreeContract,
+    record: SyncOperationRecord,
+    assessments: dict[str, CancelTreeAssessment],
+    fetch: dict[str, object],
+) -> tuple[dict[str, SavedUnprovenState], WorktreeCommandResult | None]:
+    """Save unattributable state before discarding it (MIK-R61 rule 12).
+
+    Returns the saved states and no stop on success; a refused save or a failed discard
+    returns no states and the answer that leaves the sync open.
+    """
+
+    # A refused save changes nothing and leaves the sync open.
+    try:
+        saved = save_unproven_state(
+            contract.worktree_group / "scratch",
+            record.generation,
+            [side for side in (record.code, record.memory) if side is not None],
+            assessments,
+        )
+    except CancelSaveError as error:
+        return {}, _refuse_cancel_for_unsaved_state(contract, record, fetch, error)
+    try:
+        for side in (record.code, record.memory):
+            if side is not None and side.side in saved:
+                discard_saved_unproven(side, saved[side.side].untracked)
+    except SyncGitProofError as error:
+        return (
+            {},
+            manual_repair_result(
+                "sync-cancel-saved-discard-failed",
+                f"{error} The unattributable state was saved first and nothing of it was "
+                "lost; resolve the named failure and run worktree_sync with "
+                "resolution_action='cancel' again.",
+                record,
+                fetch,
+            ),
+        )
+    return saved, None
+
+
+def _cancelled_summary(
+    saved: dict[str, SavedUnprovenState],
+    assessments: dict[str, CancelTreeAssessment],
+) -> str:
+    """The cancelled summary, naming the saved files where the cancel saved first."""
+
+    base = "The exact sync transaction was cancelled and every participating branch was restored."
+    if not saved:
+        return base
+    named = "; ".join(
+        f"{state.side}: " + ", ".join(f"{path} (sha256:{digest})" for path, digest in state.files)
+        for state in saved.values()
+    )
+    summary = (
+        f"{base} The saved files hold what the worktrees contained beyond the sync's own "
+        f"record, which the cancel could not attribute to the sync: {named}."
+    )
+    faults = sorted(
+        {assessment.merge_fault for assessment in assessments.values() if assessment.merge_fault}
+    )
+    if faults:
+        summary += " The cancel could not own these paths because " + "; ".join(faults) + "."
+    return summary
+
+
+def _refuse_cancel_for_unsaved_state(
+    contract: WorktreeContract,
+    record: SyncOperationRecord,
+    fetch: dict[str, object],
+    error: CancelSaveError,
+) -> WorktreeCommandResult:
+    """Refuse a cancel whose unattributable state cannot be saved (MIK-R61 rule 12).
+
+    The one refusal of a cancel that leaves the sync open: nothing was changed, and the
+    answer names the path it could not write and the folder to free.
+    """
+
+    folder = (contract.worktree_group / "scratch").as_posix()
+    return command_result(
+        2,
+        "sync-cancel-save-failed",
+        f"The sync cannot be cancelled: {error} Nothing was changed; the sync record "
+        f"keeps its phase. Free space in {folder} and run worktree_sync with "
+        "resolution_action='cancel' again.",
+        fetch,
+        phase=record.phase,
+        cancelArgs=_cancel_args(contract),
+    )
+
+
+def _retire_restored_stashes(record: SyncOperationRecord) -> None:
+    """Drop the kept stash entries of restored sides at terminal finalization.
+
+    Restore and settle keep every stash so a later cancel can still return the
+    parked bytes; only a terminal transaction retires them, entry by entry, and
+    only the entry its own record names. A missing entry is already gone.
+    """
+
+    for side in (record.code, record.memory):
+        if side is not None and side.wipState == "restored" and side.wipStash:
+            drop_parked_wip(side)
+
+
+def _precheck_cancel_sides(record: SyncOperationRecord) -> dict[str, CancelTreeAssessment]:
+    """Prove a cancel can run before the record moves: a refused cancel changes nothing."""
+
+    assessments: dict[str, CancelTreeAssessment] = {}
+    for side in (record.code, record.memory):
+        if side is None:
+            continue
+        if side.plan in {"already-current", "skip"}:
+            if side_branch_head(side) != side.preSyncHead:
+                raise SyncGitProofError(f"{side.side} unchanged branch moved after sync admission")
+            continue
+        if merge_head(Path(side.worktree)) is not None or side.wipState == "restore-conflict":
+            carried = _cancel_carried_head(side)
+            assessments[side.side] = assess_retained_tree(side, carried)
+        else:
+            assessments[side.side] = assess_stash_tree(side, _cancel_carried_head(side))
+    return assessments
+
+
+def _cancel_carried_head(side: SyncSideRecord) -> str | None:
+    """The head the parked reapply ran onto, or ``None`` where it never moved."""
+
+    worktree = Path(side.worktree)
+    current = head_commit(worktree)
+    active = merge_head(worktree)
+    if active is not None:
+        if current != side.preSyncHead or active != side.sourceCommit:
+            raise SyncGitProofError(f"{side.side} active merge is outside sync authority")
+        return side.sourceCommit
+    if current == side.preSyncHead:
+        return None
+    if exact_created_head(side, current):
+        return current
+    raise SyncGitProofError(
+        f"{side.side} has later or unrelated commits; automatic rollback is unsafe"
     )
 
 
@@ -287,9 +495,10 @@ def cleanup_terminal_residue(
     store: SyncOperationStore,
     record: SyncOperationRecord,
 ) -> None:
-    """Finish only idempotent temp/ref cleanup left after a terminal publication."""
+    """Finish only idempotent temp/ref/stash cleanup left after a terminal publication."""
 
     remove_temporary_worktrees(record)
+    _retire_restored_stashes(record)
     delete_authority(record)
     # Re-publish the same strict bytes after cleanup so a truncated prior write cannot
     # masquerade as successful residue collection.
@@ -301,6 +510,8 @@ def manual_repair_result(
     summary: str,
     record: SyncOperationRecord,
     fetch: dict[str, object],
+    *,
+    omissions: dict[str, object] | None = None,
 ) -> WorktreeCommandResult:
     return command_result(
         2,
@@ -309,6 +520,14 @@ def manual_repair_result(
         fetch,
         phase=record.phase,
         cancelArgs=_cancel_args_for_path(record.contractPath),
+        **({"omissions": omissions} if omissions is not None else {}),
+        **(
+            {
+                "validationRefusal": record.validationRefusal.model_dump(mode="json"),
+            }
+            if record.validationRefusal is not None
+            else {}
+        ),
     )
 
 
@@ -340,9 +559,17 @@ def _recover_from_refs(
             raise SyncGitProofError(
                 "code sync recovery refs are absent or incomplete; automatic rollback is unsafe"
             )
+        recovered: dict[str, SyncSideRecord] = {}
         for side in (memory, code):
             if side is not None:
-                _prove_rollback_possible(side)
+                adopted = _adopt_orphaned_park(contract, side, fetch, set())
+                if isinstance(adopted, WorktreeCommandResult):
+                    return adopted
+                recovered_side = adopted if adopted is not None else side
+                _prove_rollback_possible(recovered_side)
+                recovered[side.side] = recovered_side
+        code = recovered["code"]
+        memory = recovered.get("memory")
         stamp = operation_stamp()
         record = SyncOperationRecord(
             generation=1,
@@ -351,6 +578,7 @@ def _recover_from_refs(
             contractKind=sync_contract_kind(contract),
             codeBaseFrom=code.baseCommit,
             memoryBaseFrom=memory.baseCommit if memory is not None else contract.memory_base_commit,
+            **recovered_source_strategy(contract, code).record_fields(contract),
             phase="cancelling",
             memorySyncChoice="merge-memory" if memory is not None else None,
             code=code,
@@ -400,6 +628,7 @@ def _recover_complete_sides_around_partial_authority(
         for side in complete:
             rollback_side(side)
             remove_temporary_worktree(side)
+            delete_default_source_refs(side, contract.contract_path)
             delete_pinned_ref(Path(side.repository), side.sourceBackupRef, side.sourceCommit)
             delete_pinned_ref(Path(side.repository), side.backupRef, side.preSyncHead)
             delete_pinned_ref(Path(side.repository), side.baseBackupRef, side.baseCommit)

@@ -28,7 +28,7 @@ from pathlib import Path
 
 from agents_remember.tasks.document import TaskDocument
 from agents_remember.tasks.readiness import CompletionBlocker, completion_blockers
-from agents_remember.tasks.store import read_task_doc
+from agents_remember.tasks.store import json_path_for, read_task_doc
 from agents_remember.tasks.task_paths import (
     leaf_enclosure_path,
     series_contract_path,
@@ -135,6 +135,25 @@ def resolve_terminal_leaf_doc(
     if asserted is not None:
         _assert_terminal_path(asserted, want, matches)
     return matches[0] if matches else None
+
+
+def require_task_document_in_place(
+    json_path: Path, doc: TaskDocument, refusal: type[ValueError]
+) -> None:
+    """Raise ``refusal`` when rewriting ``doc``, read from ``json_path``, would land elsewhere.
+
+    The store writes a document to ``json_path_for`` its kind and slug, never back to the path it
+    was read from. A hand-made ``light`` leaf named ``01_x.json``, or a hand-made master named
+    ``other.json``, is therefore written to ``task.json`` -- over the folder's series master
+    (260928-MIK-L38 review R1). Finalize and reopen rewrite both the leaf they found by identity
+    and its master, so they check each before any write.
+    """
+    target = json_path_for(json_path.parent, doc)
+    if target.resolve(strict=False) != json_path.resolve(strict=False):
+        raise refusal(
+            f"task document {json_path} would be rewritten to {target}; its file name must match "
+            f"its kind {doc.kind!r} and slug {doc.slug!r} before this transition"
+        )
 
 
 def _terminal_asserted_path(root: Path, asserted_path: Path | None) -> Path | None:

@@ -3,12 +3,15 @@
 // same HighlightStyle => identical tokens across plain + diff). The EditorView is created
 // imperatively in an effect and torn down on unmount / content change.
 import { useEffect, useRef } from "react";
-import { EditorState, type Extension } from "@codemirror/state";
-import { EditorView, lineNumbers } from "@codemirror/view";
+import { EditorState, type Extension, type Text } from "@codemirror/state";
+import { Decoration, EditorView } from "@codemirror/view";
 
 import { css } from "../../../styled-system/css";
 import { codeTheme } from "./codemirrorTheme";
+import { numberedFrom } from "./lineNumbering";
 import { langExtension } from "./langByExtension";
+import { type PaneMarks, useMarkedPane } from "./markGutter";
+import { trayLineGutter, type FileLineTarget } from "../../tray/fileLineGutter";
 
 const host = css({
   height: "100%",
@@ -17,8 +20,42 @@ const host = css({
   "& .cm-editor": { height: "100%" },
 });
 
-export function FilePane({ content, language }: { content: string; language: string }) {
+// An excerpt sizes to its content (`fit`) and keeps its file's line numbering (`firstLine`). It has
+// no scroll box of its own (MIK-R89 v2 rule 1): the editor grows to its lines, its wrapped lines
+// never overflow, and the review page's one reading scroller scrolls it. Only the review page's panes
+// fit (its cards, statements and guarantees).
+const fitHost = css({
+  minHeight: "0",
+  "& .cm-editor": { height: "auto" },
+  // CodeMirror's base theme sets `overflow-x: auto` and is injected after this sheet.
+  "& .cm-scroller": { overflow: "visible !important" },
+});
+
+export function FilePane({
+  content,
+  language,
+  firstLine = 1,
+  fit = false,
+  marks,
+  highlightedLines,
+  trayLines,
+}: {
+  content: string;
+  language: string;
+  firstLine?: number;
+  fit?: boolean;
+  // Marks on file lines (the reviewer's per-hunk intent markers); absent = no mark gutter at all.
+  marks?: PaneMarks;
+  highlightedLines?: readonly [number, number];
+  // The File Viewer's file: a hover ⊕ in the line gutter takes its lines into the AR tray
+  // (MIK-R188 rule 1). Absent = no tray gutter (excerpts, the reviewer's cards, the Knowledge page).
+  trayLines?: FileLineTarget;
+}) {
   const ref = useRef<HTMLDivElement>(null);
+  const { portals, placement, gutterFor, drawn } = useMarkedPane(marks);
+  const trayRepository = trayLines?.repository;
+  const trayScope = trayLines?.scope;
+  const trayPath = trayLines?.path;
 
   useEffect(() => {
     const parent = ref.current;
@@ -30,21 +67,70 @@ export function FilePane({ content, language }: { content: string; language: str
     void langExtension(language).then((lang) => {
       if (disposed || !parent) return;
       const extensions: Extension[] = [
-        lineNumbers(),
+        gutterFor("all", firstLine),
+        numberedFrom(firstLine),
+        trayRepository && trayScope && trayPath
+          ? trayLineGutter({ repository: trayRepository, scope: trayScope, path: trayPath }, firstLine)
+          : [],
         EditorState.readOnly.of(true),
         EditorView.editable.of(false),
         EditorView.lineWrapping,
         codeTheme,
       ];
       if (lang) extensions.push(lang);
+      const doc = EditorState.create({ doc: content }).doc;
+      if (highlightedLines) extensions.push(citationHighlight(doc, highlightedLines, firstLine));
       view = new EditorView({ parent, state: EditorState.create({ doc: content, extensions }) });
+      if (highlightedLines)
+        view.dispatch({
+          effects: EditorView.scrollIntoView(
+            doc.line(Math.max(1, Math.min(doc.lines, highlightedLines[0] - firstLine + 1))).from,
+            { y: "start" },
+          ),
+        });
+      drawn({ after: { view, first: firstLine } });
     });
 
     return () => {
       disposed = true;
+      drawn(null);
       view?.destroy();
     };
-  }, [content, language]);
+    // `placement` rebuilds the pane when a mark moves (the marks themselves are read at build).
+  }, [content, language, firstLine, placement, gutterFor, drawn, highlightedLines, trayRepository, trayScope, trayPath]);
 
-  return <div ref={ref} className={host} data-testid="file-pane" />;
+  return (
+    <>
+      <div ref={ref} className={fit ? fitHost : host} data-testid="file-pane" />
+      {portals}
+    </>
+  );
+}
+
+function citationHighlight(
+  doc: Text,
+  [first, last]: readonly [number, number],
+  firstLine: number,
+): Extension {
+  const lines = [];
+  for (
+    let line = Math.max(1, first - firstLine + 1);
+    line <= Math.min(doc.lines, last - firstLine + 1);
+    line++
+  )
+    lines.push(
+      Decoration.line({
+        attributes: {
+          class: "cm-citedLine",
+          "data-located": "true",
+          "data-line": String(line + firstLine - 1),
+        },
+      }).range(doc.line(line).from),
+    );
+  return [
+    EditorView.decorations.of(Decoration.set(lines)),
+    EditorView.theme({
+      ".cm-citedLine": { background: "color-mix(in oklab, var(--cyan) 15%, transparent)" },
+    }),
+  ];
 }

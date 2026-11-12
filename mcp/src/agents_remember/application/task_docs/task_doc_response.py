@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import difflib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.direct_execution_grants import (
+    DirectExecutionGrant,
+    grants_for_task,
+)
 from agents_remember.tasks import (
     SprintGraphTitles,
     TaskDocument,
@@ -16,20 +21,29 @@ from agents_remember.tasks import (
     step_done,
     step_total,
 )
+from agents_remember.tasks.master_order import derive_master_order, load_master_children
 from agents_remember.tasks.master_sync import MasterSyncPlan
 
 
-def _review_state_payload(doc: TaskDocument) -> dict[str, Any]:
-    """Expose the bounded review counter, treating an absent field as zero."""
+def review_state_payload(doc: TaskDocument, limit: int | None = None) -> dict[str, Any]:
+    """Expose the bounded review counter, treating an absent field as zero.
+
+    MIK-R116 rule 2: the answer carries ``limit``, the number in force for this
+    task. A recorded state carries the limit its last begin computed; a task
+    with no recorded state carries the settings number when the caller read it.
+    """
 
     state = doc.reviewState
     if state is None:
-        return {
+        payload: dict[str, Any] = {
             "round": 0,
             "pending": False,
             "baselineFindings": [],
             "remainingFindingIds": [],
         }
+        if limit is not None:
+            payload["limit"] = limit
+        return payload
     return state.model_dump(mode="json", by_alias=True)
 
 
@@ -53,7 +67,7 @@ def task_doc_result(
         "renderedPath": markdown_path.as_posix(),
         "stepsDone": step_done(doc),
         "stepsTotal": step_total(doc),
-        "reviewState": _review_state_payload(doc),
+        "reviewState": review_state_payload(doc),
     }
     sync_payload = _master_sync_payload(master_sync, preview=False)
     if sync_payload is not None:
@@ -67,10 +81,11 @@ def task_doc_preview(
     task_root: Path,
     *,
     master_sync: MasterSyncPlan | None = None,
+    overrides: Mapping[Path, TaskDocument] | None = None,
 ) -> dict[str, Any]:
     """Return the validated would-be document, rendered diff, and loss signal."""
 
-    preview = _render_preview(task_root, doc)
+    preview = _render_preview(task_root, doc, overrides=overrides)
     result = task_doc_result(
         operation,
         doc,
@@ -82,7 +97,7 @@ def task_doc_preview(
     result["rendered"] = preview["rendered"]
     result["diff"] = preview["diff"]
     result["wouldLose"] = preview["wouldLose"]
-    sync_payload = _master_sync_payload(master_sync, preview=True)
+    sync_payload = _master_sync_payload(master_sync, preview=True, overrides=overrides)
     if sync_payload is not None:
         result["masterSync"] = sync_payload
     return result
@@ -96,8 +111,40 @@ def graph_titles_for(task_root: Path, doc: TaskDocument) -> SprintGraphTitles | 
     return read_graph_titles(task_root.parents[1], doc.executionGraph)
 
 
-def _render_preview(task_root: Path, doc: TaskDocument) -> dict[str, Any]:
-    rendered = render_markdown(doc, graph_titles=graph_titles_for(task_root, doc))
+def _preview_grant(task_root: Path, doc: TaskDocument) -> DirectExecutionGrant | None:
+    """The leaf's live grant for its rendered preview, read from the one record.
+
+    ``None`` for non-leaves and when no readable grant exists: display never
+    breaks on a missing or broken grant file (gates still refuse it).
+    """
+    if doc.kind != "subTask":
+        return None
+    parents = task_root.parents
+    if len(parents) < 3:
+        return None
+    try:
+        grants = grants_for_task(parents[2], doc.repo, task_root.name)
+    except (OSError, ValueError):
+        return None
+    return grants.get(f"{task_root.name}/{doc.slug}.json")
+
+
+def _render_preview(
+    task_root: Path,
+    doc: TaskDocument,
+    *,
+    overrides: Mapping[Path, TaskDocument] | None = None,
+) -> dict[str, Any]:
+    rendered = render_markdown(
+        doc,
+        graph_titles=graph_titles_for(task_root, doc),
+        direct_grant=_preview_grant(task_root, doc),
+        master_order=(
+            derive_master_order(doc, load_master_children(task_root, doc, overrides))
+            if doc.kind == "master" and not doc.is_sprint
+            else None
+        ),
+    )
     markdown_path = markdown_path_for(task_root, doc)
     existing = markdown_path.read_text(encoding="utf-8") if markdown_path.exists() else ""
     diff = "".join(
@@ -123,6 +170,7 @@ def _master_sync_payload(
     master_sync: MasterSyncPlan | None,
     *,
     preview: bool,
+    overrides: Mapping[Path, TaskDocument] | None = None,
 ) -> dict[str, Any] | None:
     if (
         master_sync is None
@@ -145,7 +193,7 @@ def _master_sync_payload(
         "subtaskNumber": master_sync.subtask_number,
     }
     if preview:
-        rendered = _render_preview(master_root, master_sync.master)
+        rendered = _render_preview(master_root, master_sync.master, overrides=overrides)
         payload["rendered"] = rendered["rendered"]
         payload["diff"] = rendered["diff"]
         payload["wouldLose"] = rendered["wouldLose"]

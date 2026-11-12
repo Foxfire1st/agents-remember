@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import ast
 import json
-import shlex
 from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
@@ -13,33 +13,19 @@ import pytest
 from agents_remember.application import worktree_tools
 from agents_remember.application.worktree_tool_requests import (
     CloseoutApproval,
-    CloseoutCommitMessages,
 )
-from agents_remember.kernel.git_command import run_git
-from agents_remember.kernel.memory_cache import derive_memory_ledger, refresh_memory_cache
+from agents_remember.kernel.memory_cache import derive_memory_ledger
 from agents_remember.kernel.memory_ledger import (
-    LedgerRow,
-    ledger_to_text,
     load_ledger,
 )
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
-from agents_remember.models.closeout.input import (
-    EffectiveCloseoutInput,
-    EnabledCloseoutLeg,
-)
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
-from agents_remember.tasks import TaskEnclosureRef, read_task_doc, write_task_doc
 from agents_remember.worktrees import git_worktree_manager
-from agents_remember.worktrees.integration.closeout import curator_coherence as coherence
-from agents_remember.worktrees.integration.closeout.certification import execution as selected
 from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
 from agents_remember.worktrees.modules import closeout_external
+from agents_remember.worktrees.modules import git as git_owner
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.closeout_external import _commit_memory_content
 from agents_remember.worktrees.modules.git import is_ancestor
-from agents_remember.worktrees.modules.quality import closeout_memory as memory_quality
-from agents_remember.worktrees.modules.quality import gate as quality_gate
-from agents_remember.worktrees.task_resolver import series_contract_path
 from agents_remember.worktrees.worktree_contract import load_contract
 from closeout_input_test_support import (
     ensure_fixture_waiting_door,
@@ -48,164 +34,222 @@ from integration_branch_authority_test_support import (
     _authority_fixture,
     _closed_external_leaf_worktrees,
 )
+from test_knowledge_closeout_gate import CODE_A, LEAF, _edit, build_gated
+from test_knowledge_reopen import _public_closeout, _rows_for_the_edit, _write
 from test_source_lineage import _commit_on, _fixture, _git
-
-MESSAGES = CloseoutCommitMessages(
-    code="Add transaction feature",
-    memory="Document transaction feature",
+from transaction_only_worktree_delivery_test_support import (
+    MESSAGES,
+    SEAMS,
+    UNADMITTED,
+    _apply,
+    _assert_landed_subject,
+    _assert_memory_attribution,
+    _assert_no_profile_or_review,
+    _bind_task_without_review,
+    _branch_race,
+    _closeout_through_failing_then_passing_hooks,
+    _code_and_memory_state,
+    _converted_closeout_fixture,
+    _disturbed,
+    _effective_closeout_input,
+    _forbid_acceptance_tools,
+    _install_failing_pre_commit_hooks,
+    _memory_preparations,
+    _public_config,
+    _seed_leaf_trace_row,
 )
 
 
-def _public_config(root: Path, contract) -> McpRuntimeConfig:
-    """Bind an existing temp Git fixture to MCP authority without a profile."""
+@pytest.mark.parametrize("late", ("worktree", "index"))
+def test_ordinary_code_commit_is_the_admitted_tree_and_keeps_a_later_edit(
+    tmp_path, worktree_services, late
+):
+    """R5-3 for the code side: a file edited while the commit object is written is not committed
+    and does not refuse the closeout; it stays an uncommitted change."""
 
-    code_link = root / contract.repo_name
-    if not code_link.exists():
-        code_link.symlink_to(contract.code_repo_path, target_is_directory=True)
-    if contract.memory_repo_path is not None:
-        memory_link = contract.coordination_root / "memory-repos" / f"ar-{contract.repo_name}"
-        memory_link.parent.mkdir(parents=True, exist_ok=True)
-        if not memory_link.exists():
-            memory_link.symlink_to(contract.memory_repo_path, target_is_directory=True)
-    config_path = root / "settings.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "coordinationRoot": contract.coordination_root.as_posix(),
-                "workspaceRoot": root.as_posix(),
-                "retirement": {"autoLandOnIntegration": False},
-                "repositories": {contract.repo_name: {}},
-            }
-        ),
-        encoding="utf-8",
-    )
-    return load_config(config_path)
+    contract, config = _converted_closeout_fixture(tmp_path)
+    native = git_owner.run_git
+    seen: list[str] = []
 
+    def edited_at_commit(repository, args, *extra):
+        if args[0] == "commit-tree" and repository == contract.code_worktree:
+            seen.append(args[1])
+            path = repository / "feature.py"
+            path.write_text("late user bytes\n", encoding="utf-8")
+            if late == "index":
+                _git(repository, "add", "--", "feature.py")
+                path.write_text("VALUE = 1\n", encoding="utf-8")
+        return native(repository, args, *extra)
 
-def _bind_task_without_review(contract) -> None:
-    """Add only the canonical enclosure binding; leave review evidence absent.
-
-    Both derived fields are bound, exactly as ``task_doc`` stamps them against a leaf
-    contract: a leaf document missing its ``seriesContractPath`` is the damage a later
-    start repairs, so it would model an unstarted-against document rather than this one.
-    """
-
-    task_path = contract.task_root / f"{contract.leaf_id.lower()}.json"
-    document = read_task_doc(task_path)
-    write_task_doc(
-        task_path.parent,
-        document.model_copy(
-            update={
-                "seriesContractPath": series_contract_path(contract.task_root).as_posix(),
-                "enclosures": [
-                    TaskEnclosureRef(
-                        leafId=contract.leaf_id,
-                        enclosurePath=contract.contract_path.as_posix(),
-                    )
-                ],
-            }
-        ),
+    with mock.patch.object(git_owner, "run_git", edited_at_commit):
+        applied = _apply(config, contract)
+    assert applied["ok"] is True, applied
+    code = contract.code_worktree
+    assert _git(code, "rev-parse", "HEAD^{tree}") == seen[0]
+    assert _git(code, "show", "HEAD:feature.py") == "VALUE = 1"
+    assert _git(code, "diff", "--name-only") == "feature.py"  # the index and worktree differ
+    assert _git(code, "diff", "--cached", "--name-only") == (
+        "feature.py" if late == "index" else ""
     )
 
 
-def _assert_no_profile_or_review(config, contract) -> None:
-    """Make the transaction test's absent acceptance authorities explicit."""
+@pytest.mark.parametrize("seam", SEAMS)
+def test_a_moved_code_branch_refuses_the_closeout_and_a_retry_completes_it(
+    tmp_path, worktree_services, seam
+):
+    contract, config = _converted_closeout_fixture(tmp_path)
+    before = _code_and_memory_state(contract)
+    with (
+        _branch_race(contract.code_worktree, seam),
+        pytest.raises(RuntimeError, match=SEAMS[seam]),
+    ):
+        _apply(config, contract)
+    code = contract.code_worktree
+    assert _git(code, "rev-list", "--all", "--count") == _git(code, "rev-list", "HEAD", "--count")
+    after = _code_and_memory_state(contract)
+    assert after[0] != before[0] and after[1:3] == before[1:3] and after[3:] == before[3:]
+    assert _git(code, "log", "-1", "--format=%s") == "foreign"
 
-    assert config.repositories[contract.repo_name].certification_profile is None
-    document = read_task_doc(contract.task_root / f"{contract.leaf_id.lower()}.json")
-    assert document.routeReview is None
+    applied = _apply(config, contract)  # the cause is gone: a plain retry completes
+    assert applied["ok"] is True, applied
+    assert _git(code, "show", "HEAD:feature.py") == "VALUE = 1"
+    _assert_landed_subject(code, MESSAGES.code)
 
 
-def _forbid_acceptance_tools():
-    """Patch historical acceptance entry points so an accidental call fails loudly."""
+@pytest.mark.parametrize("seam", SEAMS)
+def test_a_moved_memory_branch_leaves_the_pair_to_the_recovery_a_retry_runs(
+    tmp_path, worktree_services, seam
+):
+    """The code commit landed, the memory publication was refused, nothing of the memory side
+    stayed behind, and the rerun finishes the same pair on the code commit that landed."""
 
-    return (
-        mock.patch.multiple(
-            quality_gate,
-            run_strict_code_quality_gate=mock.Mock(
-                side_effect=AssertionError("transaction called strict code quality")
-            ),
-            create=True,
-        ),
-        mock.patch.object(
-            memory_quality,
-            "run_memory_quality_phase",
-            side_effect=AssertionError("transaction called memory quality"),
-        ),
-        mock.patch.object(
-            selected,
-            "execute_selected_closeout",
-            side_effect=AssertionError("transaction called selected certification"),
-        ),
-        mock.patch.object(
-            coherence,
-            "require_current_curator_coherence",
-            side_effect=AssertionError("transaction called curator certification"),
-        ),
+    contract, config = _converted_closeout_fixture(tmp_path)
+    memory = contract.memory_worktree
+    assert memory is not None
+    memory_before = tuple(
+        _git(memory, *arguments)
+        for arguments in (("ls-files", "--stage"), ("status", "--porcelain=v1", "-uall"))
     )
-
-
-def _install_failing_pre_commit_hooks(contract, root: Path) -> tuple[Path, Path]:
-    """Install real failing hooks in both repositories and return their logs."""
-
-    logs = (root / "code-pre-commit.log", root / "memory-pre-commit.log")
-    repositories = (contract.code_repo_path, contract.memory_repo_path)
-    for repository, log in zip(repositories, logs, strict=True):
-        assert repository is not None
-        hook_directory = Path(_git(repository, "rev-parse", "--git-path", "hooks"))
-        if not hook_directory.is_absolute():
-            hook_directory = repository / hook_directory
-        hook_directory.mkdir(parents=True, exist_ok=True)
-        hook = hook_directory / "pre-commit"
-        hook.write_text(
-            "#!/bin/sh\n"
-            f"printf '%s\\n' transaction-hook-invoked >> {shlex.quote(log.as_posix())}\n"
-            "exit 97\n",
-            encoding="utf-8",
-        )
-        hook.chmod(0o755)
-        assert hook.is_file() and hook.stat().st_mode & 0o111
-        probe = run_git(repository, ["hook", "run", "pre-commit"])
-        assert probe.returncode == 97, probe
-        assert log.read_text(encoding="utf-8").splitlines() == ["transaction-hook-invoked"]
-        log.unlink()
-    return logs
-
-
-def _assert_memory_attribution(
-    memory_worktree: Path,
-    *,
-    code_commit: str,
-    content_commit: str,
-    scratch: Path,
-) -> None:
-    """The memory commit carries exactly one Code-Commit trailer and contains no cached ledger.
-
-    The trailer is read back out of the committed object by both documented git readers, so
-    this is the attribution being bound by the hash rather than recorded beside it.
-    """
-
-    body = _git(memory_worktree, "log", "-1", "--format=%B", content_commit)
-    assert body == f"{MESSAGES.memory}\n\nCode-Commit: {code_commit}"
-    assert body.count("Code-Commit:") == 1
-    message_file = scratch / "memory-content-message.txt"
-    message_file.write_text(f"{body}\n", encoding="utf-8")
-    assert (
-        _git(memory_worktree, "interpret-trailers", "--parse", message_file.as_posix())
-        == f"Code-Commit: {code_commit}"
+    with _branch_race(memory, seam), pytest.raises(RuntimeError, match=SEAMS[seam]):
+        _apply(config, contract)
+    landed_code = _git(contract.code_worktree, "rev-parse", "HEAD")
+    _assert_landed_subject(contract.code_worktree, MESSAGES.code)
+    assert _git(memory, "rev-list", "--all", "--count") == _git(
+        memory, "rev-list", "HEAD", "--count"
     )
     assert (
-        _git(
-            memory_worktree,
-            "log",
-            "-1",
-            "--format=%(trailers:key=Code-Commit)",
-            content_commit,
-        )
-        == f"Code-Commit: {code_commit}"
+        _git(memory, "ls-files", "--stage"),
+        _git(memory, "status", "--porcelain=v1", "-uall"),
+    ) == memory_before
+    assert load_contract(contract.contract_path).closeout_status != "completed"
+
+    applied = _apply(config, contract)
+    assert applied["ok"] is True, applied
+    closed = load_contract(contract.contract_path)
+    assert closed.closeout_status == "completed" and closed.code_commit == landed_code
+    assert _git(memory, "show", "HEAD:feature.md") == "# Feature"
+    assert _git(memory, "rev-parse", "HEAD") == closed.memory_content_commit
+
+
+@pytest.mark.parametrize("refusal", (*SEAMS, "switched"))
+def test_a_refused_converted_memory_publication_gives_back_every_preparation(
+    tmp_path, worktree_services, refusal
+):
+    """On converted memory the closeout closes the leaf's history and may add an ignore rule. A
+    branch that moved (before the tip check or after the commit object was written), or a HEAD
+    switched to another branch, refuses at publication: the history file is open again byte for
+    byte, the ignore rule is gone, the index is as it was, and the rerun after the cause is gone
+    completes."""
+
+    world = build_gated(tmp_path)
+    _edit(world, CODE_A.replace("return value", "return -value"))
+    _write(world, _rows_for_the_edit())
+    history = world.memory / f"knowledge/history/{LEAF}.json"
+    ignore = world.memory / ".gitignore"
+    opened = history.read_bytes(), ignore.exists()
+    index = _git(world.memory, "ls-files", "--stage")
+    status = _git(world.memory, "status", "--porcelain=v1", "-uall")
+    _git(world.memory, "branch", "elsewhere")
+    published = closeout_external.publish_tree_commit
+
+    def switched(repository, message, **kwargs):
+        _git(repository, "symbolic-ref", "HEAD", "refs/heads/elsewhere")
+        try:
+            return published(repository, message, **kwargs)
+        finally:
+            _git(repository, "symbolic-ref", "HEAD", kwargs["before"].headRef)
+
+    if refusal == "switched":
+        race = mock.patch.object(closeout_external, "publish_tree_commit", switched)
+        match = "HEAD names refs/heads/elsewhere.*nothing was published; "
+    else:
+        race = _branch_race(world.memory, refusal)
+        match = SEAMS[refusal]
+    with race, pytest.raises(RuntimeError, match=match):
+        _public_closeout(world)
+    assert (history.read_bytes(), ignore.exists()) == opened
+    assert json.loads(history.read_text())["closed"] is False
+    assert _git(world.memory, "ls-files", "--stage") == index
+    # The closeout's metadata refresh (``overview.index.json``) is not a preparation it takes back.
+    assert [
+        row
+        for row in _git(world.memory, "status", "--porcelain=v1", "-uall").splitlines()
+        if not row.endswith("overview.index.json")
+    ] == status.splitlines()
+    # No ref reaches a commit the closeout made: everything reachable is on the current branch.
+    assert _git(world.memory, "rev-list", "--all", "--count") == _git(
+        world.memory, "rev-list", "HEAD", "--count"
     )
-    assert _git(memory_worktree, "ls-tree", "--name-only", content_commit, "--", "memory.md") == ""
+
+    closed = _public_closeout(world)
+    assert closed.payload["state"] == "closed"
+    memory = closed.payload["memory_content_commit"]
+    assert json.loads(_git(world.memory, "show", f"{memory}:knowledge/history/{LEAF}.json"))[
+        "closed"
+    ]
+
+
+@pytest.mark.parametrize(("event", "side", "moment"), UNADMITTED)
+def test_the_publication_is_bound_to_the_branch_and_the_head_the_closeout_admitted(
+    tmp_path, worktree_services, event, side, moment
+):
+    """Review R3, findings 2 and 3, through ``worktree_closeout_apply`` on converted memory. A
+    checkout switched to another branch, detached, or moved by someone else's commit between the
+    judgment and the publication refuses: no branch receives a commit of the refused side, the
+    leaf's history file and the ignore rule are as before, and the plain rerun completes."""
+
+    contract, config = _converted_closeout_fixture(tmp_path)
+    assert contract.memory_worktree is not None
+    repository = contract.code_worktree if side == "code" else contract.memory_worktree
+    branch = _git(repository, "symbolic-ref", "HEAD")
+    before = _memory_preparations(contract), _code_and_memory_state(contract)[:3]
+    with _disturbed(contract, event, side, moment) as fired:
+        with pytest.raises(RuntimeError, match=UNADMITTED[event, side, moment]):
+            _apply(config, contract)
+        assert fired
+        # Nothing of the refused side is committed anywhere: every ref of the repository names
+        # what it named, except the branch someone else moved.
+        foreign = _git(repository, "rev-parse", "HEAD") if event == "moved" else None
+        _git(repository, "symbolic-ref", "HEAD", branch)
+        commits = set(_git(repository, "rev-list", "--all").split())
+        assert _git(repository, "log", "-1", "--format=%s") in {"foreign", "base", "memory base"}
+        assert _git(repository, "rev-parse", "elsewhere") in commits - {foreign}
+        if side == "code":
+            assert _code_and_memory_state(contract)[1:3] == before[1][1:3]
+        else:  # the code commit of the pair landed; the rerun completes the pair on it
+            _assert_landed_subject(contract.code_worktree, MESSAGES.code)
+        assert _memory_preparations(contract) == before[0]
+
+        applied = _apply(config, contract)  # the cause is gone: the plain rerun completes
+    assert applied["ok"] is True and applied["state"] == "closed", applied
+    closed = load_contract(contract.contract_path)
+    memory = contract.memory_worktree
+    assert _git(memory, "rev-parse", "HEAD") == closed.memory_content_commit
+    assert _git(contract.code_worktree, "rev-parse", "HEAD") == closed.code_commit
+    history = _git(memory, "show", f"HEAD:knowledge/history/{contract.leaf_id}.json")
+    assert json.loads(history)["closed"] is True
+    for repo in (contract.code_worktree, memory):
+        assert _git(repo, "rev-parse", "elsewhere") != _git(repo, "rev-parse", "HEAD")
 
 
 def test_public_closeout_commits_code_and_memory_without_acceptance_tools(
@@ -213,7 +257,9 @@ def test_public_closeout_commits_code_and_memory_without_acceptance_tools(
 ):
     """Closeout is a Git transaction even when quality/review authorities are absent."""
 
-    fixture = _fixture(tmp_path, external_memory=True, selected_profile=False)
+    fixture = _fixture(
+        tmp_path, external_memory=True, selected_profile=False, converted_memory=True
+    )
     contract = fixture.leaf_contract
     assert contract.memory_repo_path is not None and contract.memory_worktree is not None
     contract.code_worktree.parent.mkdir(parents=True, exist_ok=True)
@@ -240,38 +286,17 @@ def test_public_closeout_commits_code_and_memory_without_acceptance_tools(
     (contract.code_worktree / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
     (contract.memory_worktree / "onboarding").mkdir()
     (contract.memory_worktree / "feature.md").write_text("# Feature\n", encoding="utf-8")
+    _seed_leaf_trace_row(contract, "leaf-1", "onboarding:feature.py")
     ensure_fixture_waiting_door(contract, force_synthetic=True)
     contract = load_contract(contract.contract_path)
     _bind_task_without_review(contract)
     config = _public_config(tmp_path, contract)
     _assert_no_profile_or_review(config, contract)
-    code_hook_log, memory_hook_log = _install_failing_pre_commit_hooks(contract, tmp_path)
-
-    with ExitStack() as stack:
-        for patcher in _forbid_acceptance_tools():
-            stack.enter_context(patcher)
-        # The existing helper publishes a deliberately non-applicable waiting door.  Its
-        # disposable sprint has no queue projection, so bypass only that fixture fence while
-        # retaining the public apply admission.
-        stack.enter_context(
-            mock.patch.object(lifecycle_operations, "require_first_ready_generation")
-        )
-        preview = worktree_tools.worktree_closeout_preview_tool(
-            config, contract.contract_path.as_posix(), MESSAGES
-        )
-        assert preview["ok"] is True, preview
-        assert preview["state"] == "would-closeout"
-        applied = worktree_tools.worktree_closeout_apply_tool(
-            config,
-            contract.contract_path.as_posix(),
-            MESSAGES,
-            CloseoutApproval(intent_note="developer approved transaction"),
-        )
-
     # Closeout runs in this process: no detached worker, no operation record. The
     # two commits and their ancestry are the whole record of what it did.
-    assert applied["ok"] is True, applied
-    assert applied["state"] == "closed", applied
+    applied, code_hook_log, memory_hook_log = _closeout_through_failing_then_passing_hooks(
+        config, contract, MESSAGES, tmp_path
+    )
     # The response's OWN address, in the envelope's spelling. `status_payload` emits the
     # snake_case `contract_path`; the guidance guard that a seat's next move depends on reads
     # `contractPath`/`enclosurePath` (`application/tool_response.py::bound_next_step`), so a
@@ -309,7 +334,10 @@ def test_public_closeout_commits_code_and_memory_without_acceptance_tools(
     assert mapping.code_commit == closed.code_commit
     assert mapping.memory_commit == closed.memory_content_commit
     # The validated messages are the ones that actually landed in the commit objects.
-    assert _git(contract.code_worktree, "log", "-1", "--format=%s") == MESSAGES.code
+    # The one-line code message's `%s` carries the fact; the memory message's first
+    # paragraph is bare and its trailers are pinned by `_assert_memory_attribution`.
+    _assert_landed_subject(contract.code_worktree, MESSAGES.code, hook=".git/hooks/pre-commit")
+    assert contract.memory_content_commit is not None
     assert (
         _git(contract.memory_worktree, "log", "-1", "--format=%s", closed.memory_content_commit)
         == MESSAGES.memory
@@ -322,15 +350,19 @@ def test_public_closeout_commits_code_and_memory_without_acceptance_tools(
         code_commit=closed.code_commit,
         content_commit=closed.memory_content_commit,
         scratch=tmp_path,
+        hook=".git/hooks/pre-commit",
     )
-    assert not code_hook_log.exists()
-    assert not memory_hook_log.exists()
+    # MIK-R152: both hooks ran for the landing that published these commits.
+    assert code_hook_log.read_text(encoding="utf-8").splitlines() == ["transaction-hook-invoked"]
+    assert memory_hook_log.read_text(encoding="utf-8").splitlines() == ["transaction-hook-invoked"]
 
 
 def test_closeout_recovery_attributes_the_memory_commit_it_still_owed(tmp_path, worktree_services):
     """Resume an interrupted public closeout with a missing cache and only its memory commit owed."""
 
-    fixture = _fixture(tmp_path, external_memory=True, selected_profile=False)
+    fixture = _fixture(
+        tmp_path, external_memory=True, selected_profile=False, converted_memory=True
+    )
     contract = fixture.leaf_contract
     assert contract.memory_repo_path is not None and contract.memory_worktree is not None
     contract.code_worktree.parent.mkdir(parents=True, exist_ok=True)
@@ -355,6 +387,7 @@ def test_closeout_recovery_attributes_the_memory_commit_it_still_owed(tmp_path, 
     (contract.code_worktree / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
     (contract.memory_worktree / "onboarding").mkdir()
     (contract.memory_worktree / "feature.md").write_text("# Feature\n", encoding="utf-8")
+    _seed_leaf_trace_row(contract, "leaf-1", "onboarding:feature.py")
     ensure_fixture_waiting_door(contract, force_synthetic=True)
     contract = load_contract(contract.contract_path)
     _bind_task_without_review(contract)
@@ -483,25 +516,15 @@ def test_public_integration_merges_prepared_pair_without_acceptance_tools(
             dry_run=True,
         )
         assert preview["ok"] is True, preview
-        # Seat retirement must still fire on the SYNCHRONOUS path: its other call
-        # site was the detached worker, so a deletion that removed this trigger
-        # would stop retiring seats silently and a green suite would not catch it.
-        # This fixture disables auto-landing, so enable retirement for the pin.
-        retiring = replace(
-            config, retirement=replace(config.retirement, auto_land_on_integration=True)
+        applied = worktree_tools.worktree_integrate_tool(
+            config,
+            contract_path=closed.contract_path.as_posix(),
+            strategy="ff-only",
+            dry_run=False,
         )
-        with mock.patch.object(worktree_tools, "auto_complete_seats", return_value={}) as retire:
-            applied = worktree_tools.worktree_integrate_tool(
-                retiring,
-                contract_path=closed.contract_path.as_posix(),
-                strategy="ff-only",
-                dry_run=False,
-            )
 
     # Integration runs in this process: the refs themselves are the record.
     assert applied["ok"] is True, applied
-    assert retire.call_args is not None, "auto_complete_seats is no longer reachable"
-    assert retire.call_args.kwargs["edge"] == "leaf-integration"
     integrated = load_contract(closed.contract_path)
     assert integrated.integration_status == "completed"
     assert integrated.integrated_code_commit == integrated.code_commit
@@ -569,17 +592,7 @@ def test_public_integration_ref_movement_refuses_before_pair_merge(tmp_path, wor
     assert current.integration_status != "completed"
 
 
-def _effective_closeout_input() -> EffectiveCloseoutInput:
-    leg = EnabledCloseoutLeg(reason="test", message="Test closeout commit")
-    return EffectiveCloseoutInput(
-        route="worktree",
-        contractKind="leaf",
-        memoryMode="external",
-        code=leg,
-        memory=leg,
-    )
-
-
+@pytest.mark.usefixtures("worktree_services")
 def test_recloseout_after_a_sync_records_the_memory_head_as_content_commit(tmp_path):
     """Closeout -> sync -> closeout records the live memory head, not the stale record.
 
@@ -616,137 +629,62 @@ def test_recloseout_after_a_sync_records_the_memory_head_as_content_commit(tmp_p
     assert is_ancestor(memory_repo, moved_source, memory_commit)
 
 
-class _ClosedCacheLeaf:
-    """One closed external leaf and the disposable cache derived from its Git attribution."""
-
-    def __init__(self, root: Path) -> None:
-        fixture = _authority_fixture(root, external_memory=True)
-        closed = _closed_external_leaf_worktrees(fixture, root, publish_closeout_evidence=False)
-        assert closed.memory_repo_path is not None and closed.memory_worktree is not None
-        assert closed.ledger_path is not None
-        self.contract = closed
-        self.memory_worktree = closed.memory_worktree
-        self.cache_path = closed.ledger_path
-        self.canonical = derive_memory_ledger(
-            self.memory_worktree, closed.memory_content_commit, repo_name=closed.repo_name
-        )
-        self.own_row = LedgerRow(closed.code_commit, closed.memory_content_commit)
-        self.source_rows = [row for row in self.canonical.rows if row != self.own_row]
-        self.content_path = self.memory_worktree / "candidate.md"
-        self.content_bytes = self.content_path.read_bytes()
-        self.code_path = closed.code_worktree / "candidate.txt"
-        self.code_bytes = self.code_path.read_bytes()
-
-    def render(self, rows: list[LedgerRow], *, header: tuple[str, str] | None = None) -> str:
-        consistent = replace(
-            self.canonical,
-            rows=rows,
-            last_verified_code_commit=rows[0].code_commit,
-            last_memory_content_commit=rows[0].memory_commit,
-        )
-        text = ledger_to_text(consistent)
-        if header is None:
-            return text
-        return text.replace(f'"{rows[0].code_commit}"', f'"{header[0]}"', 1).replace(
-            f'"{rows[0].memory_commit}"', f'"{header[1]}"', 1
-        )
-
-    def refresh(self):
-        return refresh_memory_cache(self.memory_worktree, repo_name=self.contract.repo_name)
-
-    def git_state(self):
-        return tuple(
-            (
-                _git(repository, "rev-parse", "HEAD"),
-                _git(
-                    repository,
-                    "for-each-ref",
-                    "--sort=refname",
-                    "--format=%(refname) %(objectname)",
-                ),
-                tuple(
-                    sorted(
-                        line
-                        for line in _git(
-                            repository,
-                            "cat-file",
-                            "--batch-all-objects",
-                            "--batch-check=%(objectname) %(objecttype)",
-                        ).splitlines()
-                        if line.endswith(" commit")
-                    )
-                ),
-            )
-            for repository in (self.contract.code_worktree, self.memory_worktree)
-        )
-
-    def assert_content_unchanged(self) -> None:
-        assert self.content_path.read_bytes() == self.content_bytes
-        assert self.code_path.read_bytes() == self.code_bytes
-        assert _git(self.memory_worktree, "ls-files", "--", "memory.md") == ""
-        assert _git(self.memory_worktree, "status", "--porcelain") == ""
-        assert _git(self.contract.code_worktree, "status", "--porcelain") == ""
+@pytest.mark.parametrize("name", ("repository-certification-profile", "worktrees-c09"))
+def test_l56_required_references_separate_requested_dagger_from_ordinary_closeout(name):
+    """R56 rule 5: certification is requested, not an automatic closeout gate."""
+    root = Path(__file__).resolve().parents[2]
+    text = (root / f"docs/reference/{name}.md").read_text(encoding="utf-8")
+    assert "Requested certification runs through Dagger and commits nothing" in text
+    assert "Ordinary closeout runs no gate but the invariant gate" in text
+    assert "closeout Gates 1\u20134" not in text
+    assert "Closeout reconstructs the exact staged candidate" not in text
 
 
-def test_cache_refresh_preserves_current_bytes_and_materializes_a_missing_cache(tmp_path):
-    """An existing correct cache is untouched, and a missing one is recreated without Git writes."""
-
-    leaf = _ClosedCacheLeaf(tmp_path)
-    before_bytes = leaf.cache_path.read_bytes()
-    before_git = leaf.git_state()
-
-    current = leaf.refresh()
-
-    assert current["state"] == "current"
-    assert leaf.cache_path.read_bytes() == before_bytes
-    assert leaf.git_state() == before_git
-    leaf.cache_path.unlink()
-
-    rebuilt = leaf.refresh()
-
-    assert rebuilt["state"] == "updated"
-    assert leaf.cache_path.read_bytes() == before_bytes
-    assert load_ledger(leaf.cache_path) == leaf.canonical
-    assert leaf.git_state() == before_git
-    leaf.assert_content_unchanged()
+RETIRED_PUBLICATION_CLAIMS = (
+    "prepared closeout",
+    "Prepared code commits",
+    "Prepared memory commits",
+)
 
 
-def test_cache_refresh_repairs_malformed_forged_and_reordered_data_from_git(tmp_path):
-    """Cache corruption changes neither the reconstructed attribution nor any Git object/ref."""
+def test_l56_publication_code_pins_both_live_commit_hook_mechanisms():
+    """Remove retired policy claims without weakening live hook guarantees (the module)."""
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "mcp/src/agents_remember/worktrees/modules/git.py").read_text(encoding="utf-8")
+    assert "commit-tree" in text and "reference-transaction" in text
+    assert "pre-commit" in text
+    for obsolete in RETIRED_PUBLICATION_CLAIMS:
+        assert obsolete not in text
 
-    leaf = _ClosedCacheLeaf(tmp_path)
-    own_row = leaf.own_row
-    source_row = leaf.source_rows[0]
-    malformations = (
-        ("malformed text", "<<<<<<< not a ledger\n"),
-        (
-            "forged memory and code mappings",
-            leaf.render(
-                [
-                    own_row,
-                    LedgerRow(own_row.code_commit, "0" * 40),
-                    LedgerRow("f" * 40, own_row.memory_commit),
-                    *leaf.source_rows,
-                ]
-            ),
-        ),
-        ("reordered rows", leaf.render([source_row, own_row])),
-        (
-            "header disagrees with its first row",
-            leaf.render(
-                [own_row, *leaf.source_rows],
-                header=(source_row.code_commit, source_row.memory_commit),
-            ),
-        ),
+
+def test_l56_renderer_prose_names_only_surviving_content_routes_and_exact_backfill():
+    root = Path(__file__).resolve().parents[2] / "mcp/src/agents_remember"
+    tree = ast.parse((root / "kernel/memory_attribution.py").read_text(encoding="utf-8"))
+    renderer = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "render_memory_content_message"
     )
-    before_git = leaf.git_state()
-    for name, text in malformations:
-        leaf.cache_path.write_text(text, encoding="utf-8")
+    text = ast.get_docstring(renderer)
+    assert text is not None
+    assert "three memory-content routes" in text
+    assert "direct landing" in text and "baseline adoption" in text
+    assert "Carryover commits nothing" in text
+    assert "kernel/memory_backfill.py" in text and "original commit's tree" in text
+    assert "prepared memory-content leg" not in text
+    assert "body is kept byte for byte" in text and "own final" in text
 
-        refreshed = leaf.refresh()
 
-        assert refreshed["state"] == "updated", name
-        assert load_ledger(leaf.cache_path) == leaf.canonical, name
-        assert leaf.cache_path.read_text(encoding="utf-8") == ledger_to_text(leaf.canonical), name
-        assert leaf.git_state() == before_git, name
-        leaf.assert_content_unchanged()
+@pytest.mark.parametrize(
+    "path,obsolete",
+    (
+        ("observer/projection.py", "histogram + a bounded leaderboard"),
+        ("serving/projections/snapshots.py", "git-free sidecar staleness"),
+        ("serving/change_watcher.py", "sidecar staleness / route coverage / ledgers"),
+        ("serving/projections/projection_store.py", "Staleness/coverage/ledger panels"),
+    ),
+)
+def test_l56_reader_prose_names_surviving_analytics_without_stamp_age_descriptors(path, obsolete):
+    root = Path(__file__).resolve().parents[2] / "mcp/src/agents_remember"
+    text = (root / path).read_text(encoding="utf-8")
+    assert obsolete not in text

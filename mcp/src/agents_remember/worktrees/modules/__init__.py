@@ -1,1 +1,1 @@
-"""Implementation modules for the c-09-git-worktree-manager skill worktree lifecycle facade."""
+"""Implementation modules for the worktree lifecycle facade."""

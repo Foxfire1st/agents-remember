@@ -20,6 +20,8 @@ tool's own refusal logic rather than a missing fixture.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
@@ -34,7 +36,10 @@ WORKTREE_NAME = "w"
 # rather than a refusal; the tools below pass it only to reach a LATER refusal.
 TASK_REF: dict[str, str] = {"repository": REPO, "path": f"{MASTER}/task.json"}
 LEAF_REF: dict[str, str] = {"repository": REPO, "path": f"{MASTER}/1_leaf.json"}
-ABSENT_REF: dict[str, str] = {"repository": REPO, "path": f"{MASTER}/absent-task/task.json"}
+ABSENT_REF: dict[str, str] = {
+    "repository": REPO,
+    "path": f"{MASTER}/absent-task/task.json",
+}
 
 
 def absent_contract(world) -> str:
@@ -65,34 +70,31 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
     # not a database. Inside the root so nothing is touched outside the censused boundary even if
     # a handler resolved it before refusing.
     absent_knowledge = (world.coord / "temp" / "knowledge" / "absent-knowledge.db").as_posix()
-    manager = {"role": "manager", "task_document_ref": TASK_REF}
-    worker = {"role": "worker", "task_document_ref": LEAF_REF}
     return {
         # -- core ---------------------------------------------------------------------
-        "ping": {},
         "server_info": {},
         "context_packet": {"repo_id": "no-such-repo"},
         "read_ar_files": {"repo_id": REPO, "files": [{"path": "not-covered.md"}]},
-        "resolve_context": {"repo_id": "no-such-repo"},
         "runtime_install": {"dry_run": True, "install_provider_deps": False},
-        "skills_install": {"dry_run": True},
-        # -- structural ---------------------------------------------------------------
-        "dispatch_agent": {"task_document_ref": ABSENT_REF, "role": "worker", "brief": "census"},
-        "retire_child": {"task_document_ref": ABSENT_REF, "role": "worker"},
-        "rename_child": {
-            "task_document_ref": ABSENT_REF,
-            "role": "worker",
-            "label": "census",
-        },
-        "rename_self": {"label": "no-such-seat"},
         # -- memory -------------------------------------------------------------------
-        "drift_check": {"repo_id": "no-such-repo"},
         "memory_quality_check": {
             "request": {"mode": "sync", "repo_id": REPO, "contract_path": contract}
         },
         "citation_fix": {"repo_id": REPO, "contract_path": contract, "dry_run": True},
-        "citation_migrate": {"repo_id": REPO, "contract_path": contract, "dry_run": True},
-        "route_index_refresh": {"repo_id": REPO, "contract_path": contract, "dry_run": True},
+        "citation_note_revision": {
+            "repo_id": REPO,
+            "contract_path": contract,
+            "card": "onboarding/example.py.md",
+            "reference": 1,
+            "note": "refusal census",
+            "base_digest": "0" * 64,
+            "dry_run": True,
+        },
+        "route_index_refresh": {
+            "repo_id": REPO,
+            "contract_path": contract,
+            "dry_run": True,
+        },
         "memory_init": {"repo_id": REPO, "initialize_git": True, "dry_run": True},
         "memory_baseline_status": {"repo_id": "no-such-repo"},
         # ADOPT_REPO is configured AND has a real memory repository that has never recorded
@@ -117,18 +119,6 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
             "old_base": "HEAD",
             "intent_note": "refusal census",
         },
-        # -- providers ----------------------------------------------------------------
-        "provider_status": {},
-        "provider_diagnostics": {},
-        "provider_watchers": {"action": "refresh"},
-        "grepai_search": {"query": "refusal census"},
-        "grepai_trace": {"symbol": "census", "trace_action": "callers"},
-        "cgc_symbol_search": {"repo_id": REPO, "name": "census"},
-        "cgc_callers": {"repo_id": REPO, "function": "census"},
-        "cgc_callees": {"repo_id": REPO, "function": "census"},
-        "cgc_dependencies": {"repo_id": REPO, "module": "census"},
-        "cgc_complexity": {"repo_id": REPO},
-        "cgc_visualize": {"repo_id": REPO, "dry_run": True},
         # -- worktrees ----------------------------------------------------------------
         "worktree_start": {
             "repo_id": REPO,
@@ -147,7 +137,13 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
         },
         "worktree_sync": {"contract_path": contract, "dry_run": True},
         "worktree_pause": {"contract_path": contract},
-        "direct_landing": {"contract_path": contract, "code_commit": "deadbeef", "dry_run": True},
+        "direct_landing": {
+            "contract_path": contract,
+            "code_commit": "deadbeef",
+            "leaf_task_document_ref": ABSENT_REF,
+            "dry_run": True,
+        },
+        "direct_execution_grant": {"task_document_ref": ABSENT_REF, "action": "give"},
         "worktree_closeout_preview": {"contract_path": contract},
         "worktree_closeout_apply": {
             "contract_path": contract,
@@ -171,10 +167,25 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
         },
         "worktree_cleanup": {"contract_path": contract, "dry_run": True},
         "worktree_abandon": {"contract_path": contract, "dry_run": True},
+        # An unreadable pre-locator enclosure answers a typed refusal (state,
+        # detail, nextAction); no product change, measured on the census probe.
+        # One probe per tool by census design: the older absent-group variant
+        # was a dead duplicate key (F601) and is removed; the group-mismatch
+        # refusal is still probed here.
+        "worktree_enclosure_adopt": {
+            "contract_path": contract,
+            "expected_worktree_group": (world.coord / "tasks" / REPO).as_posix(),
+            "rationale": "refusal census",
+            "dry_run": True,
+        },
         "task_reopen": {"contract_path": contract, "dry_run": True},
         "lifecycle_finalize_task": {"contract_path": contract, "dry_run": True},
         # -- task documents and queue -------------------------------------------------
-        "task_doc": {"repo_id": REPO, "operation": "get", "task_name": f"{MASTER}-absent"},
+        "task_doc": {
+            "repo_id": REPO,
+            "operation": "get",
+            "task_name": f"{MASTER}-absent",
+        },
         "curator_coherence": {"request": {"action": "status", "contract_path": contract}},
         "closeout_queue": {
             "request": {
@@ -183,109 +194,96 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
                 "caller": {"role": "orchestrator", "task_document_ref": ABSENT_REF},
             }
         },
-        # The benchmark family is driven with `dry_run: True` only. Its REAL run executes
-        # Codex agents in a sandbox (minutes, a provider call) and cannot be part of a
-        # hermetic seconds-long census; the dry run is the reachable path here, and it
-        # answers in an envelope. That the dry run is not read-only is the register's
-        # `T12` finding, owned by this leaf, and is NOT asserted by this module.
-        "codex_benchmark_prepare": {"case_id": "no-such-case", "dry_run": True},
-        "codex_benchmark_run": {"case_id": "no-such-case", "dry_run": True},
-        # -- lifecycle ----------------------------------------------------------------
-        # `lifecycle_start` is the one tool whose failure path is "already active": the
-        # sweep ends the fixture's lifecycle, and the census starts one first.
-        "lifecycle_start": {},
-        "lifecycle_resume": {},
-        "lifecycle_turn_end_notification": {"summary": "refusal census"},
-        "lifecycle_end": {"outcome": "abandoned"},
-        "switch_lifecycle": {"on_unsaved": "discard"},
-        "lifecycle_phase": {"phase": "build"},
-        "lifecycle_gate": {
-            "kind": "plan-approval",
-            "wait": False,
-            "caller": {"role": "worker", "task_document_ref": ABSENT_REF},
-        },
-        "gate_decide": {
-            "task_document_ref": ABSENT_REF,
-            "kind": "plan-approval",
-            "decision": "approve",
-            "caller": manager,
-        },
-        "gate_list": {"caller": worker},
-        # -- messages -----------------------------------------------------------------
-        "message_parent": {"ask": "refusal census", "response": "refusal census"},
-        "message_child": {
-            "task_document_ref": ABSENT_REF,
+        # MIK-R112 removed the lifecycle-state tools; no lifecycle entries remain.
+        # -- role agents ---------------------------------------------------------------
+        # Both tools serve only a role agent AR launched. The census server was started by no
+        # launch, so each call meets the first refusal the tools have: the caller has no binding
+        # (`status: "refused"`, `refusal: "caller-has-no-binding"`, a reason and a next action).
+        "role_start": {
             "role": "worker",
-            "ask": "refusal census",
-            "response": "refusal census",
+            "request_id": "00000000-0000-4000-8000-000000000001",
+            "sprint_document_ref": TASK_REF,
+            "master_document_ref": TASK_REF,
+            "task_document_ref": LEAF_REF,
         },
-        # -- capsule and skills -------------------------------------------------------
-        "role_capsule_compile": {
-            "contract_path": contract,
-            "task_path": f"{MASTER}/1_leaf.json",
+        # The set and the native retirement need the same launch binding: unbound,
+        # both meet caller-has-no-binding before anything else runs.
+        "role_start_set": {
+            "request_id": "00000000-0000-4000-8000-000000000003",
+            "sprint_document_ref": TASK_REF,
+            "master_document_ref": TASK_REF,
+            "task_document_ref": LEAF_REF,
+        },
+        "retire_child": {
+            "task_document_ref": LEAF_REF,
             "role": "worker",
         },
-        "skill_catalog_list": {},
-        "skill_catalog_read": {"uri": "skill://no-such-skill/SKILL.md"},
+        # MIK-R196 rule 3 with the architect's ruling: the host block belongs to the MCP authority
+        # settings file, so asking this surface to write it into the user's file is refused by
+        # name -- before any read of a live host and whatever the destination holds.
+        "user_settings_init": {
+            "target": "host-authority",
+        },
+        "role_message": {
+            "text": "refusal census",
+            "agent_id": "00000000-0000-4000-8000-000000000002",
+        },
+        # The architect's explainer control answers only a hosted architect seat for `claim`; this
+        # census server was started by no launch, so the claim refuses in the envelope before any
+        # write (MIK-R189 rule 7).
+        "explainer_control": {
+            "action": "claim",
+            "repo_id": REPO,
+            "task_name": MASTER,
+        },
         # -- knowledge ----------------------------------------------------------------
-        # The five `knowledge_*` families, added to the roster by the merged
-        # `260915_knowledge-substrate` line and therefore to this table by `260918-TSIP-L10`
-        # (`T94`: 72 tools, not the 67 this census was written against). Each entry drives the
-        # production call with an input that cannot succeed:
+        # The three `knowledge_*` operations over a memory tree (MIK-R26 rule 5). Each entry
+        # drives the production call with an input that cannot succeed:
         #
-        # * four of the five address a dataset this world does not have. The surface answers an
-        #   unreadable selection INSIDE its own declared envelope -- `state: "refused"` with a
-        #   shipped refusal code and detail -- rather than raising, which is the property this
-        #   census exists to check, and the code names the missing input.
-        # * `knowledge_change` writes nothing by contract, so every kind is refused as
-        #   `registration_absent` and no dataset is needed at all.
-        # * `knowledge_diff` cannot reach its dataset branch here: a valid comparison body
-        #   carries two opened snapshot contexts (`KnowledgeDiffRequest.before/.after`), which
-        #   need a real knowledge store this fixture deliberately does not build. Its declared
-        #   `invalid_payload` refusal for a body the shipped request model refuses is therefore
-        #   the reachable failure path -- a named refusal, not a raise.
+        # * `knowledge_read` and `knowledge_integrity_check` name a memory root this world does
+        #   not have. The surface answers an absent selection INSIDE its own declared envelope
+        #   -- `state: "refused"` with a shipped refusal code and detail -- rather than raising,
+        #   which is the property this census exists to check, and the code names the missing
+        #   input.
+        # * `knowledge_diff` names the same absent memory root, which it refuses as an absent
+        #   selection inside its envelope as well.
         #
-        # All five answer `ok: true` with `state: "refused"`: the mounted knowledge surface
+        # All three answer `ok: true` with `state: "refused"`: the mounted knowledge surface
         # reports a refusal as a STATE of a successful call, which is its own models' declared
         # contract (`models/tools/knowledge_responses.py`: "A refusal is a state, not a partial
         # success"). That shape is named and pinned in the conformance module beside this one
         # (`STATEFUL_REFUSALS`), never tolerated silently through `ALWAYS_ANSWERS`.
-        "knowledge_read": {
-            "databasePath": absent_knowledge,
-            "repositoryId": REPO,
-            "view": "source_context",
-        },
-        "knowledge_change": {
-            "databasePath": absent_knowledge,
-            "repositoryId": REPO,
-            "recordKind": "evidence_claim",
-        },
-        "knowledge_diff": {
-            "databasePath": absent_knowledge,
-            "repositoryId": REPO,
-            "beforePath": absent_knowledge,
-            "afterPath": absent_knowledge,
-        },
+        "knowledge_read": {"memoryRoot": absent_knowledge, "view": "source_context"},
+        "knowledge_diff": {"memoryRoot": absent_knowledge, "beforeRevision": "HEAD"},
         "knowledge_integrity_check": {
-            "databasePath": absent_knowledge,
-            "repositoryId": REPO,
+            "memoryRoot": absent_knowledge,
+            "codeRoot": world.coord.as_posix(),
         },
-        "knowledge_project": {
-            "databasePath": absent_knowledge,
-            "repositoryId": REPO,
-            "destinationRoot": (world.coord / "temp" / "knowledge-projection").as_posix(),
-            "views": [],
-        },
+        # MIK-R73 rule 1: no contract and no authorization is refused before anything is read.
+        "knowledge_write": {"authorizationRef": ""},
     }
 
 
-def drive_census(world) -> dict[str, dict[str, Any]]:
-    """Invoke one failure path per public tool and read back what arrived.
+def whole_result_for(payload: dict[str, Any]) -> dict[str, Any]:
+    """Read back the whole result one answer's ``log`` names (MIK-R108).
 
-    ``lifecycle_start`` is arranged last-first: the census begins a lifecycle so that
-    ``lifecycle_start``'s own failure path (one is already active) is the one measured, and
-    ``lifecycle_resume``'s unprepared state is the one the pin already records.
+    The answer that leaves the server holds what the caller needs next; the
+    whole result the function computed lies in the detail file beside the
+    daily log. An answer with no readable detail file yields {}.
     """
+
+    log = payload.get("log")
+    if not isinstance(log, str) or not log:
+        return {}
+    try:
+        whole = json.loads(Path(log).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return whole if isinstance(whole, dict) else {}
+
+
+def drive_census(world) -> dict[str, dict[str, Any]]:
+    """Invoke one failure path per public tool and read back what arrived."""
 
     arguments = failure_invocations(world)
     missing = set(PUBLIC_TOOLS) - set(arguments)
@@ -295,12 +293,13 @@ def drive_census(world) -> dict[str, dict[str, Any]]:
             f"the census table is not the roster: missing={sorted(missing)} extra={sorted(extra)}"
         )
 
-    # `EntryPointWorld.build` already ends the fixture's lifecycle, so `lifecycle_start`
-    # succeeds there; start one here and let the table's `lifecycle_start` entry meet the
-    # "already active" precondition its own docstring documents.
-    world.call("lifecycle_start", {})
     results: dict[str, dict[str, Any]] = {}
     for tool in PUBLIC_TOOLS:
         kind, payload = world.call(tool, arguments[tool])
-        results[tool] = {"kind": kind, "payload": payload or {}}
+        answer = payload or {}
+        results[tool] = {
+            "kind": kind,
+            "payload": answer,
+            "whole": whole_result_for(answer),
+        }
     return results

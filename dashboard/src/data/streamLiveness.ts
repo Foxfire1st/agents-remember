@@ -1,10 +1,10 @@
 // Liveness watchdog for long-lived EventSource channels (sleep/wake + half-open wedge).
 //
-// The defect class: the laptop slept with a chat open; on wake the
-// surface showed "connecting…" that NEVER cleared until a manual refresh. The browser suspends
+// The defect class: the laptop slept with the dashboard open; on wake the surface showed a
+// live-LOOKING but frozen projection until a manual refresh. The browser suspends
 // timers AND the SSE socket during sleep; on wake the EventSource is half-open dead — the
-// connection still LOOKS open to the browser, so no `error` event ever fires and neither the
-// native auto-reconnect nor the unopened-escalation engages. The same half-open corpse
+// connection still LOOKS open to the browser, so no `error` event ever fires and the
+// native auto-reconnect never engages. The same half-open corpse
 // appears WITHOUT sleep through proxies that keep dead sockets (the live-wedge class).
 //
 // Two independent detectors, judged ONLY against an OPEN channel:
@@ -12,16 +12,15 @@
 // 1. Wall-clock jump (sleep). A `setInterval` tick compares `Date.now()` between ticks: an
 //    elapsed jump past `sleepJumpMs` means the OS suspended timers — i.e. the machine slept (or
 //    the page froze hard) — and the open socket is suspect. This catches sleep precisely without
-//    penalizing idle chats, which are silent by design (the conversation events stream has no
-//    heartbeat; sse-starlette's ~15 s ping is a comment frame EventSource never surfaces).
+//    penalizing an idle channel, which is silent by design (deltas are content-only;
+//    sse-starlette's ~15 s ping is a comment frame EventSource never surfaces).
 // 2. Frame-timeout backstop. With no sleep, a wedged half-open socket is indistinguishable from
-//    a quiet chat except by duration: no observable frame for `frameTimeoutMs` (generous — idle
-//    chats are legitimately silent) judges the channel dead. A false positive costs exactly one
+//    a quiet channel except by duration: no observable frame for `frameTimeoutMs` (generous — an
+//    idle channel is legitimately silent) judges the channel dead. A false positive costs exactly one
 //    quiet resubscribe, which is honest; a missed positive is the reported permanent wedge.
 //    That "exactly one" is a hard rule, not a hope — see the one-shot contract below.
 //
-// The one-shot contract. Neither channel emits a heartbeat an EventSource can
-// surface: the conversation endpoint yields a `: connected` COMMENT and then blocks on its queue,
+// The one-shot contract. The channel emits no heartbeat an EventSource can surface:
 // sse-starlette's keepalive is a `: ping` comment, and a state tick where only ages advanced emits
 // nothing at all. So on a quiet channel "no frame for 90 s" is not evidence of death — it is the
 // normal, healthy state, and re-judging it every 90 s made every idle channel self-cycle forever
@@ -32,15 +31,13 @@
 // content again, because only then does subsequent silence carry information. The sleep detector
 // is unaffected — a suspended timer is positive evidence, not an absence.
 //
-// On a judgment the caller performs a QUIET cycle (close + fresh resumable subscribe): no
-// disconnect is reported, so the surface never flashes "connecting…" for a healthy resume — the
-// conversation endpoint's priming comment (`: connected`, active/api.py) opens the fresh
-// instance immediately, and the resume replays whatever the corpse missed from `after=<cursor>`.
-// If the fresh subscribe itself fails, the caller's ordinary error path (disconnect signal,
-// escalation) engages exactly as for a transport drop.
+// On a judgment the caller performs a QUIET cycle (close + fresh subscribe): no disconnect is
+// reported, so the surface never flashes SIGNAL LOST for a healthy resume — the fresh subscribe
+// re-ships the snapshot. If the fresh subscribe itself fails, the caller's ordinary error path
+// engages exactly as for a transport drop.
 //
 // Hidden tabs are exempt from judgment: background timer throttling makes both measures lie (a
-// throttled tick cadence looks like a jump; an idle chat is silent anyway), so checking there
+// throttled tick cadence looks like a jump; an idle channel is silent anyway), so checking there
 // would reconnect-storm healthy background tabs. The first tick after a refocus judges normally
 // — a channel whose connection died in the background is cycled within one tick, at most once.
 
@@ -51,13 +48,17 @@ export const STREAM_LIVENESS_SLEEP_JUMP_MS = 30_000;
 export const STREAM_LIVENESS_FRAME_TIMEOUT_MS = 90_000;
 /**
  * A resubscribe's OWN opening payload lands inside this window after a cycle: the state channel
- * re-ships its whole snapshot unconditionally, and a conversation resume replays whatever the
- * corpse missed. That traffic is caused by the cycle, so it must not count as the proof of life
- * that re-arms the backstop — otherwise the one-shot contract degenerates back into a 90 s loop.
+ * re-ships its whole snapshot unconditionally. That traffic is caused by the cycle, so it must not
+ * count as the proof of life that re-arms the backstop — otherwise the one-shot contract
+ * degenerates back into a 90 s loop.
  */
 export const STREAM_LIVENESS_HANDSHAKE_SETTLE_MS = 10_000;
 
-export interface StreamLivenessTuning {
+export interface StreamLivenessOptions {
+  /** True while the watched channel is OPEN — death is only ever judged on an open channel. */
+  isOpen: () => boolean;
+  /** The open channel is judged dead: the caller closes it and opens a fresh subscribe. */
+  onDead: () => void;
   /** Backstop: judge an open, frameless channel dead after this (0 disables). */
   frameTimeoutMs?: number;
   /** Wall-clock jump between ticks that reads as OS sleep. */
@@ -73,13 +74,6 @@ export interface StreamLivenessTuning {
   clearIntervalImpl?: (handle: number) => void;
   /** Registers a "became visible" callback; returns a disposer (no-op without a document). */
   listenVisibility?: (onVisible: () => void) => () => void;
-}
-
-export interface StreamLivenessOptions extends StreamLivenessTuning {
-  /** True while the watched channel is OPEN — death is only ever judged on an open channel. */
-  isOpen: () => boolean;
-  /** The open channel is judged dead: the caller closes it and opens a fresh subscribe. */
-  onDead: () => void;
 }
 
 export interface StreamLivenessWatchdog {
@@ -160,8 +154,8 @@ export function startStreamLivenessWatchdog(
       const at = now();
       lastFrameAt = at;
       // Re-arm the one-shot backstop ONLY for life that is not this cycle's own handshake replay
-      // (the state channel re-ships its whole snapshot on resubscribe; a conversation resume
-      // replays the gap — both land inside the settle window and prove nothing about liveness).
+      // (the state channel re-ships its whole snapshot on resubscribe — it lands inside the
+      // settle window and proves nothing about liveness).
       // A frame past the window is the channel delivering on its own again: silence is meaningful
       // once more, so the backstop may fire a fresh one-shot for the next idle episode.
       if (at - lastCycleAt > handshakeSettleMs) backstopSpent = false;

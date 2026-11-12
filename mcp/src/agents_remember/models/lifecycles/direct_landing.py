@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.lifecycles.mutation_evidence import GitMutationSnapshot
 from agents_remember.models.lifecycles.policy import GatePolicyRuleSnapshot
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
 
 class DirectLandingOperationInput(BaseModel):
@@ -19,16 +20,25 @@ class DirectLandingOperationInput(BaseModel):
     kind: Literal["direct-landing"] = "direct-landing"
     configPath: str
     contractPath: str
+    leafTaskDocumentRef: TaskDocumentRef
     effectiveInput: EffectiveCloseoutInput
     approvalNote: str
     gatePolicy: list[GatePolicyRuleSnapshot] = Field(default_factory=list)
     codeCommit: str = Field(pattern=r"^[0-9a-f]{40,64}$")
     codeTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")
     candidateTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")
+    codeCommitMessage: str = ""
+    """The message of a created code commit; empty for a verified-existing one."""
+    codeBefore: GitMutationSnapshot | None = None
+    """The pre-publication code snapshot (admitted ref/tip) for a create; None for verify."""
     memoryRepository: str
     memoryBranch: str
     memoryRef: str = Field(pattern=r"^refs/heads/.+$")
     memoryBefore: GitMutationSnapshot
+    # MIK-R52 rule 8: the leaf whose history file this generation judges and closes (None: the
+    # leaf was inferred from the one open history file). Part of the request identity, so a call
+    # naming another leaf is never a retry of this generation. Older journals load it as None.
+    leafId: str | None = None
 
     @model_validator(mode="after")
     def _accepted_direct_plan_is_exact(self) -> DirectLandingOperationInput:

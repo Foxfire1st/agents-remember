@@ -1,56 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from 'vitest';
 
-import type { DashboardState } from "./store";
-import type { AttentionItem, LifecycleProjection, Phase } from "../types/projection";
-import { buildTree, fmtWait, hasLiveWorktree, selectQueue } from "./selectors";
+import type { DashboardState } from './store';
+import type { AttentionItem, DriftSnapshotNode } from '../types/projection';
+import { driftSegments, fmtWait, hasLiveWorktree, selectQueue } from './selectors';
 
-const lifecycle = (id: string, repoId?: string, phase: Phase = "build"): LifecycleProjection => {
-  const base: LifecycleProjection = {
-    id,
-    state: "running",
-    phase,
-    fleeting: false,
-    tokens: 0,
-    startedAt: "t",
-    lastEventTs: "t",
-    stateEnteredAt: "t",
-    inferred: false,
-    actions: [],
-    tokenSeries: [],
-  };
-  return repoId === undefined ? base : { ...base, repoId };
-};
-
-describe("buildTree", () => {
-  it("BY PHASE groups by l-01 phase in pipeline order, members id-sorted", () => {
-    const tree = buildTree(
-      [
-        lifecycle("LC2", undefined, "build"),
-        lifecycle("LC1", undefined, "build"),
-        lifecycle("LC3", undefined, "request"),
-      ],
-      "phase",
-    );
-    expect(tree.map((g) => g.key)).toEqual(["request", "build"]); // pipeline order, not alpha
-    expect(tree.find((g) => g.key === "build")?.lifecycles.map((l) => l.id)).toEqual(["LC1", "LC2"]);
-  });
-
-  it("BY REPO groups by repoId, sorted, with members id-sorted", () => {
-    const tree = buildTree(
-      [lifecycle("LC3", "repo-b"), lifecycle("LC2", "repo-a"), lifecycle("LC1", "repo-a")],
-      "repo",
-    );
-    expect(tree.map((g) => g.key)).toEqual(["repo-a", "repo-b"]);
-    expect(tree[0].lifecycles.map((l) => l.id)).toEqual(["LC1", "LC2"]);
-  });
-
-  it("BY REPO buckets a lifecycle with no repoId under (unassigned)", () => {
-    const tree = buildTree([lifecycle("LC1")], "repo");
-    expect(tree[0].key).toBe("(unassigned)");
-  });
-});
-
-describe("hasLiveWorktree", () => {
+describe('hasLiveWorktree', () => {
   it("is the stat'ed existence truth (L11): either physical worktree admits, neither hides", () => {
     // Never a cleanup-state proxy — the flags alone decide tasks-surface visibility.
     expect(hasLiveWorktree({ codeWorktreeExists: true, memoryWorktreeExists: true })).toBe(true);
@@ -60,24 +14,26 @@ describe("hasLiveWorktree", () => {
   });
 });
 
-describe("fmtWait", () => {
-  it("scales seconds → s/m/h/d and renders unknown as a dash", () => {
-    expect(fmtWait(45)).toBe("45s");
-    expect(fmtWait(120)).toBe("2m");
-    expect(fmtWait(7200)).toBe("2h");
-    expect(fmtWait(172800)).toBe("2d");
-    expect(fmtWait(undefined)).toBe("—");
+describe('fmtWait', () => {
+  it('scales seconds → s/m/h/d and renders unknown as a dash', () => {
+    expect(fmtWait(45)).toBe('45s');
+    expect(fmtWait(120)).toBe('2m');
+    expect(fmtWait(7200)).toBe('2h');
+    expect(fmtWait(172800)).toBe('2d');
+    expect(fmtWait(undefined)).toBe('—');
   });
 });
 
-describe("selectQueue", () => {
-  it("reads the server-computed queue, empty when analytics is absent", () => {
+describe('selectQueue', () => {
+  it('reads the server-computed queue, empty when analytics is absent', () => {
     const item: AttentionItem = {
-      id: "blocked-gate:LC1",
-      kind: "blocked-gate",
-      severity: "warn",
-      lane: "lifecycle",
-      title: "Gate — input needed",
+      id: 'actionable-drift:LC1',
+      kind: 'actionable-drift',
+      severity: 'info',
+      lane: 'repo',
+      title: 'Drift requires repair',
+      itemClass: 'operational',
+      dismissible: true,
     };
     expect(
       selectQueue({
@@ -85,16 +41,20 @@ describe("selectQueue", () => {
         suppressedAttentionIds: {},
       } as DashboardState),
     ).toEqual([item]);
-    expect(selectQueue({ analytics: null, suppressedAttentionIds: {} } as DashboardState)).toEqual([]);
+    expect(selectQueue({ analytics: null, suppressedAttentionIds: {} } as DashboardState)).toEqual(
+      [],
+    );
   });
 
-  it("hides optimistically suppressed attention ids", () => {
+  it('hides optimistically suppressed attention ids', () => {
     const item: AttentionItem = {
-      id: "actionable-drift:repo:main",
-      kind: "actionable-drift",
-      severity: "warn",
-      lane: "repo",
-      title: "1 actionable drift in repo",
+      id: 'actionable-drift:repo:main',
+      kind: 'actionable-drift',
+      severity: 'warn',
+      lane: 'repo',
+      title: '1 actionable drift in repo',
+      itemClass: 'operational',
+      dismissible: true,
     };
     expect(
       selectQueue({
@@ -102,5 +62,71 @@ describe("selectQueue", () => {
         suppressedAttentionIds: { [item.id]: true },
       } as DashboardState),
     ).toEqual([]);
+  });
+
+  it('drops the provider kinds the server retired, even when a stale payload carries them', () => {
+    // Nothing publishes `provider-down` or `failed-setup` any more, so nothing can dismiss them
+    // either. A tab handed an older payload would otherwise raise an alarm with no way to clear it.
+    const retired: AttentionItem[] = [
+      {
+        id: 'provider-down:codegraphcontext-code',
+        kind: 'provider-down',
+        severity: 'alarm',
+        lane: 'repo',
+        title: 'Code index is down',
+        itemClass: 'operational',
+        dismissible: true,
+      },
+      {
+        id: 'failed-setup:legacy-ar',
+        kind: 'failed-setup',
+        severity: 'alarm',
+        lane: 'worktree',
+        title: 'Provider setup needs attention',
+        itemClass: 'operational',
+        dismissible: true,
+      },
+    ];
+    const live: AttentionItem = {
+      id: 'blocked-start:legacy-ar',
+      kind: 'blocked-start',
+      severity: 'warn',
+      lane: 'worktree',
+      title: 'Worktree start blocked',
+      itemClass: 'operational',
+      dismissible: true,
+    };
+    expect(
+      selectQueue({
+        analytics: { attentionQueue: [...retired, live] },
+        suppressedAttentionIds: {},
+      } as DashboardState),
+    ).toEqual([live]);
+    expect(
+      selectQueue({
+        analytics: { attentionQueue: retired },
+        suppressedAttentionIds: {},
+      } as DashboardState),
+    ).toEqual([]);
+  });
+});
+
+function driftSnapshot(counts: Record<string, number>): DriftSnapshotNode {
+  return { actionableCount: 0, branch: 'main', counts, repository: 'repo' };
+}
+
+// A converted repository reports `current`, `stale` and `violation` (MIK-R44):
+// the mirror orders and shows those three names instead of legacy classifications.
+describe('driftSegments on converted snapshots', () => {
+  it('orders current, stale and violation with exact shares', () => {
+    const segments = driftSegments(driftSnapshot({ current: 10, stale: 3, violation: 1 }));
+    expect(segments.map((segment) => segment.cls)).toEqual(['current', 'stale', 'violation']);
+    expect(segments.map((segment) => segment.count)).toEqual([10, 3, 1]);
+    expect(segments.reduce((sum, segment) => sum + segment.pct, 0)).toBeLessThanOrEqual(100);
+  });
+
+  it('keeps legacy classifications ahead of converted-only names', () => {
+    const segments = driftSegments(driftSnapshot({ current: 4, drifted: 2, stale: 2 }));
+    expect(segments.map((segment) => segment.cls)).toEqual(['current', 'drifted', 'stale']);
   });
 });

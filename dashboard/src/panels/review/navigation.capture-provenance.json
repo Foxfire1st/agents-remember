@@ -1,0 +1,39 @@
+{
+  "scope": "Untouched current public-route member response for the forced-order keyboard regression; not backend classification or installed acceptance.",
+  "fixture": "dashboard/src/panels/review/navigation.member-753.captured.json",
+  "source_manifest": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/consumer-followup/keyboard-capture-01/provenance.json",
+  "source_manifest_sha256": "c72d4cdbe507b714fb882269e2b8b5a057597f6c1bcde2c169674eba25a0c8f2",
+  "import_origin": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/__init__.py",
+  "command": [
+    "../scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/consumer-followup/replay.py",
+    "--source-root",
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57",
+    "--world",
+    "../scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-03-original",
+    "--requests",
+    "../scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/consumer-followup/requests.json",
+    "--out",
+    "../scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/consumer-followup/keyboard-capture-01"
+  ],
+  "responses": [
+    {
+      "label": "navigation.member-753.captured",
+      "route": "/api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L37",
+        "history": "recorded",
+        "selectorKind": "invariant",
+        "selectorId": "c88cc287-0469-556c-9f42-b742b2377478"
+      },
+      "url": "http://127.0.0.1:33271/api/review/intent?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37&history=recorded&selectorKind=invariant&selectorId=c88cc287-0469-556c-9f42-b742b2377478",
+      "status": 200,
+      "file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/consumer-followup/keyboard-capture-01/raw/navigation.member-753.captured.json",
+      "bytes": 266595,
+      "sha256": "55f535eb3cc5357d0ed8b4c979fd2fa13d4a555fd9e015d64bd85f1578cd68f5",
+      "seconds": 1.201444565987913,
+      "state": "review"
+    }
+  ]
+}

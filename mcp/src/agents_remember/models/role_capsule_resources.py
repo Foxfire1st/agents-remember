@@ -53,6 +53,14 @@ class CapsuleSkillReferencePayload(StrictResponseModel):
     revision: str
 
 
+class CapsuleDetailReferencePayload(StrictResponseModel):
+    """A step-specific file, named separately instead of injected as prose."""
+
+    sourcePath: str
+    revision: str
+    step: str
+
+
 class CapsuleRequestedToolPayload(StrictResponseModel):
     """One tool identity the capsule requests, with the source that asked for it."""
 
@@ -108,6 +116,7 @@ class RoleCapsuleResponse(ToolResponse):
     instructionIdentities: list[str] = Field(default_factory=list)
     instructions: list[CapsuleInstructionBlockPayload] = Field(default_factory=list)
     skillReferences: list[CapsuleSkillReferencePayload] = Field(default_factory=list)
+    detailReferences: list[CapsuleDetailReferencePayload] = Field(default_factory=list)
     requestedTools: list[CapsuleRequestedToolPayload] = Field(default_factory=list)
     grantedTools: list[str] = Field(default_factory=list)
     taskContext: CapsuleTaskContextPayload | None = None

@@ -9,6 +9,7 @@ rather than the average of the four.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -27,6 +28,13 @@ pytestmark = pytest.mark.fitness
 
 def _leftovers(directory: Path) -> list[str]:
     return sorted(entry.name for entry in directory.iterdir() if entry.name.endswith(".tmp"))
+
+
+def _dead_process_id() -> int:
+    """The number of a process that existed and is gone."""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait()
+    return child.pid
 
 
 class AtomicWriteTests(unittest.TestCase):
@@ -89,6 +97,85 @@ class AtomicWriteFailureTests(unittest.TestCase):
 
 
 class DirectoryFsyncTests(unittest.TestCase):
+    def test_an_impossible_process_number_is_not_known_to_be_gone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "state.json"
+            leftover = root / f".state.json.2147483648.{'a' * 32}.tmp"
+            leftover.write_text("kept\n", encoding="utf-8")
+            with mock.patch.object(atomic_write.os, "fsync", wraps=os.fsync) as fsync:
+                atomic_write.atomic_write_text(path, "new\n")
+            self.assertEqual(path.read_text(encoding="utf-8"), "new\n")
+            self.assertEqual(leftover.read_text(encoding="utf-8"), "kept\n")
+            self.assertEqual(fsync.call_count, 2)
+
+    def test_the_next_publish_removes_what_a_killed_writer_of_the_same_target_left(self) -> None:
+        # A killed process cannot remove its own temp. It holds a whole copy of what was about
+        # to be published, so the next publish of that destination takes it away.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "state.json"
+            gone = _dead_process_id()
+            leftover = root / f".state.json.{gone}.{'a' * 32}.tmp"
+            leftover.write_text("a whole copy nobody published\n", encoding="utf-8")
+            # Under this process's own number, as after a restart that got the same number.
+            reused = root / f".state.json.{os.getpid()}.{'b' * 32}.tmp"
+            reused.write_text("another\n", encoding="utf-8")
+            atomic_write.atomic_write_text(path, "new\n")
+            self.assertEqual(path.read_text(encoding="utf-8"), "new\n")
+            self.assertEqual(_leftovers(root), [])
+
+    def test_a_publish_removes_no_temp_that_is_not_an_abandoned_one_of_its_own_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "state.json"
+            gone = _dead_process_id()
+            kept = [
+                # A writer that is alive (the parent of this process) may still publish it.
+                root / f".state.json.{os.getppid()}.{'c' * 32}.tmp",
+                # Another destination whose name begins with this one's.
+                root / f".state.json.bak.{gone}.{'d' * 32}.tmp",
+                root / f".other.json.{gone}.{'e' * 32}.tmp",
+                # Not a name this module gives a temp.
+                root / ".state.json.editor.tmp",
+                root / f"state.json.{gone}.{'f' * 32}.tmp",
+            ]
+            for entry in kept:
+                entry.write_text("kept\n", encoding="utf-8")
+            atomic_write.atomic_write_text(path, "new\n")
+            self.assertEqual(_leftovers(root), sorted(entry.name for entry in kept))
+
+    def test_a_publish_in_another_thread_keeps_its_temp_while_it_is_in_flight(self) -> None:
+        # These functions do not lock: two writers of one destination may overlap, and the one
+        # that finishes first must not take the other's temp from under it.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "state.json"
+            real_replace = os.replace
+            nested: list[str] = []
+
+            def overlapping(source: object, target: object) -> None:
+                if not nested:
+                    nested.append("inner")
+                    atomic_write.atomic_write_text(path, "inner\n")
+                real_replace(source, target)  # type: ignore[arg-type]
+
+            with mock.patch.object(atomic_write.os, "replace", overlapping):
+                atomic_write.atomic_write_text(path, "outer\n")
+            self.assertEqual(path.read_text(encoding="utf-8"), "outer\n")
+            self.assertEqual(_leftovers(root), [])
+
+    def test_a_leftover_that_cannot_be_removed_does_not_fail_the_publish(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "state.json"
+            leftover = root / f".state.json.{_dead_process_id()}.{'a' * 32}.tmp"
+            leftover.write_text("stuck\n", encoding="utf-8")
+            with mock.patch.object(Path, "unlink", side_effect=PermissionError("busy")):
+                atomic_write.atomic_write_text(path, "new\n")
+            self.assertEqual(path.read_text(encoding="utf-8"), "new\n")
+            self.assertEqual(_leftovers(root), [leftover.name])
+
     def test_the_directory_entry_is_flushed_so_a_completed_rename_survives(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

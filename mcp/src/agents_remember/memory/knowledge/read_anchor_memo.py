@@ -71,6 +71,7 @@ class BoundedMemo[K: Hashable, V]:
         self._weigh = weigh
         self._entries: OrderedDict[K, tuple[V, int]] = OrderedDict()
         self._weight = 0
+        self._changes = 0
         self._lock = threading.Lock()
 
     def get(self, key: K) -> tuple[V] | None:
@@ -99,6 +100,7 @@ class BoundedMemo[K: Hashable, V]:
                 self._weight -= previous[1]
             self._entries[key] = (value, weight)
             self._weight += weight
+            self._changes += 1
             while self._weight > self._capacity:
                 _evicted, (_value, evicted_weight) = self._entries.popitem(last=False)
                 self._weight -= evicted_weight
@@ -109,6 +111,26 @@ class BoundedMemo[K: Hashable, V]:
         with self._lock:
             self._entries.clear()
             self._weight = 0
+            self._changes += 1
+
+    def items(self) -> list[tuple[K, V]]:
+        """Every entry, least recently used first (the order :meth:`put` rebuilds it in)."""
+
+        with self._lock:
+            return [(key, held[0]) for key, held in self._entries.items()]
+
+    @property
+    def capacity(self) -> int:
+        """The most total weight the table holds."""
+
+        return self._capacity
+
+    @property
+    def changes(self) -> int:
+        """How many times an entry was put or the table cleared; equal counts, equal contents."""
+
+        with self._lock:
+            return self._changes
 
     @property
     def weight(self) -> int:

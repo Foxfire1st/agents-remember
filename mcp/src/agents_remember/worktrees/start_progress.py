@@ -22,6 +22,18 @@ from typing import Any
 
 START_PROGRESS_SCHEMA = "ar-worktree-start-progress/v1"
 
+#: Pre-contract phases a pre-retirement build wrote for a search-provider gate. No surviving
+#: producer writes them any more (the provider start path is gone), so a persisted file carrying
+#: one is an obsolete record: it must never come back as a current blocked start, an attention
+#: item or a process node. Real blocks -- stale base, source lineage, memory compatibility,
+#: admission and locking -- are untouched.
+RETIRED_START_PHASES: frozenset[str] = frozenset({"provider-blocked"})
+
+
+def is_retired_start_progress(payload: dict[str, Any]) -> bool:
+    """True when a parsed beat is a retired provider gate rather than a current block."""
+    return str(payload.get("phase", "")) in RETIRED_START_PHASES
+
 
 @dataclass(frozen=True)
 class StartingEnclosure:
@@ -68,7 +80,9 @@ def write_start_progress(
     enclosure: StartingEnclosure,
     beat: StartBeat,
 ) -> None:
-    """Write the transient start-progress file. Never raises -- a start must not fail on this."""
+    """Write admitted progress, never a lineage-refused start; observability never raises."""
+    if beat.phase == "source-lineage-blocked":
+        return
     payload: dict[str, Any] = {
         "schema": START_PROGRESS_SCHEMA,
         "repoName": enclosure.repo_name,

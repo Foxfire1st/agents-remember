@@ -1,23 +1,30 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { act, cleanup, fireEvent, render, renderHook, waitFor } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 
-import type { ReviewPayload } from '../../data/review';
+import type { ReviewPayload, ReviewOutline } from '../../data/review';
 import { FamilyReviewCenter } from './FamilyReviewCenter';
 import { useReviewReadCycle, type ReviewPageRequest } from './ReviewReadCycle';
 import { ReviewReadCache } from './ReviewReadCache';
 import { shownPayload } from './ReviewOutcome';
 import { ReviewSurface } from './ReviewSurface';
+import { ChangeSetViewer } from '../changeset/ChangeSetViewer';
+import { resetCardCachesForTests } from '../../data/reviewTrees';
+import { dashboardStore } from '../../data/store';
 
-// These are complete HTTP bodies captured from the public authorship + real review route, following the
-// published cursors at page size 4 as test_review_family_context_population.py::walk_responses does. No
-// display payload is constructed. familyPaging.captured.json still holds its capture at a5bec6c3: its
-// member sources predate the structured locator, resolved ranges and locator state, and the current
-// route's walk bodies differ in selection and roster (familyReview.capture-provenance.json,
-// `not_recaptured`). Its re-capture belongs with the change that moves these cases to the current
-// route's walk, and is not done here.
+// Raw current tree-route bodies following the producer's published page-size-4 cursors.
+// See familyReview.capture-provenance.json. No successful review body is rewritten.
+// Corruptions below are explicit negative transport/admission probes, not capture replacements.
 interface Body {
   payload: ReviewPayload;
 }
@@ -33,6 +40,30 @@ const capture = JSON.parse(
   after: Body[];
 };
 const first = capture.before[0];
+const cards = JSON.parse(
+  readFileSync(
+    path.join(path.dirname(new URL(import.meta.url).pathname), 'l86.member-cards.captured.json'),
+    'utf8',
+  ),
+);
+// Historical full-tree response is retained only to isolate worklist chrome here;
+// the current full-tree producer refusal is tracked separately, not qualified by these tests.
+const trees = JSON.parse(
+  readFileSync(
+    path.join(path.dirname(new URL(import.meta.url).pathname), 'l86.trees.captured.json'),
+    'utf8',
+  ),
+);
+const lane = JSON.parse(
+  readFileSync(
+    path.join(path.dirname(new URL(import.meta.url).pathname), 'l86.lane.captured.json'),
+    'utf8',
+  ),
+);
+function treeReply(url: URL) {
+  if (!url.pathname.endsWith('/trees')) return undefined;
+  return url.searchParams.has('invariants') ? cards : url.searchParams.has('lane') ? lane : trees;
+}
 const target = {
   repo: first.payload.candidate.repository_id,
   master: first.payload.candidate.master,
@@ -42,24 +73,122 @@ const target = {
 };
 const family = (payload: ReviewPayload) =>
   payload.family_context!.entries.find((entry) => entry.family_id === capture.family_id)!;
-const response = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as Response;
+const response = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
 const cursorOf = (body: Body) => body.payload.page!.continued_from!;
 
-vi.mock('../../data/useReviewCatalogue', () => ({
-  useReviewCatalogue: () => ({
-    loading: false,
-    entries: [],
-    empty: true,
-    stale: false,
-    facts: 'test',
-    refresh: () => undefined,
-  }),
-}));
+// Test-only catalogue projection of the retained capture's identities: the replaced sidebar
+// no longer discovers members from roster disclosures. Review payloads/cursors remain exact bytes.
+function capturedOutline(): ReviewOutline {
+  const families = first.payload.family_context!.entries;
+  const members = [
+    ...new Map(
+      families.flatMap((entry) =>
+        [...entry.before.members, ...entry.after.members].map(
+          (member) => [member.invariant_id, member] as const,
+        ),
+      ),
+    ).values(),
+  ];
+  return {
+    state: 'outlined',
+    detail: 'Captured family/member identities for the mounted legacy test.',
+    families: families.map((entry) => ({
+      selector_id: entry.family_id,
+      id: entry.family_id,
+      title: entry.display_label ?? entry.family_id,
+      change: 'unchanged',
+      members: [
+        ...new Set([...entry.before.members, ...entry.after.members].map((m) => m.invariant_id)),
+      ].map((id) => ({ selector_id: id!, id: id!, membership: 'both' })),
+    })),
+    invariants: members.map((member) => ({
+      selector_id: member.invariant_id!,
+      id: member.invariant_id!,
+      summary: member.statement ?? member.display_label ?? member.invariant_id!,
+      change: 'changed',
+    })),
+  };
+}
+vi.mock('../../data/useReviewCatalogue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../data/useReviewCatalogue')>();
+  return {
+    ...actual,
+    useReviewCatalogue: () => ({
+      loading: false,
+      entries: [],
+      empty: true,
+      stale: false,
+      facts: 'test',
+      outline: capturedOutline(),
+      refresh: () => undefined,
+    }),
+  };
+});
 
 afterEach(() => {
+  resetCardCachesForTests();
   cleanup();
+  dashboardStore.getState().reset();
   vi.unstubAllGlobals();
 });
+
+// The removed source-list assertions now inspect the viewer's exact population. This test-only
+// list projects the same six captured inventory entries; it makes no HTTP/recorded-range claim.
+async function expectCompleteInventory(view: ReturnType<typeof render>) {
+  const inventory = first.payload.source.inventory;
+  expect(view.getByTestId('review-scope-record').textContent).toContain(
+    `${inventory.listed_total} changed files`,
+  );
+  const priorFetch = globalThis.fetch;
+  const files = inventory.entries.map((entry) => ({
+    path: entry.path,
+    status: entry.status,
+    insertions: 0,
+    deletions: 0,
+  }));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://review.test');
+      if (url.pathname === '/api/changeset/task')
+        return response({
+          scope: 'captured-family-inventory',
+          code: files,
+          memory: [],
+          counters: {
+            code: { files: files.length, insertions: 0, deletions: 0 },
+            memory: { files: 0, insertions: 0, deletions: 0 },
+          },
+        });
+      if (url.pathname === '/api/changeset/file-diff')
+        return response({
+          scope: 'captured-family-inventory',
+          kind: 'code',
+          path: url.searchParams.get('path'),
+          language: 'text',
+          before: null,
+          after: null,
+        });
+      return await priorFetch(input);
+    }),
+  );
+  const page = render(
+    <ChangeSetViewer repo={target.repo} scope="captured-family-inventory" onBack={vi.fn()} />,
+  );
+  try {
+    await waitFor(() =>
+      expect(page.container.querySelectorAll('[data-active]')).toHaveLength(inventory.listed_total),
+    );
+    expect(
+      [...page.container.querySelectorAll<HTMLElement>('[data-active]')].map(
+        (row) => row.querySelector('button')!.children[1].textContent,
+      ),
+    ).toEqual(inventory.entries.map((entry) => entry.path));
+  } finally {
+    page.unmount();
+    vi.stubGlobal('fetch', priorFetch);
+  }
+}
 
 function mountCycle() {
   let body: unknown = first;
@@ -93,6 +222,45 @@ function mountCycle() {
   };
 }
 
+it('starts one selected review request during StrictMode effect replay', async () => {
+  const fetch = vi.fn(async () => response(first));
+  vi.stubGlobal('fetch', fetch);
+  const cache = new ReviewReadCache();
+  const view = renderHook(() => useReviewReadCycle({ ...target, instead: null, selection: undefined, cache }), {
+    reactStrictMode: true,
+  });
+  await waitFor(() => expect(view.result.current.read.phase).toBe('reviewed'));
+  expect(fetch).toHaveBeenCalledOnce();
+});
+
+it('cancels rapid selected reads and refreshes without admitting their late answers', async () => {
+  const pending: { signal: AbortSignal; finish: (answer: Response) => void }[] = [];
+  vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) =>
+    new Promise<Response>((finish) => pending.push({ signal: init!.signal!, finish })),
+  ));
+  const cache = new ReviewReadCache();
+  const view = renderHook(({ selectorId }) =>
+    useReviewReadCycle({ ...target, selectorId, instead: null, selection: undefined, cache }),
+  { initialProps: { selectorId: target.selectorId } });
+  await waitFor(() => expect(pending).toHaveLength(1));
+  view.rerender({ selectorId: 'another-subject' });
+  await waitFor(() => expect(pending).toHaveLength(2));
+  expect(pending[0].signal.aborted).toBe(true);
+  act(() => view.result.current.refresh());
+  await waitFor(() => expect(pending).toHaveLength(3));
+  expect(pending[1].signal.aborted).toBe(true);
+  await act(async () => {
+    pending[0].finish(response(first));
+    pending[1].finish(response(first));
+  });
+  expect(view.result.current.read.phase).toBe('loading');
+  expect(cache.sizes.reviews).toBe(0);
+  await act(async () => pending[2].finish(response(first)));
+  expect(view.result.current.read.phase).toBe('reviewed');
+  view.unmount();
+  expect(pending[2].signal.aborted).toBe(true);
+});
+
 it('retains exact content and claim identities while before and after walks advance independently', async () => {
   const view = mountCycle();
   await waitFor(() => expect(view.result.current.read.phase).toBe('reviewed'));
@@ -111,7 +279,7 @@ it('retains exact content and claim identities while before and after walks adva
       initialMembers.map((member) => member.statement),
     );
     expect(payload.knowledge).toEqual(body.payload.knowledge);
-    expect(payload.evidence).toEqual(body.payload.evidence);
+    expect(payload.judgment).toEqual(body.payload.judgment);
     expect(payload.source.inventory).toEqual(first.payload.source.inventory);
     expect(payload.knowledge.revision_selection?.record_id).toBe(target.selectorId);
   }
@@ -263,7 +431,10 @@ it.each(['wrong subject', 'conflicting content', 'page refusal'])(
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes('/source-content'))
+        const url = new URL(String(input), 'http://review.test');
+        const tree = treeReply(url);
+        if (tree) return response(tree);
+        if (url.pathname.endsWith('/source-content'))
           return response({
             state: 'refused',
             operation: 'read_knowledge_review_source_content',
@@ -274,6 +445,7 @@ it.each(['wrong subject', 'conflicting content', 'page refusal'])(
               next_action: 'Read the served file.',
             },
           });
+        if (url.pathname !== '/api/review/intent') throw new Error(`Unexpected route: ${url}`);
         return response(bodies.shift());
       }),
     );
@@ -281,7 +453,7 @@ it.each(['wrong subject', 'conflicting content', 'page refusal'])(
     await view.findByTestId('review-center-member');
     const next = (body: Body) =>
       view
-        .getAllByTestId('review-family-roster-next')
+        .getAllByTestId('review-center-roster-next')
         .find(
           (button) =>
             button.dataset.family === capture.family_id &&
@@ -291,29 +463,34 @@ it.each(['wrong subject', 'conflicting content', 'page refusal'])(
     await waitFor(() =>
       expect(view.getByTestId('review-page-bounds').textContent).toContain('returned 8'),
     );
-    const selected = view
-      .getByTestId('review-center-member-changed')
-      .querySelector('pre')!.textContent;
-    const evidence = view.getByTestId('review-center-evidence').textContent;
+    // The tree's rows take their locations from the cards read, which settles on its own; the
+    // retained review is compared once every member row holds them, whatever the machine's load.
+    await waitFor(() =>
+      view.getAllByTestId('review-family-member').forEach((row) =>
+        expect(
+          within(row).queryAllByTestId(/^review-tree-(location|group)$/).length,
+        ).toBeGreaterThan(0),
+      ),
+    );
+    const selected = view.getByTestId('review-center-member-changed').textContent;
+    const evidence = view.getByTestId('review-center-judgment').textContent;
     const members = view.getAllByTestId('review-family-member').map((row) => row.textContent);
     fireEvent.click(next(capture.before[2]));
-    const failure = await view.findByTestId('review-failure');
-    expect(failure.dataset.reviewCode).toBe(
-      fault === 'page refusal' ? 'comparison_page_reset' : 'comparison_page_unreadable',
-    );
+    // The page's other reads may state their own failures; this one is the walk's.
+    const code = fault === 'page refusal' ? 'comparison_page_reset' : 'comparison_page_unreadable';
+    const walkFailure = () =>
+      view.queryAllByTestId('review-failure').find((node) => node.dataset.reviewCode === code);
+    await waitFor(() => expect(walkFailure()).toBeTruthy());
+    const failure = walkFailure()!;
     expect(view.getByTestId('review-retained-generation')).toBeTruthy();
-    expect(view.getByTestId('review-center-member-changed').querySelector('pre')!.textContent).toBe(
-      selected,
-    );
-    expect(view.getByTestId('review-center-evidence').textContent).toBe(evidence);
+    expect(view.getByTestId('review-center-member-changed').textContent).toBe(selected);
+    expect(view.getByTestId('review-center-judgment').textContent).toBe(evidence);
     expect(view.getAllByTestId('review-family-member').map((row) => row.textContent)).toEqual(
       members,
     );
     expect(view.container.textContent).not.toContain('REJECTED IMMUTABLE CONTENT');
     expect(view.container.textContent).not.toContain('rejected-subject');
-    expect(view.getAllByTestId('review-inventory-entry')).toHaveLength(
-      first.payload.source.inventory.listed_total,
-    );
+    await expectCompleteInventory(view);
     expect(next(capture.before[2])).toBeTruthy();
     if (fault === 'page refusal')
       expect(failure.textContent).toContain('Retry the published continuation.');
@@ -328,11 +505,6 @@ function mountFamilyCenter(payload: ReviewPayload) {
       subject={{ kind: 'family', id: capture.family_id }}
       selection={{ familyId: capture.family_id }}
       layout="split"
-      onLayout={vi.fn()}
-      fullFile={false}
-      onFullFile={vi.fn()}
-      openPath={null}
-      onOpenPath={vi.fn()}
       onOpenFromCenter={vi.fn()}
       onOpenMember={vi.fn()}
       onRosterNext={onRosterNext}
@@ -456,12 +628,16 @@ it('resets accumulated context on refresh, subject and history changes and drops
   expect(fresh.result.current.retained!.payload).toEqual(first.payload);
 });
 
-it('keeps selected intent, evidence, siblings, focus and open layout while a late source expression becomes reachable', async () => {
+// MIK-R89 v2 rule 4 removed this case's layout select and Full file: the diff layout follows the
+// reading column's width, and "Changes only | Full context" is the reader's one code choice.
+it('keeps selected intent, judgment, siblings and focus while later roster claims become reachable', async () => {
   const pages = new Map(
     [...capture.before.slice(1), ...capture.after.slice(1)].map((body) => [cursorOf(body), body]),
   );
   const fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input), 'http://review.test');
+    const tree = treeReply(url);
+    if (tree) return response(tree);
     if (url.pathname.endsWith('/source-content'))
       return response({
         state: 'refused',
@@ -478,22 +654,37 @@ it('keeps selected intent, evidence, siblings, focus and open layout while a lat
   vi.stubGlobal('fetch', fetch);
   const view = render(<ReviewSurface {...target} onBack={vi.fn()} />);
   await view.findByTestId('review-center-member');
-  expect(view.getByTestId('review-display-state').textContent).toContain('not yet fully loaded');
-  const evidence = view.getByTestId('review-center-evidence').textContent;
+  // Open the actual captured subject within its recorded family context.
+  const walked = view
+    .getAllByTestId('review-family')
+    .find((node) => node.dataset.family === capture.family_id)!;
+  fireEvent.click(
+    within(walked)
+      .getAllByTestId('review-family-member-open')
+      .find((node) => node.dataset.subjectId === capture.subject_id)!,
+  );
+  await waitFor(() =>
+    expect(view.getByTestId('review-center-member').dataset.family).toBe(capture.family_id),
+  );
+  expect(view.getAllByTestId('review-center-roster-next')).toHaveLength(2);
+  const evidence = view.getByTestId('review-center-judgment').textContent;
   const siblings = view.getAllByTestId('review-family-member').length;
-  const layout = view.getByTestId('review-center-diff-layout') as HTMLSelectElement;
-  fireEvent.change(layout, { target: { value: 'inline' } });
-  const statement = view
-    .getByTestId('review-center-member-changed')
-    .querySelector('pre')!.textContent;
-  fireEvent.click(view.getByTestId('review-center-full-file'));
-  const open = view.getAllByTestId('review-inventory-open')[0];
-  fireEvent.click(open);
-  const expanded = view.getByTestId('review-display-state').textContent;
-  layout.focus();
+  // The word-diff is mounted; the authoritative revision pair is Technical details' (MIK-R89 v2
+  // rule 6, amended 9dde2b09).
+  const selected = first.payload.knowledge.revision_selection!;
+  expect(view.getByTestId('review-center-member-revisions').textContent).toContain(
+    selected.before_revision_id,
+  );
+  expect(view.getByTestId('review-center-member-revisions').textContent).toContain(
+    selected.after_revision_id,
+  );
+  const statement = view.getByTestId('review-center-member-changed').textContent;
+  // A continuation keeps the reader's focus where the reader left it.
+  const filter = view.getByTestId('review-family-filter');
+  filter.focus();
   for (const body of [...capture.before.slice(1), ...capture.after.slice(1)]) {
     const control = view
-      .getAllByTestId('review-family-roster-next')
+      .getAllByTestId('review-center-roster-next')
       .find(
         (button) =>
           button.dataset.family === capture.family_id &&
@@ -506,21 +697,15 @@ it('keeps selected intent, evidence, siblings, focus and open layout while a lat
         `returned ${body.payload.page!.returned}`,
       ),
     );
-    expect(document.activeElement).toBe(layout);
+    expect(document.activeElement).toBe(filter);
   }
   const selectedStatement = view.getByTestId('review-center-member-changed');
-  expect(selectedStatement.querySelector('pre')!.textContent).toBe(statement);
-  expect(selectedStatement.textContent).toContain(first.payload.knowledge.before_statement.text);
-  expect(selectedStatement.textContent).toContain(first.payload.knowledge.after_statement.text);
-  expect(view.getByTestId('review-center-evidence').textContent).toBe(evidence);
+  expect(selectedStatement.textContent).toBe(statement);
+  expect(view.getByTestId('review-center-member-revisions').textContent).toContain(selected.before_revision_id);
+  expect(view.getByTestId('review-center-member-revisions').textContent).toContain(selected.after_revision_id);
+  expect(view.getByTestId('review-center-judgment').textContent).toBe(evidence);
   expect(view.getAllByTestId('review-family-member')).toHaveLength(siblings);
-  expect(layout.value).toBe('inline');
-  expect(view.getByTestId('review-center-full-file').getAttribute('aria-pressed')).toBe('true');
-  expect(view.getByTestId('review-display-state').textContent).toContain('expanded:');
-  expect(expanded).toContain('expanded:');
-  expect(view.getByTestId('review-display-state').textContent).not.toContain(
-    'not yet fully loaded',
-  );
+  expect(view.queryByTestId('review-center-roster-next')).toBeNull();
   const changedPaths = new Set(first.payload.source.inventory.entries.map((entry) => entry.path));
   const selectedRevision = first.payload.knowledge.revision_selection!.before_revision_id;
   const latePaths = new Set(
@@ -535,9 +720,10 @@ it('keeps selected intent, evidence, siblings, focus and open layout while a lat
     ),
   );
   expect(latePaths.size).toBeGreaterThan(0);
-  const renderedPaths = view
-    .getAllByTestId('review-expression-card')
-    .map((card) => card.dataset.path);
-  for (const path of latePaths) expect(renderedPaths).toContain(path);
-  expect(view.getAllByTestId('review-inventory-entry')).toHaveLength(changedPaths.size);
+  // The cards are the opening's read (MIK-R89 v2 W4); the later claims are reached in the
+  // selected member's slot, as the recorded addresses of its accumulated realization claims.
+  const claims = within(view.getByTestId('review-center-member-details')).getAllByTestId('review-center-expressions');
+  const addresses = claims.flatMap((list) => Array.from(list.querySelectorAll('code'), (node) => node.textContent));
+  for (const path of latePaths) expect(addresses).toContain(path);
+  await expectCompleteInventory(view);
 });

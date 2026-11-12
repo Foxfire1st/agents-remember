@@ -7,7 +7,7 @@ import unittest
 from contextlib import (
     contextmanager,
 )
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
@@ -27,7 +27,6 @@ from agents_remember.kernel.memory_ledger import (
     load_ledger,
     write_ledger,
 )
-from agents_remember.memory import baseline as adopt_baseline
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     SprintExecutionGraph,
@@ -60,7 +59,6 @@ from curator_coherence_test_support import (
     write_curator_task_topology,
 )
 
-drift = adopt_baseline.drift
 TEST_CERTIFICATION_PROFILE_REFERENCE = Path("mcp/certification-profile-v1.json")
 
 
@@ -155,13 +153,23 @@ def write_current_task_lineage(
     master_name: str,
     leaf_id: str,
 ) -> Path:
-    """Create a current organizational sprint-super -> leaf lineage."""
+    """Create a current organizational sprint-super -> leaf lineage.
+
+    Since L50 (00d6b4d4, MIK-R50) the fixture contract runs external memory, so
+    the memory edge is part of the lineage: the memory repository is created
+    here with the same source and work branches, or the lineage cannot prove
+    and task-bound seats fail closed.
+    """
     repo = coordination_root / "fixture-repositories" / repo_name
     base = init_repo(repo, "main")
     super_branch = "super"
     leaf_branch = f"ar/{leaf_id}"
     git(repo, "branch", super_branch, "main")
     git(repo, "branch", leaf_branch, super_branch)
+    memory_repo = coordination_root / "memory-repos" / repo_name
+    memory_base = init_repo(memory_repo, "main")
+    git(memory_repo, "branch", super_branch, "main")
+    git(memory_repo, "branch", leaf_branch, super_branch)
     task_root = coordination_root / "tasks" / repo_name
     master_path = task_root / master_name / "task.json"
     master = read_task_doc(master_path)
@@ -202,7 +210,7 @@ def write_current_task_lineage(
         repo_name=repo_name,
         coordination_root=coordination_root,
         workflow_kind="light-task",
-        memory_mode="disabled",
+        memory_mode="external",
     )
     leaf = default_contract(
         task,
@@ -212,6 +220,12 @@ def write_current_task_lineage(
             source_branch=super_branch,
             work_branch=leaf_branch,
             base_commit=base,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=memory_repo,
+            source_branch=super_branch,
+            work_branch=leaf_branch,
+            base_commit=memory_base,
         ),
     )
     write_contract(leaf.contract_path, leaf)
@@ -392,30 +406,66 @@ def initialized_memory_repo(
     return git(memory_repo, "rev-parse", "HEAD")
 
 
-def open_external_contract_fixture(root: Path, *, lifecycle_id: str = ""):
-    code_repo = root / "repo-a"
+@dataclass(frozen=True, slots=True)
+class FixtureNames:
+    """The names a converted fixture is built from, below its temporary root.
+
+    They default to the short ones most proofs read; a proof that measures a first message passes
+    names as long as the ones it is measuring (MIK-R193 rule 5).
+    """
+
+    repo_name: str = "repo-a"
+    task_name: str = "Commit Approval Thing"
+    master_name: str = "Commit Approval Master"
+    leaf_name: str = "commit-approval-thing"
+
+
+DEFAULT_FIXTURE_NAMES = FixtureNames()
+
+
+def open_external_contract_fixture(
+    root: Path,
+    *,
+    lifecycle_id: str = "",
+    names: FixtureNames = DEFAULT_FIXTURE_NAMES,
+):
+    """A converted external-memory contract fixture for one leaf."""
+
+    repo_name, task_name = names.repo_name, names.task_name
+    master_name, leaf_name = names.master_name, names.leaf_name
+    code_repo = root / repo_name
     init_repo(code_repo, "main")
-    install_fixture_profile(code_repo, "repo-a")
+    install_fixture_profile(code_repo, repo_name)
     git(code_repo, "add", "-A")
     git(code_repo, "commit", "-m", "Add repository certification profile")
     code_base = git(code_repo, "rev-parse", "HEAD")
-    memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
+    memory_repo = root / "ar-coordination" / "memory-repos" / f"ar-{repo_name}"
     memory_seed = init_repo(memory_repo, "main")
-    write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", code_base, memory_seed))
-    git(memory_repo, "add", "memory.md")
-    git(memory_repo, "commit", "-m", "Add memory ledger")
+    write_ledger(
+        memory_repo / "memory.md", create_initial_ledger(repo_name, code_base, memory_seed)
+    )
+    # MIK-R46 rule 8: the shared fixture builds converted memory -- the layout marker rides
+    # the base commit, so lifecycles under test run the converted routes.
+    (memory_repo / "knowledge").mkdir(parents=True, exist_ok=True)
+    (memory_repo / "knowledge" / "layout.json").write_text(
+        '{\n  "conversion": "1",\n  "schema": "ar-memory-layout/v2"\n}\n', encoding="utf-8"
+    )
+    git(memory_repo, "add", "memory.md", "knowledge/layout.json")
+    # The seed pairs with the code base (Code-Commit trailer): converted memory
+    # is judged by the invariant gate, which reads the pairing.
+    git(memory_repo, "commit", "-m", f"Add memory ledger\n\nCode-Commit: {code_base}")
     memory_base = git(memory_repo, "rev-parse", "HEAD")
     git(code_repo, "branch", "super", code_base)
     git(memory_repo, "branch", "super", memory_base)
     contract = default_contract(
         ContractTask(
-            name="Commit Approval Thing",
-            repo_name="repo-a",
+            name=task_name,
+            repo_name=repo_name,
             coordination_root=root / "ar-coordination",
             workflow_kind="chat-task",
             memory_mode="external",
         ),
-        leaf=LeafIdentity(worktree_name="commit-approval-thing", lifecycle_id=lifecycle_id),
+        leaf=LeafIdentity(worktree_name=leaf_name, lifecycle_id=lifecycle_id),
         code=RepoBranchPlan(
             repo_path=code_repo,
             source_branch="super",
@@ -431,8 +481,8 @@ def open_external_contract_fixture(root: Path, *, lifecycle_id: str = ""):
     )
     parent = default_series_contract(
         ContractTask(
-            name="Commit Approval Master",
-            repo_name="repo-a",
+            name=master_name,
+            repo_name=repo_name,
             coordination_root=root / "ar-coordination",
             workflow_kind="chat-task",
             memory_mode="external",

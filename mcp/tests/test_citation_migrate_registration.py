@@ -1,19 +1,8 @@
-"""`citation_migrate` is reachable as an MCP tool, not only as a CLI subcommand.
-
-Recorded defect (S0 of `260915-CAPS-L21`): ``application/memory_tools.citation_migrate_tool``
-existed with exactly one caller, the ``memory-citations --migrate`` CLI subcommand, and no MCP
-registration. A running server could therefore not reach it at all, and the CLI could not reach
-a live leaf either: from the primary checkout it is refused outright, and from a linked worktree
-it is confined to a disposable coordination root that cannot contain a leaf contract. The result
-was 481 superseded citation tables that no governed route could convert for six weeks.
-
-These tests pin the two halves of the repair -- the tool is registered and advertised, and the
-registered handler actually reaches ``migrate_onboarding_root`` -- so the wiring cannot be
-dropped again without a failure that names it.
-"""
+"""Retired citation migration stays absent; converted fixer wiring stays intact."""
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import sys
 import tempfile
@@ -24,18 +13,18 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.application.memory_tools import (
-    CitationOperationScope,
-    citation_migrate_tool,
-)
+from agents_remember.application import memory_tools
+from agents_remember.cli import memory_citations
+from agents_remember.errors import AuthorityError, ConfiguredContractAuthorityError
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     RepositoryScope,
 )
 from agents_remember.mcp.registration.memory import register_memory_tools
-from agents_remember.mcp.tools import PUBLIC_TOOLS, citation_migrate_payload
+from agents_remember.mcp.tools import PUBLIC_TOOLS, citation_fix_payload
+from agents_remember.memory_quality import check, converted_check
 from agents_remember.models.tools.tool_registry import (
-    PUBLIC_TOOL_RESPONSE_MODELS,
+    TOOL_RESPONSE_MODELS,
 )
 
 
@@ -58,10 +47,10 @@ def _config(tmp: Path, *, code_root: Path, memory_root: Path) -> McpRuntimeConfi
 
 
 class CitationMigrateRegistrationTests(unittest.TestCase):
-    """The server advertises the tool, and the handler is the application entry point."""
+    """The tool is gone; the sibling wiring pin stays."""
 
-    def test_the_tool_is_registered_advertised_and_has_a_response_model(self) -> None:
-        """All three surfaces together: a name in one and not another is the recorded defect."""
+    def test_the_tool_is_not_registered_advertised_or_modelled(self) -> None:
+        """MIK-R112 removed the tool; MIK-R65 also removes its legacy application path."""
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
             config = _config(tmp, code_root=tmp / "code", memory_root=tmp / "memory")
@@ -70,87 +59,105 @@ class CitationMigrateRegistrationTests(unittest.TestCase):
             register_memory_tools(server, config)
 
             names = {tool.name for tool in asyncio.run(server.list_tools())}
-        self.assertIn("citation_migrate", names)
-        self.assertIn("citation_migrate", PUBLIC_TOOLS)
-        self.assertIn("citation_migrate", PUBLIC_TOOL_RESPONSE_MODELS)
+        self.assertNotIn("citation_migrate", names)
+        self.assertNotIn("citation_migrate", PUBLIC_TOOLS)
+        self.assertNotIn("citation_migrate", TOOL_RESPONSE_MODELS)
+        self.assertFalse(hasattr(memory_tools, "citation_migrate_tool"))
+        self.assertFalse(hasattr(memory_tools, "citation_source_index_build_tool"))
+        self.assertFalse(hasattr(converted_check, "LEGACY_FORMAT_CHECKS"))
+        self.assertFalse(hasattr(converted_check, "not_applicable_on_converted"))
+        retired = (
+            "changed_lines.py",
+            "update_history",
+            "citations/candidate/git_source.py",
+            "citations/claim_change_router.py",
+            "citations/claim_reopen.py",
+            "citations/deterministic_projection.py",
+            "citations/documents/transaction.py",
+            "citations/drafts.py",
+            "citations/editing.py",
+            "citations/exclusion_register.py",
+            "citations/citation_index_settings.py",
+            "citations/fixer.py",
+            "citations/migration.py",
+            "citations/old_form.py",
+            "citations/prose.py",
+            "citations/provenance.py",
+            "citations/range_resolution.py",
+            "citations/repair.py",
+            "citations/resolution.py",
+            "citations/source_index.py",
+            "citations/source_index_database.py",
+            "citations/source_index_state.py",
+            "citations/structures.py",
+            "citations/symbol_index.py",
+            "citations/work_order.py",
+        )
+        style = MCP_SRC / "agents_remember/memory_quality/style"
+        for relative in retired:
+            if relative == "update_history":
+                self.assertEqual(list((style / relative).rglob("*.py")), [], relative)
+            else:
+                self.assertFalse((style / relative).exists(), relative)
+        self.assertEqual(len(check.STYLE_CHECKS), 3)
+        self.assertTrue(all("citations" not in name for name in check.AVAILABLE_CHECKS))
+        schema = next(
+            tool for tool in asyncio.run(server.list_tools()) if tool.name == "citation_fix"
+        )
+        self.assertNotIn("expected_snapshot", schema.inputSchema["properties"])
+        self.assertNotIn("exclude", schema.inputSchema["properties"])
+        parser = argparse.ArgumentParser()
+        memory_citations.add_arguments(parser)
+        options = {option for action in parser._actions for option in action.option_strings}
+        self.assertFalse({"--build-index", "--expected-snapshot", "--exclude"} & options)
 
-    def test_the_payload_builder_reaches_the_application_tool(self) -> None:
+    def test_citation_tools_name_a_configured_contract_authority_refusal(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
             config = _config(tmp, code_root=tmp / "code", memory_root=tmp / "memory")
-            with mock.patch(
-                "agents_remember.mcp.tools.memory.citation_migrate_tool",
-                # The real tool validates its scope before resolving anything, so the double
-                # answers the same shape the application entry point returns.
-                return_value={
-                    "ok": False,
-                    "repoId": "agents-remember",
-                    "operation": "citation_migrate",
-                    "declinedCount": 0,
-                },
-            ) as reached:
-                payload = citation_migrate_payload(
-                    config,
-                    "agents-remember",
-                    contract_path="tasks/x/enclosures/leaf/series-contract.md",
-                    dry_run=True,
-                )
-        reached.assert_called_once()
-        self.assertEqual(reached.call_args.kwargs["dry_run"], True)
-        self.assertEqual(payload["operation"], "citation_migrate")
+            contract = "tasks/x/enclosures/leaf/series-contract.md"
+            for tool, payload_builder in (("citation_fix", citation_fix_payload),):
+                with (
+                    self.subTest(tool=tool),
+                    mock.patch(
+                        f"agents_remember.mcp.tools.memory.{tool}_tool",
+                        side_effect=ConfiguredContractAuthorityError(
+                            side="memory", name="candidate"
+                        ),
+                    ),
+                ):
+                    payload = payload_builder(
+                        config, "agents-remember", contract_path=contract, dry_run=True
+                    )
+                    self.assertFalse(payload["ok"])
+                    # The delivered answer carries the envelope strip: no
+                    # operation key rides to the agent (rule 2); the refusal
+                    # proof reads the surviving identity fields.
+                    self.assertNotIn("operation", payload)
+                    self.assertEqual(payload["status"], "configured-contract-authority-invalid")
+                    self.assertEqual(payload["repoId"], "agents-remember")
+                    self.assertEqual(payload["contractPath"], contract)
+                    self.assertIn("memory candidate", payload["detail"])
+                    self.assertEqual(payload["nextAction"], "developer-decision")
 
-
-class CitationMigrateReachesTheMigrationTests(unittest.TestCase):
-    """One real call through the tool reaches ``migration.migrate_onboarding_root``."""
-
-    def test_the_tool_invokes_the_migration_over_the_leaf_memory_onboarding_root(self) -> None:
+    def test_citation_tools_propagate_other_authority_errors(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
-            tmp = Path(raw).resolve()
-            coordination = tmp / "coord"
-            memory_worktree = coordination / "worktrees" / "memory"
-            code_worktree = coordination / "worktrees" / "code"
-            (memory_worktree / "onboarding").mkdir(parents=True)
-            code_worktree.mkdir(parents=True)
-            contract_path = coordination / "tasks" / "enclosures" / "leaf" / "series-contract.md"
-            contract_path.parent.mkdir(parents=True)
-            contract_path.write_text("placeholder", encoding="utf-8")
-            config = _config(tmp, code_root=code_worktree, memory_root=memory_worktree)
-
-            scope = mock.Mock()
-            scope.repo_id = "agents-remember"
-            scope.onboarding_root = memory_worktree / "onboarding"
-            scope.code_root = code_worktree
-            scope.cache_authority = None
-
-            with (
-                mock.patch(
-                    "agents_remember.application.memory_tools._leaf_memory_writer_scope",
-                    return_value=scope,
-                ) as guarded,
-                mock.patch(
-                    "agents_remember.application.memory_tools.migration.migrate_onboarding_root",
-                    return_value={"operation": "citation_migrate", "declinedCount": 0},
-                ) as migration,
-            ):
-                result = citation_migrate_tool(
-                    config,
-                    repo_id="agents-remember",
-                    contract_path=str(contract_path),
-                    dry_run=False,
-                    operation_scope=CitationOperationScope(),
-                )
-
-            # The write guard runs FIRST and names the operation it is guarding, so the
-            # migration can never be reached on a path that skipped the enclosure check.
-            self.assertEqual(guarded.call_args.kwargs["operation"], "citation_migrate")
-            migration.assert_called_once()
-            args, kwargs = migration.call_args
-            self.assertEqual(args[0], scope.onboarding_root)
-            self.assertEqual(args[1].code_root, code_worktree)
-            self.assertEqual(args[1].memory_root, memory_worktree)
-            self.assertEqual(kwargs["only"], None)
-            self.assertEqual(kwargs["dry_run"], False)
-        self.assertEqual(result["repoId"], "agents-remember")
+            tmp = Path(raw)
+            config = _config(tmp, code_root=tmp / "code", memory_root=tmp / "memory")
+            for tool, payload_builder in (("citation_fix", citation_fix_payload),):
+                error = AuthorityError("unrelated authority failure")
+                with (
+                    self.subTest(tool=tool),
+                    mock.patch(f"agents_remember.mcp.tools.memory.{tool}_tool", side_effect=error),
+                ):
+                    with self.assertRaises(AuthorityError) as raised:
+                        payload_builder(
+                            config,
+                            "agents-remember",
+                            contract_path="tasks/x/enclosures/leaf/series-contract.md",
+                            dry_run=True,
+                        )
+                    self.assertIs(raised.exception, error)
 
 
 if __name__ == "__main__":

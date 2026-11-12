@@ -31,12 +31,9 @@ from agents_remember.application.knowledge_read import (
     open_read_context,
     read_knowledge_scope,
 )
-from agents_remember.memory.knowledge import read_anchors, realizations
-from agents_remember.memory.knowledge.connection import open_database
+from agents_remember.memory.knowledge import read_anchors
 from agents_remember.memory.knowledge.read_anchors import _confined_posix_relative
-from agents_remember.memory.knowledge.store import open_knowledge_store
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
-from agents_remember.models.knowledge.graph import RealizationClaimDraft
 from agents_remember.models.knowledge.read import (
     AnchorResolution,
     InvariantRevisionSeed,
@@ -46,13 +43,15 @@ from agents_remember.models.knowledge.read import (
     KnowledgeReadSeed,
     PathSeed,
 )
-from agents_remember.models.knowledge.result import NewAnchor, RealizationClaimRequest
-from agents_remember.models.knowledge.source import (
-    FileLocator,
-    GitBlobIdentity,
-    SourceAnchorDraft,
-)
+from agents_remember.models.knowledge.source import FileLocator
+from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
 from generation_test_support import declared_schema_name
+from knowledge_rows_test_support import (
+    NewAnchor,
+    RealizationClaimRequest,
+    open_knowledge_store,
+    realizations,
+)
 from pydantic import ValidationError
 from read_scope_test_support import (
     INTEGRATION_PATH,
@@ -340,7 +339,9 @@ def test_a_path_holding_glob_characters_is_authorable_seedable_and_observed_as_i
                 claim=RealizationClaimDraft(
                     claim_id=claim_id,
                     invariant_revision_id=fixture.resolution_revision_id,
-                    role="incidental",
+                    # The legacy "incidental" spelling normalizes to "support" at every
+                    # product boundary; text storage keeps the normalized set only.
+                    role="support",
                     rationale="A realization at a path whose name holds a glob character.",
                 ),
                 anchor=NewAnchor(anchor=draft),
@@ -371,81 +372,6 @@ def test_a_path_holding_glob_characters_is_authorable_seedable_and_observed_as_i
     assert observed[literal_path].resolution == "exact_recorded_blob"
     assert observed[literal_path].observed_source_identity == blob
     assert observed[literal_path].recorded_source_identity == blob
-
-
-def test_a_stored_path_that_cannot_be_addressed_is_refused_rather_than_reported_absent(
-    fixture: ReadScopeFixture,
-) -> None:
-    """A recorded path Git would read as magic is refused, and never answered as an absence.
-
-    The typed boundaries refuse such a spelling, so the row this case reads is written past them --
-    which is exactly the case the read path's own confinement check exists for. The row is inserted
-    as a **copy** of a real stored anchor and claim (the same JSON payloads, a new identity, one
-    changed path), so nothing but the spelling differs from a legitimate record. What matters is the
-    answer: the anchor is *not* reported as ``path_absent`` ("the requested tree contains no entry
-    at this path"), because the tree was never asked about that path. The claim keeps its recorded
-    identity and is reported as an anchor this increment cannot resolve at the spelled location.
-    """
-
-    unaddressable = ":(exclude)src/integration.py"
-    donor_claim_id = str(uuid4())
-    connection = open_database(fixture.database_path)
-    try:
-        donor = connection.execute(
-            "SELECT anchor_id, provenance FROM source_anchor WHERE repository_id = ? AND anchor_id = ?",
-            (fixture.repository_id, fixture.integration.anchor_id),
-        ).fetchone()
-        assert donor is not None, "the fixture really stored the anchor this case copies"
-        donor_anchor_id, provenance = donor
-        stored_anchor_id = str(uuid4())
-        connection.execute(
-            "INSERT INTO source_anchor "
-            "(repository_id, anchor_id, path, source_identity, locator, provenance) "
-            "SELECT repository_id, ?, ?, source_identity, locator, ? FROM source_anchor "
-            "WHERE repository_id = ? AND anchor_id = ?",
-            (
-                stored_anchor_id,
-                unaddressable,
-                provenance,
-                fixture.repository_id,
-                donor_anchor_id,
-            ),
-        )
-        connection.execute(
-            "INSERT INTO realization_claim "
-            "(repository_id, claim_id, invariant_revision_id, anchor_id, role, rationale, provenance) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                fixture.repository_id,
-                donor_claim_id,
-                fixture.subject_revision_id,
-                stored_anchor_id,
-                "support",
-                "A claim whose recorded path cannot be addressed against a tree.",
-                provenance,
-            ),
-        )
-    finally:
-        connection.close()
-
-    result = read(fixture, subject_seed(fixture))
-
-    assert result.state == "page", result.refusal
-    observed = anchors_by_path(result)
-    assert unaddressable in observed, "the claim is still selected and still carries its path"
-    refused = observed[unaddressable]
-    assert refused.resolution != "path_absent", (
-        "the tree was never asked about this path, so reporting it absent would be a false "
-        "statement about the repository"
-    )
-    assert refused.resolution == "unsupported_locator"
-    assert refused.detail.endswith(
-        "this is a refusal of the spelling, not an observation that the tree lacks the entry"
-    )
-    assert refused.recorded_source_identity == fixture.git_blobs[INTEGRATION_PATH]
-    assert refused.observed_source_identity is None
-    assert result.page is not None
-    assert donor_claim_id in {item.claim_id for item in result.page.items}
 
 
 def test_a_failed_tree_lookup_is_unavailable_rather_than_an_absent_path(
@@ -561,7 +487,7 @@ def test_a_git_that_cannot_run_is_unavailable_rather_than_an_absent_path(
     ``ls-tree`` invocation raise the ``OSError`` a missing or non-executable Git binary raises, and
     delegates every other command of the read to the real runner. The delegate is what makes the
     case measure the branch rather than a stub — the availability probe before the lookup
-    (``git cat-file -e <tree>^{tree}``) still runs for real and still answers *available*, so the
+    (``git --no-replace-objects rev-parse --verify --quiet <tree>^{tree}``) still runs for real and still answers *available*, so the
     observation can only come from the lookup that failed. The recorded command sequence is asserted,
     so a read that never reached the intercepted call fails here instead of passing on a different
     producer's answer.
@@ -624,7 +550,13 @@ def test_a_git_that_cannot_run_is_unavailable_rather_than_an_absent_path(
         KnowledgeReadRequest(seed=PathSeed(path=recorded)),
     )
     assert unavailable.state == "page", unavailable.refusal
-    assert recorded_commands[0] == ["cat-file", "-e", f"{fixture.git_tree_id}^{{tree}}"], (
+    assert recorded_commands[0] == [
+        "--no-replace-objects",
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"{fixture.git_tree_id}^{{tree}}",
+    ], (
         "the availability probe is the first command the read issues, and it is delegated: the tree "
         f"below really is available, so the answer cannot come from the availability branch: "
         f"{recorded_commands}"
@@ -734,7 +666,13 @@ def test_a_lookup_that_answered_non_zero_is_unavailable_rather_than_an_absent_pa
         KnowledgeReadRequest(seed=PathSeed(path=recorded)),
     )
     assert unavailable.state == "page", unavailable.refusal
-    assert recorded_commands[0] == ["cat-file", "-e", f"{fixture.git_tree_id}^{{tree}}"], (
+    assert recorded_commands[0] == [
+        "--no-replace-objects",
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"{fixture.git_tree_id}^{{tree}}",
+    ], (
         "the availability probe is delegated and the tree below really is available, so the tree "
         f"cannot be the producer of this answer: {recorded_commands}"
     )

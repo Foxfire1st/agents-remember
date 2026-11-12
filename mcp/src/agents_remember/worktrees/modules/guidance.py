@@ -19,12 +19,13 @@ from agents_remember.worktrees.modules.git import branch_commit, is_ancestor, wo
 from agents_remember.worktrees.modules.landing import landing_refs
 from agents_remember.worktrees.services import worktree_services
 from agents_remember.worktrees.source_lineage import source_lineage_for_contract
+from agents_remember.worktrees.task_document_copies import stale_copy_line
 from agents_remember.worktrees.worktree_contract import (
     CleanupStatus,
     CloseoutStatus,
     HumanReviewStatus,
     IntegrationStatus,
-    MemoryMode,
+    ReadableMemoryMode,
     WorkflowKind,
     WorktreeContract,
 )
@@ -95,7 +96,7 @@ class WorktreeStatusFacts(TypedDict):
     task_name: str
     code_repository_name: str
     workflow_kind: WorkflowKind
-    memory_mode: MemoryMode
+    memory_mode: ReadableMemoryMode
     kind: str
     leaf_id: str
     enclosure_path: str
@@ -123,6 +124,9 @@ class WorktreeStatusFacts(TypedDict):
     freshness: NotRequired[dict[str, object]]
     source_lineage: NotRequired[dict[str, object]]
     landing: NotRequired[list[dict[str, object]]]
+    # MIK-R111 rule 3: one line naming task-document copies that differ from
+    # their sources. Present only when something differs; absent is clean.
+    task_document_copies: NotRequired[str]
 
 
 class WorktreeStatusPayload(WorktreeStatusFacts, LifecycleGuidance):
@@ -234,8 +238,8 @@ def _published_coherence_authority(contract: WorktreeContract) -> str:
 
     Never raises, and answers ``""`` for every contract the coherence route does not apply to (a
     series contract, a leaf without external memory, a leaf with no memory worktree) and for a leaf
-    that has not published yet -- the hint must degrade to the ordinary integration step rather than
-    send an operator to a tool that will refuse.
+    that has not published yet. This identifies historical evidence without validating it against
+    the live candidate after the closeout's own writes.
     """
 
     if (
@@ -248,23 +252,6 @@ def _published_coherence_authority(contract: WorktreeContract) -> str:
         return current_curator_coherence_predecessor(contract)
     except (CuratorCoherenceError, OSError):
         return ""
-
-
-def _canonical_curator_caller(contract: WorktreeContract) -> dict[str, object]:
-    """The exact ``caller`` the coherence route expects for this contract, as a plain payload.
-
-    Derived from the contract's own task root and leaf id, which is precisely what the route's
-    caller refusal asks a caller to supply: a hint that names a tool while leaving its one
-    identity argument blank would be the same instructions-do-not-travel defect (D-26) one level up.
-    """
-
-    return {
-        "role": "curator",
-        "task_document_ref": {
-            "repository": contract.repo_name,
-            "path": f"{contract.task_root.name}/{contract.leaf_id}.json",
-        },
-    }
 
 
 def _reclaimed_phase(contract: WorktreeContract) -> LifecycleGuidance | None:
@@ -377,41 +364,21 @@ def _pre_integration_phase(contract: WorktreeContract) -> LifecycleGuidance:
 
     slice 09: a dirty worktree is NOT a commit-approval gate. `commit-approval-pending` is owned by the
     closeout preview (the real gate moment, set in closeout.py) and — once the slice-6 gate plane is
-    adopted — by a raised `closeout-approval` gate surfaced via GateNode; it is never inferred from
+    adopted — by a raised `closeout-approval` gate; it is never inferred from
     `git status`. A dirty tree falls through to the honest lifecycle-position phase below.
     """
     if contract.closeout_status == "completed":
         authority_digest = _published_coherence_authority(contract)
+        summary = "Closeout completed; integrate the task branches back into their source branches."
         if authority_digest:
-            # D-25: the documented order is closeout -> prepare -> publish -> **validate** ->
-            # integrate -> finalize, and the validate window closes at finalize, whose automatic
-            # cleanup collects the enclosure root. The hint chain used to walk straight from
-            # closeout to ``worktree_integrate`` and never named the step, so an operator following
-            # the tool's own guidance could not see it -- and a leaf that missed the window could
-            # never re-prove what it had published. The move is still the integration decision; the
-            # validation is its precondition.
-            return {
-                "phase": "integration-pending",
-                "summary": (
-                    "Closeout completed and this leaf's curator-coherence authority is published "
-                    f"({authority_digest[:12]}...). Run its standalone validate now, while the "
-                    "enclosure root still exists: lifecycle_finalize_task's automatic cleanup "
-                    "collects it and the validate window closes with it. Then integrate."
-                ),
-                **next_guidance(
-                    "request_integration_decision",
-                    tool="curator_coherence",
-                    args=contract_next_args(
-                        contract,
-                        action="validate",
-                        caller=_canonical_curator_caller(contract),
-                    ),
-                    required_args=["contract_path", "action", "caller"],
-                ),
-            }
+            summary += (
+                f" The published curator-coherence authority ({authority_digest[:12]}...) records "
+                "the pre-closeout candidate; it does not validate the live tree after closeout's "
+                "history and fingerprint writes."
+            )
         return {
             "phase": "integration-pending",
-            "summary": "Closeout completed; integrate the task branches back into their source branches.",
+            "summary": summary,
             **next_guidance(
                 "request_integration_decision",
                 tool="worktree_integrate",
@@ -544,6 +511,9 @@ def _status_payload_with_landing(
         # The one place a degraded read becomes visible to whoever called a worktree tool:
         # the phase below was computed from the substituted values, and this says so.
         facts["unknown_contract_cells"] = list(contract.unknown_cells)
+    copies_line = stale_copy_line(contract.coordination_root, contract.worktree_group)
+    if copies_line is not None:
+        facts["task_document_copies"] = copies_line
     providers = worktree_services().provider_lifecycle.setup_status(contract)
     if providers is not None:
         facts["providers"] = providers

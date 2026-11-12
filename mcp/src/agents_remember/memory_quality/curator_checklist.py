@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from agents_remember.memory_quality.knowledge_review import (
     KnowledgeReview,
     knowledge_review_section,
 )
+from agents_remember.memory_quality.knowledge_worklist_section import knowledge_worklist_lines
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorSourceCandidate,
     memory_quality_attestation_dependencies,
@@ -57,6 +59,24 @@ class CuratorChecklist:
     # stale route indexes only, which is §8.2's "does not fold into curatorActionableCount" enforced
     # by the shape of the function rather than by a comment.
     knowledge_review: tuple[AssessmentSummary, ...] = ()
+    # MIK-R28 rule 5: the live invariants no proof entry names, for a converted memory tree only.
+    # ``None`` (every unconverted tree) renders nothing, so today's checklist bytes are unchanged.
+    # Like ``knowledge_review`` it is information and never an input to ``actionable_count``.
+    without_proof: WithoutProof | None = None
+    # The leaf's persisted MIK-R08 worklist and where it lives, shown as information. ``None`` (every
+    # unconverted leaf) renders nothing. The section itself counts nothing: the mandatory gate
+    # (MIK-R09) hands each open item to ``repair_findings`` as one ``knowledge-gate`` finding, and
+    # that is how an open item reaches ``curator_actionable_count``.
+    knowledge_worklist: Mapping[str, Any] | None = None
+    knowledge_worklist_path: str | None = None
+
+
+@dataclass(frozen=True)
+class WithoutProof:
+    """The "without proof" list: one row per invariant, and why it may be incomplete."""
+
+    rows: tuple[dict[str, Any], ...]
+    problem: str | None = None
 
 
 @dataclass(frozen=True)
@@ -188,8 +208,22 @@ def write_curator_checklist(checklist: CuratorChecklist) -> dict[str, Any]:
         "missingOnboardingCount": len(missing),
         "staleRouteIndexCount": len(stale),
         "sourceChangeCandidateCount": len(source_candidates),
+        **(
+            {"invariantsWithoutProofCount": len(checklist.without_proof.rows)}
+            if checklist.without_proof is not None
+            else {}
+        ),
         "closeoutOwnedFindingCount": len(commit_owned),
         "noteworthyFindingCount": len(report_only),
+        # MIK-R110 rule 4: the complete blocking populations beside their
+        # counts, in the order the repair loop works them -- repairable
+        # findings (including census and gate blockers), missing onboarding,
+        # then stale route indexes. The answer projects the first entries up
+        # to the list bound; the checklist report above renders every row and
+        # the log records this whole result.
+        "repairFindings": repair,
+        "missingOnboardingRows": missing,
+        "staleRouteIndexes": stale,
     }
 
 
@@ -263,6 +297,14 @@ def _render(checklist: CuratorChecklist, sections: _ChecklistSections) -> str:
     _append_findings(lines, "Closeout-owned real-commit provenance", sections.commit_owned)
     _append_findings(lines, "Noteworthy report-only findings", sections.report_only)
     lines.extend(sections.knowledge_review.lines)
+    if checklist.without_proof is not None:
+        _append_without_proof(lines, checklist.without_proof)
+    if checklist.knowledge_worklist is not None:
+        lines.extend(
+            knowledge_worklist_lines(
+                checklist.knowledge_worklist, checklist.knowledge_worklist_path
+            )
+        )
     lines.extend(
         [
             "## Completion Rule",
@@ -320,6 +362,41 @@ def _append_missing(lines: list[str], rows: list[dict[str, Any]]) -> None:
                 for key in ("sourceFile", "expectedOnboarding", "state", "note")
             )
             + " |"
+        )
+    lines.append("")
+
+
+def _append_without_proof(lines: list[str], section: WithoutProof) -> None:
+    lines.extend(
+        [
+            "## Invariants without proof",
+            "",
+            (
+                "Information, not a gate (MIK-R28 rule 5): the admission rule accepts criteria "
+                "other than a proving test. Tests the recorded evidence names can become proofs "
+                "through the writer's `proofs` key once the curator authors each facet. Rows do "
+                "not count toward `curatorActionableCount`."
+            ),
+            "",
+        ]
+    )
+    if section.problem is not None:
+        lines.extend([f"Incomplete: {_cell(section.problem)}", ""])
+    if not section.rows:
+        lines.extend(["_None._", ""])
+        return
+    lines.extend(
+        [
+            "| Invariant | Status | Record | Tests named in evidence |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for row in section.rows:
+        tests = ", ".join(f"`{_cell(str(test))}`" for test in row.get("evidenceTests", ()))
+        lines.append(
+            "| "
+            + " | ".join(_cell(str(row.get(key, ""))) for key in ("invariant", "status", "path"))
+            + f" | {tests or '—'} |"
         )
     lines.append("")
 

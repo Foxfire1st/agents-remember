@@ -1,37 +1,67 @@
-"""Server, context, install, and skills payload builders."""
+"""Server, context, and install payload builders."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.application.context_packet import ContextPacketRequest, build_context_packet
-from agents_remember.application.coordination_tools import resolve_context_tool
-from agents_remember.application.runtime.install import RuntimeInstallRequest, run_runtime_install
-from agents_remember.application.runtime.skills import skills_install_tool
-from agents_remember.application.task_docs.task_ref import TaskRef
+from agents_remember.application.agent_binding import (
+    TOOL_SERVER_NAME,
+    read_agent_binding,
+)
+from agents_remember.application.context_packet import (
+    ContextPacketRequest,
+    build_context_packet,
+    slim_context_packet,
+)
+from agents_remember.application.runtime.install import (
+    RuntimeInstallRequest,
+    open_user_settings_notice,
+    run_runtime_install,
+)
+from agents_remember.application.task_scoped_mcp import (
+    task_scoped_mcp_config_for_reader,
+)
+from agents_remember.kernel.agentic_settings import AgenticSettingsError, load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.primitives.tool_reports import write_tool_report
 from agents_remember.models.core import ServingBuildPayload
+from agents_remember.models.task_document_ref import TaskScopedReaderContext
+from agents_remember.models.tools.tool_answer import (
+    RUNTIME_INSTALL_ANSWER_FIELDS,
+    TOOL_ANSWER_SHORT_STRING_MAX,
+)
+from agents_remember.serving.build_currentness import build_currentness
+from agents_remember.serving.server_registry import server_inventory
 
 from .. import SERVER_NAME, SERVER_VERSION
-from .base import PUBLIC_TOOLS, RESERVED_TOOLS, TRANSPORT, _tool_payload
+from .base import TRANSPORT, _tool_payload
 
 
-def ping_payload() -> dict[str, Any]:
-    return _tool_payload(
-        "ping",
-        {
-            "ok": True,
-            "server": SERVER_NAME,
-            "version": SERVER_VERSION,
-            "transport": TRANSPORT,
-        },
-    )
+def _unused_settings_keys(config: McpRuntimeConfig) -> list[str]:
+    """The settings keys the files hold that are no longer read (MIK-R113 rule 4).
+
+    The orchestration settings are read per use; when they cannot be read, the answer names
+    the keys of the configuration it was started with and the refusal stays with the tool
+    that needs those settings.
+    """
+    try:
+        orchestration = load_agentic_settings(config.coordination_root).unused_keys
+    except (AgenticSettingsError, OSError):
+        orchestration = ()
+    return [*config.unused_settings_keys, *orchestration]
 
 
 def server_info_payload(
     config: McpRuntimeConfig, serving_build: ServingBuildPayload
 ) -> dict[str, Any]:
+    # A server that a role launch started for one agent says which agent and which AR work, and
+    # the name under which that agent was given it: ``server`` is the package's own name, which
+    # the agent's instructions use for another installation's server.
+    binding = read_agent_binding()
+    # The user's settings file or its folder, named only while it is open to writing, with
+    # the user's two commands (MIK-R137 rule 5). The answer changes no mode and no byte.
+    open_settings = open_user_settings_notice()
+    currentness = build_currentness(config, inspect_checkout=True)
     return _tool_payload(
         "server_info",
         {
@@ -43,37 +73,59 @@ def server_info_payload(
             "coordinationRoot": config.coordination_root.as_posix(),
             "workspaceRoot": config.workspace_root.as_posix(),
             "transcriptRoot": config.transcript_root.as_posix(),
-            "harnessSkillRoot": (
-                config.harness_skill_root.as_posix() if config.harness_skill_root else None
-            ),
             "allowedRepoIds": list(config.allowed_repo_ids),
-            "allowedProviderIds": list(config.allowed_provider_ids),
-            "tools": list(PUBLIC_TOOLS),
-            "reservedTools": list(RESERVED_TOOLS),
+            "unusedProviderKeys": list(config.allowed_provider_ids),
+            "unusedSettingsKeys": _unused_settings_keys(config),
+            **(
+                {"checkoutBinding": config.checkout_binding.as_payload()}
+                if config.checkout_binding is not None
+                else {}
+            ),
+            **({"openUserSettings": open_settings} if open_settings is not None else {}),
             "servingBuild": serving_build.model_dump(mode="json", exclude_none=True),
+            "buildCurrentness": (
+                currentness.model_dump(mode="json", exclude_none=True)
+                if currentness is not None
+                else None
+            ),
+            "runningServers": [
+                server.model_dump(mode="json", exclude_none=True)
+                for server in server_inventory(config)
+            ],
+            **(
+                {"toolServer": TOOL_SERVER_NAME, "agentBinding": binding.as_report()}
+                if binding is not None
+                else {}
+            ),
         },
     )
 
 
 def context_packet_payload(
     config: McpRuntimeConfig,
-    repo_id: str,
+    request: ContextPacketRequest,
     *,
-    include_providers: bool = True,
-    include_drift: bool = False,
-    include_freshness: bool = False,
+    task_context: TaskScopedReaderContext | None = None,
+    serving_build_commit: str | None = None,
 ) -> dict[str, Any]:
+    """The agent's slim answer from one whole context packet (MIK-R109 rule 4).
+
+    What leaves the server is the roots, the task, the action lines and
+    the short values. The framework's log preserves the delivered answer
+    behind it; the whole packet is rebuilt on demand through
+    :func:`build_context_packet` (the dashboard and command line route),
+    which carries every omitted policy fact.
+    """
+
+    scoped_config = task_scoped_mcp_config_for_reader(
+        config,
+        repository_id=request.repo_id,
+        task_context=task_context,
+    )
+    full = build_context_packet(scoped_config, request)
     return _tool_payload(
         "context_packet",
-        build_context_packet(
-            config,
-            ContextPacketRequest(
-                repo_id=repo_id,
-                include_providers=include_providers,
-                include_drift=include_drift,
-                include_freshness=include_freshness,
-            ),
-        ),
+        slim_context_packet(full, serving_build_commit=serving_build_commit),
     )
 
 
@@ -92,25 +144,50 @@ def runtime_install_payload(
     """
 
     full = run_runtime_install(config, request)
-    report_path = write_tool_report(
-        config.coordination_root,
-        "runtime_install",
-        full,
-        label="dry-run" if request.dry_run else "install",
+    # A dry run is a preview and files nothing (rule 6); only an executed install files
+    # its report, and only then does the answer carry the path.
+    report_path = (
+        None
+        if request.dry_run
+        else write_tool_report(
+            config.coordination_root,
+            "runtime_install",
+            full,
+            label="install",
+        ).as_posix()
     )
     return _tool_payload(
         "runtime_install",
-        compact_runtime_install_payload(full, report_path.as_posix()),
+        compact_runtime_install_payload(full, report_path),
     )
 
 
-def compact_runtime_install_payload(full: dict[str, Any], report_path: str) -> dict[str, Any]:
-    """Keep the install outcome inline; the rebind runs (compose renders, docker
-    argv, container transcripts — historically >50k chars) live in the report."""
-    compact = {key: value for key, value in full.items() if key != "providerWatcherRebind"}
+def compact_runtime_install_payload(
+    full: dict[str, Any], report_path: str | None
+) -> dict[str, Any]:
+    """Project the whole install result onto the row's final answer fields.
+
+    Only the row's fields ride (``operation`` and any undeclared field stay
+    in the whole result for the report and the log); messages keep the first
+    five entries cut to the short-string bound each, with the rest counted
+    into the report; the rebind digest keeps attempted/ok and
+    phase/action/ok per run; the stores of removed parts keep their count,
+    their size and the sentences that name the command, and the list of the
+    stores stays in the report. ``log`` is attached by the response boundary.
+    """
+    compact = {key: value for key, value in full.items() if key in RUNTIME_INSTALL_ANSWER_FIELDS}
     messages = full.get("messages")
-    if isinstance(messages, list) and len(messages) > 5:
-        compact["messages"] = [*messages[:5], f"... {len(messages) - 5} more in the report"]
+    if "messages" in full and isinstance(messages, list):
+        kept = [message for message in messages[:5] if isinstance(message, str)]
+        cut = [
+            message
+            if len(message) <= TOOL_ANSWER_SHORT_STRING_MAX
+            else message[:TOOL_ANSWER_SHORT_STRING_MAX] + "…"
+            for message in kept
+        ]
+        if len(messages) > 5:
+            cut.append(f"... {len(messages) - 5} more in the report")
+        compact["messages"] = cut
     rebind = full.get("providerWatcherRebind")
     if isinstance(rebind, dict):
         compact["providerWatcherRebind"] = {
@@ -126,36 +203,11 @@ def compact_runtime_install_payload(full: dict[str, Any], report_path: str) -> d
                 if isinstance(run, dict)
             ],
         }
-    compact["reportPath"] = report_path
+    stores = full.get("removedPartStores")
+    if isinstance(stores, dict):
+        compact["removedPartStores"] = {
+            key: value for key, value in stores.items() if key != "stores"
+        }
+    if report_path is not None:
+        compact["reportPath"] = report_path
     return compact
-
-
-def resolve_context_payload(
-    config: McpRuntimeConfig,
-    task: TaskRef,
-    *,
-    worktree_name: str | None = None,
-    topology: str | None = None,
-) -> dict[str, Any]:
-    return _tool_payload(
-        "resolve_context",
-        resolve_context_tool(config, task, worktree_name=worktree_name, topology=topology),
-    )
-
-
-def skills_install_payload(
-    config: McpRuntimeConfig,
-    *,
-    dry_run: bool = False,
-    overwrite: bool = False,
-    archive_existing: bool = False,
-) -> dict[str, Any]:
-    return _tool_payload(
-        "skills_install",
-        skills_install_tool(
-            config,
-            dry_run=dry_run,
-            overwrite=overwrite,
-            archive_existing=archive_existing,
-        ),
-    )

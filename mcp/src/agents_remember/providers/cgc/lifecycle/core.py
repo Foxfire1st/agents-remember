@@ -112,31 +112,6 @@ def cgc_all_layouts_from_settings(
     return settings_path, provider_settings, layouts
 
 
-def cgc_project_layouts_from_settings(
-    args: argparse.Namespace,
-    primary_repo_id: str,
-) -> tuple[Path, dict[str, Any], list[CgcRuntimeLayout]]:
-    """Return all configured layouts with the target repo first for runner mounts."""
-
-    settings_path, provider_settings = cgc_settings_from_file(getattr(args, "from_settings", None))
-    roots = cgc_validated_roots(provider_settings)
-    primary = cgc_root_from_settings(provider_settings, primary_repo_id)
-    primary_stable = stable_provider_id(str(primary["repoId"]))
-    ordered_roots = [
-        primary,
-        *[root for root in roots if stable_provider_id(str(root["repoId"])) != primary_stable],
-    ]
-    layouts = [
-        cgc_runtime_layout_from_provider_settings(
-            coordination_root=args.coordination_root,
-            provider_settings=provider_settings,
-            root_settings=root_settings,
-        )
-        for root_settings in ordered_roots
-    ]
-    return settings_path, provider_settings, layouts
-
-
 def cgc_backend_settings(
     provider_settings: dict[str, Any], layout: CgcRuntimeLayout
 ) -> dict[str, Any]:

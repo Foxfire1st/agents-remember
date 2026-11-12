@@ -114,14 +114,6 @@ class InvariantRevision(KnowledgeModel):
 
 
 class StoredInvariantRevision(KnowledgeModel):
-    """A revision as read back from the store, with its decoded predecessor set."""
+    """A revision as read back from the store; its predecessor set is decoded in sorted order."""
 
     revision: InvariantRevision
-    predecessors_sorted: tuple[str, ...] = ()
-
-    @model_validator(mode="after")
-    def _require_sorted_predecessors(self) -> StoredInvariantRevision:
-        expected = tuple(sorted(self.revision.predecessors))
-        if self.predecessors_sorted != expected:
-            raise ValueError("predecessors_sorted must be the sorted predecessor set")
-        return self

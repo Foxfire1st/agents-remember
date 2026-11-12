@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from agents_remember.models.worktree import SyncKnowledgeConflict
+from agents_remember.models.worktree import (
+    SyncOmissionsProjection,
+    SyncSource,
+    SyncSourceProjection,
+)
+from agents_remember.worktrees.knowledge_crossing import crossing_summary
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.guidance import contract_next_args, recovery_guidance
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.sync_omission_report import OmissionReportError
+from agents_remember.worktrees.sync_parked_omissions import measure
 from agents_remember.worktrees.sync_transaction_authority import command_result, side_payload
 from agents_remember.worktrees.sync_transaction_git import (
     SyncGitProofError,
@@ -15,6 +22,7 @@ from agents_remember.worktrees.sync_transaction_git import (
 from agents_remember.worktrees.sync_transaction_recovery import (
     completed_sync_result,
     manual_repair_result,
+    with_recomputed_worklist,
 )
 from agents_remember.worktrees.sync_transaction_state import (
     SyncOperationRecord,
@@ -53,7 +61,22 @@ def sync_preview(
     code: SyncSideRecord,
     memory: SyncSideRecord | None,
     fetch: dict[str, object],
+    *,
+    sync_source: SyncSource | None = None,
 ) -> WorktreeCommandResult:
+    sources: dict[str, object] = {}
+    if sync_source:
+        # A repository-default preview names the mode, both resolved sources and their tips.
+        sources = {
+            "syncSource": sync_source,
+            "sources": {
+                side.side: SyncSourceProjection(
+                    branch=side.sourceBranch, commit=side.sourceCommit
+                ).model_dump(mode="json")
+                for side in (code, memory)
+                if side is not None
+            },
+        }
     return WorktreeCommandResult(
         0,
         {
@@ -63,6 +86,7 @@ def sync_preview(
             "code": side_payload(code),
             "memory": side_payload(memory),
             "fetch": fetch,
+            **sources,
         },
     )
 
@@ -82,10 +106,19 @@ def resolution_required(
     }
     if parked:
         resolution["wipRestore"] = True
-    knowledge = side.knowledgeConflict
-    if knowledge is not None:
-        resolution["knowledge"] = knowledge.model_dump(mode="json", exclude_none=True)
-    next_operation, next_args, summary = _resolution_guidance(record, side, parked, knowledge)
+    next_operation, next_args, summary = _resolution_guidance(record, side, parked)
+    if side.crossingReport:
+        crossing = crossing_summary(side.crossingReport)
+        resolution["crossing"] = crossing
+        kind = "a structural merge of knowledge files (MIK-R24 rule 8 step 3)"
+        if crossing.get("converted"):
+            kind = "a crossing sync (MIK-R24 rule 8)"
+        summary = (
+            f"{summary} This is {kind}: "
+            f"{crossing.get('conflictItems', '?')} conflicted item(s) are listed in "
+            f"{side.crossingReport}; every conflicted JSON item holds a 'crossing-conflict' "
+            "marker the knowledge validator refuses until it is resolved."
+        )
     return WorktreeCommandResult(
         2,
         {
@@ -94,9 +127,21 @@ def resolution_required(
             "resolutionOwner": "agent",
             "summary": summary,
             "resolution": resolution,
+            **(
+                {
+                    "validationRefusal": record.validationRefusal.model_dump(mode="json"),
+                }
+                if record.validationRefusal is not None
+                else {}
+            ),
             "nextOperation": next_operation,
             "nextTool": "worktree_sync",
             "nextArgs": next_args,
+            **(
+                {"omissions": _journaled_omissions(side).model_dump(mode="json", exclude_none=True)}
+                if side.omissionReport
+                else {}
+            ),
             "cancelArgs": {
                 "contract_path": record.contractPath,
                 "resolution_action": "cancel",
@@ -107,20 +152,25 @@ def resolution_required(
     )
 
 
+def _journaled_omissions(side: SyncSideRecord) -> SyncOmissionsProjection:
+    """The omission block a resumed resolution can still name: what the last continue journaled."""
+
+    return SyncOmissionsProjection(
+        side=side.side, report=side.omissionReport, omittedItems=side.omittedItems
+    )
+
+
 def _resolution_guidance(
     record: SyncOperationRecord,
     side: SyncSideRecord,
     parked: bool,
-    knowledge: SyncKnowledgeConflict | None,
 ) -> tuple[str, dict[str, object], str]:
     """The next move, its exact arguments, and the sentence that says what to do.
 
-    Three shapes, in the order they take precedence. A retained knowledge conflict that admits an
-    authored decision is the only one whose next move is the reconcile operation: repeating the
-    generic continuation against it is exactly the loop this replaced, so the advertised move names
-    the record the engine refused and the decisions that conflict admits, with the decision left as
-    a placeholder because choosing it is the agent's act and not this projection's. A parked
-    candidate reapply keeps the shipped continuation. Everything else is the shipped continuation.
+    A parked candidate reapply and a retained merge both end in the shipped continuation: the agent
+    resolves the files in the worktree, stages them, and continues. The parked sentence names the
+    stash as potentially the only saved copy of authoring the resolved tree lacks, and names the
+    recorded omission report when the last continue already found one.
     """
 
     continuation: dict[str, object] = {
@@ -128,26 +178,23 @@ def _resolution_guidance(
         "resolution_action": "continue",
         "dry_run": False,
     }
-    if knowledge is not None and knowledge.decisions:
-        return (
-            "reconcile_knowledge_resolution",
-            _reconcile_args(record, knowledge),
-            f"The retained {side.side} knowledge merge needs one authored decision: reconcile the "
-            f"conflict {_conflict_subject(knowledge)} the engine reported, then the merge continues.",
-        )
     if parked:
+        if side.omissionReport:
+            return (
+                "reconcile_sync_omissions",
+                continuation,
+                f"The last continue no longer held {side.omittedItems} parked authored item(s): "
+                f"the full report is at {side.omissionReport}. Reconcile those paths in the "
+                "worktree, or record each item's replacement or merged fact in that file, then "
+                "continue. The parked WIP stays in its stash, potentially its only saved copy, "
+                "until a continue reports it resolved.",
+            )
         return (
             "continue_sync_resolution",
             continuation,
             f"Resolve the parked {side.side} candidate reapply in its worktree, then continue; the "
-            "parked WIP stays in the stash until it is settled.",
-        )
-    if knowledge is not None:
-        return (
-            "continue_sync_resolution",
-            continuation,
-            f"The retained {side.side} merge holds a conflict no authored decision settles "
-            f"({_conflict_subject(knowledge)}): {_unsettled_instruction(knowledge)}",
+            "parked WIP stays in the stash until it is settled, and the stash is potentially its "
+            "only saved copy.",
         )
     return (
         "continue_sync_resolution",
@@ -156,118 +203,56 @@ def _resolution_guidance(
     )
 
 
-def _unsettled_instruction(knowledge: SyncKnowledgeConflict) -> str:
-    """What the caller has to do about a conflict no authored decision settles.
-
-    Two conflicts reach here and they need different work, so the sentence names which one this is.
-    A referential refusal whose retraction is unavailable is the orientation where the *arriving*
-    side removed a row the retained side still cites: the missing row is not something any arriving
-    insertion can account for, so the caller restores or removes the reference by hand in the
-    worktree dataset, stages it, and continues -- or cancels, which is the continuation the response
-    carries beside this one.
-    """
-
-    conflict = knowledge.conflict
-    if conflict is not None and conflict.precondition == "no_arriving_insertion":
-        return (
-            "the arriving side removed a row the retained side still references, and no arriving "
-            "insertion can be retracted to settle it, so restore the removed row or retract the "
-            "reference in the worktree, stage it, then continue"
-        )
-    return "resolve it in the worktree, stage it, then continue"
-
-
-def _reconcile_args(
-    record: SyncOperationRecord, knowledge: SyncKnowledgeConflict
-) -> dict[str, object]:
-    """The exact call that authors one decision, with the decision left to the agent.
-
-    The record and the decision list come from the journaled diagnosis rather than from anything
-    re-derived here, so the call the agent is handed names the same row the engine refused.
-    """
-
-    chosen: dict[str, object] = {"decision": "<" + "|".join(knowledge.decisions) + ">"}
-    conflict = knowledge.conflict
-    if conflict is not None and conflict.table and conflict.record_id:
-        chosen["table"] = conflict.table
-        chosen["record_id"] = conflict.record_id
-    return {
-        "contract_path": record.contractPath,
-        "resolution_action": "reconcile",
-        "knowledge_resolution": chosen,
-        "dry_run": False,
-    }
-
-
-def _conflict_subject(knowledge: SyncKnowledgeConflict) -> str:
-    """Name the refused row the way the diagnosis named it, or name the reason there is none."""
-
-    conflict = knowledge.conflict
-    if conflict is not None and conflict.table is not None:
-        return f"{conflict.code} on {conflict.table} {conflict.record_id}"
-    if conflict is not None:
-        return f"{conflict.code} on {knowledge.path}"
-    if knowledge.refusal is not None:
-        return f"{knowledge.refusal.code} on {knowledge.path}"
-    return f"{knowledge.path} ({knowledge.detail})"
-
-
-def reconcile_preview(side: SyncSideRecord, fetch: dict[str, object]) -> WorktreeCommandResult:
-    """Read-only preview of authoring a decision for the retained knowledge conflict.
-
-    The preview mutates nothing and does not predict the merge: it reports the conflict the journal
-    holds, the decisions it admits, and that the authored decision would be applied and the retained
-    merge validated afterwards. Whether the decision settles it is the merge's answer, not this
-    projection's.
-    """
-
-    knowledge = side.knowledgeConflict
-    assert knowledge is not None
-    return WorktreeCommandResult(
-        0,
-        {
-            "state": "would-reconcile-knowledge-conflict",
-            "summary": (
-                "Preview only; the authored decision would be applied to the retained conflict "
-                f"{_conflict_subject(knowledge)} and the retained merge validated afterwards."
-            ),
-            "resolution": {
-                "side": side.side,
-                "owner": "agent",
-                "worktree": side.worktree,
-                "files": list(side.conflictFiles),
-                "knowledge": knowledge.model_dump(mode="json", exclude_none=True),
-            },
-            "fetch": fetch,
-        },
-    )
-
-
 def parked_wip_validation_preview(
+    record: SyncOperationRecord,
     side: SyncSideRecord,
+    contract: WorktreeContract,
     fetch: dict[str, object],
 ) -> WorktreeCommandResult:
-    """Read-only preview of settling a parked-candidate reapply the agent resolved."""
+    """Read-only preview of settling a parked-candidate reapply the agent resolved.
+
+    The same inventory the continue would publish is measured here, so a preview reports the
+    omissions and the full report's path before any retirement; it writes no report. A report
+    the owner left unreadable refuses here exactly as the continue would.
+    """
 
     conflicts = content_conflicts(side)
-    ready = not conflicts
+    resolution: dict[str, object] = {
+        "side": side.side,
+        "owner": "agent",
+        "worktree": side.worktree,
+        "files": list(conflicts),
+        "wipRestore": True,
+    }
+    try:
+        omissions = measure(side, contract, record)
+    except OmissionReportError as error:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "sync-resolution-incomplete",
+                "summary": str(error),
+                "resolution": resolution,
+                "fetch": fetch,
+            },
+        )
+    ready = not conflicts and not omissions.omittedItems
+    if omissions.omittedItems:
+        summary = omissions.summary(side)
+    elif ready:
+        summary = (
+            "The parked candidate reapply is resolved; continuing retires its stash entry "
+            "and leaves the candidate uncommitted for closeout."
+        )
+    else:
+        summary = f"The parked {side.side} candidate reapply still has unmerged paths."
     return WorktreeCommandResult(
         0 if ready else 2,
         {
             "state": "would-settle-parked-wip" if ready else "sync-resolution-incomplete",
-            "summary": (
-                "The parked candidate reapply is resolved; continuing retires its stash entry "
-                "and leaves the candidate uncommitted for closeout."
-                if ready
-                else f"The parked {side.side} candidate reapply still has unmerged paths."
-            ),
-            "resolution": {
-                "side": side.side,
-                "owner": "agent",
-                "worktree": side.worktree,
-                "files": list(conflicts),
-                "wipRestore": True,
-            },
+            "summary": summary,
+            "resolution": resolution,
+            **({"omissions": omissions.as_payload()} if omissions.omittedItems else {}),
             "fetch": fetch,
         },
     )
@@ -290,10 +275,6 @@ def resolution_validation_preview(
         "owner": "agent",
         "files": list(conflicts),
     }
-    # The engine's explanation travels with every projection of the retained conflict, so a dry run
-    # answers "what is still unresolved" with the row that is unresolved rather than only the path.
-    if side.knowledgeConflict is not None:
-        resolution["knowledge"] = side.knowledgeConflict.model_dump(mode="json", exclude_none=True)
     return WorktreeCommandResult(
         0 if ready else 2,
         {
@@ -364,7 +345,7 @@ def terminal_resolution_replay(
             phase=record.phase,
         )
     if args.resolution_action == "continue":
-        return completed_sync_result(contract, record, fetch)
+        return with_recomputed_worklist(completed_sync_result(contract, record, fetch), contract)
     return command_result(
         2,
         "sync-already-completed",

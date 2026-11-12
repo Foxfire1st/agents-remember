@@ -1,1189 +1,695 @@
-import { memo, useState, type CSSProperties } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type RefObject,
+} from 'react';
 
-import {
-  Header,
-  ListBox,
-  ListBoxItem,
-  ListBoxSection,
-  ToggleButton,
-  ToggleButtonGroup,
-} from "react-aria-components";
+import { Header, ListBox, ListBoxItem, ListBoxSection } from 'react-aria-components';
 
-import { css, cva } from "../../../styled-system/css";
-import { fmtWait, hasLiveWorktree, type Pivot } from "../../data/selectors";
-import { servedAgeSeconds, useNowMs } from "../../data/servedAges";
-import { type OpenSession, useSessions } from "../../data/sessions";
-import { useDashboard } from "../../data/store";
+import { cx } from '../../../styled-system/css';
+import { selectHostActivityUnknown } from '../../data/selectors';
+import { dashboardStore, useDashboard } from '../../data/store';
+import { taskEntrySelectionKey } from '../../data/taskReference';
+import { Panel } from '../../grammar/Panel';
+import type { TaskEntry } from '../../types/projection';
+import type { AttentionAgentTarget } from '../AttentionQueue';
 import {
-  isOrchestrationDoc,
-  masterCommandNames,
-  orchestratorParentKey,
-  pathDir,
-  pathStem,
-  taskDocHierarchyLabel,
-  taskDocParentKey,
-} from "../../data/taskHierarchy";
-import {
-  findLifecycleEnclosure,
-  groupEnclosuresByLifecycle,
-  lifecycleSelectionKey,
-  parseTaskSelection,
-  seriesSelectionKey,
-  taskDocumentRefForDoc,
-  taskDocSelectionKey,
-  taskLabel,
-} from "../../data/taskIdentity";
-import { Dot } from "../../grammar/Dot";
-import { Panel } from "../../grammar/Panel";
-import { RankBadge, type RankTier } from "../../grammar/RankBadge";
-import type {
-  AgentPickupNode,
-  Analytics,
-  EnclosureNode,
-  LifecycleProjection,
-  SeriesNode,
-  TaskDocNode,
-} from "../../types/projection";
-import { AgentPickupIndicator } from "../AgentPickupIndicator";
-import {
-  ChatActivityIndicator,
-  summarizeChatActivity,
-  type ChatActivityIdentity,
-  type ChatActivitySummary,
-} from "../ChatActivityIndicator";
-import { TaskGroupDisclosure } from "../TaskGroupDisclosure";
-import { useCollapsedTaskGroups } from "../useCollapsedTaskGroups";
+  limitUntil,
+  statusLabel,
+  statusTitle,
+  statusTone,
+  taskStatusKey,
+  taskStatusReading,
+  TaskStatusWord,
+  TaskStatusClock,
+  underlyingStatusKey,
+  useTaskStatusInstant,
+  type TaskStatusReading,
+} from '../detail-panel/pageParts';
+import { activityPhrase } from '../detail-panel/activityPhrase';
+import { dim } from '../detail-panel/pageStyles';
+import { TaskGroupDisclosure } from '../TaskGroupDisclosure';
+import { useCollapsedTaskGroups } from '../useCollapsedTaskGroups';
+import { caretCell } from './columnLook';
+import { progressFigure, rowHover, shortTaskId } from './rowState';
+import { isFoldKey, treeItems, type TreeItem, type TreeView } from './treeRows';
 
-// The single unit list (note 01: the lifecycle is THE unit; note 06 IA). A BY REPO | BY PHASE pivot
-// (React Aria ToggleButtonGroup) over every lifecycle (fleeting + persistent), presented as a React
-// Aria ListBox so the 30+ rows are arrow-navigable + type-aheadable from the keyboard; selecting a
-// row drives the centre detail. A task-progress hint surfaces the work each lifecycle carries.
-const sizing = css({ flex: "1 1 0", minWidth: "0", overflowX: "hidden" });
-const headRow = css({
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: "0.5rem",
-  minWidth: "0",
-});
-const headTitle = css({ margin: "0" });
-const pivotBar = css({ display: "flex", gap: "0.25rem" });
-const pivotBtn = css({
-  font: "inherit",
-  fontSize: "0.7rem",
-  letterSpacing: "0.06em",
-  paddingInline: "0.45rem",
-  paddingBlock: "0.2rem",
-  background: "bg",
-  color: "muted",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "2px",
-  cursor: "pointer",
-  _selected: { color: "amber", borderColor: "amber" },
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
-});
-const listBox = css({
-  listStyle: "none",
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr)",
-  gap: "0.45rem",
-  width: "100%",
-  minWidth: "0",
-  margin: "0",
-  padding: "0",
-  outline: "none",
-});
-const section = css({
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr)",
-  gap: "0.12rem",
-  width: "100%",
-  minWidth: "0",
-});
-const groupHeader = css({
-  color: "amber",
-  fontSize: "0.74rem",
-  letterSpacing: "0.06em",
-  textTransform: "uppercase",
-  paddingBlock: "0.1rem",
-  minWidth: "0",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-});
-const row = cva({
-  base: {
-    position: "relative", // anchors the tier fold-corner pseudo-element
-    display: "flex",
-    alignItems: "baseline",
-    gap: "0.3rem",
-    width: "100%",
-    maxWidth: "100%",
-    minWidth: "0",
-    background: "bg",
-    borderLeftWidth: "2px",
-    borderLeftStyle: "solid",
-    borderLeftColor: "cyan",
-    paddingInline: "0.4rem",
-    paddingBlock: "0.25rem",
-    cursor: "pointer",
-    outline: "none",
-    _selected: { outline: "1px solid token(colors.amber)" },
-    _focusVisible: { outline: "1px solid token(colors.amber)" },
-  },
-  variants: {
-    fleeting: { true: { borderLeftStyle: "dashed", opacity: "0.85" } },
-    nested: {
-      true: {
-        paddingLeft: "1rem",
-        borderLeftColor: "grid",
-      },
+import { stepMarkStates } from '../detail-panel/model';
+import { StepMarks } from '../detail-panel/pageParts';
+import {
+  groupCount,
+  groupHeader,
+  indent,
+  listBox,
+  markCell,
+  rowFigure,
+  rowIdCell,
+  rowItem,
+  rowLine,
+  rowRepo,
+  rowTitle,
+  rowWordCell,
+  section,
+  sizing,
+  statusDot,
+  TaskPivotBar,
+  type Pivot,
+} from './columnPresentation';
+
+// The native task tree, grouped by repository or served status. Selecting a row
+// opens that entry; keyboard navigation and the approved column layout stay.
+//
+// The look is the one the developer approved (MIK-R144 rule 3b): a row is one line without a
+// frame (caret, mark, id, title, word, figure), the tree is indented by padding, and nothing
+// leaves the column. The head of the column carries the bell of the attention queue (rule 3a),
+// so the tree has the column's whole height. The measures are the approved pages' measures; see
+// columnLook.ts for how they are written.
+// The lines of completed ones the developer opened. Not remembered: the column opens with all of
+// them closed, and a line that holds the chosen document is open by itself.
+function useOpenFolds(): {
+  openFolds: ReadonlySet<string>;
+  toggleFold: (key: string) => void;
+  closeFold: (key: string) => void;
+} {
+  const [openFolds, setOpenFolds] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleFold = useCallback((key: string) => {
+    setOpenFolds((current) => {
+      const next = new Set(current);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  }, []);
+  const closeFold = useCallback((key: string) => {
+    setOpenFolds((current) => {
+      if (!current.has(key)) return current;
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
+  }, []);
+  return { openFolds, toggleFold, closeFold };
+}
+
+// The tree's open and closed parents and folds, and the toggles that change them. A held parent
+// or fold is drawn open, so its toggle closes it and ends its hold.
+function useTreeToggles(selectedKey: string | null) {
+  const { collapsedKeys, toggleCollapsed, collapse } = useCollapsedTaskGroups();
+  const { openFolds, toggleFold: flipFold, closeFold } = useOpenFolds();
+  const { released, release } = useReleasedHolds(selectedKey);
+  const toggleRow = useCallback(
+    (key: string, held: boolean) => {
+      if (!held) return toggleCollapsed(key);
+      release(key);
+      collapse(key);
     },
-    // The command treatment: a folded corner top-left, a tier ghost wash fading
-    // into the row bg, and — orchestration only — a gold top hairline. Renders ONLY on rows whose
-    // tier is set, i.e. when an orchestration task exists; flat runs never see it.
-    tier: {
-      orchestration: {
-        borderTopWidth: "1px",
-        borderTopStyle: "solid",
-        borderTopColor: "goldDim",
-        backgroundImage:
-          "linear-gradient(90deg, token(colors.goldGhost), token(colors.bg) 34%)",
-        _before: {
-          content: '""',
-          position: "absolute",
-          top: "0",
-          left: "0",
-          borderStyle: "solid",
-          borderWidth: "13px 13px 0 0",
-          borderColor: "token(colors.gold) transparent transparent transparent",
-        },
-      },
-      management: {
-        backgroundImage:
-          "linear-gradient(90deg, token(colors.purpleGhost), token(colors.bg) 30%)",
-        _before: {
-          content: '""',
-          position: "absolute",
-          top: "0",
-          left: "0",
-          borderStyle: "solid",
-          borderWidth: "13px 13px 0 0",
-          borderColor: "token(colors.purpleDim) transparent transparent transparent",
-        },
-      },
+    [collapse, release, toggleCollapsed],
+  );
+  const toggleFold = useCallback(
+    (key: string, held: boolean) => {
+      if (!held) return flipFold(key);
+      release(key);
+      closeFold(key);
     },
-  },
-});
-const rowId = css({
-  minWidth: "0",
-  flex: "1 1 0",
-  fontWeight: "600",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-});
-const rowSec = css({
-  flex: "0 1 2.6rem",
-  minWidth: "0",
-  maxWidth: "2.6rem",
-  color: "cyan",
-  fontSize: "0.76rem",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-});
-const rowGate = css({
-  minWidth: "0",
-  flex: "0 1 4rem",
-  maxWidth: "4rem",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  fontSize: "0.66rem",
-  color: "amber",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "amber",
-  borderRadius: "2px",
-  paddingInline: "0.28rem",
-  paddingBlock: "0.04rem",
-});
-const rowMeta = css({
-  flex: "0 1 4rem",
-  minWidth: "2.5rem",
-  maxWidth: "4rem",
-  color: "muted",
-  fontSize: "0.72rem",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-});
-function LifecycleListImpl({
-  selectedId,
+    [closeFold, flipFold, release],
+  );
+  return { view: { collapsedKeys, openFolds, selectedKey, released }, toggleRow, toggleFold };
+}
+
+const NO_KEYS: ReadonlySet<string> = new Set();
+
+// A click on any toggle opens or closes it (D309). A parent or fold that holds the chosen
+// document stands open over it (MIK-R144 rule 5) until its own toggle is used; the release lasts
+// while that document stays chosen, and the next chosen document is held open again.
+function useReleasedHolds(selectedKey: string | null): {
+  released: ReadonlySet<string>;
+  release: (key: string) => void;
+} {
+  const [state, setState] = useState<{ selection: string | null; keys: ReadonlySet<string> }>(
+    () => ({ selection: selectedKey, keys: NO_KEYS }),
+  );
+  // Every change of the chosen document ends the releases of the one before, in the render that
+  // sees it, so returning to an earlier document (A→B→A, A→none→A) brings none back
+  // (L168-R14-F01). The list renders each change of the chosen document, also while hidden.
+  if (state.selection !== selectedKey) setState({ selection: selectedKey, keys: NO_KEYS });
+  const release = useCallback(
+    (key: string) =>
+      setState((current) => ({
+        selection: selectedKey,
+        keys: new Set([...(current.selection === selectedKey ? current.keys : []), key]),
+      })),
+    [selectedKey],
+  );
+  return { released: state.selection === selectedKey ? state.keys : NO_KEYS, release };
+}
+
+// Reveal each selected task once, including a selection made by the page's drill-down.
+// A task without a visible row has nothing to reveal.
+function useRevealChosen(
+  listRef: RefObject<HTMLElement | null>,
+  chosenKey: string | null,
+  present: boolean,
+): void {
+  const shown = useRef<string | null>(null);
+  useEffect(() => {
+    const list = listRef.current;
+    if (!chosenKey || shown.current === chosenKey) return;
+    if (!list || !present) {
+      shown.current = chosenKey;
+      return;
+    }
+    const show = (): boolean => {
+      const options = list.querySelectorAll<HTMLElement>("[role='option']");
+      const chosen = [...options].find((option) => option.dataset.key === chosenKey);
+      if (!chosen) return false;
+      shown.current = chosenKey;
+      // jsdom has no scrollIntoView.
+      chosen.scrollIntoView?.({ block: 'nearest' });
+      // Arrow keys continue from the newly revealed selection.
+      chosen.focus({ preventScroll: true });
+      return true;
+    };
+    if (show()) return;
+    // The row of a parent that was closed is not in the page yet: React Aria builds its list in
+    // a pass of its own, after this one.
+    const observer = new MutationObserver(() => {
+      if (show()) observer.disconnect();
+    });
+    observer.observe(list, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [listRef, chosenKey, present]);
+}
+
+// → opens and ← closes the parent row that has the keyboard's focus: the one addition to what
+// the column does (MIK-R144 rule 5). A vertical list gives these two keys no other meaning. A
+// parent that the chosen document holds open closes as well (D309).
+function treeKey(event: KeyboardEvent, toggleRow: (key: string, held: boolean) => void): void {
+  const arrow = plainArrow(event);
+  if (!arrow) return;
+  const row =
+    event.target instanceof Element ? event.target.closest<HTMLElement>('[data-expanded]') : null;
+  const key = row?.dataset.key;
+  if (!row || !key) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const open = row.dataset.expanded === 'true';
+  if (open !== (arrow === 'open')) toggleRow(key, row.dataset.held !== undefined);
+}
+
+// What an arrow key asks of a parent row. With a modifier the two keys are the browser's (back,
+// forward) and the system's, and the row leaves them alone.
+function plainArrow(event: KeyboardEvent): 'open' | 'close' | null {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
+  if (event.key === 'ArrowRight') return 'open';
+  return event.key === 'ArrowLeft' ? 'close' : null;
+}
+
+// Memoized (tab-switch CPU): a persistent rail panel — the shell re-renders on every view
+// switch with unchanged props, and the memo gate skips this subtree then; the list's own store
+// subscriptions still drive its updates. A hidden list still renders a change of the chosen
+// document: that ends the released holds (useReleasedHolds), and none may pass unseen.
+export const LifecycleList = memo(
+  LifecycleListImpl,
+  (previous, next) =>
+    previous.selectedId === next.selectedId &&
+    previous.onOpenAgent === next.onOpenAgent &&
+    ((previous.active === false && next.active === false) ||
+      (previous.active === next.active && previous.onSelect === next.onSelect)),
+);
+
+const taskSnapshot = () => dashboardStore.getState().tasks;
+
+interface OperationGroup {
+  key: string;
+  label: string;
+  count: number;
+  items: TreeItem[];
+}
+
+// The column's head: the pivot switch and the attention bell. This is where a bell row's served
+// identity becomes the column's own navigation (L190-R1-F08, L190-R1-F09).
+//
+// A task row names the exact task document it is about; the list's selection is the taskdoc
+// identity every row here already uses (`taskEntrySelectionKey`), and the Operations page resolves
+// a task only from that identity (detail-panel/state.ts). The bell's key is therefore mapped here
+// and nowhere else — passing the raw key would select nothing.
+//
+// An agent row names an exact agent, and the rail has no chat surface of its own: the dashboard's
+// chat target belongs to the shell (the Chats view's launcher selection and its embedded frame).
+// So the way in is the shell's (`onOpenAgent`), and the row's served identities travel with it —
+// the seat's role is the selection's role and its task document is the selection's document. This
+// panel never writes the observed-chat channel (`frameTrayChannel.setFrameChat`): that records the
+// chat a frame reports showing, not a navigation request, and writing it would both fail to move
+// the frame and misstate the chat on screen.
+function TaskPivotHead({
+  count,
+  pivot,
+  onPivot,
   onSelect,
-  active = true,
+  onOpenAgent,
 }: {
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  active?: boolean;
+  count: number;
+  pivot: Pivot;
+  onPivot: (pivot: Pivot) => void;
+  onSelect: (key: string) => void;
+  onOpenAgent?: (target: AttentionAgentTarget) => void;
 }) {
-  const [pivot, setPivot] = useState<Pivot>("repo");
-  const { collapsedKeys, toggleCollapsed } = useCollapsedTaskGroups();
-  const lifecycles = useDashboard((s) => s.lifecycles);
-  const enclosures = useDashboard((s) => s.enclosures);
-  const analytics = useDashboard((s) => s.analytics);
-  const sessions = useSessions((state) => state.sessions);
-  // Row staleness advances locally between emissions — the change gate no longer
-  // re-serves a lifecycle every tick just because its age moved. A hidden kept-alive rail freezes
-  // this clock so its React Aria list does no background reconstruction.
-  const nowMs = useNowMs(10_000, active);
+  // One identity per shell callback: the bell's memo gate compares this prop, and a rebuild per
+  // render would re-render the bell on every visibility edge (the 260721 tab-switch cost).
+  const openTask = useCallback((key: string) => onSelect(taskEntrySelectionKey(key)), [onSelect]);
   return (
-    <LifecycleListRender
-      active={active}
-      selectedId={selectedId}
-      onSelect={onSelect}
+    <TaskPivotBar
+      count={count}
       pivot={pivot}
-      setPivot={setPivot}
-      collapsedKeys={collapsedKeys}
-      toggleCollapsed={toggleCollapsed}
-      lifecycles={lifecycles}
-      enclosures={enclosures}
-      analytics={analytics}
-      sessions={sessions}
-      nowMs={nowMs}
+      onPivot={onPivot}
+      onOpenTask={openTask}
+      onOpenAgent={onOpenAgent}
     />
   );
 }
 
-interface LifecycleListRenderProps {
-  active: boolean;
+/** What the column takes from its shell: its selection, and the ways in to a subject. */
+export interface LifecycleListProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
-  pivot: Pivot;
-  setPivot: (pivot: Pivot) => void;
-  collapsedKeys: ReadonlySet<string>;
-  toggleCollapsed: (key: string) => void;
-  lifecycles: Record<string, LifecycleProjection>;
-  enclosures: Record<string, EnclosureNode>;
-  analytics: Analytics | null;
-  sessions: OpenSession[];
-  nowMs: number;
+  /** The shell's way into an agent's chat; the row's exact seat and document travel with it. */
+  onOpenAgent?: (target: AttentionAgentTarget) => void;
+  active?: boolean;
 }
 
-const LifecycleListRender = memo(
-  function LifecycleListRender({
-    selectedId,
-    onSelect,
-    pivot,
-    setPivot,
-    collapsedKeys,
-    toggleCollapsed,
-    lifecycles,
-    enclosures,
-    analytics,
-    sessions,
-    nowMs,
-  }: LifecycleListRenderProps) {
-    const docs = analytics ? analytics.taskDocuments : [];
-    const series = analytics ? analytics.series : [];
-    const agentPickups = analytics ? analytics.agentPickups : [];
-    const enclosuresByLifecycle = groupEnclosuresByLifecycle(Object.values(enclosures));
-    const rows = operationRows({
-      lifecycles: Object.values(lifecycles),
-      lifecycleById: lifecycles,
-      enclosures,
-      enclosuresByLifecycle,
-      docs,
-      series,
-      agentPickups,
-      sessions,
-      nowMs,
-    });
-    const groups = groupRows(rows, pivot);
-    const selectedSelection = parseTaskSelection(selectedId, lifecycles, analytics);
-    const selectedKey = selectedSelection ? selectionKey(selectedSelection) : selectedId;
-
-    return (
+function LifecycleListImpl({
+  selectedId,
+  onSelect,
+  onOpenAgent,
+  active = true,
+}: LifecycleListProps) {
+  const subscribe = useCallback(
+    (changed: () => void) => (active ? dashboardStore.subscribe(changed) : () => {}),
+    [active],
+  );
+  const tasks = useSyncExternalStore(subscribe, taskSnapshot);
+  const [pivot, setPivot] = useState<Pivot>('repo');
+  const { view, toggleRow, toggleFold } = useTreeToggles(selectedId);
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list || !active) return;
+    const handle = (event: KeyboardEvent): void => treeKey(event, toggleRow);
+    list.addEventListener('keydown', handle);
+    return () => list.removeEventListener('keydown', handle);
+  }, [active, toggleRow]);
+  const groups = groupRows(tasks, pivot, view);
+  const present = groups.some((group) =>
+    group.items.some((item) => item.kind === 'row' && item.row.key === selectedId),
+  );
+  useRevealChosen(listRef, selectedId, present);
+  const select = (key: string): void => {
+    if (isFoldKey(key)) toggleFold(key, heldFold(groups, key));
+    else onSelect(key);
+  };
+  return (
+    <TaskStatusClock
+      // A limited row counts down, so it needs the clock even when the host timed no event.
+      active={
+        active &&
+        Object.values(tasks).some(
+          (entry) => Boolean(entry.eventAt) || taskStatusKey(entry) === 'limited',
+        )
+      }
+    >
       <Panel
-        testid="lifecycle-list"
         head={
-          <TaskPivotBar
-            count={rows.length}
+          <TaskPivotHead
+            count={Object.keys(tasks).length}
             pivot={pivot}
             onPivot={setPivot}
+            onSelect={onSelect}
+            onOpenAgent={onOpenAgent}
           />
         }
         className={sizing}
       >
-        {rows.length === 0 ? (
-          <p className="muted">No tasks.</p>
-        ) : (
+        <div ref={listRef} data-active={active}>
           <ListBox
-            className={listBox}
             aria-label="Tasks"
             selectionMode="single"
-            selectedKeys={selectedKey ? [selectedKey] : []}
+            selectedKeys={selectedId ? [selectedId] : []}
             onSelectionChange={(keys) => {
-              const id = [...keys][0];
-              if (typeof id === "string") onSelect(id);
+              const key = [...keys][0];
+              if (typeof key === 'string') select(key);
             }}
+            className={listBox}
           >
             {groups.map((group) => (
               <TaskGroupSection
                 key={group.key}
                 group={group}
-                pivot={pivot}
-                collapsedKeys={collapsedKeys}
-                onToggleCollapsed={toggleCollapsed}
+                flat={pivot === 'phase'}
+                showRepo={pivot === 'phase'}
+                tasks={tasks}
+                onToggleRow={toggleRow}
               />
             ))}
           </ListBox>
-        )}
+        </div>
       </Panel>
-    );
-  },
-  // Persist the last visible React Aria tree while the rail is display:none. Store subscriptions
-  // still update the cheap controller above, but changed catalog/projection props do not rebuild
-  // the hidden collection. Re-showing passes active=true and renders once from current truth.
-  (_previous, next) => !next.active,
-);
-
-// Memoized (tab-switch CPU): a persistent rail panel — the shell re-renders on every view
-// switch with unchanged props, and the memo gate skips this subtree then; the list's own store
-// subscriptions still drive its updates.
-export const LifecycleList = memo(LifecycleListImpl);
-
-interface OperationRowsInput {
-  lifecycles: LifecycleProjection[];
-  lifecycleById: Record<string, LifecycleProjection>;
-  enclosures: Record<string, EnclosureNode>;
-  enclosuresByLifecycle: Map<string, EnclosureNode>;
-  docs: TaskDocNode[];
-  series: SeriesNode[];
-  agentPickups: AgentPickupNode[];
-  sessions: OpenSession[];
-  nowMs: number; // the age-display clock — served staleness advances locally
-}
-
-interface OperationRow {
-  key: string;
-  label: string;
-  title: string;
-  repo: string;
-  phase: string;
-  secondary: string;
-  variant: string;
-  meta: string;
-  gate: string;
-  pickup?: AgentPickupNode;
-  chatIdentity: ChatActivityIdentity;
-  chatActivity?: ChatActivitySummary;
-  createdAt: string;
-  fallbackOrder: string;
-  parentKey?: string;
-  depth: number;
-  // The command tier: "orchestration" for a master doc carrying `orchestrates`,
-  // "management" for a master commanded by one. Unset (no insignia) everywhere else.
-  tier?: RankTier;
-  fleeting: boolean;
-  inferred: boolean;
-}
-
-// The 22px indent grammar: tier rows indent by their full depth; a non-tier row's
-// first level of nesting is today's `nested` padding (unchanged — the flat-run regression rule),
-// so only levels beyond it add margin (a leaf under a commanded master sits one step further).
-function indentStyle(item: Pick<OperationRow, "depth" | "tier">): CSSProperties | undefined {
-  const steps = item.tier ? item.depth : Math.max(0, item.depth - 1);
-  return steps > 0 ? { marginLeft: `${steps * 22}px` } : undefined;
-}
-
-interface OperationGroup {
-  key: string;
-  label: string;
-  rows: OperationRow[];
-}
-
-function operationRows(input: OperationRowsInput): OperationRow[] {
-  const representedLifecycleIds = new Set<string>();
-  // The identity rule: one task entry per enclosureId. A doc row that resolved through an
-  // enclosure CLAIMS that leaf; a lifecycle bound to the same enclosure annotates the claimed row
-  // (via the lifecycleForEnclosure fallback below) instead of rendering a second entry.
-  const representedEnclosureIds = new Set<string>();
-  const docPaths = new Set(input.docs.map((doc) => doc.docPath));
-  const docsByLifecycle = groupDocs(input.docs);
-  const pickupsByLifecycle = groupPickups(input.agentPickups);
-  const enclosureList = Object.values(input.enclosures);
-  // The visibility rule: a leaf is active while its worktree physically exists — the
-  // projection's stat'ed truth, never a cleanup-state proxy. Completed/abandoned worktrees are
-  // gone (hidden, as before), and a reopened contract (cleanup=reopened) has none until
-  // worktree_start recreates them, so it stays hidden like any other planned leaf.
-  const activeEnclosureList = enclosureList.filter(hasLiveWorktree);
-  const activeEnclosures = Object.fromEntries(
-    activeEnclosureList.map((item) => [item.enclosure, item]),
-  );
-  const activeEnclosuresByLifecycle = groupEnclosuresByLifecycle(activeEnclosureList);
-  const rows: OperationRow[] = [];
-
-  appendDocRows(
-    input,
-    rows,
-    representedLifecycleIds,
-    representedEnclosureIds,
-    activeEnclosureList,
-    enclosureList,
-    docPaths,
-    pickupsByLifecycle,
-  );
-  appendSeriesRows(
-    input,
-    rows,
-    representedLifecycleIds,
-    docPaths,
-    enclosureList,
-    pickupsByLifecycle,
-  );
-  appendLifecycleRows(
-    input,
-    rows,
-    representedLifecycleIds,
-    representedEnclosureIds,
-    docsByLifecycle,
-    pickupsByLifecycle,
-    activeEnclosures,
-    activeEnclosuresByLifecycle,
-    docPaths,
-  );
-
-  return rows
-    .map((item) => ({
-      ...item,
-      chatActivity: summarizeChatActivity(input.sessions, item.chatIdentity),
-    }))
-    .sort(compareRows);
-}
-
-function appendDocRows(
-  input: OperationRowsInput,
-  rows: OperationRow[],
-  representedLifecycleIds: Set<string>,
-  representedEnclosureIds: Set<string>,
-  activeEnclosureList: EnclosureNode[],
-  enclosureList: EnclosureNode[],
-  docPaths: Set<string>,
-  pickupsByLifecycle: ReturnType<typeof groupPickups>,
-): void {
-  for (const doc of input.docs) {
-    const enclosure = enclosureForDoc(doc, activeEnclosureList);
-    if (!isRootTaskDoc(doc) && !enclosure) continue;
-    const lifecycle =
-      runtimeForDoc(doc, input.lifecycleById, enclosureList) ??
-      (enclosure
-        ? lifecycleForEnclosure(enclosure, input.lifecycles, input.lifecycleById)
-        : undefined);
-    if (lifecycle) representedLifecycleIds.add(lifecycle.id);
-    if (enclosure) representedEnclosureIds.add(enclosure.enclosureId);
-    rows.push(
-      docRow(
-        doc,
-        lifecycle,
-        input.series,
-        docPaths,
-        pickupForLifecycle(lifecycle, pickupsByLifecycle),
-        input.docs,
-        input.nowMs,
-      ),
-    );
-  }
-}
-
-function appendSeriesRows(
-  input: OperationRowsInput,
-  rows: OperationRow[],
-  representedLifecycleIds: Set<string>,
-  docPaths: Set<string>,
-  enclosureList: EnclosureNode[],
-  pickupsByLifecycle: ReturnType<typeof groupPickups>,
-): void {
-  for (const series of input.series) {
-    if (docPaths.has(series.docPath)) continue;
-    const lifecycle = runtimeForDoc(series, input.lifecycleById, enclosureList);
-    if (lifecycle) representedLifecycleIds.add(lifecycle.id);
-    rows.push(
-      seriesRow(
-        series,
-        lifecycle,
-        pickupForLifecycle(lifecycle, pickupsByLifecycle),
-        input.docs,
-        input.nowMs,
-      ),
-    );
-  }
-}
-
-function appendLifecycleRows(
-  input: OperationRowsInput,
-  rows: OperationRow[],
-  representedLifecycleIds: Set<string>,
-  representedEnclosureIds: Set<string>,
-  docsByLifecycle: ReturnType<typeof groupDocs>,
-  pickupsByLifecycle: ReturnType<typeof groupPickups>,
-  activeEnclosures: Record<string, EnclosureNode>,
-  activeEnclosuresByLifecycle: Map<string, EnclosureNode>,
-  docPaths: Set<string>,
-): void {
-  for (const lifecycle of input.lifecycles) {
-    if (representedLifecycleIds.has(lifecycle.id)) continue;
-    const docs = docsByLifecycle.get(lifecycle.id) ?? [];
-    const enclosure = findLifecycleEnclosure(
-      lifecycle,
-      activeEnclosures,
-      activeEnclosuresByLifecycle,
-    );
-    // No live-worktree enclosure -> no task entry; an already-claimed enclosureId -> the doc row
-    // above IS this leaf's single entry (the lifecycle already annotates it).
-    if (!enclosure || representedEnclosureIds.has(enclosure.enclosureId)) continue;
-    representedEnclosureIds.add(enclosure.enclosureId);
-    rows.push(
-      lifecycleRow(
-        lifecycle,
-        docs,
-        enclosure,
-        pickupForLifecycle(lifecycle, pickupsByLifecycle),
-        input.series,
-        docPaths,
-        input.nowMs,
-      ),
-    );
-  }
-}
-
-function TaskPivotBar({
-  count,
-  pivot,
-  onPivot,
-}: {
-  count: number;
-  pivot: Pivot;
-  onPivot: (pivot: Pivot) => void;
-}) {
-  return (
-    <div className={headRow}>
-      <h2 className={headTitle}>Tasks · {count}</h2>
-      <ToggleButtonGroup
-        className={pivotBar}
-        selectionMode="single"
-        disallowEmptySelection
-        selectedKeys={[pivot]}
-        onSelectionChange={(keys) => {
-          const next = [...keys][0];
-          if (next === "repo" || next === "phase") onPivot(next);
-        }}
-        aria-label="Group tasks by"
-      >
-        <ToggleButton id="repo" className={pivotBtn}>
-          BY REPO
-        </ToggleButton>
-        <ToggleButton id="phase" className={pivotBtn}>
-          BY PHASE
-        </ToggleButton>
-      </ToggleButtonGroup>
-    </div>
+    </TaskStatusClock>
   );
 }
 
 function TaskGroupSection({
   group,
-  pivot,
-  collapsedKeys,
-  onToggleCollapsed,
+  flat,
+  showRepo,
+  tasks,
+  onToggleRow,
 }: {
   group: OperationGroup;
-  pivot: Pivot;
-  collapsedKeys: ReadonlySet<string>;
-  onToggleCollapsed: (key: string) => void;
+  flat: boolean;
+  showRepo: boolean;
+  tasks: Record<string, TaskEntry>;
+  onToggleRow: (key: string, held: boolean) => void;
 }) {
-  const descendantKeys = descendantBearingKeys(group.rows);
-  const visibleRows =
-    pivot === "repo" ? visibleHierarchyRows(group.rows, collapsedKeys) : group.rows;
   return (
-    <ListBoxSection key={group.key} className={section}>
-      <Header className={groupHeader}>{group.label}</Header>
-      {visibleRows.map((item) => (
-        <TaskRow
-          key={item.key}
-          item={item}
-          pivot={pivot}
-          hasDescendants={Boolean(
-            pivot === "repo" &&
-              item.secondary === "master" &&
-              descendantKeys.has(item.key),
-          )}
-          collapsed={collapsedKeys.has(item.key)}
-          onToggleCollapsed={onToggleCollapsed}
-        />
-      ))}
+    <ListBoxSection className={section}>
+      <Header className={groupHeader}>
+        {group.label}
+        <span className={cx(groupCount, dim)}>{group.count}</span>
+      </Header>
+      {group.items.map((item) =>
+        item.kind === 'fold' ? (
+          <FoldRow key={item.key} item={item} />
+        ) : (
+          <TaskRow
+            key={item.row.key}
+            item={item}
+            flat={flat}
+            showRepo={showRepo}
+            tasks={tasks}
+            onToggleRow={onToggleRow}
+          />
+        ),
+      )}
     </ListBoxSection>
+  );
+}
+
+type RowItem = Extract<TreeItem, { kind: 'row' }>;
+type FoldItem = Extract<TreeItem, { kind: 'fold' }>;
+
+// The caret of a parent row. BY PHASE has no tree and no caret; in the tree a row without
+// children keeps the caret's room.
+function RowCaret({
+  item,
+  flat,
+  onToggleRow,
+}: {
+  item: RowItem;
+  flat: boolean;
+  onToggleRow: (key: string, held: boolean) => void;
+}) {
+  if (flat) return null;
+  if (!item.hasChildren) return <span className={caretCell} aria-hidden="true" />;
+  return (
+    <TaskGroupDisclosure
+      label={item.row.entry.title}
+      collapsed={item.collapsed}
+      onToggle={() => onToggleRow(item.row.key, item.held)}
+    />
+  );
+}
+
+function RowMark({ entry, reading }: { entry: TaskEntry; reading: TaskStatusReading }) {
+  return (
+    <span
+      className={markCell}
+      // The mark speaks the word the row shows at the same display instant, with the exact served
+      // end beside it while the seat is limited (MIK-R190 rule 13).
+      aria-label={`Task progress: ${statusTitle(reading.shown, limitUntil(entry))}`}
+      data-testid="task-state"
+    >
+      <span className={statusDot({ tone: statusTone(reading.shown) })} aria-hidden="true" />
+    </span>
   );
 }
 
 function TaskRow({
   item,
-  pivot,
-  hasDescendants,
-  collapsed,
-  onToggleCollapsed,
+  flat,
+  showRepo,
+  tasks,
+  onToggleRow,
 }: {
-  item: OperationRow;
-  pivot: Pivot;
-  hasDescendants: boolean;
-  collapsed: boolean;
-  onToggleCollapsed: (key: string) => void;
+  item: RowItem;
+  flat: boolean;
+  showRepo: boolean;
+  tasks: Record<string, TaskEntry>;
+  onToggleRow: (key: string, held: boolean) => void;
 }) {
-  const secondary = pivot === "repo" ? item.secondary : item.repo;
+  const row = item.row;
+  const entry = row.entry;
+  const { id, form, tier } = rowPresentation(entry, tasks, flat);
   return (
     <ListBoxItem
-      key={item.key}
-      id={item.key}
-      textValue={item.label}
-      className={row({
-        fleeting: item.fleeting,
-        // Tier rows carry the command treatment and indent by margin (below); non-tier
-        // nesting keeps today's leaf look untouched (the flat-run regression rule).
-        nested: item.depth > 0 && !item.tier,
-        tier: item.tier,
-      })}
-      style={indentStyle(item)}
-      data-depth={item.depth}
-      data-parent-key={item.parentKey}
-      data-tier={item.tier}
+      id={row.key}
+      isDisabled={!entry.reference}
+      textValue={id && entry.parent ? `${id} ${entry.title}` : entry.title}
+      className={rowItem}
+      data-depth={row.depth}
+      data-parent-key={row.parentKey}
+      data-tier={tier}
+      data-expanded={expandedValue(item, flat)}
+      data-held={item.held ? '' : undefined}
+      // The mark is for the eye; the reveal gives the row the keyboard's focus. (A React Aria
+      // list item passes no `aria-current` on.)
     >
-      {hasDescendants ? (
-        <TaskGroupDisclosure
-          label={item.label}
-          collapsed={collapsed}
-          onToggle={() => onToggleCollapsed(item.key)}
-        />
-      ) : null}
-      <span
-        aria-label={`Task progress: ${item.variant}; phase: ${item.phase}`}
-        title={`Task progress: ${item.variant}; phase: ${item.phase}`}
-        data-testid="task-state"
-      >
-        <Dot variant={item.variant} />
-      </span>
-      {item.tier ? <RankBadge tier={item.tier} size="row" /> : null}
-      <span className={rowId} title={item.title}>
-        {item.label}
-      </span>
-      <span className={rowSec}>{secondary}</span>
-      <ChatActivityIndicator summary={item.chatActivity} />
-      <AgentPickupIndicator pickup={item.pickup} />
-      {item.gate ? <span className={rowGate}>{item.gate}</span> : null}
-      <span className={rowMeta}>
-        {item.meta}
-        {item.inferred ? " · inf" : ""}
-      </span>
+      <TaskRowLine
+        item={item}
+        id={id}
+        form={form}
+        flat={flat}
+        showRepo={showRepo}
+        onToggleRow={onToggleRow}
+      />
     </ListBoxItem>
   );
 }
 
-// The command facts for a master-shaped row: an orchestration doc IS the gold tier; a master
-// named in some orchestration doc's `orchestrates` takes the purple tier and nests under it. Docs
-// commanded by nothing carry neither — the whole treatment vanishes in a flat run.
-function commandFacts(
-  doc: Pick<TaskDocNode, "kind" | "docPath" | "id" | "title" | "orchestrates">,
-  allDocs: TaskDocNode[],
-): { tier?: RankTier; parentKey?: string } {
-  if (doc.kind !== "master") return {};
-  if (isOrchestrationDoc(doc)) return { tier: "orchestration" };
-  const commander = orchestratorParentKey(masterCommandNames(doc), allDocs, doc.docPath);
-  return commander ? { tier: "management", parentKey: commander } : {};
+function expandedValue(item: RowItem, flat: boolean): string | undefined {
+  return item.hasChildren && !flat ? String(!item.collapsed) : undefined;
 }
 
-function taskRepo(doc: TaskDocNode, lifecycle: LifecycleProjection | undefined): string {
-  return doc.repository || lifecycle?.repoId || "—";
-}
-
-function taskPhase(
-  doc: TaskDocNode,
-  lifecycle: LifecycleProjection | undefined,
-): string {
-  return lifecycle?.phase ?? doc.status;
-}
-
-function taskVariant(
-  doc: TaskDocNode,
-  lifecycle: LifecycleProjection | undefined,
-): string {
-  return lifecycle?.state ?? statusVariant(doc.status);
-}
-
-function taskGate(lifecycle: LifecycleProjection | undefined): string {
-  return gateHint(lifecycle?.gate?.kind);
-}
-
-function taskChatIdentity(
-  doc: TaskDocNode,
-  lifecycle: LifecycleProjection | undefined,
-): ChatActivityIdentity {
+function rowPresentation(entry: TaskEntry, tasks: Record<string, TaskEntry>, flat: boolean) {
+  const form = entry.summary?.form ?? 'task';
   return {
-    ...(taskDocumentRefForDoc(doc) ? { taskDocumentRef: taskDocumentRefForDoc(doc) } : {}),
-    ...(lifecycle ? { lifecycleId: lifecycle.id } : {}),
+    id: flat ? (form === 'task' ? entry.id : '') : shortTaskId(entry, tasks),
+    form,
+    tier: rowTier(entry, tasks),
   };
 }
 
-function docRow(
-  doc: TaskDocNode,
-  lifecycle: LifecycleProjection | undefined,
-  seriesList: SeriesNode[],
-  masterDocPaths: Set<string>,
-  pickup: AgentPickupNode | undefined,
-  allDocs: TaskDocNode[],
-  nowMs: number,
-): OperationRow {
-  const progress = doc.kind === "master" ? subTaskProgress(doc.subTasks) : taskStepProgress(doc);
-  const label = taskDocHierarchyLabel(doc, seriesList);
-  const repo = taskRepo(doc, lifecycle);
-  const phase = taskPhase(doc, lifecycle);
-  const variant = taskVariant(doc, lifecycle);
-  const gate = taskGate(lifecycle);
-  const command = commandFacts(doc, allDocs);
-  return {
-    key: taskDocSelectionKey(doc.docPath),
-    label,
-    title: taskTitle({
-      label,
-      lifecycle,
-      state: variant,
-      phase,
-      repo,
-      gate,
-      currentStep: doc.currentStep,
-    }),
-    repo,
-    phase,
-    secondary: doc.kind,
-    variant,
-    meta: rowMetaText(
-      progressHint(progress, doc.discardedCount ?? 0),
-      doc.status,
-      servedAgeSeconds(lifecycle, lifecycle?.staleSeconds, nowMs),
-    ),
-    gate,
-    pickup,
-    chatIdentity: taskChatIdentity(doc, lifecycle),
-    createdAt: doc.createdAt,
-    fallbackOrder: doc.docPath,
-    parentKey: command.parentKey ?? taskDocParentKey(doc, seriesList, masterDocPaths),
-    depth: 0,
-    tier: command.tier,
-    fleeting: lifecycle?.fleeting ?? false,
-    inferred: lifecycle?.inferred ?? false,
-  };
+function rowTier(entry: TaskEntry, tasks: Record<string, TaskEntry>) {
+  if (entry.summary?.form === 'sprint') return 'orchestration';
+  if (
+    entry.summary?.form === 'master' &&
+    entry.parent &&
+    tasks[entry.parent]?.summary?.form === 'sprint'
+  )
+    return 'management';
+  return undefined;
 }
 
-function seriesRow(
-  series: SeriesNode,
-  lifecycle: LifecycleProjection | undefined,
-  pickup: AgentPickupNode | undefined,
-  allDocs: TaskDocNode[],
-  nowMs: number,
-): OperationRow {
-  const repo = series.repository ?? lifecycle?.repoId ?? "—";
-  const phase = lifecycle?.phase ?? series.status;
-  const variant = lifecycle?.state ?? statusVariant(series.status);
-  const gate = taskGate(lifecycle);
-  const flags = lifecycleFlags(lifecycle);
-  // A folder-keyed series fallback row is still a master seat: it answers to its seriesId (the
-  // task folder), its title, or its doc folder when an orchestration doc names it.
-  const commander = seriesCommanderParent(series, allDocs);
-  return {
-    key: seriesSelectionKey(series.seriesId),
-    label: series.title,
-    title: taskTitle({
-      label: series.title,
-      lifecycle,
-      state: variant,
-      phase,
-      repo,
-      gate,
-    }),
-    repo,
-    phase,
-    secondary: "master",
-    variant,
-    meta: rowMetaText(
-      progressHint(
-        { done: series.doneCount, total: series.totalCount },
-        series.discardedCount,
-      ),
-      series.status,
-      servedAgeSeconds(lifecycle, lifecycle?.staleSeconds, nowMs),
-    ),
-    gate,
-    pickup,
-    chatIdentity: seriesChatIdentity(lifecycle),
-    createdAt: series.createdAt,
-    fallbackOrder: series.docPath,
-    parentKey: commander,
-    depth: 0,
-    tier: commander ? "management" : undefined,
-    fleeting: flags.fleeting,
-    inferred: flags.inferred,
-  };
-}
-
-function seriesCommanderParent(
-  series: SeriesNode,
-  allDocs: TaskDocNode[],
-): string | undefined {
-  return orchestratorParentKey(
-    [
-      series.seriesId,
-      series.title,
-      pathDir(series.docPath).split("/").filter(Boolean).pop() ?? "",
-    ].filter(Boolean),
-    allDocs,
+function TaskRowLine({
+  item,
+  id,
+  form,
+  flat,
+  showRepo,
+  onToggleRow,
+}: {
+  item: RowItem;
+  id: string;
+  form: string;
+  flat: boolean;
+  showRepo: boolean;
+  onToggleRow: (key: string, held: boolean) => void;
+}) {
+  const row = item.row;
+  const entry = row.entry;
+  // MIK-R175 rule 1: no `title` on the row line or on the figure box, because either one is an
+  // ancestor of the step dots and the browser would show it over them. The hover text lives on
+  // the cells beside the marks instead (rule 2), so the rest of the row keeps it.
+  // MIK-R190 rule 13: the hover, the mark and the word read the one shared display instant, so a
+  // reached window says paused in all three at once.
+  const now = useTaskStatusInstant();
+  const reading = taskStatusReading(entry, now);
+  const hover = rowHover(entry, now);
+  return (
+    <div className={rowLine} style={indent(row.depth)}>
+      <RowCaret item={item} flat={flat} onToggleRow={onToggleRow} />
+      <RowMark entry={entry} reading={reading} />
+      {id ? (
+        <span className={rowIdCell({ long: flat })} title={hover}>
+          {id}
+        </span>
+      ) : null}
+      <span
+        className={rowTitle({ weight: form === 'task' ? undefined : 'parent' })}
+        data-part="title"
+        title={hover}
+      >
+        {entry.title}
+      </span>
+      {showRepo ? (
+        <span className={rowRepo} title={hover}>
+          {entry.reference?.repository}
+        </span>
+      ) : null}
+      <span
+        className={rowWordCell({ tone: taskStatusKey(entry) === 'works' ? 'run' : 'rest' })}
+        title={hover}
+      >
+        <TaskStatusWord task={entry} testid="task-word" mark={false} />
+      </span>
+      <RowFigure entry={entry} form={form} hover={hover} />
+    </div>
   );
 }
 
-function lifecycleFlags(
-  lifecycle: LifecycleProjection | undefined,
-): { fleeting: boolean; inferred: boolean } {
-  return {
-    fleeting: lifecycle?.fleeting ?? false,
-    inferred: lifecycle?.inferred ?? false,
-  };
+function RowFigure({ entry, form, hover }: { entry: TaskEntry; form: string; hover: string }) {
+  const hostUnknown = useDashboard(selectHostActivityUnknown);
+  const figure = progressFigure(entry);
+  return (
+    <span className={cx(rowFigure, dim)}>
+      {form === 'task' ? (
+        <StepMarks
+          states={stepMarkStates(entry.summary?.steps ?? [])}
+          steps={entry.summary?.steps}
+        />
+      ) : null}
+      {form === 'task' || hostUnknown ? null : (
+        <span data-testid="child-activity">
+          {activityPhrase(entry.counts)} ·{' '}
+        </span>
+      )}
+      {figure ? <span title={hover}>{figure}</span> : null}
+    </span>
+  );
 }
 
-function seriesChatIdentity(
-  lifecycle: LifecycleProjection | undefined,
-): { lifecycleId?: string } {
-  return lifecycle ? { lifecycleId: lifecycle.id } : {};
+function foldText(item: FoldItem): string {
+  const { aborted } = item.counts;
+  const completed = `${item.counts.completed} completed`;
+  return aborted > 0 ? `${completed}, ${aborted} aborted` : completed;
 }
 
-function lifecycleRow(
-  lifecycle: LifecycleProjection,
-  docs: TaskDocNode[],
-  enclosure: EnclosureNode | undefined,
-  pickup: AgentPickupNode | undefined,
-  seriesList: SeriesNode[],
-  masterDocPaths: Set<string>,
-  nowMs: number,
-): OperationRow {
-  const label = taskLabel(lifecycle, docs, enclosure);
-  const repo = lifecycle.repoId ?? "—";
-  const gate = gateHint(lifecycle.gate?.kind);
-  const currentStep = docs.length === 1 ? docs[0].currentStep : undefined;
-  return {
-    key: lifecycleSelectionKey(lifecycle.id),
-    label,
-    title: taskTitle({
-      label,
-      lifecycle,
-      state: lifecycle.state,
-      phase: lifecycle.phase,
-      repo,
-      gate,
-      currentStep,
-    }),
-    repo,
-    phase: lifecycle.phase,
-    secondary: lifecycle.phase,
-    variant: lifecycle.state,
-    meta: rowMetaText(taskHint(docs), "", servedAgeSeconds(lifecycle, lifecycle.staleSeconds, nowMs)),
-    gate,
-    pickup,
-    chatIdentity: {
-      ...(docs.length === 1 && taskDocumentRefForDoc(docs[0])
-        ? { taskDocumentRef: taskDocumentRefForDoc(docs[0]) }
-        : {}),
-      lifecycleId: lifecycle.id,
-    },
-    createdAt: lifecycle.startedAt,
-    fallbackOrder: lifecycle.id,
-    // A lifecycle with an enclosure but no matching doc (e.g. a reopened/orphaned leaf) still
-    // belongs under its master; carry the parent so it nests instead of floating top-level.
-    parentKey: masterParentKeyForEnclosure(enclosure, seriesList, masterDocPaths),
-    depth: 0,
-    fleeting: lifecycle.fleeting,
-    inferred: lifecycle.inferred,
-  };
+function foldHover(item: FoldItem): string {
+  return `${item.open ? 'Hide' : 'Show'} ${foldText(item)}`;
 }
 
-// The master a worktree enclosure belongs to: its `taskRoot` is the master task folder and the
-// master series doc lives directly in it. Mirrors taskHierarchy's parentSelectionKey so an orphaned
-// lifecycle row nests under the same master node a normal subtask doc would.
-function masterParentKeyForEnclosure(
-  enclosure: EnclosureNode | undefined,
-  seriesList: SeriesNode[],
-  masterDocPaths: Set<string>,
-): string | undefined {
-  if (!enclosure) return undefined;
-  const series = seriesList.find((item) => pathDir(item.docPath) === enclosure.taskRoot);
-  if (!series) return undefined;
-  return masterDocPaths.has(series.docPath)
-    ? taskDocSelectionKey(series.docPath)
-    : seriesSelectionKey(series.seriesId);
+// A fold that holds the chosen document is drawn open, so its toggle closes it (D309).
+function heldFold(groups: OperationGroup[], key: string): boolean {
+  return groups.some((group) =>
+    group.items.some((item) => item.kind === 'fold' && item.key === key && item.held),
+  );
 }
 
-function groupRows(rows: OperationRow[], pivot: Pivot): OperationGroup[] {
-  const byKey = new Map<string, OperationRow[]>();
-  for (const item of rows) {
-    const key = pivot === "repo" ? item.repo : item.phase;
-    const group = byKey.get(key);
-    if (group) group.push(item);
-    else byKey.set(key, [item]);
+function FoldRow({ item }: { item: FoldItem }) {
+  const text = foldText(item);
+  return (
+    <ListBoxItem
+      id={item.key}
+      textValue={text}
+      // The caret is a sign for the eye; the name says the same in words.
+      aria-label={`${text}, ${item.open ? 'shown' : 'hidden'}`}
+      className={rowItem}
+      data-depth={item.depth}
+      data-fold={item.open ? 'open' : 'closed'}
+    >
+      <div className={rowLine} style={indent(item.depth)} title={foldHover(item)}>
+        <span className={caretCell} aria-hidden="true">
+          {item.open ? '▾' : '▸'}
+        </span>
+        <span className={markCell}>
+          <span className={statusDot({ tone: 'done' })} aria-hidden="true" />
+        </span>
+        <span className={rowTitle({ weight: 'fold' })}>{text}</span>
+      </div>
+    </ListBoxItem>
+  );
+}
+
+/** Group the served entries, without rebuilding their parent relation or status. */
+function appendMembers(
+  root: TaskEntry,
+  tasks: Record<string, TaskEntry>,
+  pivot: Pivot,
+  seen: Set<string>,
+  members: TaskEntry[],
+) {
+  const pending = [root];
+  while (pending.length) {
+    const entry = pending.pop()!;
+    if (seen.has(entry.key)) continue;
+    seen.add(entry.key);
+    members.push(entry);
+    if (pivot === 'repo') {
+      for (const child of [...entry.children].reverse()) {
+        if (tasks[child]) pending.push(tasks[child]);
+      }
+    }
   }
-  return [...byKey.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
+}
+
+function groupedEntries(tasks: Record<string, TaskEntry>, pivot: Pivot): Map<string, TaskEntry[]> {
+  const byKey = new Map<string, TaskEntry[]>();
+  const seen = new Set<string>();
+  for (const root of Object.values(tasks)) {
+    if (pivot === 'repo' && root.parent && tasks[root.parent]) continue;
+    const key = pivot === 'repo' ? (root.reference?.repository ?? '') : underlyingStatusKey(root);
+    const members = byKey.get(key) ?? [];
+    appendMembers(root, tasks, pivot, seen, members);
+    byKey.set(key, members);
+  }
+  return byKey;
+}
+
+const PHASE_ORDER = ['works', 'waiting', 'paused', 'unknown', 'started', 'planned', 'completed', 'aborted'];
+
+function groupRows(
+  tasks: Record<string, TaskEntry>,
+  pivot: Pivot,
+  view: Omit<TreeView, 'scope'>,
+): OperationGroup[] {
+  return [...groupedEntries(tasks, pivot)]
     .map(([key, members]) => ({
       key,
-      label: key,
-      rows: pivot === "repo" ? hierarchyRows(members) : members.sort(compareRows),
-    }));
-}
-
-// Depth-first hierarchy flatten. Historically two levels (master > leaf); the orchestration
-// tier adds a third (orchestration > master > leaf), so this walks parent links to any depth.
-// A `seen` guard plus the trailing sweep keep pathological parent data (a cycle, e.g. two
-// orchestration docs naming each other) from dropping rows: unreachable rows append top-level.
-function hierarchyRows(rows: OperationRow[]): OperationRow[] {
-  const byParent = new Map<string, OperationRow[]>();
-  const byKey = new Map(rows.map((item) => [item.key, item]));
-  for (const item of rows) {
-    if (!item.parentKey || !byKey.has(item.parentKey) || item.parentKey === item.key) continue;
-    const children = byParent.get(item.parentKey);
-    if (children) children.push(item);
-    else byParent.set(item.parentKey, [item]);
-  }
-  const roots = rows
-    .filter((item) => !item.parentKey || !byKey.has(item.parentKey) || item.parentKey === item.key)
-    .sort(compareRows);
-  const out: OperationRow[] = [];
-  const seen = new Set<string>();
-  const visit = (item: OperationRow, depth: number) => {
-    if (seen.has(item.key)) return;
-    seen.add(item.key);
-    out.push({ ...item, depth });
-    for (const child of (byParent.get(item.key) ?? []).sort(compareRows)) {
-      visit(child, depth + 1);
-    }
-  };
-  for (const root of roots) visit(root, 0);
-  for (const item of [...rows].sort(compareRows)) {
-    if (!seen.has(item.key)) visit(item, 0);
-  }
-  return out;
-}
-
-function descendantBearingKeys(rows: OperationRow[]): Set<string> {
-  const rowKeys = new Set(rows.map((item) => item.key));
-  return new Set(
-    rows
-      .map((item) => item.parentKey)
-      .filter((key): key is string => key !== undefined && rowKeys.has(key)),
-  );
-}
-
-// hierarchyRows is depth-first, so collapsed depths form the complete ancestor stack for each row.
-// Hidden parents are still visited here, preserving their independent collapse state for later.
-function visibleHierarchyRows(
-  rows: OperationRow[],
-  collapsedKeys: ReadonlySet<string>,
-): OperationRow[] {
-  const collapsedByDepth: boolean[] = [];
-  return rows.filter((item) => {
-    collapsedByDepth.length = item.depth;
-    const hidden = collapsedByDepth.includes(true);
-    collapsedByDepth[item.depth] = collapsedKeys.has(item.key);
-    return !hidden;
-  });
-}
-
-function selectionKey(selection: ReturnType<typeof parseTaskSelection>): string | null {
-  if (!selection) return null;
-  if (selection.kind === "taskdoc") return taskDocSelectionKey(selection.docPath);
-  if (selection.kind === "series") return seriesSelectionKey(selection.seriesId);
-  return lifecycleSelectionKey(selection.lifecycleId);
-}
-
-// The row's gate chip is the DURABLE gate kind only. The wait-loop-era fallback to the lifecycle's bare
-// `ask` payload (the question string, else the literal "ask") was retired with notify-and-continue: the
-// attention queue carries the notification and GateResponder owns durable gates, so a bare `ask` no
-// longer renders a gate affordance in the tasks row.
-function gateHint(kind: string | undefined): string {
-  return kind ?? "";
-}
-
-function taskTitle(facts: {
-  label: string;
-  lifecycle?: LifecycleProjection;
-  state: string;
-  phase: string;
-  repo: string;
-  gate: string;
-  currentStep?: string;
-}): string {
-  const lines = [`Title: ${facts.label}`];
-  if (facts.lifecycle) lines.push(`Lifecycle: ${facts.lifecycle.id}`);
-  lines.push(`State: ${facts.lifecycle?.state ?? facts.state}`);
-  lines.push(`Phase: ${facts.lifecycle?.phase ?? facts.phase}`);
-  if (facts.repo && facts.repo !== "—") lines.push(`Repo: ${facts.repo}`);
-  if (facts.gate) lines.push(`Gate: ${facts.gate}`);
-  if (facts.currentStep) lines.push(`Current step: ${facts.currentStep}`);
-  return lines.join("\n");
-}
-
-function groupDocs(docs: TaskDocNode[]): Map<string, TaskDocNode[]> {
-  const byLifecycle = new Map<string, TaskDocNode[]>();
-  for (const doc of docs) {
-    if (!doc.lifecycleId) continue;
-    const list = byLifecycle.get(doc.lifecycleId);
-    if (list) list.push(doc);
-    else byLifecycle.set(doc.lifecycleId, [doc]);
-  }
-  return byLifecycle;
-}
-
-function groupPickups(pickups: AgentPickupNode[]): Map<string, AgentPickupNode[]> {
-  const byLifecycle = new Map<string, AgentPickupNode[]>();
-  for (const pickup of pickups) {
-    if (!pickup.lifecycleId) continue;
-    const list = byLifecycle.get(pickup.lifecycleId);
-    if (list) list.push(pickup);
-    else byLifecycle.set(pickup.lifecycleId, [pickup]);
-  }
-  return byLifecycle;
-}
-
-function pickupForLifecycle(
-  lifecycle: LifecycleProjection | undefined,
-  byLifecycle: Map<string, AgentPickupNode[]>,
-): AgentPickupNode | undefined {
-  if (!lifecycle) return undefined;
-  return byLifecycle.get(lifecycle.id)?.[0];
-}
-
-function taskHint(docs: TaskDocNode[]): string {
-  if (docs.length > 1) return `series ${docs.length}`; // a multi-task series (subtask slices)
-  if (docs.length === 1) return progressHint(taskStepProgress(docs[0])); // single task progress
-  return "";
-}
-
-function runtimeForDoc(
-  doc: Pick<TaskDocNode, "docPath" | "lifecycleId">,
-  lifecycles: Record<string, LifecycleProjection>,
-  enclosures: EnclosureNode[],
-): LifecycleProjection | undefined {
-  if (doc.lifecycleId) return lifecycles[doc.lifecycleId];
-  const dir = pathDir(doc.docPath);
-  const enclosure = enclosures.find(
-    (item) =>
-      item.taskRoot === dir &&
-      (item.lifecycleId === item.taskId || item.lifecycleId === item.taskName),
-  );
-  return enclosure ? lifecycles[enclosure.lifecycleId] : undefined;
-}
-
-function isRootTaskDoc(doc: Pick<TaskDocNode, "kind" | "docPath">): boolean {
-  return doc.kind === "master" || pathStem(doc.docPath) === "task";
-}
-
-function enclosureForDoc(
-  doc: Pick<TaskDocNode, "id" | "docPath" | "lifecycleId">,
-  enclosures: EnclosureNode[],
-): EnclosureNode | undefined {
-  const dir = pathDir(doc.docPath);
-  // Enclosure leaf ids are lowercase directory names while doc ids are
-  // uppercase: every leafId comparison here is case-insensitive, matching the
-  // normalization RailChat and the change-set bar already use. Exact joins only: since
-  // task_reopen, reopening a leaf reuses its EXACT leaf id, so the old `-rN`
-  // suffix admission heuristic is gone.
-  const stem = pathStem(doc.docPath).toLowerCase();
-  const docId = doc.id ? doc.id.toLowerCase() : undefined;
-  return enclosures.find((enclosure) => {
-    if (enclosure.taskRoot !== dir) return false;
-    const leafId = enclosure.leafId.toLowerCase();
-    return leafId === stem || (docId !== undefined && leafId === docId);
-  });
-}
-
-// The lifecycle bound to an enclosure, following the cross-ref in either direction: the
-// contract's recorded lifecycleId, or a live lifecycle still anchored to the enclosure
-// (lifecycle.enclosure). This is the annotation source for a doc row whose own lifecycleId is
-// unset or stale: the bound lifecycle's gate/staleness enrich the leaf's single row instead
-// of rendering a duplicate lifecycle card for the same enclosureId.
-function lifecycleForEnclosure(
-  enclosure: EnclosureNode,
-  lifecycles: LifecycleProjection[],
-  lifecycleById: Record<string, LifecycleProjection>,
-): LifecycleProjection | undefined {
-  if (enclosure.lifecycleId && lifecycleById[enclosure.lifecycleId]) {
-    return lifecycleById[enclosure.lifecycleId];
-  }
-  // Anchor fallback: several lifecycles may anchor one enclosure with no contract
-  // lifecycleId — the most recently active one annotates the row (ISO timestamps
-  // compare lexicographically), never whichever happened to project first.
-  return lifecycles
-    .filter((lifecycle) => lifecycle.enclosure === enclosure.enclosure)
-    .reduce<LifecycleProjection | undefined>(
-      (latest, lifecycle) =>
-        !latest || lifecycle.lastEventTs > latest.lastEventTs ? lifecycle : latest,
-      undefined,
+      label: pivot === 'repo' ? key : statusLabel(underlyingStatusKey(members[0])),
+      count: members.length,
+      items:
+        pivot === 'repo'
+          ? treeItems(
+              tasks,
+              members
+                .filter((entry) => !entry.parent || !tasks[entry.parent])
+                .map((entry) => entry.key),
+              { ...view, scope: key },
+            )
+          : members.map((entry) => ({
+              kind: 'row' as const,
+              row: { entry, key: taskEntrySelectionKey(entry.key), depth: 0 },
+              hasChildren: false,
+              collapsed: false,
+              held: false,
+            })),
+    }))
+    .sort((left, right) =>
+      pivot === 'repo'
+        ? left.key.localeCompare(right.key)
+        : PHASE_ORDER.indexOf(left.key) - PHASE_ORDER.indexOf(right.key) ||
+          left.key.localeCompare(right.key),
     );
-}
-
-function taskStepProgress(doc: TaskDocNode): { done: number; total: number } {
-  return {
-    done: doc.stepsDone,
-    total: doc.stepsTotal,
-  };
-}
-
-function subTaskProgress(items: TaskDocNode["subTasks"]): { done: number; total: number } {
-  return {
-    done: items.filter((item) => item.status.toLowerCase() === "completed").length,
-    total: items.length,
-  };
-}
-
-function progressHint(progress: { done: number; total: number }, discardedCount = 0): string {
-  const completed = progress.total > 0 ? `${progress.done}/${progress.total}` : "";
-  const discarded = discardedCount > 0 ? `${discardedCount} discarded` : "";
-  return [completed, discarded].filter(Boolean).join(" · ");
-}
-
-function rowMetaText(progress: string, status: string, staleSeconds: number | undefined): string {
-  const wait = staleSeconds == null ? "" : fmtWait(staleSeconds);
-  const parts = [progress, status, wait].filter(Boolean);
-  return parts.length > 0 ? parts.join(" · ") : "—";
-}
-
-// The DOCUMENT status → dot variant, for rows with no live lifecycle. Its whole input vocabulary
-// is `tasks/document.py::DocStatus` = planning | inProgress | Completed, arriving verbatim through
-// `TaskDocNode.status` / `SeriesNode.status` (`snapshots.py` assigns `status=doc.status`). So this
-// maps exactly two outcomes and nothing else can arrive.
-//
-// It deliberately does NOT carry the lifecycle vocabulary. Both callers read
-// `lifecycle?.state ?? statusVariant(...)`, so blocked/paused/abandoned/awaiting-developer reach
-// `Dot` as the LIVE state on the left of the `??` — never through here. Arms for them were
-// unreachable and untested (the suite is identical with or without them), which is the same class
-// of permanently-dead branch this change removed from the engine-room renderer; adding one for
-// `awaiting-developer` would have been the defect the change was written to delete. `blocked`,
-// `paused` and `abandoned` were pre-existing instances of it and go with it rather than being left
-// as the exception that proves the rule — deleting them is behaviour-identical (the suite is
-// unchanged), because the server cannot reach them either.
-function statusVariant(status: string): string {
-  const normalized = status.toLowerCase();
-  if (normalized === "completed") return "completed";
-  return "running";
-}
-
-function compareRows(left: OperationRow, right: OperationRow): number {
-  const created = left.createdAt.localeCompare(right.createdAt);
-  return created || left.fallbackOrder.localeCompare(right.fallbackOrder);
 }

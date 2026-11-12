@@ -1,0 +1,10 @@
+{
+  "command": "uvx",
+  "args": [
+    "--refresh-package",
+    "agents-remember-mcp",
+    "agents-remember-mcp@latest",
+    "--config",
+    "<ABSOLUTE_USER_CONFIG_FOLDER>/agents-remember/agents-remember-settings.json"
+  ]
+}

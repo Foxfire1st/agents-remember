@@ -55,7 +55,7 @@ _PARENT_BUCKETS: tuple[str, ...] = ("master", "sprint", "none")
 
 #: ``(seat kind, own altitude, parent bucket)`` -> the altitudes the projection
 #: reads. Leaf/master/sprint come from :mod:`agents_remember.tasks.document_refs`;
-#: the "none" bucket covers a standalone leaf, a standalone master and every
+#: the "none" bucket covers a master with no commanding sprint and every
 #: sprint. All eighteen combinations are enumerated, including every launcher row,
 #: so nothing about the read scope is decided outside the table.
 _READ_ALTITUDES: Mapping[tuple[CapsuleSeatKind, TaskAltitude, str], tuple[TaskAltitude, ...]] = {

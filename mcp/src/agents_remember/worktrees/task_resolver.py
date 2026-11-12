@@ -13,13 +13,23 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks.sprint_rows import sprint_census
+from agents_remember.tasks.store import read_task_doc
 from agents_remember.tasks.task_paths import (
     ARCHIVE_DIR,
     ENCLOSURES_DIR,
+    NOTES_DIR,
     SERIES_CONTRACT_FILENAME,
+    canonical_contract_place,
+    enclosure_repository_tasks,
     is_archived_path,
+    is_below_notes,
     is_enclosure_contract,
+    is_foreign_enclosure_contract,
     iter_leaf_enclosure_contracts,
+    iter_task_contracts,
+    iter_task_folder_contracts,
     leaf_enclosure_dir,
     leaf_enclosure_path,
     series_contract_path,
@@ -29,12 +39,19 @@ from agents_remember.tasks.task_paths import (
 __all__ = [
     "ARCHIVE_DIR",
     "ENCLOSURES_DIR",
+    "NOTES_DIR",
     "SERIES_CONTRACT_FILENAME",
     "TaskResolutionError",
+    "canonical_contract_place",
+    "enclosure_repository_tasks",
     "is_archived_path",
+    "is_below_notes",
     "is_enclosure_contract",
+    "is_foreign_enclosure_contract",
     "iter_active_series_contracts",
     "iter_leaf_enclosure_contracts",
+    "iter_task_contracts",
+    "iter_task_folder_contracts",
     "leaf_enclosure_dir",
     "leaf_enclosure_path",
     "legacy_task_folder_name",
@@ -77,12 +94,9 @@ def task_root_candidates(coordination_root: Path, repo_name: str, task_name: str
 
 
 def iter_active_series_contracts(repo_task_root: Path) -> Iterator[Path]:
-    if not repo_task_root.is_dir():
-        return
-    for path in sorted(repo_task_root.rglob(SERIES_CONTRACT_FILENAME)):
-        if is_archived_path(path) or ENCLOSURES_DIR in path.parts:
-            continue
-        yield path
+    """Every live task's own series contract, at the canonical place (MIK-R83 rule 1)."""
+
+    yield from iter_task_folder_contracts(repo_task_root)
 
 
 def resolve_active_task_root(
@@ -155,11 +169,7 @@ def archive_completed_root_task(
     if task_root.parent != repo_task_root:
         return {"state": "skipped", "reason": "not-root-task", "taskRoot": task_root.as_posix()}
     if series_contract_path(task_root).exists():
-        return {
-            "state": "skipped",
-            "reason": "root-series-still-active",
-            "taskRoot": task_root.as_posix(),
-        }
+        return _series_archive_skip(coordination_root, repo_name, task_root)
     archive_root = repo_task_root / ARCHIVE_DIR
     target = archive_root / task_root.name
     if target.exists():
@@ -181,4 +191,49 @@ def archive_completed_root_task(
         "state": "archived",
         "taskRoot": task_root.as_posix(),
         "archivePath": target.as_posix(),
+    }
+
+
+_RETIRE_ROUTE = (
+    "a master is archived only by task_doc.retire_master (a dry run first), never by finalization"
+)
+
+
+def _series_archive_skip(
+    coordination_root: Path, repo_name: str, task_root: Path
+) -> dict[str, object]:
+    """Why finalizing a task that holds a series contract never archives it.
+
+    A task whose document is a master is skipped with the route that does archive it: a sprint that
+    commands it is named, a master no sprint commands is pointed at the retire operation. Any other
+    task keeps the skip it has always had.
+    """
+
+    skipped: dict[str, object] = {"state": "skipped", "taskRoot": task_root.as_posix()}
+    repository_tasks = coordination_root / "tasks" / repo_name
+    try:
+        document = read_task_doc(task_root / "task.json")
+    except (OSError, ValueError):
+        return {**skipped, "reason": "root-series-still-active"}
+    if document.kind != "master":
+        return {**skipped, "reason": "root-series-still-active"}
+    own = TaskDocumentRef(repository=repo_name, path=f"{task_root.name}/task.json")
+    census = sprint_census(repository_tasks, task_root / "task.json", own, document)
+    sprints = [
+        TaskDocumentRef(repository=repo_name, path=path.relative_to(repository_tasks).as_posix())
+        for path in census.commanding
+    ]
+    if sprints:
+        names = ", ".join(sprint.key for sprint in sprints)
+        return {
+            **skipped,
+            "reason": "sprint-commands-master",
+            "sprintTaskDocumentRef": sprints[0].model_dump(mode="json"),
+            "detail": f"The archive was skipped because sprint {names} commands this master, "
+            f"so its folder must stay resolvable; {_RETIRE_ROUTE}.",
+        }
+    return {
+        **skipped,
+        "reason": "master-archived-only-by-retire",
+        "detail": f"The archive was skipped: {_RETIRE_ROUTE}.",
     }

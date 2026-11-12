@@ -24,17 +24,13 @@ from agents_remember.application.knowledge_read import (
     read_knowledge_scope,
     read_row_counts,
 )
-from agents_remember.memory.knowledge import realizations
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.logical import logical_digest
 from agents_remember.memory.knowledge.read import _manifest_digest
-from agents_remember.memory.knowledge.schema_generations import (
-    GENERATIONS,
-    generation_for_key,
+from agents_remember.memory.knowledge.schema import (
+    CURRENT_GENERATION,
     generation_of_database,
 )
-from agents_remember.memory.knowledge.store import open_knowledge_store
-from agents_remember.models.knowledge.graph import RealizationClaimDraft
 from agents_remember.models.knowledge.read import (
     AnchorResolution,
     FamilyRevisionSeed,
@@ -49,14 +45,15 @@ from agents_remember.models.knowledge.read import (
     SelectionReason,
     continue_from_cursor,
 )
-from agents_remember.models.knowledge.result import NewAnchor, RealizationClaimRequest
-from agents_remember.models.knowledge.source import (
-    FileLocator,
-    GitBlobIdentity,
-    SourceAnchorDraft,
-    SymbolLocator,
-)
+from agents_remember.models.knowledge.source import FileLocator, SymbolLocator
+from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
 from generation_test_support import declared_schema_name
+from knowledge_rows_test_support import (
+    NewAnchor,
+    RealizationClaimRequest,
+    open_knowledge_store,
+    realizations,
+)
 from read_scope_test_support import (
     ABSENT_PATH,
     ABSENT_RECORDED_BLOB,
@@ -81,25 +78,21 @@ SCHEMA_NAME = "ar-knowledge-sqlite/v1"
 
 
 def _unregistered_generation_name() -> str:
-    """Return a schema name **no** registered generation carries, derived from the registry.
+    """A schema name this build does not declare: one past the declared version.
 
     The "another schema generation" case below needs a declared generation the build does not
-    support, and a literal is exactly how it stopped being one: the case spelled
-    ``ar-knowledge-sqlite/v9`` until ``KS-R21@v1`` registered generation 9, after which the
-    declaration named the dataset's *own* generation, the guard returned ``page`` where the case
-    asserted ``refused``, and the only case for the caller-declared-generation rule measured the
-    supported path instead (adversarial coverage review finding ``A-1``). The probe asks the code's
-    own registry rather than restating a number: it starts one past the newest registered version
-    and walks up to the first name the registry does not contain.
+    support, and it is derived from the code's own declaration rather than spelled, so it cannot
+    silently become the dataset's own schema when the declared version changes.
     """
 
-    candidate = GENERATIONS[-1].user_version + 1
-    while generation_for_key(f"ar-knowledge-sqlite/v{candidate}", candidate) is not None:
-        candidate += 1
-    return f"ar-knowledge-sqlite/v{candidate}"
+    return f"ar-knowledge-sqlite/v{CURRENT_GENERATION.user_version + 1}"
 
 
 UNSUPPORTED_SCHEMA_NAME = _unregistered_generation_name()
+# A namespace no fixture dataset is bound to. Every fixture reads under the index's own
+# namespace (an index is keyed by its tree alone), so a second fixture cannot supply a
+# foreign one; the foreign side of the namespace cases below is hand-named instead.
+FOREIGN_NAMESPACE = "33333333-3333-4333-8333-333333333333"
 EVERY_RECORDED_PATH = {
     INTEGRATION_PATH,
     SYNCHRONIZATION_PATH,
@@ -141,6 +134,23 @@ def anchored_context(fixture: ReadScopeFixture) -> KnowledgeReadContext:
         fixture.repository_id,
         repository_root=fixture.git_root,
         code_tree_id=fixture.git_tree_id,
+    )
+
+
+def foreign_context(fixture: ReadScopeFixture) -> KnowledgeReadContext:
+    """The fixture's own snapshot under a namespace no dataset holds.
+
+    The context model requires the snapshot's namespace to match the context's
+    own, so both are renamed together; the read then refuses the file against
+    the foreign namespace by name.
+    """
+
+    resolved = anchored_context(fixture)
+    return resolved.model_copy(
+        update={
+            "repository_id": FOREIGN_NAMESPACE,
+            "knowledge": resolved.knowledge.model_copy(update={"repository_id": FOREIGN_NAMESPACE}),
+        }
     )
 
 
@@ -373,7 +383,11 @@ def test_an_unsupported_locator_stays_visible_while_its_blob_is_still_observed(
                 claim=RealizationClaimDraft(
                     claim_id=claim_id,
                     invariant_revision_id=fixture.subject_revision_id,
-                    role="incidental",
+                    # Text storage keeps the normalized role set: the legacy
+                    # "incidental" spelling is refused by the sidecar model, so a
+                    # staged claim uses "support" (the role is not this case's
+                    # subject; the anchor resolution is).
+                    role="support",
                     rationale="A recorded symbol location for the same obligation.",
                 ),
                 anchor=NewAnchor(
@@ -395,10 +409,12 @@ def test_an_unsupported_locator_stays_visible_while_its_blob_is_still_observed(
 
     assert result.state == "page", result.refusal
     assert result.page is not None
+    # The read serves the projection's identities, not the caller UUIDs the
+    # claim was staged with: look the item up under the outcome's claim id.
     item = next(
         item
         for item in result.page.items
-        if item.kind == "realization_claim" and item.claim_id == claim_id
+        if item.kind == "realization_claim" and item.claim_id == created.claim_id
     )
     assert item.anchor is not None
     assert item.anchor.resolution == "unsupported_locator"
@@ -534,23 +550,22 @@ def test_a_baseline_read_serves_a_task_free_context_and_reaches_the_whole_select
 
 def test_a_context_naming_another_namespace_refuses_and_names_both_identities(
     fixture: ReadScopeFixture,
-    tmp_path: Path,
 ) -> None:
-    """A context resolved from another dataset is refused against this file, with both sides named.
+    """A context naming another namespace is refused against this file, with both sides named.
 
-    The context carries a namespace and a logical snapshot; this file is bound to neither. The
-    refusal says which namespace it expected and which it found, so the caller is not left guessing
-    whether the path or the selection was wrong.
+    The context carries a namespace and a logical snapshot; this file is bound to neither the
+    foreign namespace nor, under it, the snapshot. The refusal says which namespace it expected
+    and which it found, so the caller is not left guessing whether the path or the selection
+    was wrong.
     """
 
-    other = build_read_scope_fixture(tmp_path / "other")
-    foreign = open_read_context(other.database_path, other.repository_id)
+    foreign = foreign_context(fixture)
     assert foreign.repository_id != fixture.repository_id
 
     result = read_knowledge_scope(
         fixture.database_path,
         foreign,
-        KnowledgeReadRequest(seed=subject_seed(other)),
+        KnowledgeReadRequest(seed=subject_seed(fixture)),
     )
 
     assert result.state == "refused"
@@ -829,8 +844,8 @@ def test_a_context_declaring_another_schema_generation_is_refused_before_a_page_
     current generation again, because a registry that ever contains the name reddens here.
     """
 
-    assert UNSUPPORTED_SCHEMA_NAME not in {generation.schema_name for generation in GENERATIONS}, (
-        f"{UNSUPPORTED_SCHEMA_NAME} is a registered generation, so this case no longer reaches the "
+    assert CURRENT_GENERATION.schema_name != UNSUPPORTED_SCHEMA_NAME, (
+        f"{UNSUPPORTED_SCHEMA_NAME} is the declared schema, so this case no longer reaches the "
         "guard it exists for"
     )
     resolved = anchored_context(fixture)
@@ -956,7 +971,6 @@ def test_a_continuation_against_its_own_snapshot_continues_the_same_manifest(
 
 def test_a_refused_read_of_a_real_database_leaves_the_file_byte_identical(
     fixture: ReadScopeFixture,
-    tmp_path: Path,
 ) -> None:
     """A refusal on a real file changes no row and no logical digest, measured either side.
 
@@ -968,11 +982,10 @@ def test_a_refused_read_of_a_real_database_leaves_the_file_byte_identical(
     before_counts = read_row_counts(fixture.database_path)
     before_digest = _digest(fixture)
 
-    elsewhere = build_read_scope_fixture(tmp_path / "other")
     wrong_snapshot = read_knowledge_scope(
         fixture.database_path,
-        open_read_context(elsewhere.database_path, elsewhere.repository_id),
-        KnowledgeReadRequest(seed=subject_seed(elsewhere)),
+        foreign_context(fixture),
+        KnowledgeReadRequest(seed=subject_seed(fixture)),
     )
     assert wrong_snapshot.state == "refused"
     assert wrong_snapshot.refusal is not None
@@ -1059,7 +1072,7 @@ def test_the_selection_reasons_are_part_of_the_selected_sets_own_identity(
     result = read(
         fixture,
         InvariantRevisionSeed(
-            invariant_id=fixture.retry_invariant_id, revision_id=fixture.base_revision_id
+            invariant_id=fixture.retry_invariant_id, revision_id=fixture.subject_revision_id
         ),
     )
     assert result.state == "page", result.refusal

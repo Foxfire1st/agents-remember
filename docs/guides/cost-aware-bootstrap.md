@@ -1,114 +1,136 @@
-# Cost-aware Bootstrap
+# The Cost Of A Repository's First Memory
 
-Repository bootstrap can be token-heavy because the agent has to inspect broad
-source areas before it can write useful onboarding. This guide is for operators
-choosing the harness, model, and run shape before starting `c-03-repo-bootstrap`.
+This guide is about the cost of a repository's first memory. It says which part of the first
+setup uses many tokens, which settings choose the model of each role, and how to size the first
+tasks.
 
-The runtime does not try to optimize spend on its own. Treat model choice as an
-operator decision, then give the agent a clear bootstrap scope.
+Agents Remember chooses no model by cost and sets no token budget. Most of this page is advice,
+and each such paragraph starts with the word "Advice". The other statements describe the product.
 
-## Strategy
+## Where The Tokens Go
 
-Use a cost-efficient, large-context coding or reasoning model for the broad,
-evidence-bound parts of bootstrap, and reserve more expensive models for review
-or for areas where the first pass gets stuck.
+The setup by the Bootstrap role agent is small. Bootstrap explains the setup, asks you for your
+decisions and calls a few tools. It writes these files and no others:
 
-Good candidates for the first pass are models that can:
+| What | Written through |
+| --- | --- |
+| The user settings file, `~/.config/agents-remember/settings.json` | `user_settings_init`. The file records the harness of each role and nothing else. A file that exists stays as it is. |
+| The folders and first files of `<coordination-root>/memory-repos/ar-<repo-id>/` | `memory_init`; see [Onboard An Existing Repository](onboard-existing-repo.md#2-create-the-memory-repository). |
+| The first commit of the memory repository and the cache `<memory-root>/memory.md` | `memory_baseline_adopt`; see [Adopt Existing Memory](adopt-existing-memory.md). |
+| The folders and files of the coordination root, only when they are missing | `runtime_install`. In a first setup the Bootstrap call has created them before Bootstrap starts. |
+| One report file | Bootstrap itself. The first line of the report states its path. |
 
-- read large source files and route overviews without aggressive truncation
-- use tools reliably over many turns
-- follow path and write-boundary instructions
-- produce structured Markdown consistently
-- run long enough to finish one wave without harness session limits
+Bootstrap writes no card and no knowledge record, creates no task and starts no other role.
 
-DeepSeek V4 Pro is one example of this kind of model when used through a harness
-that supports its reasoning and tool-call behavior directly.
+The work that reads much source follows the setup: the
+[knowledge foundation](../concepts.md#knowledge-foundation) and the first cards. An Architect
+plans this work as tasks, and these roles do the reading:
 
-## Check Cost During And After Bootstrap
+- An Investigator, when the Architect starts one, researches the repository and writes its
+  evidence into one report, which the task document of the foundation task names. It writes no
+  memory.
+- A Curator writes the knowledge records and the cards.
+- A Reviewer checks the result of a task.
 
-Before running every file onboarding wave, run one representative wave and check
-the provider usage dashboard. Bootstrap workloads are usually input-heavy: the
-agent reads much more source and onboarding context than it writes. Output
-tokens matter, but repeated source/context reads usually dominate the token
-count.
+The
+[research procedure](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/reference/repository-research.md),
+the Investigator's and the Curator's instructions for this research, keeps it within bounds. A
+first pass reads the repository broadly and assigns each source path to an area, a functional part
+of the repository with a boundary and a priority. The research then covers one area at a time and
+records the areas it did not reach.
 
-As a dated example, on 2026-05-17 a completed TensorFlow memory bootstrap using
-DeepSeek V4 Pro through OpenClaw used 252 API requests and processed about 19.57
-million total tokens: about 18.51 million input cache-hit tokens, 896.6 thousand
-input cache-miss tokens, and 160.5 thousand output tokens. The exported provider
-cost for that run was about $0.60, or roughly $0.0305 per 1 million blended
-tokens. The low blended rate depended on the workload shape and DeepSeek
-pricing/cache behavior at that time.
+Advice: expect this work to read far more than it writes. An agent reads source files and
+existing memory many times and writes short records. The price of input tokens, and of cached
+input where your [model provider](../concepts.md#model-provider) offers it, decides most of the
+cost.
 
-Always check current provider pricing before extrapolating from an example. For
-DeepSeek, see the official [Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing)
-page. On 2026-05-17, DeepSeek listed V4 Pro prices per 1 million tokens and
-noted a temporary discount through 2026-05-31 15:59 UTC; future prices may differ.
+## Choose The Model Of Each Role
 
-## Suggested Phase Budget
+The role settings choose the harness, the model and the effort of each role. They stand in the
+user settings file under `orchestration.roles.<role>`:
 
-| Bootstrap work | Model choice | Notes |
-| --- | --- | --- |
-| Source inventory | fast or cost-efficient model | Mostly classification and path discovery. |
-| Scout report | cost-efficient large-context model | Broad reading matters more than polished prose. |
-| Root overview | cost-efficient model, then review if needed | High-leverage artifact; review if confidence is mixed. |
-| Route overviews | cost-efficient model | Template-driven, evidence-bound work. |
-| File onboarding waves | cost-efficient model | Repetitive work; checkpoint between waves. |
-| Curator or final review | strongest practical model or human review | Use this to catch unsupported durable claims. |
+```json
+{
+  "orchestration": {
+    "roles": {
+      "investigator": { "harness": "<harness id>", "model": "<model>", "effort": "<effort>" },
+      "curator": { "harness": "<harness id>", "model": "<model>" },
+      "reviewer": { "harness": "<harness id>", "model": "<model>" }
+    }
+  }
+}
+```
 
-## Wave Size
+A start checks `harness`, `model` and `effort` against the catalog of the host: the harnesses that
+the host can start, with the models and efforts that the host reports for each. A start refuses a
+choice that the catalog does not hold, with `agent_not_offered`, `model_not_offered` or
+`effort_not_offered`; a part that the host does not report, for example the models of a harness,
+is not checked. So a row names only what the host offers. A row without `model` takes the host's
+default model for that harness. After a setup by Bootstrap, every row names a harness and nothing
+else.
 
-Large waves can waste tokens when a run times out, hits provider limits, or drifts
-off task. Prefer checkpointable chunks:
+One start can differ from the settings: the role launcher of the dashboard and the arguments
+`agent`, `model` and `effort` of `role_start` choose for that start only.
 
-- route overviews: 1-3 routes per run
-- file onboarding: 5-10 files per run
-- commit or otherwise checkpoint after each completed wave
-- keep source reads and memory writes in separate, explicit roots
+[Harnesses and role settings](../reference/harnesses.md) describes the keys of a row, the order
+of the choices and how to edit the user settings file.
 
-For very large repositories, start with root and route overviews before asking
-for dozens of file-level onboarding artifacts. That gives later runs a better
-map and reduces repeated rediscovery.
+Advice: choose by the kind of work.
 
-## Escalation Triggers
+| Work | Advice |
+| --- | --- |
+| Research by an Investigator | A cost-efficient model with a large context. Broad reading matters more than polished prose. |
+| Records and cards by a Curator | A cost-efficient model that uses tools reliably over many turns and keeps to its instructions. |
+| Review | The strongest model that you can afford. The review catches a statement that the source does not support. |
 
-Switch to a stronger model or stop for human review when:
+Advice: a model fits the broad reading when it reads large files without cutting them short,
+calls tools reliably over many turns, keeps to the folders it may write, and finishes one task in
+one chat, before its context window is full and before it reaches the provider limit of its model
+provider.
 
-- source and documentation disagree
-- a route overview would record low-confidence architecture as durable fact
-- cross-repo boundaries or branch-sensitive memory are involved
-- the model invents invariants without source evidence
-- repeated runs fail to keep the source-read and memory-write boundaries
-- the harness starts summarizing away important context or hitting session limits
+A role can have a second set of choices, the step-up, under `orchestration.roles.<role>.stepUp`.
+For a Worker and a Curator, the step-up is taken after a number of review rounds that left
+findings; the number is 3 unless the row names another in `afterTries`.
+
+Advice: give the Curator a stronger model as its step-up. The cost-efficient model then does the
+ordinary work, and the stronger model takes only the work that the first one did not finish.
+
+## Check The Cost Early
+
+Advice: run one representative task before you plan many. Then read the usage page of your
+model provider and compare input, cached input and output. Extrapolate from your own numbers, and
+check the current prices of the provider first: prices and discounts change.
+
+## Size The First Tasks
+
+Advice: keep each task small enough to reach its closeout without a stop at a provider limit.
+
+- Give the knowledge foundation a bounded set of sources, and add areas in later tasks.
+- Give one task one source area. A task that covers the whole repository can stop at a provider
+  limit with nothing closed out.
+- Let each task reach its closeout before the next one starts on the same area. A closeout is a
+  commit of code and memory, so closed-out work survives a later stop.
+- Start with the areas that hold hidden rules and fragile logic. Leave routine helpers until a
+  task touches them.
+
+## When To Use A Stronger Model Or Stop
+
+Advice: change to a stronger model, or stop and review the work yourself, when one of these
+holds:
+
+- the source and the documentation disagree;
+- a record would state uncertain architecture as a fact;
+- the work reaches into another repository or depends on a branch;
+- the model states an invariant without evidence in the source;
+- repeated runs write outside the folders of the task;
+- the harness shortens the context so far that the agent loses facts, or the agent reaches its
+  provider limit.
 
 ## Harness Notes
 
-Prefer a harness that lets the chosen model use the provider API directly and can
-handle the repository layout you are bootstrapping. For external-memory layouts,
-the harness must be able to read the source repository and write the memory
-repository without flattening or copying the Agents Remember runtime in a way
-that breaks script paths.
+The host runs each role agent as a chat of a harness. A role can use only a harness that the host
+offers. [The host](../host.md#what-the-host-needs) says how to see which harnesses it offers
+and how to add one. The page [Install](../install/README.md) leads to the page of each harness,
+which lists what that harness needs.
 
-For OpenClaw, see [Install For OpenClaw](../install/openclaw.md) for the nested
-skill layout, `allowSymlinkTargets`, and long-running turn timeout settings.
-
-## Example Prompt Shape
-
-Keep the prompt scoped to one checkpointable unit:
-
-```text
-Read the resolved workspace instructions first.
-
-Read source files from <source-repo>.
-Write onboarding files only in <memory-repo>.
-Do not modify <source-repo>.
-
-Read onboarding/bootstrap/handoff.md and
-onboarding/bootstrap/governing-route-map.md.
-Continue Wave 1 only.
-Match the existing onboarding style.
-Commit only after Wave 1 is complete.
-```
-
-This keeps cost control outside the agent's reasoning loop while still giving it
-enough structure to finish useful bootstrap work.
+Advice: prefer a harness that reaches the provider of your chosen model directly.

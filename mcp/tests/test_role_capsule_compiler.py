@@ -3,8 +3,7 @@
 The compiler's contract is a set of observable properties, and each case here pins
 one of them:
 
-* the same admitted facts and source bytes compile to the same ordered content and
-  the same semantic digest;
+* the same admitted facts and source bytes compile to the same ordered content and the same semantic digest;
 * ephemeral diagnostics do not move that digest, while a real change to an
   applicable source block does;
 * an unrelated role's source does not reach a worker capsule at all;
@@ -68,13 +67,11 @@ SKILL_IDENTITY = f"{SKILL_ORIGIN}#{SKILL_NAME}"
 FIXTURE_ROLES = (
     "architect",
     "orchestrator",
-    "designer",
-    "strategist",
     "manager",
     "worker",
     "curator",
     "reviewer",
-    "system-specialist",
+    "investigator",
     "bootstrap",
 )
 
@@ -94,7 +91,7 @@ FIXTURE_CORE = ("authority", "invariants", "lifecycle-frame", "loop", "acceptanc
 
 FIXTURE_APPLICABILITY = {
     "orientation": FIXTURE_ROLES,
-    "planning": ("architect", "designer", "strategist", "orchestrator"),
+    "planning": ("architect", "orchestrator"),
     "implementation": ("worker",),
     "review": ("architect", "orchestrator", "manager", "reviewer"),
     "curation": ("manager", "curator"),
@@ -106,7 +103,7 @@ FIXTURE_APPLICABILITY = {
         "manager",
         "worker",
         "curator",
-        "system-specialist",
+        "investigator",
     ),
     "bootstrap": ("bootstrap",),
 }
@@ -114,13 +111,11 @@ FIXTURE_APPLICABILITY = {
 FIXTURE_ROLE_CORE = {
     "architect": ("authority", "invariants", "lifecycle-frame", "loop", "acceptance"),
     "orchestrator": ("authority", "invariants", "lifecycle-frame", "loop", "acceptance"),
-    "designer": ("authority", "invariants", "loop", "acceptance"),
-    "strategist": ("authority", "invariants", "loop", "acceptance"),
     "manager": ("authority", "invariants", "lifecycle-frame", "loop", "acceptance"),
     "worker": ("authority", "invariants", "lifecycle-frame", "acceptance"),
     "curator": ("authority", "invariants", "acceptance"),
     "reviewer": ("authority", "invariants", "loop", "acceptance"),
-    "system-specialist": ("authority", "invariants", "acceptance"),
+    "investigator": ("authority", "invariants", "acceptance"),
     "bootstrap": ("authority", "invariants", "acceptance"),
 }
 
@@ -150,6 +145,7 @@ def fixture_manifest_document() -> dict[str, object]:
             name: {
                 "source": f"operations/{name}.md",
                 "purpose": f"the {name} operation",
+                "audience": "all",
                 "applies_to_roles": list(FIXTURE_APPLICABILITY[name]),
             }
             for name in FIXTURE_OPERATIONS
@@ -473,14 +469,21 @@ def test_a_real_binding_change_does_move_the_semantic_digest() -> None:
 
 
 def test_changing_an_unrelated_role_leaves_the_worker_capsule_untouched() -> None:
-    baseline = compile_worker()
-    mutated = compile_worker(
-        sources=replaced(all_sources(), "role:designer", content="# designer, rewritten\n")
+    sources = all_sources()
+    unselected = next(source for source in sources if source.identity == "role:curator")
+    rewritten = "# curator, rewritten\n"
+    assert unselected.content != rewritten.encode()
+    changed_sources = replaced(sources, "role:curator", content=rewritten)
+    assert (
+        next(source for source in changed_sources if source.identity == "role:curator").content
+        == rewritten.encode()
     )
+    baseline = compile_worker(sources=sources)
+    mutated = compile_worker(sources=changed_sources)
 
     assert mutated.semantic_digest == baseline.semantic_digest
     assert mutated.render_instructions() == baseline.render_instructions()
-    assert all(block.identity != "role:designer" for block in mutated.capsule.instructions)
+    assert all(block.identity != "role:curator" for block in mutated.capsule.instructions)
 
 
 def test_changing_an_applicable_operation_block_changes_that_capsule() -> None:
@@ -516,6 +519,48 @@ def test_a_shared_core_change_does_not_reach_a_role_capsule() -> None:
     revised = next(source for source in edited if source.identity == "core:authority")
     assert revised.content == b"# authority, revised\n"
     assert not [b for b in mutated.capsule.instructions if b.composition_root == "core"]
+
+
+def test_every_role_digest_is_sealed_without_composing_its_content() -> None:
+    document = fixture_manifest_document()
+    path = "core/shared-obligations.md"
+    document["core"]["every-role"] = {"source": path, "purpose": "shared role digest"}  # type: ignore[index]
+    document["roles"]["worker"]["core"].append("every-role")  # type: ignore[index]
+    sources = all_sources(document)
+    original = next(source for source in sources if source.identity == "core:every-role")
+    edited = replaced(
+        sources, "core:every-role", content=original.content[:-1].decode("utf-8") + " "
+    )
+    revised = next(source for source in edited if source.identity == "core:every-role")
+    assert len(original.content) == len(revised.content)
+    assert (
+        sum(
+            before != after for before, after in zip(original.content, revised.content, strict=True)
+        )
+        == 1
+    )
+    baseline = compile_worker(document=document, sources=sources)
+    mutated = compile_worker(document=document, sources=edited)
+
+    assert mutated.semantic_digest != baseline.semantic_digest
+    assert mutated.render_instructions() == baseline.render_instructions()
+    assert not [block for block in mutated.capsule.instructions if block.composition_root == "core"]
+    for result, expected in ((baseline, original), (mutated, revised)):
+        records = [row for row in result.manifest.sources if row.identity == "core:every-role"]
+        assert len(records) == 1
+        assert records[0].composition_root == "core"
+        assert records[0].path == path
+        assert records[0].revision == expected.revision
+        assert records[0].selected is False
+
+    launcher = compile_role_capsule(
+        launcher_binding(), manifest_bytes(document), sources, selection_for(document)
+    )
+    changed_launcher = compile_role_capsule(
+        launcher_binding(), manifest_bytes(document), edited, selection_for(document)
+    )
+    assert changed_launcher.semantic_digest == launcher.semantic_digest
+    assert not [row for row in launcher.manifest.sources if row.identity == "core:every-role"]
 
 
 # --------------------------------------------------------------------------------------
@@ -609,6 +654,20 @@ def test_missing_mandatory_material_is_refused_rather_than_omitted() -> None:
     )
     assert operation_error.status == "missing-required-instruction"
     assert "operation:implementation" in operation_error.detail
+
+    document = fixture_manifest_document()
+    path = "core/shared-obligations.md"
+    document["core"]["every-role"] = {"source": path, "purpose": "shared role digest"}  # type: ignore[index]
+    document["roles"]["worker"]["core"].append("every-role")  # type: ignore[index]
+    digest_error = failure(
+        document=document,
+        sources=tuple(
+            source for source in all_sources(document) if source.identity != "core:every-role"
+        ),
+    )
+    assert digest_error.status == "missing-required-instruction"
+    assert "core:every-role" in digest_error.detail
+    assert path in digest_error.detail
 
 
 def test_a_source_the_manifest_does_not_declare_is_refused() -> None:

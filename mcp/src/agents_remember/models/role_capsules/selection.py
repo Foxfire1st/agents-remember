@@ -52,6 +52,7 @@ from agents_remember.models.role_capsules.vocabulary import (
     is_capsule_role,
     role_composition_order,
 )
+from agents_remember.models.role_identity import canonical_role
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +215,7 @@ def narrow_role(role: str) -> CapsuleRole:
     prompt — each of those would let caller-controlled text acquire a role.
     """
 
+    role = canonical_role(role)
     if not is_capsule_role(role):
         raise CapsuleCompilationError(
             status=STATUS_UNKNOWN_ROLE,

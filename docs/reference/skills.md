@@ -1,71 +1,61 @@
 # Skills Reference
 
-Installed skills live under:
+Agents Remember ships its skills inside the package. The tool server publishes every
+[skill](../concepts.md#skill) as an MCP resource, so a harness reads the skill text from the
+running server. It does so through SEP-2640, the skills extension of the Model Context Protocol,
+which the tool server declares under the id `io.modelcontextprotocol/skills`.
+
+The [source repository](https://github.com/Foxfire1st/agents-remember) of Agents Remember on
+GitHub holds the skills in two trees, the tree that an author edits and the generated copy that
+the package serves:
 
 ```text
-ar-coordination/skills/
+agents-remember/skills/                                  # the source tree, which an author edits
+mcp/src/agents_remember/package_data/runtime/skills/     # the generated copy, which the package serves
 ```
 
-The canonical source copies live under:
+The source tree and the generated copy keep the same paths and bytes. The generated copy is what
+an installed build serves. A contributor who edits a skill renews the generated copy with
+`python3 scripts/sync-skills.py`;
+[CONTRIBUTING.md](https://github.com/Foxfire1st/agents-remember/blob/main/CONTRIBUTING.md) holds
+the rules for contributors.
 
-```text
-agents-remember/skills/
-```
+## Shipped skills
 
-After editing root `skills/`, run:
-
-```text
-python3 scripts/sync-skills.py
-```
-
-That refreshes the generated MCP package-data copy and every harness starter
-package skill folder. The pre-commit and pre-push hooks run
-`python3 scripts/sync-skills.py --check` so unsynced copies fail before push.
-
-## Lifecycle And Workflow Skills
+The folder `skills/` holds one skill.
 
 | Skill | Purpose |
 | --- | --- |
-| `l-01-agent-lifecycles` | The agent lifecycles, one per agent type under one roof. Routes every session by exactly three conditions (spawn-role env → fresh role brief → otherwise free chat), carries the minimal lifecycle frame (the six lifecycle signals every session shares), and houses the self-contained per-role lifecycles (architect · backend orchestrator · designer · strategist · manager · worker · curator · system-specialist · adversarial reviewer) plus the report-template library and the reviewer criteria catalogs. For ordinary role-shaped work, free chat resolves the sprint, compiles the canonical architect brief, and calls `dispatch_agent` once in ambient-launcher mode; an explicit task-seat takeover targets the named role at its canonical altitude instead. Architect, orchestrator, and manager seats are sprint-local; their later dispatches use plane structural authority. |
-| `w-02-light-task-workflow` | Durable one-page task plan with approval gate and live checklist; escalates to a master + light sub-task series for larger work. |
+| `l-01-agent-lifecycles` | The instructions of the role agents. It holds one role file for each of the eight roles (`architect`, `investigator`, `orchestrator`, `manager`, `worker`, `reviewer`, `curator`, `bootstrap`), nine operation files (each holds the instructions for one kind of work, for example planning, review or closeout), the instructions for a chat without a role, the report templates and the review criteria. The folders `roles/`, `operations/`, `templates/` and `criteria/` of the skill hold the role files, the operation files, the templates and the review criteria; the review criteria are the catalogs by which the Reviewer judges a change. A role agent on the host (Paseo) receives one role file and one operation; see [Role capsules](role-capsules.md). [Roles and role agents](../roles.md) describes the roles and how a chat without a role starts work. |
 
-## Core Skills
+## Setup And Repository Preparation
 
-| Skill | Purpose |
-| --- | --- |
-| `c-00-initialize-memory-repo` | Create or repair a target repository memory root. |
-| `c-01-findings-capture` | Route durable findings to the right artifact. |
-| `c-02-memory-quality-control` | Control memory quality with task-start drift checks, pre-code-commit missing-onboarding checks, and closeout quality gates. |
-| `c-03-repo-bootstrap` | Bootstrap repo overviews, route-local overviews, and onboarding coverage. |
-| `c-04-retrieval-strategy-router` | Choose Semantics, Relationship, or Intent retrieval, using providers for discovery and onboarding/source as proof. |
-| `c-05-create-or-update-onboarding-files` | Create and maintain file-level onboarding and entity catalogs. |
-| `c-08-ar-coordination-context-resolver` | Resolve memory, coordination, task, temp, and cross-repo facts. |
-| `c-09-git-worktree-manager` | Manage worktree lifecycle, integration, and cleanup gates. |
-| `c-10-adopt-memory-baseline` | Adopt existing external-memory onboarding as an accepted Git memory baseline and refresh its computed ledger cache. |
-| `c-11-memory-carryover-from-branch` | Carry richer memory forward after matching code lands. |
-| `c-12-closeout` | Own closeout approval and the code → memory-content commit sequence; keep the computed ledger cache outside the Git transaction. |
-| `c-13-install-and-onboard` | Lead package-based first-run setup after the harness starter package and MCP server are wired: preflight checks, `runtime_install`, memory repo, onboarding bootstrap, the knowledge foundation, and provider indexing. |
-| `c-14-knowledge-bootstrap` | Build or resume a repository's knowledge foundation through the existing curator: read the current knowledge state, inventory bounded sources, author invariants and families through the curator's own writer, publish through the taskless bootstrap, read the result back, and report coverage and unresolved work. |
+The public documentation describes setup and repository preparation:
+[Getting Started](../getting-started.md) starts setup, [Onboard An Existing Repository](../guides/onboard-existing-repo.md)
+initializes memory, and [Adopt Existing Memory](../guides/adopt-existing-memory.md) adopts the
+first baseline. The `l-01-agent-lifecycles` skill carries the role and operation instructions. Its
+file
+[`reference/curator/repository-foundation.md`](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/reference/curator/repository-foundation.md)
+tells the Curator how to write a repository's [knowledge foundation](../concepts.md#knowledge-foundation),
+its first set of knowledge records, and its file
+[`reference/repository-research.md`](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/reference/repository-research.md)
+holds the source inventory, the bounded research and the rules of evidence for that work.
 
-## Installing Skills Into Harnesses
+Closing out a task creates the code and memory commits in one transaction, and the worktree
+lifecycle keeps landing behind its approval gates; the `l-01-agent-lifecycles` skill holds
+the instructions for both.
 
-The normal first-run path does **not** use this section. Copy the harness starter
-package instead; it already contains the skill folders each harness discovers.
+## Reading Served Skills
 
-For manual maintenance or non-package installs, use:
+A harness that reads MCP resources lists the served skills and reads one file at a time. The
+resource `skill://index.json` lists them, and so does the list method of the extension.
+Each file of a skill is an MCP resource with the address `skill://<origin>/<skill>/<path>`, which
+a harness reads with the MCP method `resources/read`. The origin names the publisher: the tool
+server's is `agents-remember/skills`, so the file `SKILL.md` of the shipped skill is
+`skill://agents-remember/skills/l-01-agent-lifecycles/SKILL.md`. Two MCP servers that serve one
+skill name keep distinct addresses through their origins.
 
-```text
-skills_install()
-```
-
-The install target is normally inferred from the MCP settings location:
-`<registration-root>/mcp/<settings>.json` installs into
-`<registration-root>/skills/`. Use `harnessSkillRoot` only for non-standard
-harness layouts.
-
-The packaged skills are flat (one folder per skill), so each installs as
-`<registration-root>/skills/<skill-name>/` named by its lowercase frontmatter name.
-
-Do not copy individual skill folders by hand for a maintenance install. The MCP
-tool copies the packaged skill tree consistently, including sibling files and
-shared helper modules.
+For the first-run path, a chat without a role needs one tool call — `role_start(role="bootstrap",
+request_id=<uuid>)` — and no skill read at all: the launched Bootstrap role agent receives its
+role capsule with its first message. You make the setup decisions with that role agent in its
+chat in the dashboard; at the end it names the Architect as your next step.

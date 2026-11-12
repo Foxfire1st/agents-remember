@@ -71,6 +71,50 @@ class MountedBundleTests(unittest.TestCase):
         with TestClient(self._app(None)) as client:
             self.assertEqual(client.get("/api/state").status_code, 200)
 
+    def test_an_unknown_api_path_is_not_found_for_every_method_with_or_without_a_bundle(
+        self,
+    ) -> None:
+        """A path under ``/api/`` that no route has never reaches the static surface."""
+
+        for label, static_dir in (("bundle", _bundle(self.tmp / "dashboard")), ("no bundle", None)):
+            with TestClient(self._app(static_dir)) as client:
+                for path in ("/api/removed/route", "/api/state/deeper", "/api", "/api/"):
+                    for method in ("GET", "HEAD", "POST", "PUT", "DELETE"):
+                        with self.subTest(label, path=path, method=method):
+                            answer = client.request(method, path)
+                            self.assertEqual(answer.status_code, 404)
+                            if method != "HEAD":
+                                self.assertEqual(answer.json(), {"detail": "Not Found"})
+                with self.subTest(label, case="a registered route still answers"):
+                    state = client.get("/api/state")
+                    self.assertEqual((state.status_code, state.json()), (200, {"ok": "yes"}))
+                with self.subTest(
+                    label, case="a known path with another method is refused as before"
+                ):
+                    self.assertEqual(client.post("/api/state").status_code, 405)
+                with self.subTest(
+                    label, case="paths outside the API still reach the static surface"
+                ):
+                    # The rule is for /api/ alone: a path that only begins with those letters,
+                    # and any other path no route has, is the static surface's to answer.
+                    served = 404 if static_dir else 503
+                    self.assertEqual(client.get("/apiary").status_code, served)
+                    self.assertEqual(client.get("/assets/missing.js").status_code, served)
+                    self.assertEqual(client.post("/assets/missing.js").status_code, 405)
+
+    def test_the_index_and_an_asset_still_load_behind_the_api_rule(self) -> None:
+        with TestClient(self._app(_bundle(self.tmp / "dashboard"))) as client:
+            index = client.get("/")
+            asset = client.get("/assets/index-abc123.js")
+            deep = client.get("/index.html")
+        self.assertEqual((index.status_code, asset.status_code, deep.status_code), (200, 200, 200))
+        self.assertIn('<div id="root">', index.text)
+        self.assertEqual(asset.text, "export default 1;\n")
+        with TestClient(self._app(None)) as client:
+            notice = client.get("/")
+        self.assertEqual(notice.status_code, 503)
+        self.assertIn(BUILD_COMMAND, notice.text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,10 +13,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_write_bytes, atomic_write_text
+from agents_remember.kernel.direct_execution_grants import (
+    DirectExecutionGrant,
+    grants_for_task,
+)
+from agents_remember.kernel.recorded_reads import ABSENT, bytes_identity, record_read
 from agents_remember.models.task_intent import require_task_intent_identity
 
 from .document import TaskDocument
 from .execution_graph_titles import SprintGraphTitles
+from .master_order import derive_master_order, load_master_children
 from .render import render_markdown
 
 
@@ -67,7 +73,18 @@ def markdown_path_for(task_root: Path, doc: TaskDocument) -> Path:
 
 
 def read_task_doc(json_path: Path) -> TaskDocument:
-    return TaskDocument.model_validate_json(json_path.read_text(encoding="utf-8"))
+    try:
+        data = json_path.read_bytes()
+    except FileNotFoundError:
+        record_read(json_path, ABSENT)
+        raise
+    except OSError as error:
+        record_read(json_path, f"unreadable ({type(error).__name__})")
+        raise
+    record_read(json_path, bytes_identity(data))
+    # Preserve read_text's universal newlines; the observation names the original bytes.
+    text = data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    return TaskDocument.model_validate_json(text)
 
 
 def capture_task_doc_source(json_path: Path) -> TaskDocSourceSnapshot:
@@ -173,6 +190,34 @@ def write_task_docs_and_remove(
         raise
 
 
+def _stored_grant_for(
+    task_root: Path,
+    doc: TaskDocument,
+    census: dict[tuple[str, str, str], dict[str, DirectExecutionGrant]],
+) -> DirectExecutionGrant | None:
+    """The leaf's live grant for its stored Markdown, read from the one record.
+
+    ``None`` for non-leaves, outside the canonical tasks layout, and when no
+    readable grant exists: publication never breaks on a missing or broken
+    grant file, and ungranted Markdown stays byte-identical (F12). One census
+    per task is shared across the batch.
+    """
+    if doc.kind != "subTask":
+        return None
+    parents = task_root.parents
+    if len(parents) < 3:
+        return None
+    key = (parents[2].as_posix(), doc.repo, task_root.name)
+    grants = census.get(key)
+    if grants is None:
+        try:
+            grants = grants_for_task(parents[2], doc.repo, task_root.name)
+        except (OSError, ValueError):
+            grants = {}
+        census[key] = grants
+    return grants.get(f"{task_root.name}/{doc.slug}.json")
+
+
 def write_task_doc_batch(
     documents: list[tuple[Path, TaskDocument]],
     *,
@@ -183,6 +228,8 @@ def write_task_doc_batch(
     writes: list[tuple[Path, str]] = []
     paths: list[tuple[Path, Path]] = []
     seen: set[Path] = set()
+    grant_census: dict[tuple[str, str, str], dict[str, DirectExecutionGrant]] = {}
+    overrides = {json_path_for(root, candidate): candidate for root, candidate in documents}
     for task_root, doc in documents:
         _require_publishable_task_document(doc)
         task_root.mkdir(parents=True, exist_ok=True)
@@ -199,6 +246,12 @@ def write_task_doc_batch(
                 render_markdown(
                     doc,
                     graph_titles=graph_titles if doc.executionGraph is not None else None,
+                    direct_grant=_stored_grant_for(task_root, doc, grant_census),
+                    master_order=(
+                        derive_master_order(doc, load_master_children(task_root, doc, overrides))
+                        if doc.kind == "master" and not doc.is_sprint
+                        else None
+                    ),
                 ),
             )
         )
@@ -236,6 +289,20 @@ def _restore_task_doc_batch(originals: dict[Path, bytes | None]) -> None:
             path.unlink(missing_ok=True)
         else:
             atomic_write_bytes(path, payload)
+
+
+def restore_task_doc_sources(snapshots: tuple[TaskDocSourceSnapshot, ...]) -> None:
+    """Restore the accepted source set when its derived-file publication fails."""
+    _restore_task_doc_batch(
+        {
+            path: raw
+            for snapshot in snapshots
+            for path, raw in (
+                (snapshot.json_path, snapshot.json_bytes),
+                (snapshot.markdown_path, snapshot.markdown_bytes),
+            )
+        }
+    )
 
 
 def _source_evidence(path: Path, payload: bytes | None) -> dict[str, object]:

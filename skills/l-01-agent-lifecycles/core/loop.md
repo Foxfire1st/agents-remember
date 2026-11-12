@@ -1,115 +1,105 @@
-# Core — The Three-Party Loop (one home — this file owns the loop doctrine)
+# Core — Owner, builder and Reviewer loop
 
-**OWNER → BUILDER → REVIEWER → owner, at every level that owns work.** The owner never
-self-approves; the builder never lands; the reviewer never decides — **verdicts are evidence**. The
-owner checks the verdict and either redispatches a builder or escalates. Role files reference this
-file; they do not restate it.
+This authoring reference defines how the owner, builder and independent Reviewer work together. The owner validates the deliverable and decides the gate; the builder builds; a distinct Reviewer supplies evidence, not gate acceptance. Role boundaries remain fixed, including when the developer chooses Architect direct coordination.
 
-| Level | Owner (holds the deliverable, rules, lands) | Builder | Reviewer |
+## Keep the roles distinct at each level
+
+| Level | Owner: holds the deliverable, rules and lands | Builder | Reviewer |
 | --- | --- | --- | --- |
-| Leaf | the leaf's owning seat (manager; architect in tight/flat mode) | spawned worker (no-commit contract) | spawned reviewer, criteria catalog + liberty |
-| Master | the manager | the leaf workers | the master-exit seam reviewer (verdict rides `master-handover-approval`) |
-| Portfolio plan | the architect | strategist when approved; orchestrator on a sanctioned strategist skip | reviewer with the plan-review catalog |
+| Leaf | Manager, or Architect under developer-chosen direct coordination | Worker | Distinct Reviewer on that leaf |
+| Master | Manager | Leaf Workers | Master-exit seam Reviewer; its verdict belongs to `master-handover-approval` |
 
-## Review is opt-in and explicit
+## Request independent review explicitly
 
-Run independent route review **only** when the developer or the approved task/role brief requests
-it; closeout and integration never require or launch it. Every review is dispatched with an explicit
-mode — `reviewMode=baseline` or `reviewMode=fix-verification` — and the full mode contract lives in
-`operations/review.md`.
+Independent review runs when the task or owner requests it, under an explicit baseline or fix-verification mode and for the exact seam. Closeout creates no new review duty. Existing required review and curation evidence still precede the gate.
 
-Independence requires **another agent**, never builder self-review: the reviewer seat is never the
-author/implementer seat. Every requirement verdict must cite evidence of the requirement's class;
-evidence of the wrong class is verdict laundering, not a pass.
+Independence requires another agent. The Reviewer is never the author or implementer. Every requirement verdict cites evidence of the requirement's class. Evidence of the wrong class cannot support a pass.
 
-## Complexity-scored tiers (per leaf, at dispatch, when review is requested)
+## Dispatch the agreed scope
 
-The owning seat scores three axes — blast radius (doctrine/enforcement/public surface vs
-leaf-local) · novelty (new subsystem vs pattern-following) · size (files × steps) — into three
-tiers:
+When review is requested, the owning seat dispatches its scope, mode, exact candidate and requirement revision. The scope follows the agreed seam, not an invented score.
 
-- **direct** — ordinary build channel plus the requested independent route review; no additional
-  loop machinery.
-- **builder-verified** — builder implements; owner additionally verifies report-vs-artifact; the
-  requested route review still runs.
-- **full loop** — builder + independent reviewer rounds, with the route partition as the review
-  scope floor where the leaf owns that seam.
+A baseline covers the complete agreed candidate diff, including unattributed changes.
+Fix-verification covers only the sealed outstanding findings and their required evidence.
+Owner validation of a report against an artifact is neither independent review nor permission to accept its own authorship.
 
-The strategist's blast-radius register is the scoring input when an orchestration task exists. A
-leaf's loop mark (tier + scope: manager | orchestrator — the owning level runs the loop with ITS
-agent set) is recorded on the leaf doc with a decision-log entry. A master whose leaves all score
-`direct` avoids iterative full-loop machinery. Atomic leaves still defer a requested route review to
-the one master integration seam; standalone and organizational leaves retain their requested review
-scope. **The knobs tune review depth and round machinery; they do not create a review when none was
-requested.**
+Record the agreed seam and review authority on the task. Organizational leaf review and atomic integration review keep their distinct scopes. A change of label or coordinating level creates no new baseline and no new mandatory review.
 
-## Rounds and convergence
+## Count rounds under the current settings
 
-- A governed review has at most **three rounds**: one thorough baseline and two fix-verification
-  rounds. A pending round may resume; a new review counts the next round.
-- Residuals of a passing round are verified by the same reviewer where the lifecycle uses follow-up
-  verification; fix rounds resume the same builder.
-- Reviews 2 and 3 verify **only** the original listed issues. Any outside-list matter goes to the
-  developer and is not a successor finding.
-- **The convergence rule.** Every fix-verification round must shrink or honestly retain the listed
-  open set with fixed/unfixed dispositions. At three rounds, or when a further round is needed, ask
-  the developer directly and wait for explicit authorization; record that instruction before any
-  authorized extra work. **Do not spin an unapproved round, split the scope, or create a new finding
-  list.** No agent may self-authorize an extra round, and no code path needs to prove human
-  authorship or build a separate authentication mechanism.
+A governed review has one thorough baseline followed by fix-verification rounds within the settings limit. `orchestration.loops.defaults.maxRounds` names the number of rounds allowed without approval.
 
-The simple review rule: if no review state is present, the used-round count is zero and the next
-review is a baseline; do not create a pristine marker or refuse because legacy review history is
-absent. Before reviewer work the owner calls `task_doc(operation="begin_review")`; after the result
-the owner records it with `task_doc(operation="record_review")` or the existing
-`task_doc(operation="record_route_review")`. Review 1 is thorough — inspect the entire agreed scope,
-applicable criteria, required routes, and lenses, then record the fixed original issue list with
-precise statements, evidence, and fix-acceptance criteria.
+Use the limit in the settings file when the round begins. A changed limit applies to the next round without a restart. The review state returned by `task_doc` carries the task's limit and its approved extra rounds. A pending round may resume; a new review counts as the next round.
 
-A changed candidate, source, requirement version, model, seat, route, or report label does **not**
-reset the list. Unknown, duplicate, rewritten, reintroduced, newly discovered, or outside-list
-issues, new criteria, new routes/lenses, whole-review requests, and passing with unresolved items
-are refused. This rule applies equally to native, hosted, plan, integration, route, lens,
-replacement, resumed, bootstrap, diagnostic, delta, and final review labels.
+Where the lifecycle uses follow-up verification, the same Reviewer verifies the residuals of a passing round. Fix rounds resume the same builder.
 
-Mechanical tests and worker diagnosis are evidence and may not publish reviewer findings or reset
-review authority.
+Fix-verification addresses only the original listed issues, subject to the two sanctioned routes below. Send every other matter outside that list to the developer; it does not become a successor finding.
 
-## Criteria catalogs (the reviewer as test bench)
+## Preserve the original list through convergence
 
-The baseline review runs its type's standing catalog from `../criteria/` (code-seam · doctrine ·
-onboarding-memory · report-verification · plan-review), the required routes, and the exploratory
-mandate, under the promotion ratchet. Fix-verification uses the sealed baseline and only the
-standing criteria/evidence needed to verify its listed IDs; it has no exploratory mandate,
-whole-catalog rediscovery, new-lens duty, or catalog-promotion authority. `roles/reviewer.md` binds
-the review mode, the evidence packet, and which catalogs apply.
+Every fix-verification round must shrink the open list or honestly retain it with fixed/unfixed dispositions. At the settings limit, or when another round is needed, request authorization as [Verify repaired findings at the round limit](../operations/review.md#verify-repaired-findings-at-the-round-limit) states.
 
-## Per-level agent sets
+Verifying repaired items is an ordinary fix-verification round. If the rounds are used up and the only remaining items were raised earlier and then repaired, the same Reviewer verifies exactly those items in the next round. This is not an exception to the authorization rule.
 
-Each level runs its loop with its own harness/model/effort set — the orchestrator-level set (the
-strongest models) and the manager-level set (cheaper, possibly workflow-free) — configured per level
-in the `orchestration.loops` settings block. The architect proposes a strategist pre-run, and it
-occurs only after developer approval; settings cannot auto-run it.
+When no review state exists, the used count is zero and the next review is the baseline. Do not invent a pristine marker. The leaf Reviewer opens its round with `task_doc(operation="begin_review")` and records its result with `record_review` or `record_route_review`. Other seams keep their own recording owner.
 
-## Requirement compilation precedes task topology
+The first review covers the complete agreed scope. It fixes the original issue list, statements, evidence and acceptance criteria for later rounds.
 
-After intent and scope are established, the architect compiles every independently falsifiable
-obligation into a canonical requirement index with a stable ID and explicit version. Clauses that
-can be violated, reviewed, owned, evidenced, or superseded independently are separate requirements.
+Mechanical tests and Worker diagnosis are evidence. They cannot publish Reviewer findings or reset review authority.
 
-Before any sprint/master/leaf task document is created, every ID + version has one self-contained,
-version-addressed packet using `../../w-02-light-task-workflow/requirement-packet-template.md`,
-including the problem, required behavior, rationale, scope and exclusions, preservation boundaries,
-failure/recovery behavior, examples, forbidden overreach, expected evidence, authority/provenance,
-dependencies, and open truth gaps. Material state, sequence, ownership, and interaction
-relationships get diagrams.
+Changing the candidate, source, requirement version, model, seat, route or report label does not reset the list. The review refuses:
 
-A fresh agent cold-reads each packet without the planning transcript and must be able to explain
-what changes, what stays unchanged, the important failure states, and proof of conformance. The
-architect presents the complete corpus for developer approval and creates task topology only after
-that approval; every approved packet records the durable ruling. Masters and leaves carry filtered
-ID + version + canonical-packet links, never rewritten requirement contracts. Each leaf owns exactly
-one primary requirement revision; several leaves may implement independently executable
-manifestations of one revision, while adjacent requirements are dependency/preservation context
-only. A requirement change increments its version, cites durable developer approval, invalidates
-affected acceptance state, and rebriefs affected leaves.
+- Unknown, duplicate, rewritten, reintroduced, newly discovered or outside-list issues, except through the two sanctioned routes below.
+- New criteria, routes or lenses.
+- Whole-review requests.
+- Passing with unresolved items.
+
+This applies to native, plan, integration, route, lens, replacement, resumed, bootstrap, diagnostic, delta and final review labels alike.
+
+## Handle the two sanctioned routes for added findings
+
+Two routes may add a finding after the list is sealed:
+
+- A valid code finding from the Curator.
+- A valid finding from an advisory review the Architect commissioned and forwarded in its questions file.
+
+For both, add it as a new sealed finding with its own identifier and reopen the verdict for that point only. Earlier sealed findings stay as they are. The Worker repairs a valid finding in a successor. For an invalid finding, give the reason it does not hold.
+
+A repair round for a Curator finding counts under the settings limit. Beyond it, send the extra-round question to the instructed reporting recipient where your role has one; otherwise send it through your parent, or ask in your own chat when you have no parent. An extra round for advisory findings is the Architect's grant. Every other new observation follows your role's developer-question route.
+
+## Use the catalog for the review mode
+
+A baseline uses its review type's standing catalog from `../criteria/`: code-seam, doctrine, onboarding-memory, report-verification or plan-review. It also uses the required routes and exploratory mandate. For criterion promotion, demotion and automation, follow the shared [Promotion Ratchet](../criteria/code-seam.md#promotion-ratchet), which the selected catalog points to.
+
+Fix-verification uses the sealed baseline and only the standing criteria and evidence needed for its listed identifiers. It has no exploratory mandate, whole-catalog rediscovery, new-lens duty or catalog-promotion authority.
+
+The [Reviewer role](../roles/reviewer.md) binds the review mode, evidence packet and applicable catalogs.
+
+## Resolve role settings without starting extra work
+
+The harness, model and effort resolve through `orchestration.roles` and the applicable `orchestration.rolesPerLevel` override. `orchestration.loops` holds loop defaults and postures.
+
+## Compile requirements before task topology
+
+After intent and scope are established, the Architect compiles every independently falsifiable obligation into a canonical requirement index with a stable identifier and explicit version. Clauses that can be violated, reviewed, owned, evidenced or superseded independently become separate requirements.
+
+For a first sprint only, the launcher creates the sprint document, a master and its first leaf before the Architect starts. They carry the developer's request and scope only: no requirement packets and no approved order. From the Architect's start on, packet approval governs them like any task document, and the Architect may reshape them through the usual task operations.
+
+Except for those first-sprint scope documents, before creating any sprint, master or leaf task document, give every identifier and version one self-contained, version-addressed packet. Use the [requirement-packet template](../templates/requirement-packet.md) and include:
+
+- Problem, required behavior and rationale.
+- Scope, exclusions and preservation boundaries.
+- Failure and recovery behavior.
+- Examples and forbidden overreach.
+- Expected evidence and authority/provenance.
+- Dependencies and open factual gaps.
+
+Use diagrams for material relationships of state, sequence, ownership and interaction.
+
+Subject to the same first-sprint exception, present the complete requirement corpus for developer approval before laying out the tasks, and record that ruling. Put canonical identifier, version and packet links in tasks rather than rewriting the contracts.
+
+A task owns one primary requirement packet. It may also own further approved packets of the same topic. Keep dependency and preservation context separate.
+
+One developer request is one task; do not split it on your own. Propose a split, with its dependencies, to the developer.
+
+A requirement change needs a new version, durable developer approval, invalidation of affected acceptance and a new brief to affected leaves. Reviews and cold reads provide advice; they never authorize adding a requirement.

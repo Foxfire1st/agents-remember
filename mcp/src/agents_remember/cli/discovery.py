@@ -1,109 +1,47 @@
-"""Trusted-settings discovery for the umbrella CLI (L1 of 260703).
+"""Read the user's tool-server settings without consulting workspace registrations.
 
-``agents-remember dashboard`` (and future subcommands) should run without
-``--config`` from anywhere under the workspace. Discovery walks the current
-directory upward; at each level it probes, in order:
-
-1. the settings convention ``.claude/mcp/agents-remember-settings.json``, and
-2. an ``.mcp.json`` whose ``mcpServers``/``agents-remember`` entry records a
-   ``--config`` argument — the harness's own registration, reused verbatim so
-   the CLI and the harness always boot from the same settings file.
-
-The nearest directory wins and the first USABLE file ends the walk — usable
-meaning it parses as JSON and its ``coordinationRoot`` is an existing absolute
-directory. That semantic probe matters because the repository itself ships a
-placeholder template at the convention path (``<PATH/TO/YOUR/...>``), which
-must never shadow the real settings above it. A malformed or foreign
-``.mcp.json`` is skipped silently: discovery must never crash on someone
-else's file. An explicit ``--config`` always bypasses this.
+Explicit --config arguments are handled by callers and bypass discovery.
 """
 
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
-from typing import Any
 
-SETTINGS_CONVENTION = Path(".claude") / "mcp" / "agents-remember-settings.json"
-MCP_REGISTRATION = ".mcp.json"
-_SERVER_NAME = "agents-remember"
+from agents_remember.cli.settings_provenance import discovered_settings_line
+from agents_remember.kernel.primitives.mcp_settings_location import mcp_settings_path
+from agents_remember.kernel.primitives.user_settings_location import UserSettingsLocationError
 
 
 class ConfigDiscoveryError(Exception):
-    """No trusted settings file was discoverable from the starting directory."""
+    """The user's tool-server settings cannot be used."""
 
 
-def discover_config(start: Path | None = None) -> Path:
-    """The nearest trusted settings JSON at or above ``start`` (default: cwd)."""
-    origin = (start or Path.cwd()).resolve()
-    for directory in (origin, *origin.parents):
-        convention = directory / SETTINGS_CONVENTION
-        if _is_usable_settings(convention):
-            return convention
-        registered = _config_from_mcp_registration(directory / MCP_REGISTRATION)
-        if registered is not None and _is_usable_settings(registered):
-            return registered
-    raise ConfigDiscoveryError(
-        "no trusted settings found: pass --config, or run from a directory at or below "
-        f"one containing {SETTINGS_CONVENTION.as_posix()} or an {MCP_REGISTRATION} whose "
-        f"{_SERVER_NAME!r} entry records a --config path (walked up from {origin})"
-    )
+def discover_config() -> Path:
+    """Select the one user-config file, independently of the caller's directory."""
+    try:
+        path = mcp_settings_path()
+    except UserSettingsLocationError as error:
+        raise ConfigDiscoveryError(str(error)) from error
+    root = _settings_coordination_root(path)
+    if root is None:
+        raise ConfigDiscoveryError(
+            f"no trusted settings found at {path}: create that settings file with an existing "
+            "absolute coordinationRoot, or pass --config with an explicit settings path"
+        )
+    print(discovered_settings_line(path, root), file=sys.stderr)
+    return path
 
 
-def _config_from_mcp_registration(mcp_json: Path) -> Path | None:
-    """The ``--config`` path recorded for the agents-remember server, if any."""
-    entry = _nested_object(_json_object(mcp_json), "mcpServers", _SERVER_NAME)
-    return None if entry is None else _config_argument(entry.get("args"))
-
-
-def _json_object(path: Path) -> dict[str, Any] | None:
-    """The file's top-level JSON object — None when absent, unreadable, or not an object.
-
-    Foreign and malformed files are someone else's: discovery skips them silently rather
-    than crashing the walk.
-    """
-    if not path.is_file():
-        return None
+def _settings_coordination_root(path: Path) -> Path | None:
+    """Accept JSON objects naming an existing absolute coordination directory."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    return data if isinstance(data, dict) else None
-
-
-def _nested_object(container: dict[str, Any] | None, *keys: str) -> dict[str, Any] | None:
-    """Follow ``keys`` down nested JSON objects; None at the first missing or non-object step."""
-    current: Any = container
-    for key in keys:
-        if not isinstance(current, dict):
-            return None
-        current = current.get(key)
-    return current if isinstance(current, dict) else None
-
-
-def _config_argument(arguments: Any) -> Path | None:
-    """The value following ``--config`` in a recorded argv list, if it carries one."""
-    if not isinstance(arguments, list):
-        return None
-    for index, argument in enumerate(arguments):
-        if argument == "--config" and index + 1 < len(arguments):
-            candidate = str(arguments[index + 1])
-            if candidate:
-                return Path(candidate)
-    return None
-
-
-def _is_usable_settings(path: Path) -> bool:
-    """True for a real trusted settings file — not the shipped placeholder template.
-
-    The probe is semantic, not syntactic: the file must parse as a JSON object whose
-    ``coordinationRoot`` is an existing absolute directory. The repository's tracked
-    template carries ``<PATH/TO/YOUR/...>`` placeholders and fails this, so a source
-    checkout never shadows the workspace's real settings.
-    """
-    data = _json_object(path)
-    root = data.get("coordinationRoot") if data is not None else None
+    root = data.get("coordinationRoot") if isinstance(data, dict) else None
     if not isinstance(root, str) or not root:
-        return False
+        return None
     candidate = Path(root)
-    return candidate.is_absolute() and candidate.is_dir()
+    return candidate if candidate.is_absolute() and candidate.is_dir() else None

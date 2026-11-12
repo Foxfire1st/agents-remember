@@ -4,8 +4,7 @@ Production code validates every tool payload against its registered response mod
 ``agents_remember.mcp.tools.base._tool_payload``. That validation runs **after** the
 producer has performed its writes, so a producer key the model forbids costs the caller
 the payload that would have told it the work was done: ``lifecycle_finalize_task``
-completed its transaction and then answered with a pydantic error, ``session_retire``
-terminated the seat and then answered with a pydantic error, and ``task_doc``'s
+completed its transaction and then answered with a pydantic error, and ``task_doc``'s
 ``read_steps`` -- the one operation the tool publishes as *the* way to read a checklist --
 could never return at all. This module moves that guarantee into the suite.
 
@@ -23,7 +22,7 @@ Two layers, and they answer different questions:
 
 * ``ToolResponseSurfaceTests`` is **total and structural**. Every registered response
   model has exactly one adapter entry and every adapter entry is registered; the public
-  roster is a subset of the registry; the 17 internal registrations are named. This layer
+  roster is a subset of the registry; no registration is unadvertised. This layer
   cannot see a wrong key, but it cannot be sampled either -- a new tool cannot be added
   without appearing here.
 * ``ToolResponseFiringStateTests`` is **executed**. Each case drives the real producer,
@@ -35,55 +34,36 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 import shutil
 import subprocess
 import tempfile
 import unittest
-from dataclasses import replace
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
 from unittest import mock
 
-from agents_remember.application.operator_inbox_tools import operator_inbox_post_tool
-from agents_remember.application.structural.outcomes import StructuralOutcome, structural_payload
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocEdit,
     TaskDocError,
     TaskDocTarget,
     task_doc_tool,
 )
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.application.worktree_tools import _worktree_result
-from agents_remember.controlplane.operator_inbox_records import (
-    InboxAddress,
-    InboxMessage,
-    InboxPoster,
-    InboxRouting,
-    create_operator_inbox_entry,
-)
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     RepositoryScope,
 )
 from agents_remember.mcp.registration import TOOL_REGISTRARS
-from agents_remember.mcp.tools import terminal as terminal_payload_tools
 from agents_remember.mcp.tools.base import PUBLIC_TOOLS, _tool_payload
-from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
 from agents_remember.mcp.tools.task_doc import task_doc_payload
 from agents_remember.models.base import FlexibleResponseModel, StrictResponseModel
 from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
-from agents_remember.models.operator_inbox import OperatorInboxPostResponse
-from agents_remember.models.structural.agent import (
-    RenameChildResponse,
-    RenameSelfResponse,
-    RetireChildResponse,
-)
 from agents_remember.models.task_doc import TaskDocResponse
-from agents_remember.models.terminal import SessionRetireResponse
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.models.worktree import WorktreeOperationControlResponse
-from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.worktrees.activation import atomic_series_activation_terminal
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_errors import (
     LifecycleControlError,
@@ -92,7 +72,6 @@ from agents_remember.worktrees.modules.finalize import FinalizeArgs, _finalized_
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 from mcp.server.fastmcp import FastMCP
 from pydantic import ValidationError
-from test_agent_notifier import _entry, _FakeHost
 
 REPO = "agents-remember"
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
@@ -110,11 +89,9 @@ def adapter_tool_ids() -> dict[str, list[str]]:
     """Every tool id a ``_tool_payload("<id>", ...)`` call site names, with its sites.
 
     Read from the source rather than from a hand-kept list, so this cannot drift from the
-    adapter surface it describes. 96 call sites name 89 ids at the merged base: some tools have
-    two entry points (``operator_inbox_post_payload`` and
-    ``registered_operator_inbox_post_payload``), and the five ``knowledge_*`` builders route
-    through the choke point as of ``260918-TSIP-L10`` -- before that they returned a raw dict,
-    which is why five registered models had no adapter entry here.
+    adapter surface it describes. 46 call sites name 44 ids: one tool (``memory_quality_check``)
+    has three entry points -- its plain read, its ``start`` and its ``poll`` -- and every
+    knowledge builder routes through the same choke point.
     """
 
     sites: dict[str, list[str]] = {}
@@ -133,7 +110,9 @@ def adapter_tool_ids() -> dict[str, list[str]]:
     return sites
 
 
-def choke_point_handlers(path: Path) -> tuple[list[ast.FunctionDef | ast.AsyncFunctionDef], int]:
+def choke_point_handlers(
+    path: Path,
+) -> tuple[list[ast.FunctionDef | ast.AsyncFunctionDef], int]:
     """The handlers in one tool module, and that module's ``_tool_payload`` call sites.
 
     A **handler** here is any public module-level function: in ``mcp/tools/`` a public
@@ -202,8 +181,8 @@ def advertised_tool_names() -> set[str]:
     population the roster assertions compare against, and it is derived from the registration
     modules rather than from ``PUBLIC_TOOLS`` -- so a tool that is registered but missing from
     the roster (or the reverse) is a disagreement this module can see, which a literal count
-    could never show. `T94`: the roster is 72 at this master's merged base, and the figure every
-    check on this master was measured against before it was 67.
+    could never show. `T94`: the roster was 72 at that master's merged base (67 before it); it is
+    72 with role tools retained and the two database-only tools removed.
     """
 
     server = FastMCP("tsip-l10-roster-probe")
@@ -219,14 +198,31 @@ def advertised_tool_names() -> set[str]:
 # one edit here -- and it is asserted ALONGSIDE the live-surface equality below, never instead
 # of it, so an accidental change fails against the registration modules rather than against a
 # number somebody has to remember to update.
-ROSTER_SIZE = 72
+#
+# 44 advertised tools, and the registry holds the same 44 names: every registered response
+# model belongs to an advertised tool, so no payload builder sits below the public surface.
+# (MIK-R109 rule 5 removed `resolve_context`; `context_packet` is the orientation read.)
+# MIK-R196 rule 11 adds user_settings_init to the advertised roster; MIK-R198 rule 6a adds
+# citation_note_revision to it, with one handler, and L183 adds explainer_control, the review
+# page's architect tool. Both are present at this merge: 44 advertised tools, the registry
+# holding the same 44 names.
+ROSTER_SIZE = 44
 
 # The tool-adapter module population and the handler population, same rule: the numbers are
 # asserted with the rule (every module's every handler returns `_tool_payload(...)`, and the
 # call-site total equals the handler total) so the rule cannot be satisfied by measuring
 # nothing, and the derivation below is what makes a silent change fail.
-TOOL_MODULE_COUNT = 20
-TOOL_HANDLER_COUNT = 96
+#
+# 14 adapter modules hold 46 handlers: `closeout_queue`, `core`, `curator_coherence`,
+# `direct_execution`, `direct_landing`, `enclosure_adoption`, `explainer_control`, `knowledge`,
+# `lifecycle_finalize`, `memory`, `read_files`, `role_agents`, `task_doc` and `worktree`.
+# (A `*_payload`-suffixed helper that only shapes a dict, such as the install compactor,
+# is not a handler: it never reaches the choke point.)
+TOOL_MODULE_COUNT = 14
+# ...and its handler to the population one tool adds -- MIK-R196's settings writer, MIK-R198's
+# note revision and L183's explainer_control each add one: 46 handlers, 46 call sites, read
+# from the merged modules rather than carried over from either side of the sync.
+TOOL_HANDLER_COUNT = 46
 
 
 def literal_keyword_values(path: Path, keyword: str) -> set[str]:
@@ -359,37 +355,17 @@ class ToolResponseSurfaceTests(unittest.TestCase):
         )
         self.assertEqual(ROSTER_SIZE, len(PUBLIC_TOOLS), "the advertised roster changed size")
 
-    def test_the_seventeen_internal_registrations_are_named_not_implied(self) -> None:
-        """The unadvertised registrations are compatibility/internal builders by design.
+    def test_no_registration_is_unadvertised(self) -> None:
+        """Every registered response model belongs to an advertised tool.
 
-        They are validated at the same choke point as the roster, so they are defects when
-        they drift; they are simply not advertised. Recording the exact set means a tool
-        that silently leaves the roster shows up here rather than nowhere.
+        A registration below the roster would be a payload builder validated at the same
+        choke point and published nowhere. The exact set is recorded -- and it is empty --
+        so a tool that silently leaves the roster while keeping its registration shows up
+        here rather than nowhere.
         """
 
         internal = set(TOOL_RESPONSE_MODELS) - set(PUBLIC_TOOLS)
-        self.assertEqual(
-            {
-                "attach_terminal_session_to_task",
-                "gate_create",
-                "gate_decide_internal",
-                "gate_list_internal",
-                "gate_response_wait",
-                "gate_wait",
-                "hosted_session_readiness",
-                "lifecycle_block",
-                "lifecycle_gate_internal",
-                "operator_inbox_consume",
-                "operator_inbox_poll",
-                "operator_inbox_post",
-                "operator_inbox_supersede",
-                "orchestration_nudge_manager",
-                "session_rename",
-                "session_retire",
-                "spawn_agent_session",
-            },
-            internal,
-        )
+        self.assertEqual(set(), internal)
 
     def test_the_models_these_fixtures_validate_are_the_registered_ones(self) -> None:
         """A fixture that validates against a hand-picked class proves nothing about the wire.
@@ -401,11 +377,6 @@ class ToolResponseSurfaceTests(unittest.TestCase):
 
         for tool, model in (
             ("lifecycle_finalize_task", LifecycleFinalizeTaskResponse),
-            ("operator_inbox_post", OperatorInboxPostResponse),
-            ("retire_child", RetireChildResponse),
-            ("rename_child", RenameChildResponse),
-            ("rename_self", RenameSelfResponse),
-            ("session_retire", SessionRetireResponse),
             ("task_doc", TaskDocResponse),
             ("worktree_operation_control", WorktreeOperationControlResponse),
         ):
@@ -451,7 +422,9 @@ class ToolResponseSurfaceTests(unittest.TestCase):
             declared_strict, strict, "a model declares strict but is not configured so"
         )
         self.assertEqual(
-            declared_flexible, flexible, "a model declares flexible but is not configured so"
+            declared_flexible,
+            flexible,
+            "a model declares flexible but is not configured so",
         )
         self.assertEqual(set(TOOL_RESPONSE_MODELS), declared_strict | declared_flexible)
 
@@ -462,7 +435,7 @@ class ToolResponseSurfaceTests(unittest.TestCase):
         place a payload meets its registered response model, so the assertion is about the
         **return** of every handler -- not about the module's text. That distinction is the
         whole point: a substring test cannot tell a module that *calls* the choke point from
-        one that *returns a dict past it*, and one appended to ``terminal.py`` as
+        one that *returns a dict past it*, and one appended to an adapter module as
         ``return {"ok": True, ...}`` left the previous ``assertIn("_tool_payload", source)``
         here green.
 
@@ -470,8 +443,8 @@ class ToolResponseSurfaceTests(unittest.TestCase):
         handlers at all, and the call-site equality is load-bearing rather than decorative: a
         ``_tool_payload`` call whose result is discarded while a raw dict is returned is
         exactly the bypass shape, and it makes the module's call sites outnumber its
-        handlers. 20 modules hold 96 handlers and 96 call sites at the merged base -- the same
-        96 the registration census reports, so the two readings cannot drift apart -- and the
+        handlers. 14 modules hold 46 handlers and 46 call sites -- the same
+        count the registration census reports, so the two readings cannot drift apart -- and the
         handler/call-site totals are also asserted equal to the id-literal total read by
         :func:`adapter_tool_ids`, which is the derivation that cannot be satisfied by measuring
         nothing. This is the case the five ``knowledge_*`` builders failed before
@@ -516,7 +489,7 @@ class ToolResponseSurfaceTests(unittest.TestCase):
             )
         self.assertEqual(TOOL_HANDLER_COUNT, handlers, "the tool-handler population changed")
         # Derived, not transcribed: the walk above and the id-literal census read the same
-        # 96 call sites from the same modules by two different routes.
+        # call sites from the same modules by two different routes.
         self.assertEqual(
             sum(len(sites) for sites in adapter_tool_ids().values()),
             call_sites_total,
@@ -577,7 +550,9 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
         )
         return _worktree_result("lifecycle_finalize_task", result)
 
-    def test_lifecycle_finalize_validates_with_the_series_release_produced(self) -> None:
+    def test_lifecycle_finalize_validates_with_the_series_release_produced(
+        self,
+    ) -> None:
         """D53: the success arm emits both keys, so both must be declared.
 
         The firing state is ``contract.kind == "series"`` **and** ``dry_run=False`` **and**
@@ -593,10 +568,14 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
         payload = self._finalize_payload(contract, dry_run=False)
 
         self.assertIn(
-            "atomicSeriesActivation", payload, "fixture did not reach the emitting branch"
+            "atomicSeriesActivation",
+            payload,
+            "fixture did not reach the emitting branch",
         )
         self.assertIn(
-            "atomicSeriesActivationRelease", payload, "fixture did not reach the emitting branch"
+            "atomicSeriesActivationRelease",
+            payload,
+            "fixture did not reach the emitting branch",
         )
         self.assertEqual("series", contract.kind)
         self.assertFalse(payload["dryRun"])
@@ -668,13 +647,13 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
 
     # -- T7: task_doc / steps ----------------------------------------------------------
 
-    def test_task_doc_read_steps_validates_and_returns_the_checklist(self) -> None:
-        """T7: ``read_steps`` is advertised in the schema and used to always error.
+    def test_task_doc_removed_reads_refuse_with_file_names(self) -> None:
+        """MIK-R111 rule 2: ``get`` and ``read_steps`` are removed reads.
 
-        The witness is ``"steps" in payload`` with the checklist non-empty: the guard is
-        ``_read_steps`` itself, and a fixture that ran any *other* operation would produce a
-        payload without the key. The ``get`` control on the same world proves the harness is
-        not what failed.
+        Both answer ``ok: false`` with ``operation-removed`` and the rendered
+        file plus the JSON beside it -- never a checklist, never a read. The
+        ``get`` control on the same world proves the harness is not what
+        failed: it refuses exactly like ``read_steps``.
         """
 
         coord = self.world("tsip-l4-taskdoc-")
@@ -724,18 +703,30 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
             ]
         )
 
-        control = task_doc_payload(coord, target, operation="get")
-        self.assertTrue(control["ok"])
-        self.assertNotIn("steps", control)
-
-        payload = task_doc_payload(coord, target, operation="read_steps")
-        self.assertIn("steps", payload, "fixture did not reach the emitting branch")
-        self.assertEqual(["S1"], [step["id"] for step in payload["steps"]])
-        self.assertEqual(["C1"], [sub["id"] for sub in payload["steps"][0]["substeps"]])
-        response = TaskDocResponse.model_validate(payload)
+        for operation in ("get", "read_steps"):
+            with tool_call_context(
+                "task_doc", {"operation": operation, "slug": "l4_demo"}, config=coord
+            ):
+                payload = task_doc_payload(coord, target, operation=operation)
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["code"], "operation-removed")
+            self.assertIn("l4_demo.md", str(payload["error"]))
+            self.assertIn("l4_demo.json", str(payload["error"]))
+            self.assertNotIn("steps", payload)
+        # MIK-R108: the model contract belongs to the whole result (read back
+        # from the answer's detail file); the answer holds the refusal
+        # without the four envelope fields.
+        self.assertIn("log", payload)
+        whole = json.loads(Path(payload["log"]).read_text(encoding="utf-8"))
+        response = TaskDocResponse.model_validate(whole)
         self.assertEqual("task_doc.read_steps", response.operation)
+        self.assertEqual("operation-removed", response.code)
+        for field in ("tokens", "tokenizer", "tokenCountExact", "operation"):
+            self.assertNotIn(field, payload)
 
-    def test_task_doc_description_and_refusal_name_the_same_kind_vocabulary(self) -> None:
+    def test_task_doc_description_and_refusal_name_the_same_kind_vocabulary(
+        self,
+    ) -> None:
         """T43 / T50's class: a description that advertises what the mechanism refuses.
 
         The published description is the load-bearing surface here because the schema cannot
@@ -746,7 +737,7 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
 
         description = advertised_description("task_doc")
         self.assertNotIn("'light'|'subTask'|'master'", description)
-        self.assertIn("kind ['subTask'|'master']", description)
+        self.assertIn("Kind: subTask or master.", description)
 
         coord = self.world("tsip-l4-kind-")
         target = TaskDocTarget(repo_id=REPO, task_name="l4-kind", slug="l4_kind")
@@ -772,6 +763,49 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
         self.assertIn("light task documents are no longer supported", message)
         self.assertIn("['subTask', 'master']", message)
 
+    def test_task_doc_alignment_states_validate_through_the_registered_response(self) -> None:
+        """Manager B: explicit unavailable is not empty; unknown states cannot widen the schema."""
+        self.assertIs(TOOL_RESPONSE_MODELS["task_doc"], TaskDocResponse)
+
+        def payload(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+            return {
+                "operation": "task_doc.create",
+                "taskId": "L1",
+                "slug": "leaf",
+                "kind": "subTask",
+                "status": "pending",
+                "docPath": "/fixture/leaf.json",
+                "renderedPath": "/fixture/leaf.md",
+                "ok": True,
+                "alignmentSweep": {"message": "Advisory sibling alignment", "openLeaves": rows},
+            }
+
+        for row in (
+            {"id": "L1", "state": "available", "requirements": []},
+            {"id": "L2", "state": "available", "requirements": ["R2"]},
+            {"id": "L3", "state": "unavailable"},
+        ):
+            parsed = TOOL_RESPONSE_MODELS["task_doc"].model_validate(payload([row]))
+            self.assertEqual(
+                parsed.model_dump(exclude_none=True)["alignmentSweep"]["openLeaves"], [row]
+            )
+        self.assertEqual(
+            TOOL_RESPONSE_MODELS["task_doc"]
+            .model_validate(payload([]))
+            .model_dump()["alignmentSweep"]["openLeaves"],
+            [],
+        )
+        for row in (
+            {"id": "L1", "state": "unknown", "requirements": []},
+            {"id": "L1", "state": "available"},
+            {"id": "L1", "state": "unavailable", "requirements": []},
+            {"id": "L1", "requirements": []},
+            {"id": "L1", "state": "available", "requirements": [], "extra": True},
+            {"id": "L1", "state": "unavailable", "extra": True},
+        ):
+            with self.subTest(row=row), self.assertRaises(ValidationError):
+                TOOL_RESPONSE_MODELS["task_doc"].model_validate(payload([row]))
+
     # -- T8: worktree_operation_control / nextTool -------------------------------------
 
     def test_every_next_tool_its_own_refusals_advertise_is_declared(self) -> None:
@@ -791,6 +825,7 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
             emitted |= literal_keyword_values(path, "next_tool")
         self.assertEqual(
             {
+                "direct_landing",
                 "worktree_closeout_preview",
                 "worktree_operation_control",
             },
@@ -826,148 +861,3 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
                 payload = _tool_payload("worktree_operation_control", refusal)
                 response = WorktreeOperationControlResponse.model_validate(payload)
                 self.assertEqual(value, response.nextTool)
-
-    # -- T15: operator_inbox_post / the refusal that could never validate --------------
-
-    def test_operator_inbox_post_sprint_owner_refusal_is_a_typed_payload(self) -> None:
-        """T15: the only refusal branch of this tool could not validate under any input.
-
-        It returned ``{ok, operation, status}``: ``status`` was not declared and ``entryId``,
-        ``state``, ``messageKind`` and ``deliveryState`` are required. The firing state is a
-        ``decision-item`` with a catalog present and no resolvable owner -- a routable
-        message on the same world is the control that proves the branch, not the harness, is
-        what produced the refusal.
-        """
-
-        coord = self.world("tsip-l4-inbox-")
-        catalog = TerminalCatalog(terminal_catalog_path(coord.coordination_root))
-        catalog.upsert(_entry("worker-1"))
-        poster = InboxPoster(created_by="tsip", created_via="cli", sender_agent_id=None)
-
-        decision = InboxMessage(
-            ask="a decision is needed",
-            response="the sprint owner must rule",
-            message_kind="decision-item",
-        )
-        produced = operator_inbox_post_tool(
-            coord, address=InboxAddress(), message=decision, poster=poster
-        )
-        self.assertEqual("sprint-owner-required", produced["status"], "refusal branch did not fire")
-        self.assertFalse(produced["ok"])
-
-        payload = operator_inbox_post_payload(
-            coord, address=InboxAddress(), message=decision, poster=poster
-        )
-        response = OperatorInboxPostResponse.model_validate(payload)
-        self.assertEqual("sprint-owner-required", response.status)
-        self.assertIsNone(response.entryId)
-        self.assertEqual("decision-item", response.messageKind)
-
-    def test_a_queued_operator_inbox_post_still_must_report_its_entry(self) -> None:
-        """The conditional requirement's other half, so the refusal cannot hollow it out.
-
-        Making the four fields optional would have let a *successful* post omit the entry it
-        queued -- trading a refusal that could never be returned for a success that cannot
-        be distinguished from one that queued nothing. The validator is what keeps the
-        success contract as strict as it was.
-        """
-
-        with self.assertRaises(ValidationError) as caught:
-            OperatorInboxPostResponse.model_validate(
-                {"ok": True, "operation": "operator_inbox_post", "status": "queued"}
-            )
-        self.assertIn("must report entryId", str(caught.exception))
-        self.assertIn("deliveryState", str(caught.exception))
-
-    # -- T16: session_retire / the stranded-row report ---------------------------------
-
-    def _retirement_world(self, prefix: str) -> McpRuntimeConfig:
-        coord = self.world(prefix)
-        catalog = TerminalCatalog(terminal_catalog_path(coord.coordination_root))
-        catalog.upsert(
-            replace(_entry("actor-1"), spawn_role="orchestrator", seat_role="orchestrator")
-        )
-        catalog.upsert(_entry("target-1"))
-        store = OperatorInboxStore(observer_root(coord))
-        store.append(
-            create_operator_inbox_entry(
-                InboxMessage(ask="queued for the seat about to retire", response="pending work"),
-                entry_id="stranded-row-1",
-                now="2026-09-18T10:00:00+00:00",
-                routing=InboxRouting(address=InboxAddress(agent_id="target-1")),
-                poster=InboxPoster(created_by="tsip", created_via="cli", sender_agent_id="actor-1"),
-            )
-        )
-        return coord
-
-    def test_session_retire_reports_the_stranded_row_after_the_seat_is_gone(self) -> None:
-        """T16: the seat is retired, then the caller got a schema error instead of the report.
-
-        Each arm runs on its own world because retirement is irreversible: on a reused world
-        the second call takes ``already-retired`` and carries none of the three keys, which
-        is how a naive harness reports a false clean. The witness is that the row really was
-        surfaced -- ``strandedRowIds`` non-empty -- and the catalog really did flip.
-        """
-
-        coord = self._retirement_world("tsip-l4-retire-")
-        payload = terminal_payload_tools.session_retire_payload(
-            coord, actor_session_id="actor-1", session_id="target-1", host=_FakeHost()
-        )
-
-        self.assertEqual("retired", payload["status"], "the guarded branch did not fire")
-        self.assertEqual(["stranded-row-1"], payload["strandedRowIds"], "no row was surfaced")
-        self.assertEqual(1, payload["strandedRowCount"])
-        response = SessionRetireResponse.model_validate(payload)
-        retired = TerminalCatalog(terminal_catalog_path(coord.coordination_root)).get("target-1")
-        self.assertIsNotNone(retired)
-        assert retired is not None  # created above; retirement terminates it
-        self.assertEqual("terminated", retired.status)
-        self.assertEqual(["stranded-row-1"], response.strandedRowIds)
-
-        retry = terminal_payload_tools.session_retire_payload(
-            coord, actor_session_id="actor-1", session_id="target-1", host=_FakeHost()
-        )
-        self.assertEqual("already-retired", retry["status"])
-        self.assertEqual([], retry.get("strandedRowIds", []))
-        SessionRetireResponse.model_validate(retry)
-
-    # -- T4: the shared structural delivery projection ---------------------------------
-
-    def test_the_structural_delivery_projection_is_declared_on_every_consumer(self) -> None:
-        """T4: one producer, six consumers, three of which did not declare its keys.
-
-        ``structural_payload`` adds ``deliveryState`` and ``adapterDeliveryState`` whenever
-        the outcome carries them. ``retire_child``, ``rename_child`` and ``rename_self``
-        reach the producer through call sites that pass no delivery state today, so the keys
-        are latent rather than live -- but the producer *can* emit them, and a model that
-        forbids a key its own producer can emit is D53's shape. The witness is the guard:
-        the outcome below carries both states, and the case fails if the producer drops
-        them, which is the only way this could pass vacuously.
-        """
-
-        outcome = StructuralOutcome(
-            operation="rename_self",
-            ok=True,
-            status="renamed",
-            document=None,
-            role="worker",
-            detail=None,
-            delivery_state="delivered",
-            adapter_delivery_state="accepted",
-        )
-        emitted = structural_payload(outcome)
-        self.assertIn("deliveryState", emitted, "fixture did not reach the emitting branch")
-        self.assertIn("adapterDeliveryState", emitted, "fixture did not reach the emitting branch")
-
-        for model in (RetireChildResponse, RenameChildResponse, RenameSelfResponse):
-            with self.subTest(model=model.__name__):
-                declared = set(model.model_fields)
-                self.assertEqual(set(), {"deliveryState", "adapterDeliveryState"} - declared)
-                response = model.model_validate(
-                    {
-                        **emitted,
-                        "operation": model.model_fields["operation"].default,
-                    }
-                )
-                self.assertEqual("delivered", response.deliveryState)
-                self.assertEqual("accepted", response.adapterDeliveryState)

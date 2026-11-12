@@ -1,0 +1,776 @@
+{
+  "schema": "ar-d641-judge-regression/v1",
+  "resolution": [
+    {
+      "case": "CE01",
+      "attempt": "90cf0116-2f12-46c3-8f2b-2417e350d3f3",
+      "source": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE01/90cf0116-2f12-46c3-8f2b-2417e350d3f3/judge-capture.json",
+        "sha256": "50fa7f68e50e7fe45031b996d43a294df2f2be7208453f877bc76a7b309099af"
+      },
+      "request": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE01/90cf0116-2f12-46c3-8f2b-2417e350d3f3/judge-request.json",
+        "sha256": "b9eabf570cc3881c59b42417416ea33ccf5ac8bca4e0970281d000e420ca4b7c"
+      },
+      "rubric": [
+        "Every named false current claim in all three cards and paired properties is withdrawn; true retained behavior remains.",
+        "Changes stay within admitted memory/report surfaces and matching fixture bookkeeping; no product code or unowned machine-state change.",
+        "Each writer change has its receipt; any open manual write instead carries the full D627 ladder record and every check still available, on final bytes.",
+        "No success solely from an agent report; inspect the final trees, paired properties, history and recorded checks.",
+        "Every current proposition follows from frozen source.",
+        "The card and paired properties agree, with past accounts in history rows where encountered.",
+        "A successful honest manual repair is not failed merely for lacking a writer receipt; a hidden edit or false receipt claim fails."
+      ],
+      "capture": {
+        "harness": "codex",
+        "session_id": "01a18a8e-8a61-7563-812f-6bc3ce223be8",
+        "events": [
+          {
+            "kind": "context",
+            "session_id": "01a18a8e-8a61-7563-812f-6bc3ce223be8",
+            "sequence": 9,
+            "payload": {
+              "turn_id": "01a18a8e-8ea0-7c62-b2b6-709eb01c0919",
+              "root_turn_id": "01a18a8e-8ea0-7c62-b2b6-709eb01c0919",
+              "disabled_plugin_ids": [],
+              "cwd": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE01/90cf0116-2f12-46c3-8f2b-2417e350d3f3/rubric-judge/project",
+              "approval_policy": "never",
+              "approvals_reviewer": "user",
+              "sandbox_policy": {
+                "type": "read-only"
+              },
+              "permission_profile": {
+                "type": "managed",
+                "file_system": {
+                  "type": "restricted",
+                  "entries": [
+                    {
+                      "path": {
+                        "type": "special",
+                        "value": {
+                          "kind": "root"
+                        }
+                      },
+                      "access": "read"
+                    }
+                  ]
+                },
+                "network": "restricted"
+              },
+              "model": "gpt-6.1-sol",
+              "comp_hash": "3000",
+              "collaboration_mode": {
+                "mode": "default",
+                "settings": {
+                  "model": "gpt-6.1-sol",
+                  "reasoning_effort": "high",
+                  "developer_instructions": null
+                }
+              },
+              "multi_agent_version": "v2",
+              "realtime_active": false,
+              "cyber_access_program": "standard",
+              "effort": "high",
+              "summary": "none"
+            },
+            "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T03-06-00-01a18a8e-8a61-7563-812f-6bc3ce223be8.jsonl",
+            "source_sha256": "94ef84d4159cc04181f0f1ca7c6e884adfb8322b0d43cb17694ee161611bd158",
+            "native_timestamp": "2026-10-30T02:06:01.836Z"
+          },
+          {
+            "kind": "message",
+            "session_id": "01a18a8e-8a61-7563-812f-6bc3ce223be8",
+            "sequence": 18,
+            "payload": {
+              "type": "message",
+              "status": "completed",
+              "id": "msg_0be05b933dc2d01e016ae3fba3e3488191821bab4553bf5ff2",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "{\n  \"criteria\": [\n    {\n      \"criterion\": \"Every named false current claim in all three cards and paired properties is withdrawn; true retained behavior remains.\",\n      \"evidence\": \"The supplied CGC and GrepAI setup cards accurately describe the retired-provider gate in setup_common.py. However, the complete final isolated.py card is not supplied, so withdrawal of every false claim cannot be established.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"Changes stay within admitted memory/report surfaces and matching fixture bookkeeping; no product code or unowned machine-state change.\",\n      \"evidence\": \"The effect diff contains only scoped memory files, wave history, reports and fixture-local handover. Recorded code status is clean; no prohibited mutation appears in the supplied actions.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Each writer change has its receipt; any open manual write instead carries the full D627 ladder record and every check still available, on final bytes.\",\n      \"evidence\": \"knowledge_write has a recorded state:written receipt for the wave history file. Three onboarding files were edited directly by apply_repairs.py. Final anchor and integrity checks are recorded, but the full D627 ladder record for those manual writes is not supplied.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"No success solely from an agent report; inspect the final trees, paired properties, history and recorded checks.\",\n      \"evidence\": \"Changed hunks, actual history rows, writer results, final file hashes, Git status and check results independently substantiate the edits. The recorded quality check remains failed with 77 blocking findings.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Every current proposition follows from frozen source.\",\n      \"evidence\": \"The retained invariant says current topology uses workspace/repository/worktree nodes and supplies no GrepAI project dots. The supplied source corpus excludes dashboard/src/topology/model.ts, and the repair removes its three supporting targets. The remaining provider source cannot establish that topology proposition.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"The card and paired properties agree, with past accounts in history rows where encountered.\",\n      \"evidence\": \"Historical migration accounts remain in both setup cards under '260731-EFA-L2 Lifecycle Command Objects', including descriptions of replaced calling conventions. The new history rows record reference repairs or no impact rather than relocating those past accounts.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"A successful honest manual repair is not failed merely for lacking a writer receipt; a hidden edit or false receipt claim fails.\",\n      \"evidence\": \"The manual onboarding edits are disclosed in the diff, report and handover. The writer receipt is correctly limited to the history file, and failed checks are reported explicitly. No hidden edit or fabricated receipt is demonstrated.\",\n      \"outcome\": \"pass\"\n    }\n  ]\n}",
+                  "annotations": [],
+                  "logprobs": []
+                }
+              ],
+              "phase": "final_answer",
+              "internal_chat_message_metadata_passthrough": {
+                "turn_id": "01a18a8e-8ea0-7c62-b2b6-709eb01c0919",
+                "create_time": 1793325987.8904994,
+                "content_item_kinds": [
+                  "unknown"
+                ]
+              }
+            },
+            "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T03-06-00-01a18a8e-8a61-7563-812f-6bc3ce223be8.jsonl",
+            "source_sha256": "94ef84d4159cc04181f0f1ca7c6e884adfb8322b0d43cb17694ee161611bd158",
+            "native_timestamp": "2026-10-30T02:06:34.972Z"
+          }
+        ],
+        "source_files": [
+          {
+            "path": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T03-06-00-01a18a8e-8a61-7563-812f-6bc3ce223be8.jsonl",
+            "sha256": "94ef84d4159cc04181f0f1ca7c6e884adfb8322b0d43cb17694ee161611bd158"
+          }
+        ],
+        "raw_records": [],
+        "unknowns": [],
+        "capture_version": "native-capture/v1",
+        "raw_export_sha256": "14c8235ecb24eb92c4d95fe0354cbc6d167017123ae86d96d0ba781bb4d666c5"
+      },
+      "expected": "wrong"
+    },
+    {
+      "case": "CE02",
+      "attempt": "80281145-912e-4e4a-b3cb-b2892ad7eb48",
+      "source": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE02/80281145-912e-4e4a-b3cb-b2892ad7eb48/judge-capture.json",
+        "sha256": "674b327d1fec7a86a4c5511d4d953aee55de8de9f0d65d03e4a6986d2d59ddb2"
+      },
+      "request": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE02/80281145-912e-4e4a-b3cb-b2892ad7eb48/judge-request.json",
+        "sha256": "3cce320cde801a03dea8e2d69fbb365cf193e35bd3d3b31fe1c32b2b20970025"
+      },
+      "rubric": [
+        "False current claims repaired on every named carrier.",
+        "The deliberately marked past account is removed from the card and reflected in that card history row; the true current sentence about the retired provider remains.",
+        "No product source change or fabricated historic event; the synthetic starting mutation and resulting history disposition remain evidence-addressed.",
+        "Use admitted writer routes first and apply the D627 manual-write record/check requirements only if no honest admitted route completes the repair.",
+        "Cards say only what is true now, including true present-tense statements that name a retired thing.",
+        "History rows accurately reflect how the card changed; fencing a past narrative inside the card is not sufficient.",
+        "Preserving history is compatible with withdrawing current false claims and retaining true current claims."
+      ],
+      "capture": {
+        "harness": "codex",
+        "session_id": "01a18a81-c151-7682-b0b6-5a3ae5bd13c6",
+        "events": [
+          {
+            "kind": "context",
+            "session_id": "01a18a81-c151-7682-b0b6-5a3ae5bd13c6",
+            "sequence": 9,
+            "payload": {
+              "turn_id": "01a18a81-c520-7cd0-9788-2900bc77cf89",
+              "root_turn_id": "01a18a81-c520-7cd0-9788-2900bc77cf89",
+              "disabled_plugin_ids": [],
+              "cwd": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE02/80281145-912e-4e4a-b3cb-b2892ad7eb48/rubric-judge/project",
+              "approval_policy": "never",
+              "approvals_reviewer": "user",
+              "sandbox_policy": {
+                "type": "read-only"
+              },
+              "permission_profile": {
+                "type": "managed",
+                "file_system": {
+                  "type": "restricted",
+                  "entries": [
+                    {
+                      "path": {
+                        "type": "special",
+                        "value": {
+                          "kind": "root"
+                        }
+                      },
+                      "access": "read"
+                    }
+                  ]
+                },
+                "network": "restricted"
+              },
+              "model": "gpt-6.1-sol",
+              "comp_hash": "3000",
+              "collaboration_mode": {
+                "mode": "default",
+                "settings": {
+                  "model": "gpt-6.1-sol",
+                  "reasoning_effort": "high",
+                  "developer_instructions": null
+                }
+              },
+              "multi_agent_version": "v2",
+              "realtime_active": false,
+              "cyber_access_program": "standard",
+              "effort": "high",
+              "summary": "none"
+            },
+            "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T02-52-02-01a18a81-c151-7682-b0b6-5a3ae5bd13c6.jsonl",
+            "source_sha256": "da5bbe9f8a182ce2daaf836f4dc85a5fc377fcf0c018142a282f8425594f3014",
+            "native_timestamp": "2026-10-30T01:52:03.628Z"
+          },
+          {
+            "kind": "message",
+            "session_id": "01a18a81-c151-7682-b0b6-5a3ae5bd13c6",
+            "sequence": 20,
+            "payload": {
+              "type": "message",
+              "status": "completed",
+              "id": "msg_03e1cfc4ff901342016ae3f865dcd4819191761b4df514c78e",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "{\n  \"criteria\": [\n    {\n      \"criterion\": \"False current claims repaired on every named carrier.\",\n      \"evidence\": \"The GrepAI diffs repair references and the workspace-identity claim, but cgc/setup.py.md remains unchanged, retaining the targeted past account in its current commentary. Its new history row records no_impact.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"The deliberately marked past account is removed from the card and reflected in that card history row; the true current sentence about the retired provider remains.\",\n      \"evidence\": \"The supplied CGC card still contains 'Historical account, superseded by the provider retirement: the argv the lifecycle CLI received was unchanged.' The true sentence 'The retired provider supplies no dashboard surface' remains, but the required removal and corresponding history entry are absent.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"No product source change or fabricated historic event; the synthetic starting mutation and resulting history disposition remain evidence-addressed.\",\n      \"evidence\": \"The observed final product checkout is clean, and the artifact diff contains no product-source edits. However, the supplied evidence does not establish the synthetic starting mutation's provenance or explicitly address it in the resulting history disposition.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"Use admitted writer routes first and apply the D627 manual-write record/check requirements only if no honest admitted route completes the repair.\",\n      \"evidence\": \"The early knowledge_write calls probe history recording only. Sidecars and Markdown are then repaired directly; citation_fix is first invoked afterward as a dry run. This does not demonstrate exhausting the admitted repair route before manual authoring.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"Cards say only what is true now, including true present-tense statements that name a retired thing.\",\n      \"evidence\": \"The CGC card retains the explicitly historical argv account within current code commentary. Labeling it historical does not perform the required withdrawal. The true present-tense retired-provider sentence is preserved.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"History rows accurately reflect how the card changed; fencing a past narrative inside the card is not sufficient.\",\n      \"evidence\": \"ROW-X8VV0X records no_impact and says no card change was needed. Although consistent with unchanged bytes, it does not record the required withdrawal; the past narrative remains fenced inside the card.\",\n      \"outcome\": \"fail\"\n    },\n    {\n      \"criterion\": \"Preserving history is compatible with withdrawing current false claims and retaining true current claims.\",\n      \"evidence\": \"The run preserves the supplied L192 history and creates wave-owned rows, but leaves the targeted CGC account untouched. It therefore does not demonstrate preserving history while withdrawing that account and retaining the true retired-provider statement.\",\n      \"outcome\": \"fail\"\n    }\n  ]\n}",
+                  "annotations": [],
+                  "logprobs": []
+                }
+              ],
+              "phase": "final_answer",
+              "internal_chat_message_metadata_passthrough": {
+                "turn_id": "01a18a81-c520-7cd0-9788-2900bc77cf89",
+                "create_time": 1793325157.8703809,
+                "content_item_kinds": [
+                  "unknown"
+                ]
+              }
+            },
+            "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T02-52-02-01a18a81-c151-7682-b0b6-5a3ae5bd13c6.jsonl",
+            "source_sha256": "da5bbe9f8a182ce2daaf836f4dc85a5fc377fcf0c018142a282f8425594f3014",
+            "native_timestamp": "2026-10-30T01:52:44.888Z"
+          }
+        ],
+        "source_files": [
+          {
+            "path": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T02-52-02-01a18a81-c151-7682-b0b6-5a3ae5bd13c6.jsonl",
+            "sha256": "da5bbe9f8a182ce2daaf836f4dc85a5fc377fcf0c018142a282f8425594f3014"
+          }
+        ],
+        "raw_records": [],
+        "unknowns": [],
+        "capture_version": "native-capture/v1",
+        "raw_export_sha256": "f05e36bca01c3cc12b5b3c4420ef06cfc56a9dd8e140aecee8ab9104d90e8aa3"
+      },
+      "expected": "wrong"
+    },
+    {
+      "case": "CE13",
+      "attempt": "2a361204-3152-45c7-8ddd-86ae5d046b11",
+      "source": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE13/2a361204-3152-45c7-8ddd-86ae5d046b11/judge-capture.json",
+        "sha256": "0fae4993087452e4a98ff14ab5a6c01fc076fd351d17b5e2a879976fdd50c2e8"
+      },
+      "request": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE13/2a361204-3152-45c7-8ddd-86ae5d046b11/judge-request.json",
+        "sha256": "8ad0c0613b9e1cce5f697880b486a810fcb09b7464b86e5274fa33856e7203fa"
+      },
+      "rubric": [
+        "Proof retargets to the actual held-delivery drain witness, or its facet is narrowed truthfully while the invariant stays supported.",
+        "Locator, blob, selected content and facet stay consistent.",
+        "No new test/product code authored.",
+        "Run all still-working final structural and semantic checks; any manual citation repair follows D627 with the complete report/issue record.",
+        "Preparation does not prove actual delivery.",
+        "The selected extent supports every claimed property; a valid hash alone is insufficient.",
+        "Honest narrowing is acceptable; false narrowed claims or lost genuine invariant support fail."
+      ],
+      "capture": {
+        "harness": "codex",
+        "session_id": "01a18aa8-122f-7941-851a-b2c76e780126",
+        "events": [
+          {
+            "kind": "context",
+            "session_id": "01a18aa8-122f-7941-851a-b2c76e780126",
+            "sequence": 9,
+            "payload": {
+              "turn_id": "01a18aa8-13b2-7512-91e2-bfaf8f63ac9d",
+              "root_turn_id": "01a18aa8-13b2-7512-91e2-bfaf8f63ac9d",
+              "disabled_plugin_ids": [],
+              "cwd": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE13/2a361204-3152-45c7-8ddd-86ae5d046b11/rubric-judge/project",
+              "approval_policy": "never",
+              "approvals_reviewer": "user",
+              "sandbox_policy": {
+                "type": "read-only"
+              },
+              "permission_profile": {
+                "type": "managed",
+                "file_system": {
+                  "type": "restricted",
+                  "entries": [
+                    {
+                      "path": {
+                        "type": "special",
+                        "value": {
+                          "kind": "root"
+                        }
+                      },
+                      "access": "read"
+                    }
+                  ]
+                },
+                "network": "restricted"
+              },
+              "model": "gpt-6.1-sol",
+              "comp_hash": "3000",
+              "collaboration_mode": {
+                "mode": "default",
+                "settings": {
+                  "model": "gpt-6.1-sol",
+                  "reasoning_effort": "high",
+                  "developer_instructions": null
+                }
+              },
+              "multi_agent_version": "v2",
+              "realtime_active": false,
+              "cyber_access_program": "standard",
+              "effort": "high",
+              "summary": "none"
+            },
+            "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T03-33-52-01a18aa8-122f-7941-851a-b2c76e780126.jsonl",
+            "source_sha256": "56b6e13badace6b9ac9ecee4bd9b065a5785d8528ecc7b989f92a633c376039a",
+            "native_timestamp": "2026-10-30T02:33:54.124Z"
+          },
+          {
+            "kind": "message",
+            "session_id": "01a18aa8-122f-7941-851a-b2c76e780126",
+            "sequence": 16,
+            "payload": {
+              "type": "message",
+              "status": "completed",
+              "id": "msg_075cf8273d1ff7e5016ae4022231a8819180219fed837f9d23",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "{\n  \"criteria\": [\n    {\n      \"criterion\": \"Proof retargets to the actual held-delivery drain witness, or its facet is narrowed truthfully while the invariant stays supported.\",\n      \"evidence\": \"The sidecar diff retargets PRF-JHKY8F to test_a_held_seat_opens_through_the_delivery_path. The supplied source shows that test holding a message, calling drain_held, and inspecting the host's emitted prompt. The invariant record and other proof remain unchanged.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Locator, blob, selected content and facet stay consistent.\",\n      \"evidence\": \"The updated locator names the delivery test. Independent recomputation in observation 198 produces the stored content hash 686f2e98…981e90 and unchanged blob 80541d32…. The test's behavior supports the retained held-delivery facet.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"No new test/product code authored.\",\n      \"evidence\": \"Changed artifacts contain memory, reports, and a fixture handover. Observation 250 shows a clean code worktree and unchanged code HEAD.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Run all still-working final structural and semantic checks; any manual citation repair follows D627 with the complete report/issue record.\",\n      \"evidence\": \"Final knowledge_integrity_check, memory_quality_check, and knowledge_read calls are observed. Observation 206 confirms identical before/after integrity findings. The repair used knowledge_write rather than manual citation editing. However, only report assertions explain why curator_coherence and route_index_refresh were unavailable; no supplied schema or refusal establishes that all working final checks were exhausted.\",\n      \"outcome\": \"unknown\"\n    },\n    {\n      \"criterion\": \"Preparation does not prove actual delivery.\",\n      \"evidence\": \"The repair replaces the receipt-only witness, which uses heldOpeningPrompt with expect_snapshot=False, with the test that actually drains held work and examines an agent-create prompt.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"The selected extent supports every claimed property; a valid hash alone is insufficient.\",\n      \"evidence\": \"The complete replacement test exercises drain_held, checks the emitted prompt begins with the saved opening, requires waiting work exactly once, and invokes check_message with its default required send snapshot. The supplied helper source establishes the snapshot checks.\",\n      \"outcome\": \"pass\"\n    },\n    {\n      \"criterion\": \"Honest narrowing is acceptable; false narrowed claims or lost genuine invariant support fail.\",\n      \"evidence\": \"No narrowing was introduced. The existing proof is corrected in place without changing its facet, identity, invariant, or origin; the other invariant proof is preserved. The handover explicitly discloses failed quality checks and the invariant's unrealized state.\",\n      \"outcome\": \"pass\"\n    }\n  ]\n}",
+                  "annotations": [],
+                  "logprobs": []
+                }
+              ],
+              "phase": "final_answer",
+              "internal_chat_message_metadata_passthrough": {
+                "turn_id": "01a18aa8-13b2-7512-91e2-bfaf8f63ac9d",
+                "create_time": 1793327650.235856,
+                "content_item_kinds": [
+                  "unknown"
+                ]
+              }
+            },
+            "source": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T03-33-52-01a18aa8-122f-7941-851a-b2c76e780126.jsonl",
+            "source_sha256": "56b6e13badace6b9ac9ecee4bd9b065a5785d8528ecc7b989f92a633c376039a",
+            "native_timestamp": "2026-10-30T02:34:17.918Z"
+          }
+        ],
+        "source_files": [
+          {
+            "path": "/home/test/.codex/sessions/2026/10/30/rollout-2026-10-30T03-33-52-01a18aa8-122f-7941-851a-b2c76e780126.jsonl",
+            "sha256": "56b6e13badace6b9ac9ecee4bd9b065a5785d8528ecc7b989f92a633c376039a"
+          }
+        ],
+        "raw_records": [],
+        "unknowns": [],
+        "capture_version": "native-capture/v1",
+        "raw_export_sha256": "0f123831b055369c75d605333e04952b6ad1880ae27677707b3afc103cd0235b"
+      },
+      "expected": "missing_capture"
+    }
+  ],
+  "carrier": {
+    "path": "projects/memory/onboarding/mcp/src/agents_remember/providers/grepai/isolated.py.md",
+    "before": "# mcp/src/agents_remember/providers/grepai/isolated.py\n\n## Governing Overview\n\n[overview.md](overview.md)\n\n## Purpose\n\n`isolated.py` builds worktree-local GrepAI provider settings that preserve the normal multi-memory provider shape while swapping only the active repository memory root.\n\n## Code Commentary\n\n### Logic\n\n`isolated_grepai_settings()` reads the configured `grepai-memory` provider via the shared `setup_common.provider_settings()` helper (which returns the provider block only when it is a dict), requires an active project id plus target memory root, and deep-copies the source provider settings into a workflow-local target. The generated target settings namespace the GrepAI workspace, runner, Postgres backend, Ollama embedder, network, runtime roots, data roots, logs, and ownership labels by a worktree provider instance id. `_isolated_grepai_roots()` preserves unrelated memory roots and replaces only the active project root with the worktree-local memory path. The isolated log root follows the central workflow-local `logs/providers/grepai/<instance>` layout rather than the provider runtime tree.\n\nThis is the worktree-provider reason for keeping GrepAI as an all-memory\nprovider shape: a worktree instance can leave unrelated repository memory roots\nas configured while making the active repo's project target point at the task\nmemory worktree. Query results for the active repo then resolve against the\nworktree memory branch without moving unrelated repo targets.\n\n`_isolated_grepai_base_fields` sets the GrepAI logical `workspace` key to a\nscope derived from the **workspace** identity (not the worktree instance id).\nThe worktree's Postgres is seeded as a clone of the workspace Postgres; the\nclone is keyed by the workspace `workspace` value. If the worktree instance id\nscoped the `workspace` key instead, the seeded clone would be invisible to the\nworktree watcher (different key), forcing a full re-embed. The fix: derive a\n`workspace_instance_id` for the `\"workspace\"` provider scope and use it as the\nscoping argument for `scoped_name(\"agents-remember-memory\", ...)`, matching the\nworkspace's own `workspace` value exactly.\n\n`_isolated_grepai_embedder` sets `seedFromContainer` in the embedder backend to\nthe workspace Ollama container name (derived by the same `workspace_instance_id`\napproach). The worktree Ollama starts empty; this key tells the embedder\nlifecycle to copy the model from the workspace Ollama via a local tar pipe\ninstead of re-pulling it over the network.\n\n### Invariants And Boundaries\n\n- Worktree GrepAI remains an all-memory provider instance; it must not collapse to a single-repo-only provider unless that architecture changes.\n- Only the active project memory root is rewritten for worktree mode; unrelated memory roots must remain pointed at their configured roots.\n- This internal helper creates one aggregate worktree GrepAI provider config with\n  addressable project roots. Current topology uses active worktree inputs and\n  workspace/repository/worktree nodes; these settings do not supply GrepAI project dots.\n- Worktree-local GrepAI logs should use `logs/providers/...` so cleanup can\n  remove provider logs without confusing them with runtime/data roots.\n- Indexed chunk contents are not rewritten here. File-content changes flow through the target memory files and watcher reconciliation.\n- This file creates settings only. Database clone/restore behavior lives in `seed.py`; lifecycle start/refresh remains in the GrepAI lifecycle modules.\n\n## Evidence\n\n- Aggregate GrepAI settings and project roots remain internal data; the current topology is derived from active worktree enclosures and has no provider-target nodes. [4]\n\n### Repo-Internal References\n\n- Provider setup combines isolated GrepAI and CGC settings before running workflow-local provider lifecycle operations. [1]\n- GrepAI database warm-start is handled by the seed module after isolated target settings exist. [2]\n- Provider identity helpers derive the worktree instance id and ownership labels. [3]\n",
+    "after": "# mcp/src/agents_remember/providers/grepai/isolated.py\n\n## Governing Overview\n\n[overview.md](overview.md)\n\n## Purpose\n\n`isolated.py` builds worktree-local GrepAI provider settings that preserve the normal multi-memory provider shape while swapping only the active repository memory root.\n\n## Code Commentary\n\n### Logic\n\n`isolated_grepai_settings()` reads the configured `grepai-memory` provider via the shared `setup_common.provider_settings()` helper (which returns the provider block only when it is a dict), requires an active project id plus target memory root, and deep-copies the source provider settings into a workflow-local target. The generated target settings namespace the GrepAI workspace, runner, Postgres backend, Ollama embedder, network, runtime roots, data roots, logs, and ownership labels by a worktree provider instance id. `_isolated_grepai_roots()` preserves unrelated memory roots and replaces only the active project root with the worktree-local memory path. The isolated log root follows the central workflow-local `logs/providers/grepai/<instance>` layout rather than the provider runtime tree.\n\nThis is the worktree-provider reason for keeping GrepAI as an all-memory\nprovider shape: a worktree instance can leave unrelated repository memory roots\nas configured while making the active repo's project target point at the task\nmemory worktree. Query results for the active repo then resolve against the\nworktree memory branch without moving unrelated repo targets.\n\n`_isolated_grepai_base_fields` sets the GrepAI logical `workspace` key to a\nscope derived from the **workspace** identity (not the worktree instance id).\nThe worktree's Postgres is seeded as a clone of the workspace Postgres; the\nclone is keyed by the workspace `workspace` value. If the worktree instance id\nscoped the `workspace` key instead, the seeded clone would be invisible to the\nworktree watcher (different key), forcing a full re-embed. The fix: derive a\n`workspace_instance_id` for the `\"workspace\"` provider scope and use it as the\nscoping argument for `scoped_name(\"agents-remember-memory\", ...)`, matching the\nworkspace's own `workspace` value exactly.\n\n`_isolated_grepai_embedder` sets `seedFromContainer` in the embedder backend to\nthe workspace Ollama container name (derived by the same `workspace_instance_id`\napproach). The worktree Ollama starts empty; this key tells the embedder\nlifecycle to copy the model from the workspace Ollama via a local tar pipe\ninstead of re-pulling it over the network.\n\n### Invariants And Boundaries\n\n- Worktree GrepAI remains an all-memory provider instance; it must not collapse to a single-repo-only provider unless that architecture changes.\n- Only the active project memory root is rewritten for worktree mode; unrelated memory roots must remain pointed at their configured roots.\n- This internal helper creates one aggregate worktree GrepAI provider config with\n  addressable project roots. Current topology uses active worktree inputs and\n  workspace/repository/worktree nodes; these settings do not supply GrepAI project dots.\n- Worktree-local GrepAI logs should use `logs/providers/...` so cleanup can\n  remove provider logs without confusing them with runtime/data roots.\n- Indexed chunk contents are not rewritten here. File-content changes flow through the target memory files and watcher reconciliation.\n- This file creates settings only. Database clone/restore behavior lives in `seed.py`; lifecycle start/refresh remains in the GrepAI lifecycle modules.\n\n## Evidence\n\n- Aggregate GrepAI settings and project roots remain internal data. [4]\n\n### Repo-Internal References\n\n- Provider setup combines isolated GrepAI and CGC settings before running workflow-local provider lifecycle operations. [1]\n- GrepAI database warm-start is handled by the seed module after isolated target settings exist. [2]\n- Provider identity helpers derive the worktree instance id and ownership labels. [3]\n",
+    "source": {
+      "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE01/90cf0116-2f12-46c3-8f2b-2417e350d3f3/after/projects/memory/onboarding/mcp/src/agents_remember/providers/grepai/isolated.py.md",
+      "sha256": "9bcd5ec135eb71c9cd05622eb35c9eb03b1a7be49656489917004fce3a7d5a29"
+    }
+  },
+  "scratchRepositories": [
+    {
+      "case": "CE03",
+      "attempt": "27f61db5-aef0-4523-a23e-c8448156ffe1",
+      "root": "reports/scratch/base-clone",
+      "source": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE03/27f61db5-aef0-4523-a23e-c8448156ffe1/attempt.json",
+        "sha256": "565b642a00a1ebc2290c3d451bdcf64db746b640dd2eedd9fd80fcd61ded2470"
+      },
+      "before": [],
+      "after": [
+        {
+          "path": "reports/scratch/base-clone/.git/HEAD",
+          "sha256": "616c1c65dee0b4869ca16d1ea76a9d4d32c1e718c9684b6c624c14e086f4a67c"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/config",
+          "sha256": "5f4d7ccc11d72462b280563b567e4fe2587d3c41e2220ec976476407aa181bd4"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/description",
+          "sha256": "85ab6c163d43a17ea9cf7788308bca1466f1b0a8d1cc92e26e9bf63da4062aee"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/hooks/applypatch-msg.sample",
+          "sha256": "0223497a0b8b033aa58a3a521b8629869386cf7ab0e2f101963d328aa62193f7"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/hooks/commit-msg.sample",
+          "sha256": "efc1401b0e99d1ff51494d154d98b46c1e99059bcd8bf9f73cecde19fd3eb23b"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/hooks/fsmonitor-watchman.sample",
+          "sha256": "9159720099ad5595b8e66645cbfd47763c1e920f46e0b50ae75e642bbec57ef0"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/hooks/post-update.sample",
+          "sha256": "81765af2daef323061dcbc5e61fc16481cb74b3bac9ad8a174b186523586f6c5"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/hooks/pre-applypatch.sample",
+          "sha256": "e15c5b469ea3e0a695bea6f2c82bcf8e62821074939ddd85b77e0007ff165475"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/hooks/pre-commit.sample",
+          "sha256": "57185b7b9f05239d7ab52db045f5b89eb31348d7b2177eab214f5eb872e1971b"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/hooks/pre-merge-commit.sample",
+          "sha256": "d3825a70337940ebbd0a5c072984e13245920cdf8898bd225c8d27a6dfc9cb53"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/hooks/pre-push.sample",
+          "sha256": "ecce9c7e04d3f5dd9d8ada81753dd1d549a9634b26770042b58dda00217d086a"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/hooks/pre-rebase.sample",
+          "sha256": "4febce867790052338076f4e66cc47efb14879d18097d1d61c8261859eaaa7b3"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/hooks/pre-receive.sample",
+          "sha256": "a4c3d2b9c7bb3fd8d1441c31bd4ee71a595d66b44fcf49ddb310252320169989"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/hooks/prepare-commit-msg.sample",
+          "sha256": "e9ddcaa4189fddd25ed97fc8c789eca7b6ca16390b2392ae3276f0c8e1aa4619"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/hooks/push-to-checkout.sample",
+          "sha256": "a53d0741798b287c6dd7afa64aee473f305e65d3f49463bb9d7408ec3b12bf5f"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/hooks/sendemail-validate.sample",
+          "sha256": "44ebfc923dc5466bc009602f0ecf067b9c65459abfe8868ddc49b78e6ced7a92"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/hooks/update.sample",
+          "sha256": "8d5f2fa83e103cf08b57eaa67521df9194f45cbdbcb37da52ad586097a14d106"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/index",
+          "sha256": "8488d9b52ef8a8f876634b490a97063d6f89defe2c63c30db6d759b7dcf94bad"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/info/exclude",
+          "sha256": "6671fe83b7a07c8932ee89164d1f2793b2318058eb8b98dc5c06ee0a5a3b0ec1"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/logs/HEAD",
+          "sha256": "7a3c715da815cffb52113683605c683732f8b9a80f9ce5ff95aced7d3cb825c8"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/logs/refs/heads/eval-fixture",
+          "sha256": "9785b1e6eebe52d3dbc5c1eb6540d8d05d7511e7c778b175bd2f3af7ff3d7d1d"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/logs/refs/remotes/origin/HEAD",
+          "sha256": "9785b1e6eebe52d3dbc5c1eb6540d8d05d7511e7c778b175bd2f3af7ff3d7d1d"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/objects/07/ce76d58212a0db6170c696821cdee8683d62a5",
+          "sha256": "235550ee17800dbb27665d74a0f583a4fb7b739184e664aea222bfe2fe6e791c"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/objects/21/d97b387924caba9ca1ae54b00580d86b1817ef",
+          "sha256": "bf5c9e7eeea124a25701f978d50bbd204ae3418e7d5fd257c97db95b3eb1c1cc"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/objects/2e/8f487f0008f01c688ef6a24adfa0531730816e",
+          "sha256": "8fbd7ad30bd850a41bf2804bf74c4c6f53f077710276501d22c635efc1cccc21"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/objects/42/2f52a6e8c4383d4e352c5eede5e93b7ef4f68d",
+          "sha256": "26b08c0f615942c2e9d3b0010631c9be5b3d92415a9e1b8a3f4b70b7f5bdabcd"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/objects/4f/6a66122acc09fbfc72af11f235a496a53e5a29",
+          "sha256": "ac9005e4ded7186c3ec7840f1d2319f90b5dacf227b6977911b78a3d458293df"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/objects/52/63130c9f89b45b7e79c29c3bf66f7ade58edf9",
+          "sha256": "f42c342226fabaa15b14a394f444dbfca2ce8a3836f9ff0d3a40a19daed3ee6c"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/objects/8a/a4ae41709bc20e13ec0771a6dc2bcf18d43d83",
+          "sha256": "966ac66e1973f5b6ff6e4338272434be310bc726bb12bf20e0fcabc729efa3d1"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/objects/93/9be45f3b74951afa40c3cc1b920c25bf89288e",
+          "sha256": "e0428708f2dfdd66562883865baf96b6bb1470f824b80ac94c1e597c3f0b6ad0"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/objects/b5/ad63a060b88e819e287d30b0d4fc04608680e0",
+          "sha256": "1979b99d1a715984c2b3951b5c7396443e1fa0950defaa1240ea4a7924339951"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/objects/de/998fefc41596670db972063e6f038910624cd8",
+          "sha256": "f98533ee364bdcb4561e57126d68060b43264df5c6a38dca9dc1135702b826f6"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/objects/e1/e7857f0bf7118d4ba10f1da548f20366fb83cb",
+          "sha256": "a37f8da89f38c5d115bbec5056f783844a1fc875130cc97578c6a071d33f61c5"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/objects/e4/3c1b72f136285d95b2e8b914d07c8fd6d1baa7",
+          "sha256": "5bbf1fb664fee83c92c6125f5d804999c0f650fb3131e74476dad711b41b6fcb"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/packed-refs",
+          "sha256": "caff32ab2e43d800ba6a4ad1edb4ad0ea61f99e8fdcf784c6a6d9087338cd21e"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/refs/heads/eval-fixture",
+          "sha256": "616c1c65dee0b4869ca16d1ea76a9d4d32c1e718c9684b6c624c14e086f4a67c"
+        },
+        {
+          "path": "reports/scratch/base-clone/.git/refs/remotes/origin/HEAD",
+          "sha256": "05b245c29e10abe94a2252356a12decafcb1bb8aa9f30ec36108f20cd0d08189"
+        },
+        {
+          "path": "reports/scratch/base-clone/knowledge/families/FAM-GDXSJG-onboarding-propagation-to-every-shipped-surface.json",
+          "sha256": "e27c2c476e95366e76ba9bad3bde35e8eb3bf5b8b8ab3baef78f5ebf0589da66"
+        },
+        {
+          "path": "reports/scratch/base-clone/knowledge/history/260928-MIK-L185.json",
+          "sha256": "b8adecd6e52260f6cea80085bef6e2cdf8ed4e25d6f5c3ee83de0c78f54e0ab2"
+        },
+        {
+          "path": "reports/scratch/base-clone/knowledge/invariants/INV-63Z0MN-the-single-extracted-dashboard-launcher-preserves.json",
+          "sha256": "bbe57fd5e1cc4ee3473ffcc5e735929f401c38f630ce924d579e8712b848df38"
+        },
+        {
+          "path": "reports/scratch/base-clone/knowledge/invariants/INV-DKN3CG-the-reference-retains-every-accepted-settings.json",
+          "sha256": "d4766f7a1721290b1a6998f9e9ac3b6925ffdec61780cfbf3f019e1f6b286aaa"
+        },
+        {
+          "path": "reports/scratch/base-clone/knowledge/invariants/INV-NNQR91-canonical-role-operation-and-onboarding-text.json",
+          "sha256": "3d0eda7f3e37b59b0b9a680cc7e9e9e08eab3f8b8c27b5076f1513a38eb385c4"
+        },
+        {
+          "path": "reports/scratch/base-clone/knowledge/layout.json",
+          "sha256": "4707ec9f22e461bf02d87a86cafb0cf9e7118f2d007b1548613c101817f10ced"
+        }
+      ]
+    },
+    {
+      "case": "CE12",
+      "attempt": "80d1fb3f-79a6-41ee-8636-3b3975d26ea9",
+      "root": "reports/scratch/memory-base",
+      "source": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE12/80d1fb3f-79a6-41ee-8636-3b3975d26ea9/attempt.json",
+        "sha256": "17542739fe4c86746f8e55e3f8580116667af80dcc2d17d086c34b69d1e9add4"
+      },
+      "before": [],
+      "after": [
+        {
+          "path": "reports/scratch/memory-base/.git/HEAD",
+          "sha256": "c0ecd6029842ae05e7a641c69fdbdfaf3405b3a594606560bd7b8e63861b79da"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/config",
+          "sha256": "14b503de4b70e382e1a9ae03e4f6944f8369426a7dd50c13650b98564f0fc666"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/description",
+          "sha256": "85ab6c163d43a17ea9cf7788308bca1466f1b0a8d1cc92e26e9bf63da4062aee"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/hooks/applypatch-msg.sample",
+          "sha256": "0223497a0b8b033aa58a3a521b8629869386cf7ab0e2f101963d328aa62193f7"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/hooks/commit-msg.sample",
+          "sha256": "efc1401b0e99d1ff51494d154d98b46c1e99059bcd8bf9f73cecde19fd3eb23b"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/hooks/fsmonitor-watchman.sample",
+          "sha256": "9159720099ad5595b8e66645cbfd47763c1e920f46e0b50ae75e642bbec57ef0"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/hooks/post-update.sample",
+          "sha256": "81765af2daef323061dcbc5e61fc16481cb74b3bac9ad8a174b186523586f6c5"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/hooks/pre-applypatch.sample",
+          "sha256": "e15c5b469ea3e0a695bea6f2c82bcf8e62821074939ddd85b77e0007ff165475"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/hooks/pre-commit.sample",
+          "sha256": "57185b7b9f05239d7ab52db045f5b89eb31348d7b2177eab214f5eb872e1971b"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/hooks/pre-merge-commit.sample",
+          "sha256": "d3825a70337940ebbd0a5c072984e13245920cdf8898bd225c8d27a6dfc9cb53"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/hooks/pre-push.sample",
+          "sha256": "ecce9c7e04d3f5dd9d8ada81753dd1d549a9634b26770042b58dda00217d086a"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/hooks/pre-rebase.sample",
+          "sha256": "4febce867790052338076f4e66cc47efb14879d18097d1d61c8261859eaaa7b3"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/hooks/pre-receive.sample",
+          "sha256": "a4c3d2b9c7bb3fd8d1441c31bd4ee71a595d66b44fcf49ddb310252320169989"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/hooks/prepare-commit-msg.sample",
+          "sha256": "e9ddcaa4189fddd25ed97fc8c789eca7b6ca16390b2392ae3276f0c8e1aa4619"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/hooks/push-to-checkout.sample",
+          "sha256": "a53d0741798b287c6dd7afa64aee473f305e65d3f49463bb9d7408ec3b12bf5f"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/hooks/sendemail-validate.sample",
+          "sha256": "44ebfc923dc5466bc009602f0ecf067b9c65459abfe8868ddc49b78e6ced7a92"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/hooks/update.sample",
+          "sha256": "8d5f2fa83e103cf08b57eaa67521df9194f45cbdbcb37da52ad586097a14d106"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/index",
+          "sha256": "d79e417989fe0afc86af20f2e59b6eb1d483bdb283b92f1b5b8c9ccde6c023f9"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/info/exclude",
+          "sha256": "6671fe83b7a07c8932ee89164d1f2793b2318058eb8b98dc5c06ee0a5a3b0ec1"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/logs/HEAD",
+          "sha256": "78ff92d478e510199ae236ff91e6a2ebb218d383087312685d8536ee00884d7d"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/logs/refs/heads/eval-fixture",
+          "sha256": "78ff92d478e510199ae236ff91e6a2ebb218d383087312685d8536ee00884d7d"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/logs/refs/remotes/origin/HEAD",
+          "sha256": "78ff92d478e510199ae236ff91e6a2ebb218d383087312685d8536ee00884d7d"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/11/b645e192bfd4bfcb7b9656ce625315d8dc7170",
+          "sha256": "7266c486a19bd731b4c63a4abe1d17d32b8b34a06721f2f0aa19be5d3105ae64"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/27/41ede538b62e440c8f8d426a30f78a02c9fec5",
+          "sha256": "754bad6a0c9118b34f6f15eacc1c7bd40805a7b4b22e6bc0aa745f2136eac7f3"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/2a/b3fbd6404492b1f153673db5fa85777bc8155c",
+          "sha256": "79f72ffa7ebc69b3a665d400e55332b99c907dd9b69089fc92d476a7284ee0c3"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/33/9d6cfe1070a75be660dfa4a613163817254ddc",
+          "sha256": "d4395d87be4d8c7fce551d47d5f9bac248820f5e213d1d91e4efa060456002f3"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/3a/dfdc9f527fd752a1206041fdd31f1cf4fd5c65",
+          "sha256": "ecac8a899f433ab89fbede82162811c59e0b0779dd81fcf530d2d186a8e96ee7"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/4c/f48e5e6571265d39a2a45ed1e54457cfbd3e3d",
+          "sha256": "cd1bb01ec0d99369d71d94ac56e71b5a6088f314bf6b801ff20fff0ade21ac9f"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/4f/6a66122acc09fbfc72af11f235a496a53e5a29",
+          "sha256": "ac9005e4ded7186c3ec7840f1d2319f90b5dacf227b6977911b78a3d458293df"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/52/9f889c99b5bae523a51d23847db3549a60c89c",
+          "sha256": "6c21c4502cf497aec750cd1fc38f6da8dacec1bd5b7e1465d0f1670359b08fa3"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/62/bc47da8a7ff82b5b7bbe3ce3468618e0475bcd",
+          "sha256": "2c8fd821d145e9b82381d6ecf2b3a56d661ca590655d282bb5b0c34e3c594b8d"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/62/f787705b4ba2ca337720859414dc56f7d89b02",
+          "sha256": "be130a8f6ef0be08f94d21187f8f36fc9dc27b822c9ea782940348f7b5e1d78e"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/71/e056ff7151b4f82140ac611cfb1014feb09623",
+          "sha256": "09e2115b7572acb300c8dcffb74ca993dd7175d1effaa27ca7b84c8fb6ecc5a7"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/7a/e517367a02c48206d6175eec11e9733fdf9a7e",
+          "sha256": "61a069e6b79d2edef74e4ae1ddc7a7cf2548e2691c70b343353086560574e63c"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/96/cf9d7e3cfb8af63d5938b8ed09ad457533cbc1",
+          "sha256": "1da84411d31995977675f18e2760b64dda9520a541a3c1ccb4c5de2d59891072"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/a6/317c948103fb94c978540413581bfff6155227",
+          "sha256": "cf72256b85ced321c2fba364c44d97f459f8e64c075bba7ae68531676388312d"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/a6/38f6874387a9cf7d5158f3aaa6e1b43206d284",
+          "sha256": "db80c3856976c1621257b6bcca3a7a247225daf7870f958c33e14565bb2af8dc"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/bf/e276d398ccd0089db8a917cbfaae581b120d46",
+          "sha256": "c76ee148d884a673eea4aa87a2eecb4de62862d7a2964f8972da68adffb08bbc"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/c2/1dc6570b71b06b6359d864cd0f42ab56326984",
+          "sha256": "79e4d6d1b882d0b7984ddc75c848f8c6b8227f7e545aa27533f09e14df9f0ddf"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/objects/e3/d50a7ee9abdb8580d4a58c0566324a07cab40e",
+          "sha256": "1f77f31ca4ac24cc46bec6575d7907dd2d7c138d806da3f9c1bb68bc89ed9bd1"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/packed-refs",
+          "sha256": "eeea400b30c9a1ff051f3a0dc671a05a2caa3d4939c00d258cb3e9306763c917"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/refs/heads/eval-fixture",
+          "sha256": "647cd4ab95b33f546d5bbad768c1b390a82be48b550f9afd54d84a3a757062e5"
+        },
+        {
+          "path": "reports/scratch/memory-base/.git/refs/remotes/origin/HEAD",
+          "sha256": "05b245c29e10abe94a2252356a12decafcb1bb8aa9f30ec36108f20cd0d08189"
+        },
+        {
+          "path": "reports/scratch/memory-base/knowledge/history/D637-CE12.json",
+          "sha256": "eb85d24b3ce1aa7f54c96a0338c756fbe9c612025b7aa3f4ca7bb3393161b063"
+        },
+        {
+          "path": "reports/scratch/memory-base/knowledge/invariants/INV-115RDW8H-L47-request-economy.json",
+          "sha256": "8db9a9b2627fa1527a9369750063c21fbbff9604c7da38b38abde0499921f6ee"
+        },
+        {
+          "path": "reports/scratch/memory-base/knowledge/invariants/INV-777108-guarantees-statements-secondary-change-facts-reasons.json",
+          "sha256": "6b7f5f3e474dc17f475a90612d49f078957a49c620f87ad84dbac8637af8dc3f"
+        },
+        {
+          "path": "reports/scratch/memory-base/knowledge/invariants/INV-8VQR13WX-ICR-R24-v3-L48-no-cross-subject-labelling.json",
+          "sha256": "c039af8ca154e21ee132a9c574a3d1b9fc9149112fd7b02b84dff30047a0e652"
+        },
+        {
+          "path": "reports/scratch/memory-base/knowledge/invariants/INV-T1ZHP5-the-focus-request-a-selection-leaves.json",
+          "sha256": "38ffcb1b69532e7bcd37a4c422ef8e18d0aa22293be1a793e76e0eeb2dbc6b2f"
+        },
+        {
+          "path": "reports/scratch/memory-base/knowledge/layout.json",
+          "sha256": "4707ec9f22e461bf02d87a86cafb0cf9e7118f2d007b1548613c101817f10ced"
+        },
+        {
+          "path": "reports/scratch/memory-base/onboarding/dashboard/src/panels/review/ReviewSurface.navigation.test.tsx.json",
+          "sha256": "a65024cbe070f6965e63a82f4d788ed491da41509f2824d9711d255ba07ea105"
+        },
+        {
+          "path": "reports/scratch/memory-base/onboarding/dashboard/src/panels/review/ReviewSurface.navigation.test.tsx.md",
+          "sha256": "276740e14656ce7797fa0e183d276a49a236fb08aa64b3fcfe8e4e6669ea5166"
+        }
+      ]
+    }
+  ]
+}

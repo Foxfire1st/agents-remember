@@ -1,17 +1,16 @@
 """Reclaiming one durable comparison generation: the two operations that may delete its content.
 
-:mod:`agents_remember.application.review_comparison_freeze` creates what a generation retains and
-records, on every artifact it creates, the operation that may delete it. This module *is* those two
-operations, and it exists beside the freeze for the reason the packet gives: a new snapshot or pin
-that cannot name its bounded reclamation path is unbounded durable state.
+Existing historical generation records name each retained artifact and its deletion owner.
+These deletion-only operations preserve that ownership during task archival; no new dataset
+snapshot or comparison pin is produced here.
 
 Two deliberate properties, both of which the reopen depends on:
 
-* **The record comes first.** Each operation writes its unavailable-history record into the
-  generation's own directory *before* it deletes anything, so an interruption leaves the honest
-  ordering -- a record for content that is still there -- rather than the misleading one. The record
-  is what lets a later reopen answer "this was deleted deliberately, here is why" instead of
-  reporting an unexplained loss.
+* **Deletion history follows each owner's ordering.** Code-object release writes its
+  unavailable-history record before invoking the release owner. Snapshot discard validates and
+  removes a present artifact before writing its deletion record; an already absent artifact is
+  recorded with no removed digest. A failure after snapshot removal can leave content gone without
+  that record. A recorded deletion lets a later reopen explain why the content is unavailable.
 * **Only what the manifest named, inside the scope the manifest recorded.** A code release deletes
   exactly the ref the manifest recorded, and refuses a ref that has moved. A snapshot discard deletes
   exactly the recorded ``cleanup_scope`` of each retained half. Neither touches the manifest itself,
@@ -183,8 +182,9 @@ def discard_comparison_snapshots(
 
     Each retained half is deleted within its own recorded ``cleanup_scope`` and nowhere else -- the
     manifest is not touched, because the manifest is the record that the generation *existed* and a
-    reopen has to be able to say so. The unavailable-history record is written first, for the reason
-    the code release writes its own first.
+    reopen has to be able to say so. A present snapshot is read, verified and removed before its
+    deletion history is written; an already absent snapshot is recorded with no removed digest.
+    A failure between removal and the history write can leave the snapshot gone without a record.
     """
 
     manifest = _read_manifest_for_owner(task_root, leaf_id, generation_id)

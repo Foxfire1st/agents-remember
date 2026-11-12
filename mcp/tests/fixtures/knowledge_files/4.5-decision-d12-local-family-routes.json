@@ -1,0 +1,67 @@
+{
+  "admission": {
+    "criteria": [
+      "real_alternatives",
+      "constrains_future_work"
+    ],
+    "justification": "Two routing designs were weighed and the choice binds every family record."
+  },
+  "alternatives": [
+    {
+      "option": "Several local routes per family, each close to the code it covers",
+      "reason": "Local routes make every place a family's code lives easy to find.",
+      "status": "chosen"
+    },
+    {
+      "option": "One owning route containing every realization",
+      "reason": "Cross-tree families collapse to the repository root and describe nothing locally.",
+      "reconsider_when": "Families rarely span subtrees in practice.",
+      "status": "rejected"
+    }
+  ],
+  "consequences": [
+    "Coverage and non-empty checks run per family route set."
+  ],
+  "context": "Families span several subtrees; they need homes that stay accurate.",
+  "decider": "developer (260928-MIK DEVELOPER-DIRECTION D12)",
+  "id": "DEC-D12RTE",
+  "links": [
+    {
+      "relation": "constrains",
+      "target": "INV-C0VR4G"
+    },
+    {
+      "relation": "constrains",
+      "target": "route:mcp/src/agents_remember/memory"
+    },
+    {
+      "alternative": 1,
+      "relation": "reconsider_on",
+      "target": "INV-C0VR4G"
+    },
+    {
+      "relation": "motivated_change_to",
+      "target": {
+        "id": "MIK-R04",
+        "packet": "requirements/MIK-R04-v2-family-routes.md",
+        "task": {
+          "path": "260928_maintained-invariant-knowledge",
+          "repository": "agents-remember"
+        },
+        "version": "v2"
+      }
+    }
+  ],
+  "origin": {
+    "handoff": {
+      "evidence": [
+        "DEVELOPER-DIRECTION D12"
+      ]
+    },
+    "task": "260928-MIK"
+  },
+  "revision": 1,
+  "schema": "ar-decision/v1",
+  "status": "active",
+  "supersedes": []
+}

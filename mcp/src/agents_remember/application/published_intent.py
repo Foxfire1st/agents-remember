@@ -1,62 +1,4 @@
-"""The repository's published intent, selected and read before a task exists (ICR-R19@v1).
-
-The ordinary planning read is a *paired* read -- source beside its onboarding -- and what it could
-not answer is "what has this repository already intended here?". :mod:`application.knowledge_read`
-has served a taskless read at one exact snapshot since KS-R07; nothing in the ordinary route ever
-selected a dataset, so a fresh planner read an empty scratch database instead of the repository's
-own published knowledge. This module is that selection.
-
-Three decisions, and this module owns exactly these:
-
-* **Which dataset.** One repository-scoped location, resolved from the coordination context the
-  ordinary read already carries: the memory layer's knowledge dataset at
-  ``<memory_root>/knowledge.sqlite`` (:data:`PUBLISHED_DATASET_NAME`). **This route declares the
-  location it reads, and the ordinary write side publishes there.** That wiring was the obligation
-  this declaration recorded until ICR-R20@v1 landed it: no shipped owner computed or defaulted a
-  publication destination before then -- ``IngestPublication.destination_path`` was whatever the
-  caller's ``--publish-to`` named, and a run that named none committed without publishing -- so the
-  ingest command now selects this one location with ``--publish``, resolving it through this module's
-  :func:`published_dataset_path` and reading the published identity back through
-  :func:`resolve_published_intent`. A run that names no destination and passes no ``--publish`` still
-  commits without publishing, which is why the destination stays a selection rather than a default.
-  The two-consecutive-task journey that proves task A's publication lands where task B's planner looks
-  is still ICR-R25@v1's. Declaring it here is what makes it one shared spelling instead of two
-  conventions that happen to agree. It is a *selection*, not a search: no other repository's dataset is read, no
-  working directory is guessed, and naming it needs no leaf, no enclosure and no task. *Which* memory
-  root that is follows the resolved context: the canonical external memory root when no enclosure is
-  in scope -- the taskless planner this route exists for -- and the memory **worktree** (that task's
-  own memory line) when one is. There is deliberately no fallback between the two: a publication that
-  is not on the line being read is reported ``not-recorded``, never substituted from the other.
-* **Which source identity.** The read context requires the source-resolution pair together or not
-  at all, so the pair is resolved here from the same context -- the code repository root and the
-  tree id of its current commit -- and a pair that cannot be resolved is left *unrequested* rather
-  than completed with a fabrication. A recorded anchor is then observed against a real tree, and a
-  blob that moved is reported as the observation it is.
-* **What a caller reads.** The seeds: a source seed (``PathSeed``) for each path the ordinary read
-  already asked about, and the identity seeds a caller names when it already holds a record id. The
-  page itself is built by the shipped selective read (``open_read_context`` +
-  ``read_knowledge_scope``) at the dataset's own snapshot. This module selects and shapes; it never
-  selects rows itself, and it holds no second store, no cache and no durable state.
-
-Every way the selection can fail is a *named* state rather than an empty success. A location holding
-no file system entry at all is ``not-recorded``: a repository whose knowledge begins later is not a
-repository whose history was measured as empty, and nothing about it is invented -- the source and
-onboarding halves of the ordinary read continue exactly as they did. A location that holds something
-other than a dataset file, a dataset that cannot be read as a dataset of this code, or one bound to
-another repository's authority home is ``unusable``, and it carries the shipped refusal code for the
-exact input (``selected_input_unavailable`` when there is no file to open, ``snapshot_unavailable``
-when there are bytes that are not the expected dataset), naming the failed binding. A path no
-recorded anchor could carry is refused as a seed instead of being answered with an absence this read
-never observed, and a record identity the snapshot does not hold is the read's own
-``selector_absent`` -- the named absence of a generation this snapshot does not carry. Today's
-database is never substituted for a historical generation.
-
-One limitation travels with a bounded page rather than being left for a caller to discover: the
-``continuation`` a page mints is a ``read_knowledge_scope`` cursor (``continuationOperation``), and
-the mounted ``knowledge_read`` tool continues *views*, so it refuses that token. A caller that needs
-more than the page carries reads on by identity -- the exact ``invariant_id``/``revision_id`` the
-page returned -- rather than by paging this cursor through a tool that does not accept it.
-"""
+"""Published text knowledge, selected through the derived index of its memory tree."""
 
 from __future__ import annotations
 
@@ -70,57 +12,69 @@ from typing import Any, Literal
 import apsw
 from pydantic import ValidationError
 
-from agents_remember.application.knowledge_before_half import read_dataset_identity
-from agents_remember.application.knowledge_read import open_read_context, read_knowledge_scope
+from agents_remember.application.knowledge_currentness import CodeTree
+from agents_remember.application.knowledge_leaf.currentness import LeafCurrentness
+from agents_remember.application.knowledge_leaf.pages import (
+    LeafRequest,
+    PreparedLeaf,
+    absent_chain,
+    prepare_leaf,
+)
+from agents_remember.application.knowledge_leaf.selection import LEAF_POLICY, LEAF_POLICY_VERSION
+from agents_remember.application.knowledge_paging import threshold_block
+from agents_remember.application.knowledge_paging.bindings import PagingRefusal
+from agents_remember.application.knowledge_paging.block_pages import bounded_block
+from agents_remember.application.knowledge_paging.currentness import WalkCurrentness
+from agents_remember.application.knowledge_paging.scope_pages import (
+    PreparedScope,
+    ScopePageRequest,
+    TreeBinding,
+    prepare_scope,
+)
+from agents_remember.application.knowledge_read import open_read_context
+from agents_remember.application.worktree_code_state import (
+    WorktreeCapture,
+    WorktreeCaptureError,
+    hold_observed_code_tree,
+)
 from agents_remember.kernel.coordination_context.models import CoordinationContext
-from agents_remember.kernel.git_command import run_git
-from agents_remember.memory.knowledge.connection import open_read_only_database
-from agents_remember.memory.knowledge.logical import bound_repository
+from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
+from agents_remember.memory.knowledge_index import (
+    IndexMismatchError,
+    KnowledgeIndexCache,
+    MemoryTreeError,
+    default_cache_directory,
+)
 from agents_remember.models.knowledge.read import (
     KNOWLEDGE_READ_POLICY_VERSION,
-    KnowledgeReadBudget,
     KnowledgeReadContext,
     KnowledgeReadPage,
-    KnowledgeReadRequest,
     KnowledgeReadResult,
     KnowledgeReadSeed,
     PathSeed,
     ReadItem,
 )
 from agents_remember.models.knowledge.result import KnowledgeRefusal
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 
 __all__ = [
-    "PUBLISHED_DATASET_NAME",
-    "PUBLISHED_INTENT_MAX_ITEMS",
-    "PUBLISHED_INTENT_MAX_UTF8_BYTES",
     "PublishedIntentSelection",
     "PublishedIntentSourcePair",
     "PublishedIntentUnavailable",
-    "published_dataset_path",
+    "PublishedMemoryTree",
+    "SelectedKnowledgeDataset",
+    "converted_memory_tree",
+    "memory_tree_block",
     "published_intent_block",
     "read_published_intent",
     "resolve_published_intent",
+    "resolve_published_memory_tree",
+    "select_knowledge_dataset",
 ]
 
-# The one file name a repository's published knowledge dataset occupies inside its memory layer.
-# THIS ROUTE DECLARES THE LOCATION IT READS, AND THE ORDINARY WRITE SIDE PUBLISHES THERE: the ingest
-# command selects it with ``--publish``, which resolves this same path through
-# ``published_dataset_path`` and reads the published identity back through
-# ``resolve_published_intent``. A run that names no destination and passes no ``--publish`` still
-# commits without publishing, which is why the destination is a selection rather than a default.
-# Before ICR-R20@v1 no shipped owner computed or defaulted a destination at all --
-# ``IngestPublication.destination_path`` was whatever the caller's ``--publish-to`` named -- and the
-# two-consecutive-task journey that has to prove task A's publication lands where task B's planner
-# looks is still ICR-R25@v1's. Declaring it here is what gives the read side and the write side one
-# shared spelling instead of two conventions that agree today.
-PUBLISHED_DATASET_NAME = "knowledge.sqlite"
-
-# One bounded page per seed. A path seed selects the revisions realized at that path plus the
-# families directly containing them, so the bound is a page size rather than a narrowing: a page
-# that leaves items behind reports ``hasMore`` and hands back the continuation that reaches them.
-PUBLISHED_INTENT_MAX_ITEMS = 8
-PUBLISHED_INTENT_MAX_UTF8_BYTES = 8192
+# The top-level policy of a tree block whose seeds were all read by the leaf read (MIK-R01).
+LEAF_POLICY_VERSION_LABEL = f"{LEAF_POLICY}/{LEAF_POLICY_VERSION}"
 
 # The two spellings a Git object identity of a tree can have. Nothing is invented for a value that
 # matches neither: the pair is then left unrequested, which the read reports as "no source
@@ -133,6 +87,9 @@ _TREE_ID_PATTERN = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
 # for a worse one. ``ValidationError`` belongs here for that same reason -- a dataset whose stored
 # namespace row this build cannot decode is an input the route was handed, not a caller mistake.
 _PUBLICATION_FAILURES = (KnowledgeStorageError, apsw.Error, OSError, ValidationError)
+_TREE_FAILURES = (*_PUBLICATION_FAILURES, MemoryTreeError)
+# A seed read through a memory tree's index also fails when the index is not the selected tree's.
+_SEED_FAILURES = (*_PUBLICATION_FAILURES, IndexMismatchError)
 
 
 @dataclass(frozen=True)
@@ -146,6 +103,10 @@ class PublishedIntentSourcePair:
 
     repository_root: Path
     code_tree_id: str
+    code_state: str = "commit"
+    """``commit`` or ``working-tree``: where this route observed the code (MIK-R73 rule 7)."""
+    capture: WorktreeCapture | None = None
+    """The held working-tree capture this pair's tree is read through, closed by its reader."""
 
 
 @dataclass(frozen=True)
@@ -162,6 +123,21 @@ class PublishedIntentSelection:
     schema_version: str
     logical_digest: str
     source_pair: PublishedIntentSourcePair | None
+    memory_tree: PublishedMemoryTree | None = None
+
+
+@dataclass(frozen=True)
+class PublishedMemoryTree:
+    """The converted memory tree a selection reads, through the index built for its key.
+
+    ``index_state`` is ``complete`` or ``partial``; ``problems`` names every file a partial index
+    could not read, so a page from it is never presented as complete.
+    """
+
+    memory_root: Path
+    tree_key: str
+    index_state: str
+    problems: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -197,82 +173,102 @@ class _UnseedablePath:
     detail: str
 
 
-def published_dataset_path(context: CoordinationContext) -> Path:
-    """The one location this repository's published knowledge dataset is selected at.
-
-    ``context.memory_root`` is the memory layer the repository's own coordination declaration
-    resolves, so the selection is repository-scoped by construction: there is no argument a caller
-    can aim at another repository's dataset, and a repository that declares no memory layer has no
-    published intent to read rather than a neighbour's to borrow.
-
-    *Which* root that is follows the resolved scope, and the difference is load-bearing: inside a
-    leaf enclosure the coordination context's memory root is the contract's memory **worktree** (that
-    task's own memory line), and with no enclosure in scope it is the canonical external memory root
-    (``kernel/coordination_context/resolver.py``, ``_effective_memory_root``). This route never
-    substitutes one for the other, so a publication that is not on the line being read is reported
-    ``not-recorded``.
-    """
-
-    return context.memory_root / PUBLISHED_DATASET_NAME
-
-
 def resolve_published_intent(
     context: CoordinationContext,
 ) -> PublishedIntentSelection | PublishedIntentUnavailable:
-    """Resolve the repository's intended published dataset, or name why it cannot be read."""
+    """Resolve text knowledge through its derived index, or refuse the legacy memory format."""
+    selected = resolve_published_memory_tree(context)
+    if selected is not None:
+        return selected
+    return _unusable(
+        context.memory_root,
+        "this memory root is unconverted; sync it across the text-storage boundary or run the knowledge conversion command before reading it",
+        code="legacy-format",
+    )
 
-    database_path = published_dataset_path(context)
-    absent = _absence_state(database_path, context.code_repository_name)
-    if absent is not None:
-        return absent
+
+def resolve_published_memory_tree(
+    context: CoordinationContext,
+) -> PublishedIntentSelection | PublishedIntentUnavailable | None:
+    """Select the converted memory tree at ``context.memory_root``, or ``None`` when unconverted.
+
+    The tree's key is recomputed from its current state on every call (MIK-R23 rule 5), and the
+    index for that key is reused or built; the selection then names the index file as the dataset
+    the shipped read opens. No authority-home check applies: the index is keyed by its tree alone,
+    and the tree is the one the repository's own coordination context resolves.
+    """
+
+    if converted_memory_tree(context.memory_root) is None:
+        return None
     try:
-        identity = read_dataset_identity(database_path)
-    except _PUBLICATION_FAILURES as error:
-        return _unusable(database_path, f"the published dataset could not be read ({error})")
-    if isinstance(identity, str):
-        return _unusable(database_path, identity)
-    mismatch = _authority_mismatch(database_path, context.code_repository_name)
-    if mismatch is not None:
-        return _unusable(database_path, mismatch)
+        selected = _index_selection(context.memory_root, context.coordination_root)
+        identity = dataset_identity(selected.database_path)
+    except _TREE_FAILURES as error:
+        return _unusable(context.memory_root, f"the memory tree could not be indexed ({error})")
     return PublishedIntentSelection(
-        database_path=database_path,
+        database_path=selected.database_path,
         repository_id=identity.repository_id,
         schema_version=identity.schema_version,
         logical_digest=identity.logical_digest,
         source_pair=_source_pair(context),
+        memory_tree=selected.memory_tree,
     )
 
 
-def _absence_state(database_path: Path, repository_name: str) -> PublishedIntentUnavailable | None:
-    """The named state of a location this route cannot read a dataset from, or ``None``.
+@dataclass(frozen=True)
+class SelectedKnowledgeDataset:
+    """The dataset file a knowledge read opens, and the memory tree it stands for, if any."""
 
-    Absent and present-but-not-a-regular-file are different facts, and one answer cannot state both:
-    a directory (or a dangling link, or a device) sitting where the publication belongs is something
-    that was put there, and reporting it as "nothing is recorded here" would hide it and send the
-    caller away satisfied. Only a location with no file system entry at all is ``not-recorded``.
-    """
+    database_path: Path
+    memory_tree: PublishedMemoryTree | None
 
-    if database_path.is_file():
-        return None
-    if not database_path.exists() and not database_path.is_symlink():
-        return PublishedIntentUnavailable(
-            state="not-recorded",
-            code="selected_input_unavailable",
-            detail=(
-                f"no published knowledge dataset is recorded for {repository_name} at "
-                f"{database_path}, so no recorded intent was read and nothing is claimed about this "
-                "repository's history; source and onboarding research continue unchanged"
-            ),
-            dataset_path=database_path,
+
+def converted_memory_tree(path: Path) -> Path | None:
+    """Return a directory holding the converted layout marker."""
+    return path if path.is_dir() and (path / LAYOUT_MARKER_PATH).is_file() else None
+
+
+def select_knowledge_dataset(
+    path: Path, *, coordination_root: Path | None
+) -> SelectedKnowledgeDataset:
+    """Select the derived index of a converted memory root; no database path is accepted."""
+    memory_root = converted_memory_tree(path)
+    if memory_root is None:
+        raise MemoryTreeError(
+            f"legacy-format: {path} is not a converted memory root; sync across the text-storage boundary or convert it"
         )
-    held = "a directory" if database_path.is_dir() else "no regular file"
-    return _unusable(
-        database_path,
-        (
-            f"the expected publication location {database_path} holds {held} rather than the "
-            "repository's published dataset, so nothing could be read from it"
+    if coordination_root is None:
+        raise MemoryTreeError(
+            f"{path} names converted memory and no coordination root is known to keep its derived index cache"
+        )
+    return _index_selection(memory_root, coordination_root)
+
+
+def memory_tree_block(tree: PublishedMemoryTree | None) -> dict[str, Any] | None:
+    """The wire spelling of a memory-tree binding: root, tree key, index state and problems."""
+
+    if tree is None:
+        return None
+    return {
+        "memoryRoot": str(tree.memory_root),
+        "treeId": tree.tree_key,
+        "indexState": tree.index_state,
+        "problems": [{"path": path, "detail": detail} for path, detail in tree.problems],
+    }
+
+
+def _index_selection(memory_root: Path, coordination_root: Path) -> SelectedKnowledgeDataset:
+    cache = KnowledgeIndexCache(default_cache_directory(coordination_root))
+    with cache.for_directory(memory_root) as index:
+        state = index.state
+    return SelectedKnowledgeDataset(
+        database_path=index.database_path,
+        memory_tree=PublishedMemoryTree(
+            memory_root=memory_root,
+            tree_key=state.key,
+            index_state=state.state,
+            problems=state.problems,
         ),
-        code="selected_input_unavailable",
     )
 
 
@@ -295,24 +291,136 @@ def published_intent_block(
 
 
 def read_published_intent(
-    selection: PublishedIntentSelection,
-    seeds: Sequence[KnowledgeReadSeed | _UnseedablePath],
-    *,
-    max_items: int = PUBLISHED_INTENT_MAX_ITEMS,
+    selection: PublishedIntentSelection, seeds: Sequence[KnowledgeReadSeed | _UnseedablePath]
 ) -> dict[str, Any]:
-    """Read one bounded page per seed at the selection's own snapshot, through the shipped read.
+    """Read pages through the index bound to the selected memory tree.
 
-    The context is opened by ``open_read_context``, which resolves the snapshot the dataset at that
-    path actually holds, and each page is built by ``read_knowledge_scope`` -- the same taskless,
-    exact-snapshot operation every other caller of the selective read uses. ``task_ref`` is left
-    unset because planning has to be able to read recorded knowledge before a leaf exists.
+    A selection resolved against a dirty checkout holds that checkout's capture; the capture lives
+    for exactly this read, so it is released here, once, whichever way the read ends (MIK-R73
+    rule 7).
     """
 
+    pair = selection.source_pair
+    try:
+        return _read_published_pages(selection, seeds)
+    finally:
+        if pair is not None and pair.capture is not None:
+            pair.capture.close()
+
+
+def _read_published_pages(
+    selection: PublishedIntentSelection, seeds: Sequence[KnowledgeReadSeed | _UnseedablePath]
+) -> dict[str, Any]:
+    tree = selection.memory_tree
+    if tree is None:
+        return _unavailable_block(
+            _unusable(
+                selection.database_path,
+                "legacy-format: this selection names no converted memory tree",
+                code="legacy-format",
+            )
+        )
     context = _open_context(selection)
     if isinstance(context, PublishedIntentUnavailable):
         return _unavailable_block(context)
-    blocks = [_seed_block(selection, context, seed, max_items) for seed in seeds]
-    return _recorded_block(selection, blocks)
+    blocks = [_seed_block(selection, context, seed) for seed in seeds]
+    scopes = WalkCurrentness(
+        selection.database_path, tree.tree_key, _code_tree(selection), _candidates(blocks)
+    )
+    leaves = [block for block in blocks if isinstance(block, PreparedLeaf)]
+    currentness = (LeafCurrentness(_code_tree(selection), leaves), scopes)
+    return bounded_block(
+        blocks, lambda laid: _tree_block(selection, laid, currentness, _block_policy(seeds))
+    )
+
+
+def _tree_block(
+    selection: PublishedIntentSelection,
+    laid: list[dict[str, Any]],
+    currentness: tuple[LeafCurrentness, WalkCurrentness],
+    policy: str,
+) -> dict[str, Any]:
+    """The complete block of a memory-tree read around its laid-out seeds.
+
+    Everything the block carries beside its seeds -- the threshold, and each returned invariant's
+    currentness (MIK-R03) at the source-resolution tree -- is added here, so it is inside the
+    measured block that the threshold bounds. ``policy`` is the selection policy the block's pages
+    were read under (:func:`_block_policy`).
+    """
+
+    block = _recorded_block(selection, [_bind_index_state(entry, selection) for entry in laid])
+    block["policyVersion"] = policy
+    block["threshold"] = threshold_block()
+    leaves, scopes = currentness
+    block["currentness"] = leaves.document(block["seeds"], scopes)
+    pair = selection.source_pair
+    if pair is not None:
+        block["currentness"]["treeScope"] = _TREE_SCOPES.get(
+            pair.code_state, _TREE_SCOPES["commit"]
+        ).format(tree=pair.code_tree_id)
+        block["currentness"]["codeState"] = pair.code_state
+    return block
+
+
+def _block_policy(seeds: Sequence[object]) -> str:
+    """The block's top-level ``policyVersion``: the leaf read's where it applies (L01 Q5, N5).
+
+    It is decided by what was asked, not by what was answered: a tree block whose seeds are all
+    paths was read by the family-complete leaf read (MIK-R01), even when every path was refused
+    (``registration_absent``, an unseedable spelling). A block with an identity seed, which the
+    scope read answers, keeps the scope policy -- and so does a block with no seed at all, which
+    asked for no leaf (MIK-R73 rule 9).
+    """
+
+    paths = bool(seeds) and all(isinstance(seed, PathSeed | _UnseedablePath) for seed in seeds)
+    return LEAF_POLICY_VERSION_LABEL if paths else KNOWLEDGE_READ_POLICY_VERSION
+
+
+def _code_tree(selection: PublishedIntentSelection) -> CodeTree | None:
+    pair = selection.source_pair
+    return None if pair is None else CodeTree(pair.repository_root, pair.code_tree_id)
+
+
+def _candidates(blocks: list[dict[str, Any] | PreparedScope | PreparedLeaf]) -> list[Any]:
+    """Every row a scope seed of the block could carry, for the one scope currentness computation.
+
+    A leaf seed computed its own selection's currentness when it was prepared.
+    """
+
+    return [
+        [dict(row.body) for row in block.rows] if isinstance(block, PreparedScope) else block
+        for block in blocks
+        if not isinstance(block, PreparedLeaf)
+    ]
+
+
+# The currentness block's statement of which tree it observed (MIK-R03, L03 ruling Q1; MIK-R73
+# rule 7): the tree this route resolved, and whether that tree is a commit or the captured working
+# tree of the checkout the caller sees.
+_TREE_SCOPES = {
+    "commit": "states observed at the committed code tree {tree} this read resolved",
+    "working-tree": (
+        "states observed at the captured working tree {tree} of the code checkout this read "
+        "resolved"
+    ),
+}
+
+
+def _bind_index_state(block: dict[str, Any], selection: PublishedIntentSelection) -> dict[str, Any]:
+    """Mark one page read from a memory tree with its index state (MIK-R23, Failure).
+
+    A page from a ``partial`` index is never presented as complete: ``enumerationComplete`` is
+    forced to ``false`` -- the page enumerated what the index holds, and the index does not hold the
+    whole tree -- and ``indexState`` says why. A page from a database is returned unchanged.
+    """
+
+    tree = selection.memory_tree
+    if tree is None or block.get("state") != "page":
+        return block
+    bound = {**block, "indexState": tree.index_state}
+    if tree.index_state != "complete":
+        bound["enumerationComplete"] = False
+    return bound
 
 
 def _source_pair(context: CoordinationContext) -> PublishedIntentSourcePair | None:
@@ -328,46 +436,19 @@ def _source_pair(context: CoordinationContext) -> PublishedIntentSourcePair | No
     if root is None:
         return None
     try:
-        completed = run_git(root, ["rev-parse", "HEAD^{tree}"])
-    except (OSError, subprocess.SubprocessError):
+        observed, capture = hold_observed_code_tree(Path(root))
+    except (OSError, subprocess.SubprocessError, WorktreeCaptureError):
         return None
-    if completed.returncode != 0:
+    if observed is None:
         return None
-    tree_id = completed.stdout.strip()
-    if not _TREE_ID_PATTERN.match(tree_id):
-        return None
-    return PublishedIntentSourcePair(repository_root=root, code_tree_id=tree_id)
-
-
-def _authority_mismatch(database_path: Path, repository_name: str) -> str | None:
-    """The reason this publication belongs to another repository, or ``None`` when it does not.
-
-    A namespace is an id, so it cannot say which repository a dataset belongs to; the authority
-    home the dataset records is the row that can. Checking it is what makes "never silently select
-    another repository" a fact this route verifies instead of a claim it makes.
-    """
-
-    try:
-        authority_home = _bound_authority_home(database_path)
-    except _PUBLICATION_FAILURES as error:
-        return f"the published dataset could not be read ({error})"
-    if authority_home == repository_name:
-        return None
-    return (
-        f"the dataset at {database_path} is bound to the authority home {authority_home!r}, not "
-        f"to {repository_name!r}; this route selects no other repository's publication"
+    # MIK-R73 rule 7: the states are observed at the code the caller sees -- the commit when the
+    # checkout is clean, else its captured working tree, held until the read that asked is done.
+    return PublishedIntentSourcePair(
+        repository_root=observed.repository,
+        code_tree_id=observed.tree_id,
+        code_state=observed.code_state,
+        capture=capture,
     )
-
-
-def _bound_authority_home(database_path: Path) -> str | None:
-    """The authority home the dataset itself records, read through a read-only handle."""
-
-    connection = open_read_only_database(database_path)
-    try:
-        repository = bound_repository(connection)
-    finally:
-        connection.close()
-    return None if repository is None else repository.authority_home
 
 
 def _open_context(
@@ -408,8 +489,7 @@ def _seed_block(
     selection: PublishedIntentSelection,
     context: KnowledgeReadContext,
     seed: KnowledgeReadSeed | _UnseedablePath,
-    max_items: int,
-) -> dict[str, Any]:
+) -> dict[str, Any] | PreparedScope | PreparedLeaf:
     if isinstance(seed, _UnseedablePath):
         return _refused_block(
             {"kind": "path", "path": seed.path}, "invalid_payload", seed.detail, None
@@ -417,25 +497,59 @@ def _seed_block(
     seed_json = _seed_json(seed)
     if seed_json is None:
         return _unaddressable_seed_block(seed)
+    assert selection.memory_tree is not None
     try:
-        result = read_knowledge_scope(
-            selection.database_path,
-            context,
-            KnowledgeReadRequest(
-                seed=seed,
-                budget=KnowledgeReadBudget(
-                    max_items=max_items, max_utf8_bytes=PUBLISHED_INTENT_MAX_UTF8_BYTES
-                ),
-            ),
-        )
-    except _PUBLICATION_FAILURES as error:
+        return _tree_page_block(selection, selection.memory_tree, context, seed, seed_json)
+    except _SEED_FAILURES as error:
         return _refused_block(
             seed_json,
             "snapshot_unavailable",
-            f"the published snapshot could not be read for this seed ({error})",
+            f"the selected memory tree could not be read ({error})",
             None,
         )
-    return _result_block(seed_json, result)
+
+
+def _tree_page_block(
+    selection: PublishedIntentSelection,
+    tree: PublishedMemoryTree,
+    context: KnowledgeReadContext,
+    seed: KnowledgeReadSeed,
+    seed_json: dict[str, Any],
+) -> PreparedScope | PreparedLeaf | dict[str, Any]:
+    """A seed's selection in a memory tree, ready to be cut within the block, or its refusal.
+
+    A path seed is read by the family-complete leaf read (MIK-R01), an identity seed by the scope
+    read.
+    """
+
+    if isinstance(seed, PathSeed):
+        leaf = prepare_leaf(
+            LeafRequest(
+                index_path=selection.database_path,
+                memory_tree_id=tree.tree_key,
+                index_state=tree.index_state,
+                path=seed.path,
+                code_tree=_code_tree(selection),
+            )
+        )
+        if isinstance(leaf, PreparedLeaf):
+            return leaf
+        if isinstance(leaf, PagingRefusal):  # pragma: no cover - page 1 carries no continuation
+            return _refused_block(seed_json, leaf.code, leaf.detail, None)
+        return {**_refusal_block(seed_json, leaf), **absent_chain(seed.path)}
+    paged = prepare_scope(
+        ScopePageRequest(
+            database_path=selection.database_path,
+            context=context,
+            seed=seed,
+            tree=TreeBinding(tree_id=tree.tree_key, index_state=tree.index_state),
+        )
+    )
+    if isinstance(paged, KnowledgeReadResult):
+        return _result_block(seed_json, paged)
+    if isinstance(paged, PagingRefusal):  # pragma: no cover - a first page carries no continuation
+        return _refused_block(seed_json, paged.code, paged.detail, None)
+    return paged
 
 
 def _seed_json(seed: object) -> dict[str, Any] | None:
@@ -574,7 +688,15 @@ def _recorded_block(
             }
         ),
         "seeds": seeds,
+        **_memory_tree_block(selection.memory_tree),
     }
+
+
+def _memory_tree_block(tree: PublishedMemoryTree | None) -> dict[str, Any]:
+    """The memory-tree binding of a selection read through the index, or nothing for a database."""
+
+    block = memory_tree_block(tree)
+    return {} if block is None else {"memoryTree": block}
 
 
 def _unavailable_block(unavailable: PublishedIntentUnavailable) -> dict[str, Any]:

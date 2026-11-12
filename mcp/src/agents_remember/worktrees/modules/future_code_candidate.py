@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agents_remember.errors import FutureCodeCandidateError
-from agents_remember.worktrees.modules.git import head_commit, worktree_candidate_tree
+from agents_remember.worktrees.modules.capture_baseline import (
+    begin_capture_baseline,
+    capture_entries,
+    note_capture_baseline,
+)
+from agents_remember.worktrees.modules.git import (
+    head_commit,
+    worktree_candidate_tree,
+)
+from agents_remember.worktrees.modules.kept_capture import kept_candidate_tree
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -22,27 +33,47 @@ class FutureCodeCandidateIdentity(BaseModel):
     codeCandidateTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")
 
 
-def capture_future_code_candidate(contract: WorktreeContract) -> FutureCodeCandidateIdentity:
-    """Derive the full add-all leaf tree without mutating its real Git index."""
+def capture_future_code_candidate(
+    contract: WorktreeContract, *, kept: bool = False
+) -> FutureCodeCandidateIdentity:
+    """Derive the full add-all leaf tree without mutating its real Git index.
+
+    ``kept`` captures through the worktree's kept index (:mod:`.kept_capture`): the same tree,
+    with only the paths that moved since the last capture written. A review read asks for it.
+    """
 
     if contract.kind != "leaf":
         raise FutureCodeCandidateError(
             "future-code-candidate-not-applicable",
             "future-code candidate identity belongs only to an ordinary leaf worktree",
         )
+    captured: tuple[tuple[str, int, int, int, int], ...] | None = None
+
+    def observe(index: Path) -> None:
+        nonlocal captured
+        captured = capture_entries(index)
+
     try:
         observed_head = head_commit(contract.code_worktree)
-        candidate_tree = _candidate_tree(contract)
+        before = begin_capture_baseline(contract.code_worktree)
+        candidate_tree = _candidate_tree(contract, observe, kept=observed_head if kept else None)
         if head_commit(contract.code_worktree) != observed_head:
             raise FutureCodeCandidateError(
                 "future-code-candidate-head-moved",
                 "code HEAD moved while deriving the isolated add-all future-code candidate",
             )
-        return FutureCodeCandidateIdentity(
+        identity = FutureCodeCandidateIdentity(
             observedCodeHead=observed_head,
             codeBaseCommit=contract.code_base_commit,
             codeCandidateTree=candidate_tree,
         )
+        # HEAD guards the source identity; equal snapshots spanning the capture guard
+        # the tree. A post-capture snapshot alone cannot certify the tree Git captured.
+        with suppress(OSError, RuntimeError):
+            note_capture_baseline(
+                contract.code_worktree, tree=candidate_tree, entries=captured, before=before
+            )
+        return identity
     except FutureCodeCandidateError:
         raise
     except (OSError, RuntimeError, ValidationError) as exc:
@@ -68,11 +99,23 @@ def require_current_future_code_candidate(
     return current
 
 
-def _candidate_tree(contract: WorktreeContract) -> str:
-    reports = contract.worktree_group / "reports"
-    reports.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(prefix=".future-code-candidate-", dir=reports) as temporary_directory:
+def _candidate_tree(
+    contract: WorktreeContract,
+    captured: Callable[[Path], None] | None = None,
+    *,
+    kept: str | None = None,
+) -> str:
+    """The add-all tree; through the worktree's kept index when ``kept`` names the observed head."""
+    if kept is not None:
+        return kept_candidate_tree(
+            contract.coordination_root, contract.code_worktree, head=kept, captured=captured
+        )
+    # The scratch index lives in the system temporary directory, never in the worktree group:
+    # a read creates no directory except to hold a file of MIK-R74 rule 6 (a) to (c), and this
+    # capture is none of those until a comparison records it.
+    with TemporaryDirectory(prefix=".future-code-candidate-") as temporary_directory:
         return worktree_candidate_tree(
             contract.code_worktree,
             Path(temporary_directory) / "index",
+            captured=captured,
         )

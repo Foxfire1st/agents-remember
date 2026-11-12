@@ -23,6 +23,8 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, cast
+from unittest import mock
 
 import pytest
 
@@ -40,26 +42,28 @@ from agents_remember.kernel._agentic_settings_core import KNOWN_ROLES
 from agents_remember.kernel.memory_init import DEFAULT_BRANCH_CONFIG_KEY
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.memory.baseline import _baseline_default_branch
+from agents_remember.memory.conversion.base import GitBaseConverter
+from agents_remember.memory_quality.knowledge_validator.commit_route import (
+    GitKnowledgeValidation,
+)
 from agents_remember.models.memory_content_excludes import MEMORY_CONTENT_EXCLUDES
 from agents_remember.models.role_capsules.vocabulary import CAPSULE_ROLES
-from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.serving import task_binding
-from agents_remember.serving.seat_binding import PIPELINE_SEAT_ROLES
-from agents_remember.serving.task_binding import (
-    TASKLESS_SEAT_ROLES,
-    TaskBindingRequest,
-    TaskDocumentResolutionFailure,
-    resolve_task_binding,
-)
 from agents_remember.tasks import document as document_module
 from agents_remember.tasks.document import LEAF_ROLES, MASTER_ROLES, SPRINT_ROLES
 from agents_remember.worktrees.integration.integration_branch_repository import (
     memory_repository_default_branch,
 )
 from agents_remember.worktrees.modules.git import commit_if_dirty
+from agents_remember.worktrees.services import (
+    WorktreeServices,
+    bind_worktree_services,
+    reset_worktree_services,
+)
 from test_worktree_support import git, init_repo
 
 REPO_ID = "repo"
+
+ROOT_OVERVIEW = "# Overview\n\n## What This Repo Is\n\nThe repository root route.\n"
 
 
 def _run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -100,6 +104,26 @@ def _memory_root(config) -> Path:
     root = config.repositories[REPO_ID].memory_root
     assert root is not None, "the fixture configures an external memory root"
     return root
+
+
+@pytest.fixture
+def bound_validation() -> Any:
+    """Bind real worktree services so the first baseline validates before it commits.
+
+    Fresh `memory_init` trees are converted, so MIK-R44 rule 7 validates the staged
+    tree through the knowledge validator instead of committing unvalidated.
+    """
+
+    bind_worktree_services(
+        WorktreeServices(
+            provider_lifecycle=mock.Mock(),
+            memory_quality=cast(Any, None),
+            citation_guard=cast(Any, None),
+            knowledge_validation=GitKnowledgeValidation(base_converter=GitBaseConverter()),
+        )
+    )
+    yield
+    reset_worktree_services()
 
 
 def _recorded_branch(memory: Path) -> str:
@@ -227,7 +251,9 @@ def test_the_recorded_refs_heads_spelling_is_accepted_and_normalized(tmp_path: P
     assert git(memory, "symbolic-ref", "HEAD") == "refs/heads/team-memory"
 
 
-def test_baseline_adoption_follows_the_configured_branch(tmp_path: Path) -> None:
+def test_baseline_adoption_follows_the_configured_branch(
+    tmp_path: Path, bound_validation: Any
+) -> None:
     """The first baseline is adopted on a repository founded on a non-``main`` branch.
 
     This is the end-to-end property: ``memory_init`` records ``spear/2026-q3``, the unborn
@@ -243,7 +269,7 @@ def test_baseline_adoption_follows_the_configured_branch(tmp_path: Path) -> None
     # The foundation is the code branch the memory is verified against, so it exists.
     git(code, "checkout", "-q", "-b", "spear/2026-q3")
     (memory / "onboarding").mkdir(parents=True, exist_ok=True)
-    (memory / "onboarding" / "overview.md").write_text("# Overview\n", encoding="utf-8")
+    (memory / "onboarding" / "overview.md").write_text(ROOT_OVERVIEW, encoding="utf-8")
 
     assert _baseline_default_branch(memory) == "spear/2026-q3"
 
@@ -271,7 +297,7 @@ def test_baseline_adoption_refuses_a_branch_the_memory_repository_does_not_recor
     memory = _memory_root(config)
     git(code, "checkout", "-q", "-b", "spear/2026-q3")
     (memory / "onboarding").mkdir(parents=True, exist_ok=True)
-    (memory / "onboarding" / "overview.md").write_text("# Overview\n", encoding="utf-8")
+    (memory / "onboarding" / "overview.md").write_text(ROOT_OVERVIEW, encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="bootstrap-only exception"):
         memory_baseline_adopt_tool(
@@ -349,7 +375,7 @@ def test_the_bootstrap_role_is_a_free_agent_and_has_no_task_altitude() -> None:
     If a later change adds it to one of these, the free agent silently becomes a task
     seat, which is the shape the developer ruled out. The assertion names both sides:
     the role IS published by the capsule vocabulary, and it is NOT in the task layer's
-    altitude sets or in the serving seat-role list.
+    altitude sets.
     """
 
     assert "bootstrap" in CAPSULE_ROLES, "the role itself must stay published"
@@ -358,69 +384,6 @@ def test_the_bootstrap_role_is_a_free_agent_and_has_no_task_altitude() -> None:
     assert "bootstrap" not in LEAF_ROLES
     # The settings surface still knows the role, so its knobs are configurable.
     assert "bootstrap" in KNOWN_ROLES
-    # ``PIPELINE_SEAT_ROLES`` is the "which roles run the task pipeline" list; the free
-    # agent is not one of them, and adding it there would be the same mistake.
-    assert "bootstrap" not in PIPELINE_SEAT_ROLES
-
-
-def test_without_a_task_document_only_the_taskless_seat_roles_are_admitted() -> None:
-    """The gate, named by its refusal: taskless roles open, every other role refuses.
-
-    Developer ruling 2026-09-16 admits ``bootstrap`` here: *"It is not a task related agent.
-    Can't be. It needs to be free agent. All what it needs is that can 'call'."* Developer ruling
-    2026-09-24 adds ``curator``: *"add `curator` to the taskless seat roles."* The assertions name
-    the observed outcome of both halves, so a later change either way fails with the role it changed
-    rather than with a count.
-    """
-
-    def refusal_for(seat_role: str):
-        return resolve_task_binding(
-            Path("/nonexistent-coordination-root"),
-            TaskBindingRequest(
-                task_document_ref=None,
-                replacement_for_task_document_ref=None,
-                seat_role=seat_role,
-            ),
-        ).refusal
-
-    # The two developer-ruled free agents and the two pre-existing taskless roles are admitted.
-    for taskless in ("bootstrap", "chat", "terminal", "curator"):
-        assert refusal_for(taskless) is None, f"{taskless} must open without a task document"
-
-    # Every task-bound role still refuses, with the same status as before this change.
-    for bound in ("worker", "architect", "agent", "manager", "reviewer"):
-        refusal = refusal_for(bound)
-        assert refusal is not None, f"{bound} must still need a task document"
-        assert refusal.status == "task-binding-required", f"{bound}: {refusal.status}"
-
-
-def test_the_free_agent_set_is_named_and_readable_not_a_bare_literal() -> None:
-    """The exemption is a named policy set the ruling is legible in — and it is exported.
-
-    If a future edit drops a free role from that set, this case fails on the role name.
-    The second assertion is the independent side: the gate is expressed in terms of the
-    named set, not a literal that could drift away from it.
-    """
-
-    assert frozenset({"chat", "terminal", "bootstrap", "curator"}) == TASKLESS_SEAT_ROLES, (
-        "the taskless set changed; if that is intended, change this case deliberately"
-    )
-    assert "bootstrap" in TASKLESS_SEAT_ROLES, "bootstrap is a free agent by developer ruling"
-    assert "curator" in TASKLESS_SEAT_ROLES, (
-        "curator is taskless by the developer's 2026-09-24 ruling, which is what makes the "
-        "knowledge-foundation procedure reachable on a repository with no task document"
-    )
-    source = Path(task_binding_module_path()).read_text(encoding="utf-8")
-    assert "not in TASKLESS_SEAT_ROLES" in source, (
-        "the refusal must consult the named set, not a second literal"
-    )
-    assert 'not in {"chat", "terminal"}' not in source, "a stale literal survives beside the set"
-
-
-def task_binding_module_path() -> str:
-    """The binding-policy module, resolved from the package rather than hard-coded."""
-
-    return str(task_binding.__file__)
 
 
 def test_no_task_altitude_set_in_the_source_names_bootstrap() -> None:
@@ -464,14 +427,16 @@ def _adoptable_memory(config, *, bootstrap_file: str = "bootstrap/state.md") -> 
     memory_init_tool(config, repo_id=REPO_ID, initial_branch="spear/2026-q3")
     memory = _memory_root(config)
     (memory / "onboarding").mkdir(parents=True, exist_ok=True)
-    (memory / "onboarding" / "overview.md").write_text("# Overview\n", encoding="utf-8")
+    (memory / "onboarding" / "overview.md").write_text(ROOT_OVERVIEW, encoding="utf-8")
     target = memory / bootstrap_file
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("transient scaffolding\n", encoding="utf-8")
     return memory
 
 
-def test_the_first_baseline_never_commits_bootstrap_scaffolding(tmp_path: Path) -> None:
+def test_the_first_baseline_never_commits_bootstrap_scaffolding(
+    tmp_path: Path, bound_validation: Any
+) -> None:
     """``bootstrap/`` is absent from the commit, and still on disk afterwards.
 
     This is the case the baseline round demanded. The behaviour it protects was measured as
@@ -514,84 +479,6 @@ def test_no_memory_content_commit_stages_bootstrap_scaffolding(tmp_path: Path) -
     assert git(memory, "ls-files", "--", "bootstrap") == ""
     assert git(memory, "ls-files", "--", "onboarding") == "onboarding/overview.md"
     assert (memory / "bootstrap" / "state.md").is_file()
-
-
-def test_a_document_supplied_to_a_taskless_role_still_resolves_but_skips_the_altitude_check(
-    tmp_path: Path,
-) -> None:
-    """The measured document-supplied path, pinned so the comment cannot drift from it.
-
-    ``bootstrap`` with no document opens (its own case above). This one supplies a document
-    and asserts what actually happens: the reference is resolved, the altitude check is
-    skipped for every taskless role — not only ``terminal`` — and a role outside the set is
-    still refused. The baseline round measured this path as UNCOVERED and the shipped comment
-    as false; both are fixed here.
-    """
-
-    coordination = tmp_path / "coordination"
-    master = coordination / "tasks" / "repo" / "master.json"
-    master.parent.mkdir(parents=True, exist_ok=True)
-    master.write_text(
-        json.dumps(
-            {
-                "schema": "ar-task-document/v1",
-                "id": "260916-REV-M1",
-                "slug": "master",
-                "title": "A master",
-                "kind": "master",
-                "repo": "repo",
-                "type": "Feature",
-                "createdAt": "2026-09-16T00:00+00:00",
-                "objective": "objective",
-                "requirements": [],
-                "subTasks": [],
-                "sections": [],
-            }
-        ),
-        encoding="utf-8",
-    )
-    document = TaskDocumentRef(repository="repo", path="master.json")
-
-    def refusal_for(seat_role: str):
-        return resolve_task_binding(
-            coordination,
-            TaskBindingRequest(
-                task_document_ref=document,
-                replacement_for_task_document_ref=None,
-                seat_role=seat_role,
-            ),
-        ).refusal
-
-    # The four roles are spelled here rather than iterated from the set under test: a loop over
-    # TASKLESS_SEAT_ROLES can only show that the set's members behave alike, so it cannot see a
-    # membership change. Membership is caught by the two cases above (`…only_the_taskless_seat_roles…`
-    # and `…named_and_readable_not_a_bare_literal`); this line makes the loop's own expectation
-    # independent of the constant it tests, so the two failure modes are separately attributable.
-    assert sorted(TASKLESS_SEAT_ROLES) == ["bootstrap", "chat", "curator", "terminal"], (
-        "the taskless set changed; that is a policy change, and the two membership cases must be "
-        "updated deliberately if it is intended"
-    )
-    # Taskless roles: the document resolves and admission is accepted, altitude check skipped.
-    for taskless in ("bootstrap", "chat", "curator", "terminal"):
-        assert refusal_for(taskless) is None, f"{taskless} with a document must be admitted"
-
-    # A role outside the set still takes the structural path and is refused on its altitude.
-    outsider = refusal_for("notarole")
-    assert outsider is not None
-    assert outsider.status == "task-binding-invalid"
-    assert "no structural task altitude" in (outsider.detail or "")
-
-    # Resolution is NOT skipped for a taskless role: a bad reference still fails loudly,
-    # with the same resolution failure a task-bound role would get.
-    with pytest.raises(TaskDocumentResolutionFailure, match="does not exist"):
-        resolve_task_binding(
-            coordination,
-            TaskBindingRequest(
-                task_document_ref=TaskDocumentRef(repository="repo", path="absent.json"),
-                replacement_for_task_document_ref=None,
-                seat_role="bootstrap",
-            ),
-        )
 
 
 def test_the_manifest_declares_no_task_altitude_for_the_free_agent() -> None:

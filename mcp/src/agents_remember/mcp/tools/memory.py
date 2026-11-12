@@ -2,24 +2,33 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from importlib import import_module
+from typing import Any, Literal
 
+from agents_remember.application.memory_quality.answer import (
+    quality_poll_answer,
+    quality_result_answer,
+    quality_start_answer,
+)
+from agents_remember.application.memory_quality.citation_runs import (
+    poll_citation_preview,
+    start_citation_preview,
+)
 from agents_remember.application.memory_quality.controller import (
     poll_memory_quality_request,
     run_memory_quality_request,
     start_memory_quality_request,
 )
 from agents_remember.application.memory_tools import (
-    DEFAULT_CARRYOVER_MESSAGES,
     DEFAULT_CITATION_OPERATION_SCOPE,
     DEFAULT_MEMORY_BRANCHES,
-    CarryoverCommitMessages,
     CarryoverSelection,
     CitationOperationScope,
     MemoryBranches,
+    _carryover_legacy_refusal,
     citation_fix_tool,
-    citation_migrate_tool,
-    drift_check_tool,
+    citation_note_revision_tool,
     memory_baseline_adopt_tool,
     memory_baseline_status_tool,
     memory_carryover_apply_tool,
@@ -27,6 +36,7 @@ from agents_remember.application.memory_tools import (
     memory_init_tool,
     route_index_refresh_tool,
 )
+from agents_remember.errors import ConfiguredContractAuthorityError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.primitives.tool_reports import write_tool_report
 from agents_remember.models.memory import (
@@ -34,36 +44,85 @@ from agents_remember.models.memory import (
     MemoryQualityStartRequest,
     MemoryQualitySyncRequest,
 )
+from agents_remember.models.tools.tool_answer import (
+    TOOL_ANSWER_LIST_MAX,
+    TOOL_ANSWER_STATUS_ENTRY_MAX,
+)
 
 from .base import _tool_payload
 
+# MIK-R112 retired `drift_check` as a registered tool (no response model),
+# so the MCP payload builder is gone with it; the status projection below
+# stays for the builder-level row proofs and any future rewiring.
+_DRIFT_STATUS_KEYS = (
+    "ok",
+    "onboardingRoot",
+    "status",
+    "error",
+    "basis",
+    "memoryRoot",
+    "codeRoot",
+    "sidecarCount",
+    "count",
+    "states",
+    "actionableCount",
+    "violationCount",
+    "reportOnlyCount",
+    "reportPath",
+)
+_DRIFT_ACTIONABLE_KEYS = ("path", "field", "target", "state")
+_DRIFT_VIOLATION_KEYS = ("path", "rule", "message")
 
-def drift_check_payload(
-    config: McpRuntimeConfig,
-    repo_id: str,
-    *,
-    detail_limit: int = 50,
-    contract_path: str | None = None,
-) -> dict[str, Any]:
-    return _tool_payload(
-        "drift_check",
-        drift_check_tool(
-            config,
-            repo_id=repo_id,
-            detail_limit=detail_limit,
-            contract_path=contract_path,
-        ),
-    )
+
+_DRIFT_SUCCESS_ROOT_KEYS = ("onboardingRoot", "memoryRoot", "codeRoot")
+
+
+def _drift_answer(full: Mapping[str, Any]) -> dict[str, Any]:
+    """MIK-R110 rules 1 and 7: one drift whole result answered as a status.
+
+    The outcome, the measurement counts, and the locations -- never the root
+    paths on a success; a refusal keeps the root context the recovery is read
+    against. A flagged run additionally carries the stale anchors and the
+    refusing findings as slim work orders up to the status entry cap -- what
+    to open and what blocks, first entries first. The verbose finding rows
+    (whose refresh verbs are constant per sample kind) stay in the drift
+    report and in the whole result the log records: refresh each stale anchor
+    through the onboarding gate.
+    """
+
+    answer: dict[str, Any] = {}
+    succeeded = bool(full.get("ok", False))
+    for key in _DRIFT_STATUS_KEYS:
+        if succeeded and key in _DRIFT_SUCCESS_ROOT_KEYS:
+            continue
+        if full.get(key) is not None:
+            answer[key] = full[key]
+    stale = full.get("actionableSample")
+    if isinstance(stale, list) and stale:
+        answer["actionableSample"] = [
+            {key: entry.get(key) for key in _DRIFT_ACTIONABLE_KEYS}
+            for entry in stale[:TOOL_ANSWER_STATUS_ENTRY_MAX]
+            if isinstance(entry, dict)
+        ]
+    violations = full.get("violationSample")
+    if isinstance(violations, list) and violations:
+        answer["violationSample"] = [
+            {key: entry.get(key) for key in _DRIFT_VIOLATION_KEYS}
+            for entry in violations[:TOOL_ANSWER_STATUS_ENTRY_MAX]
+            if isinstance(entry, dict)
+        ]
+    unreadable = full.get("unreadableSidecars")
+    if isinstance(unreadable, list) and unreadable:
+        answer["unreadableSidecars"] = unreadable[:TOOL_ANSWER_STATUS_ENTRY_MAX]
+    return answer
 
 
 def memory_quality_check_payload(
     config: McpRuntimeConfig,
     request: MemoryQualitySyncRequest,
 ) -> dict[str, Any]:
-    return _tool_payload(
-        "memory_quality_check",
-        run_memory_quality_request(config, request),
-    )
+    whole = run_memory_quality_request(config, request)
+    return _tool_payload("memory_quality_check", whole, answer=quality_result_answer(whole))
 
 
 def memory_quality_check_start_payload(
@@ -72,10 +131,8 @@ def memory_quality_check_start_payload(
 ) -> dict[str, Any]:
     """Start one bounded request; a successful admission carries its run id."""
 
-    return _tool_payload(
-        "memory_quality_check",
-        start_memory_quality_request(config, request),
-    )
+    whole = start_memory_quality_request(config, request)
+    return _tool_payload("memory_quality_check", whole, answer=quality_start_answer(whole, request))
 
 
 def memory_quality_check_poll_payload(
@@ -84,50 +141,304 @@ def memory_quality_check_poll_payload(
 ) -> dict[str, Any]:
     """Poll one started check through the repository recorded on its run."""
 
-    return _tool_payload(
-        "memory_quality_check",
-        poll_memory_quality_request(config, request),
-    )
+    whole = poll_memory_quality_request(config, request)
+    return _tool_payload("memory_quality_check", whole, answer=quality_poll_answer(whole, request))
 
 
-def citation_fix_payload(
+def citation_fix_payload(  # noqa: PLR0913 -- mirrors the flat public tool arguments
     config: McpRuntimeConfig,
     repo_id: str,
     *,
-    contract_path: str,
+    contract_path: str | None = None,
     operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
     dry_run: bool = False,
+    mode: Literal["sync", "start", "poll"] = "sync",
+    run_id: str | None = None,
 ) -> dict[str, Any]:
-    return _tool_payload(
-        "citation_fix",
-        citation_fix_tool(
+    if mode != "sync":
+        whole, answer = _citation_run_result(
+            config, repo_id, contract_path, operation_scope, dry_run, mode, run_id
+        )
+    else:
+        if run_id is not None:
+            raise ValueError("run_id is only valid with citation_fix mode=poll")
+        whole = _citation_fix_whole(config, repo_id, contract_path, operation_scope, dry_run)
+        answer = (
+            None
+            if whole.get("status") == "configured-contract-authority-invalid"
+            else _citation_fix_answer(whole)
+        )
+    return _tool_payload("citation_fix", whole, answer=answer)
+
+
+def _citation_fix_whole(
+    config: McpRuntimeConfig,
+    repo_id: str,
+    contract_path: str | None,
+    operation_scope: CitationOperationScope,
+    dry_run: bool,
+) -> dict[str, Any]:
+    try:
+        return citation_fix_tool(
             config,
             repo_id=repo_id,
             contract_path=contract_path,
             dry_run=dry_run,
             operation_scope=operation_scope,
-        ),
-    )
+        )
+    except ConfiguredContractAuthorityError as error:
+        return _citation_authority_refusal(repo_id, contract_path, error)
 
 
-def citation_migrate_payload(
+def _citation_run_result(  # noqa: PLR0913, PLR0917 -- flat tool adapter
     config: McpRuntimeConfig,
     repo_id: str,
-    *,
+    contract_path: str | None,
+    selectors: CitationOperationScope,
+    dry_run: bool,
+    mode: str,
+    run_id: str | None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    if mode == "start":
+        if not dry_run or run_id is not None:
+            raise ValueError("citation_fix start requires dry_run=true and no run_id")
+        request = MemoryQualityStartRequest(
+            mode="start", repo_id=repo_id, contract_path=contract_path
+        )
+        whole = start_citation_preview(
+            config,
+            request,
+            selectors,
+            lambda: _citation_fix_whole(config, repo_id, contract_path, selectors, True),
+        )
+    else:
+        if (
+            mode != "poll"
+            or not run_id
+            or selectors.document is not None
+            or selectors.documents is not None
+        ):
+            raise ValueError("citation_fix poll requires run_id and no document selectors")
+        request = MemoryQualityPollRequest(
+            mode="poll", repo_id=repo_id, run_id=run_id, contract_path=contract_path
+        )
+        whole = poll_citation_preview(config, request)
+    if whole.get("status") == "completed":
+        if whole.get("nextAction") == "developer-decision":
+            return whole, None
+        answer = _citation_fix_answer(whole)
+        answer.update(status="completed", runId=whole["runId"])
+        return whole, answer
+    return whole, None
+
+
+def citation_note_revision_payload(  # noqa: PLR0913 -- mirrors the tool's named arguments
+    config: McpRuntimeConfig,
+    repo_id: str,
     contract_path: str,
-    operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
+    *,
+    card: str,
+    reference: int,
+    note: str,
+    base_digest: str,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    return _tool_payload(
-        "citation_migrate",
-        citation_migrate_tool(
+    """Revise one reference's note in place, targets and anchors untouched (MIK-R198 rule 6a)."""
+
+    try:
+        whole = citation_note_revision_tool(
             config,
             repo_id=repo_id,
             contract_path=contract_path,
+            card=card,
+            reference=reference,
+            note=note,
+            base_digest=base_digest,
             dry_run=dry_run,
-            operation_scope=operation_scope,
+        )
+    except ConfiguredContractAuthorityError as error:
+        whole = _citation_authority_refusal(repo_id, contract_path, error)
+    answer = {key: whole[key] for key in _NOTE_REVISION_ANSWER_KEYS if key in whole}
+    return _tool_payload("citation_note_revision", whole, answer=answer)
+
+
+_NOTE_REVISION_ANSWER_KEYS = (
+    "ok",
+    "operation",
+    "status",
+    "dryRun",
+    "repoId",
+    "card",
+    "sidecar",
+    "reference",
+    "author",
+    "changed",
+    "targetCount",
+    "referenceCount",
+    "digestBefore",
+    "digestAfter",
+    "code",
+    "detail",
+    "nextAction",
+)
+
+
+_CITATION_STATUS_KEYS = (
+    "ok",
+    "dryRun",
+    "repoId",
+    "onboardingRoot",
+    "documentCount",
+    "rewrittenCount",
+    "staleCount",
+    "unreadableCount",
+    "refusedCount",
+)
+_CITATION_CONVERTED_ENTRY_KEYS = ("stale", "unreadableSidecars", "refused")
+
+
+def _carry_legacy_refusal(full: Mapping[str, Any], answer: dict[str, Any]) -> None:
+    """MIK-R46 rule 2: the legacy refusal's central code and conversion message.
+
+    The public answer itself carries both -- the logged whole result alone
+    does not satisfy the rule, because the caller never learns how it
+    converts from the log.
+    """
+
+    if (
+        full.get("code")
+        == import_module("agents_remember.worktrees.cutover_lock").LEGACY_FORMAT_CODE
+    ):
+        answer["code"] = full["code"]
+        if full.get("detail") is not None:
+            answer["detail"] = full["detail"]
+
+
+def _citation_fix_answer(full: Mapping[str, Any]) -> dict[str, Any]:
+    """MIK-R110 rules 1-2: one ``citation_fix`` whole result answered as a status.
+
+    Successes carry only the outcome and the document and repair counts --
+    never the root paths. Failures additionally carry the bounded
+    actionable entries -- the stale, unreadable, refused, declined, or
+    refused-document rows the curator must work, first entries up to the
+    status entry cap -- beside the root context the recovery is read against. The
+    rewritten sidecars, the authoring report, the source index, and the repair
+    rows stay in the whole result the log records. Failure entries are slim
+    work orders -- the document, the place, the machine code, and the
+    message -- capped at the status entry cap with the total counts beside
+    them.
+    """
+
+    answer: dict[str, Any] = {}
+    succeeded = bool(full.get("ok", False))
+    for key in _CITATION_STATUS_KEYS:
+        if succeeded and key == "onboardingRoot":
+            continue
+        if full.get(key) is not None:
+            answer[key] = full[key]
+    _carry_legacy_refusal(full, answer)
+    if bool(answer.get("ok", False)):
+        return answer
+    # A failed run is recovered by working the entries below, then running the
+    # tool again.
+    answer["nextAction"] = "citation_fix"
+    if full.get("status") in ("converted", "completed"):
+        authoring = full.get("authoring")
+        refused = authoring.get("refused") if isinstance(authoring, dict) else None
+        entries: dict[str, Any] = {
+            "stale": full.get("stale"),
+            "unreadableSidecars": full.get("unreadableSidecars"),
+            "refused": refused,
+        }
+    else:
+        entries = {}
+    for key in _CITATION_CONVERTED_ENTRY_KEYS:
+        rows = entries.get(key)
+        if isinstance(rows, list) and rows:
+            answer[key] = [_slim_citation_entry(row) for row in rows[:TOOL_ANSWER_STATUS_ENTRY_MAX]]
+    return answer
+
+
+_CITATION_ENTRY_KEYS = ("path", "document", "line", "code", "message", "reason")
+
+
+def _slim_citation_entry(row: Any) -> Any:
+    """One failure entry as a slim work order: document, place, code, message.
+
+    The status-answer ruling caps the answer at the default bound, and an
+    entry holds only what MIK-R110 names for it: what the curator opens
+    (path/document), the place within it (line), the machine-readable code,
+    and the message. Anchors ride in the message; elaboration stays in the
+    whole result the log records. Non-mapping rows pass through unchanged.
+    """
+
+    if not isinstance(row, dict):
+        return row
+    return {key: row[key] for key in _CITATION_ENTRY_KEYS if row.get(key) is not None}
+
+
+def _citation_authority_refusal(
+    repo_id: str, contract_path: str | None, error: ConfiguredContractAuthorityError
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "status": "configured-contract-authority-invalid",
+        "repoId": repo_id,
+        "contractPath": contract_path,
+        "detail": (
+            f"The citation operation was refused because the contract's {error.side} {error.name} "
+            "does not match the configured repository authority."
         ),
-    )
+        "nextAction": "developer-decision",
+    }
+
+
+MAX_INLINE_CITATION_ITEMS = 50
+"""How many entries of each list a converted ``citation_fix`` response carries."""
+
+_CITATION_FIX_LISTS = ("stale", "rewrittenSidecars", "unreadableSidecars")
+_AUTHORING_LISTS = ("authoredCards", "createdSidecars", "unresolvedTargets", "refused")
+
+
+def _bounded_lists(payload: dict[str, Any], names: tuple[str, ...]) -> dict[str, Any]:
+    """``payload`` with each named list capped: its full count, and ``truncated`` when capped."""
+
+    bounded = dict(payload)
+    truncated = []
+    for name in names:
+        items = payload.get(name)
+        if not isinstance(items, list):
+            continue
+        bounded[f"{name}Count"] = len(items)
+        if len(items) > MAX_INLINE_CITATION_ITEMS:
+            bounded[name] = items[:MAX_INLINE_CITATION_ITEMS]
+            truncated.append(name)
+    if truncated:
+        bounded["truncated"] = truncated
+        bounded["truncatedNote"] = (
+            f"each of {', '.join(truncated)} shows its first {MAX_INLINE_CITATION_ITEMS} entries; "
+            "the matching ...Count field is the full number. Name one card (document) for its own "
+            "list, or run `agents-remember memory-citations --fix --dry-run` for the full lists"
+        )
+    return bounded
+
+
+def _bounded_citation_fix(payload: dict[str, Any]) -> dict[str, Any]:
+    """A converted tree's ``citation_fix`` result, bounded for transport (L37 P1c, C1).
+
+    A tree-wide run on converted memory names every stale reference, every rewritten sidecar and
+    every authored card: hundreds of entries on a real tree. The response keeps the counts and the
+    first :data:`MAX_INLINE_CITATION_ITEMS` entries of each list and says which lists it capped.
+    An unconverted tree's refusal (MIK-R46 rule 1) has no such lists and is passed through.
+    """
+
+    if payload.get("status") != "converted":
+        return payload
+    bounded = _bounded_lists(payload, _CITATION_FIX_LISTS)
+    authoring = payload.get("authoring")
+    if isinstance(authoring, dict):
+        bounded["authoring"] = _bounded_lists(authoring, _AUTHORING_LISTS)
+    return bounded
 
 
 def route_index_refresh_payload(
@@ -137,15 +448,51 @@ def route_index_refresh_payload(
     dry_run: bool = False,
     contract_path: str | None = None,
 ) -> dict[str, Any]:
-    return _tool_payload(
-        "route_index_refresh",
-        route_index_refresh_tool(
-            config,
-            repo_id=repo_id,
-            dry_run=dry_run,
-            contract_path=contract_path,
-        ),
+    whole = route_index_refresh_tool(
+        config,
+        repo_id=repo_id,
+        dry_run=dry_run,
+        contract_path=contract_path,
     )
+    return _tool_payload("route_index_refresh", whole, answer=_route_index_answer(whole))
+
+
+_ROUTE_STATUS_KEYS = (
+    "ok",
+    "repoId",
+    "onboardingRoot",
+    "dryRun",
+    "routes",
+    "written",
+    "unchanged",
+    "refreshedCount",
+    "unchangedCount",
+    "staleCount",
+)
+
+
+def _route_index_answer(full: Mapping[str, Any]) -> dict[str, Any]:
+    """MIK-R110 rules 1 and 5: one route-index whole result answered as a status.
+
+    The outcome, the route counts, and the locations -- never the root paths
+    on a success; a refusal keeps the root context the recovery is read
+    against. A stale run additionally carries the stale indexes up to the
+    list bound. The successfully written indexes stay in the whole result the
+    log records -- the caller refreshes what the stale entries name, not what
+    already wrote.
+    """
+
+    answer: dict[str, Any] = {}
+    succeeded = bool(full.get("ok", False))
+    for key in _ROUTE_STATUS_KEYS:
+        if succeeded and key == "onboardingRoot":
+            continue
+        if full.get(key) is not None:
+            answer[key] = full[key]
+    stale = full.get("staleIndexes")
+    if isinstance(stale, list) and stale:
+        answer["staleIndexes"] = stale[:TOOL_ANSWER_LIST_MAX]
+    return answer
 
 
 def memory_init_payload(
@@ -183,49 +530,56 @@ def memory_baseline_adopt_payload(
     branches: MemoryBranches = DEFAULT_MEMORY_BRANCHES,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    return _tool_payload(
-        "memory_baseline_adopt",
-        memory_baseline_adopt_tool(
-            config,
-            repo_id=repo_id,
-            accept_drift=accept_drift,
-            branches=branches,
-            dry_run=dry_run,
-        ),
+    whole = memory_baseline_adopt_tool(
+        config,
+        repo_id=repo_id,
+        accept_drift=accept_drift,
+        branches=branches,
+        dry_run=dry_run,
     )
+    answer = (
+        {
+            key: value
+            for key, value in whole.items()
+            if key not in {"onboarding_root", "ledger_path", "drift", "ledger"}
+        }
+        if whole.get("state") == "legacy-format"
+        else None
+    )
+    return _tool_payload("memory_baseline_adopt", whole, answer=answer)
 
 
-MAX_INLINE_CARRYOVER_PATHS = 25
-
-
-def _capped_paths(paths: list[str]) -> list[str]:
-    if len(paths) <= MAX_INLINE_CARRYOVER_PATHS:
-        return paths
-    overflow = len(paths) - MAX_INLINE_CARRYOVER_PATHS
-    return [*paths[:MAX_INLINE_CARRYOVER_PATHS], f"... (+{overflow} more in report)"]
-
-
-def compact_carryover_payload(full: dict[str, Any], report_path: str) -> dict[str, Any]:
+def compact_carryover_payload(full: dict[str, Any], report_path: str | None) -> dict[str, Any]:
     """Keep the decisions, file the evidence.
 
     Every candidate record repeats two onboarding paths derivable from
     ``source_path`` plus the memory roots, and the same evidence/reason strings
     per entry; apply additionally duplicates every candidate verbatim in
-    ``carried``. The response keeps per-decision ``source_path`` lists (the
-    facts the model acts on), capped per decision so giant carryovers stay
-    under budget; the report keeps the full records."""
-    compact = {key: value for key, value in full.items() if key not in {"candidates", "carried"}}
+    ``carried``. The response keeps per-decision ``source_path`` lists whole
+    (the facts the model acts on); the delivery boundary still caps what the
+    caller receives, and the report keeps the full records. No per-tool cap of
+    its own survives beside the boundary: a capped list would recount there
+    and lose the total.
+    """
+    compact = {
+        key: value
+        for key, value in full.items()
+        if key not in {"candidates", "carried", "conversion", "publication"}
+    }
     decisions: dict[str, list[str]] = {}
     for candidate in full.get("candidates", []):
         decisions.setdefault(str(candidate.get("decision")), []).append(
             str(candidate.get("source_path"))
         )
-    compact["decisions"] = {decision: _capped_paths(paths) for decision, paths in decisions.items()}
+    compact["decisions"] = decisions
+    if isinstance(full.get("publication"), str):
+        compact["next"] = {"summary": full["publication"]}
     if "carried" in full:
-        compact["carriedPaths"] = _capped_paths(
-            [str(candidate.get("source_path")) for candidate in full["carried"]]
-        )
-    compact["reportPath"] = report_path
+        compact["carriedPaths"] = [
+            str(candidate.get("source_path")) for candidate in full["carried"]
+        ]
+    if report_path is not None:
+        compact["reportPath"] = report_path
     return compact
 
 
@@ -233,13 +587,21 @@ def memory_carryover_plan_payload(
     config: McpRuntimeConfig,
     selection: CarryoverSelection,
 ) -> dict[str, Any]:
-    full = memory_carryover_plan_tool(config, selection)
-    report_path = write_tool_report(
-        config.coordination_root, "memory_carryover_plan", full, label="plan"
-    )
+    # A plan is a read and files no per-call report (rule 6); the answer is the plan with
+    # no ``reportPath`` key. Only the mutating apply files its report (not adjudicated here).
+    try:
+        full = memory_carryover_plan_tool(config, selection)
+    except RuntimeError as error:
+        if not import_module("agents_remember.worktrees.cutover_lock").is_legacy_format_refusal(
+            str(error)
+        ):
+            raise
+        full = _carryover_legacy_refusal(str(error), operation="memory_carryover_plan")
+    # Derived decision facts belong to the validated/logged whole as well as its answer.
     return _tool_payload(
         "memory_carryover_plan",
-        compact_carryover_payload(full, report_path.as_posix()),
+        {**full, **(answer := compact_carryover_payload(full, None))},
+        answer=answer,
     )
 
 
@@ -249,19 +611,18 @@ def memory_carryover_apply_payload(
     *,
     intent_note: str,
     include_review_required: list[str] | None = None,
-    messages: CarryoverCommitMessages = DEFAULT_CARRYOVER_MESSAGES,
 ) -> dict[str, Any]:
     full = memory_carryover_apply_tool(
         config,
         selection,
         intent_note=intent_note,
         include_review_required=include_review_required,
-        messages=messages,
     )
     report_path = write_tool_report(
         config.coordination_root, "memory_carryover_apply", full, label="apply"
     )
     return _tool_payload(
         "memory_carryover_apply",
-        compact_carryover_payload(full, report_path.as_posix()),
+        {**full, **(answer := compact_carryover_payload(full, report_path.as_posix()))},
+        answer=answer,
     )

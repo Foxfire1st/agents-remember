@@ -1,0 +1,1282 @@
+{
+ "generator": {
+  "top": 100,
+  "sub": 100,
+  "per": 10,
+  "files": 100001
+ },
+ "masters": {
+  "260101_big": {
+   "folder": {
+    "repo": "R",
+    "master": "260101_big",
+    "path": "",
+    "entries": [
+     {
+      "name": "d000",
+      "path": "d000",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d001",
+      "path": "d001",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d002",
+      "path": "d002",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d003",
+      "path": "d003",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d004",
+      "path": "d004",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d005",
+      "path": "d005",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d006",
+      "path": "d006",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d007",
+      "path": "d007",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d008",
+      "path": "d008",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d009",
+      "path": "d009",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d010",
+      "path": "d010",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d011",
+      "path": "d011",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d012",
+      "path": "d012",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d013",
+      "path": "d013",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d014",
+      "path": "d014",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d015",
+      "path": "d015",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d016",
+      "path": "d016",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d017",
+      "path": "d017",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d018",
+      "path": "d018",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d019",
+      "path": "d019",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d020",
+      "path": "d020",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d021",
+      "path": "d021",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d022",
+      "path": "d022",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d023",
+      "path": "d023",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d024",
+      "path": "d024",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d025",
+      "path": "d025",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d026",
+      "path": "d026",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d027",
+      "path": "d027",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d028",
+      "path": "d028",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d029",
+      "path": "d029",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d030",
+      "path": "d030",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d031",
+      "path": "d031",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d032",
+      "path": "d032",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d033",
+      "path": "d033",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d034",
+      "path": "d034",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d035",
+      "path": "d035",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d036",
+      "path": "d036",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d037",
+      "path": "d037",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d038",
+      "path": "d038",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d039",
+      "path": "d039",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d040",
+      "path": "d040",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d041",
+      "path": "d041",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d042",
+      "path": "d042",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d043",
+      "path": "d043",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d044",
+      "path": "d044",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d045",
+      "path": "d045",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d046",
+      "path": "d046",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d047",
+      "path": "d047",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d048",
+      "path": "d048",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d049",
+      "path": "d049",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d050",
+      "path": "d050",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d051",
+      "path": "d051",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d052",
+      "path": "d052",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d053",
+      "path": "d053",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d054",
+      "path": "d054",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d055",
+      "path": "d055",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d056",
+      "path": "d056",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d057",
+      "path": "d057",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d058",
+      "path": "d058",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d059",
+      "path": "d059",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d060",
+      "path": "d060",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d061",
+      "path": "d061",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d062",
+      "path": "d062",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d063",
+      "path": "d063",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d064",
+      "path": "d064",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d065",
+      "path": "d065",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d066",
+      "path": "d066",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d067",
+      "path": "d067",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d068",
+      "path": "d068",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d069",
+      "path": "d069",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d070",
+      "path": "d070",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d071",
+      "path": "d071",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d072",
+      "path": "d072",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d073",
+      "path": "d073",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d074",
+      "path": "d074",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d075",
+      "path": "d075",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d076",
+      "path": "d076",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d077",
+      "path": "d077",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d078",
+      "path": "d078",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d079",
+      "path": "d079",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d080",
+      "path": "d080",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d081",
+      "path": "d081",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d082",
+      "path": "d082",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d083",
+      "path": "d083",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d084",
+      "path": "d084",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d085",
+      "path": "d085",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d086",
+      "path": "d086",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d087",
+      "path": "d087",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d088",
+      "path": "d088",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d089",
+      "path": "d089",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d090",
+      "path": "d090",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d091",
+      "path": "d091",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d092",
+      "path": "d092",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d093",
+      "path": "d093",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d094",
+      "path": "d094",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d095",
+      "path": "d095",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d096",
+      "path": "d096",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d097",
+      "path": "d097",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d098",
+      "path": "d098",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d099",
+      "path": "d099",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "top.md",
+      "path": "top.md",
+      "kind": "file",
+      "size": 9,
+      "language": "markdown"
+     }
+    ],
+    "total": 101,
+    "offset": 0,
+    "limit": 200,
+    "remaining": 0,
+    "exists": true,
+    "reason": null
+   },
+   "resolve": {
+    "repo": "R",
+    "master": "260101_big",
+    "resolutions": []
+   },
+   "reports": {
+    "repo": "R",
+    "master": "260101_big",
+    "doc": "260101_big/task.json",
+    "reports": [],
+    "total": 0,
+    "explorer": null
+   },
+   "reportsStatus": 200
+  },
+  "260101_small": {
+   "folder": {
+    "repo": "R",
+    "master": "260101_small",
+    "path": "",
+    "entries": [
+     {
+      "name": "d000",
+      "path": "d000",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d001",
+      "path": "d001",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d002",
+      "path": "d002",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d003",
+      "path": "d003",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d004",
+      "path": "d004",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d005",
+      "path": "d005",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d006",
+      "path": "d006",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d007",
+      "path": "d007",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d008",
+      "path": "d008",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d009",
+      "path": "d009",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d010",
+      "path": "d010",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d011",
+      "path": "d011",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d012",
+      "path": "d012",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d013",
+      "path": "d013",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d014",
+      "path": "d014",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d015",
+      "path": "d015",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d016",
+      "path": "d016",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d017",
+      "path": "d017",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d018",
+      "path": "d018",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d019",
+      "path": "d019",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d020",
+      "path": "d020",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d021",
+      "path": "d021",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d022",
+      "path": "d022",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d023",
+      "path": "d023",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d024",
+      "path": "d024",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d025",
+      "path": "d025",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d026",
+      "path": "d026",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d027",
+      "path": "d027",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d028",
+      "path": "d028",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d029",
+      "path": "d029",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d030",
+      "path": "d030",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d031",
+      "path": "d031",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d032",
+      "path": "d032",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d033",
+      "path": "d033",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d034",
+      "path": "d034",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d035",
+      "path": "d035",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d036",
+      "path": "d036",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d037",
+      "path": "d037",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d038",
+      "path": "d038",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d039",
+      "path": "d039",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d040",
+      "path": "d040",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d041",
+      "path": "d041",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d042",
+      "path": "d042",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d043",
+      "path": "d043",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d044",
+      "path": "d044",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d045",
+      "path": "d045",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d046",
+      "path": "d046",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d047",
+      "path": "d047",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d048",
+      "path": "d048",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d049",
+      "path": "d049",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d050",
+      "path": "d050",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d051",
+      "path": "d051",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d052",
+      "path": "d052",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d053",
+      "path": "d053",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d054",
+      "path": "d054",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d055",
+      "path": "d055",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d056",
+      "path": "d056",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d057",
+      "path": "d057",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d058",
+      "path": "d058",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d059",
+      "path": "d059",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d060",
+      "path": "d060",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d061",
+      "path": "d061",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d062",
+      "path": "d062",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d063",
+      "path": "d063",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d064",
+      "path": "d064",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d065",
+      "path": "d065",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d066",
+      "path": "d066",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d067",
+      "path": "d067",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d068",
+      "path": "d068",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d069",
+      "path": "d069",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d070",
+      "path": "d070",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d071",
+      "path": "d071",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d072",
+      "path": "d072",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d073",
+      "path": "d073",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d074",
+      "path": "d074",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d075",
+      "path": "d075",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d076",
+      "path": "d076",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d077",
+      "path": "d077",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d078",
+      "path": "d078",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d079",
+      "path": "d079",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d080",
+      "path": "d080",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d081",
+      "path": "d081",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d082",
+      "path": "d082",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d083",
+      "path": "d083",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d084",
+      "path": "d084",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d085",
+      "path": "d085",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d086",
+      "path": "d086",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d087",
+      "path": "d087",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d088",
+      "path": "d088",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d089",
+      "path": "d089",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d090",
+      "path": "d090",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d091",
+      "path": "d091",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d092",
+      "path": "d092",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d093",
+      "path": "d093",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d094",
+      "path": "d094",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d095",
+      "path": "d095",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d096",
+      "path": "d096",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d097",
+      "path": "d097",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d098",
+      "path": "d098",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "d099",
+      "path": "d099",
+      "kind": "dir",
+      "size": null
+     },
+     {
+      "name": "top.md",
+      "path": "top.md",
+      "kind": "file",
+      "size": 9,
+      "language": "markdown"
+     }
+    ],
+    "total": 101,
+    "offset": 0,
+    "limit": 200,
+    "remaining": 0,
+    "exists": true,
+    "reason": null
+   },
+   "resolve": {
+    "repo": "R",
+    "master": "260101_small",
+    "resolutions": []
+   },
+   "reports": {
+    "repo": "R",
+    "master": "260101_small",
+    "doc": "260101_small/task.json",
+    "reports": [],
+    "total": 0,
+    "explorer": null
+   },
+   "reportsStatus": 200
+  }
+ }
+}

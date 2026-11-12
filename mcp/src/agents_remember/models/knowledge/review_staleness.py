@@ -30,9 +30,10 @@ from agents_remember.models.knowledge.base import (
     PROSE_MAX_LENGTH,
     REFERENCE_MAX_LENGTH,
     SHA256_PATTERN,
-    UUID_PATTERN,
     KnowledgeModel,
 )
+from agents_remember.models.knowledge.review_final_output_receipt import tree_comparison_digest
+from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
 
 __all__ = [
     "ReviewStaleness",
@@ -93,29 +94,15 @@ class ReviewStaleness(KnowledgeModel):
 
 
 class ReviewSyncMovement(KnowledgeModel):
-    """What one leaf's managed sync measured against the comparison generation it published.
+    """A source-bound sync measurement rendered on the live review (ICR-R22).
 
-    ``ICR-R22@v1`` requires that a completed sync which carried the official line leave the review
-    unable to keep reading as untouched, and this is the value the live review read renders for that:
-    the generation that was measured, the inputs of it that moved, the identities the sync resolved in
-    their place, and one sentence derived from those fields.
-
-    **The vocabulary is the measured-currentness one, deliberately, and it is four-valued because the
-    record it reads is three-valued.** ``binding_state`` follows from what was measured, never from a
-    two-way reading of the channel matches: a retained input the sync never compared is
-    ``not-measured`` (never ``current``, which would claim a measurement nobody made, and never
-    ``stale``, which would fabricate one), an unusable record is ``unavailable``, a moved input is
-    ``stale``, and only a record whose every retained channel was compared and matched is ``current``.
-    ``record_readable``, ``reuse_permitted`` and ``reinterpreted_for_new_inputs`` carry the same three
-    facts ``ICR-R15@v1`` carries, and ``reason`` names the underlying fact whenever the state is one
-    that reports an absence -- the record's own verdict, the location's own state and the channel it
-    belongs to. The recovery is a successor generation, which ``successor_action`` names and this
-    record never performs.
-
-    ``resolved_*`` name the pair the sync resolved, and each is present exactly when that channel was
-    the one that moved -- a channel that still matches, was never compared, or could not be read has
-    nothing to report here, and inventing a value for it would be the fabricated identity this
-    vocabulary exists to refuse.
+    The movement names the complete retained tree comparison and the exact reviewed code and memory
+    trees. Each resolved identity is present only for a moved channel. ``current`` requires both
+    captures to match, ``stale`` names a measured movement, ``not-measured`` reports an uncompared
+    channel, and ``unavailable`` reports evidence that cannot be used. Neither absence claims
+    currency. A historical rebinding of the retired dataset generations is read as its own legacy
+    record and rendered as an ``unavailable`` movement, so this value carries no generation
+    identity and no dataset identity.
     """
 
     binding_state: ReviewSyncMovementState
@@ -124,19 +111,31 @@ class ReviewSyncMovement(KnowledgeModel):
     # or why the record could not be used. Empty exactly for the two states that report a measurement.
     reason: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
     statement: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    generation_id: str = Field(pattern=UUID_PATTERN)
-    generation_index: int = Field(ge=1)
+    movement_version: Literal["ar-review-sync-movement/v2"] = "ar-review-sync-movement/v2"
+    comparison: ReviewTreeComparisonRecord | None = None
     # The comparison identity the generation bound: the previous input a stale movement labels.
-    reviewed_binding_digest: str = Field(pattern=SHA256_PATTERN)
-    reviewed_candidate_code_tree_id: str = Field(pattern=GIT_OBJECT_PATTERN)
-    reviewed_knowledge_logical_digest: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    reviewed_binding_digest: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    reviewed_candidate_code_tree_id: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
+    reviewed_candidate_memory_tree_id: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
+    resolved_candidate_memory_tree_id: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
     resolved_code_head: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
     resolved_candidate_code_tree_id: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
-    resolved_knowledge_logical_digest: str | None = Field(default=None, pattern=SHA256_PATTERN)
     successor_action: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
     record_readable: bool = True
     reuse_permitted: bool = False
     reinterpreted_for_new_inputs: Literal[False] = False
+
+    @model_validator(mode="after")
+    def _validate_source_comparison(self) -> ReviewSyncMovement:
+        if self.binding_state != "unavailable" and self.comparison is None:
+            raise ValueError("a measured tree movement carries its source comparison")
+        if self.comparison is not None and (
+            self.reviewed_binding_digest != tree_comparison_digest(self.comparison)
+            or self.reviewed_candidate_code_tree_id != self.comparison.code_candidate.tree
+            or self.reviewed_candidate_memory_tree_id != self.comparison.memory_candidate.tree
+        ):
+            raise ValueError("reviewed identities must be those of the complete source comparison")
+        return self
 
     @model_validator(mode="after")
     def _the_state_follows_from_what_was_measured(self) -> ReviewSyncMovement:
@@ -182,7 +181,7 @@ class ReviewSyncMovement(KnowledgeModel):
         named = (
             self.resolved_code_head is not None,
             self.resolved_candidate_code_tree_id is not None,
-            self.resolved_knowledge_logical_digest is not None,
+            self.resolved_candidate_memory_tree_id is not None,
         )
         if state != "stale" and any(named):
             raise ValueError(

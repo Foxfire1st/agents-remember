@@ -193,10 +193,10 @@ def _require_matching_judgment(
         raise CloseoutQueueError(
             "closeout-grade-judgment-invalid", "grade judgment has the wrong canonical kind"
         )
-    if judgment.author not in {"strategist", "orchestrator"}:
+    if judgment.author not in {"architect", "orchestrator"}:
         raise CloseoutQueueError(
             "closeout-grade-author-refused",
-            "only strategist/orchestrator Judgment Register rows may grade closeout candidates",
+            "only architect/orchestrator Judgment Register rows may grade closeout candidates",
         )
     if judgment.subject != priority.subject:
         raise CloseoutQueueError(

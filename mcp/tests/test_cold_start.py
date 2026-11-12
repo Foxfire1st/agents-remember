@@ -91,7 +91,7 @@ REENTRANT_LOAD_TIMEOUT_SECONDS = 60.0
 # The payload the child counts. Fixed so the parent can count the same thing with its own
 # already-loaded counter and compare: equal counts are the proof that the vendored
 # vocabulary is the real one and that this change moved no numbers.
-PROBE_PAYLOAD = {"ok": True, "operation": "ping"}
+PROBE_PAYLOAD = {"ok": True, "operation": "server_info"}
 
 PROBE = '''\
 """Start the MCP server with every network path closed, and report what it counted."""

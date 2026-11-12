@@ -1,176 +1,175 @@
-# Memory your coding agent can trust
+# Features
 
-Coding agents are good at local edits and bad at remembering why those edits are
-dangerous. They re-read the same files every session, rediscover the same
-constraints, and produce clean, plausible changes that quietly break a rule
-nobody wrote down. The knowledge that would have stopped them — the invariants,
-naming contracts, migration scars, cross-repo edges, and "this looks safe but is
-not" facts — lives in people's heads, old PRs, and team habits, exactly where an
-agent never looks.
+Agents Remember gives a coding agent a memory of a code repository that the agent can check against
+the code. It also runs the work on that repository as tasks, which role agents build, review and
+land. This page tours what a user has and links the page that describes each part.
+[Concepts](concepts.md) defines the terms.
 
-Agents Remember turns that knowledge into durable, git-verified infrastructure:
-Markdown notes that live beside the code, prove which commit they were last
-checked against, and are trusted only when Git confirms they still match. One
-idea carries the whole system — **a source file's memory lives at a
-deterministic mirror path** — and almost everything else on this page is what
-that single idea makes cheap, verifiable, and safe.
+In short:
 
-This page walks through what that buys:
-
-- **Notes retrieved by path, not by search** — a file's memory has a fixed
-  address, so reads stay predictable and the context window never fills with
-  loosely-related matches.
-- **Staleness you can prove** — a note records the commit it was checked against,
-  so whether it still holds is a Git fact, not a guess.
-- **Search that helps *find* memory without ever becoming the memory** — semantic
-  and code-graph lookup are optional accelerators layered over the same
-  reviewable Markdown.
-- **Memory that moves through Git like code** — isolated worktrees, an
-  all-or-nothing merge across code and memory, and provider indexes that clone
-  into a worktree instead of rebuilding.
-- **Behavior that travels with the repo** — each project's own settings,
-  commands, conventions, and landing rules ride along in the memory and are read
-  the same way across different coding harnesses.
-- **Harness-native setup instead of generic glue** — starter packages for the
-  major coding harnesses carry the MCP registration, skills, hooks, rules, and
-  instructions that each harness actually discovers.
-- **Operational guardrails for real teams** — authority settings, baseline
-  adoption, branch memory carryover, cross-repo gates, benchmarks, and source
-  quality checks round out the happy path.
+- **Memory at a fixed path.** The card of a source file lies at a path derived from the path of the
+  source file, so an agent that holds the file reads its card without a search.
+- **Staleness that is measured.** Cards record [anchors](concepts.md#anchor), each the record of
+  one place in the code; the tools compare the anchors with a selected code tree and report each
+  as current or stale.
+- **Memory that moves through Git like code.** A task changes code and memory in paired worktrees,
+  and closeout commits both, with the memory commit naming its code commit.
+- **Role agents on a host.** The host runs each role agent; an Architect talks with the user,
+  and Workers, Reviewers and Curators build, review and write memory.
+- **A dashboard.** One local web page shows the chats, the task documents, the knowledge and the
+  files, and holds the review page.
+- **The repository's own instructions.** Each memory repository carries its own commands, coding
+  guidelines, design guidelines and landing rules in its `system/` folder.
 
 ## Table of Contents
 
 1. [Why agents need this](#why-agents-need-this)
 2. [The core idea: the path is the address](#the-core-idea-the-path-is-the-address)
-3. [Memory you can trust: deterministic drift and a git-verified ledger](#memory-you-can-trust-deterministic-drift-and-a-git-verified-ledger)
-4. [Three ways to reach knowledge](#three-ways-to-reach-knowledge)
-5. [Isolated worktrees that keep memory main clean](#isolated-worktrees-that-keep-memory-main-clean)
-6. [Cheap isolation: indexes are cloned, not rebuilt](#cheap-isolation-indexes-are-cloned-not-rebuilt)
-7. [How it works in a session: judgment up front, determinism underneath](#how-it-works-in-a-session-judgment-up-front-determinism-underneath)
-8. [The architecture: the model reasons, the server keeps the books](#the-architecture-the-model-reasons-the-server-keeps-the-books)
-9. [Repo-owned behavior: the `system/` folder](#repo-owned-behavior-the-system-folder)
-10. [Harness-native setup](#harness-native-setup)
-11. [Operational guardrails](#operational-guardrails)
-12. [How the pieces fit](#how-the-pieces-fit)
-13. [Learn more](#learn-more)
+3. [Memory you can trust: deterministic anchors and commit attribution](#memory-you-can-trust-deterministic-anchors-and-commit-attribution)
+4. [How an agent reaches knowledge](#how-an-agent-reaches-knowledge)
+5. [Isolated worktrees that keep the official line of the memory repository clean](#isolated-worktrees-that-keep-the-official-line-of-the-memory-repository-clean)
+6. [Task isolation and the knowledge index](#task-isolation-and-the-knowledge-index)
+7. [Role agents and the host](#role-agents-and-the-host)
+8. [The dashboard](#the-dashboard)
+9. [Task documents](#task-documents)
+10. [The review page and the explainer](#the-review-page-and-the-explainer)
+11. [Direct execution](#direct-execution)
+12. [The tool server](#the-tool-server)
+13. [The repository's own instructions: the `system/` folder](#the-repositorys-own-instructions-the-system-folder)
+14. [Setup in a harness](#setup-in-a-harness)
+15. [Operational guardrails](#operational-guardrails)
+16. [How the parts fit](#how-the-parts-fit)
+17. [Learn more](#learn-more)
 
 ## Why agents need this
 
-A top-level instruction file helps, but it does not reappear when the agent is
-deep inside a file deciding what to change. So the rule that mattered is out of
-context at the exact moment it is violated.
+A coding agent starts a session without the knowledge that a team keeps outside the code:
+invariants, naming contracts, the reasons behind a migration, and edges to other repositories. An
+instruction file at the top of a repository does not reach the agent at the moment it changes one
+file.
 
-The common alternative — pour the codebase into a vector store and retrieve
-"relevant" chunks — trades one problem for a worse one. An embedding index is a
-*second* representation of the code that has no built-in relationship to the
-commit it was built from. It drifts the moment the code changes, it answers with
-ranked guesses rather than addresses, and nothing tells the agent when a hit is
-stale. It is confidently wrong, confidently fast, and it becomes a parallel
-source of truth that no one reviews.
-
-Agents Remember takes the opposite stance. The durable memory of record is plain
-Markdown under Git: versioned, diffable, reviewable, and bound to the code by
-construction. Semantic and graph search still exist — but as opt-in accelerators
-for *finding* a note, never as the thing you trust. What you trust is the note,
-and whether Git says it still matches the code.
+Agents Remember stores this knowledge in a Git repository. The durable memory of record is
+Markdown cards, JSON sidecars and shared knowledge records under Git: versioned,
+diffable, reviewable, and anchored to the code. An agent trusts a card because Git shows whether
+the card's [anchors](concepts.md#anchor), its records of places in the code, still match the code,
+not because a search returned the card.
 
 ## The core idea: the path is the address
 
-Durable memory is stored as **onboarding units** — Markdown notes derived from
-source paths. A source file maps to a mirrored note inside its repository's memory
-repo:
+Durable memory is stored as **cards**: Markdown files at paths derived from
+source paths. A source file maps to a mirrored card inside its repository's memory
+repository:
 
 ```text
-src/foo/bar.ts
-ar-coordination/memory-repos/ar-my-app/onboarding/src/foo/bar.ts.md
+<code-repository>/src/foo/bar.ts
+<coordination-root>/memory-repos/ar-my-repo/onboarding/src/foo/bar.ts.md
 ```
 
-Each note explains what the code cannot make obvious on its own. A short metadata
-header pins the note to the exact source commit it was last verified against; the
-body holds the file's **purpose**, the **logic** worth knowing, the local
-**conventions** it follows, the **invariants and boundaries** it must keep —
-including what it must *not* do — and durable **to-dos** that belong to the file
-rather than to any one task. Claims are kept honest by citation: pointers to
-domain docs, to other files in the repo, and to cross-repo edges each carry exact
-line ranges, and an append-only **update history** records why the knowledge
-changed over time. What a note leaves out matters just as much — it does not
-restate the implementation, duplicate type signatures, or hold task-specific
-planning. It captures the judgment, not the code.
+Each card explains what the code cannot make obvious on its own: its **purpose**,
+important **logic**, **conventions**, **invariants and boundaries**, and durable
+file-level concerns. The Markdown holds current prose and
+numbered citation markers. Its [sidecar](concepts.md#sidecar), the paired JSON file
+`onboarding/<source path>.json`, holds three kinds of entries. A reference belongs to one numbered
+citation of the prose and names what the citation points at; a place in code or in a test is
+named by its anchor. A [realization](concepts.md#realization-and-proof) says that the anchored
+code realizes an [invariant](concepts.md#invariant), and a proof says that the anchored test
+demonstrates a facet of one. A [route overview](concepts.md#route-overview), the card of a
+folder, has a sidecar of its own, `overview.json`, which holds references.
 
-Because the path *is* the address, three things that are normally search problems
-become arithmetic:
+Shared truths live once in `knowledge/<kind>/<ID>-<slug>.json` records: invariants,
+families, decisions and other knowledge. Git records their meaning changes. The Curator writes
+[judgment rows](concepts.md#judgment-row) into `knowledge/history/<owner>.json`: each row records
+its judgment of one change of a task. A recomputed
+[worklist](concepts.md#worklist-and-knowledge-gate), the list of the knowledge that a change
+reaches, and the exact-tree [knowledge gate](concepts.md#knowledge-gate) check that those
+judgments answer the changes of the [candidate](concepts.md#candidate), the code tree and the
+memory tree that a task wants to commit, before publication. The [knowledge-system
+reference](reference/knowledge-system.md) describes the files, reader, review and
+commands. Cards retain current truth without duplicating code or task plans.
 
-- **Retrieval** — an agent holding a file knows its note's location directly. No
+Because the path *is* the address, three lookups need no search:
+
+- **Retrieval**: an agent holding a file knows its card's location directly. No
   ranking, no embedding threshold, no index lookup. Reads stay predictable, and
-  unrelated-but-similar material never floods the context window.
-- **Reverse lookup** — a note's path names the exact source file it describes, so
-  any path that finds a note also finds the code.
-- **Coverage** — a missing note or an orphaned one (its source file is gone) is
+  unrelated-but-similar material stays out of the context window.
+- **Reverse lookup**: a card's path names the exact source file it describes, so
+  any path that finds a card also finds the code.
+- **Coverage**: a missing card or an orphaned one (its source file is gone) is
   visible from the path alone.
 
 This also changes how memory scales. The cost of *reading* memory is proportional
-to the files in scope for a task, not to the size of the repository. A large repo
-can accumulate a great deal of memory; the agent still only reads the repo
-overview, the relevant route-local overview if one exists, and the notes for the
+to the files in scope for a task, not to the size of the repository. A large repository
+can accumulate a great deal of memory; the agent still only reads the repository
+overview, the relevant route-local overview if one exists, and the cards for the
 files it is touching.
 
-Durable memory comes in three shapes, matched to scope. **File-level notes** are
-the one-to-one core. **Route overviews** (`overview.md`) orient a whole area — a
-package, a module, or the repository itself — describing the shape of a region
+Durable memory comes in three shapes, matched to scope. **File-level cards** are
+the one-to-one core. **Route overviews** (`overview.md`) orient a whole
+[route](concepts.md#route) (the folder of a package or a module, or the repository itself),
+describing the shape of a region
 rather than a single file. And **entity catalogs** (`entities.md`) track the
 recurring entities and naming contracts that span many files at once. Overviews
 and catalogs add structure on top; they never replace the file-specific facts
 beneath them.
 
-None of this needs Docker, a server process, or any provider. By-path memory is
-always on. Everything that follows layers on top of it.
+Reading a card by its path needs no tool, no index and no running service.
 
-## Memory you can trust: deterministic drift and a git-verified ledger
+## Memory you can trust: deterministic anchors and commit attribution
 
-A note is only useful if you know whether it is still true. Two mechanics make
-that knowable without asking a model to guess.
+A card is only useful if you know whether it still matches the code. Cards
+keep prose in Markdown and code references in their JSON sidecars. The
+checks compare those anchors with the code.
 
-**Drift is a Git fact.** Each file-level note records the source commit it was
-last verified against. Checking it is a plain `git diff` for that one path —
-comparing the verification commit against the current committed state — fully
-reproducible, no LLM judgment. The check is honest in the ways that matter: local
-staged or unstaged edits flip a note to drifted *before* a commit lands, and if
-the verification commit was rebased away, the note auto-invalidates rather than
-claiming false confidence. Notes usually sit beside the source as a mirrored
-file, but can also live inline in the source itself — and an inline note is
-verified against a digest taken *with the note removed*, so editing the note
-never registers as drift; only code changes do.
+**Reference anchors bind both blob and content.** An anchor records the path of a file, the
+`blob` (the id that Git gives the whole content of that file), the `locator` (a symbol, a line
+range or the whole file) and the `content`, a hash of the bytes at the `locator`: the content
+identity. A code or test reference is
+current only when its recorded blob matches the exact paired code tree and its
+`locator` resolves there to the recorded content identity. An edit elsewhere in the
+file changes the blob: even unchanged located bytes leave the anchor in the state `stale:blob`
+until its blob is recorded anew. A uniquely moved identical range needs its `locator` and
+blob refreshed. The tool `citation_fix` makes both repairs in the memory worktree of a task.
+Changed or ambiguous content, an absent path or an unresolved
+`locator` needs a decision of the Curator. The [drift summary](concepts.md#drift-check), the
+result of a call of `context_packet` with `include_drift`, reports current and stale
+reference counts and names unreadable sidecars and validator findings separately.
 
-Before planning against a note, the agent classifies its trust level:
+Realization and proof entries use a separate currentness rule at the exact
+selected code tree: an entry can remain current when its blob changed but its
+resolved content is unchanged. An entry has one of three states:
 
-- `up to date` — no source change since verification
-- `drifted` — source changed; the note needs review
-- `missing` — the source file exists but has no note yet
-- `missing verification` — not enough metadata to trust
-- `orphaned` — the source file no longer exists
-- `unsupported` — the storage or file shape cannot be verified safely
+- `current`: the blob matches or the resolved content is unchanged
+- `stale`: content differs, the path is absent or the `locator` does not resolve
+- `unverifiable`: the requested tree or needed object cannot be read, or the `locator` of a
+  changed blob cannot be re-resolved; the answer names the reason
 
-Drifted memory can still be read *directionally* when that trust level is
-explicit — old context is often useful — but it never silently becomes current
-truth. Finding is not trusting.
+An invariant takes one of four states from its entries. It is `stale` if any entry is stale;
+otherwise it is `unverifiable` if any entry is unverifiable, `unrealized` if it has no
+realization entries, and `current` otherwise. The state `unrealized` belongs to an invariant
+only; no entry has it. These are mechanical observations, not a judgment that the prose is
+correct. Stale knowledge stays visible with its state and reason, so it can inform
+investigation without silently becoming current truth.
 
-**Broader units verify by scope, not by a single file.** A file note can be
-pinned to one source file's commit, but an overview or an entity catalog cannot —
-each describes more than one file by design, so a single-file check would be
-meaningless. Each is held honest in the way its scope demands. An overview is
-checked against its whole route: a directory-scoped `git diff` flags it the moment
-anything under that area is added, removed, moved, or changed, and a
-script-regenerated index beside it tracks what the area now covers and how to
-route agents to it — structure the model never hand-maintains. An entity catalog
-is checked by a deterministic fingerprint over the *set* of files that define each
-entity, so editing any one of them flags that entity for review. Same
-Git-anchored honesty, applied at the right altitude.
+**Broader units carry references too.** An overview's `overview.json` holds the
+anchors supporting its prose. Its currentness follows those references rather
+than a blanket directory diff. A [route index](concepts.md#route-index) is a generated file
+that describes the structure of a route. The tool `route_index_refresh` writes the route indexes
+of a task's memory worktree anew, and so does closeout; that maintenance is distinct from checking
+reference anchors. The [entity catalog](concepts.md#entity-catalog) holds a fingerprint over the
+files that define each entity. Closeout computes the fingerprint anew for each entity whose files
+or whose entry the task changed, and it refuses a candidate whose catalog names a file that the
+code tree does not hold. The user runs no check for it.
 
-**The ledger keeps memory and code in sync.** Teams that want memory in a
-separate repository can use external memory. The risk there is obvious: two Git
-repos can drift apart. A ledger (`memory.md`) closes that gap by mapping each
-verified **code commit** to the **memory commit** that describes it, newest
-first:
+**Commit attribution keeps memory and code paired.** Memory lives in a separate
+repository, so the pairing must be explicit. Each attributed memory-content commit
+carries a `Code-Commit: <sha>` trailer in its hashed Git object. The pairs of code commit
+and memory commit are derived from those commits, newest first. Agents Remember computes the file
+`memory.md`, the [memory attribution cache](concepts.md#memory-attribution-cache), at the
+root of the memory repository from the same trailers; Git ignores the file, and no memory commit
+holds it. Baseline adoption, closeout, `worktree_sync` and `direct_landing` write the file anew
+after their memory commit, so the user does nothing for it. Worktree start, closeout and landing
+take the mapping from the commits, not from the file. Answers of the tools name the file in the
+field `ledger_path`. Below a block of metadata, the file lists the pairs in this table:
 
 ```text
 | Code commit | Memory commit |
@@ -179,306 +178,328 @@ first:
 | 9f8e7d…     | 4c5b6a…       |
 ```
 
-This is a lookup table with real consequences. It lets a branch carry the memory
-version that matches its code state, it lets you restore memory to the exact
-version that was synchronized with an earlier code commit — invaluable for
-recovering from a bad state — and it lets the system *refuse* to hand over memory
-that does not match the code in front of you, rather than guess. The ledger is
-what gives external memory its operational power, and external is the only
-supported topology: a repo-local `ar-memory/` root was removed from the product.
+The commit-derived mapping has three consequences. A branch carries the memory
+version that matches its code state. A user can restore memory to the exact
+version that was synchronized with an earlier code commit: the row of that code commit in
+`memory.md` names the memory commit, which is the commit of the memory repository whose trailer
+`Code-Commit:` names that code commit, and plain Git checks that commit out. And the
+[cross-repository context](concepts.md#cross-repository-context) does not guess: it leaves out a repository
+whose code is not on the expected branch. Of a repository that is, it includes the memory only while the
+memory repository is on the expected branch too and its `memory.md` can be read, and the code alone otherwise.
+[Architecture](architecture.md#the-file-memorymd) tells which reads use `memory.md`.
 
-## Three ways to reach knowledge
+## How an agent reaches knowledge
 
-By-path is the core, but an agent often needs to *find* the right file before it
-can read its note. Agents Remember offers three retrieval substrates, matched to
-what the agent already knows, and a router that picks among them.
+An agent often has to find the right file before it can read that file's card. It has these routes:
 
-- **By path** — the agent has a file in hand; the note is at its mirror address.
-  Always available, needs nothing extra.
-- **By meaning** — the concept is known but the file is not. A semantic search
-  runs over the path-mirrored *onboarding*, so a fuzzy match returns a note whose
-  path then names the exact code file. Meaning becomes an address.
-- **By relationship** — an anchor is known but its connections are not. A
-  code-relationship graph answers callers, callees, dependencies, complexity, and
-  symbol lookups around that anchor.
+- **By path.** The agent holds a file; the card lies at the mirrored path.
+- **By tool.** `read_ar_files` names, for up to 20 paths, the governing card and the knowledge
+  records of each path. `knowledge_read` names the invariants and families attributed to one
+  source file, and the realizations and proofs of a named record. Both return names and locations,
+  never text; the agent opens the named files itself.
+- **By text search.** An agent that knows a concept but no file searches the code and the cards as
+  text, then expands the hits with `knowledge_read`.
 
-The router chooses the *shape* of the missing context first, then the cheapest
-substrate that fits:
+`context_packet` orients an agent on one code repository in one call: the roots, the memory
+repository, the `system/` folder and, on request, the drift summary.
 
-- `Semantics` when the concept is known but the structure or location is not.
-- `Relationship` when an anchor is known but its impact paths are not.
-- `Intent` when an anchor is known but its hidden contracts, invariants, or
-  branch-valid truths are not — answered by onboarding plus bounded source
-  confirmation.
+## Isolated worktrees that keep the official line of the memory repository clean
 
-These compose. A triage task can start from an anchor in a ticket, use the
-relationship graph to map nearby structure, then switch to intent to learn the
-code truths that make a change safe. And the whole stack degrades gracefully: the
-semantic and graph providers are opt-in and Dockerized, so with neither running
-the router still works on by-path and intent alone.
+A task runs in an [enclosure](concepts.md#enclosure): one Git worktree of the code repository and
+one of the memory repository, each on a private branch. Code *and* memory changes happen on
+private branches together, and the official line of the memory repository stays untouched while a
+feature or refactor is still in flight. The [official line](concepts.md#official-line) of a
+worktree is the branch from which it was cut.
 
-The discipline that holds it together: provider output is *candidate routing
-evidence, not proof*. Source files, verified onboarding, drift checks, and
-approved promotion remain the truth controls. The retrieval layer can never
-quietly become a second, drifting source of truth — because it is not the source
-of truth at all.
+Start, closeout and landing keep code and memory paired:
 
-## Isolated worktrees that keep memory main clean
+- **Start cuts each worktree from the tip of its source branch.** The source branch of the memory
+  worktree is the branch of the memory repository that has the name of the code source branch.
+  The start derives the pairs from the memory commits only to report the newest pair; it chooses
+  no memory commit by them.
+- **Closeout commits in a fixed order.** The knowledge gate checks the candidate's memory tree
+  before either commit. Code commits first; the exact prepared memory tree is
+  checked again before the memory-content commit, which carries its code
+  attribution. `memory.md` is refreshed as an ignored cache after the memory commit.
+- **Landing moves both branches to exact commits.** `worktree_integrate` judges the closed-out
+  pair again. It then moves the target branch of the code repository and the target branch of the
+  memory repository, each only while the branch still stands at the commit the call read before.
+  When a branch moved in between, the call answers `integration-ref-race` and names the call to
+  repeat.
 
-When work needs isolation, a task can run in its own Git worktree off a private
-branch, so the main branch is never touched until the change is reviewed and
-ready. With external memory this becomes a **dual worktree**: one worktree off
-the code repo and one off the memory repo. Code *and* memory changes happen on
-private branches together, and the memory main branch stays uncorrupted while a
-feature or refactor is still in flight.
+Memory is protected by the same branch, review and fast-forward machinery as
+code: versioned Markdown and JSON moving through Git. [Workflows](workflows.md) tells the steps from
+start to landing.
 
-The ledger makes this safe rather than chaotic:
+## Task isolation and the knowledge index
 
-- **Start is ledger-gated.** Creating a worktree consults the ledger for the code
-  base commit. If that commit is unmapped, start *blocks* — so an agent branching
-  off an older commit gets the memory that was true then, instead of whatever
-  happens to be on memory main. (A freshly squash-merged branch is the common
-  blocker: the merge creates a new commit the ledger has not mapped yet.)
-- **Closeout commits in a fixed order.** For an Agents Remember source commit,
-  strict project-owned code quality runs first. Then code commits, onboarding
-  metadata is stamped to that exact code commit, the *blocking* memory-quality
-  gate runs, and memory content and the ledger row commit. A failed source-quality
-  gate leaves code, memory, and ledger uncommitted; unclean onboarding blocks the
-  later memory commit.
-- **Integration is transactional across both repos.** Landing advances code main
-  and memory main as a single all-or-nothing step. A failure on the memory side
-  rolls the already-advanced code repo back too, so main never holds code without
-  its matching verified memory.
+The [enclosure](concepts.md#enclosure) of a task isolates its changes: its code worktree and its
+memory worktree lie in it.
 
-This is what "memory as a first-class citizen" means in practice: memory is
-protected by the same branch, review, fast-forward, and rollback machinery as
-code, because it *is* code — versioned Markdown moving through Git.
+The [knowledge index](concepts.md#knowledge-index) is an SQLite view derived from a selected
+memory text tree. It is cached by tree identity outside Git working trees, by default in
+`<coordination-root>/runtime/knowledge-index/` with one file for each tree, and rebuilt when
+absent. It is evicted by age and size: after a build, a file unused for 14 days is removed, then
+the oldest files until the folder holds at most 1 GiB. Knowledge writers change the text; they do
+not write or merge this index.
 
-## Cheap isolation: indexes are cloned, not rebuilt
+## Role agents and the host
 
-Per-task isolation is only worth using if it is cheap. The expensive part of a
-fresh worktree is normally the providers: re-crawling a code graph and
-re-embedding a semantic index can take minutes. Agents Remember avoids that
-almost entirely by **cloning the parent's already-built indexes into the
-worktree** instead of rebuilding them. Each worktree still gets its own isolated,
-namespaced provider stack — it just starts pre-warmed.
+Work on a code repository is done by role agents. A role agent is a chat of a harness that runs in
+one of eight roles: Architect, Investigator, Orchestrator, Manager, Worker, Reviewer, Curator or
+Bootstrap. [Roles and role agents](roles.md) describes each role.
 
-The clone is a real copy of the index, path-corrected for its new home, not a
-shortcut that re-reads the source:
+- The user talks with the **Architect**. The Architect writes the requirement packets and the
+  task documents and delegates the work.
+- A **Manager** coordinates one master. It starts a **Worker** to build a task, a **Reviewer** when
+  the Worker freezes its change, and a **Curator** after the code review has passed.
+- The Worker writes code. Only the Curator writes memory. The Manager performs closeout and landing.
+- An **Orchestrator** coordinates a sprint when two or more masters are worked on at the same time,
+  or when the user asks for one. The Architect starts it, or the user from the role launcher.
+- A question for the user travels up through the starting agents and arrives in the
+  Architect's chat.
 
-- **The code graph** is exported to a portable bundle, every source-root path
-  inside it is rewritten to the worktree's path (handling POSIX, Windows, and
-  mixed spellings, longest match first), and the rewritten bundle is re-imported
-  into the worktree's graph. The graph arrives intact and already pointing at the
-  right files.
-- **The semantic index** is cloned by dumping the workspace's vector database and
-  restoring it into the worktree's own database — embeddings and all. No text is
-  re-embedded.
-- **The embedding model** (a few hundred megabytes) is streamed container to
-  container through a local pipe rather than re-downloaded over the network, so a
-  worktree normally reuses the workspace's model instead of pulling it again — a
-  network pull remains only as a fallback.
+The host runs the role agents and shows their chats. It is Paseo; Agents Remember installs a pinned
+version and starts it. The tool `role_start` starts a role agent, and so does the
+[role launcher](concepts.md#role-launcher), a row of the dashboard's tab "Chats". Role agents send
+each other messages with the tool `role_message`. The user settings
+file names the harness, the model and the effort of each role.
 
-A subtle detail makes the clone actually stick. `git checkout` stamps every file
-with a fresh modification time, which would make the semantic watcher think the
-whole tree changed and re-embed it — undoing the clone. So the worktree's file
-timestamps are synced back to their source values, and seeding happens *before*
-any watcher starts. A full re-index exists only as an explicit fallback when a
-clone genuinely cannot be reused.
+The host runs on Linux x86_64, WSL2 included. On another platform the tool server and the dashboard
+run, and no role agent can be started. [The host](host.md) tells how to check, stop and provision
+the host, and [Harnesses and role settings](reference/harnesses.md) tells which harnesses it can
+start.
 
-The practical result: spin up an isolated worktree and its code-graph and
-semantic indexes are ready in seconds, not minutes. Because isolation is that
-cheap, it stops being a special occasion — providers can be created alongside a
-worktree and thrown away with it.
+## The dashboard
 
-## How it works in a session: judgment up front, determinism underneath
+`agents-remember dashboard --daemon` starts the dashboard, a local web page at
+`http://127.0.0.1:8765/` by default. It has four tabs:
 
-Memory is only as good as the discipline that keeps it honest, and that
-discipline is the second half of the product. Sessions route by role through
-one skill (`l-01-agent-lifecycles`): a spawned agent follows the role brief
-that spawned it, and a developer-facing session is **free chat**. It answers
-research inline and, for ordinary role-shaped work, creates or resolves the first durable sprint
-and leaf when needed, then compiles the canonical architect brief and calls `dispatch_agent` once
-on that sprint document with role `architect`. An explicit developer-declared task-seat takeover
-instead targets the named role on its canonical task document. With no plane identity the launcher is
-authorized by target-document resolution and role altitude; later hosted seats use
-plane identity and direct-child scope. Both paths durably pin the exact brief, and a
-plane refusal never falls back to ambient. The resulting sprint-bound architect runs:
+- **Chats** holds the role launcher and, under it, the chat of the selected role agent.
+- **Operations** lists the tasks as a tree of sprint, master and task, and shows the selected task
+  document. The [attention bell](concepts.md#attention-bell) lists what waits for the user: a
+  permission question of a role agent, a [held message](concepts.md#held) (a message stored for a
+  role agent that cannot take it yet), a started task that has had no agent in a turn for 15
+  minutes, a blocked worktree start, cards that need a refresh decision, and a notice for each
+  task that landed or was abandoned. The review page opens from a task's page.
+- **Knowledge** reads a memory tree: the records by kind, the invariants without proof and the
+  knowledge of a path.
+- **File Viewer** shows a source file beside its card.
 
-```text
-request → trust-checkpoint → reframe-research → decide → build → close
-```
+The button "Tray (n)" beside the tabs opens the tray, which collects picked lines and files and
+sends them to a chat. [The dashboard](dashboard.md) describes every tab and control.
 
-Before any code changes, the agent resolves context, checks drift and provider
-state, reframes the request into the best version of the task, gathers evidence,
-and waits for the developer to agree on that framing. Only then does it decide
-*how* to build:
+## Task documents
 
-- a **research-only** answer that changes no code, or
-- a **durable task** with its own plan, checklist, and decision log — chat is
-  never a build route, so even small code work takes the minimal
-  `w-02-light-task-workflow` artifact, and larger work escalates to a master +
-  light sub-task series.
+Every code change belongs to a task. A task belongs to a master, and a sprint groups masters.
+Each of the three has a task document: a JSON file that the tool `task_doc` writes, with a rendered
+Markdown copy for reading. A task document holds the objective, the requirement packets, the steps,
+the decisions and the review rounds of its work.
 
-Two principles run through the whole arc. The first is **evidence-first
-reasoning**: for anything where correctness depends on interpretation, the agent
-makes its evidence model visible — what it read, what it searched, and what would
-prove the plan correct — rather than asserting conclusions. The second is that
-**approval is not one switch but several**. Implementation approval is not commit
-approval; commit, push, PR, merge, cleanup, and memory carryover are each their
-own explicit gate. The blast radius of any single "looks good" stays bounded to
-one action.
+Task documents hold plans; cards and knowledge records hold approved current state. A question that
+changes no code needs no task: a chat answers it. The Architect writes the task document of a task
+from the
+[leaf-task](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/templates/leaf-task.md)
+template. Tools, fields and refusals call a task a `leaf`, as the name of this template does;
+[Task](concepts.md#task) tells where each of the two words appears.
 
-Crucially, onboarding records *approved current state, not plans*. Task notes,
-proposals, and in-progress thinking stay in task files; durable memory is updated
-only after a change is approved and lands, and is then re-verified against the new
-commit. That separation is what lets an agent reason from onboarding without
-wondering whether it describes reality or merely an intention.
+The dashboard shows the task documents on its tab "Operations". [Workflows](workflows.md) tells
+how a task moves from planning to landing, and the
+[MCP tool reference](reference/mcp-tools.md) lists the operations of `task_doc`.
 
-## The architecture: the model reasons, the server keeps the books
+## The review page and the explainer
 
-The split of responsibility is the design thesis. The model does the judgment —
-framing the problem, surfacing assumptions, comparing options, asking for the
-right approvals. The deterministic work is offloaded to an MCP server so the same
-repo state always yields the same result, and so the agent *cannot* improvise its
-way around a gate.
+The button "⇄ Intent review" on a task's page opens the review page. It shows the task's change set:
+the changed code, the cards and knowledge records the change reaches, and the
+[judgments](concepts.md#knowledge-judgments-and-publication) the Curator recorded. It compares
+four Git trees, the code and the memory before and after, and names each recorded comparison
+"Comparison #n".
 
-That server is a single process exposing a focused set of typed tools, and the
+The user asks questions on the page. The first request creates the task's explainer, an agent
+that answers with a chat reply or with a page of its own. Each published page is a numbered
+revision; to publish one, the explainer needs Playwright and its browser on the machine
+([what the explainer needs](guides/review-page-and-explainer.md#what-the-explainer-needs-before-it-can-publish)). On request the explainer grades the blocks of the change set, and the page sorts by its
+grades. The explainer changes no code, no memory and no task document.
+
+Before a task starts, the Architect asks the user "go, or review first?", and no role agent
+starts on the task until the task document records `go`.
+[The review page and the explainer](guides/review-page-and-explainer.md) is the guide.
+
+## Direct execution
+
+A task normally runs in an enclosure. Direct execution is work on a task without one: the role
+agents work in the checkouts of the master's branch. It needs a grant for that task. The user
+gives it with the switch "Direct execution" on the page of a task in planning, or the Architect
+gives it with the tool `direct_execution_grant`. One task at a time runs this way, and the tool
+`direct_landing` lands it with its memory. [Workflows](workflows.md#direct-execution) describes the
+route.
+
+## The tool server
+
+The model does the judgment: it frames the problem, compares options and asks for approval. The
+tool server does the deterministic work, so the same repository state gives the same answer.
+[Context resolution](concepts.md#context-resolution), the drift check, commit order and Git
+operations run in code, not in a prompt.
+
+The tool server is a single process exposing typed tools, and the
 boundary between them is the trust boundary:
 
-- **Read-only tools** compute facts with no side effects — orienting on a
-  repository, checking drift, summarizing provider health, querying the graph or
-  the semantic index, previewing a closeout. The agent can call these freely.
-- **Mutating tools** — anything that writes Git history — are commit-gated. They
-  run only behind an explicit intent note and a paired preview, and the preview
-  is literally the apply path with the commit switched off. What you approve in a
-  preview is exactly what runs.
+- **Read-only tools** orient on a repository, check drift and preview closeout
+  without changing working-tree files, the Git index, local branches or task
+  documents. They may write the permitted caches, captured objects and reports;
+  an explicitly requested freshness read may fetch the configured upstream. The
+  [read boundary](architecture.md#what-a-read-may-write) defines those writes.
+- **Mutating tools** that write Git history offer a preview: `worktree_closeout_preview`, or the
+  argument `dry_run` of the tool itself. `worktree_closeout_apply`, `direct_landing`,
+  `memory_carryover_apply` and `worktree_operation_control` also take an `intent_note`: a note in
+  which the caller records the approval or the reason for the write. A closeout, a direct landing
+  and a carryover refuse a blank note.
 
-Every tool result is shape-checked against a declared model and carries an
-accurate token count, so the agent gets predictable, budget-aware payloads it
-does not have to parse defensively. A one-call context packet replaces a dozen
-exploratory probes at the start of a task. The point of all of this is auditability:
-context resolution, drift classification, commit sequencing, and Git surgery live
-in reviewable code, not in a prompt — which is what makes the memory layer
-reproducible rather than "an LLM with good intentions."
+The tool server answers a call that carries an argument the tool does not declare as if the
+argument were absent. It bounds the size of every
+answer: 1,500 tokens by default, and at most 4,000 for some tools, among them `server_info`,
+`knowledge_read` and `role_message`. An answer holds the
+outcome, what the caller needs for its next step and, when the result is larger, the field `log`:
+the place of the file that holds the whole result. That file lies in the folder of the
+[tool log](concepts.md#tool-log): `<enclosure>/logs/` for a call of a role agent on a task with an
+enclosure, and by default `<coordination-root>/logs/mcp/` for every other call.
+[Tool answers](reference/mcp-tools.md#tool-answers) tells the bounds, and the
+[MCP tool reference](reference/mcp-tools.md) lists every tool.
 
-## Repo-owned behavior: the `system/` folder
+## The repository's own instructions: the `system/` folder
 
-Every memory repo ships a committed `system/` folder — the repository's own
-operating manual, versioned right next to its memory. It holds the storage and
-path rules that decide which files get notes, a registry of where the project's
-documentation lives, the exact lint / type-check / test / build commands for the
-repo, its coding guidelines, its branch-and-landing (`git-workflow`) flow, and the
-template for how a change should be reported.
+A memory repository carries a committed `system/` folder: the repository's own instructions,
+versioned beside its memory. The tool `memory_init` creates the folder with `settings.md`,
+`tools.md` and `sources.md`. The user adds the other files when the repository needs them. The
+folder holds:
 
-These files are **primitives, not skills**. The generic skills and the session
-lifecycle read them at the moment each one matters: the build step runs the checks
-from `tools.md` before every commit, the landing step follows `git-workflow.md`
-before any push, and a finished change is reported in the shape the repo's
-template defines. A repository tailors how an agent works on it — its commands,
-its branch policy, its code-shape budgets, its report format — by editing plain
-Markdown, never by writing a custom skill for a specific harness.
+| File | Content | Who uses it |
+| --- | --- | --- |
+| `settings.json` | storage and path rules that decide which source files are eligible for a card, the cross-repository context, and `landing.workflow` | the tool server |
+| `settings.md` | notes for people and agents on this repository's memory | whoever opens the path that `context_packet` names; only when `settings.json` is absent, the tool server reads the storage rules, the path rules and `crossRepo` from a fenced YAML block of this file |
+| `tools.md` | the commands that build, lint, type-check and test the repository | the Worker builds each worktree's environment as this file says and runs every command in it; the Reviewer takes its check commands from it |
+| `sources.md` | a registry of where the project's documentation lies | the Curator and every agent that researches the repository |
+| `coding-guidelines.md` | the repository's coding rules | the Worker reads it in full before its first source edit; the Reviewer checks every added or changed line against it |
+| `design-guidelines.md` | the look of user interfaces and pages | the Worker and the Reviewer for user-interface work; the explainer for its pages |
+| `task-publication.md` | the landing and publication flow, and how tasks are published as GitHub issues | the Architect and the Manager |
+| `code-quality-report-template.md` | the shape of a code-quality report | the Worker |
+| `skill-writing-guidelines.md` | rules for instruction texts such as skills and role files | the Worker and the Reviewer, for work on such texts |
 
-Two properties make that pay off. First, it **travels with the memory**: because
-`system/` is committed in the memory repo, every contributor who resolves that
-memory inherits the same instructions automatically — their agent picks up the
-project's conventions with no per-person configuration. Second, it is **portable
-across harnesses**: the same skills-and-instructions contract installs on Claude
-Code, Codex, Cursor, and the rest, so the same `system/` folder yields the same
-behavior whichever coding agent a contributor brings. Workspace-wide defaults can
-live in the coordinator's own `system/` folder; where the two overlap, the
-repository's own rules win.
+These files are plain Markdown and JSON. A repository changes how agents work on it by editing
+them, not by writing instructions for one harness.
 
-## Harness-native setup
+Two of the files carry more than rules for code:
 
-Agents Remember does not ask every coding harness to pretend it has the same
-plugin surface. The source repo ships starter packages for Claude Code, Codex,
-Cursor, Antigravity, VS Code with GitHub Copilot, Hermes, Pi.dev, and OpenClaw.
-Each package carries the files that harness actually loads: MCP registration
-templates, Agents Remember authority settings, skill folders, startup hooks,
-rules, or always-on instruction files.
+- **Design guidelines.** The example folder holds `design-guidelines.md` with three files it routes
+  to, `DESIGN.md`, `TREATMENT.md` and `TECHNIQUES.md`, as examples; it is the folder of example
+  files for `system/` that the package ships. Agents Remember itself prescribes
+  no design; a repository without the file gets none.
+- **Task publication.** No code reads `task-publication.md`; the Architect and the Manager follow
+  it. When the file exists, the Architect creates a linked issue when it registers a task. The
+  Manager assigns the issue and sets it in progress before the task starts, and closes it after
+  the landing and the pushes. Without the file nothing is published.
+  [Workflows](workflows.md#task-publication) describes the file.
 
-The first-run path is deliberately short. Copy the starter package, replace the
-workspace and repository placeholders, restart the harness once, then invoke
-`c-13-install-and-onboard`. That skill verifies the MCP server, runs or checks
-`runtime_install()`, initializes or adopts memory, bootstraps onboarding when
-needed, and starts provider indexing when providers are enabled. The core
-by-path memory path still works without Docker or providers; the starter package
-just makes sure the harness can actually see the server and skills before setup
-moves on.
+The folder travels with the memory: every contributor who resolves that memory repository gets the
+same instructions. The tool server serves the same [skill](concepts.md#skill), with the
+instructions of the roles, to every harness, so the same
+`system/` folder gives the same behavior whichever harness runs a role agent. The
+[example folder](https://github.com/Foxfire1st/agents-remember/tree/main/system/defaults/examples/memory-repo)
+holds an example of each file except `skill-writing-guidelines.md`; the installed package holds
+the same folder at `agents_remember/package_data/runtime/system/defaults/examples/memory-repo/`.
+The [settings reference](reference/settings-json.md) lists the keys of `settings.json`.
 
-This is also why the setup is portable. A contributor can use Claude Code while
-another uses Codex or Cursor, and both resolve the same committed memory,
-`system/` rules, and MCP tool surface. The harness changes how the first-action
-directive is loaded; it does not change what the repository asks the agent to do.
+## Setup in a harness
+
+The user registers the tool server in Claude Code, Codex, Cursor, Hermes, Pi or OpenClaw as the
+page [Install](install/README.md) tells for that harness.
+The tool server serves the skill `l-01-agent-lifecycles`, which holds the instructions of the
+roles, from its package.
+
+One call from a chat then starts the setup:
+
+```text
+role_start(role="bootstrap", request_id="<UUID>")
+```
+
+`request_id` is a UUID that the calling chat generates for this start. A call repeated with the
+same `request_id` reconciles the same role agent and starts no second one.
+
+This [Bootstrap call](concepts.md#bootstrap-call) prepares the coordination root and writes the
+host block `paseoRuntime` into the [settings file](concepts.md#settings-file),
+`~/.config/agents-remember/agents-remember-settings.json`, unless the file has one. It installs and
+starts the host, and starts the Bootstrap role agent on the harness of the calling chat. Its answer
+names the address of the dashboard, where the setup continues in the chat of that role agent. The
+Bootstrap role agent asks the user before each change. It creates the user settings file,
+initializes the memory repository and adopts its first baseline. It creates no task and starts no
+other role; the user starts an Architect for the first work.
+[Getting started](getting-started.md) tells the steps in full.
+
+Two contributors can use different harnesses on one repository. Both resolve the same committed
+memory, the same `system/` rules and the same tools. The harness changes how the tool server is
+registered; it does not change what the repository asks of the agent.
 
 ## Operational guardrails
 
-The main loop is by-path memory, drift checks, and approval-gated updates. Real
-repositories also need the edge-case machinery that keeps that loop from
-becoming fragile:
+- **The settings file** lists the code repositories the tool server may work on; a call that names
+  another repository is refused. Its key `transcriptRoot` also sets where the tool log goes.
+- **Memory baseline adoption** commits the content of an existing memory repository as its
+  [baseline](concepts.md#baseline), the first commit of its content.
+  `memory_baseline_status` first reports the [drift](concepts.md#drift-check), the difference
+  between what the anchors recorded and the code, and the state of the attribution.
+  `memory_baseline_adopt` commits only on an explicit call;
+  [Adopt Existing Memory](guides/adopt-existing-memory.md) describes it.
+- **Branch memory [carryover](concepts.md#carryover)** copies richer cards from the memory of a
+  source branch into the memory worktree of a task, only after the matching code has landed. A
+  file's card passes without a review only on one of three proofs that the code of the file
+  landed. Every commit of the source branch that touches the file is part of the official line (an
+  exact commit). Or Git's patch id of the file's change is the same on the source branch and on
+  the official line (a patch-id match). Or the bytes of the file are equal on both (a
+  final-content match). It does not copy stale branch memory wholesale.
+  [Carry Memory From a Branch](guides/carryover-from-branch.md) describes it.
+- **Branch-gated [cross-repository context](concepts.md#cross-repository-context)** names another
+  repository's code, and its memory when asked for, only while that repository is on the branch
+  the entry expects. The entries stand under `crossRepo.allow` in the memory settings file,
+  `<memory-root>/system/settings.json`. An entry names the other repository in `repo` and its
+  branch in `expectedBranch`, and `includeMemory` asks for its memory; the
+  [settings reference](reference/settings-json.md#memory-settings-file-keys) lists the keys.
+- **A [benchmark runner](concepts.md#benchmark-runner)**, the module
+  `agents_remember.benchmarks.runner`, prepares paired Codex runs with and without memory, captures
+  their output and summarizes metrics. `python -m agents_remember.benchmarks.runner list` lists
+  its cases. It is a Python module of the package, not a tool of the tool server;
+  [Benchmark Methodology](benchmarks-methodology.md#the-benchmark-runner) describes it.
 
-- **MCP authority settings** declare which repositories and providers the server
-  may touch, where transcripts go, which timeout caps apply, and how configured
-  roots stay inside allowed workspace paths.
-- **Memory baseline adoption** lets an existing external-memory repo become the
-  first ledgered baseline only after drift/status review and explicit acceptance
-  when the memory is not proven current.
-- **Branch memory carryover** imports richer onboarding from a source branch
-  only after the matching code has landed, using evidence such as exact commits,
-  patch-id matches, or final-content matches instead of copying stale branch
-  memory wholesale.
-- **Branch-gated cross-repo context** can include selected sibling-repo memory
-  only when configured branch and ledger checks say that context matches the code
-  being reasoned about.
-- **Benchmark tools** prepare paired source-only and memory-enabled Codex runs,
-  capture JSONL results, and summarize metrics so claims about the memory layer
-  can be checked instead of waved through.
-- **Source quality tooling** wraps repository-owned checks — Ruff lint
-  (complexity rules included) and format, Pyright, pytest coverage, and mandatory
-  CRAP threshold enforcement — so commit, closeout, push, and CI gates use one
-  command surface. No rail carries a baseline, allowlist or exemption file. Radon
-  is carried alongside them as a labelled report, not as enforcement: `radon cc`
-  and `radon mi` exit 0 whatever they find.
+The checks that contributors run on the source of Agents Remember itself stand in
+[CONTRIBUTING.md](https://github.com/Foxfire1st/agents-remember/blob/main/CONTRIBUTING.md).
 
-## How the pieces fit
+## How the parts fit
 
-The whole system hangs off one invariant and compounds from there:
+- The **address rule** makes a known file's card directly reachable; anchor
+  comparisons measure currentness against the code.
+- **Commit attribution** pairs memory with code across separate repositories.
+- **Enclosures** keep in-progress code and memory off the official line of each repository.
+- The **knowledge index** is rebuilt from the selected text tree.
+- The **tool server** makes every operation deterministic and checks the knowledge gate.
+- **Role agents** on the **host** do the work in roles, and the **dashboard** shows it.
+- The **`system/` folder** carries each repository's own rules with its memory.
+- **Operational guards** cover baselines, carryover and cross-repository context.
 
-- The **address rule** makes retrieval O(1) *and* makes drift a deterministic
-  `git diff`.
-- The **ledger** makes that memory time-correct against the code, even across
-  separate repositories.
-- **Dual worktrees** quarantine in-progress memory so main is never corrupted.
-- **Index cloning** makes that isolation cheap enough to use by default.
-- The **MCP server** makes every operation deterministic and gated.
-- The **lifecycle** sequences all of it behind human judgment and explicit
-  approvals.
-- The **`system/` folder** carries each repo's own rules with its memory, so the
-  same generic skills behave the way that project wants — across harnesses.
-- **Starter packages** expose the same memory system through each harness's
-  native discovery surface.
-- **Operational guards** cover authority, baselines, carryover, cross-repo
-  context, benchmarks, and quality checks when the simple path is not enough.
-
-The memory layer is intentionally small — Markdown, Git metadata, and
-deterministic paths. The workflow layer around it can be heavier, but it exists
-for one reason: to protect that small, trustworthy memory from stale or
-speculative content. That is the bet — that durable, verifiable, by-path memory
-beside the code, kept honest by Git, is what lets a coding agent finally remember
-what your team already knows.
+The memory itself is small: Markdown, JSON, Git metadata and deterministic paths. The roles, tasks
+and checks around it exist to keep stale or speculative content out of that memory.
 
 ## Learn more
 
-- [Concepts](concepts.md) — onboarding units, memory roots, drift, and approval
-  gates.
-- [Architecture](architecture.md) — runtime, coordination, and memory
-  repos.
-- [Providers](guides/providers.md) — the optional semantic and code-graph
-  providers.
-- [External Memory](guides/use-external-memory.md) — separate memory repos and
-  the ledger.
-- [Workflows](workflows.md) — the agent lifecycles and their build modes.
-- [Install Guides](install/README.md) — harness-native starter packages.
-- [Settings Reference](reference/settings-json.md) — MCP authority settings.
-- [Getting Started](getting-started.md) — set it up in your own workspace.
+- [Concepts](concepts.md): the terms.
+- [Architecture](architecture.md): the parts and who owns what.
+- [Getting started](getting-started.md): the setup in your own workspace.
+- [Install](install/README.md): registration of the tool server in each harness.
+- [The dashboard](dashboard.md): the four tabs.
+- [Roles and role agents](roles.md): the eight roles.
+- [The host](host.md): checking, stopping and provisioning the host.
+- [Workflows](workflows.md): a task from planning to landing.
+- [The review page and the explainer](guides/review-page-and-explainer.md): reviewing a change set.
+- [Use The Memory Repository](guides/use-external-memory.md): the memory repository and commit
+  attribution.
+- [Settings Reference](reference/settings-json.md): the keys of the settings files.
+- [MCP Tool Reference](reference/mcp-tools.md): every tool.
+- [Knowledge System](reference/knowledge-system.md): the files, the worklist and the knowledge gate.

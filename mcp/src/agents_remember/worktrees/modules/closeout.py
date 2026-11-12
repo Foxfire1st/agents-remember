@@ -10,12 +10,21 @@ from agents_remember.controlplane.enforcement import (
     evaluate_closeout_gate,
 )
 from agents_remember.controlplane.store import GateStore
+from agents_remember.kernel.primitives.gate_vocab import STORED_GATE_WAY_OUT
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.observer.events import now_iso
 from agents_remember.worktrees.closeout_input import (
     effective_message_arguments,
     require_effective_closeout_plan,
+)
+from agents_remember.worktrees.disabled_memory import (
+    OPT_OUT_STATUS,
+    is_disabled_contract,
+    opt_out_detail_for_contract,
+    opt_out_refusal_result,
+    opt_out_result_fields,
+    subject_for_contract,
 )
 from agents_remember.worktrees.integration.closeout.integration_reopen import (
     completed_integration_reopen,
@@ -31,7 +40,12 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identit
 from agents_remember.worktrees.ledger_projection import inspect_ledger_projection
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.closeout_external import (
+    GATE_NOT_APPLICABLE,
+    candidate_gate_verdict,
+    closeout_changed_paths,
     external_closeout_commits,
+    refuse_ungated_candidate,
+    require_gated_recovery,
 )
 from agents_remember.worktrees.modules.closeout_lineage import (
     heal_current_source_lineage,
@@ -39,9 +53,8 @@ from agents_remember.worktrees.modules.closeout_lineage import (
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
     branch_commit,
-    changed_worktree_paths,
     commit_date,
-    committed_changed_paths,
+    head_commit,
     worktree_dirty,
 )
 from agents_remember.worktrees.modules.guidance import (
@@ -61,13 +74,14 @@ from agents_remember.worktrees.modules.onboarding import (
     entity_fingerprint_refresh_plan,
     onboarding_refresh_plan,
     route_index_refresh_plan_for_context,
-    route_overview_metadata_refresh_plan,
 )
+from agents_remember.worktrees.modules.state_refusals import closeout_queue_refusal
 from agents_remember.worktrees.queue.closeout_preview import (
     closeout_order,
     closeout_summary,
     proposed_closeout_commits,
 )
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.queue.closeout_recovery import (
     MemoryCloseoutOutcome,
     accepted_code_commit,
@@ -77,6 +91,7 @@ from agents_remember.worktrees.route_review import (
     code_candidate_tree,
 )
 from agents_remember.worktrees.series_closeout import (
+    empty_landing_leaf_ids,
     publish_closeout_under_authority,
     refuse_series_workbench_commit,
     require_closeout_publication_authority,
@@ -89,27 +104,6 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
-
-
-def closeout_changed_paths(contract) -> dict[str, list[str]]:
-    """Closeout worklist: working-tree changes plus the unverified committed range.
-
-    ``committed`` covers commits the task transports (merges, pre-committed
-    slices) that no previous closeout verified; ``working`` keeps the strict
-    dirty-tree tier. A path in both tiers counts as working.
-    """
-    if contract.kind == "series":
-        return {"all": [], "working": [], "committed": []}
-    working = changed_worktree_paths(contract.code_worktree)
-    committed = committed_changed_paths(
-        contract.code_worktree, contract.code_base_commit, contract.code_commit
-    )
-    committed_only = sorted(set(committed) - set(working))
-    return {
-        "all": sorted({*working, *committed_only}),
-        "working": working,
-        "committed": committed_only,
-    }
 
 
 def _bounded_paths(paths: list[str]) -> dict[str, object]:
@@ -204,10 +198,14 @@ class _MemoryRefreshPreview:
 def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _MemoryRefreshPreview:
     """Plan the external-memory refresh and classify it, without touching anything.
 
-    Every field is the same conditional: plan it for real when the task carries external
-    memory, and answer with the empty plan when it does not -- a disabled-memory closeout has
-    no onboarding tree to refresh.
+    The plan is built for real when the task carries external memory. A
+    contract that carries the removed mode never previews a refresh: the route
+    entry refuses it with the opt-out refusal first (MIK-R50 R4a), and this
+    function refuses it itself for a direct caller (MIK-R50 R4b) rather than
+    describing an empty code-only plan.
     """
+    if contract.memory_mode != "external":
+        raise RuntimeError(opt_out_detail_for_contract(contract, "worktree_closeout"))
     changed_paths = worklist["all"]
     external_leaf = contract.memory_mode == "external" and contract.kind == "leaf"
     metadata_refresh: OnboardingRefreshPlan = (
@@ -228,14 +226,10 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
             "unsupported": [],
         }
     )
-    route_overview_refresh: RouteOverviewRefreshPlan = (
-        route_overview_metadata_refresh_plan(contract, changed_paths)
-        if external_leaf
-        else {
-            "required": [],
-            "missing_metadata": [],
-        }
-    )
+    route_overview_refresh: RouteOverviewRefreshPlan = {
+        "required": [],
+        "missing_metadata": [],
+    }
     route_index_refresh: dict[str, Any] = (
         route_index_refresh_plan_for_context(_closeout_contract_context(contract))
         if external_leaf
@@ -261,10 +255,41 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
     :func:`require_closeout_publication_authority`: the dry run used to plan a closeout the apply
     then rejected on every completion blocker, which is exactly how a partial master's landing came to
     look available when it was not. A leaf owes nothing there, so no leaf preview changes.
+
+    The same holds for the mandatory invariant gate (MIK-R09): a converted leaf's preview asks the
+    gate the apply's preflight asks, over the same two trees, and answers
+    ``knowledge-gate-refused`` with the findings instead of ``would-closeout`` when it refuses
+    (:func:`_gate_refused_preview`). An unconverted leaf's preview is refused by the cutover
+    lock first (MIK-R46 rule 1), so it never promises a closeout the apply refuses. The verdict
+    is memoised, so the apply that follows does not evaluate it again.
     """
 
+    if is_disabled_contract(contract):
+        # A contract that carries the removed mode never previews a closeout
+        # (MIK-R50 R4a): the preview refuses with the opt-out refusal, as the
+        # apply does.
+        return _opt_out_preview(contract, "worktree_closeout_preview")
     refuse_series_workbench_commit(contract)
-    require_closeout_publication_authority(contract)
+    if contract.kind == "series":
+        # MIK-R46 rule 1: the series format verdict precedes publication authority,
+        # as the apply's preflight precedes publication -- an unconverted line's
+        # true blocker is the conversion, and the preview must refuse what the
+        # apply refuses. Converted lines answer not-applicable and read authority.
+        early = candidate_gate_verdict(
+            contract, args.candidate_tree or code_candidate_tree(contract)
+        )
+        if early is not None and early != GATE_NOT_APPLICABLE:
+            return _gate_refused_preview(contract, early)
+    try:
+        require_closeout_publication_authority(contract)
+    except CloseoutQueueError as error:
+        return _closeout_queue_blocked_preview(contract, error)
+    verdict = candidate_gate_verdict(contract, args.candidate_tree or code_candidate_tree(contract))
+    if verdict is not None and verdict != GATE_NOT_APPLICABLE:
+        return _gate_refused_preview(contract, verdict)
+    gate_guard = _closeout_gate_guard(contract, args)
+    if gate_guard is not None and not gate_guard.permitted:
+        return _closeout_gate_blocked_preview(contract, gate_guard)
     code_dirty = contract.kind == "leaf" and worktree_dirty(contract.code_worktree)
     memory_dirty = (
         contract.kind == "leaf"
@@ -277,11 +302,17 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
     memory_would_commit = memory_dirty or _refresh_plans_have_work(
         refresh.metadata, refresh.entities, refresh.route_overviews, refresh.route_indexes
     )
+    # A series whose landed leaves include empty landings lists them (MIK-R61 rule 1):
+    # they stand on the chain without ordering, and the preview says so. The key is
+    # present only when there is something to list, so worlds without empty landings
+    # answer exactly as before.
+    empty_landings = empty_landing_leaf_ids(contract) if contract.kind == "series" else []
     return {
         "state": "would-closeout",
         **status_payload(contract),
         "phase": "commit-approval-pending",
         "summary": closeout_summary(contract),
+        **({"emptyLandings": empty_landings} if empty_landings else {}),
         **recovery_guidance(
             "request_commit_approval",
             tool="worktree_closeout_apply",
@@ -311,6 +342,170 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "proposed_commits": proposed_closeout_commits(
             contract, args, code_dirty, memory_would_commit
         ),
+        # Present on a converted leaf only: an unconverted leaf's preview is refused by the
+        # cutover lock (MIK-R46 rule 1), so it never promises a closeout.
+        **({} if verdict == GATE_NOT_APPLICABLE else {"knowledge_gate": {"state": "pass"}}),
+    }
+
+
+GATE_REFUSED_PREVIEW = "knowledge-gate-refused"
+
+# Every preview state that answers a refusal instead of a plan: the entry
+# marks the preview returncode from this set, so a blocked preview never
+# rides a success returncode.
+REFUSED_CLOSEOUT_PREVIEW_STATES = frozenset(
+    {
+        GATE_REFUSED_PREVIEW,
+        OPT_OUT_STATUS,
+        "closeout-gate-blocked",
+        # The series-authority previews answer state "blocked" with the
+        # check's code beside it, like every other answered refusal.
+        "blocked",
+    }
+)
+
+
+MAX_PREVIEW_FINDINGS = 50
+
+
+def _opt_out_preview(contract, operation: str) -> dict[str, object]:
+    """The preview of a closeout the removed mode refuses: never ``would-closeout``.
+
+    It carries the opt-out status with the contract, the reason and the known
+    way out, and its own next step, so the response is not followed by the hint
+    to ask for the commit approval.
+    """
+
+    fields = opt_out_result_fields(
+        subject_for_contract(contract),
+        operation,
+        "series" if contract.kind == "series" else "leaf",
+    )
+    status = {
+        key: value
+        for key, value in status_payload(contract).items()
+        if key not in ("nextTool", "nextArgs", "nextRequiredArgs")
+    }
+    return {
+        "state": OPT_OUT_STATUS,
+        **status,
+        **fields,
+        "summary": fields["detail"],
+        "commit_approval_required": False,
+        "nextStep": {"summary": str(fields.get("nextAction"))},
+    }
+
+
+def _closeout_gate_blocked_preview(contract, guard: CloseoutGuard) -> dict[str, object]:
+    """The preview of a closeout the closeout-approval gate blocks: never ``would-closeout``.
+
+    This file is the right home: the preview builder already reports the
+    gate verdict, and the apply refuses on this same guard. A preview that
+    promised ``would-closeout`` while the apply would refuse on the gate is
+    exactly the dry/real disagreement MIK-R111 rule 1 forbids. The shape
+    mirrors :func:`_gate_refused_preview`: the gate's own sentence, its
+    verdict facts, one coded blocker, and its own next step, so the response
+    is not followed by the hint to ask for the commit approval.
+    """
+
+    summary = f"The closeout would be refused, and nothing would be committed: {guard.reason}"
+    step = f"{summary}. {STORED_GATE_WAY_OUT}."
+    status = {
+        key: value
+        for key, value in status_payload(contract).items()
+        if key not in ("nextTool", "nextArgs", "nextRequiredArgs")
+    }
+    sentence = (
+        f"Closeout-approval gate {guard.gate_id or 'unaddressed'} is undecided "
+        f"({guard.reason}). {STORED_GATE_WAY_OUT}."
+    )
+    return {
+        "state": "closeout-gate-blocked",
+        "code": "closeout-gate-blocked",
+        "error": summary,
+        **status,
+        "nextOperation": "continue_work",
+        "summary": summary,
+        "commit_approval_required": False,
+        "closeout_gate": _closeout_gate_payload(guard),
+        "blockers": [{"code": "closeout-gate-blocked", "sentence": sentence}],
+        "nextStep": {"summary": step},
+    }
+
+
+def _closeout_queue_blocked_preview(contract, error: CloseoutQueueError) -> dict[str, object]:
+    """The preview of a closeout the series authority refuses: never ``would-closeout``.
+
+    The check's code rides as the state and the code, its sentence as the
+    error, unchanged. The next call exists only where exactly one follows
+    (an abandoned master is abandoned); otherwise the sentence names the
+    repair. Like the gate previews, no commit-approval hint follows.
+    """
+
+    summary = f"The closeout would be refused, and nothing would be committed: {error.detail}"
+    step = f"{summary}. "
+    if error.status == "atomic-series-closeout-master-abandoned":
+        step += "Reclaim the abandoned master with worktree_abandon."
+        next_step: dict[str, object] = {
+            "summary": step,
+            "nextTool": "worktree_abandon",
+            "nextArgs": {"contract_path": contract.contract_path.as_posix()},
+        }
+    else:
+        step += "Repair the master the sentence names, then preview the closeout again."
+        next_step = {"summary": step}
+    status = {
+        key: value
+        for key, value in status_payload(contract).items()
+        if key not in ("nextTool", "nextArgs", "nextRequiredArgs")
+    }
+    return {
+        "state": "blocked",
+        "code": error.status,
+        "error": error.detail,
+        **status,
+        "nextOperation": "continue_work",
+        "summary": summary,
+        "commit_approval_required": False,
+        "blockers": [{"code": error.status, "sentence": error.detail}],
+        "nextStep": next_step,
+    }
+
+
+def _gate_refused_preview(contract, refusal: str) -> dict[str, object]:
+    """The preview of a closeout the mandatory gate refuses: never ``would-closeout``.
+
+    It carries the gate's own sentence, the number of findings and the first
+    :data:`MAX_PREVIEW_FINDINGS` of them (a leaf at intake holds hundreds), and its own next step,
+    so the response is not followed by the hint to ask for the commit approval. The contract's
+    own next call (an apply, or the integration of an earlier closeout) is not offered either.
+    """
+
+    header, *lines = refusal.splitlines()
+    findings = [line.removeprefix("- ") for line in lines if line.startswith("- ")]
+    summary = f"The closeout would be refused, and nothing would be committed: {header}"
+    step = (
+        f"{summary}. Answer each finding (a row through the knowledge writer, or the repair it "
+        "names), rerun memory_quality_check, then preview the closeout again."
+    )
+    status = {
+        key: value
+        for key, value in status_payload(contract).items()
+        if key not in ("nextTool", "nextArgs", "nextRequiredArgs")
+    }
+    return {
+        "state": GATE_REFUSED_PREVIEW,
+        **status,
+        "nextOperation": "continue_work",
+        "summary": summary,
+        "commit_approval_required": False,
+        "knowledge_gate": {
+            "state": "refused",
+            "findingCount": len(findings),
+            "findings": findings[:MAX_PREVIEW_FINDINGS],
+            "truncated": len(findings) > MAX_PREVIEW_FINDINGS,
+        },
+        "nextStep": {"summary": step},
     }
 
 
@@ -391,8 +586,8 @@ def _refuse_unsatisfied_closeout_gate(contract, args: WorktreeArgs) -> None:
 
     Server-side gate enforcement (slice 6b): a dashboard-opened ``closeout-approval`` gate is
     binding; a gateless lifecycle uses the approval and note persisted by the canonical
-    journaled closeout operation. The agent cannot satisfy the gate itself: its own
-    ``gate_decide`` is
+    journaled closeout operation. The agent cannot satisfy the gate itself: a decision
+    it recorded is
     ``decidedBy="model"``, which :func:`evaluate_closeout_gate` rejects.
 
     THIS IS NOT THE ENFORCEMENT ANY MORE, and reading it as such is the check-then-act mistake
@@ -409,7 +604,9 @@ def _refuse_unsatisfied_closeout_gate(contract, args: WorktreeArgs) -> None:
     """
     guard = _closeout_gate_guard(contract, args)
     if guard is not None and not guard.permitted:
-        raise RuntimeError(f"closeout blocked by gate enforcement: {guard.reason}")
+        raise RuntimeError(
+            f"closeout blocked by gate enforcement: {guard.reason}. {STORED_GATE_WAY_OUT}"
+        )
 
 
 def _claim_closeout_gate(contract, args: WorktreeArgs) -> CloseoutGuard | None:
@@ -448,7 +645,7 @@ def _claim_closeout_gate(contract, args: WorktreeArgs) -> CloseoutGuard | None:
     source-head validation, the onboarding/route plans, and candidate staging -- either only reads
     or only touches the index of the task's own disposable worktree, so a refusal there changes
     nothing and must not cost the developer their approval.
-    ``mcp/tests/test_gate_replay_window.py`` pins both halves: the gate is already ``applied`` by
+    Both halves hold: the gate is already ``applied`` by
     the time the transaction commit runs, and a gate failure leaves it ``approved``.
     """
     if not contract.lifecycle_id:
@@ -462,7 +659,9 @@ def _claim_closeout_gate(contract, args: WorktreeArgs) -> CloseoutGuard | None:
         operation_key=args.operation_key or None,
     )
     if not guard.permitted:
-        raise RuntimeError(f"closeout blocked by gate enforcement: {guard.reason}")
+        raise RuntimeError(
+            f"closeout blocked by gate enforcement: {guard.reason}. {STORED_GATE_WAY_OUT}"
+        )
     return guard
 
 
@@ -525,6 +724,12 @@ class _CloseoutResultFacts:
 
 def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeCommandResult | None:
     """Finalize an already-committed detached closeout exactly once."""
+    operation = "worktree_closeout_preview" if args.dry_run else "worktree_closeout_apply"
+    if contract.memory_mode != "external":
+        # A contract that carries the removed mode never recovers a closeout
+        # (MIK-R50 R4b): the entry refuses it first, and this function refuses
+        # it itself for a direct caller rather than replaying code-only logic.
+        raise RuntimeError(opt_out_detail_for_contract(contract, operation))
     commits = args.recovery_commits
     if commits is None or (contract.memory_mode == "external" and not commits.memoryContentCommit):
         return None
@@ -541,7 +746,7 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
             "recovered": True,
             **status_payload(contract),
         }
-        repair = _memory_ledger_repair(contract, MemoryCloseoutOutcome())
+        repair = _memory_ledger_repair(contract, MemoryCloseoutOutcome(), operation=operation)
         if repair is not None:
             payload["memory_ledger_repair"] = repair
         return WorktreeCommandResult(0, payload)
@@ -555,6 +760,8 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
             require_series_contract_authority(current, operation="worktree_closeout")
         else:
             require_ordinary_worktree(current, operation="worktree_closeout")
+        # MIK-R09 rule 5: a recovered closeout finalizes only a memory commit the gate passes.
+        require_gated_recovery(current, commits.codeCommit, commits.memoryContentCommit)
         memory = prove_closeout_recovery_commits(current, commits)
         integration_reopen = completed_integration_reopen(
             current,
@@ -578,7 +785,14 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
         write_contract(current.contract_path, updated)
         return memory, integration_reopen, updated
 
-    memory, integration_reopen, updated = publish_closeout_under_authority(contract, publication)
+    try:
+        memory, integration_reopen, updated = publish_closeout_under_authority(
+            contract, publication
+        )
+    except CloseoutQueueError as error:
+        # The series authority the recovery re-proves answers with its code
+        # and sentence, never raises.
+        return closeout_queue_refusal(contract, error, next_args=contract_next_args(contract))
     payload = _closed_result_payload(
         updated,
         _CloseoutResultFacts(
@@ -619,23 +833,28 @@ def _closed_result_payload(updated, facts: _CloseoutResultFacts) -> dict[str, An
         "integration_reopen": facts.integration_reopen,
         "closeout_gate": _closeout_gate_payload(facts.gate_guard),
     }
-    repair = _memory_ledger_repair(updated, memory)
+    repair = _memory_ledger_repair(updated, memory, operation="worktree_closeout_apply")
     if repair is not None:
         payload["memory_ledger_repair"] = repair
     return payload
 
 
-def _memory_ledger_repair(updated, memory: MemoryCloseoutOutcome) -> dict[str, object] | None:
+def _memory_ledger_repair(
+    updated, memory: MemoryCloseoutOutcome, *, operation: str
+) -> dict[str, object] | None:
     """What recomputing the ledger changed, or an explicit statement that it was not touched.
 
-    External-memory closeout always speaks about its ledger; a disabled-memory closeout has
-    no ledger to speak about, so the key is absent rather than falsely present.
+    External-memory closeout always speaks about its ledger. A contract that
+    carries the removed mode has no ledger to speak about and never reaches
+    this repair: the route entry refuses it first (MIK-R50 R4a), and this
+    function refuses it itself for a direct caller (MIK-R50 R4b) rather than
+    answering a populated repair or omitting the key with code-only semantics.
     """
 
+    if updated.memory_mode != "external":
+        raise RuntimeError(opt_out_detail_for_contract(updated, operation))
     if memory.ledger_repair:
         return memory.ledger_repair
-    if updated.memory_mode != "external":
-        return None
     return inspect_ledger_projection(updated)
 
 
@@ -692,19 +911,20 @@ def _closeout_commit_phase(
         contract.code_repo_path if contract.kind == "series" else contract.code_worktree
     )
     code_commit_date = commit_date(code_repository, code_commit)
-    memory = MemoryCloseoutOutcome()
-    if contract.memory_mode == "external":
-        memory = external_closeout_commits(
-            contract,
-            args,
-            effective_input,
-            VerifiedChange(
-                commit=code_commit,
-                commit_date=code_commit_date,
-                changed_paths=worklist["all"],
-                working_paths=worklist["working"],
-            ),
-        )
+    # Every closeout commits memory (MIK-R50 R4b): there is no code-only branch
+    # left. A contract that carries the removed mode never reaches this commit
+    # phase -- the route entry refuses it with the opt-out refusal first.
+    memory = external_closeout_commits(
+        contract,
+        args,
+        effective_input,
+        VerifiedChange(
+            commit=code_commit,
+            commit_date=code_commit_date,
+            changed_paths=worklist["all"],
+            working_paths=worklist["working"],
+        ),
+    )
     integration_reopen = completed_integration_reopen(
         contract,
         code_commit=code_commit,
@@ -759,7 +979,10 @@ def closeout_result(
     if args.operation_key and not args.candidate_tree:
         raise RuntimeError("closeout operation is missing its accepted candidate tree")
     if not args.candidate_tree:
-        args = replace(args, candidate_tree=code_candidate_tree(contract))
+        # The head is read before the tree: a commit that moves the branch at any later moment
+        # then refuses the code publication instead of becoming its parent (L26 review R3-2).
+        head = head_commit(contract.code_worktree) if contract.kind == "leaf" else None
+        args = replace(args, candidate_tree=code_candidate_tree(contract), candidate_head=head)
     approval_note = _closeout_approval_note(args)
     resuming = args.approval_claimed or args.recovery_commits is not None
     if not resuming:
@@ -768,16 +991,24 @@ def closeout_result(
     accepted_candidate_tree = cast(str, args.candidate_tree)
     refuse_series_workbench_commit(contract)
     contract = _revalidate_candidate(contract, accepted_candidate_tree, dry_run=args.dry_run)
+    # MIK-R09: an open worklist item, an incomplete run or a validator failure refuses the closeout
+    # before it claims its approval or commits either side; the memory commit asks again.
+    refuse_ungated_candidate(contract, accepted_candidate_tree)
 
-    return _publish_closeout_candidate(
-        contract,
-        _CloseoutPublicationFacts(
-            args=args,
-            effective_input=effective_input,
-            worklist=worklist,
-            approval_note=approval_note,
-        ),
-    )
+    try:
+        return _publish_closeout_candidate(
+            contract,
+            _CloseoutPublicationFacts(
+                args=args,
+                effective_input=effective_input,
+                worklist=worklist,
+                approval_note=approval_note,
+            ),
+        )
+    except CloseoutQueueError as error:
+        # The series authority the publication re-proves answers with its
+        # code and sentence, never raises.
+        return closeout_queue_refusal(contract, error, next_args=contract_next_args(contract))
 
 
 @dataclass(frozen=True)
@@ -856,6 +1087,18 @@ def _closeout_entry(
     args: WorktreeArgs,
     current_contract: WorktreeContract,
 ) -> tuple[WorktreeContract, EffectiveCloseoutInput, WorktreeCommandResult | None]:
+    if is_disabled_contract(current_contract):
+        # A contract that carries the removed mode never closes out (MIK-R50
+        # R4a): the apply refuses with the opt-out refusal, as the preview does.
+        # First, before any worktree or branch read, so the refusal does not
+        # depend on what else is wrong with the enclosure.
+        effective_input = _effective_closeout_input(args)
+        operation = "worktree_closeout_preview" if args.dry_run else "worktree_closeout_apply"
+        return (
+            current_contract,
+            effective_input,
+            opt_out_refusal_result(current_contract, operation),
+        )
     _contract_path, contract = _closeout_contract(args, current_contract)
     effective_input = _effective_closeout_input(args)
     if contract.kind == "leaf":
@@ -870,9 +1113,7 @@ def _closeout_entry(
     contract = _validate_closeout_source_state(contract, dry_run=args.dry_run)
     refuse_series_workbench_commit(contract)
     if args.dry_run:
-        return (
-            contract,
-            effective_input,
-            WorktreeCommandResult(0, closeout_preview_payload(contract, args)),
-        )
+        preview = closeout_preview_payload(contract, args)
+        refused = preview["state"] in REFUSED_CLOSEOUT_PREVIEW_STATES
+        return contract, effective_input, WorktreeCommandResult(2 if refused else 0, preview)
     return contract, effective_input, None

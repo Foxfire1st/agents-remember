@@ -11,21 +11,11 @@ import type {
 
 export type ConduitState =
   | "nominal" | "complete" | "running" | "blocked" | "failed" | "stale" | "skipped" | "planned" | "unknown";
-export type RuntimeState = "nominal" | "configured" | "indexing" | "down" | "missing" | "unknown";
 
 export function conduitState(value: string): ConduitState {
   switch (value) {
     case "nominal": case "complete": case "running": case "blocked":
     case "failed": case "stale": case "skipped": case "planned":
-      return value;
-    default:
-      return "unknown";
-  }
-}
-
-export function runtimeState(value: string | undefined): RuntimeState {
-  switch (value) {
-    case "nominal": case "configured": case "indexing": case "down": case "missing":
       return value;
     default:
       return "unknown";
@@ -58,27 +48,14 @@ export const POS = {
   featCode: { x: COL_FEAT_CX - 68, y: 250, w: 136 },
   featMemory: { x: COL_FEAT_CX - 68, y: 372, w: 136 },
 } as const;
-export const ENGINE = {
-  cgc: { x: 1057, y: 102 }, grepai: { x: 1057, y: 452 }, // worktree (enclosure) engines, right world
-  mcgc: { x: 81, y: 102 }, mgrep: { x: 81, y: 452 }, // official-line (workspace) engines, left world
-  w: 54, h: 96,
-} as const;
 export const COUPLER_X = COL_WT_CX; // worktree code↔memory coupler — on the worktree column centre
 export const OFFICIAL_COUPLER_X = COL_MAIN_CX; // official-line code↔memory coupler (podstage cpl-main) — on the main centre
 
-// Flow-conduit endpoints by edge kind, anchored to node/engine edges so a line never crosses a box.
+// Flow-conduit endpoints by edge kind, anchored to node edges so a line never crosses a box.
 export const EDGE_GEOM: Record<string, readonly [number, number, number, number]> = {
   // main right edge (COL_MAIN_CX+90) → worktree left edge (COL_WT_CX-100): the intake lanes spanning the gap.
   "worktree-add": [COL_MAIN_CX + 90, 281, COL_WT_CX - 100, 281],
   "ledger-map": [COL_MAIN_CX + 90, 403, COL_WT_CX - 100, 403],
-  // Provider CLONE arrows ("cloned-from, not re-indexed"): the worktree engines are SEEDED BY
-  // CLONING the official-line engines — a fast copy of the index / vector DB — NOT rebuilt from the
-  // worktree code. So the seed/clone flow runs official-provider -> worktree-provider, sweeping across
-  // the whole stage (CGC arcs over the top, GrepAI under the bottom; see the clone-arc path in Conduit),
-  // and it is TRANSIENT — drawn only while the clone is running, gone at idle. The persistent
-  // worktree-engine -> branch wiring is a separate static wire (worktree-wire), mirroring the left world.
-  "cgc-seed": [135, 150, 1057, 150],
-  "grepai-clone": [135, 500, 1057, 500],
   // sync shares the code intake lane's CENTRELINE with worktree-add (same source→worktree channel,
   // a later phase of it) — collinear, not stacked 8px below, so the blocked sync reads as one
   // centred line on the lane rather than a confusing off-centre double.
@@ -91,43 +68,36 @@ export const EDGE_GEOM: Record<string, readonly [number, number, number, number]
   "integration-mem": [COL_WT_CX - 100, 403, COL_FEAT_CX + 68, 403],
 };
 
-// The conduit path string for an edge — a straight line for settled lanes, the cross-stage BOW for the
-// provider clone arcs (CGC over the top / GrepAI under the bottom). Shared by Conduit and the refused-
-// conduit flash overlay so the flash traces the EXACT same lane geometry (no duplicated arc maths).
+// The conduit path string for an edge — a straight settled lane. Shared by Conduit and the refused-
+// conduit flash overlay so the flash traces the EXACT same lane geometry.
 export function conduitPathD(edge: EngineProcessEdge): string | null {
   const geom = EDGE_GEOM[edge.kind];
   if (!geom) return null;
   const [x1, y1, x2, y2] = geom;
-  const cloneArc = edge.kind === "cgc-seed" || edge.kind === "grepai-clone";
-  const dip = edge.kind === "grepai-clone" ? 104 : -116; // GrepAI bows down; CGC bows up
-  return cloneArc
-    ? `M${x1} ${y1} C ${x1 + 210} ${y1 + dip}, ${x2 - 210} ${y2 + dip}, ${x2} ${y2}`
-    : `M${x1} ${y1} L ${x2} ${y2}`;
+  return `M${x1} ${y1} L ${x2} ${y2}`;
 }
 
-// Refused-conduit flash polarity (T9B/T9C/T14C), DERIVED from the edge state — never a class, and
+// Refused-conduit flash polarity (T14C), DERIVED from the edge state — never a class, and
 // never a field on the edge. A `failed` lane is a fault (red), a `stale` lane a reroute (amber).
 // Any other kind/state → no flash.
 //
 // `integration` / `integration-mem` are dead against TODAY's reducer: its two edge builders --
 // `_process_edges` and `_start_process_node` in `observer/reducer.py` -- emit only worktree-add,
-// cgc-seed, ledger-map, grepai-clone and sync, so no served payload reaches these two
-// arms. They are kept anyway, and the honest reason is NOT forward-compatibility — nothing is
-// scheduled to start emitting them. It is that (a) `EngineProcessEdge`'s own documented kind
-// vocabulary (`observer/projection.py`, the comment above `kind: str`) lists `integration` as a
-// valid kind, unlike the `refused` STATE removed alongside, which that model's state comment never
-// listed; and (b) the whole integration lane — geometry, the T14C conflict scenario, the replay
-// strategy — is authored in the dev fixtures and covered by tests, so the arms are exercised even
-// though the server does not drive them. Delete the lane and its coverage together, or not at all.
+// ledger-map and sync, so no served payload reaches these two arms. They are kept anyway, and the
+// honest reason is NOT forward-compatibility — nothing is scheduled to start emitting them. It is
+// that (a) `EngineProcessEdge`'s own documented kind vocabulary (`observer/projection.py`, the
+// comment above `kind: str`) lists `integration` as a valid kind, unlike the `refused` STATE
+// removed alongside, which that model's state comment never listed; and (b) the whole integration
+// lane — geometry, the T14C conflict scenario, the replay strategy — is authored in the dev
+// fixtures and covered by tests, so the arms are exercised even though the server does not drive
+// them. Delete the lane and its coverage together, or not at all.
 // (`integration-mem` is the memory-side mirror and is not itself in that documented list; it lives
 // or dies with `integration`, which is why it is named here rather than quietly assumed.)
 export function refusedPolarityOf(edge: EngineProcessEdge): "amber" | "red" | null {
-  const isSeedOrIntegration =
-    edge.kind === "cgc-seed" ||
-    edge.kind === "grepai-clone" ||
+  const isIntegration =
     edge.kind === "integration" ||
     edge.kind === "integration-mem";
-  if (!isSeedOrIntegration) return null;
+  if (!isIntegration) return null;
   if (edge.state === "failed") return "red";
   if (edge.state === "stale") return "amber";
   return null;
@@ -189,7 +159,7 @@ export function truncate(value: string, max: number): string {
 // quick fade + subtle pop and EXITS the same way when the block clears (via AnimatePresence). The dashboard
 // never hard-pops state in: Motion owns the enter/exit. Gated by `useShouldAnimate` → instant end-state
 // under effects-off so the snapshots stay deterministic. `transform-box: fill-box` scales from the element's
-// own centre (the `engineCharge` pattern), so the pop grows in place instead of sliding from the SVG origin.
+// own centre, so the pop grows in place instead of sliding from the SVG origin.
 export function alertProps(animate: boolean) {
   return {
     initial: animate ? { opacity: 0, scale: 0.88 } : false,
@@ -265,14 +235,3 @@ export function landingFlowState(refs: LandingRefNode[], kind: string): FlowStat
   return memPushed(refs) ? "active" : "hidden"; // carry + push-mem: the carryover frontier
 }
 
-export function chargeMotion(runtime: RuntimeState): { scaleY: number; opacity: number } {
-  switch (runtime) {
-    case "nominal":
-    case "indexing":
-      return { scaleY: 1, opacity: runtime === "indexing" ? 0.85 : 0.55 };
-    case "down":
-      return { scaleY: 1, opacity: 0.55 };
-    default:
-      return { scaleY: 0, opacity: 0 }; // configured/unknown: drained (invisible)
-  }
-}

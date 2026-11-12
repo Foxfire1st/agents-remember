@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -11,8 +12,12 @@ from agents_remember.kernel.coordination_context_resolver import (
     mirror_onboarding_path,
     resolve_storage_for_source,
 )
-from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.git_command import read_git_blobs_bytes, run_git
 from agents_remember.kernel.onboarding_doc import ROUTE_OVERVIEW_DOC_TYPES
+from agents_remember.memory_quality.converted_cards import (
+    card_sidecar_path,
+    converted_card_metadata,
+)
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
     normalize_overview_route,
     parse_table_metadata_text,
@@ -24,6 +29,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.inline impo
     extract_inline_onboarding_block,
 )
 from agents_remember.memory_quality.memory_census_scope import MemoryCensusScope
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 from agents_remember.models.lifecycles.memory_census import (
     GovernedArtifactIdentity,
     MemoryCensusBlocker,
@@ -31,6 +37,7 @@ from agents_remember.models.lifecycles.memory_census import (
     MemoryCensusRow,
     require_git_relative_path,
 )
+from agents_remember.worktrees.modules.onboarding_trace import counted_sidecar_change
 
 
 def _git(root: Path, arguments: list[str]) -> str:
@@ -46,12 +53,14 @@ class _Tree:
     root: Path
     tree: str
     members: dict[str, str] = field(init=False)
+    blobs: dict[str, str] = field(init=False)
     texts: dict[str, str] = field(default_factory=dict)
     metadata: dict[str, dict[str, str]] = field(default_factory=dict)
     metadata_loaded: bool = False
 
     def __post_init__(self) -> None:
         self.members = {}
+        self.blobs = {}
         for row in _git(self.root, ["ls-tree", "-r", "-z", self.tree]).split("\0"):
             if not row:
                 continue
@@ -59,7 +68,36 @@ class _Tree:
             require_git_relative_path(path)
             if path in self.members:
                 raise ValueError("duplicate exact Git census path")
-            self.members[path] = header.split()[0]
+            mode, _kind, blob = header.split()
+            self.members[path] = mode
+            self.blobs[path] = blob
+
+    @property
+    def converted(self) -> bool:
+        """A converted tree holds the layout marker: its cards keep no metadata table."""
+
+        return LAYOUT_MARKER_PATH in self.members
+
+    def _cards(self, prefix: str) -> list[str]:
+        return [
+            path
+            for path, mode in self.members.items()
+            if path.startswith(f"{prefix}/")
+            and path.endswith(".md")
+            and mode in {"100644", "100755"}
+        ]
+
+    def _load_converted_metadata(self, prefix: str) -> None:
+        """Each card's kind and source from the converted format, its sidecars read in one batch."""
+
+        cards = self._cards(prefix)
+        sidecars = {card: card_sidecar_path(card) for card in cards}
+        wanted = {path: self.blobs[path] for path in sidecars.values() if path in self.blobs}
+        data = read_git_blobs_bytes(self.root, wanted.values())
+        for card, sidecar in sidecars.items():
+            blob = wanted.get(sidecar)
+            text = None if blob is None else data[blob].decode("utf-8", errors="strict")
+            self.metadata[card] = converted_card_metadata(card, prefix, text)
 
     def text(self, path: str) -> str:
         require_git_relative_path(path)
@@ -72,6 +110,10 @@ class _Tree:
     def load_metadata(self, prefix: str) -> None:
         """Read table metadata in one exact-tree Git query, then use its canonical parser."""
         if self.metadata_loaded:
+            return
+        if self.converted:
+            self._load_converted_metadata(prefix)
+            self.metadata_loaded = True
             return
         result = run_git(
             self.root,
@@ -111,11 +153,7 @@ class _Tree:
             require_git_relative_path(path)
             if path.endswith(".md"):
                 lines.setdefault(path, []).append(line)
-        for path, mode in self.members.items():
-            if not path.startswith(f"{prefix}/") or not path.endswith(".md"):
-                continue
-            if mode not in {"100644", "100755"}:
-                continue
+        for path in self._cards(prefix):
             self.metadata[path] = parse_table_metadata_text("\n".join(lines.get(path, ())))
         self.metadata_loaded = True
 
@@ -123,6 +161,14 @@ class _Tree:
         if path not in self.metadata:
             self.metadata[path] = parse_table_metadata_text(self.text(path))
         return self.metadata[path]
+
+
+def _blobs(tree: _Tree, paths: Mapping[str, str]) -> dict[str, bytes]:
+    """The bytes ``tree`` holds at each of ``paths`` (absent paths omitted), read in one batch."""
+
+    held = {path: tree.blobs[path] for path in paths if path in tree.blobs}
+    data = read_git_blobs_bytes(tree.root, held.values())
+    return {path: data[blob] for path, blob in held.items()}
 
 
 @dataclass
@@ -392,9 +438,33 @@ class _Census:
                             reason="nearest-governing-route",
                         )
 
+    def edited_paths(self, documents: tuple[dict[str, dict[str, str]], ...]) -> list[str]:
+        """The task's memory edits. On a converted tree a sidecar's counted change is its card's
+        edit; a change of only anchors' ``blob``, line numbers and ``content`` (the fixer's
+        mechanical re-recording) is not, exactly as MIK-R30 rule 3 counts it."""
+
+        paths = set(self.scope.memory_paths)
+        if LAYOUT_MARKER_PATH not in self.after.members:
+            return sorted(paths, key=lambda value: value.encode("utf-8"))
+        historical, current = documents
+        sidecars = {
+            path: card
+            for path in self.scope.memory_paths
+            if path.endswith(".json")
+            and ((card := f"{path.removesuffix('.json')}.md") in current or card in historical)
+        }
+        before = _blobs(self.before, sidecars)
+        after = _blobs(self.after, sidecars)
+        paths.update(
+            card
+            for path, card in sidecars.items()
+            if counted_sidecar_change(before.get(path), after.get(path))
+        )
+        return sorted(paths, key=lambda value: value.encode("utf-8"))
+
     def edited_documents(self, documents: tuple[dict[str, dict[str, str]], ...]) -> None:
         historical, current = documents
-        for path in self.scope.memory_paths:
+        for path in self.edited_paths(documents):
             if path in current:
                 metadata = current[path]
                 if not metadata:
@@ -506,7 +576,9 @@ def build_memory_census(
     memory_root = Path(pair.memoryRoot)
     onboarding = Path(pair.onboardingRoot).relative_to(memory_root).as_posix()
     require_git_relative_path(onboarding)
-    before = _Tree(memory_root, scope.memory_baseline_commit)
+    # K_B as the census compares it: the baseline, or its conversion when the candidate is converted
+    # and the baseline is not (MIK-R24 rule 7), so the conversion itself is never an edit.
+    before = _Tree(memory_root, scope.memory_comparison_tree)
     after = _Tree(memory_root, scope.memory_candidate_tree)
     census = _Census(scope, settings, before, after, onboarding)
     try:

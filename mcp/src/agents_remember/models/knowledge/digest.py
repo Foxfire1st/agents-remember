@@ -58,16 +58,6 @@ def revision_payload_digest(revision: InvariantRevision) -> str:
     return sha256_digest(canonical_revision_payload(revision))
 
 
-def sealed_revision(revision: InvariantRevision) -> InvariantRevision:
-    """Return the revision carrying its recomputed digest.
-
-    The store recomputes rather than trusting a supplied digest, so this is the single place
-    that turns an authored aggregate into a stored one.
-    """
-
-    return revision.model_copy(update={"payload_digest": revision_payload_digest(revision)})
-
-
 def canonical_family_revision_payload(revision: FamilyRevision) -> dict[str, Any]:
     """Return the exact mapping a family revision's digest seals.
 
@@ -94,9 +84,3 @@ def family_revision_payload_digest(revision: FamilyRevision) -> str:
     """Return the SHA-256 hex digest sealing ``revision``'s authored payload."""
 
     return sha256_digest(canonical_family_revision_payload(revision))
-
-
-def sealed_family_revision(revision: FamilyRevision) -> FamilyRevision:
-    """Return the family revision carrying its recomputed digest."""
-
-    return revision.model_copy(update={"payload_digest": family_revision_payload_digest(revision)})

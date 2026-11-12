@@ -265,15 +265,20 @@ class PauseStopsAnAtomicMasterTests(unittest.TestCase):
         assert isinstance(released, dict)
         self.assertEqual(released["state"], "vacant")
 
-    def test_pausing_a_master_that_was_never_selected_succeeds_and_writes_nothing(self) -> None:
+    def test_pausing_a_master_that_was_never_selected_succeeds_and_publishes_nothing(
+        self,
+    ) -> None:
         """No selection means the master is already stopped, and the pause says so.
 
         A master between landings holds no selection, so this is the ordinary state of a master
         the developer wants parked rather than an error: the intent is already satisfied, and
         the pause reports it in its own state instead of failing. The success has to be
         EXPLICIT -- a caller must be able to tell "nothing was held" from a real release, in the
-        state it reports and in the words it uses -- and it must still be inert: no activation
-        record, no coordination write, no ref move, no commit and no ledger row.
+        state it reports and in the words it uses -- and it must still publish nothing: no ref
+        move, no commit, no landing and no ledger row. It writes exactly one thing, its own
+        pause fact at this contract's activation record, because a stop is a fact about a master
+        that held no selection too (MIK-R200 rule 4, which suppresses a stall only on that
+        record's explicit pause and never on vacancy alone).
         """
 
         self.assertEqual(self._activation_bytes(), {})
@@ -298,13 +303,15 @@ class PauseStopsAnAtomicMasterTests(unittest.TestCase):
         self.assertIn("already stopped", summary)
         self.assertIn("held no atomic-series selection", summary)
         self.assertIn("nothing was published", summary)
-        # Nothing was released, and the payload shows it in the one place a release would: an
-        # observed vacancy with no record behind it, where a released pause carries the record
-        # its own release wrote.
+        # Nothing was released; what the payload shows is the pause fact itself, on the one
+        # record a stop is allowed to write.
         observed = stopped["atomicSeriesActivation"]
         assert isinstance(observed, dict)
         self.assertEqual(observed["state"], "vacant")
-        self.assertNotIn("record", observed)
+        record = observed["record"]
+        assert isinstance(record, dict)
+        self.assertEqual(record["state"], "vacant")
+        self.assertEqual(record["pausedAt"], record["selectedAt"])
         # The hand-back is the released pause's own: a summary, and no proposed call anywhere.
         next_step = stopped["nextStep"]
         assert isinstance(next_step, dict)
@@ -312,8 +319,11 @@ class PauseStopsAnAtomicMasterTests(unittest.TestCase):
         for proposed in ("nextTool", "nextArgs", "nextOperation"):
             self.assertNotIn(proposed, stopped)
             self.assertNotIn(proposed, next_step)
-        # Inert: nothing was created to say so, and nothing else moved either.
-        self.assertEqual(self._activation_bytes(), {})
+        # Inert apart from that one record: nothing else was created or moved.
+        created = self._activation_bytes()
+        self.assertEqual(
+            set(created), {activation_path(self.series_b.coordination_root, self.series_b).name}
+        )
         self.assertEqual(self._world(), before)
         self.assertEqual(self._tips(), tips_before)
         self.assertEqual(self._documents(), documents_before)
@@ -542,9 +552,9 @@ class PauseStopsAnAtomicMasterTests(unittest.TestCase):
 
         real_release = pause_module.release_atomic_series_selection
 
-        def release_then_the_record_appears(contract: WorktreeContract) -> Any:
+        def release_then_the_record_appears(contract: WorktreeContract, **kwargs: Any) -> Any:
             try:
-                return real_release(contract)
+                return real_release(contract, **kwargs)
             except AtomicSeriesActivationError:
                 self._select(self.series_a)
                 raise

@@ -49,7 +49,6 @@ from agents_remember.worktrees.scheduling_mode import (
     commanded_sprint_masters,
     effective_execution_nature,
 )
-from agents_remember.worktrees.source_lineage import require_current_source_lineage
 from agents_remember.worktrees.task_resolver import (
     series_contract_path,
     slugify,
@@ -310,6 +309,8 @@ def require_parent_series(
     contract: WorktreeContract,
     *,
     operation: str,
+    dry_run: bool = False,
+    preview_parent: WorktreeContract | None = None,
 ) -> WorktreeContract | None:
     """Return an atomic leaf's parent series, or None for organizational direct-super work."""
 
@@ -318,9 +319,21 @@ def require_parent_series(
         return None
     _require_atomic_master(authority)
     parent_path = contract.parent_contract_path or series_contract_path(contract.task_root)
-    if not parent_path.is_file():
+    if parent_path.is_file():
+        series = _load_series(parent_path)
+    elif (
+        dry_run
+        and preview_parent is not None
+        and not parent_path.exists()
+        and not parent_path.is_symlink()
+    ):
+        # Only start planning carries the parent validated by the bootstrap owner.
+        # Durable callers still require publication, and an existing artifact is always read.
+        if preview_parent.contract_path.resolve() != parent_path.resolve():
+            raise RuntimeError(f"{operation} requires its exact parent series contract")
+        series = preview_parent
+    else:
         raise RuntimeError(f"{operation} requires its exact parent series contract")
-    series = _load_series(parent_path)
     _require_series_identity(
         _scope(contract),
         series,
@@ -328,21 +341,6 @@ def require_parent_series(
         authority.sprint_branch,
     )
     return series
-
-
-def atomic_leaf_parent(contract: WorktreeContract, *, operation: str) -> WorktreeContract | None:
-    """Resolve the exact atomic owner before deferring leaf-wide acceptance."""
-    if contract.kind != "leaf":
-        return None
-    topology = TaskDocumentTopology(contract.coordination_root)
-    owner = topology.canonical_ref(contract.repo_name, contract.task_root / "task.json")
-    if topology.resolve(owner).document.kind != "master":
-        return None
-    require_ordinary_worktree(contract, operation=operation)
-    parent = require_parent_series(contract, operation=operation)
-    if parent is not None:
-        require_current_source_lineage(contract, operation=operation)
-    return parent
 
 
 def require_sync_worktree(contract: WorktreeContract) -> None:
@@ -628,9 +626,12 @@ def _integration_surfaces(
         ) from exc
     commanded_refs: set[TaskDocumentRef] = set()
     for sprint in masters:
-        if not sprint.document.orchestrates:
+        if not sprint.document.is_sprint:
             continue
         branch = sprint.document.integrationBranch
+        if not branch and not sprint.document.orchestrates:
+            # A sprint that lost its last master and declares no branch has no line to keep.
+            continue
         if not branch:
             raise RuntimeError(
                 f"integration-branch authority requires {sprint.ref.key} to declare "
@@ -664,7 +665,7 @@ def _integration_surfaces(
     for master in masters:
         if (
             master.ref in commanded_refs
-            or master.document.orchestrates
+            or master.document.is_sprint
             or effective_execution_nature(master.document, None) != "atomic"
         ):
             continue
@@ -852,7 +853,11 @@ def _repository_sides(contract: WorktreeContract) -> tuple[_RepositorySide, ...]
             work_branch=contract.code_work_branch,
         )
     ]
-    if contract.memory_mode == "external":
+    if contract.memory_mode == "external" or contract.memory_repo_path is not None:
+        # Sides follow repository topology, not the mode label: a series that
+        # carries a memory repository participates in memory even when its mode
+        # is removed (MIK-R50 rule 3 tombstone succession reads the same sides).
+        # An external contract without a repository path stays malformed.
         if contract.memory_repo_path is None:
             raise RuntimeError("external-memory branch authority requires a repository path")
         if _repository_identity(contract.memory_repo_path, "memory") == _repository_identity(

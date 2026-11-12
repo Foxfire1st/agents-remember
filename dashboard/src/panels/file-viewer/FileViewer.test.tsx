@@ -23,7 +23,7 @@ afterEach(() => {
 describe("File Viewer center tab", () => {
   it("registers a full-bleed File Viewer view selectable from the mode bar", () => {
     dashboardStore.getState().applySnapshot(GALLERY.find((g) => g.name === "engine-fleet")!.projection);
-    const { container, getByRole } = render(<CockpitShell />);
+    const { container, getByRole } = render(<CockpitShell initialView="operations" />);
 
     fireEvent.click(getByRole("radio", { name: "File Viewer" }));
 
@@ -43,7 +43,7 @@ describe("File Viewer center tab", () => {
 
   it("keeps the File Viewer mounted (hidden) on other views so its state survives a switch", () => {
     dashboardStore.getState().applySnapshot(GALLERY.find((g) => g.name === "engine-fleet")!.projection);
-    const { container, getByRole } = render(<CockpitShell />);
+    const { container, getByRole } = render(<CockpitShell initialView="operations" />);
 
     // Mounted from the start (default Operations view), but hidden via CSS.
     const fv = container.querySelector('[data-testid="file-viewer"]');
@@ -89,7 +89,7 @@ describe("File Viewer center tab", () => {
       async () => ({ ok: true, status: 200, json: async () => ({ repos: [] }) }) as unknown as Response,
     );
     vi.stubGlobal("fetch", fn);
-    const { getByRole } = render(<CockpitShell />);
+    const { getByRole } = render(<CockpitShell initialView="operations" />);
 
     const filesReads = () =>
       (fn.mock.calls as unknown as string[][]).map((c) => c[0]).filter((u) => u.includes("/api/files/"));

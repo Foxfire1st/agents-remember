@@ -48,6 +48,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
     start_or_observe_operation,
 )
+from agents_remember.worktrees.knowledge_gate import close_owner_history
 from agents_remember.worktrees.modules import integrate as integrate_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.queue.closeout_projection_activation import (
@@ -78,7 +79,14 @@ from closeout_input_test_support import (
     start_closeout_operation,
     start_operation_record,
 )
-from test_closeout_queue import MASTER_A, MASTER_B, NOW, REPO, QueueFixture
+from test_closeout_queue import (
+    MASTER_A,
+    MASTER_B,
+    NOW,
+    REPO,
+    QueueFixture,
+    cover_fixture_code_changes,
+)
 from test_worktree_support import git
 
 LATER = "2026-08-15T01:00:00+00:00"
@@ -225,9 +233,14 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         """Close one atomic leaf out and land it on its master's branches, as the fixture does."""
 
         assert contract.memory_worktree is not None
+        assert contract.leaf_id is not None
         git(contract.code_worktree, "add", "-A")
         git(contract.code_worktree, "commit", "-m", "atomic child candidate")
         candidate_commit = git(contract.code_worktree, "rev-parse", "HEAD")
+        # The leaf's publication closes its own history (MIK-R07 rule 7): the close is the
+        # product's own write, committed inside the memory content below, so the master's
+        # later landing finds every history file closed.
+        close_owner_history(contract.memory_worktree, contract.leaf_id)
         prepare_memory_cache(contract.memory_worktree)
         git(contract.memory_worktree, "add", "-A")
         git(
@@ -427,6 +440,9 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         (leaf_a.code_worktree / "a-paused.txt").write_text("A only\n", encoding="utf-8")
         git(leaf_a.code_worktree, "add", "a-paused.txt")
         git(leaf_a.code_worktree, "commit", "-m", "A work in progress")
+        # MIK-R46 rule 8: the leaf covers its new file before the next evidence
+        # publication judges the candidate.
+        cover_fixture_code_changes(leaf_a, "a-paused.txt")
         code_source_before = rev(series_a.code_repo_path, "super")
         memory_source_before = rev(memory, "super")
         a_line = rev(series_a.code_repo_path, series_a.code_work_branch)
@@ -518,6 +534,10 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         self._paused_fixture()
         series_a = self.series[MASTER_A]
         self._rename_leaf_features(*self.fixture.contracts.values())
+        # MIK-R46 rule 8: each leaf covers its renamed feature file before the next
+        # evidence publication judges the candidate.
+        for contract in self.fixture.contracts.values():
+            cover_fixture_code_changes(contract, f"{contract.leaf_id.lower()}-feature.txt")
 
         # 1 -- two independent atomic masters, both active inside one sprint.
         self._select_both()
@@ -616,6 +636,9 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         assert leaf_id is not None
         leaf_a2 = self.fixture.start_leaf(leaf_id)
         self._rename_leaf_features(leaf_a2)
+        # MIK-R46 rule 8: the leaf covers its renamed feature file before the declaration
+        # publishes evidence over the candidate.
+        cover_fixture_code_changes(leaf_a2, f"{leaf_id.lower()}-feature.txt")
         leaf_ref = TaskDocumentRef(repository=REPO, path=f"master-a/{leaf_id.lower()}.json")
         self.assertEqual(
             self.fixture.declare_leaf(leaf_a2, leaf_ref, MASTER_A)["state"], "valid-built"

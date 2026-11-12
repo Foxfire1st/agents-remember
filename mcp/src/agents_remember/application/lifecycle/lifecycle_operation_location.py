@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
-from typing import Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -13,14 +14,11 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationKind,
     LifecycleOperationProjection,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
-    LifecycleOperationLocation,
-    LifecycleOperationLocationError,
-    resolve_lifecycle_operation_location,
-)
-from agents_remember.worktrees.integration.lifecycle.observation.projection import (
-    unreadable_contract_operation_projections,
-)
+
+if TYPE_CHECKING:  # annotation-only: the lifecycle layer loads when a location is resolved
+    from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+        LifecycleOperationLocation,
+    )
 
 
 @dataclass(frozen=True)
@@ -62,13 +60,16 @@ def configured_lifecycle_operation_location(
     """Bind a confined contract path to exactly one configured repository task root."""
 
     confined = require_within_coordination(config, str(contract_path), "contract_path")
+    resolve_lifecycle_operation_location = import_module(
+        "agents_remember.worktrees.integration.lifecycle.lifecycle_location_cache"
+    ).resolve_lifecycle_operation_location
     return confined, resolve_lifecycle_operation_location(
         config.coordination_root,
         confined,
     )
 
 
-def location_decision_payload(error: LifecycleOperationLocationError) -> LocationDecisionPayload:
+def location_decision_payload(error: Any) -> LocationDecisionPayload:
     return {
         "ok": False,
         "state": error.status,
@@ -93,7 +94,9 @@ def unreadable_status_operations(
 
     try:
         _, location = configured_lifecycle_operation_location(config, contract_path)
-    except LifecycleOperationLocationError as error:
+    except import_module(
+        "agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location"
+    ).LifecycleOperationLocationError as error:
         status_result.update(location_decision_payload(error))
         return []
     observation = observe_contract_read_failure(
@@ -114,7 +117,9 @@ def observe_contract_read_failure(
     error_type = read_failure.get("errorType")
     name = read_failure.get("name")
     operations = tuple(
-        unreadable_contract_operation_projections(
+        import_module(
+            "agents_remember.worktrees.integration.lifecycle.observation.projection"
+        ).unreadable_contract_operation_projections(
             location,
             error_type=error_type if isinstance(error_type, str) else "ContractError",
             name=name if isinstance(name, str) else location.contract_path.name,
@@ -167,23 +172,6 @@ def _contract_read_state(read_failure: Mapping[str, object]) -> Literal["missing
     return "unreadable"
 
 
-def configured_unreadable_operation_projections(
-    config: McpRuntimeConfig,
-    contract_path: Path,
-    *,
-    error_type: str,
-    name: str,
-) -> list[LifecycleOperationProjection]:
-    """Resolve the configured locator before reading retained strict journals."""
-
-    _, location = configured_lifecycle_operation_location(config, contract_path)
-    return unreadable_contract_operation_projections(
-        location,
-        error_type=error_type,
-        name=name,
-    )
-
-
 def primary_operation_projection(
     projections: list[LifecycleOperationProjection],
 ) -> LifecycleOperationProjection | None:
@@ -230,60 +218,16 @@ def operation_address_projections(
     ]
 
 
-def unreadable_operation_refusal(
-    config: McpRuntimeConfig,
-    contract_path: Path,
-    address: LifecycleOperationPublicAddress,
-    error: Exception,
-) -> dict[str, Any]:
-    """Translate one unreadable contract through retained locator-owned authority."""
+def __getattr__(name: str) -> object:
+    """The two names other modules import from here are re-exported on first use, not at import.
 
-    try:
-        projections = configured_unreadable_operation_projections(
-            config,
-            contract_path,
-            error_type=type(error).__name__,
-            name=contract_path.name,
+    `application/worktree_status.py` takes `LifecycleOperationLocation` from this module; keeping that
+    import working while the worktree layer stays unloaded is what a module-level resolver is for.
+    """
+
+    if name in {"LifecycleOperationLocation", "LifecycleOperationLocationError"}:
+        module = import_module(
+            "agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location"
         )
-    except LifecycleOperationLocationError as location_error:
-        return {"operation": address.operation, **location_decision_payload(location_error)}
-    matching = operation_address_projections(projections, address)
-    projection = primary_operation_projection(matching)
-    decision = projection.result if projection is not None else None
-    if not isinstance(decision, dict) or "decisionSurface" not in decision:
-        detail = "the canonical task contract is unreadable for this operation"
-        decision = {
-            "state": f"{address.kind}-contract-invalid",
-            "developerDecisionRequired": True,
-            "decisionSurface": detail,
-            "nextAction": "developer-decision",
-            "expected": {
-                "contractPath": contract_path.as_posix(),
-                "operationKind": address.kind,
-                **({"generation": address.generation} if address.generation is not None else {}),
-            },
-            "observed": {
-                "stage": "contract-read",
-                "side": "contract",
-                "name": contract_path.name,
-                "errorType": type(error).__name__,
-            },
-        }
-    result: dict[str, Any] = {
-        "ok": False,
-        "operation": address.operation,
-        "state": "refused",
-        "status": decision["state"],
-        "detail": decision["decisionSurface"],
-        **{key: decision[key] for key in ("nextAction", "expected", "observed")},
-    }
-    if decision.get("developerDecisionRequired") is True:
-        result.update(
-            {
-                "developerDecisionRequired": True,
-                "decisionSurface": decision["decisionSurface"],
-            }
-        )
-    if projection is not None:
-        result["lifecycleOperation"] = projection.model_dump(mode="json", exclude_none=True)
-    return result
+        return getattr(module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

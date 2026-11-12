@@ -1,7 +1,7 @@
 """The projection cadence: the one pacing decision every dashboard process shares.
 
-Kept in its own stdlib-only module so the import-light daemon agent-notifier can name the cadence it
-hands a spawned child without importing the projector (and, through it, the serving stack).
+Kept in its own stdlib-only module so that a process can name the cadence without importing the
+projector (and, through it, the serving stack).
 """
 
 from __future__ import annotations

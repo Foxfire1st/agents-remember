@@ -22,17 +22,17 @@ from typing import Any
 import apsw
 
 from agents_remember.kernel.canonical_json import decoded_json, sha256_digest
+from agents_remember.kernel.read_cancellation import raise_if_read_cancelled
 from agents_remember.memory.knowledge import schema
 from agents_remember.memory.knowledge.connection import (
-    fetch_one,
     inspect_schema,
-    open_read_only_database,
 )
+from agents_remember.memory.knowledge.dataset_identity_memo import DATASET_IDENTITIES
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
-from agents_remember.memory.knowledge.schema_generations import (
+from agents_remember.memory.knowledge.request_digests import digest_in_request
+from agents_remember.memory.knowledge.schema import (
     SchemaGeneration,
     generation_for_name,
-    generation_of_database,
 )
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.models.knowledge.repository import RepositoryIdentity
@@ -54,7 +54,7 @@ def resolve_generation(generation: SchemaGeneration | str) -> SchemaGeneration:
     """Return the generation record an encoder caller selected, however it spelled it.
 
     Dispatch -- deciding *which* generation a dataset is -- happens in
-    :mod:`…schema_generations` and reads the dataset. This function does not decide anything: it
+    :mod:`…schema` and reads the dataset. This function does not decide anything: it
     resolves a caller's already-selected generation to the record the encoder needs. A name that
     no registered generation declares is refused rather than approximated, so a caller cannot
     obtain a digest under a generation the registry does not contain.
@@ -74,7 +74,11 @@ def resolve_generation(generation: SchemaGeneration | str) -> SchemaGeneration:
 def logical_digest(connection: apsw.Connection, generation: SchemaGeneration | str) -> str:
     """Return the canonical logical digest of the dataset this connection holds open."""
 
-    return sha256_digest(logical_body(connection, generation))
+    return digest_in_request(
+        connection,
+        resolve_generation(generation),
+        lambda: sha256_digest(logical_body(connection, generation)),
+    )
 
 
 def logical_body(connection: apsw.Connection, generation: SchemaGeneration | str) -> dict[str, Any]:
@@ -129,12 +133,6 @@ def logical_body_from_tables(
     }
 
 
-def logical_digest_of_tables(generation: SchemaGeneration | str, tables: Mapping[str, Any]) -> str:
-    """Return the canonical logical digest of an already-encoded table mapping."""
-
-    return sha256_digest(logical_body_from_tables(generation, tables))
-
-
 def snapshot_identity(
     connection: apsw.Connection,
     repository: RepositoryIdentity,
@@ -160,9 +158,7 @@ def dataset_identity(database_path: Path) -> SnapshotIdentity:
     it as empty.
     """
 
-    connection = open_read_only_database(database_path)
-    try:
-        generation = generation_of_database(connection)
+    def compute(connection: apsw.Connection, generation: SchemaGeneration) -> SnapshotIdentity:
         inspect_schema(connection)
         repository = bound_repository(connection)
         if repository is None:
@@ -171,8 +167,8 @@ def dataset_identity(database_path: Path) -> SnapshotIdentity:
                 "knowledge dataset this code can address"
             )
         return snapshot_identity(connection, repository, generation)
-    finally:
-        connection.close()
+
+    return DATASET_IDENTITIES.read(database_path, compute)
 
 
 def bound_repository(connection: apsw.Connection) -> RepositoryIdentity | None:
@@ -197,25 +193,8 @@ def bound_repository(connection: apsw.Connection) -> RepositoryIdentity | None:
     return RepositoryIdentity(repository_id=str(rows[0][0]), authority_home=str(rows[0][1]))
 
 
-def require_bound_repository(connection: apsw.Connection, repository_id: str) -> RepositoryIdentity:
-    """Return the stored namespace row, refusing a database that is not bound to it.
-
-    A candidate database with no repository row, or one bound elsewhere, is not the destination the
-    admission described. The refusal is a storage error rather than a returned refusal code because
-    the caller reaches this only after `change_candidate` has already checked the same fact for its
-    typed receipt; this is the second, defensive read.
-    """
-
-    row = fetch_one(
-        connection,
-        "SELECT repository_id, authority_home FROM repository WHERE repository_id = ?",
-        (repository_id,),
-    )
-    if row is None:
-        raise KnowledgeStorageError(
-            f"the candidate database is not bound to repository namespace {repository_id}"
-        )
-    return RepositoryIdentity(repository_id=str(row[0]), authority_home=str(row[1]))
+#: How many rows are read or decoded between two looks at the read's cancellation (D585).
+_CHECK_EVERY = 256
 
 
 def _rows_of(
@@ -224,17 +203,24 @@ def _rows_of(
     """Return every row of ``table`` in primary-key order, keyed by declared column name."""
 
     columns = generation.columns[table]
-    keys = generation.primary_keys[table]
-    rows = [tuple(row) for row in connection.execute(f"SELECT {', '.join(columns)} FROM {table}")]
-    rows.sort(key=lambda row: tuple(row[columns.index(key)] for key in keys))
+    ordered = [columns.index(key) for key in generation.primary_keys[table]]
+    rows: list[tuple[Any, ...]] = []
+    for index, row in enumerate(connection.execute(f"SELECT {', '.join(columns)} FROM {table}")):
+        if not index % _CHECK_EVERY:
+            raise_if_read_cancelled()  # a large table reads for a while: a read that left stops
+        rows.append(tuple(row))
+    rows.sort(key=lambda row: tuple(row[position] for position in ordered))
     json_columns = generation.json_columns.get(table, frozenset())
-    return [
-        {
-            column: _cell(value, is_json=column in json_columns)
-            for column, value in zip(columns, row, strict=True)
-        }
-        for row in rows
-    ]
+    decoded: list[dict[str, Any]] = []
+    for row in rows:
+        raise_if_read_cancelled()  # a row's JSON cells can be large: one look per row
+        decoded.append(
+            {
+                column: _cell(value, is_json=column in json_columns)
+                for column, value in zip(columns, row, strict=True)
+            }
+        )
+    return decoded
 
 
 def cell_value(value: Any, *, is_json: bool) -> Any:

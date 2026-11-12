@@ -6,23 +6,15 @@ from typing import Any, Literal
 
 from pydantic import Field, field_validator
 
-from agents_remember.kernel.coordination_context.models import MemoryMode
+from agents_remember.kernel.memory_mode import ReadableMemoryMode
 from agents_remember.models.base import FlexibleToolResponse, StrictResponseModel
 from agents_remember.models.closeout.input import (
     CloseoutCorrectedCall,
     CloseoutInvalidField,
     ResolvedCloseoutPlan,
 )
-from agents_remember.models.knowledge.merge import (
-    AuthoredDecision,
-    AuthoredReconciliation,
-    MergeConflict,
-)
-from agents_remember.models.knowledge.result import KnowledgeRefusal
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
-from agents_remember.models.lifecycles.operation_kinds import LifecycleOperationKind
-from agents_remember.models.lifecycles.operation_wait import LifecycleWaitOutcome
 from agents_remember.models.quality import QualityGateResult
 from agents_remember.models.structural.atomic_series_activation import (
     AtomicSeriesActivationRecord,
@@ -89,11 +81,12 @@ SourceLineageState = Literal["current", "blocked", "unavailable"]
 SourceLineageEdgeState = Literal["current", "behind", "diverged", "unavailable"]
 SourceLineageRelation = Literal["super-to-master", "master-to-leaf", "super-to-leaf"]
 SourceLineageSide = Literal["code", "memory"]
-# ``reconcile`` authors a resolution for one exact conflict the merge engine refused; it is the
-# one action that carries a decided input and the only one that can settle a knowledge
-# dataset's conflict without an outside repair tool.
-SyncResolutionAction = Literal["continue", "cancel", "reconcile"]
+# Knowledge is text in Git (MIK-R26 rule 2): a retained conflict is resolved in the worktree's
+# files and staged, so there is no action that carries a decided input.
+SyncResolutionAction = Literal["continue", "cancel"]
 MemorySyncChoice = Literal["merge-memory", "skip-memory"]
+# The one selectable sync source besides the contract's own source line.
+SyncSource = Literal["repository-default"]
 SyncSide = Literal["code", "memory"]
 SyncPhase = Literal[
     "running-code",
@@ -159,48 +152,24 @@ class SyncOperationProjection(StrictResponseModel):
     identityMismatch: bool = False
     side: SyncSide | None = None
     conflictFiles: tuple[str, ...] = ()
-    # The same explanation the sync response carries, so a status read names what the agent would
-    # have to reconcile instead of only which file is unresolved.
-    knowledgeConflict: SyncKnowledgeConflict | None = None
     summary: str
     nextArgs: dict[str, object] | None = None
     cancelArgs: dict[str, object] | None = None
     evidencePath: str | None = None
+    # A journaled validator refusal (MIK-R61 rule 5), shown by worktree_status and a
+    # repeated worktree_sync while it stands.
+    validationRefusal: dict[str, object] | None = None
 
 
 class SyncResolutionInput(StrictResponseModel):
-    """One resolution call's inputs, paired so an action and its decided input travel together.
+    """One sync call's choices: the action for a retained conflict and the line it pulls.
 
-    ``reconcile`` is the only action that carries an authored decision, and the two are refused as a
-    pair when they disagree -- a decision without ``reconcile`` and ``reconcile`` without a decision
-    are both input errors -- so they are one value here rather than two parameters every layer has
-    to pass side by side and keep consistent.
+    ``source`` is ``None`` for the contract's own source line, or ``"repository-default"``
+    for each repository's default branch, which keeps the contract's base pair.
     """
 
     action: SyncResolutionAction | None = None
-    knowledge: AuthoredReconciliation | None = None
-
-
-class SyncKnowledgeConflict(StrictResponseModel):
-    """The engine's own explanation of why one conflicted knowledge dataset would not settle.
-
-    This model exists because the explanation used to stop one layer below the agent. The merge
-    engine already reported the exact conflict -- the table, the operation and the row identity it
-    refused -- and the adapter already carried a typed refusal with the action it advertised; the
-    sync asked only *whether* the dataset settled, so all of it was reduced to a boolean and the
-    agent received ``files: ["knowledge.sqlite"]`` and nothing to reconcile.
-
-    Every field is the engine's own value, carried verbatim: ``conflict`` is the attribution,
-    ``refusal`` is the typed explanation, and ``decisions`` names the authored decisions that
-    conflict admits. An empty ``decisions`` means there is nothing an authored decision can settle
-    -- a schema disagreement above all -- and the refusal's own ``next_action`` says so.
-    """
-
-    path: str
-    conflict: MergeConflict | None = None
-    refusal: KnowledgeRefusal | None = None
-    detail: str = ""
-    decisions: list[AuthoredDecision] = Field(default_factory=list)
+    source: SyncSource | None = None
 
 
 class SyncResolutionProjection(StrictResponseModel):
@@ -212,6 +181,10 @@ class SyncResolutionProjection(StrictResponseModel):
     describe itself. Without it the model refused its own projection with
     ``extra_forbidden``, so a resolution that needed agent action surfaced as a
     serialization error instead of the guidance the agent needed.
+
+    ``crossing`` is the same structural-merge summary the resolution response carries
+    beside a crossing sync (MIK-R61 rule 11): what the producer puts into ``resolution``
+    is what this model declares, so a key the model lacks fails a test and not a caller.
     """
 
     side: SyncSide
@@ -219,7 +192,31 @@ class SyncResolutionProjection(StrictResponseModel):
     worktree: str | None = None
     files: list[str] = Field(default_factory=list)
     wipRestore: bool = False
-    knowledge: SyncKnowledgeConflict | None = None
+    crossing: dict[str, object] | None = None
+
+
+class SyncSourceProjection(StrictResponseModel):
+    """The branch one side of a repository-default sync resolved, and its tip."""
+
+    branch: str
+    commit: str
+
+
+class SyncOmissionsProjection(StrictResponseModel):
+    """Parked authoring a resolution dropped: totals, per-class counts and the report's path.
+
+    A continue that measured the resolved tree carries every total. A resumed resolution
+    carries only what the journal kept from that measurement -- the side, the report and the
+    count still outstanding -- and leaves the other totals unset.
+    """
+
+    side: SyncSide
+    report: str
+    parkedPaths: int | None = None
+    omittedPaths: int | None = None
+    omittedItems: int
+    omittedByKind: dict[str, int] | None = None
+    reconciledItems: int | None = None
 
 
 class AtomicSeriesActivationFact(StrictResponseModel):
@@ -316,7 +313,9 @@ class WorktreeSummary(StrictResponseModel):
     leafId: str | None = None
     kind: str | None = None
     workflowKind: WorkflowKind | None = None
-    memoryMode: MemoryMode | None = None
+    # The readable vocabulary, not the startable one: an existing contract that
+    # carries the removed `disabled` mode is shown as it is today (MIK-R50 R3a).
+    memoryMode: ReadableMemoryMode | None = None
     worktreeGroup: str | None = None
     codeWorktree: str | None = None
     codeWorktreeExists: bool | None = None
@@ -345,6 +344,9 @@ class WorktreeSummary(StrictResponseModel):
     # field on this summary was computed from the substituted values -- this is the notice
     # that they were substituted, and the file heals the next time a lifecycle tool writes it.
     unknownContractCells: list[str] | None = None
+    # MIK-R111 rule 3: one line naming task-document copies that differ from
+    # their sources. Present only when something differs; absent is clean.
+    taskDocumentCopies: str | None = None
     error: str | None = None
     errorEvidence: dict[str, object] | None = None
     status: str | None = None
@@ -384,6 +386,9 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     # progress as running / stale (dead heartbeat) / ok /
     # ready-with-failed-phases / failed, with currentPhase and seedFallback.
     providers: dict[str, Any] | None = None
+    # MIK-R207: the outside scratch root this ending removed, or left with its reason.
+    outsideScratch: dict[str, Any] | None = None
+    outsideScratchReconcile: dict[str, Any] | None = None
     source_lineage: SourceLineageProjection | None = None
     status: str | None = None
     detail: str | None = Field(default=None, max_length=8192)
@@ -408,8 +413,8 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     # The worktree surface's rule: a next move names a *registered public* tool, because
     # these values are advertised guidance an agent is meant to act on and the roster is
     # the already-enforced authority for what the agent can actually call. The rule is
-    # deliberately per surface, not global: the `task_doc` surface may name a non-public
-    # tool (see the boundary note below), so this is not an inconsistency to flatten.
+    # deliberately per surface, not global: the `task_doc` surface carries no such rule,
+    # so this is not an inconsistency to flatten.
     #
     # Complete producer survey behind the invariant (union of 20 values, each traced to
     # its producer): NextTool and RecoveryTool literals (models/worktree.py,
@@ -420,14 +425,7 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     # the task_unstarted_evidence `RecoveryRoute` tools; and the remaining direct literals
     # in worktrees/modules/{integrate,start}.py, worktrees/task_leaf_binding.py,
     # application/worktree_tools.py, application/next_step.py and models/base.py.
-    # Every one is in PUBLIC_TOOLS except `session_retire`, which cannot reach this field.
-    #
-    # BOUNDARY -- `session_retire` is a registered but deliberately NON-PUBLIC tool
-    # (models/tools/tool_registry.py registers it with SessionRetireResponse; it is absent
-    # from mcp/tools/base.PUBLIC_TOOLS by design). It is reachable only as the `task_doc`
-    # payload's top-level `nextTool` and inside its nested `discardEvidence`, and
-    # `TaskDocResponse` is not a `WorktreeCommandResponse`, so this invariant does not
-    # apply to it. Do not "fix" that by widening PUBLIC_TOOLS to cover a non-public tool.
+    # Every one is in PUBLIC_TOOLS.
     @field_validator("nextTool")
     @classmethod
     def _require_registered_public_next_tool(cls, value: str | None) -> str | None:
@@ -464,34 +462,15 @@ class WorktreeEnclosureAdoptResponse(WorktreeCommandResponse):
     contractSha256: str | None = None
     manifestSha256: str | None = None
     artifacts: list[dict[str, object]] = Field(default_factory=list)
+    recordsFoundInPlace: bool | None = None
     removalCondition: str | None = None
-
-
-class WorktreeStatusWaitResponse(WorktreeCommandResponse):
-    """Read-only bounded wait on lifecycle meaningful-state changes (CCR-R15).
-
-    Addressed by canonical contract, operation kind, expected public generation,
-    and an opaque typed after_revision cursor from a prior snapshot.  On
-    change it returns the compact R18-coherent status plus the next cursor; on
-    timeout it returns the unchanged snapshot and cursor without claiming
-    failure.  Never carries an operation key, PID, or worker/queue/gate
-    authority.
-    """
-
-    operation: Literal["worktree_status_wait"] = "worktree_status_wait"
-    outcome: LifecycleWaitOutcome
-    operationKind: LifecycleOperationKind | None = None
-    successorGeneration: int | None = None
-    meaningfulRevision: int | None = None
-    timeoutSeconds: float | None = None
-    elapsedSeconds: float | None = None
-    lifecycleOperation: LifecycleOperationProjection | None = None
-    nextArgs: dict[str, object] | None = None
 
 
 class WorktreeSyncResponse(WorktreeCommandResponse):
     operation: Literal["worktree_sync"] = "worktree_sync"
     phase: SyncPhase | Literal["quarantined"] | None = None
+    # MIK-R08 rule 8: a completed sync recomputes the leaf's worklist; its summary, where one applies.
+    knowledgeWorklist: dict[str, Any] | None = None
     resolution: SyncResolutionProjection | None = None
     resolutionOwner: Literal["agent"] | None = None
     nextOperation: str | None = None
@@ -499,10 +478,12 @@ class WorktreeSyncResponse(WorktreeCommandResponse):
     nextArgs: dict[str, object] | None = None
     cancelArgs: dict[str, object] | None = None
     evidencePath: str | None = None
-    invalidField: (
-        Literal["memory_sync_choice", "resolution_action", "knowledge_resolution"] | None
-    ) = None
+    invalidField: Literal["memory_sync_choice", "sync_source", "resolution_action"] | None = None
     manualRepair: dict[str, object] | None = None
+    # The chosen sync source and, on a preview, the resolved branches and tips.
+    syncSource: SyncSource | None = None
+    sources: dict[SyncSide, SyncSourceProjection] | None = None
+    omissions: SyncOmissionsProjection | None = None
 
 
 class _WorktreeCloseoutResponse(WorktreeCommandResponse):
@@ -527,12 +508,6 @@ class WorktreeCloseoutApplyResponse(_WorktreeCloseoutResponse):
 class WorktreeIntegrateResponse(WorktreeCommandResponse):
     operation: Literal["worktree_integrate"] = "worktree_integrate"
     lifecycleOperation: LifecycleOperationProjection | None = None
-    # Declared even though the worktree envelope is intentionally flexible: these are stable
-    # completion-cleanup products, not incidental worktree-module details.
-    autoClosedSeats: list[str] = Field(default_factory=list)
-    autoCloseDeferredSeats: list[str] = Field(default_factory=list)
-    autoCloseFailedSeats: list[str] = Field(default_factory=list)
-    autoLandedSeats: list[str] = Field(default_factory=list)
 
 
 class WorktreeCheckpointLandingResponse(WorktreeCommandResponse):
@@ -576,28 +551,6 @@ class WorktreeOperationControlResponse(WorktreeCommandResponse):
         ]
         | None
     ) = None
-    nextArgs: dict[str, object] | None = None
-    developerDecisionRequired: bool = False
-    decisionSurface: str | None = None
-
-
-class WorktreeLegacyOperationResponse(WorktreeCommandResponse):
-    operation: Literal["worktree_legacy_operation"] = "worktree_legacy_operation"
-    lifecycleOperation: LifecycleOperationProjection | None = None
-    operationKind: str | None = None
-    legacyDigest: str | None = None
-    migratable: bool | None = None
-    migrationReason: str | None = None
-    archivable: bool | None = None
-    archiveReason: str | None = None
-    archivePath: str | None = None
-    terminalEvidence: dict[str, object] | None = None
-    removalCondition: str | None = None
-    removalGuard: dict[str, object] | None = None
-    expected: dict[str, object] = Field(default_factory=dict)
-    observed: dict[str, object] = Field(default_factory=dict)
-    nextAction: str = ""
-    nextTool: str | None = None
     nextArgs: dict[str, object] | None = None
     developerDecisionRequired: bool = False
     decisionSurface: str | None = None

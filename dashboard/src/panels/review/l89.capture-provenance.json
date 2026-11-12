@@ -1,0 +1,37 @@
+{
+  "scope": "Two card reads of the review route, captured by GET from the running dashboard on 2026-10-19 by the helpers of investigator eb128232 for the D356/D367 mockup (DESIGNER-REPORT.md: 'Built by tools/build_data.py from the helper captures in work/'). The files are byte-identical copies of those captures. They predate the card read's `symbol`, `memory` and `entry_memory` fields (MIK-R89 v2 rule 3, W12, W15); the tests add those values per entry where a case names them (changeSetOrder.test-utils.ts `withMemory`, `withSymbol`).",
+  "responses": [
+    {
+      "file": "l89.l181-cards.captured.json",
+      "sha256": "d636222c39035ccc5ae97cf2b5ac2f3c8fa04b8ed2f4d938b4743af712638f2b",
+      "bytes": 187006,
+      "route": "/api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L181",
+        "invariants": "82ef402e-a852-59cf-a037-aeabbbe2dad6"
+      },
+      "answer": "trees at comparison #8: INV-1ZKP4R, 74 entries (15 changed, 31 unchanged, 28 undetermined)",
+      "raw_file": "/var/tmp/mik-run3/architect/scratch/review-mockup-D356/work/raw/L181-trees-live-inv.json"
+    },
+    {
+      "file": "l89.l104-cards.captured.json",
+      "sha256": "d38333d0146838de6651ecee246fe3580744607a1c0484cad3abaec9f28e5542",
+      "bytes": 235519,
+      "route": "/api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L104",
+        "invariants": "the 15 added or changed subjects of the investigator's listing (changeSetOrder.test-utils.ts L104_ROWS)"
+      },
+      "answer": "trees at comparison #25: 15 invariants, 96 entries (74 changed, 20 unchanged, 2 undetermined)",
+      "raw_file": "/var/tmp/mik-run3/architect/scratch/review-mockup-D356/work/raw/L104-trees-inv.json"
+    }
+  ],
+  "outline_facts": {
+    "source": "/var/tmp/mik-run3/architect/scratch/review-mockup-D356/work/raw/L104-subjects.json (sha256 d2264837a9f38853525e15584f683a5ebad4fecaa0dea5865d4bf6212dfb2d41): id, selector id, change and effect labels of the 15 subjects; the summaries are their first words",
+    "l181": "INV-1ZKP4R changed, effect weaken, no family (mockup data-real.js); two unchanged rows beside it are synthetic and named INV-0SYNTH and INV-ZSYNTH"
+  }
+}

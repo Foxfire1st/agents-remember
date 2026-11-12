@@ -16,12 +16,9 @@ two-sided fact rather than two one-sided rows. The rules the shape enforces:
 * **A state is never blank.** Every side states which snapshot fact it is: ``recorded`` (the
   relationship and its recorded address are both there), ``unresolved`` (the relationship is
   recorded and its address is not readable), ``ungoverned`` (the snapshot records the identity and no
-  governing route) or ``not_recorded`` (the snapshot does not record the identity at all). Each
-  carries the sentence that says so, and the two last states are deliberately different facts.
-* **Authored lineage is the author's own edge, and it is labelled as such.** A successor, a split and
-  a merge are read from the snapshots' own predecessor tables; nothing here derives a lineage from a
-  path's similarity, a label, a version or an insertion order, and the vocabulary has no field a
-  similarity score could be recorded in.
+  governing route), ``unavailable`` (the snapshot records the identity and its route declarations
+  were not read) or ``not_recorded`` (the snapshot does not record the identity at all). Each carries
+  the sentence that says so, and the three last states are deliberately different facts.
 * **A rename is an inference with its own label, never a movement.** :class:`ReviewRenameInference`
   can only be constructed as Git's own similarity detection over the two bound trees; its state
   distinguishes a measured pairing, a measured non-pairing and an inference that was not measured at
@@ -47,9 +44,7 @@ from agents_remember.models.knowledge.diff import DiffCoverage
 
 __all__ = [
     "RENAME_INFERENCE_KIND",
-    "AuthoredLineageKind",
     "RenameInferenceState",
-    "ReviewAuthoredLineage",
     "ReviewPairingBasis",
     "ReviewRelationshipGap",
     "ReviewRelationshipGapCode",
@@ -74,9 +69,12 @@ ReviewRelationshipSideName = Literal["before", "after"]
 # What one side of one relationship is. ``recorded`` is the ordinary case: the snapshot holds the
 # relationship row and the address it names. ``unresolved`` is the relationship recorded with an
 # address this display could not read, ``ungoverned`` is an identity the snapshot records with no
-# governing route, and ``not_recorded`` is an identity the snapshot does not record at all -- the
-# last two are different facts and neither is a missing route.
-ReviewRelationshipState = Literal["recorded", "absent", "unresolved", "ungoverned", "not_recorded"]
+# governing route, ``unavailable`` is an identity the snapshot records whose route declarations this
+# display could not read, and ``not_recorded`` is an identity the snapshot does not record at all --
+# the last three are different facts and none of them is a missing route.
+ReviewRelationshipState = Literal[
+    "recorded", "absent", "unresolved", "ungoverned", "unavailable", "not_recorded"
+]
 
 # How one relationship moved between the two snapshots. ``retracted`` and ``added`` are one-sided
 # facts: the association is recorded by one snapshot and the other snapshot does not hold it at all,
@@ -84,16 +82,14 @@ ReviewRelationshipState = Literal["recorded", "absent", "unresolved", "ungoverne
 # deliberately not ``retracted``: the other snapshot *holds* the record and the declared selection did
 # not reach it, which is a fact about the selection rather than a deletion -- the comparison's own
 # named misreading, kept out of this vocabulary by having its own word. ``reassigned`` is the
-# governing-route case: both snapshots record an association and the route that governs the identity
-# is not the same one.
+# family-association case: both snapshots record the association and the family revision it sits in
+# is not the same one. A governing route is never ``reassigned``: a family declares a set of routes,
+# so a changed route reads as one ``retracted`` and one ``added`` relationship. ``unresolved`` states
+# that no association comparison was measurable: a governing-route side whose route declarations
+# were not read is compared with nothing.
 ReviewRelationshipTransition = Literal[
-    "unchanged", "moved", "reassigned", "retracted", "outside_selection", "added"
+    "unchanged", "moved", "reassigned", "retracted", "outside_selection", "added", "unresolved"
 ]
-
-# The three authored relations the lineage entries name. They are read from the snapshots' own
-# predecessor tables -- the child's declaration of which revision it replaced -- and from nothing
-# else.
-AuthoredLineageKind = Literal["succession", "split", "merge"]
 
 # The one basis a rename inference may claim. It is a literal with one member so no caller can
 # record a rename of its own as though a tool had measured it.
@@ -111,27 +107,16 @@ ReviewRelationshipGapCode = Literal[
     "anchor_unresolved",
     "identity_not_recorded",
     "identity_differs",
-    "predecessor_records_no_relationship",
-    "successor_line_unresolved",
     "route_not_recorded",
+    "route_unavailable",
 ]
 
 # Why one movement's two sides are displayed as one association. Every value is a *recorded* relation
-# and none of them is a similarity: the same relationship row selected by both snapshots, the same
-# member revision under a moved family revision, or an authored old/new edge between the revisions the
-# two rows cite. ``authored_successor_head_revision`` is the same authored line read one step further:
-# the candidate row was not selected by the comparison at all and was read at the uniquely established
-# head of that line (ICR-R08@v1's ruling), which the movement states so a reader knows the row came
-# from outside the comparison's page.
+# and none of them is a similarity: the same relationship row selected by both snapshots, or the
+# same governed identity's own recorded governing-route association.
 ReviewPairingBasis = Literal[
     "same_recorded_relationship",
     "same_governed_identity",
-    "same_member_revision",
-    "authored_successor_revision",
-    "authored_successor_member_revision",
-    "authored_successor_head_revision",
-    "authored_successor_line_revision",
-    "recorded_family_revision",
 ]
 
 
@@ -201,23 +186,6 @@ class ReviewRelationshipSide(KnowledgeModel):
         return self
 
 
-class ReviewAuthoredLineage(KnowledgeModel):
-    """One authored old/new relation the movement's revisions take part in.
-
-    ``kind`` is the relation the author's own predecessor rows establish -- a successor naming its
-    predecessor, one revision with several recorded successors, or one revision naming several
-    predecessors. ``related_revision_ids`` is every other revision of that relation, so a split is
-    displayed with all of the successors its author recorded rather than with the one a pairing
-    happened to pick.
-    """
-
-    kind: AuthoredLineageKind
-    side: ReviewRelationshipSideName
-    revision_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    related_revision_ids: tuple[str, ...] = Field(min_length=1)
-    statement: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-
-
 class ReviewRenameInference(KnowledgeModel):
     """Git's own rename detection over the two bound code trees, labelled as the inference it is.
 
@@ -269,9 +237,9 @@ class ReviewRelationshipMovement(KnowledgeModel):
     each side carries its own, because the comparison makes it per union item. ``pairing_basis`` is
     **why** the two sides are one association and is present exactly when there are two sides: the
     display states the recorded relation it paired on rather than asserting a bare movement.
-    ``lineage``, ``gaps`` and ``rename_inference`` are the three things that may surround a movement:
-    the author's recorded edges, the facts this display could not establish, and Git's labelled rename
-    inference -- which never stands in for either of the first two.
+    ``gaps`` and ``rename_inference`` are the two things that may surround a movement: the facts
+    this display could not establish, and Git's labelled rename inference -- which never stands in
+    for the first.
     """
 
     relationship_kind: ReviewRelationshipKind
@@ -281,7 +249,6 @@ class ReviewRelationshipMovement(KnowledgeModel):
     before: tuple[ReviewRelationshipSide, ...] = ()
     after: ReviewRelationshipSide | None = None
     pairing_basis: ReviewPairingBasis | None = None
-    lineage: tuple[ReviewAuthoredLineage, ...] = ()
     gaps: tuple[ReviewRelationshipGap, ...] = ()
     rename_inference: ReviewRenameInference | None = None
     statement: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
@@ -308,7 +275,7 @@ class ReviewRelationshipMovement(KnowledgeModel):
                 "withdrawn, or held by the other snapshot outside the declared selection -- and once "
                 "per recorded side rather than summed"
             )
-        if self.transition in ("unchanged", "moved", "reassigned") and 0 in sides:
+        if self.transition in ("unchanged", "moved", "reassigned", "unresolved") and 0 in sides:
             raise ValueError(
                 "a two-sided transition displays the side each snapshot recorded; a movement with "
                 "one side is an addition or a retraction and says so"

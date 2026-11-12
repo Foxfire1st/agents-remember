@@ -4,7 +4,7 @@
 deliberately -- the GIL would serialise the very window it forces. This file is the other axis of
 the same contract, the one that harness cannot see: two THREADS of one process, which is what the
 dashboard actually is. ``AttentionDismissalStore.dismiss`` is reached from the HTTP dismiss route
-(``serving/app.py``) and ``prune_lifecycles`` from the projection sweep; both are whole-file
+(``serving/app.py``) and ``reconcile`` from the projection sweep; both are whole-file
 read-modify-writes over the same log, and attention-dismissals is both the store that measured the
 worst loss at the base commit (31.45%) and the one wired to a button a person presses.
 
@@ -33,6 +33,7 @@ import threading
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -41,6 +42,7 @@ from agents_remember.controlplane import attention_dismissals as attention_modul
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
+    AttentionObservation,
 )
 from agents_remember.controlplane.durable_store import (
     GATE_OWNERSHIP,
@@ -51,22 +53,33 @@ from agents_remember.controlplane.durable_store import (
     require_lock_held,
     rewrite_lines,
 )
-from agents_remember.controlplane.orchestration_nudges import (
-    OrchestrationNudgeRecord,
-    OrchestrationNudgeStore,
-    replace_records,
-)
 from agents_remember.controlplane.records import GateAnchor, GateRecord, create_gate
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel import atomic_write, file_lock
 from agents_remember.kernel.file_lock import thread_mutex_for
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from pydantic import ValidationError
 
 # Long enough that a wedged lock fails the test instead of hanging the suite, short enough that a
 # real deadlock is reported in seconds rather than at the pytest timeout.
-WATCHDOG_SECONDS = 15.0
+WATCHDOG_SECONDS = HANG_GUARD_SECONDS
 
 NOW = datetime(2026, 6, 14, 10, 0, 0, tzinfo=UTC)
+
+
+def _observe_contended_mutex(path: Path, contended: threading.Event, contender: threading.Thread):
+    mutex = thread_mutex_for(path)
+
+    def acquire(*, timeout: float = -1) -> bool:
+        if threading.current_thread() is not contender:
+            return mutex.acquire(timeout=timeout)
+        acquired = mutex.acquire(blocking=False)
+        if not acquired:
+            contended.set()
+            return mutex.acquire(timeout=timeout)
+        return True
+
+    return SimpleNamespace(acquire=acquire, release=mutex.release)
 
 
 class _TempRoot(unittest.TestCase):
@@ -77,7 +90,7 @@ class _TempRoot(unittest.TestCase):
 
 
 def _drift(item_id: str) -> AttentionDismissalRecord:
-    """A dismissal the prune keeps: no lifecycle, and ``actionable-drift`` survives on its own."""
+    """A dismissal the prune keeps: the drift source is not read by this single-kind pass."""
     return AttentionDismissalRecord(
         itemId=item_id,
         kind="actionable-drift",
@@ -85,12 +98,11 @@ def _drift(item_id: str) -> AttentionDismissalRecord:
     )
 
 
-def _stale(item_id: str, lifecycle_id: str) -> AttentionDismissalRecord:
-    """A dismissal the prune drops once its lifecycle is no longer live."""
+def _gone_start(item_id: str) -> AttentionDismissalRecord:
+    """A source census proves this blocked start is no longer reported."""
     return AttentionDismissalRecord(
         itemId=item_id,
-        kind="stale-session",
-        lifecycleId=lifecycle_id,
+        kind="blocked-start",
         dismissedAt="2026-06-14T10:00:00Z",
     )
 
@@ -266,18 +278,21 @@ class InProcessExclusivityTests(_TempRoot):
         """
         store = AttentionDismissalStore(self.root)
         store.dismiss(_drift("actionable-drift:keep"))
-        store.dismiss(_stale("stale-session:L-dead", "L-dead"))
+        store.dismiss(_gone_start("blocked-start:removed"))
 
         parked = threading.Event()
         release = threading.Event()
-        dismiss_started = threading.Event()
         dismiss_done = threading.Event()
+        contended = threading.Event()
         failures: list[BaseException] = []
         park_guard = threading.Lock()
         parked_already: list[bool] = []
         real_rewrite = attention_module.rewrite_lines
 
-        def parking_rewrite(path: Path, lines: list[str], ownership: object) -> None:
+        def parking_rewrite(
+            path: Path, lines: list[str], ownership: object, *, note_own: bool = False
+        ) -> None:
+            self.assertTrue(note_own, "the actual dashboard sweep attributes its own rewrite")
             park = False
             with park_guard:
                 if not parked_already:
@@ -286,16 +301,15 @@ class InProcessExclusivityTests(_TempRoot):
             if park:
                 parked.set()
                 release.wait(WATCHDOG_SECONDS)
-            real_rewrite(path, lines, ownership)  # type: ignore[arg-type]
+            real_rewrite(path, lines, ownership, note_own=note_own)  # type: ignore[arg-type]
 
         def sweep() -> None:
             try:
-                store.prune_lifecycles(set())
+                store.reconcile([AttentionObservation("blocked-start", datetime.now(UTC))])
             except BaseException as error:  # reported to the main thread, never swallowed
                 failures.append(error)
 
         def dismiss() -> None:
-            dismiss_started.set()
             try:
                 store.dismiss(_drift("actionable-drift:new"))
             except BaseException as error:  # reported to the main thread, never swallowed
@@ -303,17 +317,26 @@ class InProcessExclusivityTests(_TempRoot):
             finally:
                 dismiss_done.set()
 
-        with patch.object(attention_module, "rewrite_lines", parking_rewrite):
-            sweeper = threading.Thread(target=sweep, daemon=True)
+        sweeper = threading.Thread(target=sweep, daemon=True)
+        dismisser = threading.Thread(target=dismiss, daemon=True)
+        with (
+            patch.object(attention_module, "rewrite_lines", parking_rewrite),
+            patch.object(
+                file_lock,
+                "thread_mutex_for",
+                side_effect=lambda path: _observe_contended_mutex(path, contended, dismisser),
+            ),
+        ):
             sweeper.start()
             self.assertTrue(parked.wait(WATCHDOG_SECONDS), "the sweep never reached its rewrite")
-            dismisser = threading.Thread(target=dismiss, daemon=True)
             dismisser.start()
-            self.assertTrue(dismiss_started.wait(WATCHDOG_SECONDS))
+            self.assertTrue(
+                contended.wait(WATCHDOG_SECONDS), "dismiss did not reach the held mutex"
+            )
             # The window is open right now: the sweep is holding a set it read before this
             # dismissal existed. The dismisser must be shut out of it, not merely lucky.
             self.assertFalse(
-                dismiss_done.wait(0.25),
+                dismiss_done.is_set(),
                 "the dismissal proceeded while a prune held the log -- the two overlap",
             )
             release.set()
@@ -322,7 +345,7 @@ class InProcessExclusivityTests(_TempRoot):
 
         self.assertEqual(failures, [])
         self.assertEqual([sweeper.is_alive(), dismisser.is_alive()], [False, False])
-        # The sweep's work AND the dismissal both survive: the dead lifecycle's row is gone, the
+        # The sweep's work AND the dismissal both survive: the removed provider's row is gone, the
         # row it was told to keep is still there, and the click that raced it was not discarded.
         self.assertEqual(
             sorted(store.current()),
@@ -423,54 +446,6 @@ class SchemaVersionMajorTests(_TempRoot):
             store.read("L1")
 
         self.assertEqual(log.read_bytes(), on_disk)
-
-
-@pytest.mark.fitness
-class OrchestrationNudgeRewriteTests(_TempRoot):
-    """The nudge log's two rewrite entry points: the safe one and the primitive it wraps."""
-
-    def setUp(self) -> None:
-        super().setUp()
-        self.store = OrchestrationNudgeStore(self.root)
-
-    def _nudge(self, nudge_id: str, *, reason: str = "inactive") -> OrchestrationNudgeRecord:
-        return OrchestrationNudgeRecord(
-            id=nudge_id,
-            ts=NOW.isoformat(),
-            state="sent",
-            reason=reason,  # type: ignore[arg-type]
-            targetAgentId="agent-1",
-            message=f"nudge {nudge_id}",
-        )
-
-    def test_compact_drops_what_keep_rejects_and_reports_the_count(self) -> None:
-        for nudge_id in ("N1", "N2", "N3"):
-            self.store.append(self._nudge(nudge_id))
-
-        dropped = self.store.compact(keep=lambda record: record.id == "N2")
-
-        self.assertEqual(dropped, 2)
-        self.assertEqual([record.id for record in self.store.read()], ["N2"])
-        # The survivor is a whole record, not a truncated line: the rewrite re-serialises it.
-        self.assertEqual(self.store.read()[0].message, "nudge N2")
-
-    def test_replace_records_refuses_an_unlocked_caller_and_changes_nothing(self) -> None:
-        """The refusal IS the durability property, not a tidiness check.
-
-        ``records`` was chosen by a read this call did not make. Unlocked, everything appended
-        since that read is about to be discarded -- so the refusal has to leave the log exactly as
-        it found it, which is the second assertion here.
-        """
-        path = self.store.log_path()
-        self.store.append(self._nudge("N1"))
-        before = path.read_bytes()
-
-        with self.assertRaises(DurableStoreError) as raised:
-            replace_records(path, [])
-
-        self.assertIn("without holding", str(raised.exception))
-        self.assertEqual(path.read_bytes(), before)
-        self.assertEqual([record.id for record in self.store.read()], ["N1"])
 
 
 @pytest.mark.fitness

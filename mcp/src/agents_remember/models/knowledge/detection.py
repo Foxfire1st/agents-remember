@@ -32,12 +32,11 @@ verdict field is, and the refusal names the field and the record it would have b
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Literal
 
 from pydantic import Field, model_validator
 
-from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.base import (
     LABEL_MAX_LENGTH,
     PATH_MAX_LENGTH,
@@ -50,20 +49,9 @@ from agents_remember.models.knowledge.base import (
 from agents_remember.models.knowledge.diff import DiffCoverage
 from agents_remember.models.knowledge.graph import RealizationRole
 from agents_remember.models.knowledge.read import KnowledgeReadContext
-from agents_remember.models.knowledge.result import KnowledgeRefusal
 
 __all__ = [
-    "CONCLUSION_BEARING_FIELD_NAMES",
     "CONDITION_VOCABULARY_VERSION",
-    "DECLARED_INPUT_SETS",
-    "DETECTION_CONDITIONS",
-    "DETECTION_EXTRACTOR_VERSION",
-    "DETECTION_LIMITATIONS",
-    "DETECTION_POLICY_VERSION",
-    "DETECTION_RUN_KIND",
-    "DETECTION_RUN_SCHEMA",
-    "DETECTION_SIGNAL_KIND",
-    "DETECTION_SIGNAL_SCHEMA",
     "MANIFEST_DESTINATION_KINDS",
     "NO_SEMANTIC_ASSESSMENT_LIMITATION",
     "DeclaredInputSet",
@@ -72,41 +60,15 @@ __all__ = [
     "DetectionCounterpartProbe",
     "DetectionInputSide",
     "DetectionLimitation",
-    "DetectionManifestResolution",
     "DetectionObservedChange",
     "DetectionRecordedInputSet",
     "DetectionRelationshipPath",
-    "DetectionRunCurrentness",
-    "DetectionRunDifference",
-    "DetectionRunInputDifference",
-    "DetectionRunPayload",
-    "DetectionRunReproduction",
-    "DetectionRunRequest",
-    "DetectionRunResult",
     "DetectionScopeManifest",
     "DetectionScopeStatus",
     "DetectionSignalPayload",
-    "DetectionSignalSet",
     "ManifestDestinationObservation",
-    "conclusion_bearing_fields",
-    "declared_input_set_discriminators",
-    "observed_basis_detail",
 ]
 
-# The policy this detection contract is produced by, in the shipped constant idiom
-# (``DIFF_POLICY_VERSION`` at ``models/knowledge/diff.py:98``;
-# ``read.KNOWLEDGE_READ_POLICY_VERSION`` in ``models/knowledge/read.py``). It names the detection
-# contract, not a second selection rule: which records are selected is R07's policy and which union
-# is compared is R08's, and neither is restated here.
-DETECTION_POLICY_VERSION = "family-detection/v1"
-
-# The extractor version this leaf authors. Measured at intake on the merged branch: the shipped
-# anchor resolver has no symbol extractor at all -- ``memory/knowledge/read_anchors.py:132-139``
-# returns ``resolution="unsupported_locator"`` with the reason that none supports a symbol locator
-# in this increment -- so there is no existing constant to cite and the version is authored here
-# rather than invented as a plausible import. It names what this build actually extracts:
-# whole-path and recorded-range observations against an exact tree object, and nothing else.
-DETECTION_EXTRACTOR_VERSION = "recorded-anchor-locator/v1"
 
 # The matched-condition vocabulary's own version. Requirement 1.2 makes the vocabulary closed and
 # *versioned with the policy*: a condition the policy does not declare is refused with the observed
@@ -121,15 +83,6 @@ DetectionCondition = Literal[
     "removed_or_reparented_attribution",
 ]
 
-# The declared membership order. It is the order the detection walk emits in and the order the
-# deterministic total order is declared over, so it is a value rather than a comment.
-DETECTION_CONDITIONS: tuple[DetectionCondition, ...] = (
-    "source_changed_on_both_sides_joined_to_same_family",
-    "one_sided_source_change_with_recorded_siblings",
-    "edited_invariant_family_or_evidence_record",
-    "absent_anchor",
-    "removed_or_reparented_attribution",
-)
 
 CONDITION_VOCABULARY_VERSION = "detection-conditions/v1"
 
@@ -142,11 +95,6 @@ DeclaredInputSet = Literal[
     "trigger_side_only",
 ]
 
-DECLARED_INPUT_SETS: tuple[DeclaredInputSet, ...] = (
-    "both_sides_declared",
-    "union_of_both_sides",
-    "trigger_side_only",
-)
 
 # The side a signal read. ``before``/``after`` are R08's own two sides; ``trigger`` names the one
 # side a trigger-side-only read consulted, which is a different fact from "the after side" because
@@ -192,21 +140,6 @@ DetectionLimitation = Literal[
     "no_semantic_assessment_performed",
 ]
 
-# The same members as the ``Literal`` above, as a tuple, so a caller can iterate the closed set and
-# a case can assert the two agree. Keeping both is the shipped idiom (``ANCHOR_RESOLUTIONS`` beside
-# ``read_anchor.AnchorResolutionState`` in ``models/knowledge/read_anchor.py``): the ``Literal`` is
-# the type a field is validated against and the tuple is the value a reader enumerates.
-DETECTION_LIMITATIONS: tuple[DetectionLimitation, ...] = (
-    "unread_declared_input",
-    "unmapped_changed_paths",
-    "unsupported_locator",
-    "truncated_scan",
-    "ambiguous_common_base",
-    "missing_attribution",
-    "no_counterpart_read",
-    "records_present_outside_the_declared_selection",
-    "no_semantic_assessment_performed",
-)
 
 # The one limitation every signal and every run states unconditionally, for the shipped comparison's
 # reason (``models/knowledge/diff.py:501-510``; the validator at ``:564-569``): no field of either
@@ -214,38 +147,6 @@ DETECTION_LIMITATIONS: tuple[DetectionLimitation, ...] = (
 # a missing field.
 NO_SEMANTIC_ASSESSMENT_LIMITATION: DetectionLimitation = "no_semantic_assessment_performed"
 
-# The conclusion-bearing names a declared field set is reviewed against. Requirement 5.2 makes
-# "a conclusion must not be representable" checkable by a review of the declared field set, and this
-# is the list that review is performed against: a field whose name names one of these concepts is a
-# conclusion field whatever its type, and :func:`conclusion_bearing_fields` reports it.
-CONCLUSION_BEARING_FIELD_NAMES: tuple[str, ...] = (
-    "severity",
-    "assessed_priority",
-    "priority",
-    "verdict",
-    "conflict",
-    "semantic_conflict",
-    "compatibility",
-    "compatible",
-    "harmless",
-    "harmlessness",
-    "neutral",
-    "neutrality",
-    "causal_explanation",
-    "explanation",
-    "assessment",
-    "finding",
-    "judgment",
-    "judgement",
-    "dangerous",
-    "impact",
-    "risk",
-    "breaks",
-    "strengthens",
-    "weakens",
-    "recommendation",
-    "disposition",
-)
 
 # Where a referenced scope manifest may live. Only ``durable_publication`` survives enclosure
 # cleanup, so only it can back a ``retained`` report; the other three are the destinations
@@ -256,51 +157,6 @@ MANIFEST_DESTINATION_KINDS: tuple[str, ...] = (
     "worktree_local",
     "regenerable_worklist",
 )
-
-# The record envelope's registry keys for this record group. The pair is the key, exactly as the
-# facet vocabulary declares its own: a second spelling elsewhere could drift from the registry.
-DETECTION_SIGNAL_KIND = "detection_signal"
-DETECTION_SIGNAL_SCHEMA = "detection-signal/v1"
-DETECTION_RUN_KIND = "detection_run"
-DETECTION_RUN_SCHEMA = "detection-run/v1"
-
-
-def conclusion_bearing_fields(model: type[KnowledgeModel]) -> tuple[str, ...]:
-    """Return the declared field names of one model that could carry a conclusion.
-
-    Requirement 5.2's first half is a *review of the declared field set*, so it needs a total,
-    mechanical answer rather than an assurance: this returns every declared field whose name names
-    a conclusion concept, and the shipped comparison's own result and this leaf's signal and run
-    must all return the empty tuple. It reads the declared field set rather than an instance, so a
-    field is reported whether or not any payload happens to populate it.
-    """
-
-    reported: list[str] = []
-    for name in model.model_fields:
-        lowered = name.lower()
-        if any(concept in lowered for concept in CONCLUSION_BEARING_FIELD_NAMES):
-            reported.append(name)
-    return tuple(reported)
-
-
-def declared_input_set_discriminators() -> Mapping[str, str]:
-    """Return each declared input set's own recorded discriminator, as prose the refusal quotes.
-
-    Requirement 2.3 makes the three members record *different* facts rather than three names for one
-    shape. The mapping is derived from the closed tuple so it cannot name a member the vocabulary
-    does not declare, and the validators below enforce exactly what each entry says.
-    """
-
-    return {
-        "both_sides_declared": (
-            "both declared sides' snapshot identities, each under its own selector and context, and "
-            "no counterpart-probe outcome"
-        ),
-        "union_of_both_sides": (
-            "the union worked over, and the counterpart probe's recorded outcome per reported item"
-        ),
-        "trigger_side_only": "exactly one side's snapshot identity and no probe outcome at all",
-    }
 
 
 class DetectionInputSide(KnowledgeModel):
@@ -751,267 +607,6 @@ class DetectionSignalPayload(KnowledgeModel):
         """Return the observed changes in the declared deterministic order over item identity."""
 
         return tuple(sorted(self.observed_changes, key=lambda change: change.item_id))
-
-
-class DetectionRunPayload(KnowledgeModel):
-    """One execution of one detection policy, reproducible from its recorded inputs.
-
-    A run records the policy identity it executed under and its exact inputs as identities -- the
-    snapshots it read, the code trees it resolved against, the selectors it applied and the
-    repository binding -- and it carries the declared deterministic total order over signal identity,
-    so reproducibility is a comparison of two ordered sequences and not of two sets.
-
-    ``declared_input_sets`` is the set of members the run's own signals declared. Requirement 2.4
-    keeps the declaration per signal: a run that executed one policy over two signals with different
-    declared input sets records both, and no field here collapses them into a run-level default.
-    """
-
-    run_id: str = Field(pattern=UUID_PATTERN)
-    repository_id: str = Field(pattern=UUID_PATTERN)
-    assessed_repository_id: str = Field(pattern=UUID_PATTERN)
-    governing_route_id: str = Field(pattern=UUID_PATTERN)
-    policy_version: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    extractor_version: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    condition_vocabulary_version: str = Field(
-        default=CONDITION_VOCABULARY_VERSION, min_length=1, max_length=LABEL_MAX_LENGTH
-    )
-    input_sides: tuple[DetectionInputSide, ...] = ()
-    declared_input_sets: tuple[DeclaredInputSet, ...] = ()
-    recorded_conditions: tuple[DetectionCondition, ...] = ()
-    signal_order: tuple[str, ...] = ()
-    limitations: tuple[DetectionLimitation, ...] = ()
-    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-
-    @model_validator(mode="after")
-    def _require_a_reproducible_run(self) -> DetectionRunPayload:
-        if NO_SEMANTIC_ASSESSMENT_LIMITATION not in self.limitations:
-            raise ValueError(
-                "every detection run states that it performs no semantic assessment; no field of "
-                "this record could carry one, and the statement is not left to be inferred"
-            )
-        if len(set(self.signal_order)) != len(self.signal_order):
-            raise ValueError(
-                "the declared deterministic total order over signal identity names each signal "
-                "once: a repeated identity is not an order over a set of signals"
-            )
-        for member in self.declared_input_sets:
-            if member not in DECLARED_INPUT_SETS:  # pragma: no cover - the Literal refuses first
-                raise ValueError(
-                    f"the declared input set {member!r} is not one this contract declares"
-                )
-        expected = _run_basis_detail(self)
-        if self.detail.strip() != expected:
-            raise ValueError(
-                "the 'detail' field of a detection run is bounded to observed basis: the recorded "
-                "policy identity, the declared input sets and the recorded limitations. A rendered "
-                f"judgment written into it is refused exactly as a verdict field is; the field must "
-                f"equal {expected!r}"
-            )
-        return self
-
-    @model_validator(mode="after")
-    def _require_an_order_for_every_condition(self) -> DetectionRunPayload:
-        """Refuse a run whose declared order and recorded conditions describe different sets.
-
-        The order is declared over signal identity and is compared element-wise, so a run whose
-        order names a different number of signals than it recorded conditions is a record whose
-        reproducibility cannot be checked at all.
-        """
-
-        if len(self.signal_order) != len(self.recorded_conditions):
-            raise ValueError(
-                "a detection run's declared order names exactly the signals it recorded: "
-                f"{len(self.signal_order)} ordered identities against "
-                f"{len(self.recorded_conditions)} recorded conditions"
-            )
-        return self
-
-
-def _run_basis_detail(run: DetectionRunPayload) -> str:
-    members = " | ".join(run.declared_input_sets) or "<none>"
-    limitations = " | ".join(run.limitations) or "<none>"
-    return (
-        f"policy={run.policy_version}; extractor={run.extractor_version}; "
-        f"conditions={run.condition_vocabulary_version}; declared_input_sets={members}; "
-        f"ordered_signals={len(run.signal_order)}; limitations={limitations}"
-    )
-
-
-class DetectionSignalSet(KnowledgeModel):
-    """The signals one run produced, in the run's declared deterministic order.
-
-    The order is the run's own recorded ``signal_order`` rather than whatever order rows happened to
-    come back in, which is what makes "reproducibility compares two ordered sequences" a property of
-    the record instead of a property of a query.
-    """
-
-    run_id: str = Field(pattern=UUID_PATTERN)
-    signals: tuple[DetectionSignalPayload, ...] = ()
-
-    def ordered_ids(self) -> tuple[str, ...]:
-        """Return the signal identities in the recorded order."""
-
-        return tuple(signal.signal_id for signal in self.signals)
-
-
-class DetectionRunRequest(KnowledgeModel):
-    """One request to record a detection run and the signals it produced."""
-
-    repository_id: str = Field(pattern=UUID_PATTERN)
-    provenance: Authorship
-    run: DetectionRunPayload
-    signals: tuple[DetectionSignalPayload, ...] = ()
-    # The datasets this run measured, as the paths their stores were opened from. They are the
-    # boundary requirement 7.1 refuses to cross: a detection write may not enter the assessed
-    # dataset's own measurement transaction, and this is what makes that checkable rather than
-    # asserted.
-    assessed_database_paths: tuple[str, ...] = ()
-
-
-class DetectionRunInputDifference(KnowledgeModel):
-    """One input or version that differs between a recorded run and its re-execution.
-
-    A changed snapshot identity, policy version, extractor version or declared input set each make
-    the two runs distinct facts, exactly as the shipped ``KnowledgeDiffBinding`` makes a moved
-    candidate unable to continue an older comparison (``models/knowledge/diff.py:256-286``). The
-    recorded and re-executed values are both carried, so the difference is inspectable rather than
-    merely reported.
-    """
-
-    kind: Literal[
-        "snapshot_identity",
-        "code_tree",
-        "selector",
-        "policy_version",
-        "extractor_version",
-        "declared_input_set",
-        "condition",
-    ]
-    side: DetectionSide | None = None
-    recorded: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    reexecuted: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-
-
-class DetectionRunReproduction(KnowledgeModel):
-    """The answer to "was this run reproduced": two ordered sequences, and what differs.
-
-    There is no field that could report the re-execution as "the same run": the type carries the
-    recorded run's identity, the re-executed run's identity and the differences, so a caller reads
-    which two runs are being compared. Requirement 3.4 refuses a re-execution that differs from the
-    recorded run being reported as the same run and refuses it overwriting the recorded one; nothing
-    in this model writes anything.
-    """
-
-    recorded_run_id: str = Field(pattern=UUID_PATTERN)
-    reexecuted_run_id: str = Field(pattern=UUID_PATTERN)
-    policy_version: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    reproduced: bool
-    ordered_signals_equal: bool
-    recorded_signal_order: tuple[str, ...] = ()
-    reexecuted_signal_order: tuple[str, ...] = ()
-    differences: tuple[DetectionRunInputDifference, ...] = ()
-
-    @model_validator(mode="after")
-    def _require_one_verdict_from_the_facts(self) -> DetectionRunReproduction:
-        """Refuse a reproduction whose verdict disagrees with the facts it carries."""
-
-        if self.reproduced and (self.differences or not self.ordered_signals_equal):
-            raise ValueError(
-                "a run reported as reproduced carries no differing input or version and two equal "
-                "ordered sequences; a difference is what makes a re-execution a distinct fact"
-            )
-        if self.ordered_signals_equal != (
-            self.recorded_signal_order == self.reexecuted_signal_order
-        ):
-            raise ValueError(
-                "the ordered-signals flag must state whether the two recorded orders are equal; a "
-                "reproduction that reports an order it does not carry is not a comparison"
-            )
-        return self
-
-
-class DetectionRunDifference(KnowledgeModel):
-    """One recorded run and one re-execution, reported as two distinct facts when they differ."""
-
-    recorded_run_id: str = Field(pattern=UUID_PATTERN)
-    reexecuted_run_id: str = Field(pattern=UUID_PATTERN)
-    same_identity: bool = False
-    differences: tuple[DetectionRunInputDifference, ...] = ()
-
-
-class DetectionRunCurrentness(KnowledgeModel):
-    """Whether a recorded run is current under the versions now in force.
-
-    Requirement 3.6 permits code to *mark* a run stale on this comparison and forbids it to
-    reinterpret the run's signals for the new versions, re-label them current, or silently re-run and
-    present the new result as the old one. The model therefore carries the recorded versions as
-    facts beside the current ones, and it carries no field holding a re-interpretation or a
-    re-labelled signal.
-    """
-
-    run_id: str = Field(pattern=UUID_PATTERN)
-    recorded_policy_version: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    current_policy_version: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    recorded_extractor_version: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    current_extractor_version: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    binding_state: Literal["current", "stale"]
-    differing_versions: tuple[str, ...] = ()
-    signals_unchanged: Literal[True] = True
-
-    @model_validator(mode="after")
-    def _require_the_state_to_follow_from_the_versions(self) -> DetectionRunCurrentness:
-        differing = tuple(
-            name
-            for name, recorded, current in (
-                ("policy_version", self.recorded_policy_version, self.current_policy_version),
-                (
-                    "extractor_version",
-                    self.recorded_extractor_version,
-                    self.current_extractor_version,
-                ),
-            )
-            if recorded != current
-        )
-        if differing != self.differing_versions:
-            raise ValueError(
-                "a run's currentness names exactly the version axes that moved: expected "
-                f"{' | '.join(differing) or '<none>'}, recorded "
-                f"{' | '.join(self.differing_versions) or '<none>'}"
-            )
-        expected_state = "stale" if differing else "current"
-        if self.binding_state != expected_state:
-            raise ValueError(
-                f"the binding state follows from the version comparison: {expected_state!r} is what "
-                f"the recorded and current versions give, not {self.binding_state!r}"
-            )
-        return self
-
-
-class DetectionRunResult(KnowledgeModel):
-    """The typed outcome of one detection operation: a recorded run, a read run, or one refusal."""
-
-    state: Literal["created", "read", "refused"]
-    operation: Literal["record_detection_run", "read_detection_run"] = "record_detection_run"
-    repository_id: str = Field(pattern=UUID_PATTERN)
-    run: DetectionRunPayload | None = None
-    signals: tuple[DetectionSignalPayload, ...] = ()
-    refusal: KnowledgeRefusal | None = None
-
-    @model_validator(mode="after")
-    def _require_one_outcome(self) -> DetectionRunResult:
-        if self.state == "refused" and (self.refusal is None or self.run is not None):
-            raise ValueError("a refused detection operation carries its refusal and no run")
-        if self.state != "refused" and (self.run is None or self.refusal is not None):
-            raise ValueError("a served detection operation carries its run and no refusal")
-        return self
-
-    def ordered_signal_ids(self) -> tuple[str, ...]:
-        """Return the served signals in the run's recorded order."""
-
-        order = {signal.signal_id: signal for signal in self.signals}
-        if self.run is None:
-            return tuple(order)
-        return tuple(name for name in self.run.signal_order if name in order)
 
 
 def observed_basis_detail(

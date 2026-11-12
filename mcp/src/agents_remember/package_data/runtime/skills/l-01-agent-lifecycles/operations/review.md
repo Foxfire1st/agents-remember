@@ -1,120 +1,141 @@
+<!-- ar:roles all -->
 # Operation — Review
 
-**What it covers:** the requested independent review seam and its exact mode contract — what a
-baseline seals, what a successor may verify, and how the verdict is recorded and consumed.
+Reviewing roles use this operation for independent review requested by the task or owner. Its inputs are the exact requirement revision, candidate and base, review mode, criteria and report path.
 
-**When it is selected:** the developer or the approved task/role brief requests review at a seam
-(leaf route review, master-exit, super-exit, portfolio plan, or a three-party loop's reviewer seat).
-**It is never selected by default**: closeout and integration neither require nor launch it.
+A first cold requirement read has no code candidate or Worker attempt and opens no code round. Once the Worker's freeze arrives, report missing candidate identity or review authority rather than guessing it.
 
-## Who carries it, and their job
+Beside the leaf's Reviewer, the Architect may commission advisory Investigators on other providers. Each stays separate and reports only to the Architect. The Reviewer's verdict remains the grade.
 
-| Role | Its job in this operation |
-| --- | --- |
-| reviewer | the reviewing seat: scope the seam, run the phase-appropriate evidence work, adjudicate each requirement revision, write the verdict |
-| manager | dispatches leaf/route and master-exit reviews, carries the mode in every brief, and calls `begin_review` / `record_review` |
-| orchestrator | dispatches the super-exit review and decides the delegated master-handover gate the verdict attaches to |
-| architect | owns plan review, rules its verdict, and carries the developer ruling at super-exit |
+<!-- ar:roles architect -->
+## Advisory independent reviews
 
-The reviewing seat may not be the author/implementer seat, and no seat reviews its own work as the
-"independent" reviewer.
+### Commission a separate view
 
-## Required inputs
+An advisory review of a leaf's freeze is an exception to normal routing: the Architect commissions it and carries the findings to the Reviewer. The Manager relays no findings.
 
-The dispatch brief must name **exactly one** review mode plus the canonical task and review purpose.
+The Architect may add advisory reviews when the developer asks or when it judges a second view worth its cost. Any number is allowed, each on any provider an installed harness reaches.
 
-| Mode | Inputs |
-| --- | --- |
-| `reviewMode=baseline` | the complete agreed scope; all applicable standing criteria (`../criteria/`); required routes/lenses; the evidence needed to inspect them. If no review state is present, the used-round count is zero and the next review is a baseline — do not create a pristine marker or refuse because legacy history is absent. |
-| `reviewMode=fix-verification` | the sealed baseline; the immediately preceding result; the exact outstanding IDs; and the worker fixes/evidence. |
+Start each advisory Investigator through `role_start` on `agents-remember-task` without a task reference. It holds no leaf seat; the leaf still has one Reviewer seat.
 
-Every review also needs: the exact stable-ID + version requirement set dispatched to the builder,
-with its canonical packets and durable corpus ruling; the candidate identity (tree/commit, or a
-non-code digest + anchors); the worker attempt records; and the resolved `system/tools.md`.
+### Give each Investigator the same material
 
-## Normal workflow
+Provide the freeze, packets, rulings, design source and Worker evidence supplied to the Reviewer. Give each advisory Investigator its own output folder, clean copy for anything it runs, and ports.
 
-1. **Confirm the mode and the claimed scope** before inspecting anything. A successor that receives
-   a whole-review mandate refuses it.
-2. **Baseline only: partition the agreed scope by material major route** (architecture/control-plane
-   ownership boundary, informed by governing route overviews and the import/call graph), name one
-   independent reviewer per affected major route, and require a **complete route-coverage table** so
-   no route disappears inside a generic diff skim. One reviewer may not silently collapse several
-   routes.
-3. **Run the phase-appropriate evidence work.**
-   - Baseline runs its type's standing catalog from `../criteria/` (the regression floor), all three
-     lenses, the required routes, and the exploratory mandate, with durable reports. Every standing
-     criterion is reported, even to say it found nothing.
-   - Fix-verification uses the sealed baseline evidence and only the listed IDs. It has **no**
-     exploratory mandate, whole-catalog rediscovery, new-lens duty, or catalog-promotion authority.
-   - Posture is always **refute-or-confirm**: try to disprove the claim; a claim that cannot survive
-     refutation is not accepted.
-4. **Seal the baseline (baseline only).** Before a first verdict can pass, record stable issue IDs,
-   precise problem statements, source/requirement evidence, and observable fix-acceptance criteria.
-   An empty first-pass issue list is a valid terminating baseline; it does not create a reason for
-   another review.
-5. **Adjudicate every requirement revision separately** as exactly `accepted` or `rejected`, against
-   one exact worker attempt and candidate, with the reviewer's own rationale and refutation attempt.
-   An aggregate verdict or a sampled subset is invalid.
-6. **Write a fixed/unfixed disposition for every preceding outstanding ID** (successor only). The
-   remaining set must be a subset of both the preceding remaining set and the sealed baseline.
-   Omission, unknown, duplicate, rewritten, reintroduced, or newly discovered IDs, a new criterion
-   under an old ID, a full-review request, or a pass with unresolved IDs is a **blocking protocol
-   refusal**.
-7. **Append the reviewer record** to the same single physical leaf journal, against that exact
-   attempt and candidate, without modifying the worker record or any earlier bytes; link that exact
-   journal anchor from the verdict rather than copying the record.
-8. **Write the verdict artifact** in the shape of `../templates/verdict.md` for the matching seam
-   variant, including an explicit pass/block recommendation and the durable-evidence checklist
-   output even when it is `N/A`.
-9. **The owner records the result** with `task_doc(operation="record_review")` or the existing
-   `task_doc(operation="record_route_review")` after the durable verdict and route evidence exist.
-   The task document remains the review authority; prose, a chat claim, or an unbound evidence
-   reference does not satisfy a requested review.
+No advisory reviewer reads the Reviewer's or Curator's files, messages to or from them or the Manager, or another advisory reviewer's folders. Each reports only to the Architect.
 
-## Authority gates
+The Investigator's capsule does not include this operation, so its brief must carry these rules. Name nothing the Architect or developer has already noticed; preserve the comparison's independence.
 
-- **Verdicts are evidence, not decisions.** The reviewer never decides a gate and never implements;
-  the decider decides. The verdict attaches to the handover gate as judge evidence, and the policy
-  may require that evidence when `requireReviewerVerdictAtSeams` is set.
-- **`task_doc(operation="begin_review")` is called before** hosted reviewer dispatch or native
-  reviewer work; the result is recorded after.
-- **The verdict cannot pass** while any requirement is rejected. A truthful `blocked` row may be
-  `accepted` as a handoff state, but the overall recommendation stays BLOCK until the requirement
-  becomes `satisfied` or an authorized `approved-change`.
-- **Evidence must match the requirement's class**: rendering/visibility needs mounted-UI proof;
-  scheduling/ordering needs operation-level proof; data-model/persisted shape needs artifact-level
-  proof; doctrine/enforcement needs a code anchor. Evidence of the wrong class is a finding, never a
-  pass.
-- **A requirement contradiction/overconstraint** is a rejection that requests architect/developer
-  revision authority; the reviewer never rewrites the packet or accepts a workaround as changed
-  semantics.
-- **A baseline block must be decomposable into leaf-shaped fix leaves** — concrete scope, target
-  files/docs, evidence, and done-when. A baseline block that cannot be named as fix leaves is not
-  yet a first-review block. A fix-verification block returns only the sealed outstanding IDs to
-  their existing owners and **cannot create a new fix leaf**.
-- **The promotion ratchet duty belongs to the first review only**; a successor may not propose a
-  catalog amendment.
+### Compare and route the findings
 
-## Failure handling
+An advisory report changes no verdict by itself; the Reviewer's verdict remains the grade the product reads. Once all reports arrive, compare findings made by all, some and one reviewer.
 
-- **A malformed handed-off worker row** is a formal attempt: reject it independently as an evidence
-  gap or the applicable exact failure class. Do not edit it, and require a successor only when the
-  worker hands off the next exact candidate.
-- **A missing, unapproved, or mismatched packet version** is an invalid citation and forces
-  rejection. If the corpus shows a newer approved version, reject stale acceptance and require the
-  affected leaf to be rebriefed.
-- **A candidate that moved during review** makes the attempt stale: reject it and require a
-  successor worker attempt plus reviewer record.
-- **An un-reviewable change set** (missing diff, missing task docs) is itself a blocking finding in
-  the verdict, routed to the decider — not an escalation up the ladder.
-- **An outside-list regression, changed route, or changed requirement** during successor
-  verification goes directly to the developer; it does not add, reopen, or reset a review.
-- **At three rounds**, ask the developer directly and wait for explicit authorization; record the
-  instruction before any extra round.
+Send the Reviewer one questions file containing each finding it did not make. Tell the Manager once for the gate and the round.
 
-## Handoff / exit
+- The questions file asks the Reviewer to rule on each as on a Curator's code finding: take it into its findings and reopen the verdict for that point, or say why it does not hold. The file states this duty because Reviewer and Manager do not read this Architect-only section.
+- The Manager's message states that the leaf's next step waits for the Reviewer's rulings and whether the Architect grants an extra round. An extra round for these findings is the Architect's grant.
+- The Reviewer returns its rulings to the Architect. An accepted finding goes to the Worker as usual. The Architect's pre-landing check confirms that every advisory finding has a ruling.
+- The Architect and developer settle disagreements by discussing the findings.
 
-The verdict artifact is the durable handoff. Terminal/finalizer truth then attests only that this
-turn ended and wakes the decider, who validates the verdict independently. The reviewer
-does not author a second completion row and does not carry the decider's runtime identity.
+### Account for costs and permissions
+
+Each advisory reviewer uses its provider's quota and the machine's memory. Investigator launch choices use admitted `orchestration.roles` settings and applicable `orchestration.rolesPerLevel` overrides.
+
+The Architect sets the mode or runs an approver only within sufficient seat permissions. Before responding to an advisory reviewer's permission prompt, read [Formal permissions](orientation.md#formal-permissions) for the once-only developer notice and existing parent route.
+
+<!-- ar:roles all -->
+
+## Outputs
+
+Write one concise pass/block recommendation with changed-file coverage, findings, checks and limitations. For every finding, give a stable identifier, location, evidence, impact and required repair or proof.
+
+A baseline covers the complete candidate diff, including all changed and unattributed files. Check each requirement against its evidence class and relevant behavior. A test result is evidence, not semantic acceptance.
+
+Fix-verification checks only the sealed outstanding findings against the same requirement and candidate lineage. Report a new contradiction or scope issue separately.
+
+<!-- ar:roles reviewer -->
+## Select focused tests
+
+In a baseline review, rerun the Worker's recorded focused-test list and repeat its search on the frozen candidate; a test file the search finds that the Worker did not run is a finding. In fix-verification, apply the search to the repair's own touched names; an unrun matching test keeps the repaired finding open and is not a new finding.
+
+<!-- ar:gives producer-list to curator: list-file, freeze-identity, handoff-check-result -->
+## Receive the intake and hand over the leaf verdict
+
+If the opening names no review mode, ask your starter for its first `role_message` on `agents-remember-task` and wait. A Reviewer started from the dashboard has no starter and asks the developer in its own chat instead. Inspect nothing and infer no mode before the answer arrives.
+
+For a leaf:
+
+1. On code `PASS`, first tell the Manager to start the Curator, before peer handover.
+2. Send the verdict directly to the Worker through `role_message` on `agents-remember-task`. The message names the verdict file; it never pastes the text. A block names the sealed-findings report and requests the whole repair stretch.
+3. Once the Curator exists, send it the passed freeze and code-`PASS` verdict directly.
+4. Review the Curator's memory change and return findings or `PASS` directly to it.
+
+A separately assigned packet cold read remains possible without an early normal leaf Reviewer.
+
+Every handover names the leaf, exact object, report or verdict path, and whole next stretch. Identify a code candidate by the head and change hash in the Worker's report, or identify the exact memory change. Use the sibling role and exact leaf task references from the handover, preserving product-supplied identifiers whole and unchanged.
+
+The Worker's message names the freeze and report. Its factual handover neither briefs nor limits the review. The Reviewer does not read the Worker's chat.
+
+For a cleanly synced leaf, expect no new freeze and open no round. When no path changed on both sides, the Worker reruns focused tests and the Manager's closeout preview decides. If a path changed on both sides or a focused test fails, the Worker sends exactly that repair for one look.
+
+When a freeze arrives, compare every finding with its entry in the Worker's freeze report. Return a freeze that lacks the entries without counting a round.
+
+Before sending your hand-off list, run `handoff-check` against that freeze with the serving build's interpreter, identified by `server_info` on `agents-remember-task`. Name the result.
+<!-- ar:roles all -->
+
+## Record code review rounds
+
+The Reviewer opens each ordinary leaf code round with `task_doc(operation="begin_review")` and records its own verdict through `record_review` or the applicable `record_route_review`. Include any preceding result required before the next begin. Non-leaf seams retain owner recording and their seam's verdict recipient.
+
+<!-- ar:roles reviewer -->
+## Recheck a repaired Worker record
+
+When all candidate findings are closed and only a finding on the Worker's record remains, check the repaired record on the last recorded round. The record may be its report, evidence table, hash or anchor.
+
+Do not call `begin_review`; the count stays. This applies only while the candidate is byte-for-byte the candidate that round recorded. If it changes, the tool refuses and names `begin_review` as the next step.
+<!-- ar:roles all -->
+
+## Verify repaired findings at the round limit
+
+When review rounds are used up and the only remaining items were raised before and have since been repaired, the same Reviewer verifies exactly those items in the next round.
+
+Within the settings limit, this is an ordinary fix-verification round. Beyond the limit, the round needs the Architect's or developer's approval, which the Manager records. No new finding or item is covered.
+
+## Messages
+
+Before filling or reading message fields, read [Message files and receipts](coordination.md#message-files-and-receipts) for its body, attachments, size limit, file line and return address.
+
+Before locating a filed message or receipt, read [Find filed messages and receipts](../reference/message-handover.md#find-filed-messages-and-receipts) for the message folder and receipt scope to search.
+
+### Handle delivery receipts
+
+Before responding to a full-store refusal, read [Handle a full-store refusal](../reference/message-handover.md#handle-a-full-store-refusal) for the pending handover, single retry and second-refusal report.
+
+## Boundaries
+
+Before a code edit, task-acceptance write, role start or Git publication, read [Permitted work and boundaries](../roles/reviewer.md#permitted-work-and-boundaries) for the Reviewer's standing restrictions. The Manager retains gate acceptance and records the Architect's or developer's extra-round approval.
+
+Memory review uses separate sealed reports, finding identifiers and its own pass count. The Reviewer records its own lane with `begin_review` and `record_review`, using `reviewKind=memory`. Code state stays unchanged. Memory review opens no code review-state round, resets no passed code review, code verdict or code baseline, and adds no identifiers to that baseline. Its ordinary pass limit is the same as code review's. A pass beyond the settings limit needs the Architect's or developer's instruction recorded by the Manager.
+
+After both code and memory return `PASS`, tell the Manager once that the leaf is ready for closeout, naming the passed freeze and both verdicts.
+
+Besides the code-`PASS` start notice and ready-for-closeout notice, Manager notices concern only authority, ownership, recovery, beyond-limit work or Curator code disagreement. The Manager relays no leaf contents. Developer questions follow the role's developer-question rule; candidate questions go directly to the Worker and memory questions to the Curator.
+
+<!-- ar:roles reviewer -->
+Before answering a Curator code finding, read [Curation failure handling](curation.md#failure-handling) for the Curator's evidenced concern and the Reviewer's recorded finding or explained rejection. Send your answer directly to the Curator and Worker.
+
+Two routes may add a finding after the list is sealed:
+
+- a valid code finding from the Curator;
+- a valid finding from an advisory review the Architect commissioned and forwarded in its questions file.
+
+For both routes, add a new sealed finding with its own identifier and reopen the verdict for that point only. Earlier sealed findings stay as they are. Give the reason for an invalid finding. The Worker repairs an accepted finding in a successor.
+
+A repair round for a Curator finding counts under the settings limit. Beyond it, send the extra-round question to the instructed reporting recipient where your role has one; otherwise send it through your parent, or ask in your own chat when you have no parent. An extra round for advisory findings is the Architect's grant. Every other new observation follows your role's developer-question route.
+
+Send an unresolved disagreement or authority issue to the Manager.
+<!-- ar:roles all -->
+
+Before responding to a non-work reply, empty or doubled-seat refusal, or an unreachable-Manager notice, read [Repair defects and report a refused handover](implementation.md#repair-defects-and-report-a-refused-handover) for its seat/problem report and the retry procedure through `role_message` on `agents-remember-task`.
+
+Before acting on a denied or unanswered harness request, read [Honor harness permission decisions](orientation.md#honor-harness-permission-decisions) for the waiting, denial and non-bypass rules.

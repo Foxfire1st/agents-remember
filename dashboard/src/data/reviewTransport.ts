@@ -15,7 +15,9 @@
 // keeps the code, reason, offending input and next action the owner published. Unrelated clients'
 // semantics are untouched: `getJson` keeps throwing on a non-2xx for the routes that use it.
 
-import { FilesApiError } from "./files";
+import { FilesApiError } from './files';
+import { sharedRead } from './abortableRead';
+import { openingFetch } from './reviewOpen';
 
 // What a reader has to be able to tell apart, as one token per answer that is not a review. The
 // surface's `loading` and `known-empty` states are not failures and are rendered as themselves; these
@@ -26,23 +28,23 @@ import { FilesApiError } from "./files";
 // the same failure, and neither of them is a review.
 export type ReviewFailureToken =
   // candidate_dataset_absent: the named dataset half does not exist, so it was never initialized.
-  | "not-initialized"
+  | 'not-initialized'
   // candidate_not_live | candidate_unresolved | review_adapter_unavailable: the recorded history
   // this review would read (the leaf's live candidate, its enclosure contract, or the adapter
   // itself) cannot be resolved here.
-  | "unavailable-history"
+  | 'unavailable-history'
   // bad-request: an input this route does not admit.
-  | "validation"
+  | 'validation'
   // bad-path: the named repository is outside the configured workspace authority.
-  | "authority"
+  | 'authority'
   // not-found: the port named a path it does not hold.
-  | "not-found"
+  | 'not-found'
   // a subject- or comparison-level refusal that is none of the above, carried by its own code.
-  | "domain-refused"
+  | 'domain-refused'
   // no HTTP response was received (the socket failed, the server is down, the request was refused).
-  | "network"
+  | 'network'
   // an HTTP response this route did not produce: a proxy page, an unwired mount, an empty body.
-  | "unreadable";
+  | 'unreadable';
 
 // One failure, in the owner's own terms. `code` is the owner's identity for it and is never
 // re-spelled; `httpStatus` is present exactly when an HTTP response carried it.
@@ -71,14 +73,18 @@ export interface ReviewRefusalFacts {
 // shown. A code this table does not know is carried as `domain-refused` with its own code intact --
 // never guessed into a state it might not be.
 const TOKEN_BY_CODE: Record<string, ReviewFailureToken> = {
-  candidate_dataset_absent: "not-initialized",
-  candidate_not_live: "unavailable-history",
-  candidate_unresolved: "unavailable-history",
-  review_adapter_unavailable: "unavailable-history",
-  unavailable: "unavailable-history",
-  "bad-request": "validation",
-  "bad-path": "authority",
-  "not-found": "not-found",
+  candidate_dataset_absent: 'not-initialized',
+  candidate_not_live: 'unavailable-history',
+  candidate_unresolved: 'unavailable-history',
+  review_adapter_unavailable: 'unavailable-history',
+  // The leaf-wide tree view only: the reviewer was busy past the request's deadline, or an input it
+  // read kept changing while it was composed. Both are transient, and both are retried by the reader.
+  reviewer_busy: 'unavailable-history',
+  inputs_changing: 'unavailable-history',
+  unavailable: 'unavailable-history',
+  'bad-request': 'validation',
+  'bad-path': 'authority',
+  'not-found': 'not-found',
 };
 
 // The refusals that answer for the *intent* half alone: the pair could not be compared, while the
@@ -87,22 +93,22 @@ const TOKEN_BY_CODE: Record<string, ReviewFailureToken> = {
 // A caller may therefore offer the inventory as a separately asked question -- never as an
 // automatic substitution, and never with a dataset this client chose.
 const INTENT_ONLY_CODES = new Set([
-  "candidate_dataset_absent",
-  "comparison_refused",
-  "subject_unresolved",
+  'candidate_dataset_absent',
+  'comparison_refused',
+  'subject_unresolved',
 ]);
 
 export const intentOnlyRefusal = (code: string): boolean => INTENT_ONLY_CODES.has(code);
 
 export const reviewFailureToken = (code: string): ReviewFailureToken =>
-  TOKEN_BY_CODE[code] ?? (code === "" ? "unreadable" : "domain-refused");
+  TOKEN_BY_CODE[code] ?? (code === '' ? 'unreadable' : 'domain-refused');
 
 // The one error a review read throws. It stays a `FilesApiError` so a caller that already caught
 // that type keeps working, and it carries the whole failure so a caller can render it.
 export class ReviewTransportError extends FilesApiError {
   constructor(readonly failure: ReviewFailure) {
     super(failure.httpStatus ?? 0, failure.code);
-    this.name = "ReviewTransportError";
+    this.name = 'ReviewTransportError';
   }
 }
 
@@ -117,7 +123,7 @@ interface ReviewBody {
 }
 
 const text = (value: unknown): string | undefined =>
-  typeof value === "string" && value !== "" ? value : undefined;
+  typeof value === 'string' && value !== '' ? value : undefined;
 
 // The route's own transport-level body (a query it did not admit, an unwired adapter, a port's
 // not-found), read as the failure it names. A response with no such body is `unreadable`: it is not
@@ -133,7 +139,7 @@ function namedFailure(
 ): ReviewFailure {
   const status = `${response.status} ${response.statusText}`.trim();
   return {
-    token: named === undefined ? "unreadable" : reviewFailureToken(named),
+    token: named === undefined ? 'unreadable' : reviewFailureToken(named),
     code: named ?? status,
     detail:
       text(body?.detail) ??
@@ -147,8 +153,8 @@ function namedFailure(
 
 function networkFailure(cause: unknown): ReviewFailure {
   return {
-    token: "network",
-    code: "network",
+    token: 'network',
+    code: 'network',
     detail: `the review read could not reach the server: ${
       cause instanceof Error ? cause.message : String(cause)
     }`,
@@ -158,15 +164,34 @@ function networkFailure(cause: unknown): ReviewFailure {
 // The one GET a review read makes. The body is read whatever the status: a body that carries this
 // route's `state` *is* the answer (a payload, a subject list, or a typed refusal), and anything else
 // is a failure. The caller admits the states it knows; an unadmitted one is reported, not rendered.
-export async function getReviewJson<T>(url: string): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(url);
-  } catch (cause) {
-    throw new ReviewTransportError(networkFailure(cause));
-  }
+//
+// Identical reads in flight are one request (`sharedRead`): a StrictMode remount, or a second reader
+// of the same URL, joins the request already asked for instead of sending another. A caller whose
+// answer may be superseded passes a `signal`: once no consumer of the request wants its answer the
+// request itself is cancelled, which the server notices as a disconnect and stops the work it was
+// doing for it; a consumer that leaves while another still waits only stops its own wait.
+export function getReviewJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  return sharedRead<T>(
+    `review:${url}`,
+    async (shared) => {
+      let response: Response;
+      try {
+        response = await openingFetch(url, shared === undefined ? undefined : { signal: shared });
+      } catch (cause) {
+        throw new ReviewTransportError(networkFailure(cause));
+      }
+      return decodeReviewJson<T>(response);
+    },
+    signal,
+    // As before: an owner released in the same pass, with nobody re-joining, sends nothing.
+    true,
+  );
+}
+
+/** The same response classification for conditional summary reads. */
+export async function decodeReviewJson<T>(response: Response): Promise<T> {
   const body = (await response.json().catch(() => null)) as (ReviewBody & T) | null;
-  if (body !== null && typeof body.state === "string") return body as T;
+  if (body !== null && typeof body.state === 'string') return body as T;
   throw new ReviewTransportError(failureFromBody(response, body));
 }
 
@@ -185,7 +210,7 @@ export const reviewProblemFromRefusal = (refusal: ReviewRefusalFacts): ReviewFai
 // An answer whose `state` this client does not admit. It is named rather than rendered, because a
 // body claiming a state this route does not declare is not a review and not a refusal.
 export const unreadableAnswer = (state: string): ReviewFailure => ({
-  token: "unreadable",
+  token: 'unreadable',
   code: state,
   detail: `the review route answered state "${state}", which this client admits as neither a review nor a refusal`,
 });

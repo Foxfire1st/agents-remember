@@ -1,0 +1,194 @@
+"""Exact-tree reviewer worklists in a warm isolated interpreter, one request at a time."""
+
+from __future__ import annotations
+
+import atexit
+import gc
+import json
+import os
+import signal
+import sys
+import time
+from dataclasses import asdict, fields
+from pathlib import Path
+from typing import Any, get_args, get_origin, get_type_hints
+
+from agents_remember.application.knowledge_worklist import read_leaf_worklist
+from agents_remember.application.knowledge_worklist.classification_context import classification_run
+from agents_remember.application.knowledge_worklist.leaf import (
+    CandidateTrees,
+    CapturedBase,
+    leaf_worklist,
+)
+from agents_remember.application.review_code_changes import (
+    tree_request,
+    trees_from_request,
+)
+from agents_remember.application.review_leaf_facts import leaf_facts
+from agents_remember.application.review_memo_store import restore_review_memos, save_review_memos
+from agents_remember.application.review_source_inventory import memo_tree_observations
+from agents_remember.application.review_tree_comparison import ReviewTrees
+from agents_remember.kernel.git_command import memo_git_object_lookups, shared_blob_reads
+from agents_remember.kernel.recorded_reads import recorded_reads, replay_reads
+from agents_remember.kernel.reviewer_worklist_process import (
+    CHILD_DEADLINE_SECONDS,
+    EXIT_BUILD_MISMATCH,
+    OPERATION,
+    ReviewerWorklistProcesses,
+    WorklistBuildMismatch,
+    WorklistProcessError,
+    arm_child_lifetime,
+    build_identity,
+    request_digest,
+)
+from agents_remember.memory.knowledge_index.build import kept_document_parses
+from agents_remember.serving.build_info import process_serving_build, runtime_source_digest
+from agents_remember.worktrees.worktree_contract import WorktreeContract
+
+# The owner for a caller that supplies none (tests, scripts). The dashboard composes its own and
+# shuts it down with the app; this one is stopped when its process ends.
+DIRECT_WORKLIST_PROCESSES = ReviewerWorklistProcesses()
+atexit.register(DIRECT_WORKLIST_PROCESSES.shutdown)
+
+
+def isolated_leaf_worklist(
+    contract: WorktreeContract,
+    *,
+    candidate: CandidateTrees,
+    base: CapturedBase,
+    processes: ReviewerWorklistProcesses | None = None,
+    trees: ReviewTrees | None = None,
+) -> dict[str, Any] | None:
+    """Call the one leaf owner in another interpreter and import its exact consumed-byte reads."""
+
+    payload = json.loads(
+        json.dumps(
+            {"contract": asdict(contract), "candidate": asdict(candidate), "base": asdict(base)},
+            default=_path,
+        )
+    )
+    source = build_identity(
+        process_serving_build().payload().model_dump(mode="json", exclude_none=True)
+    )
+    if trees is not None:
+        payload["review"] = tree_request(trees)
+    answer = (processes or DIRECT_WORKLIST_PROCESSES).compute(payload, source)
+    replay_reads(answer["reads"])
+    if answer["error"] is not None:
+        raise WorklistProcessError(f"reviewer worklist computation failed: {answer['error']}")
+    document = answer["document"]
+    return (
+        {**(document or {}), "_review": answer["review"]}
+        if answer["review"] is not None
+        else document
+    )
+
+
+def _path(value: object) -> str:
+    if isinstance(value, Path):
+        return value.as_posix()
+    raise TypeError(f"not a worklist input: {type(value).__name__}")
+
+
+def _contract(document: dict[str, Any]) -> WorktreeContract:
+    if set(document) != {field.name for field in fields(WorktreeContract)}:
+        raise WorklistProcessError("reviewer worklist request has invalid admitted contract fields")
+    hints = get_type_hints(WorktreeContract)
+    values: dict[str, Any] = {
+        name: Path(value)
+        if value is not None and (hints[name] is Path or Path in get_args(hints[name]))
+        else tuple(value)
+        if value is not None and get_origin(hints[name]) is tuple
+        else value
+        for name, value in document.items()
+    }
+    return WorktreeContract(**values)
+
+
+def _run(request: dict[str, Any]) -> dict[str, Any]:
+    digest = request.pop("request")
+    if request.get("operation") != OPERATION or request_digest(request) != digest:
+        raise WorklistProcessError("reviewer worklist request identity is invalid")
+    source = build_identity(
+        process_serving_build().payload().model_dump(mode="json", exclude_none=True)
+    )
+    if (
+        source != request["source"]
+        or runtime_source_digest(Path(source["packageRoot"])) != source["sourceDigest"]
+    ):
+        raise WorklistBuildMismatch("reviewer worklist child imported a different source or build")
+    payload = request["payload"]
+    contract = _contract(payload["contract"])
+    # This child's first request fills the blob-keyed memos from the store (D569).
+    restore_review_memos(contract.coordination_root, source["sourceDigest"])
+    candidate = CandidateTrees(**payload["candidate"])
+    base = CapturedBase(**payload["base"])
+    started = time.monotonic()
+    error = None
+    review_facts = None
+    with (
+        recorded_reads() as reads,
+        shared_blob_reads(),
+        memo_git_object_lookups(),
+        memo_tree_observations(),
+        classification_run() as classification,
+        kept_document_parses(),
+    ):
+        try:
+            review = payload.get("review")
+            trees = None if review is None else trees_from_request(review)
+            document = (
+                read_leaf_worklist(contract.contract_path)
+                if trees is not None and not trees.live
+                else leaf_worklist(contract, persist=False, candidate=candidate, base=base)
+            )
+            if trees is not None:
+                review_facts = leaf_facts(document, trees, classification)
+        except Exception as failure:
+            document = None
+            error = f"{type(failure).__name__}: {failure}"
+    return {
+        "operation": OPERATION,
+        "request": digest,
+        "source": source,
+        "module": Path(__file__).resolve().as_posix(),
+        "pid": os.getpid(),
+        "document": document,
+        "review": review_facts,
+        "reads": reads,
+        "computation": [started, time.monotonic()],
+        "error": error,
+    }
+
+
+def _serve(line: str) -> None:
+    request = json.loads(line)
+    try:
+        result = _run(request)
+    except WorklistBuildMismatch as mismatch:
+        print(mismatch, file=sys.stderr)
+        raise SystemExit(EXIT_BUILD_MISMATCH) from mismatch
+    sys.stdout.write(json.dumps(result) + "\n")
+    sys.stdout.flush()
+
+
+def main() -> None:
+    arm_child_lifetime()
+    signal.setitimer(signal.ITIMER_REAL, 0)
+    gc.disable()
+    for line in sys.stdin:
+        signal.setitimer(signal.ITIMER_REAL, CHILD_DEADLINE_SECONDS)
+        try:
+            _serve(line)
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            del line
+            # Request contexts have exited; retain imports, never the preceding request's graph.
+            gc.collect()
+        # After the answer was delivered: what this request added to the memos is queued for the
+        # answer writer, which stores it beside the next request (D569).
+        save_review_memos()
+
+
+if __name__ == "__main__":
+    main()

@@ -56,7 +56,9 @@ function Placeholder({ label }: { label: string }) {
   );
 }
 
-function CodeSide({ code }: { code: FileContent | null }) {
+// `repository` names the File Viewer's repository: its pane carries the line gutter's ⊕ (MIK-R188
+// rule 1). Without it the pane has no tray gutter.
+function CodeSide({ code, repository }: { code: FileContent | null; repository?: string }) {
   if (!code) return <Placeholder label="Select a code file from the tree" />;
   if (code.language === "binary")
     return <Placeholder label={`Binary file — ${code.size.toLocaleString()} bytes (not shown)`} />;
@@ -65,7 +67,11 @@ function CodeSide({ code }: { code: FileContent | null }) {
       {code.truncated ? (
         <div className={banner}>Showing the first 2 MiB of {code.size.toLocaleString()} bytes</div>
       ) : null}
-      <FilePane content={code.content} language={code.language} />
+      <FilePane
+        content={code.content}
+        language={code.language}
+        trayLines={repository ? { repository, scope: code.scope, path: code.path } : undefined}
+      />
     </div>
   );
 }
@@ -91,10 +97,12 @@ export function DualPane({
   code,
   sidecar,
   split,
+  repository,
 }: {
   code: FileContent | null;
   sidecar: SidecarView;
   split: boolean;
+  repository?: string;
 }) {
   // Nothing opened yet: a faint effects-gated boomerang backdrop fills the whole pane (mirrors the
   // Operations / Chats empty states), replacing the per-side "select a file" placeholders until a code
@@ -116,14 +124,14 @@ export function DualPane({
   if (!split || overviewOnly) {
     return (
       <div className={fill} data-testid="dual-pane">
-        {overviewOnly ? <SidecarSide sidecar={sidecar} /> : <CodeSide code={code} />}
+        {overviewOnly ? <SidecarSide sidecar={sidecar} /> : <CodeSide code={code} repository={repository} />}
       </div>
     );
   }
   return (
     <PanelGroup direction="horizontal" autoSaveId="fileviewer.dualpane" data-testid="dual-pane">
       <Panel defaultSize={62} minSize={25}>
-        <CodeSide code={code} />
+        <CodeSide code={code} repository={repository} />
       </Panel>
       <PanelResizeHandle className={handle} />
       <Panel defaultSize={38} minSize={20}>

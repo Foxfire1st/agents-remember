@@ -7,21 +7,52 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
+from agents_remember.application.knowledge_gate import GateResult, evaluate_leaf_gate
+from agents_remember.application.knowledge_worklist import (
+    answering_trace_subjects,
+    leaf_onboarding_trace_sides,
+    recompute_leaf_worklist,
+)
+from agents_remember.application.knowledge_worklist.leaf import CandidateTrees
+from agents_remember.application.knowledge_worklist.onboarding_trace import worktree_code_blobs
+from agents_remember.application.memory_quality.answer import (
+    failed_quality_error,
+    quality_result_answer,
+    quality_run_next_args,
+)
 from agents_remember.application.memory_quality.census import (
     PreparedMemoryCensus,
     census_curator_candidates,
     prepare_memory_census,
     publish_memory_census,
 )
+from agents_remember.application.memory_quality.converted_base import (
+    converted_check_base,
+    leaf_base_port,
+    leaf_base_request,
+)
+from agents_remember.application.memory_quality.knowledge_inputs import (
+    build_route_indexes,
+)
+from agents_remember.application.memory_quality.knowledge_inputs import (
+    knowledge_briefs as _knowledge_briefs,
+)
+from agents_remember.application.memory_quality.knowledge_inputs import (
+    without_proof as _without_proof,
+)
+from agents_remember.application.memory_quality.run_answers import (
+    _pair_refusal,
+    _poll_scope_mismatch,
+    _scope_projection,
+    _unfinished_poll_payload,
+)
 from agents_remember.application.memory_quality.runs import (
     QualityRunIdentity,
-    QualityRunSnapshot,
     poll_quality_run,
     start_quality_run,
 )
 from agents_remember.application.memory_scope import (
     MemoryScope,
-    MemoryScopeIdentity,
     resolve_memory_candidate_scope,
     resolve_memory_scope,
     revalidate_memory_candidate_scope,
@@ -35,7 +66,7 @@ from agents_remember.errors import (
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.kernel.route_index import build_route_indexes
+from agents_remember.kernel.route_index import RouteIndexBuildResult
 from agents_remember.memory_quality.check import (
     DRIFT_CHECK_NAME,
     DriftCheckContext,
@@ -44,6 +75,7 @@ from agents_remember.memory_quality.check import (
 )
 from agents_remember.memory_quality.curator_checklist import (
     CuratorChecklist,
+    WithoutProof,
     split_commit_owned_findings,
     write_curator_checklist,
 )
@@ -62,26 +94,31 @@ from agents_remember.memory_quality.knowledge_review import (
     AssessmentSummaryInput,
     summarise_assessment_state,
 )
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 from agents_remember.models.lifecycles.review_assessment import assessment_subject_id
 from agents_remember.models.memory import (
     MemoryQualityPollRequest,
     MemoryQualityStartRequest,
     MemoryQualitySyncRequest,
 )
+from agents_remember.worktrees.cutover_lock import cutover_lock_refusal
 from agents_remember.worktrees.integration.closeout.curator_coherence import (
     ValidatedCuratorCoherence,
     all_assessment_subject_ids,
-    curator_coherence_no_impact,
     curator_coherence_paths,
     curator_coherence_subject_assessment_state,
     require_current_curator_coherence,
 )
+from agents_remember.worktrees.knowledge_crossing import unconverted_line_refusal
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.modules.onboarding import (
-    contract_memory_verified_commit,
-    validate_memory_refresh_attestations,
+    IdenticalChangesUnreadable,
+    OnboardingTraceInputs,
+    entity_evidence_findings_for_candidate,
+    identical_changes_from_run,
+    onboarding_trace_gate_for_context,
 )
-from agents_remember.worktrees.modules.onboarding_acceptance import OnboardingBodyGateEvidence
+from agents_remember.worktrees.modules.onboarding_trace import CHECK_NAME, INCOMPLETE_CODE
 
 _CAPACITY_GUIDANCE = (
     "Poll an existing run or wait for active memory-quality work to finish, then submit "
@@ -103,13 +140,14 @@ class MemoryQualityExecution:
     checks: tuple[str, ...]
     detail_limit: int
     publish_curator_report: bool
+    full_run: bool = True
 
     @property
     def identity(self) -> QualityRunIdentity:
         return QualityRunIdentity(
             repo_id=self.scope.repo_id,
             scope=self.scope.identity,
-            checks=self.checks,
+            checks=() if self.full_run else self.checks,
             detail_limit=self.detail_limit,
             publish_curator_report=self.publish_curator_report,
         )
@@ -154,7 +192,13 @@ def _start_memory_quality_request(
             "operation": "memory_quality_check",
             "repoId": execution.scope.repo_id,
             "status": "capacity-reached",
+            # MIK-R110 rule 4: a not-ok answer holds the reason as a code, a
+            # one-sentence error, and the next action.
+            "code": "capacity-reached",
+            "error": "The check server is at its run capacity; start the check again shortly.",
             "guidance": _CAPACITY_GUIDANCE,
+            "nextAction": "memory_quality_check",
+            "nextArgs": quality_run_next_args(request, mode="start"),
             **_scope_projection(execution.scope.identity),
         }
     if admission.run_id is None:
@@ -172,19 +216,30 @@ def _start_memory_quality_request(
 def _poll_memory_quality_request(
     config: McpRuntimeConfig,
     request: MemoryQualityPollRequest,
+    *,
+    operation: str = "memory_quality_check",
 ) -> dict[str, object]:
-    """Poll one run only through its configured canonical repository."""
+    """Poll one run only through its configured canonical repository and operation."""
 
     repo_id = require_repo(config, request.repo_id).repo_id
     snapshot = poll_quality_run(repo_id, request.run_id)
-    if snapshot is None:
+    if snapshot is None or snapshot.identity.operation != operation:
         return {
             "ok": False,
             "operation": "memory_quality_check",
             "repoId": repo_id,
             "status": "run-not-found",
+            # MIK-R110 rule 4: a not-ok answer holds the reason as a code, a
+            # one-sentence error, and the next action.
+            "code": "run-not-found",
+            "error": (
+                "The run id is unknown, evicted, or belongs to another repository; "
+                "start the check again."
+            ),
             "runId": request.run_id,
             "guidance": _RUN_NOT_FOUND_GUIDANCE,
+            "nextAction": "memory_quality_check",
+            "nextArgs": quality_run_next_args(request, mode="start"),
         }
     scope_identity = snapshot.identity.scope
     mismatch = _poll_scope_mismatch(request, scope_identity)
@@ -227,11 +282,32 @@ def _poll_memory_quality_request(
                 "runId": snapshot.run_id,
             }
     if snapshot.status != "completed":
-        return _unfinished_poll_payload(repo_id, snapshot, scope_identity)
+        return _unfinished_poll_payload(repo_id, snapshot, scope_identity, request)
     result = dict(snapshot.result or {})
     if result.get("status") == "scope-refused":
         return {**result, "runId": snapshot.run_id}
     return {**result, "status": "completed", "runId": snapshot.run_id}
+
+
+def poll_scoped_run(
+    config: McpRuntimeConfig,
+    request: MemoryQualityPollRequest,
+    *,
+    operation: str,
+) -> dict[str, object]:
+    """Share the check's repository, scope and candidate-pair guards with previews."""
+    result = _poll_memory_quality_request(config, request, operation=operation)
+    if result.get("operation") == "memory_quality_check":
+        result["operation"] = operation
+    if result.get("nextAction") == "memory_quality_check":
+        result["nextAction"] = operation
+        result["nextArgs"] = {
+            "repo_id": request.repo_id,
+            "contract_path": request.contract_path,
+            "mode": "start",
+            "dry_run": True,
+        }
+    return result
 
 
 def _stamped(payload: dict[str, object]) -> dict[str, object]:
@@ -273,88 +349,11 @@ def poll_memory_quality_request(
     return _stamped(_poll_memory_quality_request(config, request))
 
 
-def _unfinished_poll_payload(
-    repo_id: str,
-    snapshot: QualityRunSnapshot,
-    scope_identity: MemoryScopeIdentity,
-) -> dict[str, object]:
-    result: dict[str, object] = {
-        "ok": True,
-        "operation": "memory_quality_check",
-        "repoId": repo_id,
-        "status": snapshot.status,
-        "runId": snapshot.run_id,
-        **_scope_projection(scope_identity),
-    }
-    if snapshot.status == "failed":
-        result["error"] = snapshot.error
-    return result
-
-
 def _execute_or_refuse(execution: MemoryQualityExecution) -> dict[str, object]:
     try:
         return _execute_memory_quality(execution)
     except MemoryCandidatePairError as error:
         return _pair_refusal(execution.scope.repo_id, error)
-
-
-def _pair_refusal(repo_id: str, error: MemoryCandidatePairError) -> dict[str, object]:
-    result: dict[str, object] = {
-        "ok": False,
-        "operation": "memory_quality_check",
-        "repoId": repo_id,
-        "status": "scope-refused",
-        **error.response_fields(),
-    }
-    result["status"] = "scope-refused"
-    return result
-
-
-def _scope_projection(identity: MemoryScopeIdentity) -> dict[str, object]:
-    pair = identity.pair_identity
-    if pair is None:
-        return {
-            "scopeAuthority": "official-diagnostic",
-            "acceptanceEligible": False,
-        }
-    return {
-        "scopeAuthority": "leaf-candidate",
-        "acceptanceEligible": True,
-        "contractPath": pair.contractPath,
-        "pairIdentity": pair.model_dump(mode="json"),
-    }
-
-
-def _poll_scope_mismatch(
-    request: MemoryQualityPollRequest,
-    identity: MemoryScopeIdentity,
-) -> dict[str, object] | None:
-    pair = identity.pair_identity
-    requested = request.contract_path
-    if pair is None and requested is None:
-        return None
-    if (
-        pair is not None
-        and requested is not None
-        and Path(requested).resolve() == Path(pair.contractPath).resolve()
-    ):
-        return None
-    contract_path = pair.contractPath if pair is not None else str(requested or "")
-    error = MemoryCandidatePairError(
-        "memory-candidate-pair-poll-scope-mismatch",
-        "poll must repeat the exact scope of the admitted memory-quality run",
-        failure=MemoryCandidatePairFailure(
-            field="contractPath",
-            contract_path=contract_path,
-            expected={"contractPath": None if pair is None else pair.contractPath},
-            observed={"contractPath": requested},
-            next_action="memory_quality_check",
-        ),
-    )
-    return {
-        **_pair_refusal(request.repo_id, error),
-        "runId": request.run_id,
-    }
 
 
 def _resolve_execution(
@@ -377,17 +376,75 @@ def _resolve_execution(
         checks=checks,
         detail_limit=request.detail_limit,
         publish_curator_report=scope.curator_report_path is not None and not request.checks,
+        full_run=not request.checks,
+    )
+
+
+def _unconverted_refusal(scope: Any) -> str | None:
+    """Why this run refuses its unconverted memory (MIK-R24 rule 9, MIK-R09 rule 6), or ``None``.
+
+    A leaf's tree is refused when its official line is converted, or by the cutover lock; the
+    official checkout of a repository-level run is refused by the cutover lock.
+    """
+
+    contract = scope.contract
+    if contract is not None:
+        if not isinstance(contract.memory_worktree, Path):
+            return None
+        return unconverted_line_refusal(
+            memory_worktree=contract.memory_worktree,
+            memory_repository=contract.memory_repo_path,
+            official_branch=contract.memory_source_branch,
+            operation="memory_quality_check",
+        )
+    memory_root = Path(scope.onboarding_root).parent
+    if (memory_root / LAYOUT_MARKER_PATH).is_file():
+        return None
+    return cutover_lock_refusal(
+        memory_root,
+        operation="memory_quality_check",
+        line=f"the official memory checkout {memory_root.as_posix()}",
     )
 
 
 def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, object]:
     scope = revalidate_memory_candidate_scope(execution.config, execution.scope)
+    refusal = _unconverted_refusal(scope)
+    if refusal is not None:
+        # MIK-R24 rule 9 / MIK-R09 rule 6: unconverted memory is never checked in the old format
+        # once its official line, or anything in its repository, is converted; it crosses first.
+        whole: dict[str, object] = {
+            "ok": False,
+            "operation": "memory_quality_check",
+            "repoId": scope.repo_id,
+            "state": "refused",
+            "code": "unconverted-memory",
+            "detail": refusal,
+        }
+        # The delivered answer projects blockingCount, nextAction and status; the whole
+        # carries the projection's own values (computed in the one place, nothing made up)
+        # so the answer validates against it.
+        projected = quality_result_answer(whole)
+        whole["status"] = projected["status"]
+        whole["blockingCount"] = projected["blockingCount"]
+        whole["nextAction"] = projected["nextAction"]
+        return whole
     quality_code_root = scope.quality_code_root
     quality_context = scope.quality_context
     candidate_inputs = (
         _curator_candidate_inputs(scope) if execution.publish_curator_report else None
     )
     census = prepare_memory_census(scope)
+    gate, worklist = _knowledge_gate_and_worklist(scope, candidate_inputs)
+    leaf_request = leaf_base_request(scope.contract, execution.config.coordination_root)
+    route_indexes = None
+    if execution.full_run:
+        route_indexes = build_route_indexes(
+            code_root=scope.quality_code_root,
+            onboarding_root=scope.onboarding_root,
+            repository=scope.quality_context.code_repository_name,
+            storage=scope.quality_context.storage,
+        )
     payload = run_memory_quality_check(
         scope.onboarding_root,
         checks=execution.checks,
@@ -395,13 +452,11 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
             code_repository_root=quality_code_root,
             context=quality_context,
             detail_limit=execution.detail_limit,
-            unstamped_code_commit=(
-                None if scope.prepared_code_view is not None else scope.unstamped_code_commit
-            ),
-            retained_code_history_commits=scope.prepared_code_history_commits,
             report_path=(scope.curator_report_path if execution.publish_curator_report else None),
             include_rows=execution.publish_curator_report,
             write_report=not execution.publish_curator_report,
+            knowledge_base=converted_check_base(scope, execution.config.coordination_root),
+            landing_base=(None if leaf_request is None else leaf_base_port(leaf_request)),
         ),
         include_report_only_findings=execution.publish_curator_report,
     )
@@ -423,43 +478,122 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
         response["memoryCensus"] = publish_memory_census(
             census, detail_limit=execution.detail_limit
         )
+    response.update(_knowledge_briefs(worklist, gate))
+    if route_indexes is not None:
+        response["routeIndexCacheBuild"] = route_indexes.cache_build_summary()
+    proof = _without_proof(scope.onboarding_root.parent, execution.config.coordination_root)
+    if proof is not None:
+        response["invariantsWithoutProofCount"] = len(proof.rows)
     if not execution.publish_curator_report:
-        return _bounded_quality_response(response, execution.detail_limit)
+        return _answered_quality_response(
+            _bounded_quality_response(response, execution.detail_limit)
+        )
     _attach_curator_checklist(
         execution,
         payload,
         response,
         candidate_inputs=candidate_inputs,
-        census=census,
+        prepared=_PreparedInputs(
+            census=census,
+            worklist=worklist,
+            gate=gate,
+            without_proof=proof,
+            route_indexes=route_indexes,
+        ),
     )
-    return _bounded_quality_response(response, execution.detail_limit)
+    return _answered_quality_response(_bounded_quality_response(response, execution.detail_limit))
 
 
-def _bounded_quality_response(response: dict[str, object], detail_limit: int) -> dict[str, object]:
-    """Bound transport samples after complete checklist and catalog publication."""
+def _answered_quality_response(response: dict[str, object]) -> dict[str, object]:
+    """Keep the computed status in the whole result the log records.
 
-    def sampled(payload: dict[str, Any]) -> dict[str, Any]:
-        result = dict(payload)
-        for field, count_field in (
-            ("findings", "findingSampleCount"),
-            ("surfacedFindings", "surfacedSampleCount"),
-            ("debtFindings", "debtSampleCount"),
-            ("reportOnlySample", "reportOnlySampleCount"),
-        ):
-            findings = result.get(field)
-            if isinstance(findings, list):
-                result[field] = findings[:detail_limit]
-                result[count_field] = len(result[field])
-        return result
+    MIK-R110 rule 4 computes the agent-facing answer once from the whole
+    check result; the whole result carries its keys (status, reason, and
+    blocking selection) so the log, the command line, and the delivered
+    status reason from one set of entries.
+    """
 
-    result = sampled(response)
-    checks = result.get("checks")
-    if isinstance(checks, dict):
-        result["checks"] = {
-            name: sampled(check) if isinstance(check, dict) else check
-            for name, check in checks.items()
-        }
-    return result
+    answer = quality_result_answer(dict(response))
+    for key, value in answer.items():
+        if key not in ("ok", "repoId", "onboardingRoot", "routeIndexCacheBuild"):
+            response[key] = value
+    return response
+
+
+@dataclass(frozen=True)
+class _PreparedInputs:
+    """What the run prepared before the checks: the census, and the leaf's worklist (MIK-R08)."""
+
+    census: PreparedMemoryCensus | None
+    without_proof: WithoutProof | None = None
+    route_indexes: RouteIndexBuildResult | None = None
+    worklist: tuple[dict[str, Any], str | None] | None = None
+    gate: GateResult | None = None
+    """MIK-R09's verdict over the exact curator candidate; ``None`` for an unconverted leaf."""
+
+
+def _knowledge_gate_and_worklist(
+    scope: MemoryScope, candidate_inputs: _CuratorCandidateInputs | None
+) -> tuple[GateResult | None, tuple[dict[str, Any], str | None] | None]:
+    """The gate's verdict and the worklist it recomputed; without a gate, the plain recompute."""
+
+    gate = _knowledge_gate(scope, candidate_inputs)
+    if gate is None:
+        return None, _knowledge_worklist(scope)
+    return gate, (dict(gate.worklist), gate.worklist_path)
+
+
+def _knowledge_gate(
+    scope: MemoryScope, candidate_inputs: _CuratorCandidateInputs | None
+) -> GateResult | None:
+    """The mandatory gate over the exact candidate this curator publication attests (MIK-R09).
+
+    It recomputes the worklist over the captured code and memory trees and persists it, decides every
+    item through its kind's predicate and runs the validator. ``None`` for a scope that publishes no
+    curator report, a non-leaf scope, and every unconverted leaf, whose run is unchanged.
+    """
+
+    contract = scope.contract
+    if (
+        contract is None
+        or candidate_inputs is None
+        or contract.kind != "leaf"
+        or contract.memory_mode != "external"
+    ):
+        return None
+    return evaluate_leaf_gate(
+        contract,
+        CandidateTrees(code=candidate_inputs.code_tree, memory=candidate_inputs.memory_tree),
+    )
+
+
+def _knowledge_worklist(scope: MemoryScope) -> tuple[dict[str, Any], str | None] | None:
+    """Recompute and persist the leaf's MIK-R08 worklist; ``None`` where none applies.
+
+    A leaf contract gets a worklist when K_B or K_C is converted; a non-leaf scope or a leaf
+    whose two memory sides are unconverted gets none. :func:`recompute_leaf_worklist` is the
+    one recompute entry point.
+    """
+
+    contract = scope.contract
+    return None if contract is None else recompute_leaf_worklist(contract)
+
+
+def _bounded_quality_response(response: dict[str, object], _detail_limit: int) -> dict[str, object]:
+    """Keep the complete computed populations in the whole result the log records.
+
+    The logger, the command line, and the internal lane all read this whole
+    result, so no finding population is cut here: the detail file must recover
+    every row, including rows a subset or failed-report delivery sample leaves
+    out. Delivery sampling lives in the answer projection --
+    ``quality_result_answer`` carries counts and the blocking entries capped
+    at ``TOOL_ANSWER_LIST_MAX`` -- while ``_detail_limit`` (retained for the
+    pinned call shape) still bounds the census and catalog publication the
+    callers request elsewhere. Failed-report recovery reads these same
+    complete rows.
+    """
+
+    return dict(response)
 
 
 def _attach_curator_checklist(
@@ -468,7 +602,7 @@ def _attach_curator_checklist(
     response: dict[str, object],
     *,
     candidate_inputs: _CuratorCandidateInputs | None = None,
-    census: PreparedMemoryCensus | None,
+    prepared: _PreparedInputs,
 ) -> None:
     config = execution.config
     scope = revalidate_memory_candidate_scope(config, execution.scope)
@@ -524,13 +658,8 @@ def _attach_curator_checklist(
         settings=scope.quality_context.storage,
         code_repository_name=scope.quality_context.code_repository_name,
     )
-    route_indexes = build_route_indexes(
-        code_root=scope.quality_code_root,
-        onboarding_root=scope.onboarding_root,
-        repository=scope.quality_context.code_repository_name,
-        storage=scope.quality_context.storage,
-        dry_run=True,
-    )
+    route_indexes = prepared.route_indexes
+    assert route_indexes is not None
     scope = revalidate_memory_candidate_scope(config, scope)
     if scope.curator_report_path is None:
         raise RuntimeError("curator publication has no enclosure-local report path")
@@ -543,9 +672,9 @@ def _attach_curator_checklist(
         expected=candidate_inputs,
         observed=_curator_candidate_inputs(scope),
     )
-    if census is None:
+    if prepared.census is None:
         raise RuntimeError("curator publication requires its complete plane-derived census")
-    source_candidates = census_curator_candidates(census)
+    source_candidates = census_curator_candidates(prepared.census)
     # The knowledge-review summary is derived from the curator-coherence authority, which only the
     # external-memory leaf path below can read -- but `CuratorChecklist` is built for EVERY scope.
     # It is therefore initialised here, on the same path as the other two accepted-no-impact
@@ -557,55 +686,36 @@ def _attach_curator_checklist(
         and scope.contract.memory_mode == "external"
         and scope.contract.kind == "leaf"
     ):
-        changed_paths = sorted({*census.scope.working_paths, *census.scope.committed_paths})
-        current_working_paths = _current_working_code_paths(scope, census.scope.working_paths)
-        accepted_no_impact = frozenset()
-        accepted_route_no_impact = frozenset()
+        changed_paths = sorted(
+            {*prepared.census.scope.working_paths, *prepared.census.scope.committed_paths}
+        )
+        current_working_paths = _current_working_code_paths(
+            scope, prepared.census.scope.working_paths
+        )
         try:
             coherence = require_current_curator_coherence(scope.contract)
         except CuratorCoherenceError:
             pass
         else:
-            no_impact = curator_coherence_no_impact(coherence)
-            accepted_no_impact = no_impact.content_sources
-            accepted_route_no_impact = no_impact.source_routes
             knowledge_review = curator_knowledge_review_summaries(coherence)
-        try:
-            validate_memory_refresh_attestations(
-                scope.quality_context,
-                changed_paths,
+        gate_findings, gate_report_only = _onboarding_refresh_gate(
+            scope,
+            _OnboardingGateInputs(
+                traced_paths=_gate_changed_paths(prepared.worklist, changed_paths),
                 working_paths=current_working_paths,
-                body_gate=OnboardingBodyGateEvidence(
-                    memory_tree=scope.onboarding_root.parent,
-                    memory_verified_commit=contract_memory_verified_commit(scope.contract),
-                    accepted_no_impact=accepted_no_impact,
-                ),
-                route_body_gate=OnboardingBodyGateEvidence(
-                    memory_tree=scope.onboarding_root.parent,
-                    memory_verified_commit=contract_memory_verified_commit(scope.contract),
-                    accepted_no_impact=accepted_route_no_impact,
-                ),
+                worklist=prepared.worklist,
+            ),
+            response,
+        )
+        repair_findings.extend(_with_gate(gate_findings, prepared.gate))
+        report_only.extend(_needed_rows_dropped(gate_report_only, prepared.worklist, response))
+        # MIK-R178 rule 4: an entity row citing a path the code candidate lacks is actionable.
+        repair_findings.extend(
+            entity_evidence_findings_for_candidate(
+                scope.quality_context, scope.contract.code_worktree
             )
-        except RuntimeError as error:
-            repair_findings.append(
-                {
-                    "check": "memory-refresh-attestations",
-                    "code": "memory-refresh-attestation-failed",
-                    "path": "",
-                    "message": str(error),
-                }
-            )
-    repair_findings.extend(
-        {
-            "check": "memory-census",
-            "code": blocker.code,
-            "path": blocker.identity.memoryRootRelativePath
-            if blocker.identity
-            else blocker.sourcePath or "",
-            "message": blocker.detail,
-        }
-        for blocker in census.result.blockers
-    )
+        )
+    repair_findings.extend(_prepared_findings(prepared))
     checklist = write_curator_checklist(
         CuratorChecklist(
             report_path=scope.curator_report_path,
@@ -624,6 +734,9 @@ def _attach_curator_checklist(
             drift_rows=drift_rows,
             report_only_findings=report_only,
             knowledge_review=knowledge_review,
+            without_proof=prepared.without_proof,
+            knowledge_worklist=None if prepared.worklist is None else prepared.worklist[0],
+            knowledge_worklist_path=None if prepared.worklist is None else prepared.worklist[1],
         )
     )
     response.pop("reportOnlyFindings", None)
@@ -636,6 +749,223 @@ def _attach_curator_checklist(
         missing_onboarding=missing_onboarding,
         stale_route_indexes=route_indexes.stale_indexes,
     )
+
+
+def _prepared_findings(prepared: _PreparedInputs) -> list[dict[str, Any]]:
+    """The census's blockers, as repair findings."""
+
+    assert prepared.census is not None
+    findings: list[dict[str, Any]] = []
+    for blocker in prepared.census.result.blockers:
+        path = (
+            blocker.identity.memoryRootRelativePath
+            if blocker.identity
+            else blocker.sourcePath or ""
+        )
+        findings.append(
+            {
+                "check": "memory-census",
+                "code": blocker.code,
+                "path": path,
+                "message": blocker.detail,
+                # MIK-R110 rule 4: what the repair loop opens (document),
+                # what motivated it (place), and why it blocks (reason).
+                "document": path,
+                "place": blocker.sourcePath or "",
+                "reason": blocker.detail,
+            }
+        )
+    return findings
+
+
+def _with_gate(findings: list[Any], gate: GateResult | None) -> list[Any]:
+    """The onboarding gate's findings and the mandatory gate's, each open item counted once.
+
+    MIK-R09 rule 1: each open worklist item, each unreadable input and each validator violation
+    is one repair finding toward ``curatorActionableCount``; none is report-only. Rule 7: the
+    onboarding gate runs through the same registry, so an ``onboarding_trace`` item MIK-R30 already
+    reports (same item ID, with its own required action) is not counted again, and neither is an
+    unreadable onboarding side when the gate's worklist is itself incomplete.
+    """
+
+    if gate is None:
+        return findings
+    traced = {finding.get("itemId") for finding in findings if finding.get("itemId")}
+    kept = _onboarding_findings_beside(
+        findings, incomplete=gate.worklist.get("state") != "complete"
+    )
+    kept += [
+        finding.to_repair_finding()
+        for finding in gate.findings
+        if finding.item is None or finding.item not in traced
+    ]
+    return kept
+
+
+def _onboarding_findings_beside(findings: list[Any], *, incomplete: bool) -> list[Any]:
+    """MIK-R30's findings, less its unreadable-side problem when the gate already names it."""
+
+    if not incomplete:
+        return list(findings)
+    return [
+        finding
+        for finding in findings
+        if finding.get("check") != "onboarding-trace" or "itemId" in finding
+    ]
+
+
+def _needed_rows_dropped(
+    findings: list[Any],
+    worklist: tuple[dict[str, Any], str | None] | None,
+    response: dict[str, object] | None = None,
+) -> list[Any]:
+    """MIK-R30's report-only findings, less the rows an unexplained item needs (MIK-R10 rule 5).
+
+    An ``onboarding:<path>`` row answering an uncovered file's unexplained change is the trace that
+    item requires, so it is never reported as an unnecessary row. MIK-R30's report-only findings
+    are exactly its unnecessary rows, so the tool response's ``onboardingTrace`` count is set to
+    what is kept, and the two agree.
+    """
+
+    answering = (
+        frozenset()
+        if worklist is None
+        else answering_trace_subjects(worklist[0].get("items") or ())
+    )
+    kept = [one for one in findings if one.get("subject") not in answering]
+    brief = None if response is None else response.get("onboardingTrace")
+    if isinstance(brief, dict):
+        brief["unnecessaryRowCount"] = len(kept)
+    return kept
+
+
+def _gate_changed_paths(
+    worklist: tuple[dict[str, Any], str | None] | None, census_paths: list[str]
+) -> list[str]:
+    """The changed source paths MIK-R30's gate judges: the worklist's own, when it is complete.
+
+    The gate compares the leaf's base B with its candidate C. The census compares from the recorded
+    closeout's code commit once a leaf has closed out, so for a leaf that continues afterwards its
+    paths are only the newer ones. The response's ``onboardingTrace`` block is computed over the
+    gate's paths, so the block and the gate name the same open traces (L37 carry).
+    """
+
+    document = None if worklist is None else worklist[0]
+    if document is None or document.get("state") != "complete":
+        return census_paths
+    return sorted({str(change["path"]) for change in document.get("changes") or ()})
+
+
+def _worklist_identical_changes(
+    worklist: tuple[dict[str, Any], str | None] | None,
+) -> tuple[dict[str, list[str]] | None, str]:
+    """The worklist run's identical-copy groups, or why they cannot be read (MIK-R177).
+
+    The gate groups its trace items exactly as ``worklist_onboarding`` does, from the same
+    document's ``identicalChanges``. A document that is absent or not ``complete`` names no groups,
+    and the gate refuses by name instead of judging ungrouped items.
+    """
+
+    if worklist is None:
+        return None, "no worklist run covers this leaf"
+    document = worklist[0]
+    state = document.get("state")
+    if state != "complete":
+        return None, f"the worklist run is {state!r}"
+    try:
+        groups = identical_changes_from_run(document)
+    except IdenticalChangesUnreadable as error:
+        return None, str(error)
+    return groups, ""
+
+
+@dataclass(frozen=True)
+class _OnboardingGateInputs:
+    """What one run hands its onboarding gate: its paths and its worklist run.
+
+    ``traced_paths`` is the gate's own changed set (MIK-R30's); ``worklist`` is the run's own
+    document, whose ``identicalChanges`` the gate groups identical copies by (MIK-R177).
+    """
+
+    traced_paths: list[str]
+    working_paths: list[str]
+    worklist: tuple[dict[str, Any], str | None] | None
+
+
+def _onboarding_refresh_gate(
+    scope: MemoryScope,
+    inputs: _OnboardingGateInputs,
+    response: dict[str, object],
+) -> tuple[list[Any], list[Any]]:
+    """The leaf's onboarding gate: its repair findings and its report-only findings.
+
+    A converted tree (K_B or K_C holds the layout marker) runs MIK-R30's history-file gate: one
+    repair finding per missing trace, unnecessary rows report-only, and ``onboardingTrace`` on the
+    response. Missing converted sides are incomplete; unconverted public inputs refuse upstream.
+    """
+
+    contract = scope.contract
+    assert contract is not None
+    traced_paths = inputs.traced_paths
+    working_paths, worklist = inputs.working_paths, inputs.worklist
+    memory_tree = scope.onboarding_root.parent
+    trace_sides = leaf_onboarding_trace_sides(contract, memory_tree=memory_tree)
+    if trace_sides is not None:
+        try:
+            code_blobs = worktree_code_blobs(contract.code_worktree, traced_paths)
+        except Exception as error:
+            return (
+                [
+                    {
+                        "check": CHECK_NAME,
+                        "code": INCOMPLETE_CODE,
+                        "path": "",
+                        "message": (
+                            "the onboarding trace gate cannot read the code candidate's "
+                            f"blobs: {error}"
+                        ),
+                    }
+                ],
+                [],
+            )
+        identical_changes, unreadable = _worklist_identical_changes(worklist)
+        if identical_changes is None:
+            return (
+                [
+                    {
+                        "check": CHECK_NAME,
+                        "code": INCOMPLETE_CODE,
+                        "path": "" if worklist is None or worklist[1] is None else worklist[1],
+                        "message": (
+                            "the onboarding trace gate cannot read the worklist's identical-copy "
+                            f"groups: {unreadable}. It judges no ungrouped items; recompute the "
+                            "leaf's worklist (knowledge_integrity_check, or this leaf's "
+                            "memory_quality_check) and rerun the gate"
+                        ),
+                    }
+                ],
+                [],
+            )
+        trace, findings = onboarding_trace_gate_for_context(
+            scope.quality_context,
+            traced_paths,
+            trace_sides,
+            OnboardingTraceInputs(
+                code_blobs=code_blobs,
+                identical_changes=identical_changes,
+                working_paths=working_paths,
+            ),
+        )
+        response["onboardingTrace"] = trace.brief()
+        return list(findings), trace.report_only_findings()
+    return [
+        {
+            "check": CHECK_NAME,
+            "code": INCOMPLETE_CODE,
+            "path": "",
+            "message": "the onboarding trace gate has no converted memory sides",
+        }
+    ], []
 
 
 def _checklist_finding_sets(
@@ -835,13 +1165,20 @@ def _attach_coherence_readiness(scope: MemoryScope, response: dict[str, object])
     try:
         validated = require_current_curator_coherence(scope.contract)
     except CuratorCoherenceError as exc:
+        # MIK-R110 rule 4: an answer with ``ok`` false holds the reason as a code and the
+        # next action. A refusal taken over from the coherence check keeps that check's
+        # next action -- including ``task_doc`` when the task document has no parent, as
+        # ``curator_coherence`` names for the same state.
         response["ok"] = False
         response["checklistStatus"] = "coherence-required"
         response["coherenceStatus"] = exc.status
+        response["code"] = exc.status
         response["guidance"] = (
             "Memory repairs are complete, but closeout is not ready: publish or refresh the "
             "exact structured curator-coherence authority with curator_coherence, then validate it."
         )
+        response["error"] = failed_quality_error(response, {"code": exc.status}, 0)
+        response["nextAction"] = exc.next_action or "curator_coherence"
         return
     response["coherenceStatus"] = "current"
     response["coherenceRecordDigest"] = validated.record_digest

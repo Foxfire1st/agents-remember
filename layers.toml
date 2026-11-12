@@ -118,8 +118,8 @@ rank = 4
 path = "controlplane/"
 present = true
 charter = """
-Durable interaction records and the policy over them: gates, the operator inbox,
-expectations, escalation and retention rules, and the single-writer durable-store
+Durable interaction records and the policy over them: gates, attention dismissals, the
+closeout queue's records, retention rules, and the single-writer durable-store
 contract they share. Lowest of the stateful interaction services because it is the
 substrate the rest observe, project and act on, so the primitives its own records are aged
 and folded by are defined here rather than borrowed from a package above.
@@ -211,12 +211,15 @@ charter = """
 Memory repository initialization, baseline adoption and carryover. Above memory_quality
 because adopting a baseline asks whether it is current.
 
-Experimental knowledge storage (`memory/knowledge/`) also lives here: the concrete APSW-backed
-SQLite candidate that holds repository, invariant and revision identity. It is a durable record
-store, so it ranks with the record stores rather than with the application that admits its
-writes. Consumers that rank below it -- `worktrees` and `memory_quality` among them -- receive
+Knowledge is text in Git: cards and sidecars under `onboarding/` and records under `knowledge/`
+(file models in `models/knowledge_files/`). The derived index of a memory tree also lives here
+(`memory/knowledge_index/`, built with the schema and the read code of `memory/knowledge/`): an
+APSW-backed SQLite cache that is rebuilt from those files and that no caller writes. The canonical
+knowledge database is retired (MIK-R26); `memory/conversion/` holds the one reader of a legacy
+database. The index storage ranks with the record stores rather than with the application.
+Consumers that rank below it -- `worktrees` and `memory_quality` among them -- receive
 `models/knowledge` values or an already-prepared result from `application`, and never import
-this package.
+`memory/knowledge/`.
 """
 
 [package.providers]
@@ -272,11 +275,10 @@ path = "serving/"
 present = true
 deleted_by = "260731-EFA-L12"
 charter = """
-The served process as it stands today: the HTTP application, the terminal host, the
-harness control bridge, the conversation runtime and the adapters behind them. Everything
-here is a PERFORMER -- if a module in `serving/` is a pure decision, a predicate, a router
-or a policy, its home is the domain package that owns the substrate it decides about, not
-this one. 260731-EFA-L10 and 260731-EFA-L11 move the adapters and five packages out of it;
+The served process as it stands today: the HTTP application, its projections and the
+routes behind the dashboard. Everything here is a PERFORMER -- if a module in `serving/`
+is a pure decision, a predicate, a router or a policy, its home is the domain package that
+owns the substrate it decides about, not this one. 260731-EFA-L10 and 260731-EFA-L11 move the adapters and five packages out of it;
 260731-EFA-L12 takes the web surface into `dashboard/` and deletes what is left.
 """
 

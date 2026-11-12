@@ -30,9 +30,15 @@ class LifecycleFinalizeTaskResponse(ToolResponse):
     targetBranch: str | None = None
     blockers: list[str | CompletionBlocker] = Field(default_factory=list)
     cleanup: dict[str, Any] = Field(default_factory=dict)
+    # MIK-R207: the outside scratch root a completed-cleanup retry removed, or the one that
+    # still remains and blocks the answer. Absent for an enclosure published before it.
+    outsideScratch: dict[str, Any] = Field(default_factory=dict)
+    # MIK-R207 rule 5: what the terminal sweep removed, and the roots it left with their reason.
+    outsideScratchReconcile: dict[str, Any] = Field(default_factory=dict)
     taskUpdates: dict[str, Any] = Field(default_factory=dict)
     projectionEffects: list[TaskDocProjectionEffect] = Field(default_factory=list, max_length=8)
     taskArchive: dict[str, Any] = Field(default_factory=dict)
+    agentArchive: dict[str, Any] = Field(default_factory=dict)
     summary: str = ""
     # The atomic-series activation facts the SUCCESS path of a real series finalize carries:
     # ``worktrees/modules/finalize.py`` merges them out of
@@ -48,10 +54,3 @@ class LifecycleFinalizeTaskResponse(ToolResponse):
     # why the transaction completed and the caller got a validation error instead of the payload.
     atomicSeriesActivation: AtomicSeriesActivationFact | None = None
     atomicSeriesActivationRelease: AtomicSeriesActivationRelease | None = None
-    # Completion-seat cleanup is additive to finalization truth. Default-on auto-close reports the
-    # exact retired, missing-report, and per-seat-failure sets; the explicit settings opt-out uses
-    # the historical landed/archive field instead. All are empty on a dry run or disabled edge.
-    autoClosedSeats: list[str] = Field(default_factory=list)
-    autoCloseDeferredSeats: list[str] = Field(default_factory=list)
-    autoCloseFailedSeats: list[str] = Field(default_factory=list)
-    autoLandedSeats: list[str] = Field(default_factory=list)

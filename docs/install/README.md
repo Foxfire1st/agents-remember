@@ -1,63 +1,59 @@
-# Install Guides
+# Install
 
-These pages explain how to copy the Agents Remember starter package for each
-agent harness.
+Agents Remember is installed in the same five steps for every harness. This page names the steps
+and links the page of each harness. [Getting started](../getting-started.md) tells the steps in
+full.
 
-The normal first-run path is:
+## Platforms
 
-1. Copy the harness-native package files from this repo into your workspace.
-2. Render the copied package. The `render-starter` script is a convenience for
-   replacing placeholders in the copied files: it infers the workspace root from
-   the copied harness folder, fills repository names and hook/context commands,
-   and validates that each requested repository folder exists. Pass every
-   repository folder name after one `--repo`, for example:
+The package declares Linux and macOS as its platforms, and it requires Python 3.14
+(`>=3.14,<3.15`). Windows is supported through WSL, which counts as Linux.
 
-   ```text
-   python .codex/render-starter.py --repo my-repo shared-lib
-   ```
+The host, which runs the role agents, supports Linux x86_64 only. On another platform, step 4
+refuses at its host stage, the part of the call that installs and starts the host, and no role
+agent starts. [Platforms without a host](../host.md#platforms-without-a-host) tells what the call
+does there.
 
-   On POSIX systems you can use `render-starter.sh`; on native Windows you can
-   use `render-starter.ps1`.
+## Install steps
 
-   If you prefer not to run the renderer, manually replace every placeholder in
-   the copied package and validate that no `<PATH/TO/YOUR/PROJECTS_FOLDER>`,
-   `<YOUR_REPOSITORY_FOLDER_NAME>`, or hook-command placeholder remains.
-3. Register the Agents Remember MCP server, usually:
+1. **Install the package.** Install the published package `agents-remember-mcp` with uv.
+   [Getting started](../getting-started.md#1-install-the-package) also tells how to build and
+   install the package from a checkout of the repository.
+2. **Write the settings file.** Create `~/.config/agents-remember/agents-remember-settings.json`.
+   It names the workspace root, the coordination root and your code repositories.
+3. **Register the tool server in your harness.** The harness starts the command
+   `agents-remember-mcp` with the arguments `--config` and the full path of the settings file.
+   The page of your harness shows the file and the form of this declaration. Restart the harness.
+4. **Start the setup.** In a chat of that harness, the agent makes one call:
+   `role_start(role="bootstrap", request_id="<a new UUID>")`. The call creates the coordination
+   root, installs and starts the host, starts one role agent in the role Bootstrap and starts the
+   dashboard.
+5. **Open the dashboard.** Open the address that the answer names, by default
+   `http://127.0.0.1:8765/`, and continue the setup in the chat of the Bootstrap role agent.
 
-   ```text
-   uvx agents-remember-mcp@latest --config <absolute path to agents-remember-settings.json>
-   ```
+The tool server serves the [skill](../concepts.md#skill) `l-01-agent-lifecycles`, the
+instructions of the roles, to the harness as MCP resources: files that a harness can list and read
+through the tool server. The setup needs no read of the skill; a role agent receives its part of
+the instructions with its first message.
 
-4. Restart the harness once.
-5. Invoke `c-13-install-and-onboard`; it runs or verifies `runtime_install()` and
-   then handles memory, onboarding, and providers.
+## Choose your harness
 
-Initial skills and hooks/rules/instructions come from the copied package. Do not
-run `skills_install()` for first-run setup; that MCP tool remains available for
-manual maintenance and non-package installs.
+Each page shows how the tool server is registered in that harness, which role agents the host can
+start with it, and what the harness needs.
 
-**Native Windows note:** enable long paths before working with worktree-backed
-tasks — worktree folders nest deeply enough that repos with deep trees exceed
-the legacy 260-character `MAX_PATH`, which breaks Python tooling, pip installs,
-and test fixtures mid-task. Run in an elevated PowerShell, then restart your
-harness:
+- [Install for Claude Code](claude-code.md)
+- [Install for Codex](codex.md)
+- [Install for Cursor](cursor.md)
+- [Install for Hermes](hermes.md)
+- [Install for Pi](pi.md)
+- [Install for OpenClaw](openclaw.md)
 
-```text
-Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name LongPathsEnabled -Value 1 -Type DWord
-git config --global core.longpaths true
-```
+The page of a harness names its harness id, the value that the argument `agent` of `role_start`
+and the key `harness` of the role settings take: `claude` for Claude Code, `codex` for Codex,
+`hermes` for Hermes with its provider entry, and `pi` for Pi. The host starts no role agent on
+Cursor or OpenClaw. A refused call of step 4 can list more ids: it names the harnesses the host
+knows, and `agents-remember paseo status --config <settings file>` shows under `providers` which of
+them are available.
 
-`worktree_start` checks this up front and refuses with the projected path
-length when the host cannot represent the worktree's deepest files. WSL is not
-affected.
-
-Then choose the guide for your tool:
-
-- [Codex](codex.md)
-- [Claude Code](claude-code.md)
-- [Cursor](cursor.md)
-- [Antigravity](antigravity.md)
-- [VS Code + GitHub Copilot](vscode-copilot.md)
-- [Hermes.md](hermes.md)
-- [Pi.dev](pi.md)
-- [OpenClaw](openclaw.md)
+[Harnesses and role settings](../reference/harnesses.md) lists what every harness needs in one
+place and describes the settings of a role. [The host](../host.md) describes the host itself.

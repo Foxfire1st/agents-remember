@@ -1,42 +1,147 @@
-import { AnimatePresence, motion } from "motion/react";
-import { memo, useState } from "react";
+import { memo, useRef, useState, type RefObject } from 'react';
+import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components';
 
-import { css, cva } from "../../styled-system/css";
-import { postAttentionDismiss } from "../data/actions";
-import { fmtWait, selectQueue } from "../data/selectors";
-import { servedAgeSeconds, useNowMs } from "../data/servedAges";
-import { dashboardStore, useDashboard } from "../data/store";
-import { Dot } from "../grammar/Dot";
-import { Panel } from "../grammar/Panel";
-import type { AttentionItem, TaskDocNode } from "../types/projection";
+import { css, cva, cx } from '../../styled-system/css';
+import { postAttentionDismiss } from '../data/actions';
+import { fmtWait, selectQueue } from '../data/selectors';
+import { servedAgeSeconds, useNowMs } from '../data/servedAges';
+import { dashboardStore, useDashboard } from '../data/store';
+import { Dot } from '../grammar/Dot';
+import { columnTabButton } from '../grammar/viewTabLook';
+import {
+  ATTENTION_SEVERITIES,
+  type AttentionItem,
+  type AttentionSeverity,
+  type TaskDocumentRef,
+} from '../types/projection';
+import { dim } from './detail-panel/pageStyles';
 
-// The home-screen attention queue: the server-ranked list of what needs the human,
-// rebuilt from mc2's renderAttn UX. "Open" jumps to the item's lifecycle in the detail view — the
-// deliberate queue↔detail coupling. Lifecycle-bound rows are dismissable: a
-// per-item "Dismiss" and "Clear all" both POST a current acknowledgement. Lifecycle rows are scoped
-// by lifecycle id, gate rows are consumed by cancelling/deleting the gate, and actionable-drift rows
-// are repo-level one-shot signals anchored by the drift snapshot timestamp.
-const sizing = css({ flex: "0 1 auto", maxHeight: "42%" });
-const list = css({ listStyle: "none", margin: "0", padding: "0", display: "grid", gap: "0.35rem" });
-const item = cva({
+// The attention queue: the server-ranked list of what needs the human. It is no block of the
+// column (MIK-R144 rule 3a): a bell in the head of the tasks column carries the number that waits
+// and the colour of the most pressing entry, and opens the entries in a layer over the tree. The
+// tree behind it keeps its place and its height. The layer is the dashboard's popover (the one of
+// the model and effort control): it has a bound of its own, scrolls inside it, and closes by
+// Escape, by a click outside and by the bell.
+//
+// Each entry shows its location as plain text, and names what it is about: the canonical task
+// document it opens, and the exact agent it concerns. Those are the row's own served identities;
+// the surface that can actually navigate owns the identity mapping (the tree's selection key, the
+// shell's chat target). The × and "Clear all" POST the current source occurrence's
+// acknowledgement; the server owns dismissal identity. Every entry is one acknowledgement per
+// occurrence (MIK-R200 rule 7): whatever its kind, a row carries a × and "Clear all" takes the
+// whole queue, because the human who has read an entry is the one who decides it is read.
+//
+// The measures are the task page's text sizes (MIK-R163 rule 1); see
+// lifecycle-list/columnLook.ts.
+//
+// The bell is a view tab at the column's size (`columnTabButton`). What only a bell has is here:
+// it takes the colour of the most pressing entry that waits, and it is filled while its layer is
+// open. Each of these is said on a state of the button, so it stands above the tab's own colour.
+const bellShape = css({
+  display: 'inline-flex',
+  alignItems: 'stretch',
+  "&[data-tone='alarm']": { color: 'alarm', borderColor: 'currentColor' },
+  "&[data-tone='warn']": { color: 'amber', borderColor: 'currentColor' },
+  "&[data-tone='info']": { color: 'cyan', borderColor: 'currentColor' },
+  _expanded: { background: 'color-mix(in oklab, currentColor 16%, token(colors.bg))' },
+});
+// The bell's face fills the button, so its hover text is the button's: a React Aria button passes
+// no `title` on. It reaches over the tab's own room to the button's edge and sets the bell's
+// narrower room; the number is set as a number, without the tab's letter spacing.
+const bellFace = css({
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '0.2625rem',
+  marginInline: '-0.525rem',
+  marginBlock: '-0.2625rem',
+  paddingInline: '0.3938rem',
+  paddingBlock: '0.2625rem',
+  lineHeight: '1',
+});
+// A line drawing of 13 px in the bell's own colour.
+const bellIcon = css({
+  display: 'block',
+  width: '0.8125rem',
+  height: '0.8125rem',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: '1.4',
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+});
+const bellCount = css({ fontWeight: '700', letterSpacing: '0' });
+// Where the layer hangs: under the head of the column, a little inside the column's edges. The
+// head (grammar/Panel's sticky band) is the box this line is laid out in.
+const layerAnchor = css({
+  position: 'absolute',
+  left: 'calc(0.3938rem - 1px)',
+  right: 'calc(0.3938rem - 1px)',
+  bottom: '0',
+  height: '0',
+  pointerEvents: 'none',
+});
+const layer = cva({
   base: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: "0.5rem",
-    paddingInline: "0.5rem",
-    paddingBlock: "0.4rem",
-    background: "bg",
-    borderLeftWidth: "3px",
-    borderLeftStyle: "solid",
-    borderLeftColor: "grid",
+    width: 'var(--trigger-width)',
+    overflow: 'auto',
+    background: 'bg',
+    color: 'ink',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, token(colors.muted) 45%, token(colors.grid))',
+    borderRadius: '3px',
+    boxShadow: '0 12px 30px oklch(0.08 0.02 250 / 0.8)',
+    paddingInline: '0.6125rem',
+    paddingBottom: '0.3938rem',
+    scrollbarWidth: 'thin',
+    scrollbarColor: 'token(colors.grid) transparent',
   },
-  variants: {
-    severity: {
-      alarm: { borderLeftColor: "alarm" },
-      warn: { borderLeftColor: "amber" },
-      info: { borderLeftColor: "cyan" },
-    },
-  },
+  variants: { empty: { true: { paddingBottom: '0.1313rem' } } },
+});
+const layerBody = css({ outline: 'none' });
+// The head of the layer is one line at the column's own width. In a rail that was dragged
+// narrower "Clear all" goes under the title and the title breaks: nothing is pushed out of sight.
+const layerHead = css({
+  position: 'sticky',
+  top: '0',
+  zIndex: '2',
+  display: 'flex',
+  flexWrap: 'wrap',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  columnGap: '0.4375rem',
+  rowGap: '0.2625rem',
+  minWidth: '0',
+  marginInline: '-0.6125rem',
+  marginBottom: '0.1313rem',
+  paddingInline: '0.6125rem',
+  paddingTop: '0.4375rem',
+  paddingBottom: '0.3063rem',
+  background: 'bg',
+});
+const heading = css({ margin: '0', minWidth: '0' });
+const nothing = css({ color: 'muted', fontWeight: '400' });
+const list = css({
+  listStyle: 'none',
+  display: 'grid',
+  marginBlock: '0',
+  marginInline: '-0.2625rem',
+  padding: '0',
+});
+// An entry is two lines: mark, what, age, dismiss; under it the task.
+const item = css({
+  display: 'grid',
+  gridTemplateColumns: '1ch minmax(0, 1fr) auto auto',
+  columnGap: '0.3938rem',
+  alignItems: 'baseline',
+  paddingInline: '0.2625rem',
+  paddingBlock: '0.21rem',
+  fontSize: '0.72rem',
+  lineHeight: '1.45',
+  borderTopWidth: '1px',
+  borderTopStyle: 'solid',
+  borderTopColor: 'color-mix(in oklab, token(colors.grid) 55%, transparent)',
+  _first: { borderTopWidth: '0' },
 });
 // The Dot is decorative (`aria-hidden`), so the severity has to be spoken by its wrapper. The
 // wrapper needs a ROLE that can carry a name: `aria-label` on a bare span names a `generic`, which
@@ -45,128 +150,107 @@ const item = cva({
 // puts "Severity: warn" in the accessibility tree with the glyph hidden underneath it.
 // (LifecycleList's equivalent span escapes the same bug only because it sits inside React Aria's
 // `role="option"`, whose name-from-content absorbs the label.)
-// `flexShrink` because the wrapper, not the Dot, is the flex item.
-const severityMark = css({ flexShrink: "0", lineHeight: "1.35" });
-const bodyCol = css({ flex: "1", minWidth: "0" });
-const head = css({ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" });
-const heading = css({ margin: "0" });
-const itemTitle = css({ fontWeight: "600" });
-const detail = css({ color: "ink", opacity: "0.85", fontSize: "0.82rem" });
-const meta = css({ color: "muted", fontSize: "0.75rem", letterSpacing: "0.04em" });
-const ghost = css({
-  font: "inherit",
-  color: "inherit",
-  background: "transparent",
-  borderStyle: "none",
-  cursor: "pointer",
-  textAlign: "left",
+// Dot brings a margin for running text; here the grid's gap spaces it.
+const severityMark = css({
+  textAlign: 'center',
+  userSelect: 'none',
+  '& > span': { marginRight: '0' },
 });
-const clearButton = css({
-  font: "inherit",
-  fontSize: "0.7rem",
-  color: "amber",
-  background: "transparent",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "amber",
-  borderRadius: "2px",
-  paddingInline: "0.45rem",
-  paddingBlock: "0.16rem",
-  cursor: "pointer",
-  _disabled: { opacity: 0.5, cursor: "default" },
+const what = css({
+  minWidth: '0',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  fontSize: '0.8rem',
 });
+const age = css({ fontSize: '0.72rem', whiteSpace: 'nowrap' });
 const dismissButton = css({
-  font: "inherit",
-  fontSize: "0.7rem",
-  color: "muted",
-  background: "transparent",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "2px",
-  paddingInline: "0.4rem",
-  paddingBlock: "0.12rem",
-  cursor: "pointer",
-  _hover: { color: "ink", borderColor: "muted" },
-  _disabled: { opacity: 0.5, cursor: "default" },
+  font: 'inherit',
+  lineHeight: '1',
+  color: 'muted',
+  background: 'transparent',
+  borderStyle: 'none',
+  paddingBlock: '0',
+  paddingInline: '0.1313rem',
+  cursor: 'pointer',
+  _hover: { color: 'ink' },
+  _disabled: { opacity: 0.5, cursor: 'default' },
 });
-const actionsCol = css({ display: "flex", alignItems: "center", gap: "0.35rem" });
 
-const EMPTY_TASK_DOCS: readonly TaskDocNode[] = [];
+const where = cva({
+  base: {
+    gridColumn: '2 / 5',
+    minWidth: '0',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.72rem',
+    color: 'muted',
+  },
+  variants: {
+    link: {
+      true: {
+        font: 'inherit',
+        fontSize: '0.72rem',
+        color: 'cyan',
+        background: 'transparent',
+        borderStyle: 'none',
+        padding: '0',
+        textAlign: 'left',
+        cursor: 'pointer',
+        _hover: { textDecoration: 'underline' },
+      },
+    },
+  },
+});
+// The subject line: the place, then the row's own controls for what it names. The place keeps its
+// ellipsis and the controls keep their width, so a narrow rail never hides the way in.
+const subject = css({
+  gridColumn: '2 / 5',
+  display: 'flex',
+  alignItems: 'baseline',
+  columnGap: '0.3938rem',
+  minWidth: '0',
+});
+const placeText = css({ flex: '1 1 auto', minWidth: '0' });
+const subjectControl = css({ flex: 'none' });
 
-function taskForAttention(item: AttentionItem, docs: readonly TaskDocNode[]): TaskDocNode | undefined {
-  if (!item.lifecycleId) return undefined;
-  const matches = docs.filter((doc) => doc.lifecycleId === item.lifecycleId);
-  return matches.find((doc) => doc.kind !== "master") ?? matches[0];
-}
+const KIND_WORDS: Record<AttentionSeverity, string> = {
+  alarm: 'alarm',
+  warn: 'warning',
+  info: 'information',
+};
+// The layer's bound: this part of the height of the column it lies over.
+const LAYER_BOUND = 0.62;
 
-function titleForAttention(item: AttentionItem, doc: TaskDocNode | undefined): string {
-  if (!doc) return item.title;
-  return doc.id ? `Task ${doc.id}: ${doc.title}` : doc.title;
-}
-
-function detailForAttention(item: AttentionItem, doc: TaskDocNode | undefined): string | undefined {
-  if (!doc) return item.detail;
-  return [item.title, item.detail].filter(Boolean).join(" · ");
+// The cause of an entry: what differs between the entries of one task.
+function causeForAttention(item: AttentionItem): string {
+  return [item.title, item.detail].filter(Boolean).join(' · ');
 }
 
 function dismissPayload(item: AttentionItem) {
   return {
     itemId: item.id,
     kind: item.kind,
-    lifecycleId: item.lifecycleId ?? null,
-    gateId: item.gateId,
   };
-}
-
-function canDismiss(item: AttentionItem): boolean {
-  return Boolean(
-    item.lifecycleId ||
-      (item.kind === "gate-open" && item.gateId) ||
-      item.kind === "actionable-drift",
-  );
-}
-
-function AttentionHead({
-  queueLength,
-  dismissableCount,
-  clearing,
-  onClearAll,
-}: {
-  queueLength: number;
-  dismissableCount: number;
-  clearing: boolean;
-  onClearAll: () => void;
-}) {
-  return (
-    <div className={head}>
-      <h2 className={heading}>Attention · {queueLength} waiting</h2>
-      {dismissableCount > 0 ? (
-        <button
-          type="button"
-          className={clearButton}
-          onClick={onClearAll}
-          disabled={clearing}
-          data-testid="attn-clear"
-        >
-          {clearing ? "Clearing" : "Clear all"}
-        </button>
-      ) : null}
-    </div>
-  );
 }
 
 function dismissAttentionItem(
   item: AttentionItem,
   dismissing: ReadonlySet<string>,
   setDismissing: (updater: (prev: ReadonlySet<string>) => ReadonlySet<string>) => void,
+  setFailed: (failed: boolean) => void,
 ): void {
-  if (!canDismiss(item) || dismissing.has(item.id)) return;
+  if (dismissing.has(item.id)) return;
+  setFailed(false);
   dashboardStore.getState().suppressAttention([item.id]);
   setDismissing((prev) => new Set(prev).add(item.id));
   void postAttentionDismiss(dismissPayload(item))
     .then((status) => {
-      if (status !== "dismissed") dashboardStore.getState().releaseAttention([item.id]);
+      if (status !== 'dismissed') {
+        dashboardStore.getState().releaseAttention([item.id]);
+        setFailed(true);
+      }
     })
     .finally(() =>
       setDismissing((prev) => {
@@ -181,148 +265,328 @@ function clearAllAttention(
   items: AttentionItem[],
   clearing: boolean,
   setClearing: (value: boolean) => void,
+  setFailed: (failed: boolean) => void,
 ): void {
-  if (clearing || items.length === 0) return;
-  const ids = items.map((item) => item.id);
+  // Every entry is one acknowledgement of its own occurrence (MIK-R200 rule 7), so every entry
+  // takes part: the queue is cleared whole.
+  const targets = items;
+  if (clearing || targets.length === 0) return;
+  setFailed(false);
+  const ids = targets.map((item) => item.id);
   dashboardStore.getState().suppressAttention(ids);
   setClearing(true);
   void Promise.all(
-    items.map(async (item) => ({
+    targets.map(async (item) => ({
       id: item.id,
       status: await postAttentionDismiss(dismissPayload(item)),
     })),
   )
     .then((results) => {
-      const failed = results.filter((result) => result.status !== "dismissed").map((result) => result.id);
-      if (failed.length > 0) dashboardStore.getState().releaseAttention(failed);
+      const failed = results
+        .filter((result) => result.status !== 'dismissed')
+        .map((result) => result.id);
+      if (failed.length > 0) {
+        dashboardStore.getState().releaseAttention(failed);
+        setFailed(true);
+      }
     })
     .finally(() => setClearing(false));
 }
 
-function AttentionRow({
+// What the bell says in words: the number that waits and, in its hover, the kinds.
+function bellWords(queue: readonly AttentionItem[]): { label: string; hover: string } {
+  if (queue.length === 0) {
+    return { label: 'Attention: nothing waiting', hover: 'Attention: nothing waiting' };
+  }
+  const label = `Attention: ${queue.length} waiting`;
+  const kinds = ATTENTION_SEVERITIES.map((severity) => {
+    const count = queue.filter((entry) => entry.severity === severity).length;
+    return count > 0 ? `${count} ${KIND_WORDS[severity]}` : '';
+  }).filter(Boolean);
+  return { label, hover: `${label} (${kinds.join(', ')})` };
+}
+
+// The bell, drawn for this panel on a grid of 16: a dome 7.4 wide and 4 high round (8, 6.6), sides
+// down to 8.9, a lip that flares out to 2.7 and 13.3 at 11.8, a clapper under it and a stem on
+// top. It is the panel's own drawing, scaled as a whole until it reaches as far as the bell of the
+// approved pages does in their pictures (9.5 by 12 px at 13 px). The body is one closed path, so
+// `filled` can tint it while something waits.
+function BellIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg className={bellIcon} viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M2.7 11.8Q4.3 10 4.3 8.9V6.6A3.7 4 0 0 1 8 2.6A3.7 4 0 0 1 11.7 6.6V8.9Q11.7 10 13.3 11.8Z"
+        fill={filled ? 'currentColor' : 'none'}
+        fillOpacity="0.28"
+      />
+      <path d="M6.4 14A1.7 1.8 0 0 0 9.6 14" />
+      <path d="M8 1.5V2.6" />
+    </svg>
+  );
+}
+
+// The agent a row names, as the surface that can open a chat needs it (MIK-R200 rule 8): the exact
+// served agent id, and the seat and document the dashboard's chat target is built from — the
+// launcher's selection is `{role, taskDocumentRef}` and its frame target is the execution of that
+// selection. A taskless seat carries no document, and never gets a task invented for it.
+export interface AttentionAgentTarget {
+  agentId: string;
+  role?: string;
+  taskKey?: string;
+  taskReference?: TaskDocumentRef;
+}
+
+export function agentTargetOf(item: AttentionItem): AttentionAgentTarget | null {
+  if (item.agentId === undefined) return null;
+  return {
+    agentId: item.agentId,
+    ...(item.agentRole !== undefined ? { role: item.agentRole } : {}),
+    ...(item.taskKey !== undefined ? { taskKey: item.taskKey } : {}),
+    ...(item.taskReference !== undefined ? { taskReference: item.taskReference } : {}),
+  };
+}
+
+// A row's way in to what it names. The task link is its own control and the agent's is a second
+// one, so a row that names both offers both; a taskless agent row offers the agent only. The
+// controls stay off when no handler can take them: a link that cannot open its subject is worse
+// than none (L190-R1-F09).
+function SubjectLinks({
   entry,
-  docs,
-  nowMs,
-  dismissing,
-  onSelect,
-  onDismiss,
+  onOpenTask,
+  onOpenAgent,
 }: {
   entry: AttentionItem;
-  docs: readonly TaskDocNode[];
-  nowMs: number;
-  dismissing: ReadonlySet<string>;
-  onSelect: (lifecycleId: string) => void;
-  onDismiss: (item: AttentionItem) => void;
+  onOpenTask?: (taskKey: string) => void;
+  onOpenAgent?: (target: AttentionAgentTarget) => void;
 }) {
-  const lifecycleId = entry.lifecycleId;
-  const doc = taskForAttention(entry, docs);
-  const displayTitle = titleForAttention(entry, doc);
-  const displayDetail = detailForAttention(entry, doc);
-  const dismissable = canDismiss(entry);
+  const taskKey = entry.taskKey;
+  const agent = agentTargetOf(entry);
   return (
-    <motion.li
-      key={entry.id}
-      layout
-      initial={{ opacity: 0, y: -4 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      className={item({ severity: entry.severity })}
+    <>
+      {taskKey !== undefined && onOpenTask ? (
+        <button
+          type="button"
+          className={cx(where({ link: true }), subjectControl)}
+          onClick={() => onOpenTask(taskKey)}
+          data-testid="attn-open"
+          aria-label={`Open task ${taskKey}`}
+          title={`Open task ${taskKey}`}
+        >
+          task
+        </button>
+      ) : null}
+      {agent && onOpenAgent ? (
+        <button
+          type="button"
+          className={cx(where({ link: true }), subjectControl)}
+          onClick={() => onOpenAgent(agent)}
+          data-testid="attn-open-agent"
+          aria-label={`Open agent ${agent.agentId}`}
+          title={`Open chat with ${agent.agentId}`}
+        >
+          agent
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+function AttentionRow({
+  entry,
+  place,
+  nowMs,
+  dismissing,
+  onDismiss,
+  onOpenTask,
+  onOpenAgent,
+}: {
+  entry: AttentionItem;
+  place: string;
+  nowMs: number;
+  dismissing: boolean;
+  onDismiss: (item: AttentionItem) => void;
+  onOpenTask?: (taskKey: string) => void;
+  onOpenAgent?: (target: AttentionAgentTarget) => void;
+}) {
+  const cause = causeForAttention(entry);
+  const waited = fmtWait(servedAgeSeconds(entry, entry.waitSeconds, nowMs));
+  return (
+    <li
+      className={item}
+      title={[cause, place, `Severity: ${entry.severity}`, `${entry.lane} · ${waited}`].join('\n')}
       data-testid="attn-item"
     >
       <span
         className={severityMark}
         role="img"
         aria-label={`Severity: ${entry.severity}`}
-        title={`Severity: ${entry.severity}`}
         data-testid="attn-severity"
       >
         <Dot variant={entry.severity} />
       </span>
-      <div className={bodyCol}>
-        <div className={itemTitle}>{displayTitle}</div>
-        {displayDetail ? <div className={detail}>{displayDetail}</div> : null}
-        <div className={meta}>
-          {entry.lane} · {fmtWait(servedAgeSeconds(entry, entry.waitSeconds, nowMs))}
-        </div>
-      </div>
-      <div className={actionsCol}>
-        {lifecycleId ? (
-          <button type="button" className={ghost} onClick={() => onSelect(lifecycleId)}>
-            Open
-          </button>
-        ) : null}
-        {dismissable ? (
-          <button
-            type="button"
-            className={dismissButton}
-            onClick={() => onDismiss(entry)}
-            disabled={dismissing.has(entry.id)}
-            data-testid="attn-dismiss"
-            aria-label={`Dismiss ${displayTitle}`}
-          >
-            Dismiss
-          </button>
-        ) : null}
-      </div>
-    </motion.li>
+      <span className={what}>{cause}</span>
+      <span className={cx(age, dim)}>{waited}</span>
+      <button
+        type="button"
+        className={dismissButton}
+        onClick={() => onDismiss(entry)}
+        disabled={dismissing}
+        data-testid="attn-dismiss"
+        aria-label={`Dismiss ${cause}: ${place}`}
+        title="Dismiss"
+      >
+        ×
+      </button>
+      <span className={subject}>
+        <span className={cx(where(), placeText)} data-testid="attn-place">
+          {place}
+        </span>
+        <SubjectLinks entry={entry} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} />
+      </span>
+    </li>
   );
 }
 
-function AttentionQueueImpl({
-  onSelect,
-  active = true,
+function AttentionLayer({
+  queue,
+  bodyRef,
+  onOpenTask,
+  onOpenAgent,
 }: {
-  onSelect: (lifecycleId: string) => void;
-  active?: boolean;
+  queue: readonly AttentionItem[];
+  bodyRef: RefObject<HTMLElement | null>;
+  onOpenTask?: (taskKey: string) => void;
+  onOpenAgent?: (target: AttentionAgentTarget) => void;
 }) {
-  const queue = useDashboard(selectQueue);
-  const docs = useDashboard((state) => state.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
-  // Wait times advance locally between emissions — the change gate no longer
-  // re-serves the queue every tick just because the waits aged. A hidden kept-alive rail freezes
-  // this clock; it has no visible age labels to refresh.
-  const nowMs = useNowMs(10_000, active);
+  // Wait times advance locally between emissions — the change gate no longer re-serves the queue
+  // every tick just because the waits aged. The clock runs only while the layer is open: a
+  // closed bell shows no age.
+  const nowMs = useNowMs(10_000);
   const [clearing, setClearing] = useState(false);
   const [dismissing, setDismissing] = useState<ReadonlySet<string>>(() => new Set());
-  const dismissableQueue = queue.filter(canDismiss);
-  const dismissItem = (item: AttentionItem) => dismissAttentionItem(item, dismissing, setDismissing);
-  const clearAll = () => clearAllAttention(dismissableQueue, clearing, setClearing);
+  const [failed, setFailed] = useState(false);
+  // "Clear all" takes the whole queue: every entry is its own acknowledgement, and the heading
+  // counts the same entries.
+  const clearable = queue.length > 0;
+  // An entry that goes takes its × and the keyboard's focus with it. The layer takes the focus
+  // first, so the keyboard stays in it: Escape still closes it and Tab goes on inside.
+  const keepFocus = () => bodyRef.current?.focus();
   return (
-    <Panel
-      testid="attention-queue"
-      head={
-        <AttentionHead
-          queueLength={queue.length}
-          dismissableCount={dismissableQueue.length}
-          clearing={clearing}
-          onClearAll={clearAll}
-        />
-      }
-      className={sizing}
-    >
-      {queue.length === 0 ? (
-        <p className="muted">Queue clear — nothing waiting.</p>
-      ) : (
+    <>
+      <div className={layerHead}>
+        <h2 className={heading}>
+          Attention ·{' '}
+          {queue.length > 0 ? (
+            `${queue.length} waiting`
+          ) : (
+            <span className={nothing}>nothing waiting</span>
+          )}
+        </h2>
+        {clearable ? (
+          <button
+            type="button"
+            className={columnTabButton}
+            onClick={() => {
+              keepFocus();
+              clearAllAttention([...queue], clearing, setClearing, setFailed);
+            }}
+            disabled={clearing}
+            data-testid="attn-clear"
+          >
+            {clearing ? 'Clearing' : 'Clear all'}
+          </button>
+        ) : null}
+      </div>
+      {failed ? <p role="alert">Dismissal did not hold. Try again.</p> : null}
+      {queue.length > 0 ? (
         <ul className={list}>
-          <AnimatePresence initial={false}>
-            {queue.map((q) => (
+          {queue.map((entry) => {
+            return (
               <AttentionRow
-                key={q.id}
-                entry={q}
-                docs={docs}
+                key={entry.id}
+                entry={entry}
+                place={entry.repoId ?? entry.lane}
                 nowMs={nowMs}
-                dismissing={dismissing}
-                onSelect={onSelect}
-                onDismiss={dismissItem}
+                dismissing={dismissing.has(entry.id)}
+                onDismiss={(target) => {
+                  keepFocus();
+                  dismissAttentionItem(target, dismissing, setDismissing, setFailed);
+                }}
+                onOpenTask={onOpenTask}
+                onOpenAgent={onOpenAgent}
               />
-            ))}
-          </AnimatePresence>
+            );
+          })}
         </ul>
-      )}
-    </Panel>
+      ) : null}
+    </>
   );
 }
 
-// Memoized (tab-switch CPU): a persistent rail panel — the shell re-renders on every view
-// switch with unchanged props, and the memo gate skips this subtree then; the queue's own store
-// subscriptions still drive its updates.
+function AttentionQueueImpl({ onOpenTask, onOpenAgent }: AttentionQueueProps) {
+  const queue = useDashboard(selectQueue);
+  const [open, setOpen] = useState(false);
+  const [bound, setBound] = useState<number | undefined>(undefined);
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const bodyRef = useRef<HTMLElement>(null);
+  const words = bellWords(queue);
+  const pressing = ATTENTION_SEVERITIES.find((severity) =>
+    queue.some((entry) => entry.severity === severity),
+  );
+  const changeOpen = (next: boolean) => {
+    if (next) {
+      const column = anchorRef.current?.closest('section');
+      setBound(column?.clientHeight ? Math.round(column.clientHeight * LAYER_BOUND) : undefined);
+    }
+    setOpen(next);
+  };
+  return (
+    <DialogTrigger isOpen={open} onOpenChange={changeOpen}>
+      <span ref={anchorRef} className={layerAnchor} aria-hidden="true" />
+      <Button
+        className={cx(columnTabButton, bellShape)}
+        data-tone={pressing}
+        aria-label={words.label}
+        data-testid="attention-bell"
+      >
+        <span className={bellFace} title={words.hover}>
+          <BellIcon filled={queue.length > 0} />
+          {queue.length > 0 ? <span className={bellCount}>{queue.length}</span> : null}
+        </span>
+      </Button>
+      <Popover
+        className={layer({ empty: queue.length === 0 })}
+        triggerRef={anchorRef}
+        placement="bottom start"
+        offset={2}
+        maxHeight={bound}
+      >
+        <Dialog
+          ref={bodyRef}
+          className={layerBody}
+          aria-label="Attention"
+          data-testid="attention-queue"
+        >
+          <AttentionLayer
+            queue={queue}
+            bodyRef={bodyRef}
+            onOpenTask={onOpenTask}
+            onOpenAgent={onOpenAgent}
+          />
+        </Dialog>
+      </Popover>
+    </DialogTrigger>
+  );
+}
+
+// The ways out of the layer, optional so the queue stays usable where nothing can navigate: a row
+// renders a control only when the handler AND the identity it needs are both there.
+export interface AttentionQueueProps {
+  onOpenTask?: (taskKey: string) => void;
+  onOpenAgent?: (target: AttentionAgentTarget) => void;
+}
+
+// Memoized (tab-switch CPU): the bell sits in the head of a persistent rail panel. The queue's
+// store subscription still drives the bell's updates; the open handlers come from the column and
+// only change when its own props do.
 export const AttentionQueue = memo(AttentionQueueImpl);

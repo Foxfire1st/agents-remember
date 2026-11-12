@@ -49,7 +49,6 @@ from agents_remember.application.knowledge_write_admission import (
     AdmissionProvenance,
     KnowledgeWriteAdmission,
 )
-from agents_remember.application.published_intent import published_dataset_path
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel.coordination_context.models import (
     CoordinationContext,
@@ -64,19 +63,12 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, R
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 
 __all__ = [
-    "BOOTSTRAP_STAGING_DIRECTORY",
     "AdmittedKnowledgeBootstrap",
     "BootstrapAuthority",
     "BootstrapRefusal",
     "admit_bootstrap_context",
     "bootstrap_scope",
-    "bootstrap_staging_root",
 ]
-
-# The one directory name a bootstrap's temporary staging lives under, inside the coordination
-# context's own named temp root. It is a constant rather than a caller argument so the cleanup owner
-# and the writer name the same place by construction.
-BOOTSTRAP_STAGING_DIRECTORY = "knowledge-bootstrap"
 
 # The one prefix a bootstrap operation's retry scope carries. A repository's bootstrap and any leaf
 # of that repository therefore never share an allocation-journal key: the scope is joined with the
@@ -131,20 +123,11 @@ class BootstrapRefusal:
 
 @dataclass(frozen=True)
 class AdmittedKnowledgeBootstrap:
-    """One admitted bootstrap context: the authority, the admission, and the two places it uses.
-
-    ``destination_path`` is the location this bootstrap publishes to, resolved through the ordinary
-    read route's own owner (:func:`~agents_remember.application.published_intent.
-    published_dataset_path`), so the writer and a later task's planner cannot disagree about where a
-    repository's knowledge lives. ``staging_root`` is the bounded temporary area this bootstrap's
-    candidate and its retained progress record live in, derived from the context's own temp root.
-    """
+    """The admitted authority and context for writing the repository's text knowledge."""
 
     authority: BootstrapAuthority
     admission: KnowledgeWriteAdmission
     context: CoordinationContext
-    destination_path: Path
-    staging_root: Path
 
     @property
     def repo_id(self) -> str:
@@ -160,16 +143,6 @@ def bootstrap_scope(repo_id: str) -> str:
     """
 
     return f"{_SCOPE_PREFIX}:{repo_id}"
-
-
-def bootstrap_staging_root(context: CoordinationContext, repo_id: str) -> Path:
-    """Where a repository's bootstrap stages its candidate and its retained progress.
-
-    Derived from the resolved context's own named temp root rather than from an argument, so the
-    writer, the resume path and the cleanup owner all name one directory by construction.
-    """
-
-    return context.temp_root / BOOTSTRAP_STAGING_DIRECTORY / repo_id
 
 
 def admit_bootstrap_context(
@@ -200,7 +173,7 @@ def admit_bootstrap_context(
                 f"repo_id {repo_id!r} declares no external memory root, so there is no memory line "
                 "for a knowledge bootstrap to publish on"
             ),
-            "declare the repository's memory root and run the c-00-initialize-memory-repo route",
+            "declare the repository's memory root and follow the memory initialization guide (docs/guides/onboard-existing-repo.md)",
         )
     root_refusal = _coordination_root_refusal(config, repo_id)
     if root_refusal is not None:
@@ -230,7 +203,7 @@ def _coordination_root_refusal(config: McpRuntimeConfig, repo_id: str) -> Bootst
             f"the coordination root {config.coordination_root.as_posix()} does not exist or is not a "
             f"directory, so repo_id {repo_id!r} has no workspace to bootstrap knowledge in"
         ),
-        "run runtime_install to create the coordinator scaffold first (c-13-install-and-onboard)",
+        "run runtime_install to create the coordinator scaffold first (docs/getting-started.md)",
     )
 
 
@@ -343,8 +316,6 @@ def _context_admission(
         authority=authority,
         admission=_admission(authority, code_commit, memory_commit),
         context=context,
-        destination_path=published_dataset_path(context),
-        staging_root=bootstrap_staging_root(context, repo_id),
     )
 
 

@@ -136,7 +136,7 @@ def discard_unstarted_subtask(request: DiscardUnstartedRequest) -> dict[str, Any
         task_root,
         parent,
         updated,
-        [updated],
+        [(task_root, updated)],
         (parent_snapshot, evidence.child_source),
         publisher=_discard_publication(
             _DiscardPublicationRequest(
@@ -279,7 +279,7 @@ def _resume_discard_unstarted(
         task_root,
         parent,
         parent,
-        [parent],
+        [(task_root, parent)],
         (parent_snapshot, capture_task_doc_source(leaf_files[0])),
         publisher=publication,
     )

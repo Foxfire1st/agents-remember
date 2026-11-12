@@ -98,8 +98,24 @@ def run(args: argparse.Namespace) -> int:
 
 
 def _apply(request: MemoryBackfillRequest, args: argparse.Namespace) -> int:
+    from agents_remember.worktrees.modules.landing_commit_check import (  # noqa: PLC0415
+        LandingCommitCheckRefusal,
+        check_published_tree,
+        restore_hook_rewritten_worktree,
+    )
+
+    def commit_check(tree: str) -> None:
+        try:
+            check_published_tree(request.memory_repo, tree)
+        except LandingCommitCheckRefusal as refused:
+            if refused.reason == "changed":
+                restore_hook_rewritten_worktree(request.memory_repo, tree, refused.changed_paths)
+            raise
+
     try:
-        result = apply_memory_backfill(request, expected_digest=args.expected_digest)
+        result = apply_memory_backfill(
+            request, expected_digest=args.expected_digest, commit_check=commit_check
+        )
     except MemoryBackfillRefusal as error:
         print(f"the backfill was refused: {error}")
         return EXIT_REFUSED

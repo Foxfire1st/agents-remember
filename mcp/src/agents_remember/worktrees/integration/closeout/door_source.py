@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agents_remember.errors import TaskIntentError
+from agents_remember.kernel.direct_execution_grants import DirectGrantError, require_grant
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.closeout.source import (
     CandidateAdmissionFacts,
@@ -131,11 +132,6 @@ def _series_door_candidate(
     request: CloseoutDoorRequest,
     topology: TaskDocumentTopology,
 ) -> ResolvedTaskDocument | None:
-    if not config.direct_execution_enabled:
-        raise TaskDocumentRefError(
-            "closeout-door-direct-policy-disabled",
-            "series door publication requires sanctioned direct execution policy",
-        )
     asserted = request.candidate_task_document_ref or _live_task_document_ref(contract)
     if asserted is None:
         if request.action != "status":
@@ -144,6 +140,13 @@ def _series_door_candidate(
                 "series door declaration for direct landing requires candidate_task_document_ref",
             )
         return None
+    try:
+        require_grant(config.coordination_root, asserted)
+    except DirectGrantError as error:
+        raise TaskDocumentRefError(
+            "closeout-door-leaf-without-grant",
+            f"series door for {asserted.repository}:{asserted.path} is refused: {error.detail}",
+        ) from error
     candidate = topology.resolve(asserted)
     if not candidate.path.resolve().is_relative_to(contract.task_root.resolve()):
         raise TaskDocumentRefError(

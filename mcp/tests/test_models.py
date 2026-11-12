@@ -12,7 +12,9 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.application.tool_response import complete_tool_response
 from agents_remember.mcp.tools import PUBLIC_TOOLS
-from agents_remember.models.tools.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
+from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
+from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
     with_terminal_atomic_series_release,
 )
@@ -29,7 +31,7 @@ def _series_contract(root: Path) -> WorktreeContract:
         task_name="t",
         repo_name="r",
         workflow_kind="light-task",
-        memory_mode="disabled",
+        memory_mode="external",
         coordination_root=root,
         task_root=root / "tasks" / "r" / "t",
         contract_path=root / "tasks" / "r" / "t" / "series-contract.md",
@@ -52,8 +54,8 @@ class PublicToolResponseModelTests(unittest.TestCase):
         inside its declared 2300 cases on the line this leaf certifies.
         """
 
-        self.assertEqual(set(PUBLIC_TOOLS), set(PUBLIC_TOOL_RESPONSE_MODELS))
-        for tool_name, model in PUBLIC_TOOL_RESPONSE_MODELS.items():
+        self.assertEqual(set(PUBLIC_TOOLS), set(TOOL_RESPONSE_MODELS))
+        for tool_name, model in TOOL_RESPONSE_MODELS.items():
             with self.subTest(tool=tool_name):
                 self.assertTrue(issubclass(model, BaseModel))
                 schema = model.model_json_schema()
@@ -109,12 +111,29 @@ class PublicToolResponseModelTests(unittest.TestCase):
             self.assertIn("atomicSeriesActivation", emitted.payload)
             self.assertIn("atomicSeriesActivationRelease", emitted.payload)
 
-            finalized = complete_tool_response("lifecycle_finalize_task", dict(emitted.payload))
+            # D-47's pin lives where the wire boundary validates: the emitter's
+            # exact output must validate at its registered model.
+            whole = finalize_tool_response("lifecycle_finalize_task", dict(emitted.payload))
+            response = LifecycleFinalizeTaskResponse.model_validate(whole)
+            self.assertEqual(response.operation, "lifecycle_finalize_task")
+            self.assertEqual(whole["operation"], "lifecycle_finalize_task")
+            self.assertEqual(whole["state"], "finalized")
+            self.assertIn("atomicSeriesActivation", whole)
+            self.assertIn("atomicSeriesActivationRelease", whole)
 
-            self.assertEqual(finalized["operation"], "lifecycle_finalize_task")
+            # MIK-R108: the answer the caller acts on holds the outcome
+            # without the four envelope fields.
+            finalized = complete_tool_response("lifecycle_finalize_task", dict(emitted.payload))
             self.assertEqual(finalized["state"], "finalized")
-            self.assertIn("atomicSeriesActivation", finalized)
-            self.assertIn("atomicSeriesActivationRelease", finalized)
+            # MIK-R111 rule 1: both release facts stay in the validated whole
+            # above, not the outcome/next-step answer. No call context supplies
+            # a log here, so this model pin reads the retained validation result.
+            self.assertIn("atomicSeriesActivation", whole)
+            self.assertIn("atomicSeriesActivationRelease", whole)
+            self.assertNotIn("atomicSeriesActivation", finalized)
+            self.assertNotIn("atomicSeriesActivationRelease", finalized)
+            for field in ("tokens", "tokenizer", "tokenCountExact", "operation"):
+                self.assertNotIn(field, finalized)
 
 
 if __name__ == "__main__":

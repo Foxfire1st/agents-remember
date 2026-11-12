@@ -14,15 +14,12 @@ separately failable readings, and they are deliberately kept apart:
 * the **commands the procedure prints** exist on the shipped command line, and every option it prints
   belongs to the subcommand it prints it with. A document that describes commands which do not exist is
   the failure the requirement names, and it is mechanical to catch;
-* the **seats** the procedure names are admitted by the shipped opener — measured at the route, because
-  the launch *compiler* accepts any declared role while the *opener* admits a session with no task
-  document only for the taskless seat roles. Those are ``chat``, ``terminal`` and ``bootstrap``, and —
-  by the developer's 2026-09-24 ruling, taken when the missing route was put to them — ``curator``.
-  The procedure's own text states the gate, and this module pins it by observation rather than by
-  reading the policy constant;
-* the instructions that **are** delivered name the procedure: to the seats the opener admits taskless,
-  to the curator shape the compiler produces, and through the two served skills an ordinary setup
-  follows.
+* the **capsules** the launch compiler produces for the seats the procedure names carry it: the
+  ``bootstrap`` free agent's, and the ``curator``'s both with no task document and on one. A capsule
+  compiled with no task document is bound to the named absence ``free-agent:<role>``, never to a
+  document;
+* the instructions that **are** delivered name the procedure: to the bootstrap free agent, to the
+  curator shape the compiler produces, and through the two served skills an ordinary setup follows.
 
 WHAT DEFENDS WHAT
 -----------------
@@ -36,16 +33,12 @@ WHAT DEFENDS WHAT
       through the shipped command line                     which fills each printed placeholder and
                                                            runs the real parser over the exact
                                                            subcommand and options
-    a seat-less session is admitted for the four          ``test_the_opener_admits_exactly...``,
-      taskless roles and refused for the rest, by          which drives the dashboard's own open route
-      status, and a taskless curator is INSTRUCTED         over the shipped real coordination world and
-                                                           reads each arm's delivery mode
-    the bootstrap seat's own instructions reach the       ``test_the_admitted_taskless_seat...``,
-      procedure and the state vocabulary                   which opens that seat and reads its
-                                                           compiled instructions
-    the curator SEAT opens on a task document AND         ``test_the_curator_seat_opens...``,
-      opens taskless with the free-agent reference         which opens ``role=curator`` both ways and
-                                                           reads the delivered mode
+    the bootstrap free agent's own instructions reach     ``test_the_bootstrap_free_agent...``,
+      the procedure and the state vocabulary, bound to     which compiles that seat with no task
+      the named absence of a task document                 document and reads its capsule
+    the curator's capsule compiles on a task document     ``test_the_curator_capsule_compiles...``,
+      AND with none, under different task references       which compiles ``role=curator`` both ways
+                                                           and reads each capsule's binding
     the curator SHAPE's compiled instructions name it     ``test_the_compiled_curator_shape...``,
                                                            which compiles that shape through the launch
                                                            compiler and names only what it measured
@@ -62,72 +55,224 @@ WHAT THIS DOES NOT COVER (stated, not implied)
   host, not a property of this checkout: ``scripts/sync-skills.py --check`` owns the nine packaged
   copies (byte for byte, in ``mcp/tests/test_sync_scripts.py``), and an installed harness root is owned
   by whoever runs the install.
-- **Whether the seat policy itself is right.** A taskless CURATOR seat **is** admitted — ``curator``
-  joined the taskless seat roles by the developer's **2026-09-24 ruling**, recorded in
-  ``serving/task_binding.py``'s ``TASKLESS_SEAT_ROLES`` — and the seat case above asserts that
-  admission and the ``free-agent:curator`` capsule it receives, not a refusal. This module measures the
-  shipped opener; it does not decide that policy.
+- **Which role a launch admits without a task document.** The launch compiler produces a capsule for
+  any declared role; whether a launch of that role may start at all is the role launch's decision and
+  its own tests' subject. This module measures the compiler's answer and does not decide that policy.
 - **The wording of the procedure.** These cases assert that the named surfaces are published, reached,
-  admitted and parseable. They do not read the prose for meaning, and a wrong sentence in a live
+  compiled and parseable. They do not read the prose for meaning, and a wrong sentence in a live
   document is the curator's and the verifier's subject rather than this module's.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+import shlex
 import shutil
 import tempfile
 from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
 
 import pytest
 from agents_remember.application.role_capsules.launch import compile_launch_capsule
+from agents_remember.application.skill_resources.catalog import (
+    read_served_file,
+    require_servable,
+)
 from agents_remember.application.skill_resources.operation import (
-    skill_catalog_list_tool,
-    skill_catalog_read_tool,
+    skill_catalog_registry,
+)
+from agents_remember.application.skill_resources.provider import shipped_composition_corpus
+from agents_remember.application.skill_resources.responses import (
+    skill_catalog_list_response,
+    skill_catalog_read_response,
 )
 from agents_remember.cli.__main__ import build_parser
-from agents_remember.cli.dashboard import serving_collaborators
+from agents_remember.cli.role_instruction_details import compose_launch_instructions
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.observer import reset_ambient
-from agents_remember.serving.app import create_app
+from agents_remember.models.role_capsules.types import compute_content_digest
+from agents_remember.serving.capsule_delivery import CapsuleDelivery
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
-from agents_remember.serving.projector import ProjectionCadence
-from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog
-from fastapi.testclient import TestClient
-from test_capsule_launch_wiring import LEAF_REF, _scratch_world, _write_codex_settings
+from agents_remember_test_support.testing.capsule_budget_d695 import (
+    current_budget_view,
+    load_current_budget_view,
+)
+from agents_remember_test_support.testing.leaf_instruction_wording import (
+    assert_action_pointer,
+    normalized,
+)
+from test_capsule_launch_wiring import LEAF_REF, _scratch_world
 
 pytestmark = pytest.mark.evidence_unit
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
 CANONICAL_SKILLS = REPOSITORY_ROOT / "skills"
-PROCEDURE_SKILL = "c-14-knowledge-bootstrap"
-PROCEDURE_FILE = CANONICAL_SKILLS / PROCEDURE_SKILL / "SKILL.md"
+FOUNDATION_SOURCE = "reference/curator/repository-foundation.md"
+FOUNDATION_ACTION = "Before a repository's first or resumed knowledge foundation, read"
+FOUNDATION_HEADING = "# Curator repository foundation"
+FOUNDATION_WORKFLOW_CLAUSE = (
+    "Before authoring the foundation, follow [the curation operation](../../operations/curation.md)"
+)
+FOUNDATION_PROCEDURE_CLAUSES = (
+    "Repository foundation is regular task work.",
+    "The user-started Architect opens the real foundation task under a master and starts the Curator on that task document.",
+    "The Curator uses its actual enclosure contract.",
+    "Receive the repository identifier, resolved context, scope, sources and current knowledge state. "
+    "No incidental code delta is required.",
+    FOUNDATION_WORKFLOW_CLAUSE,
+    "Onboarding is optional input and never a start prerequisite.",
+    "This foundation procedure authors no onboarding.",
+)
+FOUNDATION_AUTHORITY_CLAUSES = (
+    "For setup\N{RIGHT SINGLE QUOTATION MARK}s state report and next step, follow [Name the next step]",
+    "An instructed session cannot replace task admission.",
+    "Report a missing task; never fabricate a task, worktree or enclosure.",
+)
+
+
+def delivered_foundation(
+    capsule: CapsuleDelivery, root: Path, report_path: Path, clauses: tuple[str, ...]
+) -> str:
+    """Verify this compiled shape's declared, pointed-at, delivered foundation text.
+
+    The budget declaration is a guard assertion here, not a claimed compiler refusal.
+    """
+    budgets = current_budget_view(load_current_budget_view(root / "capsule-budgets-current.json"))
+    assert FOUNDATION_SOURCE in budgets["step_details"], "undeclared budget detail"
+    manifest = json.loads((root / "composition-manifest.json").read_text())
+    declared = manifest["references"]["curator/repository-foundation"]
+    assert declared["source"] == FOUNDATION_SOURCE
+    assert declared["step_detail"] is True
+    assert "curator" in declared["roles"]
+    assert declared["step"].strip()
+    assert_action_pointer(capsule.trusted_instructions, FOUNDATION_SOURCE, FOUNDATION_ACTION)
+    assert "]({{detail:" + FOUNDATION_SOURCE + "}})" in capsule.trusted_instructions
+    references = [r for r in capsule.detail_references if r.source_path == FOUNDATION_SOURCE]
+    assert len(references) == 1
+    reference = references[0]
+    assert reference.step == declared["step"]
+    assert reference.content == (root / FOUNDATION_SOURCE).read_bytes()
+    instructions, record = compose_launch_instructions(capsule, str(report_path), {})
+    entries = [r for r in record["detailReferences"] if r["sourcePath"] == FOUNDATION_SOURCE]
+    assert len(entries) == 1
+    assert entries[0]["step"] == reference.step
+    path = Path(entries[0]["path"])
+    assert f"]({path.as_posix()})" in instructions
+    assert "{{detail:" not in instructions
+
+    # The emitted copy equals the source byte for byte except that each relative link is
+    # rewritten to the absolute shipped file; every rewritten target names the same file
+    # and anchor (A004 pinned plain byte equality before the foundation gained links).
+    link = re.compile(r"\]\(([^)]+)\)")
+    emitted_text, source_text = path.read_text(), reference.content.decode("utf-8")
+    assert link.sub("](target)", emitted_text) == link.sub("](target)", source_text)
+    with shipped_composition_corpus() as (origin, _manifest):
+        owner = origin / FOUNDATION_SOURCE
+        for emitted, written in zip(
+            link.findall(emitted_text), link.findall(source_text), strict=True
+        ):
+            if written.startswith("skill://"):
+                assert emitted == written
+                continue
+            emitted_path, _, emitted_anchor = emitted.partition("#")
+            written_path, _, written_anchor = written.partition("#")
+            assert emitted_anchor == written_anchor, (emitted, written)
+            assert Path(emitted_path).resolve() == (owner.parent / written_path).resolve()
+    detail = path.read_text()
+    assert detail.splitlines()[0] == FOUNDATION_HEADING
+    for clause in clauses:
+        assert normalized(clause) in normalized(detail), clause
+    return detail
+
+
+def foundation_delivery_controls(
+    capsule: CapsuleDelivery,
+    root: Path,
+    output: Path,
+    clauses: tuple[str, ...],
+    sentence: str,
+) -> None:
+    """All five corruptions fail the same delivery proof, without editing shipped sources.
+
+    These are assertion-boundary controls on a captured capsule and copied declarations;
+    they make no claim that the compiler consumes the budget registry.
+    """
+    for mutation in (
+        "step_details",
+        "heading",
+        "sentence",
+        "undeclared-pointer",
+        "relocated-pointer",
+    ):
+        copied = output / mutation / "lifecycle"
+        for relative in (
+            "capsule-budgets-current.json",
+            "composition-manifest.json",
+            FOUNDATION_SOURCE,
+        ):
+            target = copied / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(root / relative, target)
+        changed_capsule = capsule
+        if mutation == "step_details":
+            target = copied / "capsule-budgets-current.json"
+            budgets = json.loads(target.read_text())
+            del budgets["current_measurements"]["step_details"][FOUNDATION_SOURCE]
+            target.write_text(json.dumps(budgets))
+        elif mutation == "relocated-pointer":
+            marker = "{{detail:" + FOUNDATION_SOURCE + "}}"
+            assert capsule.trusted_instructions.count(marker) == 1
+            changed = capsule.trusted_instructions.replace(marker, "", 1)
+            changed += "\n\nAt an unrelated action, read [foundation](" + marker + ")."
+            assert FOUNDATION_ACTION in changed
+            assert changed.count(marker) == 1
+            changed_capsule = replace(capsule, trusted_instructions=changed)
+        elif mutation == "undeclared-pointer":
+            changed = capsule.trusted_instructions.replace(
+                "{{detail:" + FOUNDATION_SOURCE + "}}", "{{detail:reference/undeclared.md}}"
+            )
+            assert changed != capsule.trusted_instructions
+            changed_capsule = replace(capsule, trusted_instructions=changed)
+        else:
+            target = copied / FOUNDATION_SOURCE
+            original = target.read_text()
+            changed = original.replace(
+                FOUNDATION_HEADING if mutation == "heading" else sentence,
+                "# Renamed foundation" if mutation == "heading" else "",
+            )
+            assert changed != original
+            target.write_text(changed)
+            content = target.read_bytes()
+            changed_capsule = replace(
+                capsule,
+                detail_references=tuple(
+                    replace(r, content=content, revision=compute_content_digest(content))
+                    if r.source_path == FOUNDATION_SOURCE
+                    else r
+                    for r in capsule.detail_references
+                ),
+            )
+        with pytest.raises(AssertionError):
+            delivered_foundation(changed_capsule, copied, output / mutation / "report.md", clauses)
+
 
 #: The shipped umbrella CLI's own program name, as the procedure prints it.
 PROGRAM = "agents-remember"
 
-#: A printed invocation: the program name opens the line (optionally indented), so an inline mention
-#: of a command inside a sentence is prose rather than a command line the document prints.
-_INVOCATION = re.compile(rf"^(\s*){PROGRAM}\s+([a-z][a-z0-9-]*)")
-_LONG_OPTION = re.compile(r"--[a-z][a-z0-9-]*")
+#: Both launchers printed by the procedure. A launcher opens the line (optionally indented), so an
+#: inline mention inside a sentence is prose rather than a command line the document prints.
+_INVOCATION = re.compile(
+    rf'^\s*(?:{PROGRAM}\s+|PYTHONPATH="\$AR_SERVING_PARENT"\s+'
+    r'"\$AR_SERVING_PYTHON"\s+-P\s+-m\s+agents_remember\.cli\s+)'
+)
 _CONTINUATION = re.compile(r"^\s+--")
 _PLACEHOLDER = re.compile(r"<[^>]*>")
 
 #: What a printed placeholder is replaced with: it only has to satisfy the parser's arity, never a
 #: real path, because this case grades the command line's SHAPE and runs no command.
 PLACEHOLDER_VALUE = "placeholder"
-
-
-def procedure_text() -> str:
-    """The canonical procedure's bytes, as the shipped source tree holds them."""
-
-    return PROCEDURE_FILE.read_text(encoding="utf-8")
 
 
 def digest(text: str) -> str:
@@ -154,24 +299,62 @@ def body_of(text: str) -> str:
 def printed_invocations(text: str) -> Iterator[list[str]]:
     """Each ``agents-remember`` invocation ``text`` prints, as a placeholder-filled argv.
 
-    A command in this corpus wraps across continuation lines that begin with an option, so one
-    invocation's span is its own line plus every following line that starts with one. The extraction
-    is deliberately over-inclusive: an option read from a neighbouring sentence still has to parse, so
-    over-reading makes the case stricter rather than weaker.
+    Join explicit shell continuations before recognizing the launcher, then include option-only
+    continuation lines. Normalize the serving-bound Python launcher to the parser's program name;
+    every following token remains subject to the real parser. Placeholders are filled before shell
+    tokenization because their descriptive text can contain spaces and apostrophes.
     """
 
-    lines = text.splitlines()
+    lines = re.sub(r"\\\r?\n", "", text).splitlines()
     for index, line in enumerate(lines):
         found = _INVOCATION.match(line)
         if found is None:
             continue
-        span = [line[len(found.group(1)) :]]
+        span = [line[found.end() :]]
         for following in lines[index + 1 :]:
             if not _CONTINUATION.match(following):
                 break
             span.append(following)
         filled = _PLACEHOLDER.sub(PLACEHOLDER_VALUE, "\n".join(span))
-        yield filled.split()
+        yield [PROGRAM, *shlex.split(filled)]
+
+
+@pytest.mark.parametrize(
+    "launcher",
+    [
+        PROGRAM,
+        'PYTHONPATH="$AR_SERVING_PARENT" "$AR_SERVING_PYTHON" -P -m agents_remember.cli \\\n',
+    ],
+)
+def test_printed_invocations_preserve_arguments_and_parser_failures(launcher: str) -> None:
+    command = (
+        f"{launcher} knowledge-ingest --contract <this leaf's enclosure contract> \\\n"
+        "    --list <hand-off list> --authorization-ref <ref> --commit --json"
+    )
+    invocations = list(
+        printed_invocations(f"Prose mentions {PROGRAM} knowledge-ingest.\n{command}")
+    )
+    assert invocations == [
+        [
+            PROGRAM,
+            "knowledge-ingest",
+            "--contract",
+            PLACEHOLDER_VALUE,
+            "--list",
+            PLACEHOLDER_VALUE,
+            "--authorization-ref",
+            PLACEHOLDER_VALUE,
+            "--commit",
+            "--json",
+        ]
+    ]
+    parser = build_parser()
+    parser.parse_args(invocations[0][1:])
+    for invalid in (command + " --not-a-real-option", f"{launcher} not-a-real-subcommand"):
+        [argv] = list(printed_invocations(invalid))
+        with pytest.raises(SystemExit) as refused:
+            parser.parse_args(argv[1:])
+        assert refused.value.code == 2
 
 
 def served_body(skill_name: str) -> str:
@@ -182,7 +365,7 @@ def served_body(skill_name: str) -> str:
     delivery the server does not make.
     """
 
-    listing = skill_catalog_list_tool()
+    listing = skill_catalog_list_response(skill_catalog_registry())
     assert listing.unreadable == [], (
         "the shipped skills tree carries unservable skill(s), so no body can be served: "
         + "; ".join(f"{item.skillPath}: {item.reason}" for item in listing.unreadable)
@@ -192,18 +375,26 @@ def served_body(skill_name: str) -> str:
         f"the shipped catalog publishes {len(entries)} entries named {skill_name!r}; a fresh session "
         "discovers what it may read through this list"
     )
-    read = skill_catalog_read_tool(entries[0].uri)
+    read = _read_shipped_skill(entries[0].uri)
     assert read.skillName == skill_name, read.skillName
     return read.content
 
 
-def free_agent_instructions(role: str) -> tuple[str, str]:
-    """The instructions the launch COMPILER produces for a seat shape, and its own summary.
+def _read_shipped_skill(uri: str):
+    """One shipped skill file through the staying registry path (no removed tool)."""
 
-    This is the compiler's answer, not an admission. Whether a session of that shape may be opened at
-    all is the opener's decision, and
-    `test_the_opener_admits_exactly_the_taskless_seat_roles_and_instructs_each` measures that
-    separately — the two are different surfaces and this module keeps them apart on purpose.
+    catalog = skill_catalog_registry()
+    require_servable(catalog, action="reading a skill file")
+    served = read_served_file(catalog, uri)
+    root = served.entry.root
+    return skill_catalog_read_response(served, skill_revision="" if root is None else root.revision)
+
+
+def free_agent_capsule(role: str) -> CapsuleDelivery:
+    """The capsule the launch COMPILER produces for one role with no task document.
+
+    This is the compiler's answer, not an admission: it takes any declared role, and whether a launch
+    of that role may start is decided elsewhere.
 
     The world holds no task artifact of any kind: no settings beyond the two roots, no task document,
     no enclosure, no worktree, no memory repository. That absence is the point — the compiler's
@@ -220,298 +411,36 @@ def free_agent_instructions(role: str) -> tuple[str, str]:
             repositories={},
         )
         launched = compile_launch_capsule(
-            config,
-            LaunchCapsuleRequest(role=role, workspace_root=workspace, harness="codex"),
+            config, LaunchCapsuleRequest(role=role, workspace_root=workspace)
         )
         assert not launched.is_refusal, launched.explain()
-        delivery = launched.codex_delivery
+        delivery = launched.delivery
         assert delivery is not None, launched.explain()
-        return delivery.trusted_instructions, launched.explain()
+        return delivery
 
 
-@contextmanager
-def launch_world() -> Iterator[tuple[Path, McpRuntimeConfig, object]]:
-    """The shipped real coordination world, with the dashboard's own open route over it.
+def test_the_curator_capsule_compiles_on_a_task_document_and_taskless(tmp_path: Path) -> None:
+    """The curator's capsule compiles WITH a task document, and it also compiles with none.
 
-    The world is the one ``mcp/tests/test_capsule_launch_wiring.py`` owns and keeps real — a
-    coordination root, a task document, its enclosure contract, the code worktree and the external
-    memory root — built here through that module's own builder rather than reimplemented, so this case
-    drives the same production route that module already exercises. The root is short because the
-    opener mints a Unix-domain socket under it.
+    On the task document the capsule is bound to that document, the dispatched route the procedure's
+    leaf entry states. Without one it is bound to the named absence ``free-agent:curator``: the
+    capsule of an instructed session that authors a first knowledge foundation before any task
+    exists (no curator seat is started without a task document). Both carry the curator role, and
+    the two are separately attributable: they must not report the same task reference.
     """
 
-    root = Path(tempfile.mkdtemp(prefix="l27-"))
-    try:
-        config, host, _repo = _scratch_world(root)
-        _write_codex_settings(root)
-        yield root, config, host
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
-
-
-def open_seat(
-    root: Path, config: McpRuntimeConfig, host: object, session: str, body: dict[str, object]
-) -> tuple[int, dict[str, object]]:
-    """Open one seat through ``POST /api/terminal/{session}`` and return its status and body."""
-
-    reset_ambient()
-    collaborators = replace(
-        serving_collaborators(config),
-        terminal_host=cast(TerminalHost, host),
-        terminal_catalog=TerminalCatalog(root / "logs" / "dashboard" / "terminal-sessions.json"),
+    config, _repo = _scratch_world(tmp_path)
+    launched = compile_launch_capsule(
+        config,
+        LaunchCapsuleRequest(role="curator", workspace_root=tmp_path, task_document_ref=LEAF_REF),
     )
-    app = create_app(config, cadence=ProjectionCadence(interval=100), collaborators=collaborators)
-    with TestClient(app) as client:
-        response = client.post(f"/api/terminal/{session}", json=body)
-    return response.status_code, response.json()
+    assert launched.delivery is not None, launched.explain()
+    bound = launched.delivery.binding
+    assert bound.role == "curator", bound.as_report()
 
-
-def test_the_opener_admits_exactly_the_taskless_seat_roles_and_instructs_each() -> None:
-    """The seat gate by its observed status over the five arms the policy decides, plus the boundary.
-
-    The requirement's whole new-project entry depends on which seat may be opened before a task
-    exists, so this is measured at the real opener rather than inferred from what the launch compiler
-    accepts — the compiler takes any declared role, and the opener is the surface that admits a
-    session. **The arms ARE the status table**: a policy change the constant's own pin cannot see (an
-    admission that opens the wrong seat, or opens one that is never instructed) fails here by name.
-    ``curator`` is taskless by the developer's 2026-09-24 ruling, taken when the missing route was put
-    to them; the fourth arm asserts the *delivery*, because a 200 without a capsule would satisfy the
-    constant and still leave a fresh curator with nothing to follow. The last arm is the boundary the
-    gate does not cover: a terminal-kind open is a plain pane whatever role it was asked for.
-    """
-
-    arms: tuple[tuple[str, dict[str, object]], ...] = (
-        (
-            "bootstrap-no-document",
-            {"kind": "harness", "harness": "codex", "role": "bootstrap"},
-        ),
-        ("chat-no-document", {"kind": "harness", "harness": "codex", "role": "chat"}),
-        ("worker-no-document", {"kind": "harness", "harness": "codex", "role": "worker"}),
-        ("curator-no-document", {"kind": "harness", "harness": "codex", "role": "curator"}),
-        (
-            "curator-on-a-task-document",
-            {
-                "kind": "harness",
-                "harness": "codex",
-                "role": "curator",
-                "taskDocumentRef": LEAF_REF.model_dump(),
-            },
-        ),
-        ("curator-as-a-terminal", {"kind": "terminal", "role": "curator"}),
-    )
-    with launch_world() as (root, config, host):
-        observed = {arm: open_seat(root, config, host, f"l32-{arm}", body) for arm, body in arms}
-
-    def mode(arm: str) -> dict[str, object]:
-        return cast("dict[str, object]", observed[arm][1]["instructionMode"])
-
-    # Arm 1 — the first-hour free agent: admitted taskless, instructed by its own capsule.
-    status, body = observed["bootstrap-no-document"]
-    assert status == 200, (status, body)
-    assert mode("bootstrap-no-document")["mode"] == "capsule", mode("bootstrap-no-document")
-    assert mode("bootstrap-no-document")["taskReference"] == "free-agent:bootstrap", mode(
-        "bootstrap-no-document"
-    )
-
-    # Arm 2 — a session that declared no role: admitted, and with no instructions to receive.
-    status, body = observed["chat-no-document"]
-    assert status == 200, (status, body)
-    assert mode("chat-no-document")["mode"] == "legacy", mode("chat-no-document")
-
-    # Arm 3 — a task-bound role with no document is still refused, by name.
-    status, body = observed["worker-no-document"]
-    assert status == 400, (status, body)
-    assert body["status"] == "task-binding-required", body
-
-    # Arm 4 — THE ADMISSION THE RULING MADE: taskless AND instructed.
-    status, body = observed["curator-no-document"]
-    assert status == 200, (status, body)
-    assert mode("curator-no-document")["mode"] == "capsule", mode("curator-no-document")
-    assert mode("curator-no-document")["role"] == "curator", mode("curator-no-document")
-    assert mode("curator-no-document")["taskReference"] == "free-agent:curator", mode(
-        "curator-no-document"
-    )
-
-    # Arm 5 — the same role ON a document still takes the dispatched route, so the ruling widened
-    # the seat rather than replacing it.
-    status, body = observed["curator-on-a-task-document"]
-    assert status == 200, (status, body)
-    assert mode("curator-on-a-task-document")["role"] == "curator", mode(
-        "curator-on-a-task-document"
-    )
-    assert (
-        mode("curator-on-a-task-document")["taskReference"]
-        != mode("curator-no-document")["taskReference"]
-    ), "a document-bound curator and a taskless one must not report the same task reference"
-
-    # Arm 6, the boundary: a terminal-kind open is a plain pane for every role, so the taskless
-    # curator seat is a HARNESS seat and this arm is not a second route to its instructions.
-    status, body = observed["curator-as-a-terminal"]
-    assert status == 200, (status, body)
-    assert mode("curator-as-a-terminal")["mode"] == "legacy", mode("curator-as-a-terminal")
-
-
-def test_the_admitted_taskless_seat_receives_the_foundation_step() -> None:
-    """The bootstrap seat opens with no document, and its own instructions reach the foundation.
-
-    The bootstrap seat is the read-and-report carrier for a repository whose foundation is absent: it
-    is admitted with no task document, and its own compiled instructions name the procedure and the
-    knowledge states, so a greenfield repository reaches the step at all. It is not the only seat the
-    opener admits taskless and instructs — a **taskless curator** seat is admitted by the developer's
-    2026-09-24 ruling and receives the curator's capsule — which is why the six-arm case above, not
-    this one, owns the seat table. The instructions below are this seat's own compiled capsule.
-    """
-
-    instructions, summary = free_agent_instructions("bootstrap")
-    assert PROCEDURE_SKILL in instructions, (
-        "the taskless seat the opener admits is not instructed about the knowledge-foundation "
-        f"procedure, so ordinary setup cannot reach it ({summary})"
-    )
-    assert "not-recorded" in instructions, (
-        "the bootstrap seat's instructions name no knowledge state, so a repository whose foundation "
-        "is absent cannot be reported as anything but a ready setup"
-    )
-
-    with launch_world() as (root, config, host):
-        status, body = open_seat(
-            root,
-            config,
-            host,
-            "l27-bootstrap-instructed",
-            {"kind": "harness", "harness": "codex", "role": "bootstrap"},
-        )
-    assert status == 200, body
-    mode = cast("dict[str, object]", body["instructionMode"])
-    assert mode["taskReference"] == "free-agent:bootstrap", mode
-
-
-def test_the_curator_seat_opens_on_a_task_document_and_taskless() -> None:
-    """The curator's own seat opens WITH a named role scope, and it also opens with no document.
-
-    With the task document it is admitted on the dispatched-brief route the procedure's leaf entry
-    states. Without one it is admitted too — **the developer's 2026-09-24 ruling**, which is the arm
-    this case exists to keep honest: before it, this docstring read "a session for the curator without
-    a document is refused (``task-binding-required``)", which was true then and is false now. The five
-    arms and their delivery modes are asserted together in
-    ``test_the_opener_admits_exactly_the_taskless_seat_roles_and_instructs_each``; what this case adds
-    is the document-bound arm at its own surface, so the two routes are separately attributable.
-    """
-
-    with launch_world() as (root, config, host):
-        status, body = open_seat(
-            root,
-            config,
-            host,
-            "l27-curator-bound",
-            {
-                "kind": "harness",
-                "harness": "codex",
-                "role": "curator",
-                "taskDocumentRef": LEAF_REF.model_dump(),
-            },
-        )
-        assert status == 200, body
-    mode = cast("dict[str, object]", body["instructionMode"])
-    assert mode["role"] == "curator", mode
-
-
-def test_the_served_catalog_publishes_the_bootstrap_procedure() -> None:
-    """A fresh session discovers the procedure, and the bytes it reads are the canonical tree's.
-
-    The catalog is the delivery route: an agent does not read ``skills/`` directly, it lists what the
-    server publishes and reads one entry back. Serving a stale or hand-edited copy would therefore be
-    indistinguishable, from inside a session, from shipping the wrong instruction — so the served
-    content is compared with the canonical file rather than trusted.
-    """
-
-    listing = skill_catalog_list_tool()
-    entries = [entry for entry in listing.skills if entry.name == PROCEDURE_SKILL]
-    assert entries, (
-        f"the shipped catalog publishes no {PROCEDURE_SKILL!r} skill, so no fresh session can "
-        f"discover the procedure; published: {sorted(entry.name for entry in listing.skills)}"
-    )
-    assert entries[0].uri.endswith(f"/{PROCEDURE_SKILL}/SKILL.md"), entries[0].uri
-    assert "SKILL.md" in entries[0].files, entries[0].files
-
-    canonical = procedure_text()
-    assert served_body(PROCEDURE_SKILL) == canonical, (
-        "the served bytes differ from the canonical tree's; run python3 scripts/sync-skills.py"
-    )
-    assert entries[0].revision == f"sha256:{digest(canonical)}", entries[0].revision
-
-
-def test_every_invocation_the_procedure_prints_resolves_in_the_shipped_parser() -> None:
-    """The requirement's own failure: a document that describes commands which do not exist.
-
-    Each printed invocation is filled in and run through the real parser, so both halves are graded at
-    once — the subcommand must be declared, and every option printed with it must belong to that
-    subcommand. An option that moved to another subcommand is a failure here, which is the shape a
-    reorganisation produces. Nothing is executed: the parser is the whole subject.
-    """
-
-    parser = build_parser()
-    invocations = list(printed_invocations(procedure_text()))
-    assert len(invocations) >= 3, (
-        f"only {len(invocations)} invocation(s) were extracted from the procedure; the extraction "
-        "stopped covering the document it grades"
-    )
-
-    problems: list[str] = []
-    for argv in invocations:
-        assert argv[0] == PROGRAM, argv
-        try:
-            parser.parse_args(argv[1:])
-        except SystemExit as exit_status:
-            problems.append(f"`{' '.join(argv)}` does not parse ({exit_status.code})")
-    assert problems == [], (
-        "the procedure prints commands the shipped command line does not accept:\n  "
-        + "\n  ".join(problems)
-    )
-
-
-def test_the_compiled_curator_shape_names_the_procedure_it_would_receive() -> None:
-    """The curator SHAPE's compiled instructions name the procedure — the compiler, not an admission.
-
-    This case is deliberately named for the compiler, because that is all it measures: the launch
-    compiler builds a free-agent capsule for any declared role, whether or not the opener admits that
-    role without a task document. Which roles the opener *does* admit is
-    ``test_the_opener_admits_exactly_the_taskless_seat_roles_and_instructs_each``'s subject, and since
-    the developer's 2026-09-24 ruling ``curator`` is one of them — so this shape's instructions are
-    delivered to a taskless session as well as to a curator opened on a task document.
-    """
-
-    instructions, summary = free_agent_instructions("curator")
-    assert PROCEDURE_SKILL in instructions, (
-        "the curator shape's compiled instructions never name the knowledge-bootstrap procedure, so "
-        f"a curator seat opened on a task document would not be told about it ({summary})"
-    )
-    assert "knowledge-bootstrap" in instructions, (
-        "the curator shape's instructions name no taskless bootstrap entry, leaving the only printed "
-        "route one that requires an enclosure contract"
-    )
-
-
-def test_the_served_setup_and_onboarding_surfaces_reach_the_procedure() -> None:
-    """The two skills an ordinary setup follows name the procedure and report the knowledge state.
-
-    This is the reachability half of the delivery, read through the same served route as the procedure
-    itself and on the bodies rather than on the frontmatter descriptions: the setup skill a first run
-    follows, and the onboarding skill whose handoff follows it. Both are asserted on the bytes a
-    session actually loads and follows, not on the files beside them.
-    """
-
-    setup = body_of(served_body("c-13-install-and-onboard"))
-    assert PROCEDURE_SKILL in setup, (
-        "the served setup skill's instructions never name the knowledge-bootstrap procedure, so "
-        "ordinary setup cannot reach the repository's knowledge foundation"
-    )
-    assert "not-recorded" in setup, (
-        "the served setup skill's instructions name no knowledge state, so it cannot report a "
-        "repository whose foundation is absent without reporting it ready"
-    )
-
-    onboarding = body_of(served_body("c-03-repo-bootstrap"))
-    assert PROCEDURE_SKILL in onboarding, (
-        "the served onboarding skill's handoff never names the knowledge-foundation procedure, so "
-        "onboarding output reads as the repository's whole foundation"
+    taskless = free_agent_capsule("curator").binding
+    assert taskless.role == "curator", taskless.as_report()
+    assert taskless.task_path == "free-agent:curator", taskless.as_report()
+    assert bound.task_path != taskless.task_path, (
+        "a document-bound curator and a taskless one must not report the same task reference"
     )

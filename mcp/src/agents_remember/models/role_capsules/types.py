@@ -40,6 +40,7 @@ from agents_remember.models.role_capsules.vocabulary import (
 )
 
 if TYPE_CHECKING:
+    from agents_remember.models.role_capsules.contracts import CapsuleContractMarker
     from agents_remember.models.role_capsules.diagnostics import CapsuleManifest
 
 # --------------------------------------------------------------------------------------
@@ -448,6 +449,16 @@ class CapsuleToolRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class CapsuleDetailReference:
+    """Exact source bytes delivered separately for one named step."""
+
+    source_path: str
+    revision: CapsuleDigest
+    content: bytes
+    step: str
+
+
+@dataclass(frozen=True, slots=True)
 class CapsuleCapsule:
     """The compiled content, in one deterministic ordered value."""
 
@@ -457,6 +468,8 @@ class CapsuleCapsule:
     requested_tools: tuple[CapsuleToolRequest, ...]
     semantic_digest: CapsuleDigest
     binding: CapsuleBinding
+    detail_references: tuple[CapsuleDetailReference, ...] = ()
+    contract_markers: tuple[CapsuleContractMarker, ...] = ()
 
     @property
     def instructions(self) -> tuple[CapsuleInstructionBlock, ...]:

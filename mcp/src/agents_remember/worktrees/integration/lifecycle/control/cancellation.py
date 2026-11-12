@@ -62,6 +62,11 @@ from agents_remember.worktrees.integration.organizational_completion_repair impo
     OrganizationalRepairPublicationError,
     prepare_organizational_completion_repair,
 )
+from agents_remember.worktrees.knowledge_gate import (
+    ClosingReceiptError,
+    require_readable_closings,
+    settle_direct_closing,
+)
 from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
@@ -75,6 +80,7 @@ def cancel_operation(
 ) -> LifecycleOperationProjection:
     """Cancel one generation without allowing its worker authority to escape."""
 
+    _require_readable_direct_closings(contract, record)
     terminal = _terminal_cancel_projection(contract, store, record, dry_run=dry_run)
     if terminal is not None:
         return terminal
@@ -94,6 +100,7 @@ def cancel_operation(
         evidence=evidence,
         stamp=_stamp(),
     )
+    _restore_direct_closing(contract, cancelled)
     contract = _complete_organizational_repair(contract, cancelled, dry_run=False)
     projection = operation_projection(cancelled, contract=contract)
     return project_closeout_refresh(projection, contract, cancelled, dry_run=False)
@@ -109,6 +116,8 @@ def _terminal_cancel_projection(
     """Finish an already-cancelled generation or reject a completed one."""
 
     if record.status == "cancelled":
+        if not dry_run:
+            _restore_direct_closing(contract, record)
         completed = complete_pending_door(contract, store, record, dry_run=dry_run)
         observed_contract = contract if dry_run else load_contract(contract.contract_path)
         current_contract = _complete_organizational_repair(
@@ -133,6 +142,38 @@ def _terminal_cancel_projection(
             next_action="retire",
         )
     return None
+
+
+def _restore_direct_closing(contract: WorktreeContract, record: LifecycleOperationRecord) -> None:
+    """A cancelled direct landing never committed its closing of the leaf's history file (MIK-R09).
+
+    The closing the landing kept for this generation is restored, once the cancellation is
+    published; a file edited since the closing is left as it is.
+    """
+
+    if record.operationKind == "direct-landing":
+        try:
+            settle_direct_closing(contract, current=record.fingerprint, state="cancelled")
+        except ClosingReceiptError as exc:
+            raise _closing_refusal(exc) from exc
+
+
+def _require_readable_direct_closings(
+    contract: WorktreeContract, record: LifecycleOperationRecord
+) -> None:
+    """Refuse, before anything moves, when a direct landing's kept closing cannot be read."""
+
+    if record.operationKind == "direct-landing":
+        try:
+            require_readable_closings(contract)
+        except ClosingReceiptError as exc:
+            raise _closing_refusal(exc) from exc
+
+
+def _closing_refusal(error: ClosingReceiptError) -> LifecycleControlError:
+    return LifecycleControlError(
+        "direct-landing-closing-receipt-unreadable", str(error), next_action="developer-decision"
+    )
 
 
 def _publish_cancelled_outcome(

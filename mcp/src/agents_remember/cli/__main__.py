@@ -1,24 +1,43 @@
 """Umbrella command-line entrypoint: ``agents-remember <subcommand>``.
 
 The single front door for the package's CLI tools. It carries ``dashboard``, the memory
-maintenance and migration commands, the knowledge write plane's ingest and its **taskless**
-``knowledge-bootstrap`` entry, the review plane's ``review-record-comparison`` entry, and the
-existing ``context_packet`` adapter as subparsers. The MCP server keeps its own
-``agents-remember-mcp`` console script -- harness configs launch the server by that exact name, so
-it is never folded in here.
+maintenance and migration commands, the knowledge file writer's ``knowledge-ingest`` and its
+**taskless** ``knowledge-bootstrap`` entry, the text knowledge format's ``knowledge-format``
+formatter, ``knowledge-convert`` conversion, ``knowledge-validate`` validator, ``knowledge-index``
+derived index, ``knowledge-worklist`` change-to-knowledge worklist and read-only
+``knowledge-routes`` family-route report, the migration census's ``knowledge-census`` inventory
+and report, ``knowledge-copies`` for retired dataset cleanup, and the Paseo runtime commands,
+as subparsers. The MCP server keeps its own ``agents-remember-mcp``
+console script -- harness configs launch the server by that exact name, so it is never folded in
+here.
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 
 from agents_remember.cli import (
     dashboard,
+    handoff_check,
     knowledge_bootstrap,
+    knowledge_census,
+    knowledge_convert,
+    knowledge_copies,
+    knowledge_format,
+    knowledge_index,
     knowledge_ingest,
+    knowledge_routes,
+    knowledge_validate,
+    knowledge_worklist,
+    leaf_enclosure_start,
     memory_backfill,
     memory_citations,
-    review_comparison_record,
+    paseo_runtime,
+    providers_remove,
+    removed_stores,
+    tool_log_stats,
+    upgrade_user_settings,
 )
 
 
@@ -28,6 +47,14 @@ def build_parser() -> argparse.ArgumentParser:
     dash = sub.add_parser("dashboard", help="Run the local mission-control dashboard.")
     dashboard.add_arguments(dash)
     dash.set_defaults(func=dashboard.run)
+    _register_memory_commands(sub)
+    _register_knowledge_commands(sub)
+    _register_runtime_commands(sub)
+    return parser
+
+
+def _register_memory_commands(sub: argparse._SubParsersAction) -> None:
+    """The memory maintenance commands."""
     citations = sub.add_parser(
         "memory-citations",
         help="Check a leaf's memory citations; --fix regenerates their ranges from the anchors.",
@@ -40,11 +67,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     memory_backfill.add_arguments(backfill)
     backfill.set_defaults(func=memory_backfill.run)
+
+
+def _register_knowledge_commands(sub: argparse._SubParsersAction) -> None:
+    """The knowledge maintenance commands."""
+    handoff = sub.add_parser(
+        "handoff-check", help="Check every producer handoff against a named candidate (read-only)."
+    )
+    handoff_check.add_arguments(handoff)
+    handoff.set_defaults(func=handoff_check.run)
     ingest = sub.add_parser(
         "knowledge-ingest",
         help=(
-            "Ingest an orchestrator's curator hand-off list into a leaf's candidate; the "
-            "knowledge write plane's production entry point."
+            "Write a curator hand-off list into a leaf's converted memory worktree as knowledge "
+            "files; the knowledge file writer's leaf entry point."
         ),
     )
     knowledge_ingest.add_arguments(ingest)
@@ -52,26 +88,119 @@ def build_parser() -> argparse.ArgumentParser:
     bootstrap = sub.add_parser(
         "knowledge-bootstrap",
         help=(
-            "Initialize or resume a repository's knowledge foundation without a leaf enclosure; "
-            "the taskless bootstrap's production entry point."
+            "Write a repository's foundation knowledge as a wave of knowledge files, without a "
+            "leaf enclosure; the knowledge file writer's taskless entry point."
         ),
     )
     knowledge_bootstrap.add_arguments(bootstrap)
     bootstrap.set_defaults(func=knowledge_bootstrap.run)
-    record = sub.add_parser(
-        "review-record-comparison",
+    fmt = sub.add_parser(
+        "knowledge-format",
+        help="Rewrite knowledge JSON files in the canonical formatting; --check only reports.",
+    )
+    knowledge_format.add_arguments(fmt)
+    fmt.set_defaults(func=knowledge_format.run)
+    convert = sub.add_parser(
+        "knowledge-convert",
         help=(
-            "Record one leaf's review comparison as a durable generation; the Intent Reviewer's "
-            "comparison producer."
+            "Convert a memory tree and its knowledge database into the text knowledge format; "
+            "the first step of the first-conversion procedure (MIK-R46 rule 6). Permanent: "
+            "unconverted lines live in other clones, so the converter stays (MIK-R46 rule 7)."
+        ),
+        description=(
+            "Convert a memory tree and its knowledge database into the text knowledge format. "
+            "This command is the first step of the first-conversion procedure (MIK-R46 rule 6): "
+            "memory with no attributed baseline converts in place, then adopts the baseline; "
+            "memory with an official line converts inside one new leaf's memory worktree as that "
+            "leaf's first memory change. The converter stays: the command, its read-only reader "
+            "of the legacy database, and conversion-format version 1 are permanent parts of the "
+            "product (MIK-R46 rule 7)."
         ),
     )
-    review_comparison_record.add_arguments(record)
-    record.set_defaults(func=review_comparison_record.run)
-    return parser
+    knowledge_convert.add_arguments(convert)
+    convert.set_defaults(func=knowledge_convert.run)
+    validate = sub.add_parser(
+        "knowledge-validate",
+        help="Validate a converted memory tree against the knowledge formats and integrity rules.",
+    )
+    knowledge_validate.add_arguments(validate)
+    validate.set_defaults(func=knowledge_validate.run)
+    index = sub.add_parser(
+        "knowledge-index",
+        help="Build or reuse the derived knowledge index of one memory tree and report it.",
+    )
+    knowledge_index.add_arguments(index)
+    index.set_defaults(func=knowledge_index.run)
+    worklist = sub.add_parser(
+        "knowledge-worklist",
+        help="Compute the change-to-knowledge worklist of a leaf or of four named sides.",
+    )
+    knowledge_worklist.add_arguments(worklist)
+    worklist.set_defaults(func=knowledge_worklist.run)
+    routes = sub.add_parser(
+        "knowledge-routes",
+        help="Show each family's routes, route state and mechanical route suggestion (read-only).",
+    )
+    knowledge_routes.add_arguments(routes)
+    routes.set_defaults(func=knowledge_routes.run)
+    census = sub.add_parser(
+        "knowledge-census",
+        help="Pin and inventory a migration census, or report its measures and route status.",
+    )
+    knowledge_census.add_arguments(census)
+    census.set_defaults(func=knowledge_census.run)
+    copies = sub.add_parser(
+        "knowledge-copies",
+        help=(
+            "List the leftover copies of the retired knowledge database under a coordination "
+            "root with the rule that decides each; --apply deletes those MIK-R26 rule 6 names."
+        ),
+    )
+    knowledge_copies.add_arguments(copies)
+    copies.set_defaults(func=knowledge_copies.run)
+
+
+def _register_runtime_commands(sub: argparse._SubParsersAction) -> None:
+    """The runtime and settings maintenance commands."""
+    paseo = sub.add_parser(
+        "paseo",
+        help="Provision, inspect or stop the pinned Paseo runtime the settings describe.",
+    )
+    paseo_runtime.add_arguments(paseo)
+    paseo.set_defaults(func=paseo_runtime.run)
+    stats = sub.add_parser(
+        "tool-log-stats",
+        help="Print per-tool answer sizes from a tool-call log folder (read-only).",
+    )
+    tool_log_stats.add_arguments(stats)
+    stats.set_defaults(func=tool_log_stats.run)
+    upgrade = sub.add_parser(
+        "upgrade-user-settings",
+        help="Move the old coordination settings file to the user's configuration directory.",
+    )
+    upgrade_user_settings.add_arguments(upgrade)
+    upgrade.set_defaults(func=upgrade_user_settings.run)
+    removal = sub.add_parser(
+        "providers-remove",
+        help="Stop provider watchers and remove leftover provider runtime folders.",
+    )
+    providers_remove.add_arguments(removal)
+    removal.set_defaults(func=providers_remove.run)
+    stores = sub.add_parser(
+        "removed-stores",
+        help="Remove the stores of removed parts (MIK-R113 rule 5).",
+    )
+    removed_stores.add_arguments(stores)
+    stores.set_defaults(func=removed_stores.run)
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    arguments = sys.argv[1:] if argv is None else list(argv)
+    if arguments[:1] == [leaf_enclosure_start.COMMAND]:
+        # Internal: the dashboard backend runs it as a child process. It is no sub-command of
+        # the public parser, so no help lists it.
+        return leaf_enclosure_start.main(arguments[1:])
+    args = build_parser().parse_args(arguments)
     return int(args.func(args))
 
 

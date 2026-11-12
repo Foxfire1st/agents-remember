@@ -35,20 +35,13 @@ from pathlib import Path
 from typing import Literal
 
 __all__ = [
-    "DURABLE_EVIDENCE_REFUSED_DESTINATIONS",
     "DurableEvidencePublication",
     "EvidenceReadBack",
     "durable_reports_root",
-    "enclosure_reports_removed",
     "publish_durable_evidence",
     "read_back_evidence",
 ]
 
-# The two destinations a retention claim may **not** rest on, named here so a caller cannot reach
-# them by accident and so a case can assert that neither is ever produced. An enclosure-local report
-# is removed at cleanup for a leaf contract, and the terminal enclosure archive's content set is
-# fixed to the enclosure manifest, the adoption receipt and the operation journals.
-DURABLE_EVIDENCE_REFUSED_DESTINATIONS: tuple[str, ...] = ("enclosure_reports", "terminal_archive")
 
 # Where a durable artifact may live, relative to the task root. This is the shipped curator-coherence
 # route's own subdirectory, so one place owns "leaf evidence parked where it survives".
@@ -201,19 +194,6 @@ def read_back_evidence(publication: DurableEvidencePublication) -> EvidenceReadB
         byte_count=len(content),
         state="matched" if observed == publication.sha256 else "mismatched",
     )
-
-
-def enclosure_reports_removed(enclosure_reports: Path) -> bool:
-    """Return whether one enclosure's own ``reports/`` directory is gone.
-
-    The clause's measurement is "publish, clean the enclosure up, read the destination back". This is
-    the middle step, and it is measured rather than assumed for the same reason the read-back is: a
-    retention claim that rests on reading ``worktrees/modules/cleanup.py`` is precisely the claim the
-    source review declined to certify. Its next action is not to store evidence here -- it is to store
-    it at the durable destination.
-    """
-
-    return not enclosure_reports.exists()
 
 
 def _require_one_file_name(file_name: str) -> None:

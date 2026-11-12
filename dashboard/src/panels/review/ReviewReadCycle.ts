@@ -43,6 +43,12 @@
 //     surface's `ReviewReadCache` under its key, and returning to that question renders the kept
 //     answer without a request. A refresh forgets the question it re-asks; an answer from another
 //     comparison generation empties the cache (see that module).
+//   * NO READ ON OPENING IS THROWN AWAY (MIK-R40 rule 5). The reviewer's first read waits for the
+//     catalogue to choose a subject, for a bounded time; when the catalogue is slower than the bound
+//     the task-context review is read meanwhile. If the catalogue then answers first, that read is
+//     superseded: its answer never writes the panes, but it is kept in the cache (same generation
+//     only), so "All source changes" opens from it without a second request. Only the task-context
+//     answer is kept this way; a superseded subject's answer is dropped, as before.
 //
 // WHAT IT DOES NOT DO. No timer, no retry ladder, no polling: a read happens when the question changes
 // or when the reader asks. A read that fails leaves the last coherent payload retained and lets the
@@ -58,6 +64,7 @@ import type {
   ReviewPayload,
   ReviewSelectorKind,
 } from '../../data/review';
+import { detachInFlightReads } from '../../data/abortableRead';
 import { intentReview, reviewProblemFromCause, reviewProblemFromRefusal } from '../../data/review';
 import { type ReviewRead, readFrom } from './ReviewOutcome';
 import type { ReviewReadCache } from './ReviewReadCache';
@@ -112,6 +119,7 @@ function askReview(
     selection: ReviewPageRequest | undefined;
     history?: ReviewHistory;
     previous: string | null;
+    signal: AbortSignal;
   },
   apply: (answered: ReviewRead) => void,
 ): void {
@@ -127,10 +135,12 @@ function askReview(
         question.selection,
         question.history,
         question.previous ?? undefined,
+        question.signal,
       );
       apply(readFrom(result));
     } catch (cause) {
-      apply({ phase: 'failed', problem: reviewProblemFromCause(cause) });
+      if (!question.signal.aborted)
+        apply({ phase: 'failed', problem: reviewProblemFromCause(cause) });
     }
   })();
 }
@@ -163,6 +173,7 @@ interface ReadContext {
 function startRead(reads: { current: number }, context: ReadContext): () => void {
   let superseded = false;
   const askedFor = context.targetKey;
+  const inputEpoch = context.cache.inputEpoch;
   const seq = ++reads.current;
   const current = () => !superseded && reads.current === seq;
   // THE IDENTITY BELONGS TO ONE READ (L17-F1). It is sent only when this read is the one the refresh
@@ -198,8 +209,16 @@ function startRead(reads: { current: number }, context: ReadContext): () => void
   context.setRetained((retained) =>
     continuing ? { ...continuing, key: askedFor } : retained?.key === askedFor ? retained : null,
   );
-  askReview({ ...context.request, previous }, (answered) => {
-    if (!current()) return;
+  const controller = new AbortController();
+  askReview({ ...context.request, previous, signal: controller.signal }, (answered) => {
+    if (context.cache.inputEpoch !== inputEpoch) return;
+    if (!current()) {
+      // Superseded: it never writes the read state. The task-context answer is kept unshown.
+      const taskContext = context.request.selectorKind === undefined;
+      if (taskContext && whole && previous === null && answered.phase === 'reviewed')
+        context.cache.keepUnshown(askedFor, answered.payload);
+      return;
+    }
     const admitted = familyContinuationRead(answered, continuing, cursor);
     if (admitted.phase === 'reviewed') {
       // A refresh's answer states its staleness against the identity it carried; it is shown once,
@@ -213,6 +232,7 @@ function startRead(reads: { current: number }, context: ReadContext): () => void
   });
   return () => {
     superseded = true;
+    controller.abort();
   };
 }
 
@@ -294,6 +314,8 @@ export interface ReviewReadCycle {
   // The reader's own request that the displayed comparison be re-read against the candidate as it is
   // now: the same question, carrying the identity of what is on screen.
   refresh: () => void;
+  memoryChanged: () => void;
+  memoryWatchFailed: (detail: string) => void;
   // The last payload admitted for this task context, whichever subject it answered. The surface keeps
   // its shell (scope, navigation, source explorer) over it while another subject is pending, failed or
   // refused, and never renders it as that subject's reading. `null` before any answer.
@@ -353,6 +375,33 @@ function useLatest<T>(value: T): { current: T } {
   const ref = useRef(value);
   ref.current = value;
   return ref;
+}
+
+function memoryWatchActions(context: {
+  cache: ReviewReadCache; reads: { current: number }; refresh: () => void;
+  setAnswer: (answer: KeyedRead) => void; targetRef: { current: string };
+}) {
+  return {
+    memoryChanged: () => {
+      context.reads.current += 1;
+      context.cache.invalidateReviews();
+      context.refresh();
+    },
+    memoryWatchFailed: (detail: string) => {
+      context.reads.current += 1;
+      context.setAnswer({ key: context.targetRef.current, read: {
+        phase: 'failed', problem: reviewProblemFromCause(new Error(detail)),
+      } });
+    },
+  };
+}
+
+// A refresh re-asks the server: the kept answer for the question on screen is not the answer, and
+// neither is a review request asked before the press (identical reads in flight are shared, and a
+// renewal must send its own).
+function forgetAnswered(cache: ReviewReadCache, key: string): void {
+  cache.forgetReview(key);
+  detachInFlightReads('review:');
 }
 
 export function useReviewReadCycle({
@@ -421,8 +470,7 @@ export function useReviewReadCycle({
   }, [targetKey, questionKey, refreshNonce, asked, hold, retainedRef, carriedRef, cache, setFrame]);
 
   const refresh = useCallback(() => {
-    // A refresh re-asks the server: the kept answer for the question on screen is not the answer.
-    cache.forgetReview(targetRef.current);
+    forgetAnswered(cache, targetRef.current);
     const shown = retainedRef.current;
     const shownBinding = shown?.payload.comparison?.binding_digest;
     // The identity is filed with the question it was displayed for AND the read that will replace it,
@@ -466,6 +514,7 @@ export function useReviewReadCycle({
     retained,
     carried: carriedHere,
     refresh,
+    ...memoryWatchActions({ cache, reads, refresh, setAnswer, targetRef }),
     frame,
   };
 }

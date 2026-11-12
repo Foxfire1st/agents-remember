@@ -21,7 +21,6 @@ from agents_remember_quality.profile_publication import (
     prepare_profile_reports,
 )
 
-AMBIENT_CODEX_PROTOCOL = profile_results.AMBIENT_CODEX_PROTOCOL
 BASELINE_CODEX_PROTOCOL = profile_results.BASELINE_CODEX_PROTOCOL
 _QualityProgress = profile_results.QualityProgress
 _profile_result_payload = profile_results.profile_result_payload
@@ -40,7 +39,7 @@ RUNTIME_CHECKER = f"{RUNTIME_INSTALLER_ROOT}/check-python-runtime.py"
 RUNTIME_INSTALLER = f"{RUNTIME_INSTALLER_ROOT}/install-python-runtime.sh"
 RUNTIME_ROOT = "/opt/agents-remember-python"
 RUNTIME_CURRENT = f"{RUNTIME_ROOT}/current"
-RUNTIME_PYTHON = f"{RUNTIME_CURRENT}/bin/python3.13"
+RUNTIME_PYTHON = f"{RUNTIME_CURRENT}/bin/python3.14"
 RUNTIME_UV = f"{RUNTIME_CURRENT}/bin/uv"
 RUNTIME_PROOF = "/opt/agents-remember-python-runtime.json"
 VENV_ROOT = "/opt/ar-venv"

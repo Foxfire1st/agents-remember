@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Any
 from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -15,78 +13,146 @@ PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.memory_quality.style.citations import grammars, model
-from test_memory_citation_fix import TreeCase
+from agents_remember.memory_quality.style.citations import extents, grammars
+from tree_sitter import Parser
 
 
 def spans(path: str, source: str) -> dict[str, list[tuple[int, int]]]:
-    return grammars.definitions(path, source.splitlines())
+    return {
+        name: [binding.span for binding in items]
+        for name, items in grammars.bindings(path, source.splitlines()).items()
+    }
 
 
-class TypeScriptPureMoveTests(TreeCase):
-    """L6-R16, both directions: the grammar is what turns this decline into a repair.
-
-    One tree, one move. ``RailRow`` is DECLARED in one file and MENTIONED in another, and
-    the citation points at the file it left. With the TypeScript grammar the mention is not
-    a candidate, so the declaration resolves uniquely and ``--fix`` repoints the claim; with
-    the grammar withdrawn both files are mentions, nothing resolves uniquely, and the claim
-    is handed to the curator with both locations named.
-
-    The cited file is deleted by the move and the card is stamped at the commit that still
-    held the declaration there, so a relocation has to prove continuity as well: the anchor
-    was a DEFINITION in the cited file, and the tree-wide match must be a DEFINITION too.
-    """
-
-    def moved(self) -> None:
-        self.tree.history()
-        self.tree.source(
-            "dashboard/src/rail.tsx",
-            "export class RailRow {\n  render() {\n    return null;\n  }\n}\n",
-        )
-        stamp = self.tree.stamp()
-        self.tree.source(
-            "dashboard/src/rail/RailRow.tsx",
-            'import { useState } from "react";\n\n'
-            "export class RailRow {\n  render() {\n    return null;\n  }\n}\n",
-        )
-        self.tree.source(
-            "dashboard/src/panels/FlowTab.tsx",
-            'import { RailRow } from "../rail/RailRow";\n\n'
-            "export const FlowTab = () => new RailRow();\n",
-        )
-        self.tree.remove_source("dashboard/src/rail.tsx")
-        self.tree.card(
-            "dashboard/src/panels/FlowTab.tsx",
-            "| The rail row owns its own render. | `RailRow` | dashboard/src/rail.tsx:1-4 |",
-            stamp=stamp,
-        )
-
-    def withdrawn(self) -> AbstractContextManager[Any]:
-        """The tree exactly as it was before this leaf: no grammar reads ``.tsx``."""
-        remaining = {
-            suffix: grammar
-            for suffix, grammar in grammars.SUFFIX_GRAMMARS.items()
-            if grammar not in {grammars.TSX, grammars.TYPESCRIPT, grammars.JAVASCRIPT}
+class TestCaseDefinitionTests(unittest.TestCase):
+    def test_test_file_eligibility_is_once_per_parse_and_preserves_bindings(self) -> None:
+        lines = [
+            "function helper() {}",
+            'it("preserved case", () => {',
+            "  const value = 1;",
+            "});",
+        ]
+        ordinary = {
+            "helper": [grammars.Binding((1, 1), 1)],
+            "value": [grammars.Binding((3, 3), 3)],
         }
-        return mock.patch.dict(grammars.SUFFIX_GRAMMARS, remaining, clear=True)
+        for suffix in ("ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"):
+            for is_test in (True, False):
+                path = f"review{'.test' if is_test else ''}.{suffix}"
+                expected = dict(ordinary)
+                if is_test:
+                    expected["preserved case"] = [grammars.Binding((2, 4), 2, test_case=True)]
+                with (
+                    self.subTest(path=path),
+                    mock.patch.object(
+                        grammars.test_cases, "is_test_file", wraps=grammars.test_cases.is_test_file
+                    ) as eligible,
+                ):
+                    self.assertEqual(grammars.bindings(path, lines), expected)
+                    eligible.assert_called_once_with(path)
+                    # A second parse checks its own eligibility; no cross-call cache is added.
+                    self.assertEqual(grammars.bindings(path, lines), expected)
+                    self.assertEqual(eligible.call_args_list, [mock.call(path), mock.call(path)])
+        with mock.patch.object(grammars.test_cases, "is_test_file") as eligible:
+            self.assertEqual(
+                grammars.bindings("review.test.py", ["def helper():", "    return 1"]),
+                {"helper": [grammars.Binding((1, 2), 1)]},
+            )
+            self.assertEqual(grammars.bindings("review.test.txt", lines), {})
+            eligible.assert_not_called()
 
-    def test_with_the_grammar_the_move_is_repaired_onto_the_declaration(self) -> None:
-        self.moved()
+    def test_nested_test_titles_bind_qualified_and_unique_bare_names(self) -> None:
+        source = """describe('review fixes', () => {
+  describe("loaded.cards", () => {
+    it("covers only members", () => {
+      expect(1).toBe(1);
+    });
+  });
+});"""
+        for suffix in ("ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"):
+            with self.subTest(suffix=suffix):
+                path = f"review.test.{suffix}"
+                bound = extents.definitions(path, source.splitlines())
+                self.assertEqual(
+                    extents.qualified_spans(
+                        "review fixes > loaded.cards > covers only members", bound
+                    ),
+                    ((3, 5),),
+                )
+                self.assertEqual(extents.qualified_spans("covers only members", bound), ((3, 5),))
+                self.assertNotIn("covers only members", spans(f"review.{suffix}", source))
 
-        result = self.tree.fix()
+    def test_plain_string_titles_decode_javascript_escapes(self) -> None:
+        source = r"""describe('review\'s', () => { it("say \u{1F600} \u0061 \x62", () => {}); });"""
+        self.assertIn("review's > say 😀 a b", spans("review.test.ts", source))
 
-        self.assertEqual(self.sources(result), "dashboard/src/rail/RailRow.tsx:3-7")
-        self.assertEqual(result["declinedCount"], 0)
-        self.assert_check_clean()
+    def test_utf16_pairs_match_scalar_titles_and_preserve_lone_units(self) -> None:
+        for spelling in (r"\uD83D\uDE00", r"\u{1F600}", "😀"):
+            source = f'describe("suite {spelling}", () => {{ it("say {spelling}", () => {{}}); }});'
+            bound = extents.definitions("review.test.ts", source.splitlines())
+            for title in ("say 😀", "suite 😀 > say 😀"):
+                self.assertEqual(extents.qualified_spans(title, bound), ((1, 1),))
+        for unit in (r"\uD83D", r"\uDE00"):
+            self.assertIn(
+                chr(int(unit[2:], 16)), spans("review.test.ts", f'it("{unit}", () => {{}});')
+            )
+        source = r'it("say \uD83D\uDE00", () => {}); test("say \u{1F600}", () => {});'
+        self.assertEqual(
+            len(extents.qualified_spans("say 😀", extents.definitions("review.test.ts", [source]))),
+            2,
+        )
 
-    def test_without_the_grammar_the_same_move_is_declined(self) -> None:
-        self.moved()
+    def test_duplicate_bare_titles_stay_ambiguous_even_on_one_line(self) -> None:
+        source: str = "describe('left', () => { it('same', () => {}); }); describe('right', () => { test('same', () => {}); });"
+        bound = extents.definitions("review.spec.ts", source.splitlines())
+        self.assertEqual(len(extents.qualified_spans("same", bound)), 2)
+        self.assertEqual(extents.qualified_spans("left > same", bound), ((1, 1),))
+        self.assertEqual(extents.qualified_spans("right > same", bound), ((1, 1),))
 
-        with self.withdrawn():
-            result = self.tree.fix()
+    def test_leading_comment_extras_do_not_replace_semantic_first_arguments(self) -> None:
+        source = """describe(/* suite */ "suite", () => {
+  it(/* case */ "block", () => {});
+  test(// case
+    "line", () => {});
+  it(/* note */ value + "computed", "later", () => {});
+  test(/* note */ 123, "nonstring", () => {});
+});"""
+        for suffix in ("ts", "tsx", "js"):
+            path = f"comments.test.{suffix}"
+            grammar = grammars.grammar_of(path)
+            assert grammar is not None
+            tree = Parser(grammars.language(grammar)).parse(source.encode())
+            arguments = (
+                tree.root_node.named_children[0].named_children[0].child_by_field_name("arguments")
+            )
+            assert arguments is not None
+            self.assertFalse(tree.root_node.has_error)
+            self.assertEqual(arguments.named_children[0].type, "comment")
+            self.assertTrue(arguments.named_children[0].is_extra)
+            bound = extents.definitions(path, source.splitlines())
+            self.assertEqual(extents.qualified_spans("suite > block", bound), ((2, 2),))
+            self.assertEqual(extents.qualified_spans("suite > line", bound), ((3, 4),))
+            for title in ("computed", "later", "nonstring"):
+                self.assertNotIn(title, bound)
 
-        self.assertEqual(result["claimsRepaired"], 0)
-        self.assertEqual(self.declined(result)["code"], "anchor_ambiguous")
+    def test_unsupported_case_forms_explain_the_reason_and_offer_line_ranges(self) -> None:
+        source = """it.skip('skipped', () => {});
+test.todo('todo');
+test.each([1])('parameterized', () => {});
+it(`computed ${value}`, () => {});"""
+        bound = spans("review.spec.ts", source)
+        # A case that does not run proves nothing, so it offers no line range either (rule 3).
+        for title, reason, offers_range in (
+            ("skipped", ".skip, which does not run", False),
+            ("todo", ".todo, which does not run", False),
+            ("parameterized", ".each", True),
+            ("computed", "computed", True),
+        ):
+            with self.subTest(title=title):
+                self.assertNotIn(title, bound)
+                message = grammars.test_case_refusal("review.spec.ts", source.splitlines(), title)
+                self.assertIn(reason, message or "")
+                self.assertEqual(offers_range, "line_range" in (message or ""))
 
 
 class PythonExtentTests(unittest.TestCase):
@@ -183,65 +249,10 @@ for path, source in (
     ("k.tsx", "export const Row = () => null;\\n"),
     ("k.js", "export function main() {}\\n"),
 ):
-    if not grammars.definitions(path, source.splitlines()):
+    if not grammars.bindings(path, source.splitlines()):
         raise SystemExit(f"{path} parsed to nothing with egress blocked")
 print("ok")
 '''
-
-
-class TypeScriptAnchorGrammarTests(unittest.TestCase):
-    """R32 modes 1, 2, 3 and 5, plus the nearby shapes that stay negative."""
-
-    def test_a_url_does_not_lose_its_double_slash_during_quote_matching(self) -> None:
-        anchor = model.Anchor(kind=model.QUOTE, text="https://example.invalid/a")
-
-        self.assertTrue(model.occurs_in(anchor, 'const url = "https://example.invalid/a";'))
-
-
-class TypeScriptInterfacePoolRepairTests(TreeCase):
-    """R32 mode 4: pooled members repair to their defining interface file.
-
-    The card is stamped at the commit where the same interface still declared every pooled
-    member, so the relocation proves the members were DEFINITIONS there and are DEFINITIONS
-    at their new file.
-    """
-
-    def test_three_interface_members_in_another_file_repair_as_one_claim(self) -> None:
-        self.tree.history()
-        self.tree.source("dashboard/src/panels/old.ts", "export const keep = true;\n")
-        self.tree.source(
-            "dashboard/src/panels/gone.ts",
-            "export interface PanelProps {\n"
-            "  title: string;\n"
-            "  onSelect(): void;\n"
-            "  disabled?: boolean;\n"
-            "}\n",
-        )
-        stamp = self.tree.stamp()
-        self.tree.source(
-            "dashboard/src/types/panel.ts",
-            "export interface PanelProps {\n"
-            "  title: string;\n"
-            "  onSelect(): void;\n"
-            "  disabled?: boolean;\n"
-            "}\n",
-        )
-        self.tree.remove_source("dashboard/src/panels/gone.ts")
-        self.tree.card(
-            "dashboard/src/panels/view.tsx",
-            "| Panel inputs are shared. | `title`; `onSelect`; `disabled` "
-            "| dashboard/src/panels/gone.ts:1-4 |",
-            stamp=stamp,
-        )
-
-        result = self.tree.fix()
-
-        self.assertEqual(result["claimsRepaired"], 1, result["declined"])
-        self.assertEqual(result["declinedCount"], 0, result["declined"])
-        self.assertEqual(
-            self.sources(result),
-            "dashboard/src/types/panel.ts:2-4",
-        )
 
 
 if __name__ == "__main__":

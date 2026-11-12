@@ -25,8 +25,10 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from importlib import import_module
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agents_remember.application.role_capsules import (
     CapsuleAdmissionRequest,
@@ -69,15 +71,10 @@ from agents_remember.models.role_capsules.types import (
     compute_content_digest,
 )
 from agents_remember.models.role_capsules.vocabulary import CAPSULE_ROLES, CapsuleOperation
+from agents_remember.models.role_identity import ROLE_ALIAS_NOTICE, canonical_role
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.tasks.store import capture_task_doc_source
-from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
-from agents_remember.worktrees.worktree_contract import (
-    ContractError,
-    WorktreeContract,
-    load_contract,
-)
 
 from .provider import SHIPPED_SKILL_ORIGIN, shipped_composition_corpus
 
@@ -86,6 +83,10 @@ from .provider import SHIPPED_SKILL_ORIGIN, shipped_composition_corpus
 #: declared-path rules are written against those relative paths. The manifest is
 #: therefore admitted as ``composition-manifest.json`` beside them.
 COMPOSITION_MANIFEST = "composition-manifest.json"
+
+
+if TYPE_CHECKING:  # annotations are strings; the contract itself loads at its call sites
+    from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +122,7 @@ class CapsuleCompileOutcome:
     refusal: CapsuleCompilationError | None
     binding: CapsuleBinding | None = None
     projection: TaskProjection | None = None
+    used_role_alias: bool = False
 
     @property
     def ok(self) -> bool:
@@ -148,9 +150,11 @@ class CapsuleCompileOutcome:
         """One operator-facing line: the digest, or the refusal and its remedy."""
 
         if self.refusal is not None:
-            return self.refusal.render()
-        assert self.compilation is not None
-        return self.compilation.render_explanation()
+            message = self.refusal.render()
+        else:
+            assert self.compilation is not None
+            message = self.compilation.render_explanation()
+        return message + (" " + ROLE_ALIAS_NOTICE if self.used_role_alias else "")
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +186,9 @@ class CapsuleSeatAddress:
     role: str
     operation: str
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "role", canonical_role(self.role))
+
 
 @dataclass(frozen=True, slots=True)
 class AdmittedEnclosure:
@@ -203,6 +210,17 @@ class AdmittedEnclosure:
 
 
 def compile_task_capsule(
+    config: McpRuntimeConfig,
+    request: CapsuleCompileRequest,
+    *,
+    sources: CapsuleSourceSelectionRequest | None = None,
+) -> CapsuleCompileOutcome:
+    canonical = replace(request, role=canonical_role(request.role))
+    outcome = _compile_task_capsule(config, canonical, sources=sources)
+    return replace(outcome, used_role_alias=request.role == "system-specialist")
+
+
+def _compile_task_capsule(
     config: McpRuntimeConfig,
     request: CapsuleCompileRequest,
     *,
@@ -379,7 +397,9 @@ def _enclosure(config: McpRuntimeConfig, request: CapsuleCompileRequest) -> Admi
                     topology="external", coordination_root=config.coordination_root
                 ),
                 selector=request.enclosure,
-                contract_reader=WorktreeContractReader(),
+                contract_reader=import_module(
+                    "agents_remember.worktrees.modules.contract_reader"
+                ).WorktreeContractReader(),
             ),
         )
     except (ValueError, OSError) as error:
@@ -402,8 +422,13 @@ def _enclosure(config: McpRuntimeConfig, request: CapsuleCompileRequest) -> Admi
             ),
         )
     try:
-        contract = load_contract(contract_path)
-    except (ContractError, OSError) as error:
+        contract = import_module("agents_remember.worktrees.worktree_contract").load_contract(
+            contract_path
+        )
+    except (
+        import_module("agents_remember.worktrees.worktree_contract").ContractError,
+        OSError,
+    ) as error:
         raise TaskProjectionSourceError(
             "contract-unavailable",
             f"worktree contract {contract_path.as_posix()} is unreadable: {error}",
@@ -434,8 +459,15 @@ def _declared_repository_root(request: CapsuleCompileRequest) -> Path | None:
     if contract_path is None:
         return None
     try:
-        return load_contract(contract_path).code_repo_path
-    except (ContractError, OSError) as error:
+        return (
+            import_module("agents_remember.worktrees.worktree_contract")
+            .load_contract(contract_path)
+            .code_repo_path
+        )
+    except (
+        import_module("agents_remember.worktrees.worktree_contract").ContractError,
+        OSError,
+    ) as error:
         raise TaskProjectionSourceError(
             "contract-unavailable",
             f"worktree contract {contract_path.as_posix()} is unreadable: {error}",
@@ -550,7 +582,18 @@ def routed_admission_for(
         role=(entry.file,),
         operation=(operation_entry.source,),
         specialization=(),
-        skill=tuple(sorted(_skill_root_source(parsed, name, origin) for name in entry.skills)),
+        skill=tuple(
+            sorted(
+                {
+                    *(_skill_root_source(parsed, name, origin) for name in entry.skills),
+                    *(
+                        detail.source
+                        for detail in parsed.detail_references
+                        if seat.role in detail.roles
+                    ),
+                }
+            )
+        ),
     )
 
 

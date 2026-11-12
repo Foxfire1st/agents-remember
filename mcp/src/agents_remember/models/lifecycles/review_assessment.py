@@ -129,19 +129,21 @@ def _canonical_text(value: str) -> str:
 
 
 class AssessmentSubject(_StrictAssessmentModel):
-    """What one assessment judges: an identity, a revision pair, or an explicit comparison.
+    """What one assessment judges: an identity, a revision pair, or an explicit comparison."""
 
-    ``recordId`` carries the judged identity under every kind, so a family assessment names the
-    family's own record identity rather than a manufactured source file. ``comparisonRef`` is the
-    explicit comparison a ``comparison`` subject judges, and the record carries the same comparison
-    in its own ``comparisonRef``; the two are one fact and are required to agree.
-
-    The revision lists are required for a revision-bearing kind because a family assessment that
-    named no revision would be a judgment about nothing in particular -- the design's own contrast is
-    a family *revision* and an invariant *revision*, and "the family, in general" is not one of the
-    examined inputs a binding can store. They are refused for ``comparison``, whose examined inputs
-    are the comparison's two sides rather than a revision list.
-    """
+    # Design rationale (not published in input schemas; kept short for callers
+    # per Parent ruling 0a408a8a): ``recordId`` carries the judged identity
+    # under every kind, so a family assessment names the family's own record
+    # identity rather than a manufactured source file. ``comparisonRef`` is the
+    # explicit comparison a ``comparison`` subject judges, and the record
+    # carries the same comparison in its own ``comparisonRef``; the two are one
+    # fact and are required to agree. The revision lists are required for a
+    # revision-bearing kind because a family assessment that named no revision
+    # would be a judgment about nothing in particular -- the design's own
+    # contrast is a family *revision* and an invariant *revision*, and "the
+    # family, in general" is not one of the examined inputs a binding can
+    # store. They are refused for ``comparison``, whose examined inputs are the
+    # comparison's two sides rather than a revision list.
 
     kind: AssessmentSubjectKind
     recordId: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
@@ -186,12 +188,13 @@ class AssessmentSubject(_StrictAssessmentModel):
 
 
 class AssessmentEvidenceReference(_StrictAssessmentModel):
-    """One citation, under the namespace the shipped resolver already confines.
+    """One citation, under the namespace the shipped resolver already confines."""
 
-    A citation is a *reference*, not a promotion (requirement 3.2): an assessment may cite a
-    detection signal, a source file, a manifest or a task document here, and doing so neither changes
-    the cited record's type nor turns it into a finding.
-    """
+    # Design rationale (not published in input schemas; kept short for callers
+    # per Parent ruling 0a408a8a): a citation is a *reference*, not a promotion
+    # (requirement 3.2): an assessment may cite a detection signal, a source
+    # file, a manifest or a task document here, and doing so neither changes
+    # the cited record's type nor turns it into a finding.
 
     namespace: AssessmentEvidenceNamespace
     ref: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
@@ -355,20 +358,22 @@ class _AuthoredAssessmentFields(_StrictAssessmentModel):
 
 
 class ReviewAssessmentRevision(_AuthoredAssessmentFields):
-    """What a caller may *author*: the finding, its rationale, and its citations.
+    """What a caller may author: the finding, its rationale, and its citations."""
 
-    This is deliberately a **different type** from the record that gets stored, and the difference is
-    the whole of requirement 2.1 made structural rather than procedural. The submission shape carries
-    no ``provenance``, no ``authorRef`` and no ``authorRole`` -- there is no field here for a caller to
-    fill in, so "a caller cannot author an assessment under another identity" is a property of the
-    shape rather than of a check somebody has to remember to run. ``examinedInputs`` is absent for the
-    same reason: the binding is built from the publication path's own observation, and a caller who
-    could submit it could claim inputs that were never examined.
-
-    ``design/retrieval-review-design.md:366`` states the split exactly: "The authenticated existing
-    publication path supplies author and authority provenance; caller text supplies the finding,
-    rationale, assumptions, disposition, and citations."
-    """
+    # Design rationale (not published in input schemas; kept short for callers
+    # per Parent ruling 0a408a8a): this is deliberately a **different type**
+    # from the record that gets stored, and the difference is the whole of
+    # requirement 2.1 made structural rather than procedural. The submission
+    # shape carries no ``provenance``, no ``authorRef`` and no ``authorRole``
+    # -- there is no field here for a caller to fill in, so "a caller cannot
+    # author an assessment under another identity" is a property of the shape
+    # rather than of a check somebody has to remember to run. ``examinedInputs``
+    # is absent for the same reason: the binding is built from the publication
+    # path's own observation, and a caller who could submit it could claim
+    # inputs that were never examined. ``design/retrieval-review-design.md:366``
+    # states the split exactly: "The authenticated existing publication path
+    # supplies author and authority provenance; caller text supplies the
+    # finding, rationale, assumptions, disposition, and citations."
 
 
 class ReviewAssessment(_AuthoredAssessmentFields):
@@ -461,8 +466,9 @@ class SubjectAssessmentState(_StrictAssessmentModel):
     disagreements, ``notMeasuredCount`` counts records no measurement covered, ``unavailableCount``
     counts records whose measurement failed, and the remainder are measured current. The partition is
     *enforced*, not promised: every count must equal the number of entries that carry its state, the
-    three of them together may not exceed the records, and ``status`` must be the status those entries
-    themselves state. A summary able to disagree with the records it summarises -- a ``current``
+    three of them together may not exceed the records. ``unresolvedCount`` separately counts
+    entries whose disposition is unresolved, independent of currentness. ``status`` follows the entries
+    themselves. A summary able to disagree with the records it summarises -- a ``current``
     subject holding an entry nothing measured, say -- is therefore unrepresentable.
     """
 
@@ -483,8 +489,11 @@ class SubjectAssessmentState(_StrictAssessmentModel):
         if self.status != "none-recorded" and not self.assessments:
             raise ValueError("a subject with a recorded assessment cannot report none")
         self._require_the_counts_to_partition_the_records()
-        if self.unresolvedCount > self.assessmentCount:
-            raise ValueError("the unresolved count cannot exceed the records it counts")
+        unresolved = sum(entry.disposition == "unresolved" for entry in self.assessments)
+        if self.unresolvedCount != unresolved:
+            raise ValueError(
+                "the unresolved count must equal the entries with unresolved disposition"
+            )
         if self.assessmentCount and self._status_of_records() != self.status:
             raise ValueError(
                 f"status {self.status!r} does not follow from the records: their states are "
@@ -525,7 +534,7 @@ class SubjectAssessmentState(_StrictAssessmentModel):
             )
 
     def _status_of_records(self) -> SubjectAssessmentStatus:
-        """Return the status these records themselves state, in precedence order."""
+        """Apply precedence to binding states and the counted unresolved dispositions."""
 
         states = {entry.currentness for entry in self.assessments}
         if "stale" in states:

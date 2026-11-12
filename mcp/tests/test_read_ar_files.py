@@ -1,37 +1,45 @@
-"""Paired source reads preserve requested bytes, confine paths and deduplicate unchanged onboarding.
+"""``read_ar_files`` names where a thing is and does not carry it (MIK-R109 rule 1).
 
-The second half of the module is the published-intent half of the same route (ICR-R19@v1): the
-ordinary paired read also resolves the repository's published knowledge dataset from its
-coordination context and reads the recorded intent about each requested path at that dataset's own
-snapshot, or names -- by its exact binding -- why it could not.
+For each requested path (as strings, up to twenty) the tool answers whether
+the file exists in the caller's code checkout, the governing card as a
+location in the caller's memory worktree (or that it has none), the card's
+record counts by state on the code the caller sees, and — only for records
+whose state asks the caller to act — the text ID, kind, state and card
+heading of each. Overviews are listed once per call as locations, nearest
+first. No source text, card text or overview text is returned; removed
+parameters and object-form entries are refused with ``argument-removed``;
+the same call on the same state gives the same answer.
 """
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
-from uuid import uuid4
+from typing import Any, cast
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
-# The canonical retrieval carrier that documents this route: the one file a reader follows to
-# discover it, and therefore the file a carrier-parity case has to measure.
-CARRIER = Path(__file__).resolve().parents[2] / "skills/c-04-retrieval-strategy-router/SKILL.md"
+# The response contract owns the field catalog; role instructions own how to read it.
+# Keep field-spelling parity here without copying that catalog into the role prose.
+CARRIER = MCP_SRC / "agents_remember/models/read_files.py"
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
 from agents_remember.application.published_intent import (
     PublishedIntentSelection,
+    published_intent_block,
     read_published_intent,
     resolve_published_intent,
 )
 from agents_remember.application.read_files import read_ar_files_tool
-from agents_remember.errors import AuthorityError
 from agents_remember.kernel.coordination_context.models import (
     CoordinationContext,
     CrossRepoSettings,
@@ -40,27 +48,27 @@ from agents_remember.kernel.coordination_context.models import (
 from agents_remember.kernel.primitives.runtime_config import (
     load_config,
 )
+from agents_remember.mcp.registration import TOOL_REGISTRARS
 from agents_remember.mcp.tools import read_ar_files_payload
-from agents_remember.models.knowledge.read import (
-    InvariantIdentitySeed,
-    InvariantRevisionSeed,
+from agents_remember.models.knowledge_files import (
+    derived_realization_id,
+    derived_record_id,
 )
-from agents_remember.observer import (
-    AmbientLifecycle,
-    EventStore,
-    install_ambient,
-    observer_root,
-    reset_ambient,
-)
-from agents_remember.observer.ambient import AmbientTiming
+from agents_remember.models.read_files import NamedFile
+from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
+from knowledge_index_test_support import write_review_tree
+from knowledge_writer_test_support import CODE_FILE, build_world, canonical, commit_all
+from mcp.server.fastmcp import FastMCP
 from read_scope_test_support import (
     BATCH_PATH,
-    INTEGRATION_PATH,
     build_read_scope_fixture,
 )
 from test_config import settings_payload
+from tool_entry_point_world import EntryPointWorld
 
 REPO = "agents-remember"
+
+ARGUMENT_REMOVED = "read the file with your own tools; this tool names the cards"
 
 
 # --------------------------------------------------------------------------
@@ -166,32 +174,24 @@ def _write_route_index(onboarding_root: Path, route: str, *, covered: list[str])
 
 
 # --------------------------------------------------------------------------
-# ranged-read helper
+# request shape: strings only, one to twenty, no removed parameters
 # --------------------------------------------------------------------------
 
 
-# --------------------------------------------------------------------------
-# application layer: status semantics, path confinement, source independence
-# --------------------------------------------------------------------------
-
-
-class ApplicationStatusTests(unittest.TestCase):
+class RequestShapeTests(unittest.TestCase):
     def setUp(self) -> None:
         self._dir = Path(tempfile.mkdtemp())
         self.code = self._dir / "workspace" / REPO
         (self.code / "pkg").mkdir(parents=True)
-        (self.code / "pkg" / "mod.py").write_text("x = 1\ny = 2\nz = 3\n", encoding="utf-8")
-        (self.code / "pkg" / "other.py").write_text("# other\n", encoding="utf-8")
-        (self.code / "bin.dat").write_bytes(b"\xff\xfe\x00\x01binary")
+        (self.code / "pkg" / "mod.py").write_text("x = 1\n", encoding="utf-8")
         self.onb = self._dir / "memory" / "onboarding"
         self.onb.mkdir(parents=True)
         self.config = _make_config(self._dir, self.code)
-        reset_ambient()
 
     def tearDown(self) -> None:
-        reset_ambient()
+        pass
 
-    def _read(self, files, *, storage_mode: str):
+    def _read(self, files, *, storage_mode: str = "disabled"):
         ctx = _build_context(
             self.code,
             self.onb,
@@ -200,55 +200,469 @@ class ApplicationStatusTests(unittest.TestCase):
         )
         return read_ar_files_tool(self.config, repo_id=REPO, files=files, _context=ctx)
 
-    def test_range_request_returns_exact_slice(self) -> None:
-        result = self._read(
-            [{"path": "pkg/mod.py", "source": {"startLine": 2, "endLine": 3}}],
-            storage_mode="disabled",
-        )
-        self.assertEqual(result["files"][0]["source"], "y = 2\nz = 3\n")
+    def test_object_entry_is_refused_with_argument_removed(self) -> None:
+        result = self._read([{"path": "pkg/mod.py", "source": "full"}])
+        self.assertEqual(result["state"], "refused")
+        self.assertEqual(result["refusalCode"], "argument-removed")
+        self.assertEqual(result["refusalDetail"], ARGUMENT_REMOVED)
 
-    def test_full_read_is_not_truncated(self) -> None:
-        # A file larger than a few KB read as "full" returns its content
-        # byte-for-byte -- the full path must never silently truncate.
-        big = "\n".join(f"line {i:05d} " + "x" * 80 for i in range(400)) + "\n"
-        self.assertGreater(len(big.encode("utf-8")), 4096)
-        (self.code / "pkg" / "big.py").write_text(big, encoding="utf-8")
-        result = self._read([{"path": "pkg/big.py"}], storage_mode="disabled")
-        self.assertEqual(result["files"][0]["source"], big)
+    def test_range_entry_is_refused_with_argument_removed(self) -> None:
+        result = self._read([{"path": "pkg/mod.py", "source": {"startLine": 1, "endLine": 2}}])
+        self.assertEqual(result["state"], "refused")
+        self.assertEqual(result["refusalCode"], "argument-removed")
 
-    def test_binary_source_is_omitted(self) -> None:
-        result = self._read([{"path": "bin.dat"}], storage_mode="disabled")
-        self.assertNotIn("source", result["files"][0])
+    def test_onboarding_suppressed_entry_is_refused_with_argument_removed(self) -> None:
+        result = self._read([{"path": "pkg/mod.py", "onboarding": False}])
+        self.assertEqual(result["state"], "refused")
+        self.assertEqual(result["refusalCode"], "argument-removed")
+
+    def test_refresh_is_refused_with_argument_removed(self) -> None:
+        payload = read_ar_files_payload(self.config, REPO, ["pkg/mod.py"], refresh=True)
+        self.assertEqual(payload["state"], "refused")
+        self.assertEqual(payload["refusalCode"], "argument-removed")
+        self.assertEqual(payload["refusalDetail"], ARGUMENT_REMOVED)
+
+    def test_empty_list_is_refused_before_anything_is_read(self) -> None:
+        result = self._read([])
+        self.assertEqual(result["state"], "refused")
+        self.assertEqual(result["refusalCode"], "empty_paths")
+
+    def test_twenty_paths_are_accepted_and_twenty_one_refused(self) -> None:
+        twenty = [f"pkg/mod{i}.py" for i in range(20)]
+        for rel in twenty:
+            (self.code / rel).write_text("x = 1\n", encoding="utf-8")
+        result = self._read(twenty)
+        self.assertEqual(result["state"], "named")
+        self.assertEqual(len(result["files"]), 20)
+        refused = self._read([*twenty, "pkg/extra.py"])
+        self.assertEqual(refused["state"], "refused")
+        self.assertEqual(refused["refusalCode"], "too_many_paths")
+
+    def test_the_same_call_twice_gives_the_same_answer(self) -> None:
+        # No per-session state: nothing is kept about what was sent.
+        first = self._read(["pkg/mod.py", "pkg/missing.py"])
+        second = self._read(["pkg/mod.py", "pkg/missing.py"])
+        self.assertEqual(first, second)
 
     def test_path_confinement_rejects_escape(self) -> None:
-        with self.assertRaises(AuthorityError):
-            self._read([{"path": "../secret.txt"}], storage_mode="disabled")
+        # Confinement fails closed at the row boundary: the outside path
+        # earns its row, and nothing outside is read.
+        result = self._read(["pkg/mod.py", "../secret.txt"])
+        self.assertEqual(result["state"], "named")
+        self.assertTrue(result["files"][0]["exists"])
+        row = result["files"][1]
+        self.assertEqual(row["refusalCode"], "outside-repository")
+        self.assertIn("refusalDetail", row)
+        self.assertNotIn("card", row)
+
+    def test_escape_first_and_last_keep_valid_rows(self) -> None:
+        for files in (
+            ["../secret.txt", "pkg/mod.py"],
+            ["pkg/mod.py", "/abs/secret.txt"],
+        ):
+            with self.subTest(files=files):
+                result = self._read(files)
+                self.assertEqual(result["state"], "named")
+                kinds = {row.get("refusalCode", "named") for row in result["files"]}
+                self.assertEqual(kinds, {"named", "outside-repository"}, result)
+                named = next(row for row in result["files"] if "refusalCode" not in row)
+                self.assertTrue(named["exists"])
 
     def test_symlink_file_escape_rejected(self) -> None:
-        # A symlink inside the repo pointing at a file OUTSIDE the repo resolves
-        # out of root, so confinement rejects it (not a literal ".." token).
         outside = self._dir / "outside_secret.txt"
         outside.write_text("secret\n", encoding="utf-8")
         link = self.code / "leak.py"
         link.symlink_to(outside)
-        with self.assertRaises(AuthorityError):
-            self._read([{"path": "leak.py"}], storage_mode="disabled")
+        result = self._read(["pkg/mod.py", "leak.py"])
+        self.assertEqual(result["state"], "named")
+        self.assertTrue(result["files"][0]["exists"])
+        self.assertEqual(result["files"][1]["refusalCode"], "outside-repository")
 
     def test_symlink_dir_escape_rejected(self) -> None:
-        # A symlinked directory inside the repo pointing OUTSIDE, addressed via a
-        # child path, still resolves out of root and is rejected.
         outside_dir = self._dir / "outside_dir"
         outside_dir.mkdir()
         (outside_dir / "secret.py").write_text("secret = 1\n", encoding="utf-8")
         link = self.code / "linkdir"
         link.symlink_to(outside_dir, target_is_directory=True)
-        with self.assertRaises(AuthorityError):
-            self._read([{"path": "linkdir/secret.py"}], storage_mode="disabled")
+        result = self._read(["linkdir/secret.py"])
+        self.assertEqual(result["state"], "named")
+        (row,) = result["files"]
+        self.assertEqual(row["refusalCode"], "outside-repository")
 
 
-class FrontDoorDedupTests(unittest.TestCase):
-    """Auto-attach + per-lifecycle dedup of repo overview + route chain."""
+# --------------------------------------------------------------------------
+# naming on a converted tree: locations, counts, no text
+# --------------------------------------------------------------------------
 
+
+class NamingTests(unittest.TestCase):
+    """One path and twenty hold no source, card or overview text; locations open."""
+
+    def setUp(self) -> None:
+        self._dir = Path(tempfile.mkdtemp())
+        world = build_world(self._dir / "converted")
+        self.code = self._dir / "workspace" / REPO
+        self.code.parent.mkdir()
+        shutil.move(str(world.code), str(self.code))
+        self.memory = world.memory
+        self.config = _make_config(self._dir, self.code)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._dir, ignore_errors=True)
+
+    def _context(self, storage_mode: str = "repo-sidecar"):
+        return _build_context(
+            self.code,
+            self.memory / "onboarding",
+            coordination_root=self.config.coordination_root,
+            storage_mode=storage_mode,
+        )
+
+    def _read(self, files):
+        return read_ar_files_tool(
+            self.config,
+            repo_id=REPO,
+            files=files,
+            working_folder=self._dir,
+            _context=self._context(),
+        )
+
+    def test_one_path_names_without_carrying(self) -> None:
+        result = self._read([CODE_FILE])
+        self.assertEqual(result["state"], "named")
+        row = result["files"][0]
+        self.assertTrue(row["exists"])
+        self.assertTrue(row["card"].endswith(f"onboarding/{CODE_FILE}.md"))
+        # The location opens as written from the caller's working folder.
+        self.assertTrue((self._dir / row["card"]).is_file())
+        self.assertEqual(
+            set(row["recordCounts"]), {"stale", "unverifiable", "unrealized", "current"}
+        )
+        # No text of any kind travels: the recorded statement stays out.
+        dumped = json.dumps(result)
+        self.assertNotIn("a landing is one recorded pair", dumped)
+        self.assertNotIn("Land both halves", dumped)
+
+    def test_twenty_paths_hold_no_text_and_name_the_chain_once(self) -> None:
+        files = [CODE_FILE, *[f"pkg/extra{i}.py" for i in range(19)]]
+        for rel in files[1:]:
+            (self.code / rel).write_text("x = 1\n", encoding="utf-8")
+        result = self._read(files)
+        self.assertEqual(len(result["files"]), 20)
+        dumped = json.dumps(result)
+        self.assertNotIn("a landing is one recorded pair", dumped)
+        # Overview locations are named once for the call, not per file.
+        self.assertEqual(len(result["overviews"]), len(set(result["overviews"])))
+        for location in result["overviews"]:
+            self.assertTrue((self._dir / location).is_file(), location)
+
+    def test_a_path_that_is_not_in_the_repository_says_so(self) -> None:
+        result = self._read([CODE_FILE, "pkg/ghost.py"])
+        self.assertTrue(result["files"][0]["exists"])
+        ghost = result["files"][1]
+        self.assertFalse(ghost["exists"])
+        self.assertNotIn("card", ghost)
+
+    def test_a_path_with_no_card_has_none(self) -> None:
+        (self.code / "pkg" / "nocard.py").write_text("x = 1\n", encoding="utf-8")
+        result = self._read(["pkg/nocard.py"])
+        row = result["files"][0]
+        self.assertTrue(row["exists"])
+        self.assertIsNone(row["card"])
+
+    def test_memory_states_travel_with_the_answer(self) -> None:
+        result = self._read([CODE_FILE])
+        self.assertEqual(result["memoryState"], "converted")
+        self.assertEqual(result["codeState"], "commit")
+        self.assertTrue(result["codeTree"])
+
+
+# --------------------------------------------------------------------------
+# a stale record is named singly, with its heading in the card
+# --------------------------------------------------------------------------
+
+
+class StaleNamingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._dir = Path(tempfile.mkdtemp())
+        world = build_world(self._dir / "converted")
+        self.code = self._dir / "workspace" / REPO
+        self.code.parent.mkdir()
+        shutil.move(str(world.code), str(self.code))
+        self.memory = world.memory
+        # Converted grammar: sections citing numbered references, resolved
+        # through the card's sidecar. The stale record's own anchor lives
+        # under "Landing pair"; another file's reference lives under "Tests".
+        card = self.memory / "onboarding" / f"{CODE_FILE}.md"
+        sidecar_path = card.with_suffix(".json")
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        anchor = sidecar["realizes"][0]["anchor"]
+        sidecar["references"] = {
+            "1": {"targets": [{"kind": "code", "anchor": dict(anchor)}]},
+            "2": {
+                "targets": [
+                    {
+                        "kind": "test",
+                        "anchor": {
+                            "path": "tests/test_landing.py",
+                            "locator": {"kind": "file"},
+                            "blob": "0" * 40,
+                            "content": "sha256:" + "0" * 64,
+                        },
+                    }
+                ]
+            },
+        }
+        sidecar_path.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+        card.write_text(
+            "\n".join(
+                [
+                    "# Human title unlike the path",
+                    "",
+                    "## Landing pair",
+                    "",
+                    "- landing holds [1]",
+                    "",
+                    "## Tests",
+                    "",
+                    "- tested elsewhere [2]",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        self.config = _make_config(self._dir, self.code)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._dir, ignore_errors=True)
+
+    def _read(self, files):
+        ctx = _build_context(
+            self.code,
+            self.memory / "onboarding",
+            coordination_root=self.config.coordination_root,
+            storage_mode="repo-sidecar",
+        )
+        return read_ar_files_tool(
+            self.config,
+            repo_id=REPO,
+            files=files,
+            working_folder=self._dir,
+            _context=ctx,
+        )
+
+    def _break_anchor(self) -> None:
+        from knowledge_writer_test_support import git as _git  # noqa: PLC0415
+
+        path = self.code / CODE_FILE
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "return (code, memory)", "return (memory, code)"
+            ),
+            encoding="utf-8",
+        )
+        _git(self.code, "add", "-A")
+        _git(self.code, "commit", "-q", "-m", "break the recorded anchor")
+
+    def test_a_broken_anchor_is_named_with_id_kind_state_and_heading(self) -> None:
+        self._break_anchor()
+        result = self._read([CODE_FILE])
+        row = result["files"][0]
+        self.assertEqual(row["recordCounts"]["stale"], 1)
+        self.assertEqual(row["cardState"], "stale")
+        (named,) = [one for one in row["actionNeeded"] if one["state"] == "stale"]
+        self.assertTrue(named["id"].startswith("INV-"))
+        self.assertEqual(named["kind"], "invariant")
+        self.assertEqual(named["heading"], "Landing pair")
+
+    def test_an_uncommitted_edit_is_observed_at_the_working_tree(self) -> None:
+        """MIK-R73 rule 7: the states are measured on the bytes the caller sees.
+
+        The edit is made and left uncommitted: before the change the block said ``head`` and named
+        the record current at a tree that no longer holds the function. Afterwards the block states
+        ``working-tree``, names the captured tree, and the anchored record reads stale. The capture
+        writes nothing: HEAD, the index and the object store are byte-identical after the read.
+        """
+
+        from knowledge_writer_test_support import git as _git  # noqa: PLC0415
+
+        before = self._read([CODE_FILE])
+        self.assertEqual(before["codeState"], "commit")
+        head_before = _git(self.code, "rev-parse", "HEAD").strip()
+        index_before = (self.code / ".git" / "index").read_bytes()
+        objects_before = sorted(p.name for p in (self.code / ".git" / "objects").rglob("*"))
+
+        path = self.code / CODE_FILE
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "return (code, memory)", "return (memory, code)"
+            ),
+            encoding="utf-8",
+        )
+
+        edited = self._read([CODE_FILE])
+
+        self.assertEqual(edited["codeState"], "working-tree")
+        self.assertNotEqual(edited["codeTree"], before["codeTree"])
+        self.assertEqual(edited["files"][0]["cardState"], "stale")
+        self.assertEqual(edited["files"][0]["recordCounts"]["stale"], 1)
+        self.assertEqual(_git(self.code, "rev-parse", "HEAD").strip(), head_before)
+        self.assertEqual((self.code / ".git" / "index").read_bytes(), index_before)
+        self.assertEqual(
+            sorted(p.name for p in (self.code / ".git" / "objects").rglob("*")), objects_before
+        )
+        self.assertIn("pkg/landing.py", _git(self.code, "status", "--porcelain"))
+
+    def test_a_current_card_names_no_record(self) -> None:
+        result = self._read([CODE_FILE])
+        row = result["files"][0]
+        self.assertEqual(row["actionNeeded"], [])
+        self.assertEqual(row["cardState"], "current")
+
+
+# --------------------------------------------------------------------------
+# two records in one source file resolve to their own card sections
+# --------------------------------------------------------------------------
+
+
+class DistinctSectionHeadingTests(unittest.TestCase):
+    """MIK-R109 round-1 F07: headings come from the converted grammar.
+
+    Two stale records anchor the same source file at two recorded blobs;
+    the card cites each blob under its own section through the sidecar's
+    numbered references. The registered naming read must resolve each
+    record to its own section -- not to the first path-matching section,
+    and not to the card title (which unlike the source path is asserted
+    distinct from both sections).
+    """
+
+    _TITLE = "Human title unlike the path"
+    _FIRST = "First hold"
+    _SECOND = "Second hold"
+
+    def setUp(self) -> None:
+        self._dir = Path(tempfile.mkdtemp())
+        world = build_world(self._dir / "converted")
+        self.code = self._dir / "workspace" / REPO
+        self.code.parent.mkdir()
+        shutil.move(str(world.code), str(self.code))
+        # The registered payload resolves memory from the configured
+        # coordination root, so the fixture memory moves to the default
+        # external root rather than staying beside the world.
+        self.memory = self._dir / "ar-coordination" / "memory-repos" / f"ar-{REPO}"
+        self.memory.parent.mkdir(parents=True)
+        shutil.move(str(world.memory), str(self.memory))
+        locator = {"kind": "symbol", "name": "land_pair"}
+        source = self.code / CODE_FILE
+        # The edits land inside the anchored symbol: appending trailing
+        # comments would leave the symbol's content identical (and the
+        # records current), so each version rewrites the function body.
+        source.write_text(
+            source.read_text(encoding="utf-8").replace(
+                "return (code, memory)", "return (memory, code)"
+            ),
+            encoding="utf-8",
+        )
+        commit_all(self.code, "second version")
+        anchor_v2 = CodeSnapshot.capture(self.code).resolve(CODE_FILE, locator).to_document()
+        source.write_text(
+            source.read_text(encoding="utf-8").replace(
+                "return (memory, code)", "return (code, code)"
+            ),
+            encoding="utf-8",
+        )
+        commit_all(self.code, "current version")
+        second_legacy = "second-landing-section"
+        second_invariant = derived_record_id("invariant", second_legacy)
+        (
+            self.memory / "knowledge" / "invariants" / f"{second_invariant}-second-landing.json"
+        ).write_text(
+            canonical(
+                {
+                    "schema": "ar-invariant/v1",
+                    "id": second_invariant,
+                    "revision": 1,
+                    "status": "accepted",
+                    "statement": "The second hold lands as one pair.",
+                    "applicability": "Every landing.",
+                    "conditions": [],
+                    "exclusions": [],
+                    "supersedes": [],
+                    "admission": "legacy-unassessed",
+                    "origin": {
+                        "task": "260101-OLD",
+                        "leaf": "260101-OLD-L1",
+                        "legacyId": second_legacy,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        family_path = next((self.memory / "knowledge" / "families").glob("*.json"))
+        family = json.loads(family_path.read_text(encoding="utf-8"))
+        family["members"] = [*family["members"], second_invariant]
+        family_path.write_text(canonical(family), encoding="utf-8")
+        card = self.memory / "onboarding" / f"{CODE_FILE}.md"
+        sidecar_path = card.with_suffix(".json")
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        anchor_v1 = sidecar["realizes"][0]["anchor"]
+        sidecar["realizes"].append(
+            {
+                "id": derived_realization_id(second_legacy, CODE_FILE, locator),
+                "invariant": second_invariant,
+                "anchor": anchor_v2,
+                "role": "primary-authority",
+                "rationale": "The second hold lands both halves.",
+            }
+        )
+        sidecar["references"] = {
+            "1": {"targets": [{"kind": "code", "anchor": dict(anchor_v1)}]},
+            "2": {"targets": [{"kind": "code", "anchor": dict(anchor_v2)}]},
+        }
+        sidecar_path.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+        card.write_text(
+            "\n".join(
+                [
+                    f"# {self._TITLE}",
+                    "",
+                    f"## {self._FIRST}",
+                    "",
+                    "- first holds [1]",
+                    "",
+                    f"## {self._SECOND}",
+                    "",
+                    "- second holds [2]",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        commit_all(self.memory, "two records under two sections")
+        self.config = _make_config(self._dir, self.code)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._dir, ignore_errors=True)
+
+    def test_two_records_in_one_file_resolve_to_their_own_sections(self) -> None:
+        payload = read_ar_files_payload(self.config, REPO, [CODE_FILE])
+        TOOL_RESPONSE_MODELS["read_ar_files"].model_validate(payload)
+        self.assertEqual(payload["state"], "named", payload)
+        (row,) = payload["files"]
+        self.assertTrue(row["exists"], payload)
+        self.assertEqual(row["recordCounts"].get("stale"), 2, payload)
+        headings = {one["id"]: one["heading"] for one in row["actionNeeded"]}
+        self.assertEqual(len(headings), 2, payload)
+        self.assertEqual(set(headings.values()), {self._FIRST, self._SECOND}, payload)
+        self.assertNotIn(self._TITLE, headings.values())
+        self.assertNotEqual(self._TITLE, CODE_FILE)
+
+
+# --------------------------------------------------------------------------
+# overview locations: once per call, nearest first, openable
+# --------------------------------------------------------------------------
+
+
+class OverviewLocationTests(unittest.TestCase):
     def setUp(self) -> None:
         self._dir = Path(tempfile.mkdtemp())
         self.code = self._dir / "workspace" / REPO
@@ -262,428 +676,119 @@ class FrontDoorDedupTests(unittest.TestCase):
         _write_sidecar(self.onb, "pkg/sub/mod.py", "Mod body.")
         _write_route_index(self.onb, "pkg/sub", covered=["pkg/sub/mod.py"])
         self.config = _make_config(self._dir, self.code)
-        self.ctx = _build_context(
+
+    def tearDown(self) -> None:
+        pass
+
+    def _read(self, files):
+        ctx = _build_context(
             self.code,
             self.onb,
             coordination_root=self.config.coordination_root,
             storage_mode="repo-sidecar",
         )
-        reset_ambient()
-        amb = AmbientLifecycle(
-            EventStore(observer_root(self.config)), timing=AmbientTiming(heartbeat_seconds=3600)
-        )
-        amb.start(fleeting=True)
-        install_ambient(amb)
-        self.amb = amb
-
-    def tearDown(self) -> None:
-        reset_ambient()
-
-    def _read(self, files, *, refresh: bool = False):
         return read_ar_files_tool(
-            self.config, repo_id=REPO, files=files, refresh=refresh, _context=self.ctx
+            self.config,
+            repo_id=REPO,
+            files=files,
+            working_folder=self._dir,
+            _context=ctx,
         )
 
-    def test_first_read_attaches_overview_and_route_chain(self) -> None:
-        result = self._read([{"path": "pkg/sub/mod.py"}])
-        self.assertEqual(result["repository_overview"]["path"], "overview.md")
-        self.assertIn("root text", result["repository_overview"]["overview"])
-        routes = result["route_overviews"]
-        self.assertIn("pkg/sub", routes)
-        self.assertIn("pkg", routes)
+    def test_chain_is_listed_once_nearest_first(self) -> None:
+        result = self._read(["pkg/sub/mod.py"])
+        self.assertEqual(
+            result["overviews"],
+            [
+                "memory/onboarding/pkg/sub/overview.md",
+                "memory/onboarding/pkg/overview.md",
+                "memory/onboarding/overview.md",
+            ],
+        )
 
-    def test_second_read_dedups_unchanged_pieces(self) -> None:
-        self._read([{"path": "pkg/sub/mod.py"}])
-        again = self._read([{"path": "pkg/sub/mod.py"}])
-        self.assertNotIn("repository_overview", again)
-        self.assertNotIn("route_overviews", again)
+    def test_locations_open_as_written_and_carry_no_text(self) -> None:
+        result = self._read(["pkg/sub/mod.py"])
+        for location in result["overviews"]:
+            self.assertTrue((self._dir / location).is_file(), location)
+        dumped = json.dumps(result)
+        for text in ("root text", "pkg text", "sub text", "Mod body."):
+            self.assertNotIn(text, dumped)
 
-    def test_changed_overview_is_reserved(self) -> None:
-        self._read([{"path": "pkg/sub/mod.py"}])
-        _write_overview(self.onb, "", "# Repo overview\nCHANGED root text\n")
-        again = self._read([{"path": "pkg/sub/mod.py"}])
-        self.assertIn("repository_overview", again)
-        self.assertIn("CHANGED", again["repository_overview"]["overview"])
-        # The unchanged route overviews stay deduped.
-        self.assertNotIn("route_overviews", again)
-
-    def test_refresh_forces_reserve(self) -> None:
-        self._read([{"path": "pkg/sub/mod.py"}])
-        again = self._read([{"path": "pkg/sub/mod.py"}], refresh=True)
-        self.assertIn("repository_overview", again)
-        self.assertIn("route_overviews", again)
-
-    def test_compact_marker_resets_served(self) -> None:
-        self._read([{"path": "pkg/sub/mod.py"}])
-        marker = observer_root(self.config) / "workspace" / "compact-reset.json"
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text("{}", encoding="utf-8")
-        again = self._read([{"path": "pkg/sub/mod.py"}])
-        self.assertIn("repository_overview", again)
-        # Marker consumed exactly once.
-        self.assertFalse(marker.exists())
+    def test_twenty_paths_sharing_one_chain_name_it_once(self) -> None:
+        # Packet boundary: twenty paths under one chain name the chain once,
+        # nearest first, each overview a single time.
+        files = []
+        for index in range(20):
+            rel = f"pkg/sub/extra{index}.py"
+            (self.code / rel).write_text("a = 1\n", encoding="utf-8")
+            files.append(rel)
+        result = self._read(files)
+        self.assertEqual(
+            result["overviews"],
+            [
+                "memory/onboarding/pkg/sub/overview.md",
+                "memory/onboarding/pkg/overview.md",
+                "memory/onboarding/overview.md",
+            ],
+        )
 
 
 # --------------------------------------------------------------------------
-# integration: five-file cap + payload builder through the real fixture
+# memory states: missing or unconverted names no card
 # --------------------------------------------------------------------------
 
 
-class FiveFileCapAndPayloadTests(unittest.TestCase):
-    """End-to-end through the real resolver + payload builder + token choke point."""
-
+class MemoryStateTests(unittest.TestCase):
     def setUp(self) -> None:
         self._dir = Path(tempfile.mkdtemp())
         self.code = self._dir / "workspace" / REPO
-        memory = self._dir / "ar-coordination" / "memory-repos" / f"ar-{REPO}"
-        (memory / "system").mkdir(parents=True, exist_ok=True)
-        (memory / "onboarding").mkdir(parents=True, exist_ok=True)
-        (memory / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
-        self.code.mkdir(parents=True, exist_ok=True)
-        (self.code / "README.md").write_text("# Fixture\nline2\n", encoding="utf-8")
+        (self.code / "pkg").mkdir(parents=True)
+        (self.code / "pkg" / "mod.py").write_text("x = 1\n", encoding="utf-8")
+        self.onb = self._dir / "memory" / "onboarding"
+        self.onb.mkdir(parents=True)
+        _write_sidecar(self.onb, "pkg/mod.py", "Mod body.")
+        _write_route_index(self.onb, "pkg", covered=["pkg/mod.py"])
         self.config = _make_config(self._dir, self.code)
-        reset_ambient()
 
     def tearDown(self) -> None:
-        reset_ambient()
+        pass
 
-    def test_payload_reads_committed_source(self) -> None:
-        payload = read_ar_files_payload(self.config, REPO, [{"path": "README.md"}])
-        self.assertEqual(payload["files"][0]["source"], "# Fixture\nline2\n")
-
-
-# --------------------------------------------------------------------------
-# published intent: the ordinary route reads the repository's publication
-# --------------------------------------------------------------------------
-
-
-class PublishedIntentRouteTests(unittest.TestCase):
-    """The paired read also reads the repository's published intent, without a task.
-
-    ICR-R19@v1: a planner that holds no leaf, no enclosure and no task must still be able to read
-    what the repository already recorded about the paths it is standing in, at that dataset's exact
-    identities -- and every way that read can fail has to be a *named* state rather than an empty
-    page. The dataset is the read-scope fixture's real one (built through the public store
-    operations, with real Git blobs), placed at the published location, and the code root is the
-    fixture's own Git tree, so the anchors these cases observe are real.
-    """
-
-    def setUp(self) -> None:
-        self._dir = Path(tempfile.mkdtemp())
-        self.fixture = build_read_scope_fixture(self._dir / "read-scope")
-        # The fixture's Git tree becomes the configured repository itself, so the code root this
-        # read resolves is the tree the fixture's recorded anchors were authored against.
-        self.code = self._dir / "read-scope" / REPO
-        shutil.move(str(self.fixture.git_root), str(self.code))
-        self.memory = self._dir / "memory"
-        (self.memory / "onboarding").mkdir(parents=True)
-        self.config = _make_config(self._dir, self.code)
-        reset_ambient()
-
-    def tearDown(self) -> None:
-        reset_ambient()
-
-    def _published(self, memory_root: Path | None = None, payload: bytes | None = None) -> Path:
-        """Place (or damage) the repository's published dataset at its one selected location."""
-        root = memory_root or self.memory
-        (root / "onboarding").mkdir(parents=True, exist_ok=True)
-        target = root / "knowledge.sqlite"
-        if payload is None:
-            shutil.copyfile(self.fixture.database_path, target)
-        else:
-            target.write_bytes(payload)
-        return target
-
-    def _context(self, *, memory_root: Path | None = None, repo_name: str = REPO):
-        root = memory_root or self.memory
-        return _build_context(
+    def _read(self, onboarding_root: Path):
+        ctx = _build_context(
             self.code,
-            root / "onboarding",
+            onboarding_root,
             coordination_root=self.config.coordination_root,
             storage_mode="repo-sidecar",
-            repo_name=repo_name,
         )
-
-    def _read(self, files, **kwargs):
         return read_ar_files_tool(
-            self.config, repo_id=REPO, files=files, _context=self._context(**kwargs)
-        )
-
-    def _selection(self, **kwargs) -> PublishedIntentSelection:
-        """The fixture's publication as a resolved selection, or a case that cannot be measured.
-
-        Resolution answers with a selection *or* a named absence, and every case that reads by seed
-        needs the first: asserting the type here keeps a fixture that stopped resolving from being
-        read as a page that happened to be empty.
-        """
-
-        resolved = resolve_published_intent(self._context(**kwargs))
-        assert isinstance(resolved, PublishedIntentSelection), (
-            f"the fixture's publication did not resolve to a selection: {resolved}"
-        )
-        return resolved
-
-    def test_the_ordinary_read_returns_the_published_intent_at_its_exact_identities(self) -> None:
-        published = self._published()
-        result = self._read([{"path": INTEGRATION_PATH}])
-
-        # The source half is untouched: the intent read never replaces the paired read.
-        self.assertIn("shared retry budget", result["files"][0]["source"])
-
-        block = result["published_intent"]
-        self.assertEqual(block["state"], "recorded")
-        self.assertEqual(block["datasetPath"], str(published))
-        self.assertEqual(block["repositoryId"], self.fixture.repository_id)
-        self.assertEqual(block["snapshot"], self.fixture.knowledge_digest)
-        self.assertEqual(block["sourceResolution"]["codeTreeId"], self.fixture.git_tree_id)
-
-        entry = block["seeds"][0]
-        self.assertEqual(entry["seed"], {"kind": "path", "path": INTEGRATION_PATH})
-        self.assertEqual(entry["state"], "page")
-        self.assertEqual(entry["snapshot"], self.fixture.knowledge_digest)
-        self.assertGreater(entry["counts"]["primary_items_total"], len(entry["items"]))
-        self.assertTrue(entry["hasMore"])
-        self.assertTrue(entry["counts"]["primary_items_total"] > 0)
-        # The token this page mints continues the scope read, not the mounted view tool: the block
-        # says which operation continues it rather than leaving the caller to discover the refusal.
-        self.assertEqual(entry["continuationOperation"], "read_knowledge_scope")
-        subjects = {(item.get("invariant_id"), item.get("revision_id")) for item in entry["items"]}
-        self.assertIn(
-            (self.fixture.retry_invariant_id, self.fixture.subject_revision_id),
-            subjects,
-            "the invariant realized at the requested path is read at its exact retained identity",
-        )
-        statement = next(
-            item["statement"]
-            for item in entry["items"]
-            if item.get("revision_id") == self.fixture.subject_revision_id
-        )
-        self.assertIn("share one budget", statement)
-
-    def test_a_repository_that_publishes_nothing_reports_not_recorded(self) -> None:
-        result = self._read([{"path": INTEGRATION_PATH}])
-
-        block = result["published_intent"]
-        self.assertEqual(block["state"], "not-recorded")
-        self.assertEqual(block["refusalCode"], "selected_input_unavailable")
-        self.assertIn(str(self.memory / "knowledge.sqlite"), block["refusalDetail"])
-        self.assertEqual(block["seeds"], [])
-        # The boundary example: no initialized knowledge still allows source/onboarding research.
-        self.assertIn("shared retry budget", result["files"][0]["source"])
-
-    def test_a_dataset_that_is_not_a_dataset_names_the_failed_binding(self) -> None:
-        published = self._published(payload=b"this is not a database\n")
-
-        block = self._read([{"path": INTEGRATION_PATH}])["published_intent"]
-        self.assertEqual(block["state"], "unusable")
-        self.assertEqual(block["refusalCode"], "snapshot_unavailable")
-        self.assertIn(str(published), block["refusalDetail"])
-        self.assertEqual(block["seeds"], [])
-
-    def test_a_directory_at_the_publication_path_is_not_reported_as_nothing_recorded(self) -> None:
-        """A non-file entry where the publication belongs is a named state, not an absence.
-
-        Nothing was ever published here, so the same location can also hold a directory (or a
-        dangling link) put there by something else. Reporting that as ``not-recorded`` would send the
-        caller away believing the repository publishes nothing, when the truth is that the expected
-        publication cannot be read from what is there.
-        """
-
-        (self.memory / "knowledge.sqlite").mkdir()
-
-        block = self._read([{"path": INTEGRATION_PATH}])["published_intent"]
-        self.assertEqual(block["state"], "unusable")
-        self.assertEqual(block["refusalCode"], "selected_input_unavailable")
-        self.assertIn("a directory", block["refusalDetail"])
-        self.assertIn(str(self.memory / "knowledge.sqlite"), block["refusalDetail"])
-        self.assertEqual(block["seeds"], [])
-
-    def test_a_seed_that_is_not_a_typed_seed_is_refused_rather_than_raising(self) -> None:
-        """The exported route answers a caller's wrong seed with a refusal, never an AttributeError.
-
-        ``read_published_intent`` is an exported application function, so a caller can reach it with
-        a value its annotation describes but the runtime never checked. That input is a mistake at
-        the call site, and this route's discipline is to name it in the same vocabulary as every
-        other unusable input instead of raising from inside the read.
-        """
-
-        self._published()
-        selection = self._selection()
-        misaddressed: Any = "src/integration.py"
-
-        entry = read_published_intent(selection, [misaddressed])["seeds"][0]
-        self.assertEqual(entry["state"], "refused")
-        self.assertEqual(entry["refusalCode"], "invalid_payload")
-        self.assertEqual(entry["seed"]["kind"], "unaddressable")
-        self.assertEqual(entry["seed"]["python_type"], "str")
-        self.assertIn("not one of the typed seeds", entry["refusalDetail"])
-
-    def test_the_carrier_uses_the_field_spellings_the_payload_actually_returns(self) -> None:
-        """The carrier names the block's own keys, not a camelCase guess.
-
-        A carrier that spells a field the payload never carries is a reader's dead end, and no
-        behavioural case can catch it: the code is right and the instruction is wrong. This case
-        derives the item and count vocabulary from a real page and requires the carrier to use it --
-        and requires the camelCase variants, which nothing produces, to be absent.
-        """
-
-        self._published()
-        page = self._read([{"path": INTEGRATION_PATH}])["published_intent"]["seeds"][0]
-        carrier = CARRIER.read_text(encoding="utf-8")
-
-        for spelling in ("item_id", "invariant_id", "record_id", "revision_id"):
-            self.assertIn(spelling, page["items"][0])
-            self.assertIn(f"`{spelling}`", carrier)
-        for spelling in ("primary_items_total", "primary_items_remaining"):
-            self.assertIn(spelling, page["counts"])
-            self.assertIn(spelling, carrier)
-        self.assertIn("continuationOperation", page)
-        self.assertIn("continuationOperation", carrier)
-        self.assertIn("read_knowledge_scope", carrier)
-        for unproduced in ("itemId", "invariantId", "recordId", "revisionId", "primaryItemsTotal"):
-            self.assertNotIn(unproduced, carrier)
-
-    def test_a_dataset_bound_to_another_repository_is_never_silently_read(self) -> None:
-        published = self._published()
-
-        block = self._read([{"path": INTEGRATION_PATH}], repo_name="another-repository")[
-            "published_intent"
-        ]
-        self.assertEqual(block["state"], "unusable")
-        self.assertIn("agents-remember", block["refusalDetail"])
-        self.assertIn("another-repository", block["refusalDetail"])
-        self.assertIn(str(published), block["refusalDetail"])
-        # The other repository's records are not answered from, under any spelling.
-        self.assertEqual(block["seeds"], [])
-
-    def test_a_path_the_snapshot_records_nothing_about_is_a_named_absence(self) -> None:
-        self._published()
-
-        block = self._read([{"path": "src/never-recorded.py"}])["published_intent"]
-        self.assertEqual(block["state"], "recorded")
-        entry = block["seeds"][0]
-        self.assertEqual(entry["state"], "refused")
-        self.assertEqual(entry["refusalCode"], "registration_absent")
-        self.assertNotIn("items", entry)
-
-    def test_an_identity_the_snapshot_does_not_hold_is_a_named_absence(self) -> None:
-        self._published()
-        selection = self._selection()
-        missing_revision = str(uuid4())
-
-        block = read_published_intent(
-            selection,
-            [
-                InvariantRevisionSeed(
-                    invariant_id=self.fixture.retry_invariant_id, revision_id=missing_revision
-                )
-            ],
-        )
-        entry = block["seeds"][0]
-        self.assertEqual(entry["state"], "refused")
-        self.assertEqual(entry["refusalCode"], "selector_absent")
-        self.assertIn(missing_revision, entry["refusalDetail"])
-
-        held = read_published_intent(
-            selection, [InvariantIdentitySeed(invariant_id=self.fixture.retry_invariant_id)]
-        )["seeds"][0]
-        self.assertEqual(held["state"], "page")
-        retained = {item["revision_id"] for item in held["items"]}
-        self.assertIn(self.fixture.base_revision_id, retained)
-        self.assertIn(self.fixture.subject_revision_id, retained)
-        self.assertGreater(held["counts"]["primary_items_total"], len(held["items"]))
-
-    def test_a_path_no_recorded_anchor_could_carry_is_refused_as_a_seed(self) -> None:
-        self._published()
-
-        block = self._read([{"path": ":(exclude)src/integration.py"}])["published_intent"]
-        entry = block["seeds"][0]
-        self.assertEqual(entry["state"], "refused")
-        self.assertEqual(entry["refusalCode"], "invalid_payload")
-        self.assertIn("no seed selects it", entry["refusalDetail"])
-
-    def test_the_resolved_source_pair_is_what_recorded_anchors_are_observed_against(self) -> None:
-        self._published()
-
-        resolved = self._read([{"path": INTEGRATION_PATH}])["published_intent"]["seeds"][0]
-        plain_root = self._dir / "plain-code"
-        plain_root.mkdir()
-        unrequested = read_ar_files_tool(
             self.config,
             repo_id=REPO,
-            files=[{"path": INTEGRATION_PATH}],
-            _context=_build_context(
-                plain_root,
-                self.memory / "onboarding",
-                coordination_root=self.config.coordination_root,
-                storage_mode="repo-sidecar",
-            ),
-        )["published_intent"]
-
-        # The fixture records seven realizations at six locations: five resolve against its own
-        # tree, one names a path the tree does not hold and one names another blob -- so a pair
-        # that was really used reports exactly two unresolved anchors.
-        self.assertEqual(unrequested["sourceResolution"], None)
-        both = (
-            resolved["counts"]["unresolved_anchor_total"],
-            unrequested["seeds"][0]["counts"]["unresolved_anchor_total"],
-        )
-        self.assertEqual(both, (2, resolved["counts"]["realization_claims_total"]))
-
-    def test_an_identity_seeded_page_carries_exact_retained_revisions(self) -> None:
-        self._published()
-
-        block = self._identity_seeded_page()
-        entry = block["seeds"][0]
-        self.assertEqual(entry["state"], "page")
-        self.assertEqual(entry["seed"]["kind"], "invariant_revision")
-        # The seed names one exact revision, and the page carries that identity's own retained
-        # revisions at their exact ids. Every retained revision the fixture authored for it is one
-        # of the three the page can name -- a sibling revision that entered through a directly
-        # containing family keeps its own invariant id, so it is never re-attributed here.
-        mine = {
-            item["revision_id"]
-            for item in entry["items"]
-            if item.get("invariant_id") == self.fixture.retry_invariant_id
-        }
-        self.assertTrue(
-            mine
-            <= {
-                self.fixture.base_revision_id,
-                self.fixture.subject_revision_id,
-                self.fixture.successor_revision_id,
-            }
-        )
-        self.assertIn(self.fixture.subject_revision_id, mine)
-        self.assertEqual(entry["snapshot"], self.fixture.knowledge_digest)
-        self.assertGreater(entry["counts"]["primary_items_total"], len(entry["items"]))
-
-    def _identity_seeded_page(self):
-        """One exact revision of the fixture's retry identity, read through the same route.
-
-        The identity seed is the second half of "bounded source/identity seeds": a caller that
-        already holds a recorded identity reads it without re-discovering it from a path first.
-        """
-
-        selection = self._selection()
-        return read_published_intent(
-            selection,
-            [
-                InvariantRevisionSeed(
-                    invariant_id=self.fixture.retry_invariant_id,
-                    revision_id=self.fixture.subject_revision_id,
-                )
-            ],
+            files=["pkg/mod.py"],
+            working_folder=self._dir,
+            _context=ctx,
         )
 
+    def test_missing_memory_names_no_card(self) -> None:
+        shutil.rmtree(self._dir / "memory")
+        result = self._read(self._dir / "memory" / "onboarding")
+        self.assertEqual(result["memoryState"], "missing")
+        self.assertTrue(result["files"][0]["exists"])
+        self.assertIsNone(result["files"][0]["card"])
 
-class PublishedIntentMountedRouteTests(unittest.TestCase):
-    """The mounted ``read_ar_files`` route resolves the publication from the real coordination tree.
+    def test_unconverted_memory_names_no_card(self) -> None:
+        result = self._read(self.onb)
+        self.assertEqual(result["memoryState"], "unconverted")
+        self.assertTrue(result["files"][0]["exists"])
+        self.assertIsNone(result["files"][0]["card"])
 
-    The application cases above inject a context; these two drive ``read_ar_files_payload``, so the
-    memory root is the one the repository's own coordination declaration resolves and the response
-    is the one the registered model validates and the token choke point stamps.
-    """
+
+# --------------------------------------------------------------------------
+# mounted route: the registered model validates the new shape
+# --------------------------------------------------------------------------
+
+
+class MountedContractTests(unittest.TestCase):
+    """The mounted route resolves memory from the real coordination tree."""
 
     def setUp(self) -> None:
         self._dir = Path(tempfile.mkdtemp())
@@ -695,36 +800,923 @@ class PublishedIntentMountedRouteTests(unittest.TestCase):
         (self.memory / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
         (self.memory / "onboarding").mkdir(parents=True)
         self.config = _make_config(self._dir, self.code)
-        reset_ambient()
 
     def tearDown(self) -> None:
-        reset_ambient()
+        pass
 
-    def test_the_mounted_route_reads_the_memory_layer_publication(self) -> None:
-        shutil.copyfile(self.fixture.database_path, self.memory / "knowledge.sqlite")
+    def test_named_answer_validates_against_the_registered_model(self) -> None:
+        card = self.memory / "onboarding" / f"{BATCH_PATH}.md"
+        card.parent.mkdir(parents=True, exist_ok=True)
+        card.write_text("# batch\n\nLegacy card.\n", encoding="utf-8")
+        payload = read_ar_files_payload(self.config, REPO, [BATCH_PATH])
+        TOOL_RESPONSE_MODELS["read_ar_files"].model_validate(payload)
+        self.assertEqual(payload["state"], "named")
+        self.assertEqual(payload["memoryState"], "unconverted")
+        self.assertTrue(payload["files"][0]["exists"])
+        self.assertIsNone(payload["files"][0].get("card"))
+        dumped = json.dumps(payload)
+        self.assertNotIn("Legacy card.", dumped)
 
+    def test_refused_answer_validates_against_the_registered_model(self) -> None:
         payload = read_ar_files_payload(self.config, REPO, [{"path": BATCH_PATH}])
+        TOOL_RESPONSE_MODELS["read_ar_files"].model_validate(payload)
+        self.assertEqual(payload["state"], "refused")
+        self.assertEqual(payload["refusalCode"], "argument-removed")
 
-        block = payload["published_intent"]
-        self.assertEqual(block["state"], "recorded")
-        self.assertEqual(block["datasetPath"], str(self.memory / "knowledge.sqlite"))
-        self.assertEqual(block["snapshot"], self.fixture.knowledge_digest)
-        self.assertEqual(block["sourceResolution"]["repositoryRoot"], str(self.code))
-        self.assertEqual(block["sourceResolution"]["codeTreeId"], self.fixture.git_tree_id)
-        subjects = {
-            item.get("invariant_id")
-            for item in block["seeds"][0]["items"]
-            if item.get("invariant_id")
-        }
-        self.assertIn(self.fixture.batch_invariant_id, subjects)
 
-    def test_the_mounted_route_names_the_absence_before_anything_is_published(self) -> None:
-        payload = read_ar_files_payload(self.config, REPO, [{"path": BATCH_PATH}])
+# --------------------------------------------------------------------------
+# published intent: the direct block keeps its contract (the tool no longer carries it)
+# --------------------------------------------------------------------------
 
-        block = payload["published_intent"]
-        self.assertEqual(block["state"], "not-recorded")
-        self.assertIn(str(self.memory / "knowledge.sqlite"), block["refusalDetail"])
-        self.assertIn("# batch", payload["files"][0]["source"])
+
+class PublishedIntentDirectTests(unittest.TestCase):
+    """The selective block itself is unchanged; only its ride on read_ar_files is gone."""
+
+    def setUp(self) -> None:
+        self._dir = Path(tempfile.mkdtemp())
+        world = build_world(self._dir / "converted")
+        self.code = self._dir / "workspace" / REPO
+        self.code.parent.mkdir()
+        shutil.move(str(world.code), str(self.code))
+        self.memory = world.memory
+        self.config = _make_config(self._dir, self.code)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._dir, ignore_errors=True)
+
+    def _context(self):
+        return _build_context(
+            self.code,
+            self.memory / "onboarding",
+            coordination_root=self.config.coordination_root,
+            storage_mode="repo-sidecar",
+        )
+
+    def _selection(self) -> PublishedIntentSelection:
+        selected = resolve_published_intent(self._context())
+        assert isinstance(selected, PublishedIntentSelection), selected
+        return selected
+
+    def test_a_seed_that_is_not_typed_is_refused_rather_than_raising(self) -> None:
+        entry = read_published_intent(self._selection(), [cast(Any, object())])["seeds"][0]
+        self.assertEqual(entry["state"], "refused")
+        self.assertEqual(entry["refusalCode"], "invalid_payload")
+
+    def test_a_path_with_no_recorded_anchor_is_a_named_absence(self) -> None:
+        entry = published_intent_block(self._context(), ["unassigned/never-recorded.py"])["seeds"][
+            0
+        ]
+        self.assertEqual(entry["refusalCode"], "registration_absent")
+        self.assertEqual(entry["state"], "refused")
+        self.assertNotIn("rows", entry)
+
+    def test_a_path_that_cannot_be_a_seed_is_refused(self) -> None:
+        entry = published_intent_block(self._context(), [":(exclude)pkg/a.py"])["seeds"][0]
+        self.assertEqual(entry["state"], "refused")
+        self.assertEqual(entry["refusalCode"], "invalid_payload")
+
+    def test_an_unconverted_root_cannot_open_a_legacy_database(self) -> None:
+        marker = self.memory / "knowledge/layout.json"
+        marker.unlink()
+        frozen = self.memory / "knowledge.sqlite"
+        frozen.write_bytes(b"SQLite format 3\x00 frozen legacy bytes")
+        block = published_intent_block(self._context(), [CODE_FILE])
+        self.assertEqual(block["state"], "unusable")
+        self.assertEqual(block["refusalCode"], "legacy-format")
+        self.assertEqual(block["seeds"], [])
+
+
+# --------------------------------------------------------------------------
+# carrier parity: the skill names the answer's own keys
+# --------------------------------------------------------------------------
+
+
+class CarrierParityTests(unittest.TestCase):
+    def _assert_carrier_spellings(self, carrier: str) -> None:
+        for spelling in (
+            "`card`",
+            "`recordCounts`",
+            "`actionNeeded`",
+            "`overviews`",
+            "`codeState`",
+            "`memoryState`",
+        ):
+            self.assertIn(spelling, carrier)
+        for retired in (
+            "published_intent",
+            "repository_overview",
+            "route_overviews",
+            "served_earlier",
+        ):
+            self.assertNotIn(retired, carrier)
+
+    def test_the_carrier_uses_the_field_spellings_the_answer_returns(self) -> None:
+        """The response contract documents the actual answer fields, without a role-text copy."""
+
+        carrier = CARRIER.read_text(encoding="utf-8")
+        self._assert_carrier_spellings(carrier)
+        self.assertLessEqual({"card", "recordCounts", "actionNeeded"}, set(NamedFile.model_fields))
+        self.assertLessEqual(
+            {"overviews", "codeState", "memoryState"},
+            set(TOOL_RESPONSE_MODELS["read_ar_files"].model_fields),
+        )
+        for field in (
+            "card",
+            "recordCounts",
+            "actionNeeded",
+            "overviews",
+            "codeState",
+            "memoryState",
+        ):
+            with self.subTest(renamed_documented_field=field):
+                damaged = carrier.replace(f"``{field}``", "``wrongField``")
+                self.assertNotEqual(damaged, carrier)
+                with self.assertRaises(AssertionError):
+                    self._assert_carrier_spellings(damaged)
+        for retired in (
+            "published_intent",
+            "repository_overview",
+            "route_overviews",
+            "served_earlier",
+        ):
+            with (
+                self.subTest(retired_documented_field=retired),
+                self.assertRaises(AssertionError),
+            ):
+                self._assert_carrier_spellings(carrier + f"\n``{retired}``\n")
+
+
+# --------------------------------------------------------------------------
+# registered naming on a converted world memory
+# --------------------------------------------------------------------------
+
+
+class RegisteredNamingTests(unittest.TestCase):
+    """Registered ``read_ar_files`` calls on a converted world memory.
+
+    Boundary refusal, nearest-first overviews, row-level confinement,
+    stale-card absence and partial-index qualification through the
+    registered handler -- not injected contexts.
+    """
+
+    def setUp(self) -> None:
+        self.world = EntryPointWorld()
+        self.addCleanup(self.world.close)
+        self.world.build()
+        code = self.world.code
+        (code / "pkg" / "sub").mkdir(parents=True, exist_ok=True)
+        for index in range(10):
+            (code / f"pkg/mod{index}.py").write_text("x = 1\n", encoding="utf-8")
+            (code / f"pkg/sub/deep{index}.py").write_text("x = 1\n", encoding="utf-8")
+        (code / "pkg/stale.py").write_text("x = 1\n", encoding="utf-8")
+        (code / "pkg/ok.py").write_text("x = 1\n", encoding="utf-8")
+        memory = self.world.memory
+        write_review_tree(memory)
+        onb = memory / "onboarding"
+        _write_overview(onb, "", "# Repo overview\nroot text\n")
+        _write_overview(onb, "pkg", "# pkg overview\npkg text\n")
+        _write_overview(onb, "pkg/sub", "# sub overview\nsub text\n")
+        _write_route_index(
+            onb,
+            "pkg",
+            covered=[f"pkg/mod{index}.py" for index in range(10)]
+            + [f"pkg/sub/deep{index}.py" for index in range(10)]
+            + ["pkg/stale.py", "pkg/ok.py"],
+        )
+
+    def _call(self, files, **arguments) -> dict[str, Any]:
+        outcome, out = self.world.call(
+            "read_ar_files", {"repo_id": "repo-a", "files": files, **arguments}
+        )
+        self.assertEqual(outcome, "RETURNED", out)
+        self.assertIsInstance(out, dict)
+        assert isinstance(out, dict)
+        return out
+
+    def test_omitted_refresh_names(self) -> None:
+        out = self._call(["pkg/mod0.py"])
+        self.assertEqual(out["state"], "named", out)
+        self.assertTrue(out["files"][0]["exists"], out)
+
+    def test_explicit_true_false_and_null_refresh_are_refused(self) -> None:
+        for refresh in (True, False, None):
+            with self.subTest(refresh=refresh):
+                out = self._call(["pkg/mod0.py"], refresh=refresh)
+                self.assertEqual(out["state"], "refused", out)
+                self.assertEqual(out["refusalCode"], "argument-removed", out)
+                self.assertEqual(
+                    out["refusalDetail"],
+                    "read the file with your own tools; this tool names the cards",
+                    out,
+                )
+
+    def test_object_entries_are_refused(self) -> None:
+        out = self._call([{"path": "pkg/mod0.py", "source": "full"}])
+        self.assertEqual(out["state"], "refused", out)
+        self.assertEqual(out["refusalCode"], "argument-removed", out)
+        self.assertEqual(
+            out["refusalDetail"],
+            "read the file with your own tools; this tool names the cards",
+            out,
+        )
+
+    def test_source_and_onboarding_entries_are_refused(self) -> None:
+        for entry in (
+            {"path": "pkg/mod0.py", "onboarding": "full"},
+            {"path": "pkg/mod0.py", "source": "full", "onboarding": "full"},
+        ):
+            with self.subTest(entry=entry):
+                out = self._call([entry])
+                self.assertEqual(out["state"], "refused", out)
+                self.assertEqual(out["refusalCode"], "argument-removed", out)
+                self.assertEqual(
+                    out["refusalDetail"],
+                    "read the file with your own tools; this tool names the cards",
+                    out,
+                )
+
+    def test_removed_refresh_is_absent_from_the_advertised_schema(self) -> None:
+        server: Any = FastMCP("removed-argument-schema")
+        for register_tools in TOOL_REGISTRARS:
+            register_tools(server, None)  # type: ignore[arg-type]
+        schemas = {tool.name: tool.inputSchema or {} for tool in asyncio.run(server.list_tools())}
+        properties = schemas["read_ar_files"].get("properties", {})
+        self.assertNotIn("refresh", properties, schemas["read_ar_files"])
+        self.assertIn("files", properties, schemas["read_ar_files"])
+
+    def test_twenty_paths_name_shared_chains_nearest_first(self) -> None:
+        files = [f"pkg/mod{index}.py" for index in range(10)] + [
+            f"pkg/sub/deep{index}.py" for index in range(10)
+        ]
+        out = self._call(files)
+        self.assertEqual(out["state"], "named", out)
+        self.assertEqual(len(out["files"]), 20, out)
+        overviews = out["overviews"]
+        self.assertEqual(len(overviews), len(set(overviews)), out)
+        ranks = {location: rank for rank, location in enumerate(overviews)}
+        sub = next(path for path in overviews if path.endswith("pkg/sub/overview.md"))
+        pkg = next(
+            path for path in overviews if path.endswith("pkg/overview.md") and "pkg/sub" not in path
+        )
+        root = next(
+            path for path in overviews if path.endswith("overview.md") and "pkg" not in path
+        )
+        self.assertLess(ranks[sub], ranks[pkg], out)
+        self.assertLess(ranks[pkg], ranks[root], out)
+
+    def test_mixed_batch_reports_bad_rows_and_answers_good_ones(self) -> None:
+        out = self._call(["../outside.py", "pkg/mod0.py", "/abs.py"])
+        self.assertEqual(out["state"], "named", out)
+        self.assertEqual(len(out["files"]), 3, out)
+        self.assertEqual(out["files"][0]["refusalCode"], "outside-repository", out)
+        self.assertTrue(out["files"][1]["exists"], out)
+        self.assertNotIn("refusalCode", out["files"][1], out)
+        self.assertEqual(out["files"][2]["refusalCode"], "outside-repository", out)
+
+    def test_stale_covered_card_reports_absence(self) -> None:
+        out = self._call(["pkg/stale.py", "pkg/mod0.py"])
+        self.assertEqual(out["state"], "named", out)
+        stale, _sibling = out["files"]
+        self.assertTrue(stale["exists"], out)
+        self.assertIsNone(stale.get("card"), out)
+        self.assertIn("statesProblem", stale, out)
+
+    def test_partial_index_qualifies_counts(self) -> None:
+        (self.world.memory / "knowledge" / "broken.json").write_text("{not json", encoding="utf-8")
+        (self.world.memory / "onboarding" / "pkg" / "ok.py.md").write_text(
+            "# ok card\n", encoding="utf-8"
+        )
+        out = self._call(["pkg/ok.py"])
+        self.assertEqual(out["state"], "named", out)
+        (row,) = out["files"]
+        self.assertEqual(row.get("indexComplete"), False, out)
+        problem = row.get("statesProblem", "")
+        self.assertIn("partial", problem, out)
+        # Repair evidence: the skipped file with its reason, not a bare
+        # pointer at the check tool.
+        self.assertIn("broken.json", problem, out)
+        self.assertIn("knowledge_integrity_check", problem, out)
+
+
+# --------------------------------------------------------------------------
+# registered repair evidence: malformed records name (path, reason)
+# --------------------------------------------------------------------------
+
+
+class RegisteredRepairEvidenceTests(unittest.TestCase):
+    """Skipped index files name their path and reason through registered reads.
+
+    A converted tree with a malformed existing record carries the repair
+    evidence (path, reason, integrity-check route) alongside the surviving
+    counts; the complete-tree control shows normality with no qualifier.
+    """
+
+    def setUp(self) -> None:
+        self.world = EntryPointWorld()
+        self.addCleanup(self.world.close)
+        self.world.build()
+        code, memory = self.world.code, self.world.memory
+        (code / "pkg").mkdir(parents=True, exist_ok=True)
+        (code / "pkg/mod.py").write_text("x = 1\n", encoding="utf-8")
+        (memory / "knowledge" / "invariants").mkdir(parents=True, exist_ok=True)
+        (memory / "knowledge/layout.json").write_text(
+            json.dumps({"schema": "ar-memory-layout/v2", "conversion": "1"}),
+            encoding="utf-8",
+        )
+        self.inv_id = derived_record_id("invariant", "repair-evidence")
+        self.inv_rel = f"knowledge/invariants/{self.inv_id}-mod.json"
+        (memory / self.inv_rel).write_text(
+            canonical(
+                {
+                    "schema": "ar-invariant/v1",
+                    "id": self.inv_id,
+                    "revision": 1,
+                    "status": "accepted",
+                    "statement": "Mod lands as one pair.",
+                    "applicability": "Every mod.",
+                    "conditions": [],
+                    "exclusions": [],
+                    "supersedes": [],
+                    "admission": "legacy-unassessed",
+                    "origin": {
+                        "task": "260928-MIK",
+                        "leaf": "260928-MIK-L109",
+                        "legacyId": "legacy-repair-evidence",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.fam_id = derived_record_id("family", "repair-evidence-family")
+        (memory / "knowledge/families").mkdir(parents=True, exist_ok=True)
+        (memory / "knowledge/families" / f"{self.fam_id}-mod.json").write_text(
+            canonical(
+                {
+                    "schema": "ar-family/v1",
+                    "id": self.fam_id,
+                    "revision": 1,
+                    "status": "accepted",
+                    "title": "Repair evidence family",
+                    "guarantee": "Mod holds together.",
+                    "members": [self.inv_id],
+                    "routes": ["pkg"],
+                    "admission": "legacy-unassessed",
+                    "origin": {
+                        "task": "260928-MIK",
+                        "leaf": "260928-MIK-L109",
+                        "legacyId": "legacy-repair-evidence-family",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        onb = memory / "onboarding"
+        _write_sidecar(onb, "pkg/mod.py", "Mod body.")
+        blob = subprocess.run(
+            ["git", "-C", str(code), "hash-object", "pkg/mod.py"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        digest = "sha256:" + hashlib.sha256((code / "pkg/mod.py").read_bytes()).hexdigest()
+        self.rlz_id = "RLZ-500000"
+        (onb / "pkg/mod.py.json").write_text(
+            json.dumps(
+                {
+                    "schema": "ar-onboarding-file/v1",
+                    "path": "pkg/mod.py",
+                    "references": {},
+                    "realizes": [
+                        {
+                            "id": self.rlz_id,
+                            "invariant": self.inv_id,
+                            "anchor": {
+                                "locator": {"kind": "file"},
+                                "blob": blob,
+                                "content": digest,
+                            },
+                            "role": "primary-authority",
+                            "rationale": "Mod enforces the invariant.",
+                        }
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        _write_route_index(onb, "pkg", covered=["pkg/mod.py"])
+        for root in (code, memory):
+            for name, value in (
+                ("user.email", "repair@example.invalid"),
+                ("user.name", "repair"),
+            ):
+                subprocess.run(
+                    ["git", "-C", str(root), "config", name, value],
+                    check=True,
+                    capture_output=True,
+                )
+        commit_all(code, "one governed file")
+        commit_all(memory, "one governing card")
+
+    def _call(self, files) -> dict[str, Any]:
+        outcome, out = self.world.call("read_ar_files", {"repo_id": "repo-a", "files": list(files)})
+        self.assertEqual(outcome, "RETURNED", out)
+        self.assertIsInstance(out, dict)
+        assert out is not None
+        return out
+
+    def test_complete_tree_names_counts_with_no_qualifier(self) -> None:
+        out = self._call(["pkg/mod.py"])
+        self.assertEqual(out["state"], "named", out)
+        (row,) = out["files"]
+        self.assertTrue(row["exists"], out)
+        self.assertNotIn("knowledge index is partial", row.get("statesProblem", ""), out)
+        # The live link is measured, not fallback: one current realization
+        # counted, a current card, and no qualifier beside the counts (a
+        # complete index carries no statesProblem/indexComplete keys).
+        self.assertGreaterEqual(row["recordCounts"].get("current", 0), 1, out)
+        self.assertEqual(row.get("cardState"), "current", out)
+        self.assertEqual(row.get("statesProblem", ""), "", out)
+        self.assertNotIn("indexComplete", row, out)
+
+    def test_converted_malformed_record_names_repair_evidence(self) -> None:
+        # Malform the existing indexed record (not an extra invalid file,
+        # not a missing layout): the surviving counts stay beside the
+        # repair evidence for the skipped file.
+        (self.world.memory / self.inv_rel).write_text("{not json", encoding="utf-8")
+        out = self._call(["pkg/mod.py"])
+        self.assertEqual(out["state"], "named", out)
+        (row,) = out["files"]
+        self.assertTrue(row["exists"], out)
+        problem = row.get("statesProblem", "")
+        self.assertIn("knowledge index is partial", problem, out)
+        self.assertIn(f"{self.inv_id}-mod.json", problem, out)
+        self.assertIn("knowledge_integrity_check", problem, out)
+        # The surviving zero is qualified, not normal: the linked
+        # invariant is unreadable, so no current realization is counted
+        # and the index is incomplete -- unlike the control's measured
+        # nonzero counts with no qualifier.
+        self.assertEqual(row["recordCounts"].get("current", 0), 0, out)
+        self.assertFalse(row.get("indexComplete"), out)
+
+
+# --------------------------------------------------------------------------
+# registered card lifecycle: readability before emission, sibling by sibling
+# --------------------------------------------------------------------------
+
+
+class RegisteredCardLifecycleTests(unittest.TestCase):
+    """Card create/delete/replace through the registered handler.
+
+    Readability is checked before emission: an unreadable card names no
+    location and no states, the actual surface is reported, and the valid
+    sibling's row is asserted state-by-state in every phase, including the
+    boundary replacement.
+    """
+
+    def setUp(self) -> None:
+        self.world = EntryPointWorld()
+        self.addCleanup(self.world.close)
+        self.world.build()
+        code, memory = self.world.code, self.world.memory
+        (code / "pkg").mkdir(parents=True, exist_ok=True)
+        (code / "pkg/keep.py").write_text("x = 1\n", encoding="utf-8")
+        (code / "pkg/drop.py").write_text("x = 2\n", encoding="utf-8")
+        onb = memory / "onboarding"
+        (memory / "knowledge").mkdir(parents=True, exist_ok=True)
+        (memory / "knowledge/layout.json").write_text(
+            json.dumps({"schema": "ar-memory-layout/v2", "conversion": "1"}),
+            encoding="utf-8",
+        )
+        _write_sidecar(onb, "pkg/keep.py", "Keep body.")
+        _write_sidecar(onb, "pkg/drop.py", "Drop body.")
+        _write_route_index(onb, "pkg", covered=["pkg/keep.py", "pkg/drop.py"])
+        for root in (code, memory):
+            for name, value in (
+                ("user.email", "lifecycle@example.invalid"),
+                ("user.name", "lifecycle"),
+            ):
+                subprocess.run(
+                    ["git", "-C", str(root), "config", name, value],
+                    check=True,
+                    capture_output=True,
+                )
+        commit_all(code, "two governed files")
+        commit_all(memory, "two governing cards")
+
+    def _call(self, files) -> dict[str, Any]:
+        outcome, out = self.world.call("read_ar_files", {"repo_id": "repo-a", "files": list(files)})
+        self.assertEqual(outcome, "RETURNED", out)
+        self.assertIsInstance(out, dict)
+        assert out is not None
+        return out
+
+    def _rows(self, out: dict[str, Any]):
+        rows = {str(row["path"]): row for row in out["files"]}
+        self.assertEqual(set(rows), {"pkg/keep.py", "pkg/drop.py"}, out)
+        return rows
+
+    def _assert_valid_sibling(self, row, out) -> None:
+        self.assertTrue(row["exists"], out)
+        self.assertTrue(str(row["card"]).endswith("pkg/keep.py.md"), out)
+        self.assertEqual(
+            row.get("recordCounts"),
+            {"current": 0, "stale": 0, "unverifiable": 0, "unrealized": 0},
+            out,
+        )
+        self.assertIsNone(row.get("cardState"), out)
+        self.assertEqual(row.get("actionNeeded"), [], out)
+        self.assertIn("registration_absent", row.get("statesProblem", ""), out)
+
+    def test_card_lifecycle_keeps_the_valid_sibling_state_by_state(self) -> None:
+        files = ["pkg/keep.py", "pkg/drop.py"]
+        rows = self._rows(self._call(files))
+        self._assert_valid_sibling(rows["pkg/keep.py"], rows)
+        self.assertTrue(str(rows["pkg/drop.py"]["card"]).endswith("pkg/drop.py.md"), rows)
+        # Deleting the card names the absence and keeps the sibling.
+        (self.world.memory / "onboarding" / "pkg/drop.py.md").unlink()
+        rows = self._rows(self._call(files))
+        self._assert_valid_sibling(rows["pkg/keep.py"], rows)
+        dropped = rows["pkg/drop.py"]
+        self.assertTrue(dropped["exists"], rows)
+        self.assertIsNone(dropped.get("card"), rows)
+        self.assertIn("no readable file", dropped.get("statesProblem", ""), rows)
+        # Replacing the card at its path with unreadable bytes names the
+        # actual surface instead of an unopenable location; the sibling
+        # still aligns state-by-state.
+        (self.world.memory / "onboarding" / "pkg/drop.py.md").write_bytes(b"\xff\xfe\x00not-utf8")
+        rows = self._rows(self._call(files))
+        self._assert_valid_sibling(rows["pkg/keep.py"], rows)
+        dropped = rows["pkg/drop.py"]
+        self.assertTrue(dropped["exists"], rows)
+        self.assertIsNone(dropped.get("card"), rows)
+        self.assertIn("could not be read", dropped.get("statesProblem", ""), rows)
+
+
+# --------------------------------------------------------------------------
+# registered distinct sections: two records, one file, own anchors
+# --------------------------------------------------------------------------
+
+
+class RegisteredDistinctSectionTests(unittest.TestCase):
+    """Two stale records anchor one file at two recorded blobs (registered).
+
+    Mirrors DistinctSectionHeadingTests through the registered handler:
+    the card cites each blob under its own section through the sidecar's
+    numbered references, with trailing context lines after each bullet so
+    only a multiline reference match resolves them. Each record must
+    resolve to its own section -- not to the first path-matching section,
+    and not to the card title -- with no title fallback flagged.
+    """
+
+    _TITLE = "Human title unlike the path"
+    _FIRST = "First hold"
+    _SECOND = "Second hold"
+
+    def setUp(self) -> None:
+        self.world = EntryPointWorld()
+        self.addCleanup(self.world.close)
+        self.world.build()
+        code, memory = self.world.code, self.world.memory
+        rel = "pkg/hold.py"
+        (code / "pkg").mkdir(parents=True, exist_ok=True)
+        anchors = []
+        for version in (1, 2):
+            (code / rel).write_text(f"def hold():\n    return {version}\n", encoding="utf-8")
+            blob = subprocess.run(
+                ["git", "-C", str(code), "hash-object", rel],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            digest = "sha256:" + hashlib.sha256((code / rel).read_bytes()).hexdigest()
+            anchors.append({"locator": {"kind": "file"}, "blob": blob, "content": digest})
+        (code / rel).write_text("def hold():\n    return 3\n", encoding="utf-8")
+        onb = memory / "onboarding"
+        (memory / "knowledge").mkdir(parents=True, exist_ok=True)
+        (memory / "knowledge/layout.json").write_text(
+            json.dumps({"schema": "ar-memory-layout/v2", "conversion": "1"}),
+            encoding="utf-8",
+        )
+        _write_overview(onb, "pkg", "# pkg overview\npkg text\n")
+        invariants = []
+        for index in range(2):
+            inv = derived_record_id("invariant", f"reg-mirror-{index}")
+            invariants.append(inv)
+            inv_path = memory / "knowledge" / "invariants" / f"{inv}-hold-{index}.json"
+            inv_path.parent.mkdir(parents=True, exist_ok=True)
+            inv_path.write_text(
+                canonical(
+                    {
+                        "schema": "ar-invariant/v1",
+                        "id": inv,
+                        "revision": 1,
+                        "status": "accepted",
+                        "statement": f"Hold {index} lands as one pair.",
+                        "applicability": f"Every hold {index}.",
+                        "conditions": [],
+                        "exclusions": [],
+                        "supersedes": [],
+                        "admission": "legacy-unassessed",
+                        "origin": {
+                            "task": "260928-MIK",
+                            "leaf": "260928-MIK-L109",
+                            "legacyId": f"legacy-reg-mirror-{index}",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+        (onb / f"{rel}.md").write_text(
+            "\n".join(
+                [
+                    f"# {self._TITLE}",
+                    "",
+                    f"## {self._FIRST}",
+                    "",
+                    "- first holds [1]",
+                    "Trailing context after the first bullet.",
+                    "",
+                    f"## {self._SECOND}",
+                    "",
+                    "- second holds [2]",
+                    "Trailing context after the second bullet.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (onb / f"{rel}.json").write_text(
+            json.dumps(
+                {
+                    "schema": "ar-onboarding-file/v1",
+                    "path": rel,
+                    "references": {
+                        "1": {"targets": [{"kind": "code", "anchor": dict(anchors[0])}]},
+                        "2": {"targets": [{"kind": "code", "anchor": dict(anchors[1])}]},
+                    },
+                    "realizes": [
+                        {
+                            "id": f"RLZ-{200 + index:06d}",
+                            "invariant": inv,
+                            "anchor": anchors[index],
+                            "role": "primary-authority",
+                            "rationale": f"Hold {index} lands both halves.",
+                        }
+                        for index, inv in enumerate(invariants)
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        _write_route_index(onb, "pkg", covered=[rel])
+        for root in (code, memory):
+            for name, value in (
+                ("user.email", "sections@example.invalid"),
+                ("user.name", "sections"),
+            ):
+                subprocess.run(
+                    ["git", "-C", str(root), "config", name, value],
+                    check=True,
+                    capture_output=True,
+                )
+        commit_all(code, "current version")
+        commit_all(memory, "two records under two sections")
+
+    def test_two_records_resolve_to_their_own_sections_registered(self) -> None:
+        outcome, out = self.world.call(
+            "read_ar_files", {"repo_id": "repo-a", "files": ["pkg/hold.py"]}
+        )
+        self.assertEqual(outcome, "RETURNED", out)
+        assert out is not None
+        TOOL_RESPONSE_MODELS["read_ar_files"].model_validate(out)
+        self.assertEqual(out["state"], "named", out)
+        (row,) = out["files"]
+        self.assertTrue(row["exists"], out)
+        self.assertEqual(row["recordCounts"].get("stale"), 2, out)
+        headings = {one["id"]: one["heading"] for one in row["actionNeeded"]}
+        self.assertEqual(len(headings), 2, out)
+        self.assertEqual(set(headings.values()), {self._FIRST, self._SECOND}, out)
+        self.assertNotIn(self._TITLE, headings.values())
+        for one in row["actionNeeded"]:
+            self.assertFalse(one["titleFallback"], one)
+
+    def test_unscored_sections_report_title_fallback_registered(self) -> None:
+        onb = self.world.memory / "onboarding"
+        (onb / "pkg/hold.py.md").write_text(
+            "\n".join(
+                [
+                    f"# {self._TITLE}",
+                    "",
+                    "## Unrelated hold",
+                    "",
+                    "- nothing cites a reference here",
+                    "Trailing context.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        sidecar_path = onb / "pkg/hold.py.json"
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        sidecar["references"] = {}
+        sidecar_path.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+        outcome, out = self.world.call(
+            "read_ar_files", {"repo_id": "repo-a", "files": ["pkg/hold.py"]}
+        )
+        self.assertEqual(outcome, "RETURNED", out)
+        assert out is not None
+        (row,) = out["files"]
+        self.assertEqual(row["recordCounts"].get("stale"), 2, out)
+        self.assertEqual(len(row["actionNeeded"]), 2, out)
+        for one in row["actionNeeded"]:
+            self.assertEqual(one["heading"], self._TITLE, one)
+            self.assertTrue(one["titleFallback"], one)
+
+
+# --------------------------------------------------------------------------
+# registered same-blob sections: content-exact scoring
+# --------------------------------------------------------------------------
+
+
+class RegisteredSameBlobSectionTests(unittest.TestCase):
+    """Two stale records share one recorded blob under distinct sections (registered).
+
+    Same file version, distinct recorded contents: the sidecar cites each
+    content under its own section. Each record must resolve to the section
+    citing its own content -- a record-to-heading mapping, not a set of
+    values -- even though both sections match the shared blob. The
+    earlier section must not win for the later section's record.
+    """
+
+    _TITLE = "Human title unlike the path"
+    _FIRST = "First symbol"
+    _SECOND = "Second symbol"
+
+    def setUp(self) -> None:
+        self.world = EntryPointWorld()
+        self.addCleanup(self.world.close)
+        self.world.build()
+        code, memory = self.world.code, self.world.memory
+        rel = "pkg/two.py"
+        (code / "pkg").mkdir(parents=True, exist_ok=True)
+        (code / rel).write_text("def two():\n    return 1\n", encoding="utf-8")
+        blob = subprocess.run(
+            ["git", "-C", str(code), "hash-object", rel],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        first_content = "sha256:" + "1" * 64
+        second_content = "sha256:" + "2" * 64
+        onb = memory / "onboarding"
+        (memory / "knowledge").mkdir(parents=True, exist_ok=True)
+        (memory / "knowledge/layout.json").write_text(
+            json.dumps({"schema": "ar-memory-layout/v2", "conversion": "1"}),
+            encoding="utf-8",
+        )
+        (memory / "knowledge/invariants").mkdir(parents=True, exist_ok=True)
+        self.inv_ids = []
+        for index, name in enumerate(("first", "second")):
+            inv = derived_record_id("invariant", f"reg-same-blob-{index}")
+            self.inv_ids.append(inv)
+            (memory / "knowledge/invariants" / f"{inv}-hold-{index}.json").write_text(
+                canonical(
+                    {
+                        "schema": "ar-invariant/v1",
+                        "id": inv,
+                        "revision": 1,
+                        "status": "accepted",
+                        "statement": f"Hold {name} lands as one pair.",
+                        "applicability": f"Every hold {name}.",
+                        "conditions": [],
+                        "exclusions": [],
+                        "supersedes": [],
+                        "admission": "legacy-unassessed",
+                        "origin": {
+                            "task": "260928-MIK",
+                            "leaf": "260928-MIK-L109",
+                            "legacyId": f"legacy-reg-same-blob-{index}",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+        (onb / "pkg").mkdir(parents=True, exist_ok=True)
+        (onb / f"{rel}.md").write_text(
+            "\n".join(
+                [
+                    f"# {self._TITLE}",
+                    "",
+                    f"## {self._FIRST}",
+                    "",
+                    "- first holds [1]",
+                    "Trailing context after the first bullet.",
+                    "",
+                    f"## {self._SECOND}",
+                    "",
+                    "- second holds [2]",
+                    "Trailing context after the second bullet.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (onb / f"{rel}.json").write_text(
+            json.dumps(
+                {
+                    "schema": "ar-onboarding-file/v1",
+                    "path": rel,
+                    "references": {
+                        "1": {
+                            "targets": [
+                                {
+                                    "kind": "code",
+                                    "anchor": {
+                                        "locator": {"kind": "file"},
+                                        "blob": blob,
+                                        "content": first_content,
+                                    },
+                                }
+                            ]
+                        },
+                        "2": {
+                            "targets": [
+                                {
+                                    "kind": "code",
+                                    "anchor": {
+                                        "locator": {"kind": "file"},
+                                        "blob": blob,
+                                        "content": second_content,
+                                    },
+                                }
+                            ]
+                        },
+                    },
+                    "realizes": [
+                        {
+                            "id": "RLZ-400000",
+                            "invariant": self.inv_ids[0],
+                            "anchor": {
+                                "locator": {"kind": "file"},
+                                "blob": blob,
+                                "content": first_content,
+                            },
+                            "role": "primary-authority",
+                            "rationale": "First holds both halves.",
+                        },
+                        {
+                            "id": "RLZ-400001",
+                            "invariant": self.inv_ids[1],
+                            "anchor": {
+                                "locator": {"kind": "file"},
+                                "blob": blob,
+                                "content": second_content,
+                            },
+                            "role": "primary-authority",
+                            "rationale": "Second holds both halves.",
+                        },
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        _write_route_index(onb, "pkg", covered=[rel])
+        for root in (code, memory):
+            for name, value in (
+                ("user.email", "sections@example.invalid"),
+                ("user.name", "sections"),
+            ):
+                subprocess.run(
+                    ["git", "-C", str(root), "config", name, value],
+                    check=True,
+                    capture_output=True,
+                )
+        (code / rel).write_text("def two():\n    return 2\n", encoding="utf-8")
+        commit_all(code, "newer version stales the records")
+        commit_all(memory, "two records under two sections")
+
+    def test_same_blob_records_resolve_to_their_own_content_sections(self) -> None:
+        outcome, out = self.world.call(
+            "read_ar_files", {"repo_id": "repo-a", "files": ["pkg/two.py"]}
+        )
+        self.assertEqual(outcome, "RETURNED", out)
+        assert out is not None
+        TOOL_RESPONSE_MODELS["read_ar_files"].model_validate(out)
+        self.assertEqual(out["state"], "named", out)
+        (row,) = out["files"]
+        self.assertTrue(row["exists"], out)
+        self.assertEqual(row["recordCounts"].get("stale"), 2, out)
+        headings = {one["id"]: one["heading"] for one in row["actionNeeded"]}
+        self.assertEqual(
+            headings,
+            {self.inv_ids[0]: self._FIRST, self.inv_ids[1]: self._SECOND},
+            out,
+        )
+        for one in row["actionNeeded"]:
+            self.assertFalse(one["titleFallback"], one)
 
 
 # --------------------------------------------------------------------------

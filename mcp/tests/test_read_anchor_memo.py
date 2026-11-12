@@ -202,10 +202,10 @@ def test_repeated_observations_answer_identically_from_one_read_per_object(
 
     assert first == baseline, "a remembered answer is the answer the unremembered path gives"
     assert second == first
-    assert git_calls[len(after_first) :] == [["cat-file", "-e", f"{tree.tree_id}^{{tree}}"]], (
-        "a repeat pass asks Git only whether the tree is still there"
-    )
-    assert _git_kind(after_first, "cat-file", "-e") == 1
+    assert git_calls[len(after_first) :] == [
+        ["--no-replace-objects", "rev-parse", "--verify", "--quiet", f"{tree.tree_id}^{{tree}}"]
+    ], "a repeat pass asks Git only whether the tree is still there"
+    assert _git_kind(after_first, "--no-replace-objects", "rev-parse") == 1
     assert _git_kind(after_first, "ls-tree") == 3, (
         "one lookup per distinct path, the absent one too"
     )
@@ -258,18 +258,18 @@ def test_a_failure_is_never_remembered_and_the_later_success_is_observed(
     assert "exited 128" in answers[1]["detail"]
     assert "could not read blob" in answers[2]["detail"]
     assert [" ".join(call[:2]) for call in calls] == [
-        "cat-file -e",  # failed: asked again below
-        "cat-file -e",  # every resolver probes the tree afresh
+        "--no-replace-objects rev-parse",  # failed: asked again below
+        "--no-replace-objects rev-parse",  # every resolver probes the tree afresh
         "ls-tree -z",  # failed: asked again below
-        "cat-file -e",
+        "--no-replace-objects rev-parse",
         "ls-tree -z",
         "cat-file blob",  # failed: asked again below
-        "cat-file -e",
+        "--no-replace-objects rev-parse",
         "cat-file blob",
     ], "each failed question is asked again, and each answered one is not"
     settled = len(calls)
     assert _observe(tree, claim)[0] == answers[3]
-    assert [" ".join(call[:2]) for call in calls[settled:]] == ["cat-file -e"], (
+    assert [" ".join(call[:2]) for call in calls[settled:]] == ["--no-replace-objects rev-parse"], (
         "only the success is remembered, and it is then served behind a fresh probe"
     )
 
@@ -289,7 +289,7 @@ def test_a_question_asked_with_an_abbreviated_tree_id_is_never_remembered(
         assert read_anchors._tree_exists(tree.root, abbreviated)
 
     assert _git_kind(git_calls, "ls-tree") == 2
-    assert _git_kind(git_calls, "cat-file", "-e") == 2
+    assert _git_kind(git_calls, "--no-replace-objects", "rev-parse") == 2
     assert len(TREE_ENTRIES) == 0
     complete = [
         is_complete_object_id(value)

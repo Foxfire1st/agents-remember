@@ -30,6 +30,8 @@ archived locator.
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
 import tempfile
 import tomllib
@@ -40,6 +42,7 @@ from typing import Any, cast
 
 import test_suite_budget
 from agents_remember.application import worktree_tools
+from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocEdit,
     TaskDocTarget,
@@ -53,6 +56,9 @@ from agents_remember.application.worktree_tool_requests import (
     StartExecution,
     TaskIdentity,
 )
+from agents_remember.cli import knowledge_convert
+from agents_remember.memory.conversion.convert import CONVERSION_FORMAT_VERSION
+from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.worktrees.modules.git import branch_exists, is_ancestor
 from agents_remember.worktrees.reopen import reopen_task
@@ -71,25 +77,11 @@ LEAF_SLUG = "l2"
 CODE_MESSAGE = "260918-TSIP-L9: the extension leaf's code"
 MEMORY_MESSAGE = "260918-TSIP-L9: the extension leaf's memory"
 
-# ---------------------------------------------------------------------------------------
-# This module drives a whole master lifecycle in-process, so the unit population is where it
-# runs -- and the unit population is over its declared rail. That is not this module's defect and
-# it is not this module's edit to make: the budget surface is `260918-TSIP-L7`'s (the raise to
-# 3000/600) and now `260918-TSIP-L13`'s (the developer's second ruling, 4000/1000). Named, counted,
-# with the owner and the rule -- repaired => remove the entry in the same change; never delete the
-# constant, never widen it (the `ENVELOPE_LOSING_RAISERS` shape in `test_tool_entry_point_sweep.py`).
-#
-# It is a *tolerance*, not an acceptance: when the base already carries the ruled rail, the case
-# below is a plain assertion that the declaration is at least the ruling. While the raise is
-# still in flight it reports that fact instead of failing on someone else's pending edit.
-# ---------------------------------------------------------------------------------------
-RULED_UNIT_BUDGET = 4000
-RULED_INTEGRATION_BUDGET = 1000
-BUDGET_RAIL_PENDING = (
-    "260918-TSIP-L13",
-    "the declared pair is below the developer's ruled 4000/1000; the ceiling raise has not landed "
-    "on this base and `mcp/tests/test_suite_budget.py` is red for it",
-)
+# The current approved rails are pinned independently of the declaration.
+# Both the declaration and its boundary fixture must follow a deliberate raise;
+# a lower historical pair is no longer a tolerated pending state on this tree.
+RULED_UNIT_BUDGET = 10000
+RULED_INTEGRATION_BUDGET = 2000
 
 
 class _World:
@@ -162,6 +154,9 @@ class _World:
                     "repo": self.terminal.repo_name,
                     "createdAt": "2026-07-01T11:00",
                     "master": "task.md",
+                    # MIK-R189 rule 2: a leaf created now waits `pending`; this world starts it
+                    # at once, so it records the architect's go as the product requires.
+                    "intentReview": {"state": "go"},
                     "steps": [{"id": "S1", "title": "the extension work", "status": "pending"}],
                 }
             ),
@@ -354,20 +349,9 @@ class SeriesExtensionRouteTests(unittest.TestCase):
             )
 
     def test_the_declared_case_rails_carry_the_developer_ruling(self) -> None:
-        """The ruling arm: true in the RAISED landing order only, and it says so when it is not."""
+        """The declaration must carry the current approved pair without a pending-raise skip."""
 
         declared = _declared_case_rails()
-        below = {
-            name: (declared[name], ruled)
-            for name, ruled in (
-                ("unit_case_budget", RULED_UNIT_BUDGET),
-                ("integration_case_budget", RULED_INTEGRATION_BUDGET),
-            )
-            if declared[name] < ruled
-        }
-        if below:
-            owner, why = BUDGET_RAIL_PENDING
-            self.skipTest(f"{owner}: {why}; declared (observed, ruled) = {below!r}")
         self.assertEqual(
             declared,
             {
@@ -465,7 +449,7 @@ class SeriesExtensionRouteTests(unittest.TestCase):
         started = world.start_leaf()
         self.assertTrue(started["ok"], started.get("summary"))
         self.assertEqual(started["state"], "started")
-        self._leaf = load_contract(Path(started["contract_path"]))
+        self._leaf = load_contract(Path(started["nextArgs"]["contract_path"]))
         self.assertEqual((self._leaf.kind, self._leaf.leaf_id), ("leaf", LEAF))
         self.assertTrue(self._leaf.code_worktree.exists())
         assert self._leaf.memory_worktree is not None
@@ -502,8 +486,51 @@ class SeriesExtensionRouteTests(unittest.TestCase):
 
         del world
         assert self._leaf.memory_worktree is not None
+        # The start creates a fresh, unconverted memory worktree: its first conversion
+        # (the public command) precedes any ordinary memory operation on it.
+        convert_args = argparse.Namespace(
+            memory_root=self._leaf.memory_worktree,
+            code=self._leaf.code_worktree,
+            code_commit="HEAD",
+            version=CONVERSION_FORMAT_VERSION,
+            report=None,
+            check=False,
+        )
+        self.assertEqual(knowledge_convert.run(convert_args), 0)
         (self._leaf.code_worktree / "extension.txt").write_text("extension\n", encoding="utf-8")
         (self._leaf.memory_worktree / f"{LEAF_SLUG}.md").write_text(f"# {LEAF}\n", encoding="utf-8")
+        # The gate judges the new code file: give the leaf's open history its trace row.
+        history_dir = self._leaf.memory_worktree / "knowledge" / "history"
+        history_dir.mkdir(parents=True, exist_ok=True)
+        history_path = history_dir / f"{LEAF}.json"
+        if history_path.is_file():
+            document = json.loads(history_path.read_text(encoding="utf-8"))
+            rows = list(document.get("rows", []))
+        else:
+            rows = []
+        rows.append(
+            {
+                "id": f"ROW-{len(rows):06d}",
+                "subject": "onboarding:extension.txt",
+                "disposition": "no_impact",
+                "reason": "The extension file carries no invariant.",
+                "items": [],
+                "sources": [
+                    {
+                        "path": "extension.txt",
+                        "blob": CodeSnapshot.capture(self._leaf.code_worktree).blobs[
+                            "extension.txt"
+                        ],
+                    }
+                ],
+            }
+        )
+        history_path.write_text(
+            canonical_text(
+                {"schema": "ar-history/v1", "leaf": LEAF, "closed": False, "rows": rows}
+            ),
+            encoding="utf-8",
+        )
         git(self._leaf.code_worktree, "add", "-A")
         git(self._leaf.code_worktree, "commit", "-m", CODE_MESSAGE)
 
@@ -511,10 +538,11 @@ class SeriesExtensionRouteTests(unittest.TestCase):
         """Step 5: closeout records the accepted commit; integration lands it on the re-cut line."""
 
         messages = CloseoutCommitMessages(code=CODE_MESSAGE, memory=MEMORY_MESSAGE)
+        _preview = worktree_tools.worktree_closeout_preview_tool(
+            world.cfg, self._leaf.contract_path.as_posix(), messages
+        )
         self.assertEqual(
-            worktree_tools.worktree_closeout_preview_tool(
-                world.cfg, self._leaf.contract_path.as_posix(), messages
-            )["state"],
+            _preview["state"],
             "would-closeout",
         )
         closed = worktree_tools.worktree_closeout_apply_tool(

@@ -16,20 +16,31 @@
 // UNAVAILABLE IS NOT ZERO. A comparison whose knowledge could not be read shows a brief state ("no
 // knowledge yet", "unavailable") and no counts; the owner's code, reason and next action are one click
 // away in the disclosure beside the control (ICR-R16). A partial answer shows its counts marked partial.
-import type { ChangeSetTarget } from "../changeset/ChangeSetViewer";
-import { type IntentSummaryRead, useIntentReviewSummary } from "../../data/reviewIntentSummary";
-import { EntryStateDetails, briefProblem, problemSentence } from "./entryState";
-import { changeSetBtn, changeSetCounts } from "./styles";
+//
+// UNEXPLAINED IS A SEPARATE FACT. A tree comparison's summary also carries the unexplained-changes
+// lane's file count: `· K without an invariant`, with a separate unknown count when some file's
+// attribution is unknown. It is its own element after `+N −N`, never added to it. A partially measured
+// change set says `· attribution partial` (the unmeasured scope is in the disclosure), an unmeasured
+// one `· attribution unknown`; zero of both, a dataset comparison and a pending read show nothing.
+import type { ChangeSetTarget } from '../changeset/ChangeSetViewer';
+import { type IntentSummaryRead, useIntentReviewSummary } from '../../data/reviewIntentSummary';
+import type { ReviewLaneSummary } from '../../data/reviewLane';
+import { EntryStateDetails, briefProblem, problemSentence } from './entryState';
+import { changeSetBtn, changeSetCounts } from './styles';
 
 function IntentCounts({ read }: { read: IntentSummaryRead }) {
-  if (read.phase === "loading") {
+  if (read.phase === 'loading') {
     return (
-      <span className={changeSetCounts} data-testid="intent-review-state" data-review-state="loading">
+      <span
+        className={changeSetCounts}
+        data-testid="intent-review-state"
+        data-review-state="loading"
+      >
         …
       </span>
     );
   }
-  if (read.phase === "unavailable") {
+  if (read.phase === 'unavailable') {
     return (
       <span
         className={changeSetCounts}
@@ -51,8 +62,12 @@ function IntentCounts({ read }: { read: IntentSummaryRead }) {
       >
         +{read.counts.added} −{read.counts.removed}
       </span>
-      {read.phase === "partial" ? (
-        <span className={changeSetCounts} data-testid="intent-review-state" data-review-state="partial">
+      {read.phase === 'partial' ? (
+        <span
+          className={changeSetCounts}
+          data-testid="intent-review-state"
+          data-review-state="partial"
+        >
           partial
         </span>
       ) : null}
@@ -60,15 +75,67 @@ function IntentCounts({ read }: { read: IntentSummaryRead }) {
   );
 }
 
+// The lane's entry count, or nothing: `null` for zero of both, a pending read and a dataset comparison.
+function attributionText(attribution: ReviewLaneSummary): string | null {
+  if (attribution.state === 'partial') return '· attribution partial';
+  if (attribution.state === 'unavailable') return '· attribution unknown';
+  const unexplained = attribution.unexplained ?? 0;
+  const unknown = attribution.attribution_unknown ?? 0;
+  if (unknown > 0) return `· ${unexplained} without an invariant · ${unknown} unknown`;
+  return unexplained > 0 ? `· ${unexplained} without an invariant` : null;
+}
+
+function AttributionCount({ read }: { read: IntentSummaryRead }) {
+  const attribution = read.phase === 'loading' ? undefined : read.attribution;
+  const text = attribution ? attributionText(attribution) : null;
+  if (!attribution || text === null) return null;
+  return (
+    <span
+      className={changeSetCounts}
+      data-testid="intent-review-attribution"
+      data-attribution-state={attribution.state}
+      data-unexplained={attribution.unexplained}
+      data-unknown={attribution.attribution_unknown}
+    >
+      {text}
+    </span>
+  );
+}
+
+function OpenWorkCount({ read }: { read: IntentSummaryRead }) {
+  const count = read.phase === 'loading' ? undefined : read.unexplainedOpen;
+  if (count === undefined) return null;
+  return (
+    <span className={changeSetCounts} data-testid="intent-review-open">
+      {count ? `· ${count} open` : '· all answered'}
+    </span>
+  );
+}
+
+function AttributionDetails({ read }: { read: IntentSummaryRead }) {
+  const attribution = read.phase === 'loading' ? undefined : read.attribution;
+  if (!attribution || attribution.state === 'counted') return null;
+  const scope = attribution.unmeasured.length
+    ? ` Not measured: ${attribution.unmeasured.join(', ')}.`
+    : '';
+  return (
+    <EntryStateDetails testId="intent-review-attribution-details" label="Attribution">
+      {attribution.state === 'partial'
+        ? `The change set was measured with some paths not reportable whole, so no unexplained count is given. ${attribution.detail ?? ''}${scope}`
+        : `The attribution of the changed files could not be measured: ${attribution.detail ?? 'no reason was given'}.`}
+    </EntryStateDetails>
+  );
+}
+
 function IntentDetails({ read }: { read: IntentSummaryRead }) {
-  if (read.phase === "unavailable") {
+  if (read.phase === 'unavailable') {
     return (
       <EntryStateDetails testId="intent-review-details" label="Intent review">
         {problemSentence(read.problem)}
       </EntryStateDetails>
     );
   }
-  if (read.phase === "partial") {
+  if (read.phase === 'partial') {
     return (
       <EntryStateDetails testId="intent-review-details" label="Intent review">
         {read.counts.unresolved} subject(s) have no single current revision on one side, so they are
@@ -96,12 +163,10 @@ export function IntentReviewEntry({
   onOpen: (target: ChangeSetTarget) => void;
 }) {
   const read = useIntentReviewSummary(repo, master, leaf, facts);
-  const target: ChangeSetTarget = {
-    repo,
-    master,
-    leaf,
-    review: live ? {} : { historical: true },
-  };
+  // A landed leaf opens its review on the pair it delivered, which is the page's own default -- not
+  // the leaf's last numbered record. The task entry used to ask every closed leaf for the recorded
+  // comparison, which no delivered link could then escape (MIK-R195 F06).
+  const target: ChangeSetTarget = { repo, master, leaf, review: {} };
   return (
     <>
       <button
@@ -111,10 +176,13 @@ export function IntentReviewEntry({
         data-testid="open-intent-review"
         data-intent-state={read.phase}
       >
-        ⇄ {live ? "Intent review" : "Intent review (recorded)"}
+        ⇄ {live ? 'Intent review' : 'Intent review (recorded)'}
         <IntentCounts read={read} />
+        <AttributionCount read={read} />
+        <OpenWorkCount read={read} />
       </button>
       <IntentDetails read={read} />
+      <AttributionDetails read={read} />
     </>
   );
 }

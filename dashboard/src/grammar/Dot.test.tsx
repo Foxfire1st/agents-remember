@@ -1,19 +1,14 @@
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { LIFECYCLE_STATES } from "../types/projection";
-import { DOT_VARIANTS, Dot } from "./Dot";
+import { ATTENTION_SEVERITIES } from '../types/projection';
+import { DOT_VARIANTS, Dot } from './Dot';
 
 afterEach(cleanup);
 
-// The dot is the only place a lifecycle state or an attention severity becomes something a
-// developer can see. An unrecognised variant does NOT throw and does NOT render blank — it falls
-// through to the cva base, so a state this build has never heard of ships looking like whatever the
-// base looks like. That is how `awaiting-developer` reached the developer in the first place, and
-// it is why the fallback is in the list below as an eleventh citizen rather than as a special case:
-// "distinct from the fallback" and "distinct from each other" are the same requirement.
+// Every published severity and the unknown mark remain visually distinct.
 
-const FALLBACK = "__no-such-variant__";
+const FALLBACK = '__no-such-variant__';
 const ALL_VARIANTS = [...DOT_VARIANTS, FALLBACK];
 
 const markOf = (variant: string): Element => {
@@ -33,32 +28,24 @@ const markOf = (variant: string): Element => {
  * identical to anyone with the Calm toggle on or reduced motion set.
  */
 const appearanceOf = (mark: Element): string => {
-  const ink = (mark.getAttribute("class") ?? "")
+  const ink = (mark.getAttribute('class') ?? '')
     .split(/\s+/)
-    .filter((token) => token.length > 0 && !token.includes("anim"))
+    .filter((token) => token.length > 0 && !token.includes('anim'))
     .sort()
-    .join(" ");
-  return `${mark.textContent ?? ""} ${ink}`;
+    .join(' ');
+  return `${mark.textContent ?? ''} ${ink}`;
 };
 
-describe("Dot", () => {
-  it("treats exactly the states the wire can send and the severities the queue can rank", () => {
-    // Read off the recipe, never hand-copied: a second list of the same keys is precisely what let
-    // `awaiting-developer` reach this component with no treatment at all. Asserted in BOTH
-    // directions — a new lifecycle state with no dot treatment fails here, and so does a variant in
-    // the recipe that nothing can ever send.
-    expect([...DOT_VARIANTS].sort()).toEqual([...LIFECYCLE_STATES, "alarm", "warn", "info"].sort());
+describe('Dot', () => {
+  it('treats exactly the severities the queue can rank', () => {
+    expect([...DOT_VARIANTS].sort()).toEqual([...ATTENTION_SEVERITIES].sort());
   });
 
-  it("renders every state and severity differently from every other, and from a variant it does not know", () => {
-    // The whole property, flat. Colour alone cannot carry it — `blocked`/`alarm`, `running`/`info`
-    // and `awaiting-developer`/`warn` are each one hue shared by a state and a severity that the
-    // cockpit's left rail shows at the same time — so the glyph is what makes this pass, and a
-    // variant that loses either channel to another collides here.
+  it('renders every severity differently from each other and the unknown mark', () => {
     const seen = new Map<string, string>();
     for (const variant of ALL_VARIANTS) {
       const mark = markOf(variant);
-      expect(mark.textContent, `'${variant}' renders no mark`).not.toBe("");
+      expect(mark.textContent, `'${variant}' renders no mark`).not.toBe('');
       const appearance = appearanceOf(mark);
       expect(
         seen.get(appearance),
@@ -69,15 +56,10 @@ describe("Dot", () => {
     expect(seen.size).toBe(ALL_VARIANTS.length);
   });
 
-  it("gives every variant an ink of its own, so the glyph is redundancy and not a replacement", () => {
-    // Colour is the channel: it is the fastest read and it is what works at the size these are
-    // drawn. The glyph exists to separate the pairs colour deliberately GROUPS, not as a licence to
-    // drop colour — without this, a build that stripped every hue would still pass the test above.
-    // Sharing the base's tone is the one collision that is never safe, because every consumer can
-    // hit the base: while it was `amber` that was literally true of `warn`, and it is how
-    // `awaiting-developer` reached the developer looking like nothing special.
+  it('gives every variant an ink of its own, so the glyph is redundancy and not a replacement', () => {
+    // The unknown tone must not be mistaken for any published severity.
     const inkOf = (variant: string): string | undefined =>
-      (markOf(variant).getAttribute("class") ?? "").match(/(?:^|\s)(c_\S+)/)?.[1];
+      (markOf(variant).getAttribute('class') ?? '').match(/(?:^|\s)(c_\S+)/)?.[1];
     const base = inkOf(FALLBACK);
     expect(base).toBeTruthy();
     for (const variant of DOT_VARIANTS) {

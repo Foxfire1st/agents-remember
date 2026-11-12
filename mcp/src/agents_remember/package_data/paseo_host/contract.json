@@ -1,0 +1,13 @@
+{
+  "package": "@getpaseo/cli",
+  "version": "0.15.4",
+  "node": {
+    "version": "26.11.1",
+    "archives": {
+      "linux-x64": {
+        "url": "https://nodejs.org/dist/v26.11.1/node-v26.11.1-linux-x64.tar.xz",
+        "sha256": "3883bfc73f9a680ca4eab04b196068aaaab1373ffa77d8fc1a4408222495b651"
+      }
+    }
+  }
+}

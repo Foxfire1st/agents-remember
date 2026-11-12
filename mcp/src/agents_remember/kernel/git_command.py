@@ -27,30 +27,33 @@ anywhere in the package rather than only a spawn it can see the argv of.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, overload
+from threading import Event
+from typing import Any, BinaryIO, Literal, overload
 
-from agents_remember.kernel.git_closeout_publication import (
-    _CLOSEOUT_PUBLICATION_AUTHORITY,
-    GitCloseoutPublicationBinding,
-    GitCloseoutPublicationCapability,
-    GitCloseoutPublicationError,
-    GitCloseoutPublicationObservation,
-    GitCloseoutPublicationResult,
-)
+from agents_remember.kernel.git_object_memo_keys import _memo_cat_file, _memo_rev_parse
 from agents_remember.kernel.git_preparation import (
     _PREPARATION_AUTHORITY,
     ExistingGitPreparationBinding,
     GitPreparationError,
-    PreparationAction,
     PrivateGitPreparationBinding,
     PrivateGitPreparationCapability,
     PrivateGitPreparationObservation,
     require_git_object_id,
     require_physical_tree,
+)
+from agents_remember.kernel.read_cancellation import (
+    CancellationToken,
+    ReadCancelled,
+    raise_if_read_cancelled,
+    read_cancellation,
 )
 
 GIT_REPOSITORY_SELECTOR_ENV = (
@@ -95,14 +98,13 @@ GIT_REMOTE_TIMEOUT_SECONDS = 120
 GIT_METADATA_TIMEOUT_SECONDS = 30
 GIT_BULK_REMOTE_TIMEOUT_SECONDS = 1800
 
-
-@dataclass(frozen=True)
-class GitCommandPlan:
-    """Exact runner input and complete argv for the caller's durable command intent."""
-
-    cwd: Path
-    args: tuple[str, ...]
-    argv: tuple[str, ...]
+# What a caller that parses ``git diff`` output passes, so the user's Git configuration cannot
+# change the format it parses (MIK-R42): ``diff.noprefix``, ``diff.srcPrefix``/``diff.dstPrefix``
+# and ``diff.mnemonicPrefix`` change the ``a/``/``b/`` of every file header, ``diff.external``
+# replaces the output with a driver's, and forced colour (``color.ui``, ``color.diff``) wraps it in
+# escape sequences. Command-line options win over every one of them.
+DIFF_PREFIX_OPTIONS = ("--src-prefix=a/", "--dst-prefix=b/")
+PARSED_DIFF_OPTIONS = ("--no-color", "--no-ext-diff", *DIFF_PREFIX_OPTIONS)
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,7 @@ class _GitRun:
     input_text: str | None
     timeout: float
     environment: dict[str, str]
+    new_session: bool = False
 
 
 @dataclass(frozen=True)
@@ -127,6 +130,14 @@ class GitRunnerOptions:
     input_text: str | None = None
     timeout: float = GIT_LOCAL_TIMEOUT_SECONDS
     identity: dict[str, str] | None = None
+    new_session: bool = False
+    object_inputs: Path | None = None
+    """A second object store the command may read, never write (MIK-R73 rule 7).
+
+    A working-tree capture stages its blobs outside the repository, because a read may not write
+    into it. The captured tree is read back through Git's own ``GIT_ALTERNATE_OBJECT_DIRECTORIES``:
+    one mechanism, read-only, no copy of the objects and no second observation path.
+    """
 
 
 @dataclass(frozen=True)
@@ -139,11 +150,18 @@ class IsolatedGitState:
 
 
 def git_environment() -> dict[str, str]:
-    """Return the ambient environment without Git repository selectors."""
+    """Return the ambient environment without Git repository selectors.
+
+    Every command through this kernel additionally runs with ``GIT_OPTIONAL_LOCKS=0`` (MIK-R74
+    rule 6): a read must never take a lock the repository did not ask for, and no command here
+    needs an optional one -- writers keep the locks their operation requires, which are never
+    optional.
+    """
 
     environment = os.environ.copy()
     for name in GIT_REPOSITORY_SELECTOR_ENV:
         environment.pop(name, None)
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
     return environment
 
 
@@ -190,6 +208,11 @@ def run_git(
     is additive and never subtractive: the selector stripping runs first and this cannot put a
     selector back, because the names it accepts are checked against that same list.
 
+    ``options.new_session`` starts the command alone in its process group, so a timeout stops
+    the command with the children it started. Callers that own a command's descendants can
+    use it under their bound; the landing hook runner separately owns its hook's process group
+    (MIK-R152 rule 6).
+
     ``safe.directory`` names ``repo_root`` and not the ``*`` the benchmark runner used.
     That is narrower, not weaker: it is the exact tree every one of these commands
     operates on, and a wildcard additionally disarms the ownership check for any *other*
@@ -197,27 +220,93 @@ def run_git(
     """
 
     settings = options or GitRunnerOptions()
+    return _run_git(repo_root, args, _git_run(settings, repo_root))
+
+
+def run_git_bytes(
+    repo_root: Path,
+    args: list[str],
+    options: GitRunnerOptions | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run ``git args`` and return Git's exact output bytes, never a decoded string.
+
+    A read that compares Git's own bytes -- a ``-z`` pathname enumeration above all -- must not
+    pass through the text transport: ``text=True`` decodes with universal newlines, so a pathname
+    holding CR is rewritten to LF and two distinct pathnames become one. This form keeps every
+    byte the child wrote, so a NUL-delimited record's path is the identity Git gave it.
+    """
+
+    settings = options or GitRunnerOptions()
+    return _run_git(repo_root, args, _git_run(settings, repo_root), raw_output=True)
+
+
+def run_git_into(
+    repo_root: Path,
+    args: list[str],
+    output: BinaryIO,
+    options: GitRunnerOptions | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run ``git args`` with its exact stdout written into ``output``, never through a pipe.
+
+    A read that only has to frame a large output -- a closure's every body -- need not carry
+    those bytes through this process: Git writes the file itself and the caller frames it in
+    place. The child runs in its own session, so a timeout or an abandoned read stops it with
+    its process group, exactly as for a piped command.
+    """
+
+    execution = _git_run(options or GitRunnerOptions(), repo_root)
+    argv = _git_argv(repo_root, args, execution.work_dir)
+    stdin_input = None if execution.input_text is None else execution.input_text.encode("utf-8")
+    raise_if_read_cancelled()
+    process = subprocess.Popen(
+        argv,
+        cwd=execution.work_dir,
+        stdout=output,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL if stdin_input is None else subprocess.PIPE,
+        env=execution.environment,
+        start_new_session=True,
+    )
+    _output, error_output = _wait_process(
+        process, stdin_input, execution.timeout, _GIT_CANCELLATION.get(), read_cancellation()
+    )
+    return subprocess.CompletedProcess(argv, process.returncode, None, error_output)
+
+
+def object_input_environment(object_inputs: Path | None) -> dict[str, str]:
+    """The environment that makes a read see objects held outside the repository."""
+
+    if object_inputs is None:
+        return {}
+    return {"GIT_ALTERNATE_OBJECT_DIRECTORIES": object_inputs.as_posix()}
+
+
+def _git_run(settings: GitRunnerOptions, repo_root: Path) -> _GitRun:
+    """How one observed command runs: its sanitized environment, identity and aim."""
+
     environment = git_environment()
     for name, value in (settings.identity or {}).items():
         if name in GIT_REPOSITORY_SELECTOR_ENV:
             raise ValueError(f"{name} is a Git repository selector and cannot be set as identity")
         environment[name] = value
-    return _run_git(
-        repo_root,
-        args,
-        _GitRun(
-            work_dir=repo_root if settings.work_dir is None else settings.work_dir,
-            input_text=settings.input_text,
-            timeout=settings.timeout,
-            environment=environment,
-        ),
+    environment.update(object_input_environment(settings.object_inputs))
+    return _GitRun(
+        work_dir=repo_root if settings.work_dir is None else settings.work_dir,
+        input_text=settings.input_text,
+        timeout=settings.timeout,
+        environment=environment,
+        new_session=settings.new_session,
     )
 
 
 def run_git_with_index(
-    repo_root: Path, args: list[str], index_path: Path
+    repo_root: Path, args: list[str], index_path: Path, *, input_text: str | None = None
 ) -> subprocess.CompletedProcess[str]:
-    """Run Git against one explicit isolated index after stripping ambient selectors."""
+    """Run Git against one explicit isolated index after stripping ambient selectors.
+
+    ``input_text`` feeds Git's stdin, for the commands that take their paths there
+    (``update-index --stdin``); without it stdin is ``DEVNULL``, as for every other command.
+    """
     environment = git_environment()
     environment["GIT_INDEX_FILE"] = index_path.as_posix()
     return _run_git(
@@ -225,11 +314,31 @@ def run_git_with_index(
         args,
         _GitRun(
             work_dir=repo_root,
-            input_text=None,
+            input_text=input_text,
             timeout=GIT_LOCAL_TIMEOUT_SECONDS,
             environment=environment,
         ),
     )
+
+
+def copy_git_index(source: Path, target: Path) -> None:
+    """Copy a Git index for a disposable capture, keeping the index file's modification time.
+
+    Git trusts an index entry's recorded stat data unless the file may have been rewritten in the
+    second the index was written. Such an entry is "racily clean" and is compared by content, and
+    Git recognises it by its recorded time not being older than the index *file's* own modification
+    time. A plain copy is a new file with a new time: no entry is racily clean any more, and a
+    same-size rewrite made in that second keeps its old blob in whatever ``git add`` then captures.
+    The copy therefore carries the source's time, so Git's own check works on it exactly as on the
+    repository's index. Bytes and time are read from one open file, so an index replaced meanwhile
+    cannot pair one index's bytes with another's time.
+    """
+
+    with source.open("rb") as stream:
+        stamp = os.fstat(stream.fileno())
+        data = stream.read()
+    target.write_bytes(data)
+    os.utime(target, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
 
 
 def run_git_with_isolated_index_and_objects(
@@ -286,30 +395,140 @@ def _run_git(
 def _run_git(
     repo_root: Path, args: list[str], execution: _GitRun, *, raw_output: bool = False
 ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+    memo = _OBJECT_LOOKUPS.get()
+    key = _memo_key(repo_root, args, execution, raw_output=raw_output) if memo is not None else None
+    if memo is not None and key is not None and key in memo:
+        held = memo[key]
+        assert isinstance(held, subprocess.CompletedProcess)
+        return held  # type: ignore[return-value]
+    stdin_input: str | bytes | None = execution.input_text
+    if raw_output and stdin_input is not None:
+        stdin_input = stdin_input.encode("utf-8")
     stdin_kwargs: dict[str, object] = (
-        {"input": execution.input_text}
-        if execution.input_text is not None
-        else {"stdin": subprocess.DEVNULL}
+        {"input": stdin_input} if stdin_input is not None else {"stdin": subprocess.DEVNULL}
     )
-    return subprocess.run(
-        _git_argv(repo_root, args, execution.work_dir),
-        cwd=execution.work_dir,
-        text=not raw_output,
-        encoding=None if raw_output else "utf-8",
-        errors=None if raw_output else "surrogateescape",
-        capture_output=True,
-        env=execution.environment,
-        timeout=execution.timeout,
-        check=False,
-        **stdin_kwargs,  # type: ignore[arg-type]
-    )
+    argv = _git_argv(repo_root, args, execution.work_dir)
+    cancellation = _GIT_CANCELLATION.get()
+    # A read whose client went away launches no further Git child (D569 mean 4), and the one
+    # it is running is stopped with its process group by ``_wait_process``.
+    reader = read_cancellation()
+    raise_if_read_cancelled()
+    if not execution.new_session and cancellation is None and reader is None:
+        result = subprocess.run(
+            argv,
+            cwd=execution.work_dir,
+            text=not raw_output,
+            encoding=None if raw_output else "utf-8",
+            errors=None if raw_output else "surrogateescape",
+            capture_output=True,
+            env=execution.environment,
+            timeout=execution.timeout,
+            check=False,
+            **stdin_kwargs,  # type: ignore[arg-type]
+        )
+    else:
+        # A new session owns its process group, so a timeout -- or a client that
+        # went away -- stops the command with the children it started. ``subprocess.run``
+        # kills only the direct child; here the group goes first and the error still
+        # reads as the timeout every caller already handles.
+        process = subprocess.Popen(
+            argv,
+            cwd=execution.work_dir,
+            text=not raw_output,
+            encoding=None if raw_output else "utf-8",
+            errors=None if raw_output else "surrogateescape",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL if stdin_input is None else subprocess.PIPE,
+            env=execution.environment,
+            start_new_session=True,
+        )
+        output, error_output = _wait_process(
+            process, stdin_input, execution.timeout, cancellation, reader
+        )
+        code = process.returncode
+        result = subprocess.CompletedProcess(argv, code, output, error_output)
+    # A failure is never kept: a missing object created later in the request must
+    # read fresh (F20). Only a successful immutable lookup is an immutable answer.
+    if memo is not None and key is not None and result.returncode == 0:
+        memo[key] = result
+    return result
 
 
-def _read_git_bytes(root: Path, args: list[str]) -> bytes:
+def _kill_process_group(process: subprocess.Popen) -> None:
+    """End one Git child with the process group it started (the runner's only kill).
+
+    ``_wait_process`` calls this for a timeout and for an abandoned read, so the
+    runner has one child/process-group kill owner (L174-R1-08).
+    """
+
+    with suppress(ProcessLookupError, PermissionError, OSError):
+        os.killpg(process.pid, signal.SIGKILL)
+
+
+def _wait_process(
+    process: subprocess.Popen,
+    stdin_input: str | bytes | None,
+    timeout: float | None,
+    cancellation: Event | None,
+    reader: CancellationToken | None = None,
+) -> tuple[Any, Any]:
+    """Wait for one Git child, ending it on its timeout or when its reader abandoned it.
+
+    Without a cancellation this is ``communicate`` with the caller's timeout. With one,
+    the wait is polled: the process group is killed as soon as the reader goes away, and
+    the child's own timeout still applies when it never does. ``cancellation`` (the change-set
+    reads') answers the killed child's result; ``reader`` (a cancellable read's,
+    :mod:`agents_remember.kernel.read_cancellation`) reaps the child and raises
+    :class:`ReadCancelled`, so no caller can mistake the kill for a failed Git read.
+    """
+
+    argv = process.args
+    if cancellation is None and reader is None:
+        try:
+            return process.communicate(
+                input=stdin_input if stdin_input is not None else None, timeout=timeout
+            )
+        except subprocess.TimeoutExpired:
+            assert timeout is not None
+            _kill_process_group(process)
+            output, error_output = process.communicate()
+            raise subprocess.TimeoutExpired(argv, timeout, output, error_output) from None
+    deadline = None if timeout is None else time.monotonic() + timeout
+    sent = False
+    while True:
+        if deadline is not None and time.monotonic() >= deadline:
+            assert timeout is not None
+            _kill_process_group(process)
+            output, error_output = process.communicate()
+            raise subprocess.TimeoutExpired(argv, timeout, output, error_output)
+        remaining = 0.05 if deadline is None else min(0.05, deadline - time.monotonic())
+        try:
+            return process.communicate(
+                input=None if sent else stdin_input,
+                timeout=remaining,
+            )
+        except subprocess.TimeoutExpired:
+            sent = True
+        if reader is not None and reader.is_set():
+            _kill_process_group(process)
+            process.communicate()
+            raise ReadCancelled
+        if cancellation is not None and cancellation.is_set():
+            _kill_process_group(process)
+            return process.communicate()
+
+
+def _read_git_bytes(root: Path, args: list[str], *, object_inputs: Path | None = None) -> bytes:
     result = _run_git(
         root,
         args,
-        _GitRun(root, None, GIT_LOCAL_TIMEOUT_SECONDS, git_environment()),
+        _GitRun(
+            root,
+            None,
+            GIT_LOCAL_TIMEOUT_SECONDS,
+            {**git_environment(), **object_input_environment(object_inputs)},
+        ),
         raw_output=True,
     )
     if result.returncode:
@@ -334,10 +553,255 @@ def read_git_blob_bytes(root: Path, blob_id: str) -> bytes:
     return _read_git_bytes(root, ["cat-file", "blob", blob_id])
 
 
-def read_git_tree_bytes(root: Path, tree: str) -> bytes:
+_BLOB_READS: ContextVar[dict[tuple[str, str], bytes] | None] = ContextVar(
+    "git_blob_reads", default=None
+)
+
+
+_OBJECT_LOOKUPS: ContextVar[
+    dict[tuple[str, str, tuple[str, ...], tuple[tuple[str, str], ...], bool], object] | None
+] = ContextVar("git_object_lookups", default=None)
+
+# A read the client abandoned must not outlive its client (MIK-R176 rule 4). The
+# serving layer sets one cancellation Event around an abandoned read's work; the
+# runner then checks it while the child runs and stops the child with the process
+# group it started. Outside such a block the runner behaves exactly as before.
+_GIT_CANCELLATION: ContextVar[Event | None] = ContextVar("git_cancellation", default=None)
+
+
+@contextmanager
+def cancellable_git_commands(cancellation: Event) -> Iterator[None]:
+    """Within the block, setting ``cancellation`` kills a running Git child and its group."""
+
+    token = _GIT_CANCELLATION.set(cancellation)
+    try:
+        yield
+    finally:
+        _GIT_CANCELLATION.reset(token)
+
+
+@contextmanager
+def memo_git_object_lookups() -> Iterator[None]:
+    """Within the block, the same Git lookup of the same object runs once (MIK-R81 rule 7).
+
+    Only successful lookups whose answer the effective execution determines are kept: an
+    object ID is the hash of its bytes, and the worktree's own index location is a pure
+    function of the execution, so a repeated successful lookup can only return the same
+    answer. A failed lookup is never kept — an object created later in the request reads
+    fresh. Anything that names a ref, a worktree, the index or a session (``HEAD``,
+    branches, ``for-each-ref``, ``status``, ``cat-file --batch``, ``update-ref``, ``add``,
+    ``write-tree`` …) runs every time, exactly as without the block, and so does every
+    form whose answer replace refs or ref movement can redirect: pretty-printed, typed,
+    and peeled object reads (``cat-file -p``/``-t``/``<type>``, ``<sha>^{...}``,
+    ``<sha>:<path>``), tree listings, revision walks, and merge-base (F20). The one
+    exception is a peel behind a leading ``--no-replace-objects`` -- git's own global
+    flag, which makes the read name the true object behind any replace ref, so those
+    answers are immutable and collapse like any other content-addressed read. The cache lives and
+    dies with the block and is keyed by the effective execution (repository, working
+    directory, isolated index/object storage) and the exact argv, so two different stores
+    or working directories never share an answer. Scopes nest: an inner scope inside an
+    already-open one joins it, so one subject read keeps one lookup cache no matter how
+    many wrapped ports it passes through (F17); the outermost exit still ends it.
+    """
+
+    if _OBJECT_LOOKUPS.get() is not None:
+        yield
+        return
+    token = _OBJECT_LOOKUPS.set({})
+    try:
+        yield
+    finally:
+        _OBJECT_LOOKUPS.reset(token)
+
+
+# The only flags a memoized argv may carry, per verb. Anything else runs fresh:
+# an unlisted flag may change what the command asks about (F20).
+_REV_PARSE_FLAGS = frozenset({"--verify", "--quiet"})
+_CAT_FILE_FLAGS = frozenset({"-e"})
+# One exact argv naming no object at all: locating the worktree's own index file and top-level
+# directory is a pure function of the effective execution (repository, working directory,
+# environment), so the same execution asks it once per request scope (F17). Anything with a
+# different index file, object directory or working directory is a different key (F20).
+_INDEX_LOCATION_ARGV = (
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-path",
+    "index",
+    "--show-toplevel",
+)
+
+
+def _flags_of(rest: list[str]) -> set[str] | None:
+    """The dash-flags in ``rest``, or None when any entry is not a plain flag."""
+    flags = {arg for arg in rest if arg.startswith("-")}
+    if any(not arg.startswith("--") and len(arg) != 2 for arg in flags):
+        return None
+    return flags
+
+
+def _memo_key(
+    repo_root: Path, args: list[str], execution: _GitRun, *, raw_output: bool
+) -> tuple[str, str, tuple[str, ...], tuple[tuple[str, str], ...], bool] | None:
+    """The memo key for an immutable object lookup, else None (run it fresh)."""
+    if not args or execution.input_text is not None:
+        return None
+    # A leading ``--no-replace-objects`` is git's own global flag (it must precede
+    # the verb): the read names the true object behind any replace ref, so peels
+    # spelled with it are immutable content-addressed answers (F17+F20).
+    no_replace = args[0] == "--no-replace-objects"
+    body = args[1:] if no_replace else args
+    if not body:
+        return None
+    verb, rest = body[0], body[1:]
+    positionals = [arg for arg in rest if not arg.startswith("-")]
+    flags = _flags_of(rest)
+    if flags is None:
+        return None
+    allowed = (
+        (
+            verb == "rev-parse"
+            and flags <= _REV_PARSE_FLAGS
+            and _memo_rev_parse(positionals, no_replace)
+        )
+        or (verb == "cat-file" and flags <= _CAT_FILE_FLAGS and _memo_cat_file(rest, no_replace))
+        or (not no_replace and tuple(args) == _INDEX_LOCATION_ARGV)
+    )
+    if not allowed:
+        return None
+    environment = execution.environment
+    return (
+        repo_root.as_posix(),
+        execution.work_dir.as_posix(),
+        tuple(args),
+        tuple(sorted(environment.items())),
+        raw_output,
+    )
+
+
+@contextmanager
+def shared_blob_reads() -> Iterator[None]:
+    """Within the block, a blob read from a repository is not read from it a second time.
+
+    A blob ID is the hash of its bytes, so a repeated read can only return the same bytes; the
+    block just keeps the first answer. One computation that reads the same Git trees through more
+    than one owner (the worklist's snapshots, its onboarding trace and its held base) pays the
+    ``git cat-file`` for each blob once. The cache lives and dies with the block, and is keyed by
+    repository too, so an object one repository lacks is still missing from it.
+    """
+
+    if _BLOB_READS.get() is not None:
+        yield
+        return
+    token = _BLOB_READS.set({})
+    try:
+        yield
+    finally:
+        _BLOB_READS.reset(token)
+
+
+def read_git_blobs_bytes(
+    root: Path, blob_ids: Iterable[str], *, object_inputs: Path | None = None
+) -> dict[str, bytes]:
+    """Read many fully named blobs' original bytes through one ``git cat-file --batch``.
+
+    The result maps each requested ID to its exact bytes (no decoding, no newline
+    normalization). A missing object, or one that is not a blob, raises.
+    """
+
+    requested = sorted(set(blob_ids))
+    for blob_id in requested:
+        require_git_object_id(blob_id)
+    if not requested:
+        return {}
+    if object_inputs is not None:
+        # A capture's store lives only as long as its read, so its bytes are never pooled with
+        # the repository's: the pool is keyed by repository root and blob id alone.
+        return _batch_blobs(root, requested, object_inputs=object_inputs)
+    shared = _BLOB_READS.get()
+    held = {} if shared is None else _held_blobs(shared, root, requested)
+    missing = [blob_id for blob_id in requested if blob_id not in held]
+    blobs = _batch_blobs(root, missing) if missing else {}
+    if shared is not None:
+        shared.update({(root.as_posix(), blob_id): data for blob_id, data in blobs.items()})
+    return {blob_id: held[blob_id] if blob_id in held else blobs[blob_id] for blob_id in requested}
+
+
+def _held_blobs(
+    shared: dict[tuple[str, str], bytes], root: Path, requested: list[str]
+) -> dict[str, bytes]:
+    return {
+        blob_id: shared[(root.as_posix(), blob_id)]
+        for blob_id in requested
+        if (root.as_posix(), blob_id) in shared
+    }
+
+
+def _batch_blobs(
+    root: Path, requested: list[str], *, object_inputs: Path | None = None
+) -> dict[str, bytes]:
+    result = _run_git(
+        root,
+        ["cat-file", "--batch"],
+        _GitRun(
+            root,
+            "".join(f"{blob}\n" for blob in requested),
+            GIT_LOCAL_TIMEOUT_SECONDS,
+            {**git_environment(), **object_input_environment(object_inputs)},
+        ),
+        raw_output=True,
+    )
+    if result.returncode:
+        raise GitPreparationError(f"exact Git blob observation failed: {result.stderr!r}")
+    output = result.stdout
+    blobs: dict[str, bytes] = {}
+    offset = 0
+    for blob_id in requested:
+        header_end = output.index(b"\n", offset)
+        header = output[offset:header_end].decode("ascii").split(" ")
+        if len(header) != 3 or header[0] != blob_id or header[1] != "blob":
+            raise GitPreparationError(f"{blob_id} is not a readable blob: {header!r}")
+        start = header_end + 1
+        end = start + int(header[2])
+        blobs[blob_id] = output[start:end]
+        offset = end + 1
+    return blobs
+
+
+def merge_file_bytes(
+    root: Path, ours: Path, base: Path, theirs: Path, labels: tuple[str, str, str]
+) -> tuple[bytes, int]:
+    """Three-way merge three files' exact bytes with ``git merge-file -p``.
+
+    Returns the merged bytes (conflict hunks carry ``labels`` for ours, base and theirs) and the
+    number of conflicts. Nothing is written: the result is only printed. A Git failure raises.
+    """
+    result = _run_git(
+        root,
+        [
+            "merge-file",
+            "-p",
+            "-L",
+            labels[0],
+            "-L",
+            labels[1],
+            "-L",
+            labels[2],
+            ours.as_posix(),
+            base.as_posix(),
+            theirs.as_posix(),
+        ],
+        _GitRun(root, None, GIT_LOCAL_TIMEOUT_SECONDS, git_environment()),
+        raw_output=True,
+    )
+    if result.returncode < 0 or result.returncode > 127:
+        raise GitPreparationError(f"git merge-file failed: {result.stderr!r}")
+    return result.stdout, result.returncode
+
+
+def read_git_tree_bytes(root: Path, tree: str, *, object_inputs: Path | None = None) -> bytes:
     """Read recursive NUL-delimited tree rows with original pathname bytes."""
     require_git_object_id(tree)
-    return _read_git_bytes(root, ["ls-tree", "-r", "-z", tree])
+    return _read_git_bytes(root, ["ls-tree", "-r", "-z", tree], object_inputs=object_inputs)
 
 
 def _preparation_output(root: Path, args: list[str]) -> str:
@@ -629,155 +1093,19 @@ def inspect_git_preparation(
         capability.require_authority()
 
 
-def preparation_command(
-    binding: PrivateGitPreparationBinding, action: PreparationAction
-) -> GitCommandPlan:
-    """Describe the sole allowed command for a journal to persist before execution."""
-    binding.validate()
-    if action == "create":
-        root = binding.logical_root
-        args = [
-            "worktree",
-            "add",
-            "--detach",
-            "--no-checkout",
-            binding.private_root.as_posix(),
-            binding.parent_commit,
-        ]
-    elif action == "materialize":
-        root = binding.private_root
-        args = ["read-tree", "--reset", "-u", binding.admitted_tree]
-    elif action == "commit":
-        root = binding.private_root
-        args = ["commit"]
-        if binding.hook_policy == "strict-code-no-verify":
-            args.append("--no-verify")
-        args.extend(["-m", binding.message])
-    else:
-        raise GitPreparationError("unknown private preparation action")
-    return GitCommandPlan(root, tuple(args), tuple(_git_argv(root, args, root)))
+def ref_compare_and_swap_args(
+    ref: str, new_commit: str, expected_old_commit: str, *, reason: str | None = None
+) -> list[str]:
+    """The one expected-old ref move every closeout publication uses.
 
-
-def run_git_preparation(
-    capability: PrivateGitPreparationCapability,
-    action: PreparationAction,
-) -> subprocess.CompletedProcess[str]:
-    """Perform one admitted command once, with exact before/after readback.
-
-    Timeouts propagate; callers must retain the durable intent and inspect its one named
-    output. An existing committed output is observation-only and can never be recommitted.
-    Normal identity, signing, prepare-commit-msg and post-commit semantics remain Git-owned.
+    No queued publication command survives to journal it: the ordinary closeout
+    and direct landing run it straight after they build their commit from the judged tree. Git
+    refuses the move when the ref no longer names ``expected_old_commit``.
     """
-    before = inspect_git_preparation(capability)
-    binding = capability.binding
-    required = {"create": "absent", "materialize": "created", "commit": "materialized"}
-    if action not in required or before.state != required[action]:
-        raise GitPreparationError(
-            f"private preparation action {action!r} is not admitted from {before.state}"
-        )
-    command = preparation_command(binding, action)
-    capability.require_authority()
-    result = run_git(command.cwd, list(command.args))
-    after = inspect_git_preparation(capability)
-    expected = {"create": "created", "materialize": "materialized", "commit": "committed"}
-    if result.returncode == 0 and after.state != expected[action]:
-        raise GitPreparationError("successful Git command did not produce its exact private state")
-    return result
-
-
-def _observe_closeout_publication(
-    binding: GitCloseoutPublicationBinding,
-) -> GitCloseoutPublicationObservation:
-    current = _preparation_output(
-        binding.root, ["rev-parse", "--verify", binding.logical_ref]
-    ).strip()
-    if current not in (binding.expected_old_commit, binding.prepared_commit):
-        raise GitCloseoutPublicationError(
-            "named closeout ref is outside its original old/new publication states"
-        )
-    _require_logical_git_root(binding.root, binding.common_directory, binding.logical_ref, current)
-    binding.require_prepared_bytes(read_git_commit_bytes(binding.root, binding.prepared_commit))
-    entries = _preparation_tree_entries(binding.root, binding.prepared_tree)
-    if (
-        binding.allow_memory_cache
-        and binding.prepared_commit != binding.expected_old_commit
-        and "memory.md" in entries
-    ):
-        raise GitCloseoutPublicationError("new memory publication includes the derived cache")
-    _require_preparation_index(
-        binding.root,
-        entries,
-        allow_memory_cache=binding.allow_memory_cache,
-    )
-    _require_logical_git_root(binding.root, binding.common_directory, binding.logical_ref, current)
-    state = (
-        "existing"
-        if binding.expected_old_commit == binding.prepared_commit
-        else "new"
-        if current == binding.prepared_commit
-        else "old"
-    )
-    return GitCloseoutPublicationObservation(state, current, binding.prepared_tree)
-
-
-def admit_git_closeout_publication(
-    binding: GitCloseoutPublicationBinding,
-    *,
-    authorize: Callable[[GitCloseoutPublicationBinding], None],
-) -> GitCloseoutPublicationCapability:
-    """Admit one actual closeout journal/approval owner, never integration authority."""
-    capability = GitCloseoutPublicationCapability(
-        binding, authorize, _CLOSEOUT_PUBLICATION_AUTHORITY
-    )
-    inspect_git_closeout_publication(capability)
-    return capability
-
-
-def inspect_git_closeout_publication(
-    capability: GitCloseoutPublicationCapability,
-) -> GitCloseoutPublicationObservation:
-    """Reprove only the named old/new ref and its already-materialized candidate."""
-    capability.require_authority()
-    try:
-        return _observe_closeout_publication(capability.binding)
-    except GitPreparationError as error:
-        raise GitCloseoutPublicationError(str(error)) from error
-    finally:
-        capability.require_authority()
-
-
-def closeout_publication_command(binding: GitCloseoutPublicationBinding) -> GitCommandPlan:
-    """Describe the one expected-old CAS for the caller's durable publication intent."""
-    binding.validate()
-    if binding.expected_old_commit == binding.prepared_commit:
-        raise GitCloseoutPublicationError("existing closeout output is observation-only")
-    args = ["update-ref", binding.logical_ref, binding.prepared_commit, binding.expected_old_commit]
-    return GitCommandPlan(
-        binding.root, tuple(args), tuple(_git_argv(binding.root, args, binding.root))
-    )
-
-
-def publish_git_closeout_ref(
-    capability: GitCloseoutPublicationCapability,
-) -> GitCloseoutPublicationResult:
-    """CAS one ref once; this neither materializes files nor promises cross-repo atomicity.
-
-    A timeout remains the upper journal owner's unknown command. Already-new and
-    no-op existing states return read-only evidence with no command. A failed after
-    proof retains an available actual command result on the typed refusal.
-    """
-    before = inspect_git_closeout_publication(capability)
-    if before.state != "old":
-        return GitCloseoutPublicationResult(before, before, None)
-    command = closeout_publication_command(capability.binding)
-    capability.require_authority()
-    result = run_git(command.cwd, list(command.args))
-    try:
-        after = inspect_git_closeout_publication(capability)
-        if result.returncode == 0 and after.state != "new":
-            raise GitCloseoutPublicationError(
-                "successful closeout CAS did not retain the prepared ref"
-            )
-    except GitCloseoutPublicationError as error:
-        raise GitCloseoutPublicationError(str(error), command=result) from error
-    return GitCloseoutPublicationResult(before, after, result)
+    return [
+        "update-ref",
+        *(() if reason is None else ("-m", reason)),
+        ref,
+        new_commit,
+        expected_old_commit,
+    ]

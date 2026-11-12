@@ -1,0 +1,279 @@
+/**
+ * The parent-wake handlers contributed to the host.
+ *
+ * MIK-R172@v2 rule 6: the send still asks for `steer`, but a line is only sent to
+ * a parent that is mid-turn when the product knows that parent's provider keeps
+ * its running turn under a steer (`TURN_ENDED_STEERING_PROVIDERS`, empty today);
+ * otherwise the line is held and this handler sends it when that turn ends.
+ *
+ * MIK-R183: a leaf seat's completed turn with no hand-off, which rule 3 leaves
+ * silent, is sent a message of its own after a 60-second wait, checked against
+ * the host's state at the send; at most twice in a row, and every silent end
+ * from the third on gives its parent the marked line. The plugin's rows for it —
+ * seat messages, marked lines, cancelled waits, skipped sends and left-alone
+ * ends — go to its own file `<PASEO_HOME>/agents-remember/turn-ends.jsonl`
+ * (rule 7), not to console output, which reaches no file, and not to
+ * `host-activity.json`, whose readers forbid extra keys. A write that fails is
+ * named in `turn-ends.error.json`. A cleanup clears every pending wait, so a
+ * reload starts afresh (rule 8).
+ *
+ * The handlers are registered under Paseo 0.15's hook names through
+ * `server.addHook`; the legacy `server.on` names stop working after 2027-04-30.
+ */
+import type { PluginHookContext, PluginLifecycleRegistration } from "@getpaseo/plugin/server";
+import { limitedUntil, readProviderLimits } from "./provider_limits.ts";
+import { readRoleAgents } from "./role_agents.ts";
+import type { SubagentTracker } from "./subagents.ts";
+import { createTurnEndLog, type TurnEndLogRow } from "./turn_log.ts";
+import {
+  TURN_ENDED_STEERING_PROVIDERS,
+  cleanupSeatWaits,
+  createTurnEndedTracker,
+  noteAgentArchived,
+  notePermissionRequested,
+  notePermissionResolved,
+  noteTurnEnded,
+  noteTurnStarted,
+  type HostAgentState,
+  type TurnEndedSignals,
+  type TurnRows,
+} from "./turn_ended.ts";
+
+/**
+ * Rule 3: `@getpaseo/protocol`'s `PARENT_AGENT_ID_LABEL`. Spelled here rather than
+ * imported, so the plugin keeps no runtime dependency on a package the host already
+ * owns; the value is asserted in the tests.
+ */
+const PARENT_AGENT_ID_LABEL = "paseo.parent-agent-id";
+
+/**
+ * Rule 3/4's load bound: one read walks at most this many pages of this many
+ * agents. An incomplete read supplies no host facts, so the decision leaves the
+ * seat alone instead of waking it from a partial view of the fleet.
+ */
+const HOST_STATE_PAGE_LIMIT = 8;
+const HOST_STATE_PAGE_SIZE = 200;
+const HOST_STATE_AGENT_LIMIT = HOST_STATE_PAGE_LIMIT * HOST_STATE_PAGE_SIZE;
+
+export interface ParentWakeOptions {
+  /** The daemon home; the environment's `PASEO_HOME` when absent. */
+  readonly home?: string;
+  /** MIK-R190 rules 4 and 5: the seat's running provider subagents. */
+  readonly subagents?: SubagentTracker;
+  /**
+   * The plugin's own row writer, when the caller already holds one (the same file
+   * carries MIK-R216's provider verdicts); absent, the rows go to this module's own.
+   */
+  readonly log?: (row: TurnEndLogRow) => void;
+  /** MIK-R216 rule 1: the host's ACP verdict for a provider id. */
+  readonly acpProvider?: (providerId: string) => boolean;
+  /** A seat's open declared wait, handed to the host-activity record as it changes. */
+  readonly declaredWait?: TurnEndedSignals["declaredWait"];
+}
+
+/** The host's agents, as rule 3 and rule 4's send read them. */
+async function readHostState(
+  paseo: { readonly agents: { list(options: unknown): Promise<unknown> } },
+): Promise<readonly HostAgentState[] | null> {
+  try {
+    const states: HostAgentState[] = [];
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    // Rule 3/4: a walk that stops on a cap is not a completed read. It returns
+    // null, so the decision treats the host's facts as unavailable and sends
+    // nothing, rather than taking partial data for the whole fleet.
+    let complete = false;
+    for (let pages = 0; pages < HOST_STATE_PAGE_LIMIT; pages += 1) {
+      if (states.length >= HOST_STATE_AGENT_LIMIT) break;
+      const page = (await paseo.agents.list({
+        filter: { includeArchived: true },
+        page: cursor === undefined ? { limit: HOST_STATE_PAGE_SIZE } : { limit: HOST_STATE_PAGE_SIZE, cursor },
+      })) as {
+        entries?: ReadonlyArray<{ agent?: Record<string, unknown> }>;
+        pageInfo?: { hasMore?: boolean; nextCursor?: string | null };
+      };
+      for (const entry of page.entries ?? []) {
+        const agent = entry.agent;
+        if (agent === undefined || typeof agent["id"] !== "string") continue;
+        // Rule 3: the host shows a parent link only as the `paseo.parent-agent-id`
+        // label, so a child is found by it — also one whose turn began before this
+        // plugin loaded.
+        const labels = agent["labels"];
+        const parentAgentId =
+          labels !== null && typeof labels === "object"
+            ? (() => {
+                const value = (labels as Record<string, unknown>)[PARENT_AGENT_ID_LABEL];
+                return typeof value === "string" && value !== "" ? value : null;
+              })()
+            : null;
+        states.push({
+          id: agent["id"],
+          parentAgentId,
+          inTurn: Boolean(agent["activeTurn"]),
+          permissionWait: Array.isArray(agent["pendingPermissions"]) && agent["pendingPermissions"].length > 0,
+          archived: Boolean(agent["archivedAt"]) || agent["status"] === "closed",
+        });
+      }
+      const next = page.pageInfo?.nextCursor ?? undefined;
+      if (page.pageInfo?.hasMore !== true) {
+        complete = true;
+        break;
+      }
+      // F06: no cursor or a repeated one stops progress, not pagination. Neither
+      // proves that the unread fleet holds no active child or permission wait.
+      if (next === undefined || seen.has(next)) break;
+      seen.add(next);
+      cursor = next;
+    }
+    return complete ? states : null;
+  } catch {
+    // Unavailable host facts leave the seat alone; the parent's line keeps its rule.
+    return null;
+  }
+}
+
+/** The host's timeline handle of one agent, as the plugin SDK types it. */
+type AgentTimeline = ReturnType<PluginHookContext["paseo"]["agents"]["ref"]>["timeline"];
+
+/** The part of the host API a turn end reads its timeline through. */
+interface TimelineReader {
+  readonly agents: { ref(id: string): { readonly timeline: Pick<AgentTimeline, "refetch"> } };
+}
+
+/**
+ * The ended turn's timeline. From Paseo 0.13 the `agent.turn.after` hook carries an
+ * empty `timeline`, and the host says to read history through the API instead. The
+ * whole timeline the host holds is read through `agents.ref(id).timeline.refetch`
+ * (served since 0.12; `limit: 0` is Paseo's "every row"), which yields the same
+ * projected rows the 0.12 hook carried, so the decision in `turn_ended.ts` reads
+ * what it read on 0.12. The reply keeps each row's turn id beside the row, not in
+ * it; it is put back on the row, because the decision scopes the ended turn's rows
+ * by it.
+ *
+ * A read that fails gives `null`, which the decision reads as an unreadable turn:
+ * the line says its last line is unreadable, and nothing in it counts as a
+ * hand-off or a declaration. The hook's own list is no fallback, since on 0.15 it
+ * is always empty and would pass a failed read off as a turn without text.
+ */
+export async function readTurnTimeline(paseo: TimelineReader, agentId: string): Promise<TurnRows> {
+  try {
+    const page = await paseo.agents.ref(agentId).timeline.refetch({ direction: "tail", limit: 0 });
+    if (!Array.isArray(page?.entries)) throw new Error("the timeline reply holds no entries");
+    return page.entries.flatMap((entry) => {
+      if (entry?.item == null) return [];
+      const turnId = entry.turnId;
+      return [typeof turnId === "string" && turnId !== "" ? { ...entry.item, turnId } : entry.item];
+    });
+  } catch (error) {
+    console.error(`agents-remember turn end: the timeline of agent ${agentId} could not be read`, error);
+    return null;
+  }
+}
+
+export function registerParentWakeEvents(
+  server: Pick<PluginLifecycleRegistration, "addHook">,
+  options: ParentWakeOptions = {},
+): () => void {
+  const home = options.home ?? process.env.PASEO_HOME;
+  const log = options.log === undefined ? createTurnEndLog(home) : { append: options.log };
+  const subagents = options.subagents;
+  // MIK-R190: the two host signals the send-back reads — the seat's own running
+  // subagents, and the one file that says a seat is limited and until when. The
+  // file is read only where a decision needs it: at the wait's end, at the parent
+  // gate and when a resume fires (rule 15 keeps every timer out of it).
+  const signals: TurnEndedSignals = {
+    ...(subagents === undefined
+      ? {}
+      : {
+          runningSubagents: (agentId: string) => subagents.count(agentId),
+          watchSubagents: (agentId: string, listener: () => void) => subagents.watch(agentId, listener),
+          unwatchSubagents: (agentId: string, listener: () => void) =>
+            subagents.unwatch(agentId, listener),
+        }),
+    limitedUntil: (agentId: string, now: Date) => limitedUntil(readProviderLimits(home), agentId, now),
+    // L184-R1-F13: the role record, read where a deferred action decides, so a
+    // seat that has left it is reclaimed with its timer instead of being sent to.
+    roleRecord: () => readRoleAgents(home),
+    // MIK-R216 rule 1: the ACP verdict the plugin wrote at its start.
+    ...(options.acpProvider === undefined ? {} : { acpProvider: options.acpProvider }),
+    ...(options.declaredWait === undefined ? {} : { declaredWait: options.declaredWait }),
+  };
+  const turns = createTurnEndedTracker(
+    TURN_ENDED_STEERING_PROVIDERS,
+    (row) => log.append(row),
+    signals,
+  );
+
+  server.addHook("agent.turn.before", async (event) => {
+    noteTurnStarted(
+      { id: event.agent.id, parentAgentId: event.agent.parentAgentId, provider: event.agent.provider },
+      turns,
+    );
+  });
+
+  server.addHook("agent.turn.after", async (event, context) => {
+    void (async () => {
+      try {
+        const timeline = await readTurnTimeline(context.paseo, event.agent.id);
+        const records = readRoleAgents(process.env.PASEO_HOME);
+        const outcome = await noteTurnEnded(
+          { id: event.agent.id, parentAgentId: event.agent.parentAgentId, provider: event.agent.provider },
+          timeline,
+          records,
+          turns,
+          { sendMessage: (id, text) => context.paseo.agents.ref(id).send(text, { activeTurnBehavior: "steer" }) },
+          {
+            // The ended turn's id scopes the rows the decision reads
+            // (L172-R1-F01) and its outcome decides whether the end can be
+            // silent (rule 3).
+            turnId: event.turnId,
+            outcome: event.outcome?.kind,
+            // Rule 3/4: the host's own state at this end and at the send.
+            readHost: () => readHostState(context.paseo),
+          },
+        );
+        // MIK-R172 rule 5: an agent the agent list does not hold is named in
+        // the host log once, with the reason, instead of being skipped silently.
+        if (outcome.kind === "none" && outcome.log !== undefined) console.warn(outcome.log);
+      } catch (error) {
+        console.error("agents-remember turn_ended handler failed", error);
+      }
+    })();
+  });
+
+  server.addHook("agent.permission.before", async (event) => {
+    notePermissionRequested(event.agent.id, turns);
+  });
+
+  server.addHook("agent.permission.after", async (event, context) => {
+    void (async () => {
+      try {
+        await notePermissionResolved(
+          event.agent.id,
+          turns,
+          { sendMessage: (id, text) => context.paseo.agents.ref(id).send(text, { activeTurnBehavior: "steer" }) },
+          // A line held for a departed parent is re-resolved at this send.
+          readRoleAgents(process.env.PASEO_HOME),
+        );
+      } catch (error) {
+        console.error("agents-remember permission_resolved handler failed", error);
+      }
+    })();
+  });
+
+  server.addHook("agent.archive.after", async (event) => {
+    noteAgentArchived(event.agent.id, turns);
+  });
+
+  // L184-R1-F09: close is the other terminal lifecycle path, and it is the one the
+  // wake tracker did not hear. It is treated as archive, as the host's own listing
+  // does (`status === "closed"` is archived), so no deferred resume survives it.
+  server.addHook("agent.close.after", async (event) => {
+    noteAgentArchived(event.agent.id, turns);
+  });
+
+  // MIK-R183 rule 8: the plugin's cleanup clears every pending wait, so a reload starts
+  // afresh and no wait fires after it. MIK-R190 adds the subagent watches, the armed
+  // resumes and the limited parents' timers to what the boundary clears.
+  return () => cleanupSeatWaits(turns);
+}

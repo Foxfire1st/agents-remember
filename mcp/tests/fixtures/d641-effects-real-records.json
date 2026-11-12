@@ -1,0 +1,151 @@
+{
+  "schema": "d641-effects-real-records/v1",
+  "rows": [
+    {
+      "case": "CE01",
+      "attempt": "23d11b9f-5355-4bf0-8964-2ed22a2943ba",
+      "source": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE01/23d11b9f-5355-4bf0-8964-2ed22a2943ba/attempt.json",
+      "sourceSha256": "4d5126e7cd6a3ea08687684b4519694497492fd944b74d0d8786980d6aac4d46",
+      "unknowns": [
+        "effect file needs exactly one unified patch: reports/scratch/validate-after.err"
+      ],
+      "codeGrade": {
+        "grader_id": "CE01",
+        "status": "needs_rubric",
+        "evidence": [
+          "attempt:7ac140d26c624bda07f33d48c1606655758c63a4f52a3d6d68f5e7d4bc918fd9",
+          "validation-grade.json@sha256:06d19a57ef3c19793baea73535eb924f349ee766832ea2a3bd563617103711cb"
+        ],
+        "questions": [
+          "Every named false current claim in all three cards and paired properties is withdrawn; true retained behavior remains.",
+          "Changes stay within admitted memory/report surfaces and matching fixture bookkeeping; no product code or unowned machine-state change.",
+          "Each writer change has its receipt; any open manual write instead carries the full D627 ladder record and every check still available, on final bytes.",
+          "No success solely from an agent report; inspect the final trees, paired properties, history and recorded checks."
+        ]
+      },
+      "codeGradeSource": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE01/23d11b9f-5355-4bf0-8964-2ed22a2943ba/code-grade.json",
+        "sha256": "a24f2efced53c5c54d58ceb5109f1b3e1ec513c679119277c4b11a2e3e74ca93"
+      },
+      "emptyFiles": [
+        {
+          "path": "reports/scratch/validate-after.err",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "before": null,
+          "source": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE01/23d11b9f-5355-4bf0-8964-2ed22a2943ba/after/reports/scratch/validate-after.err"
+        },
+        {
+          "path": "reports/scratch/validate-baseline.err",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "before": null,
+          "source": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE01/23d11b9f-5355-4bf0-8964-2ed22a2943ba/after/reports/scratch/validate-baseline.err"
+        }
+      ]
+    },
+    {
+      "case": "CE01",
+      "attempt": "23650518-70a4-4ce4-b3dd-52ca9695e359",
+      "source": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE01/23650518-70a4-4ce4-b3dd-52ca9695e359/attempt.json",
+      "sourceSha256": "f16b42ac3325fcc06a061fcea53737c21bd7ad9ef10a26cfe21e9b0b3962dddd",
+      "unknowns": [
+        "effect file needs exactly one unified patch: reports/scratch/validate-after.err"
+      ],
+      "codeGrade": {
+        "grader_id": "CE01",
+        "status": "needs_rubric",
+        "evidence": [
+          "attempt:eeed80748d2fb2c3aa693bddd7d03911363b2f4e20929ad17f7d2c93191d75d3",
+          "validation-grade.json@sha256:00d359665a663546ac0d69f6a4635dda144a8a35fcacd42273f8ab9f948471d1"
+        ],
+        "questions": [
+          "Every named false current claim in all three cards and paired properties is withdrawn; true retained behavior remains.",
+          "Changes stay within admitted memory/report surfaces and matching fixture bookkeeping; no product code or unowned machine-state change.",
+          "Each writer change has its receipt; any open manual write instead carries the full D627 ladder record and every check still available, on final bytes.",
+          "No success solely from an agent report; inspect the final trees, paired properties, history and recorded checks."
+        ]
+      },
+      "codeGradeSource": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE01/23650518-70a4-4ce4-b3dd-52ca9695e359/code-grade.json",
+        "sha256": "2e86534cb10604a8ed7e14fc252f34c0e327b62d26a54f34930be297117529a5"
+      },
+      "emptyFiles": [
+        {
+          "path": "reports/scratch/validate-after.err",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "before": null,
+          "source": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE01/23650518-70a4-4ce4-b3dd-52ca9695e359/after/reports/scratch/validate-after.err"
+        }
+      ]
+    },
+    {
+      "case": "CE03",
+      "attempt": "27f61db5-aef0-4523-a23e-c8448156ffe1",
+      "source": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE03/27f61db5-aef0-4523-a23e-c8448156ffe1/attempt.json",
+      "sourceSha256": "565b642a00a1ebc2290c3d451bdcf64db746b640dd2eedd9fd80fcd61ded2470",
+      "unknowns": [],
+      "codeGrade": {
+        "grader_id": "CE03",
+        "status": "unknown",
+        "evidence": [
+          "git-semantics:{\"after\": null, \"before\": null, \"benign_metadata_paths\": [], \"changes\": [\"_InvalidSnapshot: retained repository is absent or a symlink: /home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE03/27f61db5-aef0-4523-a23e-c8448156ffe1/before/reports/scratch/base-clone\"], \"commands\": [], \"source_files\": [], \"status\": \"unknown\"}"
+        ],
+        "questions": [
+          "Unadmitted Git state change in reports/scratch/base-clone: _InvalidSnapshot: retained repository is absent or a symlink: /home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE03/27f61db5-aef0-4523-a23e-c8448156ffe1/before/reports/scratch/base-clone"
+        ]
+      },
+      "codeGradeSource": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE03/27f61db5-aef0-4523-a23e-c8448156ffe1/code-grade.json",
+        "sha256": "3e805f94d782b8318adf35999bf370633cd2dc47727f4cd5ea86d3c476026d9a"
+      },
+      "emptyFiles": [
+        {
+          "path": "reports/scratch/validate-with-base.err",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "before": null,
+          "source": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE03/27f61db5-aef0-4523-a23e-c8448156ffe1/after/reports/scratch/validate-with-base.err"
+        }
+      ]
+    },
+    {
+      "case": "CE12",
+      "attempt": "80d1fb3f-79a6-41ee-8636-3b3975d26ea9",
+      "source": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE12/80d1fb3f-79a6-41ee-8636-3b3975d26ea9/attempt.json",
+      "sourceSha256": "17542739fe4c86746f8e55e3f8580116667af80dcc2d17d086c34b69d1e9add4",
+      "unknowns": [],
+      "codeGrade": {
+        "grader_id": "CE12",
+        "status": "unknown",
+        "evidence": [
+          "git-semantics:{\"after\": null, \"before\": null, \"benign_metadata_paths\": [], \"changes\": [\"_InvalidSnapshot: retained repository is absent or a symlink: /home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE12/80d1fb3f-79a6-41ee-8636-3b3975d26ea9/before/reports/scratch/memory-base\"], \"commands\": [], \"source_files\": [], \"status\": \"unknown\"}"
+        ],
+        "questions": [
+          "Unadmitted Git state change in reports/scratch/memory-base: _InvalidSnapshot: retained repository is absent or a symlink: /home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE12/80d1fb3f-79a6-41ee-8636-3b3975d26ea9/before/reports/scratch/memory-base"
+        ]
+      },
+      "codeGradeSource": {
+        "path": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE12/80d1fb3f-79a6-41ee-8636-3b3975d26ea9/code-grade.json",
+        "sha256": "4831355100b678a831ba39ce5193e3619f501a5c244fe2c5e10ca6201bd70827"
+      },
+      "emptyFiles": [
+        {
+          "path": "reports/scratch/validate-base.err",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "before": null,
+          "source": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE12/80d1fb3f-79a6-41ee-8636-3b3975d26ea9/after/reports/scratch/validate-base.err"
+        },
+        {
+          "path": "reports/scratch/validate-tree-base.err",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "before": null,
+          "source": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE12/80d1fb3f-79a6-41ee-8636-3b3975d26ea9/after/reports/scratch/validate-tree-base.err"
+        },
+        {
+          "path": "reports/scratch/validate-tree.err",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "before": null,
+          "source": "/home/test/projects/ar-coordination/notes/261029_agent-evals/runs/20261030-old-text-hermes/hermes/CE12/80d1fb3f-79a6-41ee-8636-3b3975d26ea9/after/reports/scratch/validate-tree.err"
+        }
+      ]
+    }
+  ]
+}

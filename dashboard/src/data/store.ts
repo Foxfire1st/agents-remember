@@ -1,25 +1,27 @@
-import { useStore } from "zustand";
-import { createStore } from "zustand/vanilla";
+import { useStore } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 
-import type { ObserverEvent } from "../types/event";
+import type { ObserverEvent } from '../types/event';
 import type {
-  Analytics,
-  CloseoutQueueNode,
-  EnclosureNode,
-  LifecycleProjection,
-  Metrics,
-  ProviderNode,
-  ServingBuild,
-  AgentNotifierHeartbeat,
-  WorkspaceProjection,
-} from "../types/projection";
-import { stableEquals, stampServed } from "./servedAges";
+Analytics,
+BuildCurrentness,
+CloseoutQueueNode,
+EnclosureNode,
+Metrics,
+ServingBuild,
+TaskCounts,
+TaskEntry,
+WorkspaceProjection,
+} from '../types/projection';
+import { ConditionalReads } from './conditionalReads';
+import { stableEquals,stampServed } from './servedAges';
+import { TaskDocumentResources } from './taskDocuments';
 
 // A defaulted list read keeps `applySnapshotState`'s complexity under the lint budget: the `??` lives
 // here, in a separate function, rather than adding a branch inside the snapshot applier.
 const asList = <T>(value: T[] | undefined): T[] => value ?? [];
 
-export type ConnState = "connecting" | "live" | "signal-lost";
+export type ConnState = 'connecting' | 'live' | 'signal-lost';
 
 export interface DashboardState {
   conn: ConnState;
@@ -29,9 +31,13 @@ export interface DashboardState {
   // failure overlay (e.g. the FleetingEnclosure) from the previous mode can't orphan and bleed through. In
   // production nothing calls `reset()`, so `gen` stays 0 and the canvas is never remounted by it.
   gen: number;
-  lifecycles: Record<string, LifecycleProjection>; // keyed by id
+  tasks: Record<string, TaskEntry>;
+  taskDocuments: TaskDocumentResources;
+  changeSets: ConditionalReads;
+  changeSetFiles: ConditionalReads;
+  intentSummaries: ConditionalReads;
+  taskCounts: TaskCounts;
   enclosures: Record<string, EnclosureNode>; // keyed by `enclosure`
-  providers: Record<string, ProviderNode>; // keyed by id
   activeWorktreeGroups: string[]; // worktree-group basenames with a live enclosure (Topology scope)
   closeoutQueues: CloseoutQueueNode[]; // projected sprint closeout queues (L8)
   metrics: Metrics | null;
@@ -39,17 +45,20 @@ export interface DashboardState {
   // The boot-time serving stamp (260703-L15): which build/process is answering. Rides the
   // snapshot; rendered muted in the top bar so a stale server is visible at a glance.
   servingBuild: ServingBuild | null;
-  // The agent-notifier sweep's self-liveness tick (260707-HFX2-L2 R5). Rendered red in the top bar
-  // past its staleness cutoff -- "the last turtle is the developer's glance".
-  agentNotifierHeartbeat: AgentNotifierHeartbeat | null;
+  buildCurrentness: BuildCurrentness | null;
+  servingProcessId: number | null;
   events: ObserverEvent[]; // raw observer feed retained client-side until reset/reload
   eventsHydrated: boolean;
+  // The newest event timestamp the store knows, from the /api/events `ready`
+  // marker -- which names the last feed even when the replay window holds
+  // nothing (MIK-R114 rule 8: the panel says when the river was last fed).
+  eventsLastTs: string | null;
   suppressedAttentionIds: Record<string, true>;
   setConn: (conn: ConnState) => void;
   applySnapshot: (projection: WorkspaceProjection) => void;
   applyDelta: (event: string, data: unknown) => void;
   pushEvent: (line: string) => void;
-  markEventsHydrated: () => void;
+  markEventsHydrated: (lastEventTs?: string | null) => void;
   suppressAttention: (ids: readonly string[]) => void;
   releaseAttention: (ids: readonly string[]) => void;
   reset: () => void;
@@ -70,28 +79,8 @@ const EVENT_WINDOW = 2000;
 // staleness displays advance locally between real emissions.
 
 /** Reuse the current value when the incoming one is stable-equal (keeps identity + anchor). */
-const reuse = <T>(current: T, incoming: T): T => (stableEquals(current, incoming) ? current : incoming);
-
-// `stableEquals` deliberately ignores `ageSeconds` (it's in VOLATILE_AGE_FIELDS) -- exactly
-// the field the heartbeat tick advances. A field-literal comparison is needed here so a
-// genuine tick advance (ageSeconds changing) is still recognized as a change, while a truly
-// idle heartbeat (including null/null) still produces zero store writes.
-const heartbeatEquals = (
-  a: AgentNotifierHeartbeat | null,
-  b: AgentNotifierHeartbeat | null,
-): boolean => {
-  if (a === b) return true;
-  if (a === null || b === null) return false;
-  return (
-    a.lastTickAt === b.lastTickAt &&
-    a.ageSeconds === b.ageSeconds &&
-    a.staleCutoffSeconds === b.staleCutoffSeconds &&
-    a.stale === b.stale &&
-    a.pendingInboxCount === b.pendingInboxCount &&
-    a.redeliverableInboxCount === b.redeliverableInboxCount &&
-    a.lastSweepDurationSeconds === b.lastSweepDurationSeconds
-  );
-};
+const reuse = <T>(current: T, incoming: T): T =>
+  stableEquals(current, incoming) ? current : incoming;
 
 /**
  * Merge an incoming collection into the id-keyed map, reusing every stable-equal node.
@@ -126,13 +115,7 @@ const stampAnalytics = (analytics: Analytics | null): void => {
   const at = Date.now();
   const collections: (readonly object[] | undefined)[] = [
     analytics.driftSnapshots,
-    analytics.stalestSidecars,
-    analytics.setupSummaries,
-    analytics.setupProgress,
     analytics.toolReports,
-    analytics.agentPickups,
-    analytics.taskDocuments,
-    analytics.series,
     analytics.attentionQueue,
     analytics.engineProcesses,
   ];
@@ -167,16 +150,46 @@ const pruneSuppressedAttention = (
 
 type DeltaReducer = (state: DashboardState, data: unknown) => Partial<DashboardState> | null;
 
+const BUILD_MODES: ReadonlySet<unknown> = new Set(['installed', 'checkout']);
+const BUILD_STATES: ReadonlySet<unknown> = new Set(['current', 'stale', 'unknown']);
+const BUILD_CURRENTNESS_TEXT = new Set([
+  'firstSeenAt',
+  'installedDigest',
+  'loadedDigest',
+  'reason',
+  'remedy',
+]);
+
+// The `buildCurrentness` frame is a checked parse, not a cast: it reads as the producer's
+// BuildCurrentnessPayload (two literal fields, optional text, no other key) or it is dropped.
+function readsAsBuildCurrentness(data: unknown): data is BuildCurrentness {
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return false;
+  if (!('mode' in data) || !BUILD_MODES.has(data.mode)) return false;
+  if (!('state' in data) || !BUILD_STATES.has(data.state)) return false;
+  return Object.entries(data).every(
+    ([key, value]) =>
+      key === 'mode' || key === 'state' || (BUILD_CURRENTNESS_TEXT.has(key) && typeof value === 'string'),
+  );
+}
+
 const DELTA_REDUCERS: Record<string, DeltaReducer> = {
-  lifecycle: (state, data) => {
-    const node = data as LifecycleProjection;
-    if (stableEquals(state.lifecycles[node.id], node)) return null;
-    stampServed(node);
-    return { lifecycles: upsert(state.lifecycles, node, (x) => x.id) };
+  buildCurrentness: (state, data) => {
+    if (!readsAsBuildCurrentness(data)) return null;
+    return stableEquals(state.buildCurrentness, data) ? null : { buildCurrentness: data };
   },
-  "lifecycle.removed": (state, data) => {
-    const { id } = data as { id: string };
-    return id in state.lifecycles ? { lifecycles: remove(state.lifecycles, id) } : null;
+  task: (state, data) => {
+    const node = data as TaskEntry;
+    if (stableEquals(state.tasks[node.key], node)) return null;
+    stampServed(node);
+    return { tasks: upsert(state.tasks, node, (item) => item.key) };
+  },
+  'task.removed': (state, data) => {
+    const { key } = data as { key: string };
+    return key in state.tasks ? { tasks: remove(state.tasks, key) } : null;
+  },
+  taskCounts: (state, data) => {
+    const taskCounts = data as TaskCounts;
+    return stableEquals(state.taskCounts, taskCounts) ? null : { taskCounts };
   },
   enclosure: (state, data) => {
     const node = data as EnclosureNode;
@@ -184,21 +197,11 @@ const DELTA_REDUCERS: Record<string, DeltaReducer> = {
     stampServed(node);
     return { enclosures: upsert(state.enclosures, node, (x) => x.enclosure) };
   },
-  "enclosure.removed": (state, data) => {
+  'enclosure.removed': (state, data) => {
     const { enclosure } = data as { enclosure: string };
     return enclosure in state.enclosures
       ? { enclosures: remove(state.enclosures, enclosure) }
       : null;
-  },
-  provider: (state, data) => {
-    const node = data as ProviderNode;
-    if (stableEquals(state.providers[node.id], node)) return null;
-    stampServed(node);
-    return { providers: upsert(state.providers, node, (x) => x.id) };
-  },
-  "provider.removed": (state, data) => {
-    const { id } = data as { id: string };
-    return id in state.providers ? { providers: remove(state.providers, id) } : null;
   },
   activeWorktreeGroups: (state, data) => {
     // Whole-value replacement (a bare list, no key) — see serving/delta.py.
@@ -234,28 +237,9 @@ function reduceDelta(
   return reducer === undefined ? null : reducer(state, data);
 }
 
-function snapshotUnchanged(
-  state: DashboardState,
-  lifecycles: Record<string, LifecycleProjection>,
-  enclosures: Record<string, EnclosureNode>,
-  providers: Record<string, ProviderNode>,
-  activeWorktreeGroups: string[],
-  closeoutQueues: CloseoutQueueNode[],
-  metrics: Metrics | null,
-  analytics: Analytics | null,
-  servingBuild: ServingBuild | null,
-  suppressedAttentionIds: Record<string, boolean>,
-): boolean {
-  return (
-    lifecycles === state.lifecycles &&
-    enclosures === state.enclosures &&
-    providers === state.providers &&
-    activeWorktreeGroups === state.activeWorktreeGroups &&
-    closeoutQueues === state.closeoutQueues &&
-    metrics === state.metrics &&
-    analytics === state.analytics &&
-    servingBuild === state.servingBuild &&
-    suppressedAttentionIds === state.suppressedAttentionIds
+function snapshotUnchanged(state: DashboardState, incoming: Partial<DashboardState>): boolean {
+  return (Object.keys(incoming) as (keyof DashboardState)[]).every(
+    (key) => incoming[key] === state[key],
   );
 }
 
@@ -264,9 +248,11 @@ function applySnapshotState(
   set: (partial: Partial<DashboardState>) => void,
   projection: WorkspaceProjection,
 ): void {
-  const lifecycles = mergeKeyed(state.lifecycles, projection.lifecycles, (x) => x.id);
+  const tasks = mergeKeyed(state.tasks, projection.tasks, (task) =>
+    task.key,
+  );
+  const taskCounts = reuse(state.taskCounts, projection.taskCounts);
   const enclosures = mergeKeyed(state.enclosures, projection.enclosures, (x) => x.enclosure);
-  const providers = mergeKeyed(state.providers, projection.providers, (x) => x.id);
   const activeWorktreeGroups = reuse(
     state.activeWorktreeGroups,
     projection.activeWorktreeGroups ?? [],
@@ -276,72 +262,83 @@ function applySnapshotState(
   const analytics = reuse(state.analytics, projection.analytics);
   if (analytics !== state.analytics) stampAnalytics(analytics);
   const servingBuild = reuse(state.servingBuild, projection.servingBuild ?? null);
-  // 260707-HFX2-L2 R5: deliberately EXCLUDED from the `unchanged` gate below — it is a live tick
-  // age injected at response time (mirroring the backend's own "volatile ages excluded" posture,
-  // delta.py), so it is always applied even when nothing else in the snapshot changed.
-  // The rename window serves the tick under both the current key and the legacy alias; accept
-  // either (current wins). Remove the legacy fallback with the window.
-  const agentNotifierHeartbeat =
-    projection.agentNotifierHeartbeat ?? projection.supervisorHeartbeat ?? null;
-  const suppressedAttentionIds = pruneSuppressedAttention(
-    state.suppressedAttentionIds,
-    analytics,
-  );
-  const unchanged = snapshotUnchanged(
-    state,
-    lifecycles,
+  const buildCurrentness = reuse(state.buildCurrentness, projection.buildCurrentness ?? null);
+  const servingProcessId = projection.servingProcessId ?? null;
+  const suppressedAttentionIds = pruneSuppressedAttention(state.suppressedAttentionIds, analytics);
+  const incoming = {
+    tasks,
+    taskCounts,
     enclosures,
-    providers,
     activeWorktreeGroups,
     closeoutQueues,
     metrics,
     analytics,
     servingBuild,
+    buildCurrentness,
+    servingProcessId,
     suppressedAttentionIds,
-  );
-  // An unchanged snapshot (a reconnect while idle) is a NO-OP for content, but the heartbeat
-  // tick still rides through below -- only when it actually changed, so a truly idle
-  // reconnect (e.g. null/null) still performs zero store writes.
-  if (unchanged && state.conn === "live") {
-    if (!heartbeatEquals(state.agentNotifierHeartbeat, agentNotifierHeartbeat)) {
-      set({ agentNotifierHeartbeat });
-    }
-    return;
-  }
+  };
+  const unchanged = snapshotUnchanged(state, incoming);
+  // An unchanged snapshot (a reconnect while idle) is a NO-OP: zero store writes.
+  if (unchanged && state.conn === 'live') return;
   set({
-    conn: "live",
+    conn: 'live',
     // `generatedAt` is the stamp of the last APPLIED content (the top bar's "@ hh:mm:ss"),
     // so an unchanged re-snapshot must not advance it — ages and stamp stay coherent.
     generatedAt: unchanged ? state.generatedAt : projection.generatedAt,
-    lifecycles,
-    enclosures,
-    providers,
-    activeWorktreeGroups,
-    closeoutQueues,
-    metrics,
-    analytics,
-    servingBuild,
-    agentNotifierHeartbeat,
-    suppressedAttentionIds,
+    ...incoming,
   });
 }
 
-export const dashboardStore = createStore<DashboardState>((set, get) => ({
-  conn: "connecting",
+type WorkspaceState = Pick<
+  DashboardState,
+  | 'generatedAt'
+  | 'tasks'
+  | 'taskDocuments'
+  | 'changeSets'
+  | 'changeSetFiles'
+  | 'intentSummaries'
+  | 'taskCounts'
+  | 'enclosures'
+  | 'activeWorktreeGroups'
+  | 'closeoutQueues'
+  | 'metrics'
+  | 'analytics'
+  | 'servingBuild'
+  | 'buildCurrentness'
+  | 'servingProcessId'
+  | 'events'
+  | 'eventsHydrated'
+  | 'eventsLastTs'
+  | 'suppressedAttentionIds'
+>;
+
+const emptyWorkspace = (): WorkspaceState => ({
   generatedAt: null,
-  gen: 0,
-  lifecycles: {},
+  tasks: {},
+  taskDocuments: new TaskDocumentResources(),
+  changeSets: new ConditionalReads(256),
+  changeSetFiles: new ConditionalReads(64, 16 * 1024 * 1024),
+  intentSummaries: new ConditionalReads(128),
+  taskCounts: { planned: 0, started: 0, aborted: 0, completed: 0, works: 0, waiting: 0, paused: 0, unknown: 0 },
   enclosures: {},
-  providers: {},
   activeWorktreeGroups: [],
   closeoutQueues: [],
   metrics: null,
   analytics: null,
   servingBuild: null,
-  agentNotifierHeartbeat: null,
+  buildCurrentness: null,
+  servingProcessId: null,
   events: [],
   eventsHydrated: false,
+  eventsLastTs: null,
   suppressedAttentionIds: {},
+});
+
+export const dashboardStore = createStore<DashboardState>((set, get) => ({
+  conn: 'connecting',
+  gen: 0,
+  ...emptyWorkspace(),
   setConn: (conn) => {
     if (get().conn !== conn) set({ conn });
   },
@@ -365,7 +362,14 @@ export const dashboardStore = createStore<DashboardState>((set, get) => ({
         return {}; // ignore malformed lines; never break the feed
       }
     }),
-  markEventsHydrated: () => set({ eventsHydrated: true }),
+  markEventsHydrated: (lastEventTs) =>
+    set((state) => ({
+      eventsHydrated: true,
+      eventsLastTs:
+        typeof lastEventTs === 'string'
+          ? lastEventTs
+          : (state.events.at(-1)?.ts ?? state.eventsLastTs),
+    })),
   suppressAttention: (ids) =>
     set((state) => ({
       suppressedAttentionIds: {
@@ -384,19 +388,7 @@ export const dashboardStore = createStore<DashboardState>((set, get) => ({
   reset: () =>
     set((state) => ({
       gen: state.gen + 1,
-      generatedAt: null,
-      lifecycles: {},
-      enclosures: {},
-      providers: {},
-      activeWorktreeGroups: [],
-      closeoutQueues: [],
-      metrics: null,
-      analytics: null,
-      servingBuild: null,
-      agentNotifierHeartbeat: null,
-      events: [],
-      eventsHydrated: false,
-      suppressedAttentionIds: {},
+      ...emptyWorkspace(),
     })),
 }));
 

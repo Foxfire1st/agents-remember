@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -9,19 +10,25 @@ from agents_remember.application.memory_mode_refusal import (
     memory_mode_refusal_evidence,
     memory_mode_refusal_payload,
 )
+from agents_remember.application.tool_answer_log import ensure_enclosure_logs_dir
 from agents_remember.errors import MemoryModeUnsupportedError
 from agents_remember.kernel.git_freshness import freshness_to_packet, read_branch_freshness
 from agents_remember.kernel.memory_mode import (
     is_removed_memory_mode,
     memory_mode_refusal_fields,
 )
-from agents_remember.tasks.store import write_task_docs
+from agents_remember.tasks import TaskDocument
+from agents_remember.tasks.document import INTENT_REVIEW_REFUSAL, intent_review_refusal
+from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
+from agents_remember.tasks.task_paths import leaf_enclosure_path
+from agents_remember.worktrees import outside_scratch
 from agents_remember.worktrees.activation.atomic_series_activation import (
     atomic_series_status_projection,
 )
 from agents_remember.worktrees.activation.atomic_series_activation_transaction import (
     activate_atomic_series_contract,
 )
+from agents_remember.worktrees.disabled_memory import disabled_opt_out_result
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
     require_parent_series,
@@ -35,7 +42,10 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
 from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
     public_failure_evidence,
 )
-from agents_remember.worktrees.leaf_refs import resolve_leaf_enclosure_contract_for_ref
+from agents_remember.worktrees.leaf_refs import (
+    LeafRefResolutionError,
+    resolve_leaf_enclosure_contract_for_ref,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.context import resolve_context
 from agents_remember.worktrees.modules.git import (
@@ -49,6 +59,10 @@ from agents_remember.worktrees.modules.guidance import (
     status_payload,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.startup.leaf_ref_start import (
+    invalid_contract_request_result,
+    resolve_start_leaf_doc_id,
+)
 from agents_remember.worktrees.modules.startup.series_attach import (
     series_attach_result,
 )
@@ -57,6 +71,14 @@ from agents_remember.worktrees.modules.startup.start_contract import (
 )
 from agents_remember.worktrees.modules.startup.start_memory import (
     prepare_memory_for_start,
+)
+from agents_remember.worktrees.modules.startup.start_plan import (
+    _blocked_memory_start_result,
+    _blocked_provider_start_result,
+    _contract_after_memory_start,
+    _PreparedStartEnclosure,
+    _preview_start_enclosure,
+    _StartEnclosurePlan,
 )
 from agents_remember.worktrees.modules.startup.start_provider_preflight import (
     provider_enablement_state,
@@ -79,22 +101,24 @@ from agents_remember.worktrees.start_progress import (
     clear_start_progress,
     write_start_progress,
 )
-from agents_remember.worktrees.task_fact_publication import (
-    contract_projection_scopes,
-    publish_task_fact_mutation,
+from agents_remember.worktrees.start_task_publication import (
+    publish_start_task_facts,
+)
+from agents_remember.worktrees.start_task_publication import (
+    task_start_authority_refusal as _task_start_authority_refusal,
 )
 from agents_remember.worktrees.task_leaf_binding import (
     TaskLeafBindingError,
-    plan_current_leaf_enclosure_registration,
-    require_current_leaf_enclosure_binding,
     require_current_start_task_binding,
 )
-from agents_remember.worktrees.task_resolver import resolve_leaf_enclosure_contract
+from agents_remember.worktrees.task_resolver import (
+    TaskResolutionError,
+    resolve_active_task_root,
+    resolve_leaf_enclosure_contract,
+)
 from agents_remember.worktrees.worktree_contract import (
-    ContractCells,
     ContractError,
     WorktreeContract,
-    amend_contract,
     contract_publication_text,
     load_contract,
 )
@@ -195,6 +219,15 @@ def status_result(args: WorktreeArgs) -> WorktreeCommandResult:
 
 def attach_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract = load_contract_from_args(args)
+    refusal = _contract_intent_review_block(contract, planning_only=True)
+    if refusal is not None:
+        return refusal
+    return _attach_admitted(contract, args)
+
+
+def _attach_admitted(contract: WorktreeContract, args: WorktreeArgs) -> WorktreeCommandResult:
+    """Attach the contract once the leaf's intent review admits it (MIK-R189 rule 2)."""
+
     try:
         require_matching_lifecycle_operation_location(contract)
     except LifecycleOperationLocationError as error:
@@ -228,91 +261,11 @@ def attach_result(args: WorktreeArgs) -> WorktreeCommandResult:
             },
         )
     try:
-        _publish_leaf_task_enclosure_binding(contract, args)
+        publish_start_task_facts(contract, dry_run=args.dry_run, started=False)
     except TaskLeafBindingError as error:
         return _task_start_authority_refusal(error)
     return WorktreeCommandResult(
         0, {"state": "attached", "attached": True, **status_payload(contract)}
-    )
-
-
-def _blocked_memory_start_result(
-    context, args: WorktreeArgs, code_state: str, memory_state: dict[str, object]
-) -> WorktreeCommandResult:
-    return WorktreeCommandResult(
-        2,
-        {
-            "state": "blocked",
-            "summary": "Code worktree is prepared, but external memory cannot be used until the developer selects a recovery path.",
-            **recovery_guidance(
-                "choose_memory_recovery",
-                tool="worktree_start",
-                args={
-                    "repo_id": context.code_repository_name,
-                    "task_name": args.task_name,
-                    "worktree_name": args.worktree_name,
-                    "workflow_kind": args.workflow_kind,
-                },
-                required_args=["memory_choice"],
-            ),
-            "code_worktree": code_state,
-            "memory": memory_state,
-        },
-    )
-
-
-def _contract_after_memory_start(
-    contract: WorktreeContract, memory_state: dict[str, object]
-) -> WorktreeContract:
-    if contract.memory_mode == "external" and memory_state["state"] == "disabled":
-        return amend_contract(
-            replace(
-                contract,
-                memory_repo_path=None,
-                memory_source_branch="",
-                memory_work_branch="",
-                memory_base_commit="",
-                memory_worktree=None,
-                ledger_path=None,
-                memory_state="disabled",
-            ),
-            # Through the typed record, like every other vocabulary cell: `memory_state` above
-            # is free text and `memory_mode` is not.
-            ContractCells(memory_mode="disabled"),
-        )
-    reconciled_base = memory_state.get("reconciledMemoryBaseCommit")
-    if isinstance(reconciled_base, str) and reconciled_base:
-        return replace(contract, memory_base_commit=reconciled_base)
-    return contract
-
-
-def _blocked_provider_start_result(
-    context,
-    args: WorktreeArgs,
-    code_state: str,
-    memory_state: dict[str, object],
-    provider_state: dict[str, object],
-) -> WorktreeCommandResult:
-    return WorktreeCommandResult(
-        2,
-        {
-            "state": "blocked",
-            "summary": "Worktree provider setup could not be prepared safely.",
-            **recovery_guidance(
-                "choose_provider_setup_recovery",
-                tool="worktree_start",
-                args={
-                    "repo_id": context.code_repository_name,
-                    "task_name": args.task_name,
-                    "worktree_name": args.worktree_name,
-                    "workflow_kind": args.workflow_kind,
-                    "skip_provider_setup": True,
-                },
-            ),
-            "code_worktree": code_state,
-            "memory": memory_state,
-            "providers": provider_state,
-        },
     )
 
 
@@ -515,21 +468,165 @@ def _record_start_progress(
     )
 
 
+def _unknown_choice_result(args: WorktreeArgs) -> WorktreeCommandResult | None:
+    """An unknown recovery answer is not a removal and never borrows the opt-out status.
+
+    The CLI no longer offers ``disabled-memory`` as a choice (L50-CODE-R1-F06),
+    so an unknown answer reaches the application; the MCP signature always
+    passed it through. Either way it is answered here as an invalid request,
+    in the same shape as every other mistyped start argument.
+    """
+    if args.memory_choice is None or args.memory_choice == "disabled-memory":
+        return None
+    return invalid_contract_request_result(
+        ContractError(
+            f"unknown memory_choice {args.memory_choice!r}; memory cannot be disabled for a task"
+        )
+    )
+
+
+def _live_disabled_leaf_attach_result(context, args: WorktreeArgs) -> WorktreeCommandResult | None:
+    """Attach a no-mode start to its live disabled leaf before new-parent admission.
+
+    R3a preserves attaching to a live leaf; building a fresh external contract
+    first lets the disabled master-series admission refuse before the existing
+    object can answer (L50-CODE-R1-F01).  This narrow pre-check fires only when
+    the request names no memory directive at all and a live disabled leaf
+    contract already exists at the requested address.  Genuinely new leaves,
+    explicit disabled requests and explicit conversions all keep the build path
+    and its refusals; any resolution failure falls through so argument errors
+    keep their exact current answers.
+    """
+    if args.memory_mode is not None or args.memory_choice is not None or args.topology is not None:
+        return None
+    try:
+        leaf_id = resolve_start_leaf_doc_id(context, args)
+        task_root = resolve_active_task_root(
+            context.coordination_root,
+            context.code_repository_name,
+            args.task_name or "",
+            parent_task=args.parent_task,
+        )
+        contract_path = leaf_enclosure_path(task_root, leaf_id)
+        existing = load_contract(contract_path) if contract_path.exists() else None
+    except (
+        AssertionError,
+        LeafRefResolutionError,
+        TaskResolutionError,
+        ContractError,
+        OSError,
+    ):
+        return None
+    if (
+        existing is None
+        or existing.memory_mode != "disabled"
+        or existing.cleanup in ("abandoned", "reopened", "completed")
+    ):
+        return None
+    return _active_existing_contract_result(context, existing, args)
+
+
 def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     refused = _removed_vocabulary_result(args)
+    if refused is None:
+        refused = disabled_opt_out_result(args)
+    if refused is None:
+        refused = _unknown_choice_result(args)
     if refused is not None:
         return refused
     context = resolve_context(args)
-    contract = build_start_contract(context, args)
-    if isinstance(contract, WorktreeCommandResult):
-        return contract
+    refused = _open_intent_review_start_result(context, args)
+    if refused is not None:
+        return refused
+    return _admitted_start_result(context, args)
+
+
+def _admitted_start_result(context, args: WorktreeArgs) -> WorktreeCommandResult:
+    """Build and create the enclosure once the leaf's intent review admits the start."""
+
+    attached = _live_disabled_leaf_attach_result(context, args)
+    if attached is not None:
+        return attached
+    built = build_start_contract(context, args)
+    if isinstance(built, WorktreeCommandResult):
+        return built
+    contract = built.contract
     existing_result = _existing_contract_result(context, contract, args)
     if existing_result is not None:
         return existing_result
-    preflighted = _preflighted_contract(context, contract, args)
+    preflighted = _preflighted_contract(
+        context, contract, args, preview_parent=built.preview_parent
+    )
     if isinstance(preflighted, WorktreeCommandResult):
         return preflighted
-    return _create_start_enclosure(context, preflighted, args)
+    return _create_start_enclosure(context, preflighted, args, preview_parent=built.preview_parent)
+
+
+def _open_intent_review_start_result(context, args: WorktreeArgs) -> WorktreeCommandResult | None:
+    """MIK-R189 rule 2: refuse a leaf start whose intent review is still open.
+
+    Answered before the contract is built, so the refusal creates nothing at all: no worktree,
+    no branch, no contract and no task-document change. An unresolvable leaf is left to
+    ``build_start_contract``, whose own refusal also comes before anything is created.
+    """
+
+    if not args.task_name:
+        return None
+    try:
+        leaf_id = resolve_start_leaf_doc_id(context, args)
+        task_root = resolve_active_task_root(
+            context.coordination_root,
+            context.code_repository_name,
+            args.task_name,
+            parent_task=args.parent_task,
+        )
+        found = resolve_terminal_leaf_doc(task_root, leaf_id)
+    except (AssertionError, LeafRefResolutionError, TaskResolutionError, OSError, ValueError):
+        return None
+    if found is None:
+        return None
+    return _intent_review_block(found[0], found[1])
+
+
+def _contract_intent_review_block(
+    contract: WorktreeContract, *, planning_only: bool
+) -> WorktreeCommandResult | None:
+    """MIK-R189 rule 2: the open review of the leaf this contract belongs to, or ``None``.
+
+    ``planning_only`` is the attach reading: a leaf that already reads ``inProgress`` or later is
+    re-entering its existing enclosure, not starting work. A start reads every stage.
+    """
+
+    if contract.kind != "leaf" or not contract.leaf_id:
+        return None
+    try:
+        found = resolve_terminal_leaf_doc(contract.task_root, contract.leaf_id)
+    except (OSError, ValueError):
+        return None
+    if found is None or (planning_only and found[1].status != "planning"):
+        return None
+    return _intent_review_block(found[0], found[1])
+
+
+def _intent_review_block(
+    document_path: Path, document: TaskDocument
+) -> WorktreeCommandResult | None:
+    """The named refusal of one leaf whose intent review is open, or ``None`` when admitted."""
+    refusal = intent_review_refusal(document)
+    if refusal is None:
+        return None
+    return WorktreeCommandResult(
+        2,
+        {
+            "state": INTENT_REVIEW_REFUSAL,
+            "status": INTENT_REVIEW_REFUSAL,
+            "summary": refusal,
+            "detail": refusal,
+            "taskDocument": document_path.as_posix(),
+            # The wait is the architect's record, not something this caller retries.
+            "nextAction": "ask-architect",
+        },
+    )
 
 
 def _removed_vocabulary_result(args: WorktreeArgs) -> WorktreeCommandResult | None:
@@ -539,9 +636,13 @@ def _removed_vocabulary_result(args: WorktreeArgs) -> WorktreeCommandResult | No
     point at which no worktree, branch, contract or task binding exists to unwind. It reports
     the removed member and the supported set as a typed status rather than an exception, and
     it never substitutes ``external`` for what was asked.
+
+    ``disabled`` is refused just below with its own opt-out refusal, never here: answering
+    it with the ``internal`` text would blame a memory root inside the code repository
+    that was never the problem.
     """
     for requested in (args.memory_mode, args.topology):
-        if requested is not None and is_removed_memory_mode(requested):
+        if requested is not None and requested != "disabled" and is_removed_memory_mode(requested):
             # The request boundary holds the *value*, so it builds the refusal facts from the
             # vocabulary rather than from a raised error.
             fields = memory_mode_refusal_fields(requested)
@@ -590,7 +691,7 @@ def _active_existing_contract_result(
         assert lineage is not None
         return WorktreeCommandResult(2, lineage_block_payload(lineage))
     try:
-        _publish_leaf_task_enclosure_binding(existing, args)
+        publish_start_task_facts(existing, dry_run=args.dry_run)
     except TaskLeafBindingError as error:
         return _task_start_authority_refusal(error)
     if args.retry_provider_setup:
@@ -623,19 +724,19 @@ def _resume_existing_location(
 
 
 def _preflighted_contract(
-    context, contract: WorktreeContract, args: WorktreeArgs
+    context,
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    *,
+    preview_parent: WorktreeContract | None = None,
 ) -> WorktreeContract | WorktreeCommandResult:
     """Run the pre-creation preflights, returning the blocked result or the usable contract.
 
     The returned contract remains bound to the source tips from its ordinary build.
     """
-    # A dry-run that is about to create a master's first leaf also plans the parent
-    # integration contract and branch without publishing either. That virtual parent was
-    # built from the protected source's current tip, so asking the ordinary lineage reader
-    # to load its deliberately absent contract would turn preview non-mutation into a false
-    # unavailable refusal. Only this in-process planned-parent case bypasses the filesystem
-    # projection; existing parent contracts still fail closed through the normal reader.
-    lineage_block = _parent_lineage_start_block(context, contract, args)
+    lineage_block = _parent_lineage_start_block(
+        context, contract, args, preview_parent=preview_parent
+    )
     if lineage_block is not None:
         return lineage_block
     stale_base_block = _stale_base_preflight(context, contract, args)
@@ -658,10 +759,15 @@ def _preflighted_contract(
 
 
 def _parent_lineage_start_block(
-    context, contract: WorktreeContract, args: WorktreeArgs
+    context,
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    *,
+    preview_parent: WorktreeContract | None = None,
 ) -> WorktreeCommandResult | None:
     parent_is_planned = (
         args.dry_run
+        and preview_parent is not None
         and bool(contract.parent_task_name)
         and contract.parent_contract_path is not None
         and not contract.parent_contract_path.exists()
@@ -685,16 +791,23 @@ def _parent_lineage_start_block(
 
 
 def _create_start_enclosure(
-    context, contract: WorktreeContract, args: WorktreeArgs
+    context,
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    *,
+    preview_parent: WorktreeContract | None = None,
 ) -> WorktreeCommandResult:
     """Create the code worktree, prepare memory, write the contract, and set the providers up."""
+    intent_block = _contract_intent_review_block(contract, planning_only=False)
+    if intent_block is not None:
+        return intent_block
     _record_start_progress(context, contract, args, StartBeat(phase="preflight"))
-    prepared = _prepare_start_enclosure(context, contract, args)
+    prepared = _prepare_start_enclosure(context, contract, args, preview_parent=preview_parent)
     if isinstance(prepared, WorktreeCommandResult):
         return prepared
     contract = prepared.contract
     try:
-        projection_effects = _publish_leaf_task_enclosure_binding(contract, args)
+        projection_effects = publish_start_task_facts(contract, dry_run=args.dry_run)
     except TaskLeafBindingError as error:
         return _task_start_authority_refusal(error)
     provider_state = run_or_launch_provider_setup(
@@ -719,27 +832,15 @@ def _create_start_enclosure(
     )
 
 
-@dataclass(frozen=True)
-class _PreparedStartEnclosure:
-    contract: WorktreeContract
-    code_state: str
-    memory_state: dict[str, object]
-    provider_plan: dict[str, object]
-
-
-@dataclass(frozen=True)
-class _StartEnclosurePlan:
-    contract: WorktreeContract
-    memory_preview: dict[str, object]
-    provider_plan: dict[str, object]
-
-
 def _prepare_start_enclosure(
     context,
     contract: WorktreeContract,
     args: WorktreeArgs,
+    *,
+    preview_parent: WorktreeContract | None = None,
 ) -> _PreparedStartEnclosure | WorktreeCommandResult:
-    planned = _plan_start_enclosure(context, contract, args)
+    contract = _start_contract_with_outside_scratch(contract, dry_run=args.dry_run)
+    planned = _plan_start_enclosure(context, contract, args, preview_parent=preview_parent)
     if isinstance(planned, WorktreeCommandResult):
         return planned
     if args.dry_run:
@@ -747,19 +848,69 @@ def _prepare_start_enclosure(
     return _materialize_start_enclosure(context, contract, args, planned)
 
 
+def _start_contract_with_outside_scratch(
+    contract: WorktreeContract, *, dry_run: bool
+) -> WorktreeContract:
+    """The contract carrying this generation's outside scratch root (MIK-R207 rule 1).
+
+    The record has to exist before the exact contract text is written, because the text is
+    what the manifest and the locator pin. A preview allocates nothing and records nothing, so
+    a dry run never names a root it did not create.
+    """
+
+    if dry_run:
+        return contract
+    predecessor = _restartable_start_predecessor(contract)
+    return outside_scratch.with_root_record(
+        contract,
+        predecessor_generation=(
+            outside_scratch.recorded_generation(predecessor.contract_path)
+            if predecessor is not None
+            else ""
+        ),
+        new_generation=predecessor is not None,
+    )
+
+
 def _plan_start_enclosure(
     context,
     contract: WorktreeContract,
     args: WorktreeArgs,
+    *,
+    preview_parent: WorktreeContract | None = None,
 ) -> _StartEnclosurePlan | WorktreeCommandResult:
-    lineage_block = _parent_lineage_start_block(context, contract, args)
+    lineage_block = _parent_lineage_start_block(
+        context, contract, args, preview_parent=preview_parent
+    )
     if lineage_block is not None:
         return lineage_block
-    require_parent_series(contract, operation="worktree_start")
+    parent = require_parent_series(
+        contract,
+        operation="worktree_start",
+        dry_run=args.dry_run,
+        preview_parent=preview_parent,
+    )
     require_ordinary_worktree(contract, operation="worktree_start")
-    memory_preview = prepare_memory_for_start(contract, replace(args, dry_run=True))
+    unpublished_parent = (
+        parent
+        if args.dry_run and parent is not None and not parent.contract_path.exists()
+        else None
+    )
+    memory_preview = prepare_memory_for_start(
+        contract, replace(args, dry_run=True), preview_parent=unpublished_parent
+    )
     if memory_preview["state"] == "blocked":
         return _blocked_memory_start_result(context, args, "not-created", memory_preview)
+    if memory_preview["state"] == "memory-opt-out-refused":
+        # The removed ``disabled-memory`` recovery answer, refused by name with
+        # the mode, the reason and the action (MIK-R50 R1c). Nothing was created.
+        return WorktreeCommandResult(
+            2,
+            {
+                "summary": str(memory_preview.get("detail", memory_preview)),
+                **memory_preview,
+            },
+        )
     planned_contract = _contract_after_memory_start(contract, memory_preview)
     provider_plan = plan_providers_for_start(context, planned_contract, args)
     if provider_plan["state"] == "blocked":
@@ -771,16 +922,6 @@ def _plan_start_enclosure(
             provider_plan,
         )
     return _StartEnclosurePlan(planned_contract, memory_preview, provider_plan)
-
-
-def _preview_start_enclosure(plan: _StartEnclosurePlan) -> _PreparedStartEnclosure:
-    code_state = ensure_worktree(plan.contract, side="code", dry_run=True)
-    return _PreparedStartEnclosure(
-        plan.contract,
-        code_state,
-        plan.memory_preview,
-        plan.provider_plan,
-    )
 
 
 def _materialize_start_enclosure(
@@ -872,6 +1013,12 @@ def _materialize_start_enclosure(
     except LifecycleOperationLocationError as error:
         return _location_refusal(error)
     _clear_start_block(context, planned_contract, args)
+    # MIK-R108 rule 3: <enclosure>/logs/ is made with the enclosure. It lies
+    # outside both worktrees and outside Git; the tool-call log writer makes
+    # it again if it is removed by hand. A start that cannot make it still
+    # starts: logging that failure is the log writer's job, not the start's.
+    with suppress(Exception):
+        ensure_enclosure_logs_dir(planned_contract.worktree_group)
     return _PreparedStartEnclosure(
         planned_contract,
         code_state,
@@ -889,101 +1036,6 @@ def _restartable_start_predecessor(
         return None
     existing = load_contract(planned_contract.contract_path)
     return existing if existing.cleanup in {"abandoned", "reopened"} else None
-
-
-def _task_start_authority_refusal(error: TaskLeafBindingError) -> WorktreeCommandResult:
-    next_action = "re-read-task-authority"
-    if error.status.startswith("task-enclosure-binding"):
-        next_action = "repair-task-enclosure-binding"
-    return WorktreeCommandResult(
-        2,
-        {
-            "state": error.status,
-            "status": error.status,
-            "summary": error.detail,
-            "detail": error.detail,
-            **error.facts,
-            "nextAction": next_action,
-            "nextTool": "task_doc",
-            "nextArgs": {"operation": "get"},
-        },
-    )
-
-
-def _publish_leaf_task_enclosure_binding(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-) -> list[dict[str, object]]:
-    """Publish and read back one exact leaf/task/enclosure binding.
-
-    Starts and supported reattachments share this task-first writer.  The contract
-    is the address authority; the canonical parent row selects the JSON document.
-    An exact existing binding is a no-op, which makes retries idempotent.
-    """
-
-    if args.dry_run or contract.kind != "leaf" or not contract.leaf_id:
-        return []
-    prepared: dict[str, object] = {}
-
-    def validate() -> None:
-        plan = plan_current_leaf_enclosure_registration(
-            contract.coordination_root,
-            contract.repo_name,
-            contract.task_root,
-            contract.leaf_id,
-            contract.contract_path,
-            lifecycle_id=contract.lifecycle_id or None,
-            task_name=contract.task_name,
-        )
-        if plan.blockers:
-            raise TaskLeafBindingError(
-                "leaf enclosure registration would republish terminal status with unresolved "
-                f"work units: {[blocker.model_dump() for blocker in plan.blockers]!r}",
-                status="task-enclosure-binding-terminal-blocked",
-                facts={
-                    "leafId": plan.leaf_id,
-                    "taskName": contract.task_name,
-                    "taskDocument": plan.doc_path.as_posix(),
-                    "contractPath": plan.enclosure_path,
-                    "recoveryOperation": (
-                        "resolve the task document's unfinished work units, then re-run "
-                        "worktree_start/worktree_attach"
-                    ),
-                },
-            )
-        prepared["plan"] = plan
-
-    def projection_scopes() -> tuple:
-        plan = prepared.get("plan")
-        candidate = getattr(plan, "candidate", None)
-        return contract_projection_scopes(contract, (candidate,)) if candidate is not None else ()
-
-    def publication():
-        plan = prepared.get("plan")
-        candidate = getattr(plan, "candidate", None)
-        return write_task_docs(contract.task_root, [candidate]) if candidate is not None else []
-
-    validate()
-    plan = prepared["plan"]
-    if getattr(plan, "candidate", None) is not None:
-        published = publish_task_fact_mutation(
-            contract.coordination_root,
-            validate=validate,
-            projection_scopes=projection_scopes,
-            publication=publication,
-        )
-        effects = [effect.model_dump(by_alias=True) for effect in published.projection_effects]
-    else:
-        effects = []
-    require_current_leaf_enclosure_binding(
-        contract.coordination_root,
-        contract.repo_name,
-        contract.task_root,
-        contract.leaf_id,
-        contract.contract_path,
-        task_name=contract.task_name,
-    )
-    return effects
 
 
 def _location_refusal(error: LifecycleOperationLocationError) -> WorktreeCommandResult:

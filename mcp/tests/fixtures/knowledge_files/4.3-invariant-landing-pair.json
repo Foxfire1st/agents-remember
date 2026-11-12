@@ -1,0 +1,22 @@
+{
+  "admission": {
+    "criteria": [
+      "spans_locations",
+      "guarded_by_test"
+    ],
+    "justification": "Enforced in integrate.py and direct_landing.py, and proved by test_direct_landing.py."
+  },
+  "applicability": "Leaf closeout and integration with external memory.",
+  "conditions": [],
+  "exclusions": [],
+  "id": "INV-7K3F9Q",
+  "origin": {
+    "leaf": "260928-MIK-L21",
+    "task": "260928-MIK"
+  },
+  "revision": 1,
+  "schema": "ar-invariant/v1",
+  "statement": "A leaf's code commit and its refreshed external-memory content commit land as one recorded pair, and the memory ledger's rows are derived from committed attribution rather than from a working tree.",
+  "status": "proposed",
+  "supersedes": []
+}

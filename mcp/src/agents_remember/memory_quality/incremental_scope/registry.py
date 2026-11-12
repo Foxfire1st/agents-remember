@@ -5,13 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agents_remember.memory_quality.check import AVAILABLE_CHECKS, DRIFT_CHECK_NAME
-from agents_remember.memory_quality.style.citations import claim_reopen, range_resolution
 from agents_remember.memory_quality.style.document_shape import (
     diff_markers,
     entity_catalog_alignment,
     tables,
 )
-from agents_remember.memory_quality.style.update_history import history_order
 
 from .models import CheckerScopePolicy, EdgeClass, canonical_digest
 
@@ -53,8 +51,6 @@ EDGE_OWNER_CONTRACTS: dict[EdgeClass, EdgeOwnerContract] = {
     ),
 }
 
-_ALL_EDGE_CLASSES = tuple(EDGE_OWNER_CONTRACTS)
-
 _POLICIES = (
     CheckerScopePolicy(
         checker=DRIFT_CHECK_NAME,
@@ -62,14 +58,6 @@ _POLICIES = (
         reason=(
             "the drift summary owns whole onboarding, inline, entity, and Git-history observation; "
             "no complete selected runner exists"
-        ),
-    ),
-    CheckerScopePolicy(
-        checker=claim_reopen.CHECK_NAME,
-        mode="full-only",
-        reason=(
-            "claim reopening observes tree-wide provenance and dependency changes; no complete "
-            "selected runner exists"
         ),
     ),
     CheckerScopePolicy(
@@ -81,21 +69,6 @@ _POLICIES = (
         checker=entity_catalog_alignment.CHECK_NAME,
         mode="full-only",
         reason="the checker validates the single repository-wide entity catalog as a whole",
-    ),
-    CheckerScopePolicy(
-        checker=history_order.CHECK_NAME,
-        mode="full-only",
-        reason="the history checker exposes only a whole-onboarding runner",
-    ),
-    CheckerScopePolicy(
-        checker=range_resolution.CHECK_NAME,
-        mode="incremental",
-        extractorVersion="citation-range-selected-documents/v1",
-        edgeClasses=_ALL_EDGE_CLASSES,
-        reason=(
-            "the checker accepts one confined document with one exact frozen citation-source "
-            "index generation"
-        ),
     ),
     CheckerScopePolicy(
         checker=tables.CHECK_NAME,

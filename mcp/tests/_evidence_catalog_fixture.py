@@ -14,7 +14,7 @@ def write_synthetic_evidence_catalog(
     root: Path,
     artifacts: Mapping[str, Sequence[str]],
 ) -> Path:
-    """Write exact metadata for the governed artifacts a synthetic repo created."""
+    """Write exact metadata, in canonical form, for the governed artifacts a synthetic repo created."""
 
     if not artifacts:
         raise ValueError("a synthetic evidence catalog requires at least one artifact")
@@ -55,7 +55,9 @@ def write_synthetic_evidence_catalog(
                 'permanence_rationale = "Required input to the synthetic contract."',
                 'replacement_contract = "contract:synthetic-test-evidence"',
                 'consumer_scope = "exact"',
-                f"consumers = {json.dumps(list(consumers))}",
+                "consumers = [",
+                *(f"  {json.dumps(consumer)}," for consumer in sorted(set(consumers))),
+                "]",
             )
         )
     catalog = root / "mcp/tests/evidence-lifecycle.toml"

@@ -8,12 +8,83 @@ The sibling lock path, thread state and capability cache have one owner here.
 from __future__ import annotations
 
 import fcntl
+import os
+import stat
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import BinaryIO
 
 from agents_remember.errors import LockCapabilityError
+
+
+class LockAcquisitionTimeout(LockCapabilityError):
+    """The caller's finite exclusion budget expired; the resource was not entered."""
+
+
+class FileLease:
+    """One OS descriptor hold, independent of the thread that acquired it."""
+
+    def __init__(self, handle: BinaryIO) -> None:
+        self._handle = handle
+
+    @property
+    def closed(self) -> bool:
+        return self._handle.closed
+
+    def close(self) -> None:
+        if not self._handle.closed:
+            try:
+                fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                self._handle.close()
+
+
+def try_file_lease(resource_path: Path, resource: str) -> FileLease | None:
+    """Take an OS hold without waiting; no thread mutex survives this call.
+
+    The empty sibling lock contains no data and is never removed. Exclusion ends
+    when its descriptor closes or its process dies, regardless of file existence.
+    """
+    path = lock_path_for(resource_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mutex = thread_mutex_for(resource_path)
+    if not mutex.acquire(blocking=False):
+        return None
+    try:
+        try:
+            _verify_lock_capability(path, resource, time.monotonic())
+        except LockAcquisitionTimeout:
+            return None
+        handle = path.open("a+b")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            handle.close()
+            return None
+        except BaseException:
+            handle.close()
+            raise
+        return FileLease(handle)
+    finally:
+        mutex.release()
+
+
+def _acquire_flock(descriptor: int, deadline: float | None) -> None:
+    while True:
+        try:
+            flags = fcntl.LOCK_EX | (fcntl.LOCK_NB if deadline is not None else 0)
+            fcntl.flock(descriptor, flags)
+            return
+        except BlockingIOError:
+            remaining = deadline - time.monotonic() if deadline is not None else 0
+            if remaining <= 0:
+                raise LockAcquisitionTimeout(
+                    "the resource lock is busy; retry after its owner finishes"
+                ) from None
+            time.sleep(min(0.05, remaining))
 
 
 class _LockDepth(threading.local):
@@ -55,7 +126,25 @@ def thread_mutex_for(log_path: Path) -> threading.RLock:
         return _thread_mutexes.setdefault(path, threading.RLock())
 
 
-def _verify_lock_capability(path: Path, resource: str) -> None:
+def _lock_handle(path: Path, io_path: Path | None = None) -> BinaryIO:
+    """Open the caller's held physical target while retaining its canonical lock identity."""
+    if io_path is None:
+        return path.open("a+b")
+    descriptor = os.open(
+        io_path, os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600
+    )
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError("the lock is not a regular file")
+        return os.fdopen(descriptor, "a+b")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _verify_lock_capability(
+    path: Path, resource: str, deadline: float | None, io_path: Path | None = None
+) -> None:
     """Refuse a filesystem whose ``flock`` does not actually exclude.
 
     Taken twice from two file descriptions in this one process: POSIX says the second must be
@@ -65,10 +154,10 @@ def _verify_lock_capability(path: Path, resource: str) -> None:
     """
     if path in _verified_lock_paths:
         return
-    with path.open("a+b") as first:
-        fcntl.flock(first.fileno(), fcntl.LOCK_EX)
+    with _lock_handle(path, io_path) as first:
+        _acquire_flock(first.fileno(), deadline)
         try:
-            with path.open("a+b") as second:
+            with _lock_handle(path, io_path) as second:
                 try:
                     fcntl.flock(second.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except OSError:
@@ -85,15 +174,26 @@ def _verify_lock_capability(path: Path, resource: str) -> None:
 
 
 @contextmanager
-def exclusive_file_lock(resource_path: Path, resource: str) -> Iterator[None]:
+def exclusive_file_lock(
+    resource_path: Path,
+    resource: str,
+    *,
+    deadline: float | None = None,
+    io_path: Path | None = None,
+) -> Iterator[None]:
     """Hold one mutex and flock across the caller's complete transaction.
 
     Same-thread nesting shares the outer hold, including exception release. Other
     threads and processes remain excluded. Acquire the mutex before flock; never
     acquire another resource's lock while holding this one.
+
+    ``io_path`` names the same resource through a directory descriptor held by the caller.
+    Only native IO uses that spelling; mutexes, capability caching and nesting retain the
+    canonical resource identity, so separate descriptor numbers cannot split one lock.
     """
     path = lock_path_for(resource_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    target = lock_path_for(io_path) if io_path is not None else path
+    target.parent.mkdir(parents=True, exist_ok=True)
     depth = _lock_depth.depth.get(path, 0)
     if depth:
         _lock_depth.depth[path] = depth + 1
@@ -102,16 +202,28 @@ def exclusive_file_lock(resource_path: Path, resource: str) -> Iterator[None]:
         finally:
             _lock_depth.depth[path] = depth
         return
-    with thread_mutex_for(resource_path):
-        _verify_lock_capability(path, resource)
-        with path.open("a+b") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    mutex = thread_mutex_for(resource_path)
+    acquired = (
+        mutex.acquire()
+        if deadline is None
+        else mutex.acquire(timeout=max(0, deadline - time.monotonic()))
+    )
+    if not acquired:
+        raise LockAcquisitionTimeout(
+            f"the {resource} lock ({path}) is busy; retry after its owner finishes"
+        )
+    try:
+        _verify_lock_capability(path, resource, deadline, target if io_path is not None else None)
+        with _lock_handle(path, target if io_path is not None else None) as handle:
+            _acquire_flock(handle.fileno(), deadline)
             _lock_depth.depth[path] = 1
             try:
                 yield
             finally:
                 _lock_depth.depth.pop(path, None)
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        mutex.release()
 
 
 def lock_held(resource_path: Path) -> bool:

@@ -10,12 +10,15 @@ Adaptive waking (260712-PTS-L3): with a ``change_watcher`` the pacemaker is no l
 unconditional ``sleep(interval)`` -- the loop wakes on debounced input changes (floored to
 one projection per ``interval``; ``--interval`` keeps meaning the fast-path cadence floor)
 or on a slow ``heartbeat`` when nothing changed, so a quiet daemon idles near zero CPU.
-Freshness bounds: change -> SSE delta within debounce + projection time (plus the interval
-floor when busy); ``/api/state`` staleness and time-derived field resolution are bounded
-by the heartbeat. The live path retains fixed-slot reader-domain snapshots and invalidates
+Live ticks rest after completion for ``max(interval, min(tick duration, 3s))``. The rest
+adds at most 3s at the default interval, in addition to any running/next projection time;
+changes received meanwhile remain pending. A task/host input may spend ChangePacer's one early
+pass per rest window, without another producer or publication path. ``/api/state`` staleness and
+time-derived field resolution remain bounded by the heartbeat. The live path retains fixed-slot
+reader-domain snapshots and invalidates
 only the domains named by the watcher. Without a watcher (sim replay, existing tests) the
-loop keeps the exact fixed-interval full-refresh behaviour, and a failed watcher degrades
-back to it loudly (fail-open).
+loop keeps the exact fixed-interval full-refresh behaviour. A failed watcher requests full
+refreshes at the interval floor and retains the bounded rest, with errors reported loudly.
 
 Two seams keep this generic across live and sim (slice 4b): ``now`` is the clock the
 tick projects at (a replay clock under sim, wall-clock UTC live), and ``before_tick`` is
@@ -36,23 +39,47 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from agents_remember.serving.cadence import DEFAULT_PROJECTION_CADENCE, ProjectionCadence
-from agents_remember.serving.change_watcher import DEFAULT_HEARTBEAT_SECONDS, ChangePacer
+from agents_remember.serving.background_accounting import (
+    OWNER_PROJECTION,
+    BackgroundLedger,
+    measured,
+    offload,
+)
+from agents_remember.serving.cadence import (
+    DEFAULT_PROJECTION_CADENCE,
+    ProjectionCadence,
+)
+from agents_remember.serving.change_watcher import (
+    ALL_PROJECTION_DOMAINS,
+    DEFAULT_HEARTBEAT_SECONDS,
+    ChangePacer,
+    ProjectionWake,
+)
 from agents_remember.serving.delta import (
     DeltaEvent,
     StableProjectionState,
     diff_projection,
     stable_projection_state,
 )
+from agents_remember.serving.projections.host_activity import (
+    HostActivityReconcile,
+    activity_directory,
+)
+from agents_remember.serving.projections.host_supervisor import (
+    HostSupervisorSubscription,
+)
 from agents_remember.serving.projections.projection_inputs import (
+    ProjectionDomain,
     ProjectionInputState,
     ProjectionRefresh,
+    ProjectionRefreshKind,
 )
 from agents_remember.serving.projections.projection_store import (
     ProjectionTickState,
@@ -66,7 +93,6 @@ if TYPE_CHECKING:
     from agents_remember.observer.projection import WorkspaceProjection
     from agents_remember.serving.change_watcher import ChangeWatch
     from agents_remember.serving.projections.landing_state import LandingStateRefresh
-    from agents_remember.serving.projections.projection_store import ProviderStateRefresh
 
 logger = logging.getLogger(__name__)
 
@@ -118,14 +144,18 @@ class ProjectionRefreshers:
     choice -- "is this projector attached to a moving world?" -- not three independent hooks.
     """
 
-    provider: ProviderStateRefresh | None = None
     landing: LandingStateRefresh | None = None
     change_watcher: ChangeWatch | None = None
+    host_activity_reconcile: HostActivityReconcile | None = None
 
 
 LIVE_PROJECTION_CLOCK = ProjectionReplay()
 """No replay clock and no feeder: the projector reads real time and drives a moving world."""
 NO_PROJECTION_REFRESHERS = ProjectionRefreshers()
+
+
+class ProjectorClosed(RuntimeError):
+    """The serving owner stopped before a requested projection was available."""
 
 
 class Projector:
@@ -138,6 +168,7 @@ class Projector:
         cadence: ProjectionCadence = DEFAULT_PROJECTION_CADENCE,
         replay: ProjectionReplay = LIVE_PROJECTION_CLOCK,
         refreshers: ProjectionRefreshers = NO_PROJECTION_REFRESHERS,
+        ledger: BackgroundLedger | None = None,
     ) -> None:
         interval = cadence.interval
         heartbeat = cadence.heartbeat
@@ -146,13 +177,15 @@ class Projector:
         self._interval = interval
         self._now: Callable[[], datetime] = replay.now or _utcnow
         self._before_tick = replay.before_tick
-        self._provider_refresher = refreshers.provider
         self._landing_refresher = refreshers.landing
         # Adaptive waking (260712-PTS-L3): with a watcher, the run loop paces via the
         # ChangePacer (change-driven + heartbeat, floored to one tick per ``interval``).
         # Without one -- sim replay and the injected-now() tests -- it keeps the exact
         # legacy ``sleep(interval)`` pacemaker.
         self._change_watcher = change_watcher
+        self._host_supervisor = HostSupervisorSubscription()
+        # The stable form of the tick being published, when that tick computed one.
+        self._tick_stable: StableProjectionState | None = None
         self._pacer: ChangePacer | None = (
             ChangePacer(
                 interval=interval,
@@ -161,12 +194,22 @@ class Projector:
             if change_watcher is not None
             else None
         )
-        self._input_state = ProjectionInputState() if change_watcher is not None else None
+        self._input_state = (
+            ProjectionInputState(
+                host_activity_reconcile=refreshers.host_activity_reconcile,
+                host_supervisor_armed=lambda: self._host_supervisor.armed,
+            )
+            if change_watcher is not None
+            else None
+        )
         # Instrumentation (R7 tests + ops): successful projections since run() started,
-        # and why the last tick woke ("change" | "heartbeat" | "interval").
+        # and why the last tick woke ("change" | "heartbeat" | "interval" | "full").
         self.projection_count = 0
         self.last_wake_reason: str | None = None
         self.last_invalidated_domains: frozenset[str] = frozenset()
+        # The always-on background account (MIK-R81 rule 1): per-owner processor time
+        # plus every wake with its reason. None keeps tests and sim replay unmeasured.
+        self._ledger = ledger
         # (seq, projection) publish as ONE tuple: /api/state runs in a threadpool, so pairing
         # them via two attributes could tear (a bumped seq read against the previous snapshot
         # would hand a poller a stale body under a fresh ETag).
@@ -176,13 +219,32 @@ class Projector:
         # holding "0" from the previous process would 304 against different content otherwise.
         self._boot_id = uuid4().hex[:12]
         self._subscribers: set[asyncio.Queue[_Item]] = set()
+        self._ready = asyncio.Event()
+        self._readiness_closed = False
+
+    def bind_series_changed(self, callback: Callable[[str, str], bool]) -> None:
+        """Bind the app's one preparation owner before native watches start."""
+        if self._change_watcher is not None:
+            self._change_watcher.bind_series_changed(callback)
+
+    def has_subscribers(self) -> bool:
+        """Whether a page currently consumes this projector's shared SSE stream."""
+        return bool(self._subscribers)
 
     async def prime(self) -> None:
         """Compute the first projection so the first client gets an immediate snapshot.
 
         Resilient: a failure here is logged and left for the tick loop to retry, so the
-        server still starts and serves ``503`` from ``/api/state`` until a tick succeeds.
+        server still starts while projection-dependent requests await a successful tick.
+        The wake is recorded before the outcome is known (F02): the prime ran because a
+        full refresh was due at boot, whatever it returns.
         """
+        if self._ledger is not None:
+            self._ledger.note_wake(
+                "full",
+                tuple(sorted(domain.value for domain in ALL_PROJECTION_DOMAINS)),
+                0,
+            )
         try:
             first = await self._tick(
                 self._now(),
@@ -193,6 +255,72 @@ class Projector:
             return
         self._latest_stable = stable_projection_state(first)
         self._published = (0, first)
+        self._broadcast((0, DeltaEvent("snapshot", first)))
+        self._ready.set()
+
+    def _next_refresh(self, wake: ProjectionWake) -> ProjectionRefresh:
+        """Map one pacer wake to the tick's refresh, recording why it ran (F02)."""
+        self.last_wake_reason = wake.reason
+        self.last_invalidated_domains = frozenset(domain.value for domain in wake.domains)
+        if self._ledger is not None:
+            self._ledger.note_wake(
+                wake.reason,
+                tuple(sorted(domain.value for domain in wake.domains)),
+                wake.path_count,
+                wake.paths,
+            )
+        if wake.reason == "change":
+            return ProjectionRefresh.change(
+                wake.domains, paths=wake.paths, paths_complete=wake.paths_complete
+            )
+        if wake.reason == "heartbeat":
+            return ProjectionRefresh.heartbeat()
+        return ProjectionRefresh(
+            ProjectionRefreshKind.FULL, wake.domains, wake.paths, wake.paths_complete
+        )
+
+    def _publish_wake(self, wake: ProjectionWake | None, current: WorkspaceProjection) -> bool:
+        """Publish one tick and acknowledge it; False means retry next interval.
+
+        Publish-then-acknowledge (F05/F06): a failure in stable-form generation, diff
+        or publish keeps the wake outstanding for the retry instead of clearing it,
+        and a failed every-domain wake merges its domains into pending for the next
+        eligible cycle. The acknowledgement runs inside the run-loop guard too: a
+        failing acknowledge retries like a failing publish, never kills the loop.
+        """
+        try:
+            with measured(OWNER_PROJECTION, self._ledger):
+                self._publish_projection(current)
+        except Exception:
+            logger.exception("projection publish failed; retrying next interval")
+            if wake is not None and self._pacer is not None:
+                self._pacer.note_failed_full(wake)
+            return False
+        try:
+            self._finish_tick(wake)
+        except Exception:
+            logger.exception("projection acknowledge failed; retrying next interval")
+            if wake is not None and self._pacer is not None:
+                self._pacer.note_failed_full(wake)
+            return False
+        return True
+
+    def _finish_tick(self, wake: ProjectionWake | None) -> None:
+        """Acknowledge a published tick and advance the heal bound for full ones.
+
+        The tick published: its wake's invalidations clear (an arrival during the tick
+        keeps the merged set outstanding), and a published full refresh — every domain,
+        not just a full wake — advances the 5-minute heal bound. Publish-then-acknowledge
+        (MIK-R81 rule 6): this runs only after :meth:`_publish_projection` succeeded, so a
+        failure in generation, diff or publish keeps the wake outstanding for the retry
+        instead of consuming the healing marker. (No pacer in sim replay: nothing to
+        acknowledge.)
+        """
+        if wake is not None and self._pacer is not None:
+            self._pacer.acknowledge(wake)
+            if wake.reason in ("interval", "full"):
+                self._pacer.confirm_full_published()
+        self.projection_count += 1
 
     async def run(self) -> None:
         """Tick on wake: re-project, diff, broadcast. One bad tick never kills the loop."""
@@ -213,31 +341,46 @@ class Projector:
             watch_task.add_done_callback(self._on_watch_task_done)
         try:
             while True:
+                wake: ProjectionWake | None = None
                 if self._pacer is None:
                     await asyncio.sleep(self._interval)
                     refresh = None
+                    # Watcherless ticks run too (F02): the tick below records its worker
+                    # unit; the wake says why it ran.
+                    if self._ledger is not None:
+                        self._ledger.note_wake("interval", (), 0)
                 else:
                     wake = await self._pacer.wait()
-                    self.last_wake_reason = wake.reason
-                    self.last_invalidated_domains = frozenset(
-                        domain.value for domain in wake.domains
-                    )
-                    if wake.reason == "change":
-                        refresh = ProjectionRefresh.change(wake.domains)
-                    elif wake.reason == "heartbeat":
-                        refresh = ProjectionRefresh.heartbeat()
-                    else:
-                        refresh = ProjectionRefresh.full()
+                    refresh = self._next_refresh(wake)
                 try:
                     current = await self._tick(self._now(), refresh)
                 except Exception:
                     logger.exception("projection tick failed; retrying next interval")
+                    if wake is not None and self._pacer is not None:
+                        self._pacer.note_failed_full(wake)
                     continue
-                self.projection_count += 1
-                self._publish_projection(current)
+                if not self._publish_wake(wake, current):
+                    continue
         finally:
+            self._host_supervisor.close()
             await _shutdown_task(watch_task, "change watcher")
             await _shutdown_task(landing_task, "landing refresher")
+
+    def watcher_health(self) -> dict[str, object] | None:
+        """The change watcher's health for the served state (MIK-R81 rule 5), or None.
+
+        None while this projector runs without a watcher (sim replay, injected-now
+        tests): there is no watcher to report on, so the served key is omitted
+        rather than fabricated. Otherwise the answer says whether the watcher is
+        running, and since when it is not.
+        """
+        pacer = self._pacer
+        if pacer is None:
+            return None
+        return {
+            "running": pacer.watcher_healthy,
+            "downSince": pacer.watcher_down_since,
+        }
 
     async def _tick(
         self, moment: datetime, refresh: ProjectionRefresh | None
@@ -249,45 +392,79 @@ class Projector:
         cancellation to the serving lifespan. This keeps temp-worktree cleanup from racing a late
         atomic projection write while preserving cancellation as the caller-visible outcome.
         """
-        tick = asyncio.create_task(asyncio.to_thread(self._tick_sync, moment, refresh))
+        started = time.monotonic()
         try:
-            return await asyncio.shield(tick)
-        except asyncio.CancelledError:
-            try:
-                await tick
-            except Exception:
-                logger.exception("projection tick failed while projector shutdown drained it")
-            raise
+            if self._pacer is not None and (
+                not self._host_supervisor.started
+                or (refresh is not None and refresh.affects(ProjectionDomain.HOST_ACTIVITY))
+            ):
+                directory = activity_directory(self._config)
+                await self._host_supervisor.refresh(
+                    directory.parent if directory is not None else None,
+                    self._host_exited,
+                    self._ledger,
+                )
+            # _tick_sync owns the actual CPU unit, including direct replay calls.
+            return await offload(
+                OWNER_PROJECTION,
+                None,
+                self._tick_sync,
+                moment,
+                refresh,
+                self._latest_stable,
+            )
+        finally:
+            if self._pacer is not None:
+                self._pacer.projection_completed(time.monotonic() - started)
+
+    def _host_exited(self) -> None:
+        if self._pacer is not None:
+            self._pacer.notify_change(frozenset({ProjectionDomain.HOST_ACTIVITY}))
 
     def _on_watch_task_done(self, task: asyncio.Task[None]) -> None:
-        """R7 fail-open: a finished watcher task degrades pacing to the fixed interval."""
+        """A finished watcher task switches pacing to interval-driven full refreshes."""
         if self._pacer is None or task.cancelled():
             return
         exception = task.exception()
         if exception is not None:
             logger.error(
-                "change watcher task died; falling back to fixed-interval ticking every %.1fs",
+                "change watcher task died; full refreshes use a %.1fs floor plus projection rest",
                 self._interval,
                 exc_info=exception,
             )
         self._pacer.set_watcher_healthy(False)
 
     def _tick_sync(
-        self, moment: datetime, refresh: ProjectionRefresh | None = None
+        self,
+        moment: datetime,
+        refresh: ProjectionRefresh | None = None,
+        previous_stable: StableProjectionState | None = None,
     ) -> WorkspaceProjection:
-        """Run the optional pre-tick hook, then project at ``moment`` (off the loop thread)."""
+        """Run the optional pre-tick hook, then project at ``moment`` (off the loop thread).
+
+        The tick's own thread-CPU and wall cost is recorded under the projection
+        owner (MIK-R81 rule 1). ``latest-state.json`` is rewritten only when the
+        projection's stable content moved since ``previous_stable`` (MIK-R81 rule 3).
+        """
         if self._before_tick is not None:
             self._before_tick(moment)
-        return project_and_write(
-            self._config,
-            now=moment,
-            refresh=refresh,
-            tick=ProjectionTickState(
-                input_state=self._input_state,
-                provider_refresher=self._provider_refresher,
-                landing_state=self._landing_refresher,
-            ),
+        self._tick_stable = None
+        tick = ProjectionTickState(
+            input_state=self._input_state,
+            landing_state=self._landing_refresher,
         )
+        with measured(OWNER_PROJECTION, self._ledger):
+            projection = project_and_write(
+                self._config,
+                now=moment,
+                refresh=refresh,
+                previous_stable=previous_stable,
+                tick=tick,
+            )
+        # Publication diffs the stable form this tick already computed for its write decision:
+        # one dump per tick instead of two (MIK-R179 rule 2).
+        self._tick_stable = tick.stable
+        return projection
 
     def _publish_projection(self, current: WorkspaceProjection) -> None:
         """Atomically publish one successful tick and notify current subscribers.
@@ -297,7 +474,7 @@ class Projector:
         ``snapshot`` event. The published tuple is committed before queue notification; this
         method contains no await, so subscription capture cannot interleave with the transition.
         """
-        current_stable = stable_projection_state(current)
+        current_stable = self._tick_stable or stable_projection_state(current)
         seq, previous = self._published
         events = (
             [DeltaEvent("snapshot", current)]
@@ -315,8 +492,24 @@ class Projector:
             items.append((seq, event))
         self._latest_stable = current_stable
         self._published = (seq, current)
+        self._ready.set()
         for item in items:
             self._broadcast(item)
+
+    async def wait_ready(self) -> None:
+        """Join the first real publication without starting or owning its producer.
+
+        Cancelling one waiter leaves the shared event and projection task intact.
+        A failed prime leaves waiters pending for the existing run-loop retry.
+        """
+        await self._ready.wait()
+        if self._readiness_closed:
+            raise ProjectorClosed("projection owner has stopped")
+
+    def close_readiness(self) -> None:
+        """Release pending request waits when the serving owner begins shutdown."""
+        self._readiness_closed = True
+        self._ready.set()
 
     def current(self) -> tuple[int, WorkspaceProjection | None]:
         """The latest (sequence, projection) for a new connection's snapshot."""

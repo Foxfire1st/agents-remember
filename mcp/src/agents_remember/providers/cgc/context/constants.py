@@ -119,10 +119,6 @@ CGC_PATCHED_SNIPPET = f"""    if local_cgcignore_path is None:
 # agents-remember: the dashboard bundle under package_data is a COMMITTED build artifact
 # (megabyte-scale minified JS with a supported .js suffix) — .gitignore cannot exclude it
 # and every rebuild otherwise triggers a full incremental re-index cascade per asset.
-CGC_REPO_CGCIGNORE_EXTRAS: dict[str, tuple[str, ...]] = {
-    "agents-remember": ("mcp/src/agents_remember/package_data/",),
-}
-
 CGC_TIMER_POP_PATCH_MARKER = (
     "Agents Remember patch: pop fired debounce timers so the per-path dict stays bounded"
 )

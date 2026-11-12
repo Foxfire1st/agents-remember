@@ -1,7 +1,7 @@
 """Tests for the JSON-primary task-document layer (slice 3c, commit 1).
 
 Covers the ``ar-task-document/v1`` schema (round-trip, alias, strictness, progress
-helpers), the deterministic markdown renderer (the ``w-02-light-task-workflow``
+helpers), the deterministic markdown renderer (the ``l-01-agent-lifecycles``
 template shape, checkbox mapping, escaping, empty sections), the JSON+markdown
 store, the ``task_doc`` application operations and error paths (including contract
 lifecycle-key pickup), and the MCP tool registration.
@@ -29,6 +29,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     RepositoryScope,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     TaskDocument,
     completion_blockers,
@@ -44,6 +45,7 @@ from agents_remember.tasks import (
     write_task_docs,
 )
 from agents_remember.tasks.master_sync import derived_master_status, plan_master_sync
+from agents_remember.tasks.sprint_rows import sprint_census
 
 
 def _doc(**over: Any) -> TaskDocument:
@@ -123,7 +125,7 @@ def _config(coord: Path) -> McpRuntimeConfig:
 
 
 class SchemaTests(unittest.TestCase):
-    def test_progress_counts_every_declared_parent_and_child(self) -> None:
+    def test_progress_counts_major_steps_without_changing_completion_readiness(self) -> None:
         doc = _doc(
             steps=[
                 {
@@ -138,8 +140,8 @@ class SchemaTests(unittest.TestCase):
                 {"id": "S2", "title": "Two", "status": "done"},
             ]
         )
-        # Parent S1 remains visible beside its two children, plus S2: 4 units, 2 done.
-        self.assertEqual((step_done(doc), step_total(doc)), (2, 4))
+        # Presentation counts major steps; readiness still checks the nested work.
+        self.assertEqual((step_done(doc), step_total(doc)), (1, 2))
         self.assertEqual(
             [(item.id, item.parentId, item.status) for item in completion_blockers(doc)],
             [("S1", None, "inProgress"), ("S1.b", "S1", "pending")],
@@ -313,12 +315,7 @@ class RowStatusReflectsLandingTests(unittest.TestCase):
         self.assertEqual(row.status, "Completed")
 
     def test_the_other_three_inputs_keep_their_own_meaning(self) -> None:
-        """Step state still distinguishes started from untouched, and it cannot overrule steps.
-
-        A stale ``Completed`` document with an unresolved step is neither: the document is not
-        the landing and the step is not done, so the row stays open. An untouched leaf keeps
-        projecting its own ``planning`` state rather than being folded into ``inProgress``.
-        """
+        """The master mirrors document stage even when old progress disagrees (MIK-R167)."""
         unresolved = self._leaf(
             status="Completed",
             steps=[
@@ -328,8 +325,89 @@ class RowStatusReflectsLandingTests(unittest.TestCase):
         )
         untouched = self._leaf(status="planning", steps=[{"id": "S1", "title": "One"}])
 
-        self.assertEqual(derived_master_status(unresolved), "inProgress")
+        self.assertEqual(derived_master_status(unresolved), "Completed")
         self.assertEqual(derived_master_status(untouched), "planning")
+        marked_but_planned = self._leaf(
+            status="planning", steps=[{"id": "S1", "title": "One", "status": "done"}]
+        )
+        self.assertEqual(derived_master_status(marked_but_planned), "planning")
+
+
+class SprintCensusDocumentScopeTests(unittest.TestCase):
+    """MIK-R209: only ``<task root>/<folder>/task.json`` is a task document.
+
+    A file named ``task.json`` deeper inside a task folder is never read, counted or
+    listed -- not as a commander, not as a retirement record, and not as an unreadable
+    document. The archive, enclosures and the master's own document stay excluded, a
+    document at the task root itself is no folder document either, and a symlinked task
+    folder is not another task document.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tasks = Path(self._tmp.name) / "tasks" / "repo"
+        self.master_ref = TaskDocumentRef(repository="repo", path="master/task.json")
+        self.master = _master(id="MASTER", slug="master", title="Human master")
+        write_task_doc(self.tasks / "master", self.master)
+        write_task_doc(
+            self.tasks / "sprint",
+            _master(
+                id="SPRINT",
+                slug="sprint",
+                title="Sprint",
+                orchestrates=["master"],
+                subTasks=[
+                    {
+                        "number": "1",
+                        "name": "Human master",
+                        "status": "planning",
+                        "masterRef": self.master_ref.model_dump(mode="json"),
+                    }
+                ],
+            ),
+        )
+
+    def _census(self):
+        return sprint_census(
+            self.tasks,
+            self.tasks / "master" / "task.json",
+            self.master_ref,
+            self.master,
+        )
+
+    def _write_deep(self, relative: str, text: str) -> None:
+        path = self.tasks / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def test_deep_files_are_neither_read_nor_counted_nor_listed(self) -> None:
+        sprint = (self.tasks / "sprint" / "task.json").read_text(encoding="utf-8")
+        for relative in (
+            "master/notes/reports/worker/run/task.json",
+            "sprint/notes/reports/worker/run/task.json",
+            "0_archive/master/notes/task.json",
+            "enclosures/leaf/task.json",
+        ):
+            self._write_deep(relative, sprint)
+        self._write_deep("task.json", sprint)
+        self._write_deep(
+            "master/notes/reports/retirement/task.json",
+            '{"subTasks": [{"retirement": {"masterRef": '
+            '{"repository": "repo", "path": "master/task.json"}}}]}',
+        )
+        self._write_deep("master/notes/reports/broken/task.json", '{"orchestrates": ["master"]')
+        census = self._census()
+        self.assertEqual(census.commanding, (self.tasks / "sprint" / "task.json",))
+        self.assertEqual(census.recording, ())
+        self.assertEqual(census.unreadable, ())
+
+    def test_a_symlinked_task_folder_is_not_another_task_document(self) -> None:
+        (self.tasks / "alias").symlink_to(self.tasks / "sprint", target_is_directory=True)
+        census = self._census()
+        self.assertEqual(census.commanding, (self.tasks / "sprint" / "task.json",))
+        self.assertEqual(census.recording, ())
+        self.assertEqual(census.unreadable, ())
 
 
 class RenderTests(unittest.TestCase):

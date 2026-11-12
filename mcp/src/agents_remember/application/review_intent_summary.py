@@ -29,12 +29,16 @@ small read that answers it, over the same resolved pair the reviewer opens:
 
 The read is a handful of indexed statements per identity on each snapshot, opened read-only; it runs
 no comparison of subjects and loads no subject content beyond each head's own fields.
+
+A tree comparison's summary also carries the unexplained-changes lane's file-level count
+(:func:`~agents_remember.application.review_unexplained_lane.lane_summary`), computed over the same
+resolved trees in the same request: the entry asks for it exactly when it asks for the intent counts.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -49,16 +53,17 @@ from agents_remember.application.review_candidate_resolution import (
 )
 from agents_remember.application.review_pair_preflight import pair_preflight_refusal
 from agents_remember.application.review_revision_comparison import revision_heads
+from agents_remember.application.review_unexplained_lane import lane_summary
+from agents_remember.application.review_worklist_answers import stored_unexplained_open
+from agents_remember.kernel.git_command import memo_git_object_lookups
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.read_queries import (
     fetch_family_revisions,
-    fetch_identity_rows,
     fetch_invariant_revisions,
     fetch_memberships_of_families_full,
-    fetch_predecessor_edges,
     fetch_realizations_for_invariants,
-    fetch_revision_ids,
+    fetch_revision_populations,
 )
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.review import ReviewRefusal
@@ -68,7 +73,7 @@ from agents_remember.models.knowledge.review_intent_summary import (
     ReviewIntentSummaryResult,
 )
 
-__all__ = ["intent_summary_of", "read_review_intent_summary"]
+__all__ = ["intent_summary_of", "read_review_intent_summary", "summarize_review"]
 
 # The invariant revision fields compared between two heads: the authored statement and its record
 # status. Display version and provenance differ on every successor, so they are not compared; a
@@ -120,7 +125,12 @@ class _SideIntent:
 
 
 def read_review_intent_summary(
-    config: McpRuntimeConfig, repository_id: str, master: str, leaf_id: str
+    config: McpRuntimeConfig,
+    repository_id: str,
+    master: str,
+    leaf_id: str,
+    *,
+    observe: Callable[[ReviewCandidateResolution], None] | None = None,
 ) -> ReviewIntentSummaryResult:
     """Resolve the comparison the task context names and summarize its changed intent.
 
@@ -128,10 +138,46 @@ def read_review_intent_summary(
     recorded comparison), so the counts beside the entry describe the comparison the entry opens.
     """
 
-    resolved = resolve_review_candidate(config, repository_id, master, leaf_id)
-    if isinstance(resolved, ReviewRefusal):
-        return _unavailable(repository_id, master, leaf_id, resolved)
-    return intent_summary_of(resolved, master)
+    return summarize_review(
+        lambda: resolve_review_candidate(config, repository_id, master, leaf_id),
+        repository_id,
+        master,
+        leaf_id,
+        observe=observe,
+    )
+
+
+def summarize_review(
+    resolve: Callable[[], ReviewCandidateResolution | ReviewRefusal],
+    repository_id: str,
+    master: str,
+    leaf_id: str,
+    *,
+    observe: Callable[[ReviewCandidateResolution], None] | None = None,
+) -> ReviewIntentSummaryResult:
+    """Summarize the comparison ``resolve`` names, resolved inside this read's one Git-lookup memo.
+
+    The caller chooses the resolution: the leaf's own (:func:`read_review_intent_summary`), or one
+    recorded tree comparison by its number (MIK-R89 v2 rule 10), whose refusal of a number the leaf
+    did not record is ``unavailable`` here. The answer's ``comparison`` names the number counted.
+    """
+
+    with memo_git_object_lookups():
+        resolved = resolve()
+        if isinstance(resolved, ReviewRefusal):
+            return _unavailable(repository_id, master, leaf_id, resolved)
+        if observe is not None:
+            observe(resolved)
+        summary = intent_summary_of(resolved, master)
+        if resolved.trees is None:
+            return summary
+        return summary.model_copy(
+            update={
+                "attribution": lane_summary(resolved.trees),
+                "unexplained_open": stored_unexplained_open(resolved.contract, resolved.trees),
+                "comparison": resolved.trees.record.number,
+            }
+        )
 
 
 def intent_summary_of(
@@ -203,7 +249,6 @@ def _read_side(database: Path, namespace: str) -> _SideIntent:
 
     connection = open_read_only_database(database)
     try:
-        edges = fetch_predecessor_edges(connection, namespace)
         invariant_populations = _populations(
             connection, namespace, ("invariant", "invariant_revision", "invariant_id")
         )
@@ -216,8 +261,8 @@ def _read_side(database: Path, namespace: str) -> _SideIntent:
             for revision in population
         }
         return _SideIntent(
-            invariants=_invariant_side(connection, namespace, invariant_populations, edges),
-            families=_family_side(connection, namespace, (family_populations, edges), invariant_of),
+            invariants=_invariant_side(connection, namespace, invariant_populations),
+            families=_family_side(connection, namespace, family_populations, invariant_of),
         )
     finally:
         connection.close()
@@ -228,33 +273,21 @@ def _populations(
 ) -> dict[str, tuple[str, ...]]:
     """Every identity of one kind with its retained revision ids, through the shipped readers."""
 
-    identity_table, revision_table, identity_column = tables
-    identities = fetch_identity_rows(
-        connection, namespace, identity_table, identity_column, "display_label"
-    )
-    return {
-        identity: fetch_revision_ids(
-            connection, namespace, revision_table, identity_column, identity
-        )
-        for identity in identities
-    }
+    return fetch_revision_populations(connection, namespace, *tables)
 
 
 def _heads(
-    populations: Mapping[str, tuple[str, ...]], edges: Sequence[tuple[str, str]]
+    populations: Mapping[str, tuple[str, ...]],
 ) -> dict[str, tuple[str, ...]]:
-    return {
-        identity: revision_heads(population, edges) for identity, population in populations.items()
-    }
+    return {identity: revision_heads(population) for identity, population in populations.items()}
 
 
 def _invariant_side(
     connection: apsw.Connection,
     namespace: str,
     populations: Mapping[str, tuple[str, ...]],
-    edges: Sequence[tuple[str, str]],
 ) -> _KindSide:
-    heads = _heads(populations, edges)
+    heads = _heads(populations)
     head_ids = _all_heads(heads)
     content = {
         str(row["revision_id"]): tuple(_canonical(row[name]) for name in _STATEMENT_FIELDS)
@@ -274,11 +307,10 @@ def _invariant_side(
 def _family_side(
     connection: apsw.Connection,
     namespace: str,
-    lineage: tuple[Mapping[str, tuple[str, ...]], Sequence[tuple[str, str]]],
+    populations: Mapping[str, tuple[str, ...]],
     invariant_of: Mapping[str, str],
 ) -> _KindSide:
-    populations, edges = lineage
-    heads = _heads(populations, edges)
+    heads = _heads(populations)
     head_ids = _all_heads(heads)
     content = {
         str(row["revision_id"]): tuple(_canonical(row[name]) for name in _GUARANTEE_FIELDS)

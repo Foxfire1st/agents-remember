@@ -1,8 +1,20 @@
 """Pydantic response contracts for Agents Remember MCP tools."""
 
-from agents_remember.models import (
-    conversations as conversations,  # curated package surface
-)
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agents_remember.models.tokens import (
+        DEFAULT_TOKEN_COUNTER,
+        ApproximateTokenCounter,
+        ResponseTokenCounter,
+        TiktokenTokenCounter,
+        count_response_tokens,
+        dump_with_token_count,
+        finalize_payload_tokens,
+        response_payload,
+    )
+
+from agents_remember.kernel.memory_mode import MemoryMode
 from agents_remember.models.base import (
     FlexibleResponseModel,
     FlexibleToolResponse,
@@ -14,8 +26,8 @@ from agents_remember.models.benchmarks import (
     CodexBenchmarkPrepareResponse,
     CodexBenchmarkRunResponse,
 )
-from agents_remember.models.context_packet import ContextPacketV2
-from agents_remember.models.core import PingResponse, ServerInfoResponse, Transport
+from agents_remember.models.context_packet import ContextPacketV2, SlimContextPacket
+from agents_remember.models.core import ServerInfoResponse, Transport
 from agents_remember.models.drift import DriftSummary
 from agents_remember.models.memory import (
     DriftCheckResponse,
@@ -51,25 +63,14 @@ from agents_remember.models.providers import (
     ProviderWatchersResponse,
     WatcherState,
 )
-from agents_remember.models.runtime import ResolveContextResponse, RuntimeInstallResponse
-from agents_remember.models.skills import SkillsInstallResponse
-from agents_remember.models.tokens import (
-    DEFAULT_TOKEN_COUNTER,
-    ApproximateTokenCounter,
-    ResponseTokenCounter,
-    TiktokenTokenCounter,
-    count_response_tokens,
-    dump_with_token_count,
-    finalize_payload_tokens,
-    response_payload,
-)
-from agents_remember.models.tools.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.models.runtime import RuntimeInstallResponse
+from agents_remember.models.task_document_ref import TaskScopedReaderContext
+from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.models.worktree import (
     CleanupStatus,
     HumanReviewStatus,
     IntegrationStatus,
     LifecycleStatus,
-    MemoryMode,
     NextOperation,
     NextTool,
     WorkflowKind,
@@ -89,7 +90,7 @@ from agents_remember.models.worktree import (
 
 __all__ = [
     "DEFAULT_TOKEN_COUNTER",
-    "PUBLIC_TOOL_RESPONSE_MODELS",
+    "TOOL_RESPONSE_MODELS",
     "ApproximateTokenCounter",
     "CGCCalleesResponse",
     "CGCCallersResponse",
@@ -122,7 +123,6 @@ __all__ = [
     "MemoryQualityCheckResponse",
     "NextOperation",
     "NextTool",
-    "PingResponse",
     "ProviderDiagnosticsItem",
     "ProviderDiagnosticsResponse",
     "ProviderIdentity",
@@ -133,14 +133,14 @@ __all__ = [
     "ProviderTargetRepo",
     "ProviderWatcherAction",
     "ProviderWatchersResponse",
-    "ResolveContextResponse",
     "ResponseModel",
     "ResponseTokenCounter",
     "RouteIndexRefreshResponse",
     "RuntimeInstallResponse",
     "ServerInfoResponse",
-    "SkillsInstallResponse",
+    "SlimContextPacket",
     "StrictResponseModel",
+    "TaskScopedReaderContext",
     "TiktokenTokenCounter",
     "ToolResponse",
     "Transport",
@@ -163,3 +163,29 @@ __all__ = [
     "finalize_payload_tokens",
     "response_payload",
 ]
+
+
+# MIK-R204 @ v1 rule 1 (the resolver sits at the end of the module): the token counter imports `tiktoken`, which is a second of startup for a package
+# that discovery never needs. The names stay importable exactly as before; they are resolved on first use.
+_TOKEN_NAMES = frozenset(
+    {
+        "DEFAULT_TOKEN_COUNTER",
+        "ApproximateTokenCounter",
+        "ResponseTokenCounter",
+        "TiktokenTokenCounter",
+        "count_response_tokens",
+        "dump_with_token_count",
+        "finalize_payload_tokens",
+        "response_payload",
+    }
+)
+
+
+def __getattr__(name: str) -> object:
+    """Resolve the token-counter vocabulary on first use instead of at import (PEP 562)."""
+
+    if name in _TOKEN_NAMES:
+        from agents_remember.models import tokens as module  # noqa: PLC0415
+
+        return getattr(module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

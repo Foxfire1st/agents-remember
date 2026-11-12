@@ -83,6 +83,8 @@ def identity_index(
         identities[entry.source] = instruction_identity("specialization", name)
     for name, entry in parsed.skills.items():
         identities[entry.source] = skills_declared_identity(entry.origin, name)
+    for entry in parsed.detail_references:
+        identities[entry.source] = f"skill:detail:{entry.source}"
     for path in selection.specialization:
         identities[path] = specializations_declared_identity(path)
     return identities

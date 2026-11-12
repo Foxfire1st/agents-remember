@@ -6,9 +6,6 @@
     "vite.config.ts",
     "vitest.config.ts",
     "playwright.config.ts",
-    "playwright.production.config.ts",
-    "playwright.chats-e2e.config.ts",
-    "playwright.perf.config.ts",
     "panda.config.ts",
     "postcss.config.cjs"
   ],

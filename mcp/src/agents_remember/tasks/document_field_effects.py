@@ -21,6 +21,7 @@ from agents_remember.models.task_intent import (
     MissingTaskIntent,
     TaskIntentIdentity,
 )
+from agents_remember.models.task_retirement import MasterRetirementProof, RetirementEdgeSelection
 
 from .document import (
     CodeExample,
@@ -28,7 +29,11 @@ from .document import (
     DiscardedSubTask,
     DiscardSourceProof,
     DiscardUnstartedProof,
+    ExpectedKnowledgeEffect,
     HeaderNote,
+    IntentReview,
+    IntentReviewRevision,
+    ReviewApproval,
     ReviewFinding,
     ReviewState,
     RouteReviewChildIntent,
@@ -49,6 +54,7 @@ from .document import (
     TaskEnclosureRef,
     TaskExecutionRegistration,
 )
+from .route_review import ReviewRound
 
 
 class TaskDocumentFieldEffect(StrEnum):
@@ -153,6 +159,8 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "repo": NORMATIVE,
         "type": NORMATIVE,
         "createdAt": AUDIT,
+        "completedAt": AUDIT,
+        "waitsFor": STRUCTURAL,
         "master": AUDIT,
         "headerNotes": AUDIT,
         "seriesContractPath": LIFECYCLE,
@@ -162,15 +170,21 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "enclosures": LIFECYCLE,
         "executionRegistrations": LIFECYCLE,
         "lifecycleId": LIFECYCLE,
+        "knowledgeMaintenanceScope": LIFECYCLE,
+        "expectedKnowledgeEffects": NORMATIVE,
+        "intentReview": NORMATIVE,
         "objective": NORMATIVE,
         "requirements": NORMATIVE,
         "design": NORMATIVE,
+        "nonGoals": NORMATIVE,
+        "acceptance": NORMATIVE,
         "steps": INTENT_AND_PROGRESS | READINESS,
         "codeExamples": NORMATIVE,
         "codeExamplesNote": NORMATIVE,
         "decisions": AUDIT,
         "routeReview": EVIDENCE,
         "reviewState": EVIDENCE,
+        "memoryReviewState": EVIDENCE,
         "openQuestions": NORMATIVE,
         "references": EVIDENCE,
         "subTasks": STRUCTURAL | PROGRESS_AND_READINESS,
@@ -213,16 +227,32 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "findingId": EVIDENCE,
         "description": EVIDENCE,
     },
+    ReviewApproval: {
+        "by": EVIDENCE,
+        "text": EVIDENCE,
+    },
     ReviewState: {
+        "recordedRounds": EVIDENCE,
         "round": EVIDENCE,
         "pending": EVIDENCE,
         "baselineFindings": EVIDENCE,
         "remainingFindingIds": EVIDENCE,
+        "limit": EVIDENCE,
+        "candidateTree": EVIDENCE,
+        "candidateIdentity": EVIDENCE,
+        "approval": EVIDENCE,
         "developerApproval": EVIDENCE,
         "additionalRounds": EVIDENCE,
     },
+    ReviewRound: {
+        "round": EVIDENCE,
+        "kind": EVIDENCE,
+        "findingsRemain": EVIDENCE,
+        "verdictRef": EVIDENCE,
+    },
     RouteReviewRecord: {
         "candidateTree": EVIDENCE,
+        "baseCommit": EVIDENCE,
         "verdict": EVIDENCE,
         "verdictRef": EVIDENCE,
         "reviewedAt": EVIDENCE,
@@ -264,6 +294,21 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "snippet": NORMATIVE,
     },
     HeaderNote: {"label": AUDIT, "value": AUDIT},
+    ExpectedKnowledgeEffect: {
+        "subject": NORMATIVE,
+        "effect": NORMATIVE,
+        "requirementRef": NORMATIVE,
+    },
+    IntentReview: {
+        "state": NORMATIVE,
+        "decisionRef": NORMATIVE,
+        "agreedRevision": NORMATIVE,
+    },
+    IntentReviewRevision: {
+        "revisionId": NORMATIVE,
+        "sha256": NORMATIVE,
+        "packetVersions": NORMATIVE,
+    },
     TaskEnclosureRef: {"leafId": LIFECYCLE, "enclosurePath": LIFECYCLE},
     TaskExecutionRegistration: {
         "sourceKind": LIFECYCLE,
@@ -280,6 +325,21 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "judgmentId": EVIDENCE,
     },
     SprintExecutionGraph: {"nodes": STRUCTURAL, "edges": STRUCTURAL},
+    MasterRetirementProof: {
+        "version": AUDIT,
+        "masterRef": AUDIT,
+        "archiveRef": AUDIT,
+        "reason": AUDIT,
+        "retiredAt": AUDIT,
+        "removedOrchestrates": AUDIT,
+        "removedGraphNodes": AUDIT,
+        "removedEdges": AUDIT,
+        "affirmedEdges": AUDIT,
+        "masterJsonSha256": AUDIT,
+        "masterMarkdownSha256": AUDIT,
+        "readinessFacts": AUDIT,
+    },
+    RetirementEdgeSelection: {"predecessor": AUDIT, "successor": AUDIT},
     SubTaskRef: {
         "number": STRUCTURAL,
         "name": NORMATIVE,
@@ -287,6 +347,7 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "status": PROGRESS_AND_READINESS,
         "scope": STRUCTURAL,
         "masterRef": STRUCTURAL,
+        "retirement": AUDIT,
     },
     DiscardSourceProof: {"state": AUDIT, "sha256": AUDIT, "size": AUDIT},
     DiscardUnstartedProof: {
@@ -489,8 +550,14 @@ def validate_task_document_field_effects(
     *,
     root_model: type[BaseModel] = TaskDocument,
 ) -> None:
-    """Refuse any unclassified, stale, or empty task-document field taxonomy entry."""
+    """Refuse any unclassified, stale, or empty task-document field taxonomy entry.
 
+    The schema classes and the taxonomy are fixed when the module loads, so a root that
+    validated once is not walked again; a refusal is never remembered and repeats.
+    """
+
+    if root_model in _validated_roots:
+        return
     for model in task_document_schema_models(root_model):
         classifications = _classifications_for(model)
         if classifications is None:
@@ -501,6 +568,10 @@ def validate_task_document_field_effects(
             raise TaskDocumentFieldEffectTaxonomyError(
                 f"invalid field-effect taxonomy for {_model_name(model)}: {detail}"
             )
+    _validated_roots.add(root_model)
+
+
+_validated_roots: set[type[BaseModel]] = set()
 
 
 def _taxonomy_difference(

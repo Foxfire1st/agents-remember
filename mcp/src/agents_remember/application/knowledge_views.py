@@ -1,10 +1,8 @@
-"""The application seam for the five query views (``KS-R20@v1`` §1, §3).
+"""The application seam for the three query views (``KS-R20@v1`` §1, §3).
 
-This is the seventh application seam beside :mod:`knowledge`, :mod:`knowledge_snapshot`,
-:mod:`knowledge_merge`, :mod:`knowledge_export`, :mod:`knowledge_read`, :mod:`knowledge_facets` and
-:mod:`knowledge_evidence`, and like them it decides no authority and holds no durable state. It
-resolves the snapshot, admits the request, builds the reader port, and returns the typed payload the
-renderer produced.
+This seam reads the derived index beside :mod:`knowledge_read`. It decides no authority and
+holds no durable state: it resolves the index snapshot, admits the request, builds the reader port,
+and returns the typed payload the renderer produced.
 
 **The snapshot resolver is the shipped one.** The snapshot a view declares comes from
 ``open_read_context``, which reads the identity the dataset at that path actually holds. A view
@@ -29,13 +27,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agents_remember.application.knowledge_read import open_read_context
-from agents_remember.application.knowledge_view_render import (
-    UnadmittedOrderingInput,
-    render_curation_queue,
+from agents_remember.application.knowledge_view_render import UnadmittedOrderingInput
+from agents_remember.application.knowledge_view_rows import (
     render_family,
     render_invariant,
-    render_review_matrix,
     render_source_context,
 )
 from agents_remember.memory.knowledge.connection import (
@@ -49,13 +44,9 @@ from agents_remember.models.knowledge.read import (
     KnowledgeReadSnapshot,
     snapshot_of_context,
 )
-from agents_remember.models.knowledge.result import KnowledgeRefusal
 from agents_remember.models.knowledge.view import (
-    VIEW_PURPOSES,
-    CurationQueueView,
     FamilyView,
     InvariantView,
-    ReviewMatrixView,
     SourceContextView,
     ViewCompleteness,
     ViewCounts,
@@ -138,7 +129,7 @@ def _admit(context: KnowledgeReadContext, request: ViewRequest) -> ViewRefusal |
             offending_input=request.repository_id,
             expected=context.knowledge.repository_id,
             observed=request.repository_id,
-            next_action="address the read at the namespace the dataset is bound to",
+            next_action="address the read at the namespace the derived index is bound to",
         )
     if request.continuation is None:
         return None
@@ -248,61 +239,17 @@ def _counts(
         rows_returned=returned,
         rows_remaining=max(total - next_position, 0),
         facets_omitted=None if request.view in ("invariant", "source_context") else 0,
-        dependency_content_identity_mismatches=(
-            _dependency_mismatches(reader) if request.view == "review_matrix" else None
-        ),
     )
-
-
-def _dependency_mismatches(reader: Any) -> int:
-    """How many recorded dependencies resolve to different bytes than they record."""
-
-    mismatched = 0
-    for row in reader.rows("verification_observation"):
-        payload = row.payload
-        artifact = payload.get("result_artifact")
-        if isinstance(artifact, dict) and artifact.get("digest_checked_against_bytes") is False:
-            mismatched += 1
-    return mismatched
 
 
 _RENDERERS: dict[str, Any] = {
     "source_context": render_source_context,
     "invariant": render_invariant,
     "family": render_family,
-    "review_matrix": render_review_matrix,
-    "curation_queue": render_curation_queue,
 }
 
 _PAYLOADS: dict[str, Any] = {
     "source_context": SourceContextView,
     "invariant": InvariantView,
     "family": FamilyView,
-    "review_matrix": ReviewMatrixView,
-    "curation_queue": CurationQueueView,
 }
-
-
-def view_purposes() -> dict[str, str]:
-    """The published one-line purpose of each view, for the interface ``KS-R22@v1`` mounts."""
-
-    return dict(VIEW_PURPOSES)
-
-
-def open_view_context(
-    database_path: Path,
-    repository_id: str,
-    *,
-    repository_root: Path | None = None,
-    code_tree_id: str | None = None,
-    task_ref: str | None = None,
-) -> KnowledgeReadContext | KnowledgeRefusal:  # pragma: no cover - re-exported convenience
-    """Resolve the read context a view read is addressed at, through the shipped resolver."""
-
-    return open_read_context(
-        database_path,
-        repository_id,
-        repository_root=repository_root,
-        code_tree_id=code_tree_id,
-        task_ref=task_ref,
-    )

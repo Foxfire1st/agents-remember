@@ -55,6 +55,7 @@ class LifecycleEnclosureAdoptionReceipt(StrictResponseModel):
     manifestSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     auditIntent: str = Field(min_length=1, max_length=4096)
     artifacts: list[AdoptedLifecycleArtifact]
+    recordsFoundInPlace: bool = False
 
 
 @dataclass(frozen=True)
@@ -62,11 +63,17 @@ class LifecycleEnclosureAdoptionPreview:
     artifacts: EnclosurePublicationArtifacts
     receipt: LifecycleEnclosureAdoptionReceipt
     source_paths: tuple[Path, ...]
+    found_in_place: bool = False
 
     def payload(self) -> dict[str, object]:
+        state = (
+            "would-adopt-enclosure-found-in-place"
+            if self.found_in_place
+            else "would-adopt-enclosure"
+        )
         return {
-            "state": "would-adopt-enclosure",
-            "status": "would-adopt-enclosure",
+            "state": state,
+            "status": state,
             "contractPath": self.artifacts.contract_path.as_posix(),
             "expectedWorktreeGroup": self.artifacts.reserved_locator.worktreeGroup,
             "locatorPath": self.artifacts.locator_path.as_posix(),
@@ -75,6 +82,7 @@ class LifecycleEnclosureAdoptionPreview:
             "contractSha256": self.receipt.contractSha256,
             "manifestSha256": self.receipt.manifestSha256,
             "artifacts": [item.model_dump(mode="json") for item in self.receipt.artifacts],
+            "recordsFoundInPlace": self.found_in_place,
             "sourcePaths": [path.as_posix() for path in self.source_paths],
             "removalCondition": (
                 "remove worktree_enclosure_adopt only after the explicit inventory contains "
@@ -128,15 +136,29 @@ def preview_lifecycle_enclosure_adoption(
             contract.worktree_group / "reports" / item.name for item in receipt.artifacts
         )
         _require_receipt_artifacts(receipt, artifacts, source_paths)
-        return LifecycleEnclosureAdoptionPreview(artifacts, receipt, source_paths)
+        return LifecycleEnclosureAdoptionPreview(
+            artifacts, receipt, source_paths, found_in_place=receipt.recordsFoundInPlace
+        )
     source_paths = _legacy_artifact_paths(contract.worktree_group / "reports", contract_path)
     target_paths = _root_artifact_paths(artifacts.manifest_path.parent, contract_path)
     if target_paths and not source_paths:
-        raise LifecycleOperationLocationError(
-            "operation-location-adoption-conflict",
-            "root-local operation bytes exist without an adoption receipt or legacy originals",
-            expected={"legacyReports": "exact source bytes or an exact adoption receipt"},
-            observed={"rootArtifacts": [path.name for path in target_paths]},
+        # Amended MIK-R82 rule 4: operation records written in place are taken as
+        # they are — listed with size and hash, receipted as found in place, and
+        # neither copied nor moved. Contradicting bytes still refuse below.
+        adopted = [_artifact(path) for path in target_paths]
+        receipt = LifecycleEnclosureAdoptionReceipt(
+            publicationRequestId=_adoption_request_id(artifacts, intent, adopted, in_place=True),
+            enclosurePublicationRequestId=artifacts.reserved_locator.publicationRequestId,
+            contractPath=artifacts.contract_path.as_posix(),
+            contractSha256=_sha256(contract_bytes),
+            worktreeGroup=expected_root.as_posix(),
+            manifestSha256=artifacts.reserved_locator.expectedManifestSha256,
+            auditIntent=intent,
+            artifacts=adopted,
+            recordsFoundInPlace=True,
+        )
+        return LifecycleEnclosureAdoptionPreview(
+            artifacts, receipt, target_paths, found_in_place=True
         )
     _require_preview_target_compatibility(source_paths, target_paths)
     adopted = [_artifact(path) for path in source_paths]
@@ -159,18 +181,10 @@ def apply_lifecycle_enclosure_adoption(
     """Publish the exact preview under locator authority and retire old active copies."""
 
     def copy_legacy_artifacts() -> None:
-        current = preview_lifecycle_enclosure_adoption(
-            preview.artifacts.contract_path,
-            expected_worktree_group=Path(preview.receipt.worktreeGroup),
-            rationale=preview.receipt.auditIntent,
-        )
-        if current.receipt != preview.receipt:
-            raise LifecycleOperationLocationError(
-                "operation-location-adoption-conflict",
-                "the explicit adoption evidence changed between preview and apply",
-                expected=preview.receipt.model_dump(mode="json"),
-                observed=current.receipt.model_dump(mode="json"),
-            )
+        current = _require_unchanged_preview(preview)
+        if preview.found_in_place:
+            _verify_in_place_records(preview, current)
+            return
         for item, source in zip(preview.receipt.artifacts, current.source_paths, strict=True):
             target = preview.artifacts.manifest_path.parent / item.name
             source_bytes = _read_bytes(source, "legacy operation")
@@ -200,12 +214,11 @@ def apply_lifecycle_enclosure_adoption(
                 )
         else:
             _publish_adoption_receipt(receipt_path, receipt_text)
-        for item, source in zip(preview.receipt.artifacts, preview.source_paths, strict=True):
-            if not source.exists():
-                continue
-            source_bytes = _read_bytes(source, "legacy operation")
-            _require_artifact_bytes(item, source_bytes, side="legacy")
-            _retire_legacy_source(source, item)
+        if preview.found_in_place:
+            # The in-place sources are the canonical records themselves: verified
+            # above, receipted here, never retired.
+            return
+        _retire_legacy_sources(preview)
 
     location = publish_enclosure_location(
         preview.artifacts,
@@ -214,6 +227,42 @@ def apply_lifecycle_enclosure_adoption(
         after_addressable=publish_receipt,
     )
     return location, preview.receipt
+
+
+def _require_unchanged_preview(
+    preview: LifecycleEnclosureAdoptionPreview,
+) -> LifecycleEnclosureAdoptionPreview:
+    current = preview_lifecycle_enclosure_adoption(
+        preview.artifacts.contract_path,
+        expected_worktree_group=Path(preview.receipt.worktreeGroup),
+        rationale=preview.receipt.auditIntent,
+    )
+    if current.receipt != preview.receipt:
+        raise LifecycleOperationLocationError(
+            "operation-location-adoption-conflict",
+            "the explicit adoption evidence changed between preview and apply",
+            expected=preview.receipt.model_dump(mode="json"),
+            observed=current.receipt.model_dump(mode="json"),
+        )
+    return current
+
+
+def _verify_in_place_records(
+    preview: LifecycleEnclosureAdoptionPreview,
+    current: LifecycleEnclosureAdoptionPreview,
+) -> None:
+    """Verify records found in place where they are — nothing copied or moved."""
+    for item, target in zip(preview.receipt.artifacts, current.source_paths, strict=True):
+        _require_artifact_bytes(item, _read_bytes(target, "root operation"), side="root")
+
+
+def _retire_legacy_sources(preview: LifecycleEnclosureAdoptionPreview) -> None:
+    for item, source in zip(preview.receipt.artifacts, preview.source_paths, strict=True):
+        if not source.exists():
+            continue
+        source_bytes = _read_bytes(source, "legacy operation")
+        _require_artifact_bytes(item, source_bytes, side="legacy")
+        _retire_legacy_source(source, item)
 
 
 def _legacy_artifact_paths(reports: Path, contract_path: Path) -> tuple[Path, ...]:
@@ -319,6 +368,7 @@ def _require_matching_receipt(
             artifacts,
             intent,
             receipt.artifacts,
+            in_place=receipt.recordsFoundInPlace,
         ),
         "enclosurePublicationRequestId": artifacts.reserved_locator.publicationRequestId,
         "contractPath": artifacts.contract_path.as_posix(),
@@ -326,6 +376,7 @@ def _require_matching_receipt(
         "worktreeGroup": artifacts.reserved_locator.worktreeGroup,
         "manifestSha256": artifacts.reserved_locator.expectedManifestSha256,
         "auditIntent": intent,
+        "recordsFoundInPlace": receipt.recordsFoundInPlace,
     }
     observed = receipt.model_dump(
         mode="json",
@@ -479,6 +530,8 @@ def _adoption_request_id(
     artifacts: EnclosurePublicationArtifacts,
     intent: str,
     adopted: list[AdoptedLifecycleArtifact],
+    *,
+    in_place: bool = False,
 ) -> str:
     payload = {
         "enclosurePublicationRequestId": (artifacts.reserved_locator.publicationRequestId),
@@ -487,4 +540,8 @@ def _adoption_request_id(
         "manifestSha256": artifacts.reserved_locator.expectedManifestSha256,
         "artifacts": [item.model_dump(mode="json") for item in adopted],
     }
+    if in_place:
+        # Legacy request identities are preserved byte-for-byte; only the amended
+        # found-in-place mode carries its marker inside the request identity.
+        payload["recordsFoundInPlace"] = True
     return _sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))

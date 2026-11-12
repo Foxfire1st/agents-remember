@@ -13,7 +13,7 @@ import { CONSTEL_STATUSES } from "./model";
 //
 // `Record<ConstelStatus, string>` already fails `tsc -b` on a sixth status. This makes the same
 // gap fail under vitest, so it is visible from either gate rather than only from the one someone
-// remembered to run — the reason `model.test.ts` iterates `LIFECYCLE_STATES` instead of naming
+// remembered to run — the reason `model.test.ts` iterates `CONSTEL_STATUSES` instead of naming
 // states, restated in this module's vocabulary.
 describe("constelColors", () => {
   const stub = (name: string, fallback: string): string => `var(${name}|${fallback})`;

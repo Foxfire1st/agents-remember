@@ -9,8 +9,6 @@ from typing import Any
 
 from agents_remember.providers.lifecycle.runtime_environment import subprocess_env
 
-UNLIMITED_TIMEOUT = 0
-
 
 def run_command(
     command: list[str],

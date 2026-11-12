@@ -54,7 +54,7 @@ case "$cache_root:$tooling_root" in
     ;;
 esac
 
-python="$prefix/bin/python3.13"
+python="$prefix/bin/python$AR_PYTHON_MINOR"
 if [ -x "$python" ]; then
   "$python" "$script_dir/check-python-runtime.py" \
     --expected-version "$AR_PYTHON_VERSION" \

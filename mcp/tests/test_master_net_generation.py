@@ -33,12 +33,15 @@ through a private helper.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.serving import changeset as changeset_module
 from agents_remember.serving.changeset import (
     MasterFileRef,
     master_changeset,
@@ -52,10 +55,10 @@ from agents_remember.serving.master_net_generation import (
     select_master_net,
 )
 from agents_remember.worktrees.modules.git import (
-    changed_files_with_counts,
     changed_worktree_paths,
     committed_changed_paths,
 )
+from agents_remember.worktrees.modules.git_changes import changed_files_with_counts
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
     load_contract,
@@ -145,12 +148,13 @@ def _leaf_contract(
     """One cleaned leaf enclosure: recorded base and landed commit, no live worktree."""
 
     worktree = live_worktree or (series.worktree_group / f"wt-{leaf_id}")
+    memory_worktree = series.worktree_group / f"memory-wt-{leaf_id}"
     return WorktreeContract(
         task_id=series.task_id,
         task_name=series.task_name,
         repo_name=series.repo_name,
         workflow_kind="light-task",
-        memory_mode="disabled",
+        memory_mode="external",
         coordination_root=series.coordination_root,
         task_root=series.task_root,
         contract_path=_contract_path(series.task_root, leaf_id),
@@ -163,6 +167,12 @@ def _leaf_contract(
         code_worktree=worktree,
         code_commit=landed,
         integrated_code_commit=landed,
+        memory_repo_path=series.memory_repo_path,
+        memory_source_branch=series.memory_source_branch,
+        memory_work_branch=f"ar/{leaf_id}",
+        memory_base_commit="",
+        memory_worktree=memory_worktree,
+        ledger_path=memory_worktree / MEMORY_PATH,
         kind="leaf",
         leaf_id=leaf_id,
         parent_task_name=series.task_name,
@@ -420,15 +430,18 @@ def test_a_live_leaf_is_labelled_working_and_its_draft_stays_out_of_the_net(
     )
     (live_dir / "src" / "draft.py").write_text("# uncommitted draft\n", encoding="utf-8")
     series_root = master_fixture.config.coordination_root / "tasks" / REPO / MASTER
+    live_contract_path = _contract_path(series_root, "fixture-live")
     series = WorktreeContract(
         task_id="260921_TEST_MASTER_NET",
         task_name=MASTER,
         repo_name=REPO,
         workflow_kind="light-task",
-        memory_mode="disabled",
+        memory_mode="external",
         coordination_root=master_fixture.config.coordination_root,
         task_root=series_root,
-        contract_path=series_root / "series-contract.md",
+        # MIK-R83 rule 3 without exception: the leaf's cell names the leaf contract this file is,
+        # and the master it belongs to is named by parent_contract_path.
+        contract_path=live_contract_path,
         task_artifact=series_root / "task.md",
         worktree_group=master_fixture.config.workspace_root / "worktrees",
         code_repo_path=master_fixture.code_repo,
@@ -436,11 +449,20 @@ def test_a_live_leaf_is_labelled_working_and_its_draft_stays_out_of_the_net(
         code_work_branch="ar/fixture-live",
         code_base_commit=master_fixture.tip_one,
         code_worktree=live_dir,
+        memory_repo_path=master_fixture.memory_repo,
+        memory_source_branch="series",
+        memory_work_branch="ar/fixture-live",
+        memory_base_commit=master_fixture.base_memory,
+        memory_worktree=master_fixture.config.workspace_root / "worktrees" / "memory-wt-live",
+        ledger_path=master_fixture.config.workspace_root
+        / "worktrees"
+        / "memory-wt-live"
+        / MEMORY_PATH,
         kind="leaf",
         leaf_id="fixture-live",
         parent_task_name=MASTER,
+        parent_contract_path=series_root / "series-contract.md",
     )
-    live_contract_path = _contract_path(series_root, "fixture-live")
     live_contract_path.parent.mkdir(parents=True, exist_ok=True)
     write_contract(live_contract_path, series)
 
@@ -488,7 +510,9 @@ def test_a_diff_failure_after_validation_is_refused_never_reported_as_zero(
     def fail_diff(repo: Path, base: str, head: str | None = None) -> list[dict[str, object]]:
         raise RuntimeError("simulated unreadable tree between the pinned endpoints")
 
-    monkeypatch.setattr("agents_remember.serving.changeset.changed_files_with_counts", fail_diff)
+    monkeypatch.setattr(
+        "agents_remember.serving.changeset.master_changed_files_with_counts", fail_diff
+    )
     with pytest.raises(MasterEndpointAbsent) as caught:
         master_changeset(master_fixture.config, REPO, MASTER, include_leaves=False)
     assert caught.value.kind == "unresolvable"
@@ -673,7 +697,7 @@ def test_the_change_set_route_serves_a_quoted_name_as_an_address(tmp_path: Path)
             task_name=MASTER,
             repo_name=REPO,
             workflow_kind="light-task",
-            memory_mode="disabled",
+            memory_mode="external",
             coordination_root=fixture.config.coordination_root,
             task_root=series_root,
             contract_path=live_contract_path,
@@ -684,6 +708,15 @@ def test_the_change_set_route_serves_a_quoted_name_as_an_address(tmp_path: Path)
             code_work_branch="ar/fixture-quoted",
             code_base_commit=fixture.tip_two,
             code_worktree=live_dir,
+            memory_repo_path=fixture.memory_repo,
+            memory_source_branch="series",
+            memory_work_branch="ar/fixture-quoted",
+            memory_base_commit="",
+            memory_worktree=fixture.config.workspace_root / "worktrees" / "memory-wt-quoted",
+            ledger_path=fixture.config.workspace_root
+            / "worktrees"
+            / "memory-wt-quoted"
+            / MEMORY_PATH,
             kind="leaf",
             leaf_id="fixture-quoted",
             parent_task_name=MASTER,
@@ -705,3 +738,107 @@ def test_the_change_set_route_serves_a_quoted_name_as_an_address(tmp_path: Path)
     for entry in body["code"]:
         assert (live_dir / entry["path"]).is_file(), entry["path"]
     assert body["counters"]["code"] == {"files": 2, "insertions": 5, "deletions": 0}
+
+
+def test_a_master_net_is_served_again_from_its_endpoint_commits(
+    master_fixture: MasterFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The net is keyed by its endpoints: the second read runs no net diff at all.
+
+    ``MIK-R176@v2`` rule 5: a diff between two commit ids is fixed by those ids and served
+    again with no observation. The master net is one such diff, so the second request for the
+    same generation must not reach the repository — measured at the operation the route calls,
+    not inside a private helper, so a recomputation anywhere below it is still counted.
+    """
+
+    net_calls: list[tuple[Path, str, str | None]] = []
+    sidecar_reads: list[str] = []
+    real_diff = changeset_module.master_changed_files_with_counts
+    real_sidecar = changeset_module.route_sidecar_status
+
+    def witness_diff(root: Path, base: str, head: str) -> list[dict[str, Any]]:
+        net_calls.append((root, base, head))
+        return real_diff(root, base, head)
+
+    def witness_sidecar(onboarding_root: Path, rel: str, *args: Any, **kwargs: Any) -> str:
+        sidecar_reads.append(rel)
+        return real_sidecar(onboarding_root, rel, *args, **kwargs)
+
+    monkeypatch.setattr(changeset_module, "master_changed_files_with_counts", witness_diff)
+    monkeypatch.setattr(changeset_module, "route_sidecar_status", witness_sidecar)
+
+    app = FastAPI()
+    register_changeset_routes(app, master_fixture.config)
+    client = TestClient(app)
+    params = {"repo": REPO, "master": MASTER}
+    code_net = (master_fixture.base_code, master_fixture.tip_two)
+
+    first = client.get("/api/changeset/master", params=params)
+    assert first.status_code == 200, first.text
+    assert any((base, head) == code_net for _, base, head in net_calls), (
+        "the first read computes the net"
+    )
+    computed = len(net_calls)
+
+    second = client.get("/api/changeset/master", params=params)
+    assert second.status_code == 200, second.text
+
+    assert second.json() == first.json()
+    assert [(base, head) for _, base, head in net_calls[computed:]].count(code_net) == 0, (
+        "the master net was recomputed instead of served from its endpoint commits"
+    )
+    assert sidecar_reads == [], "a sidecar decision was re-read for an endpoint-keyed net"
+
+
+def test_a_master_nets_sidecar_flags_follow_the_onboarding_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The flags are the net's one non-endpoint input, so they are observed, never frozen.
+
+    The ``hasSidecar`` flags are read from the memory repository's *working* onboarding tree,
+    which the endpoint commits do not fix. A cache keyed on the endpoints alone would keep
+    publishing an old flag; the read therefore observes each path its sidecar decision consults,
+    so an unchanged index costs an observation and a moved one costs the recomputation.
+    """
+
+    fixture = build_master_fixture(tmp_path / "sidecar-inputs")
+    (fixture.code_repo / KEEP_PATH).write_text(KEEP_EDITED_TEXT, encoding="utf-8")
+    _commit(fixture.code_repo, "the series edits a file the net carries")
+    onboarding = fixture.memory_repo / "onboarding"
+    onboarding.mkdir(parents=True, exist_ok=True)
+    index_path = onboarding / "overview.index.json"
+    index_path.write_text(
+        json.dumps({"sourceScope": ["src/"], "coveredFiles": [KEEP_PATH]}), encoding="utf-8"
+    )
+
+    decisions: list[str] = []
+    real_sidecar = changeset_module.route_sidecar_status
+
+    def witness_sidecar(onboarding_root: Path, rel: str, *args: Any, **kwargs: Any) -> str:
+        decisions.append(rel)
+        return real_sidecar(onboarding_root, rel, *args, **kwargs)
+
+    app = FastAPI()
+    register_changeset_routes(app, fixture.config)
+    monkeypatch.setattr(changeset_module, "route_sidecar_status", witness_sidecar)
+    client = TestClient(app)
+    params = {"repo": REPO, "master": MASTER, "includeLeaves": "false"}
+
+    covered = client.get("/api/changeset/master", params=params)
+    assert covered.status_code == 200, covered.text
+    assert [entry["path"] for entry in covered.json()["code"]] == [KEEP_PATH]
+    assert covered.json()["code"][0]["hasSidecar"] is True
+    assert decisions == [KEEP_PATH], "the first read decides the flag from the index"
+
+    unchanged = client.get("/api/changeset/master", params=params)
+    assert unchanged.status_code == 200, unchanged.text
+    assert unchanged.json() == covered.json()
+    assert decisions == [KEEP_PATH], "an unchanged index was re-decided instead of observed"
+
+    index_path.write_text(
+        json.dumps({"sourceScope": ["src/"], "coveredFiles": []}), encoding="utf-8"
+    )
+    moved = client.get("/api/changeset/master", params=params)
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["code"][0]["hasSidecar"] is False, "a moved index left a stale flag"
+    assert decisions == [KEEP_PATH, KEEP_PATH], "the moved index was not re-decided"

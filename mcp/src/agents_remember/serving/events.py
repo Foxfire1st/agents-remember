@@ -1,21 +1,10 @@
-"""The raw observer-event SSE channel: byte-offset tail of the append-only logs (4b).
+"""Raw workspace observer events with cursor-safe SSE resume.
 
-The ``state`` channel (``app.py``) serves the *folded* projection and re-snapshots on
-reconnect -- right for a bounded projection. This channel instead streams the underlying
-``ar-observer-event/v1`` records **verbatim** with exact byte-offset resume, because the
-event log is append-only and unbounded: a reconnecting client must resume where it left
-off, not replay history. It powers the future event-log panel and sim scrubbing.
-
-Each per-lifecycle log (``lifecycles/<id>/events.jsonl``) and the workspace log
-(``workspace/events.jsonl``) is an independent append-only file, so the resume position is
-a **per-source byte-offset map**, carried opaquely in the SSE ``id`` (base64url JSON).
-On (re)connect the ``Last-Event-ID`` cursor is decoded and every source resumes from its
-own offset -- so this stays a *separate* endpoint from ``/api/stream`` rather than mixing
-byte-offset resume with the state channel's snapshot resume on one stream.
-
-The tail reader is a pure function (``read_new_events``) over a root + offset map, kept
-independent of the HTTP layer so resume, multi-source ordering, and partial-line handling
-are unit-testable without a client.
+The state channel publishes the resolved projection. This channel publishes the
+workspace river's underlying records verbatim, using virtual byte offsets that
+survive its age and size compaction. A fresh connection starts in the retained
+recent window; reconnects resume after their last complete record. This reader
+changes no source file: the river's writer and compactor own retention.
 """
 
 from __future__ import annotations
@@ -31,14 +20,18 @@ from typing import TYPE_CHECKING
 from fastapi.sse import ServerSentEvent
 
 from agents_remember.kernel.primitives.observer_paths import observer_root
-from agents_remember.observer.event_retention import (
-    initial_event_offsets,
-    prune_expired_lifecycle_event_logs,
-)
+from agents_remember.observer.event_retention import initial_event_offsets
 from agents_remember.observer.store import (
+    WORKSPACE_LOCK_FILE,
     WORKSPACE_SOURCE,
     workspace_base_offset,
-    workspace_river_lock,
+    workspace_river_read,
+)
+from agents_remember.serving.background_accounting import (
+    OWNER_EVENT_TAIL,
+    BackgroundLedger,
+    measured,
+    offload,
 )
 
 if TYPE_CHECKING:
@@ -48,18 +41,16 @@ if TYPE_CHECKING:
         McpRuntimeConfig,
     )
 
-# The workspace log has no lifecycle id; this reserved cursor key routes it. A lifecycle
-# id can never collide (lifecycle ids are ULIDs -- Crockford base32, never "workspace").
+# The river has one workspace source; its cursor retains the transport's source map.
 _WORKSPACE = WORKSPACE_SOURCE
 
-# Heartbeats are a liveness signal (already carried by the projection's status file), not agent
-# activity, so the river never streams them.
-_HEARTBEAT_KIND = "lifecycle.heartbeat"
 # A fresh connect streams its (already window-bounded) backlog in chunks, so the loop is never
 # blocked materializing thousands of records before the first byte.
 DEFAULT_EVENT_BATCH = 500
-# Pruning walks every log; run it on connect and then on a slow cadence, not every tail tick.
-PRUNE_INTERVAL_SECONDS = 60.0
+# How many trailing bytes one source's tail scan reads to find its newest event
+# timestamp for the ``ready`` marker (MIK-R114 rule 8: the panel names the last
+# feed even when the stream's window holds nothing).
+_LAST_TS_TAIL_BYTES = 8192
 
 
 @dataclass(frozen=True)
@@ -103,25 +94,12 @@ def decode_cursor(cursor: str | None) -> dict[str, int]:
     }
 
 
-def _source_path(root: Path, source: str) -> Path:
-    if source == _WORKSPACE:
-        return root / "workspace" / "events.jsonl"
-    return root / "lifecycles" / source / "events.jsonl"
+def _source_path(root: Path) -> Path:
+    return root / WORKSPACE_SOURCE / "events.jsonl"
 
 
 def _discover_sources(root: Path) -> list[str]:
-    """Every readable log source under ``root``, lifecycles sorted then workspace last."""
-    sources: list[str] = []
-    lifecycles_dir = root / "lifecycles"
-    if lifecycles_dir.is_dir():
-        sources.extend(
-            entry.name
-            for entry in sorted(lifecycles_dir.iterdir())
-            if entry.is_dir() and (entry / "events.jsonl").is_file()
-        )
-    if (root / "workspace" / "events.jsonl").is_file():
-        sources.append(_WORKSPACE)
-    return sources
+    return [_WORKSPACE] if _source_path(root).is_file() else []
 
 
 def _read_lines_from(path: Path, start: int) -> tuple[list[tuple[bytes, int]], int]:
@@ -157,35 +135,67 @@ def _read_lines_from(path: Path, start: int) -> tuple[list[tuple[bytes, int]], i
     return lines, start + consumed
 
 
-def _read_source_lines(
-    root: Path, source: str, virtual_start: int
-) -> tuple[list[tuple[bytes, int]], int]:
+# The workspace read establishes its (base, file) pair by construction, never by
+# counting attempts. A pair counts only (A) when base and file were both read
+# while holding the shared river lock, or (B) when no lockfile existed before
+# the read and none exists after it, so no writer came into being. There is no
+# attempt bound because no bound is needed: a lockless read that finds a lock
+# afterwards repeats the read once under the shared lock, and the hold reports
+# itself -- where it reports not held the read returns no rows with the
+# caller's cursor unchanged.
+
+
+def _read_source_lines(root: Path, virtual_start: int) -> tuple[list[tuple[bytes, int]], int]:
     """Read complete lines and return offsets in the source's cursor coordinate system.
 
-    Lifecycle logs remain physical-offset streams. The workspace river is physically compacted while
-    live, so its SSE cursor is virtual: ``baseOffset`` (bytes already reclaimed) + current file offset.
-    The same lock used by append/compact makes the base sidecar and the file a consistent pair while
-    this read maps a client cursor to the current physical file.
+    The workspace river is physically compacted while live, so its SSE cursor is virtual: ``baseOffset`` (bytes already reclaimed) + current file offset.
+    The read holds the shared river lock without creating any observer file, so the base sidecar
+    and the file are a consistent pair while this read maps a client cursor to the current physical
+    file; when no lockfile exists the read proceeds without it rather than creating one.
+
+    That unlocked missing-lock branch can still race first writers: a writer can
+    create the lock and compact between this read's base snapshot and its file
+    read. The compactor replaces the file first and writes the base second, both
+    under the one writer lock, so equal base reads around the file read prove
+    nothing there -- but the lockfile always covers that window, because the
+    writer creates it when first acquiring the lock and it is never deleted.
+    The pair therefore counts by construction: (A) base and file both read while
+    holding the shared river lock, which excludes every append and every cut
+    for the hold, or (B) no lockfile before the read and none after it, so no
+    writer came into being. A lockless read that finds a lockfile afterwards
+    discards its window and repeats the read once under the shared lock; the
+    hold reports itself, and where it reports not held the read returns no rows
+    with the caller's cursor unchanged, so the rows come with the next read. A delayed row is allowed; a
+    lost or a repeated row is not. The branch still creates, rewrites and
+    deletes no observer file.
     """
-    path = _source_path(root, source)
-    if source != _WORKSPACE:
-        return _read_lines_from(path, virtual_start)
-    with workspace_river_lock(root):
+    path = _source_path(root)
+    lock_path = root / WORKSPACE_SOURCE / WORKSPACE_LOCK_FILE
+    if not lock_path.exists():
         base = workspace_base_offset(root)
         try:
             size = path.stat().st_size
         except OSError:
             size = 0
-        physical_start = min(max(virtual_start - base, 0), size)
-        lines, physical_end = _read_lines_from(path, physical_start)
+        lines, physical_end = _read_lines_from(path, min(max(virtual_start - base, 0), size))
+        if not lock_path.exists():
+            return [
+                (record, base + offset_after) for record, offset_after in lines
+            ], base + physical_end
+    with workspace_river_read(root) as held:
+        if not held:
+            return [], virtual_start
+        if not lock_path.exists():
+            return [], virtual_start
+        base = workspace_base_offset(root)
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        lines, physical_end = _read_lines_from(path, min(max(virtual_start - base, 0), size))
         return [
             (record, base + offset_after) for record, offset_after in lines
         ], base + physical_end
-
-
-def _is_heartbeat_event(payload: dict[str, object]) -> bool:
-    """True when a parsed observer-event object is a heartbeat (liveness, not activity)."""
-    return payload.get("kind") == _HEARTBEAT_KIND
 
 
 def read_new_events(
@@ -193,17 +203,15 @@ def read_new_events(
 ) -> tuple[list[RawEvent], dict[str, int]]:
     """Read complete lines past ``offsets`` across every source; return events + new offsets.
 
-    Pure and deterministic: sources are walked in a fixed order (lifecycles sorted, workspace
-    last) and each event carries the offset map snapshot *after* it, so a client resuming from
-    any event's cursor skips exactly what it already received -- across all sources. Heartbeat
-    lines advance the offset but are never emitted (liveness, not activity). When ``limit`` is
+    Each event carries its virtual offset after the complete record, so a client
+    resuming from that cursor skips exactly what it received. When ``limit`` is
     set the read returns early after that many emitted events, with offsets pointing just past
     the last consumed line, so the caller can drain a large backlog in bounded chunks.
     """
     current = dict(offsets)
     events: list[RawEvent] = []
     for source in _discover_sources(root):
-        lines, end = _read_source_lines(root, source, current.get(source, 0))
+        lines, end = _read_source_lines(root, current.get(source, 0))
         for record, offset_after in lines:
             current[source] = offset_after
             try:
@@ -218,8 +226,6 @@ def read_new_events(
                 continue
             if not isinstance(payload, dict):
                 continue
-            if _is_heartbeat_event(payload):
-                continue
             events.append(
                 RawEvent(source=source, data=text, payload=payload, cursor=encode_cursor(current))
             )
@@ -229,51 +235,136 @@ def read_new_events(
     return events, current
 
 
+def last_event_ts(root: Path) -> str | None:
+    """The newest event timestamp across every source, or ``None`` when empty.
+
+    Read from each source's tail only, so a connect never scans whole logs: the
+    ``ready`` marker carries this so the panel can name the last feed even when
+    the stream's replay window holds nothing (MIK-R114 rule 8). Unparseable rows
+    never veto a readable one.
+    """
+    newest: datetime | None = None
+    newest_raw: str | None = None
+    for _source in _discover_sources(root):
+        raw = _source_last_ts(_source_path(root))
+        if raw is None:
+            continue
+        parsed = _parse_ts(raw)
+        if parsed is None:
+            continue
+        if newest is None or parsed > newest:
+            newest = parsed
+            newest_raw = raw
+    return newest_raw
+
+
+def _source_last_ts(path: Path) -> str | None:
+    """The ``ts`` of the last complete row of one log file, if it parses."""
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            size = handle.tell()
+            handle.seek(max(0, size - _LAST_TS_TAIL_BYTES))
+            tail = handle.read()
+    except OSError:
+        return None
+    for raw in reversed(tail.split(b"\n")):
+        text = raw.decode("utf-8", errors="replace").strip()
+        if not text:
+            continue
+        try:
+            payload = json.loads(text)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        ts = payload.get("ts")
+        if isinstance(ts, str) and ts and _parse_ts(ts) is not None:
+            return ts
+    return None
+
+
+def _parse_ts(raw: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _initial_offsets_and_last_ts(root: Path) -> tuple[dict[str, int], str | None]:
+    """One worker-thread pass for a fresh connect: replay offsets + last feed."""
+    now = datetime.now(UTC)
+    return initial_event_offsets(root, now=now), last_event_ts(root)
+
+
+def _ready_payload(stored_ts: str | None) -> dict[str, object]:
+    """The ``ready`` marker: coherence signal, plus the last feed when known."""
+    if stored_ts is None:
+        return {"ready": True}
+    return {"ready": True, "lastEventTs": stored_ts}
+
+
 async def stream_raw_events(
-    config: McpRuntimeConfig, *, last_event_id: str | None = None, interval: float = 1.0
+    config: McpRuntimeConfig,
+    *,
+    last_event_id: str | None = None,
+    interval: float = 1.0,
+    ledger: BackgroundLedger | None = None,
 ) -> AsyncGenerator[ServerSentEvent]:
     """Emit raw ``event`` SSE records, resuming from ``last_event_id`` then tailing new lines.
 
     Connect cost is bounded: the offset map is computed once (not re-scanned every tick),
-    pruning runs on connect then on a slow cadence, and the backlog is streamed in bounded
-    chunks -- yielding to the loop between chunks -- so a large history never blocks the event
-    loop or materializes all at once before the first byte. The ``ready`` marker is sent once
-    the (window-bounded) backlog has drained, signalling a coherent first snapshot.
+    and the backlog is streamed in bounded chunks -- yielding to the loop between chunks --
+    so a large history never blocks the event loop or materializes all at once before the
+    first byte. The ``ready`` marker is sent once the (window-bounded) backlog has drained,
+    signalling a coherent first snapshot; it carries ``lastEventTs`` (the newest event
+    timestamp across every source, which may be older than the replay window) so the panel
+    can name the last feed on a silent river.
+
+    This stream never writes: no prune, no compaction, no cursor sidecar.
     """
     root = observer_root(config)
-    now = datetime.now(UTC)
-    # CS-6 D1 (260707-HFX2-L12): the prune + initial-offset scan read the whole workspace river
-    # backlog from byte 0. Run them in a worker thread so a large events.jsonl on a fresh connect
+    # CS-6 D1 (260707-HFX2-L12): the initial-offset scan reads the workspace river
+    # backlog from byte 0. Run it in a worker thread so a large events.jsonl on a fresh connect
     # never blocks the shared asyncio loop (which serves every SSE stream + every API request),
     # matching how ``read_new_events`` below is already offloaded.
-    await asyncio.to_thread(prune_expired_lifecycle_event_logs, root, now=now)
     cursor_offsets = decode_cursor(last_event_id)
     if cursor_offsets:
         offsets = cursor_offsets
+        stored_ts: str | None = None
     else:
-        offsets = await asyncio.to_thread(initial_event_offsets, root, now=now)
+        offsets, stored_ts = await offload(
+            OWNER_EVENT_TAIL, ledger, _initial_offsets_and_last_ts, root
+        )
     ready_sent = False
-    last_prune = now
     while True:
-        moment = datetime.now(UTC)
-        if (moment - last_prune).total_seconds() >= PRUNE_INTERVAL_SECONDS:
-            await asyncio.to_thread(prune_expired_lifecycle_event_logs, root, now=moment)
-            last_prune = moment
-        events, offsets = await asyncio.to_thread(
-            read_new_events, root, offsets, limit=DEFAULT_EVENT_BATCH
+        events, offsets = await offload(
+            OWNER_EVENT_TAIL, ledger, read_new_events, root, offsets, limit=DEFAULT_EVENT_BATCH
         )
         for event in events:
             # ServerSentEvent JSON-encodes whatever it is given (the state channel passes dicts),
             # so emit the object parsed and validated by ``read_new_events`` -- passing the
             # pre-serialized JSONL string would double-encode the wire (`data: "{...}"`).
-            yield ServerSentEvent(data=event.payload, event="event", id=event.cursor, retry=2000)
+            with measured(OWNER_EVENT_TAIL, ledger):
+                payload = ServerSentEvent(
+                    data=event.payload, event="event", id=event.cursor, retry=2000
+                )
+            yield payload
         if events:
             # More backlog may remain; drain it promptly but yield to the loop between chunks.
             await asyncio.sleep(0)
             continue
         if not ready_sent:
             ready_sent = True
-            yield ServerSentEvent(
-                data={"ready": True}, event="ready", id=encode_cursor(offsets), retry=2000
-            )
+            with measured(OWNER_EVENT_TAIL, ledger):
+                payload = ServerSentEvent(
+                    data=_ready_payload(stored_ts),
+                    event="ready",
+                    id=encode_cursor(offsets),
+                    retry=2000,
+                )
+            yield payload
         await asyncio.sleep(interval)

@@ -22,7 +22,7 @@ from agents_remember.models.knowledge.base import (
 )
 from agents_remember.models.knowledge.source import LineRangeLocator, SourceLocator
 
-__all__ = ["ANCHOR_RESOLUTIONS", "AnchorResolution", "AnchorResolutionState"]
+__all__ = ["AnchorResolution", "AnchorResolutionState"]
 
 AnchorResolutionState = Literal[
     "exact_recorded_blob",
@@ -33,16 +33,6 @@ AnchorResolutionState = Literal[
     "unsupported_locator",
     "not_requested",
 ]
-
-ANCHOR_RESOLUTIONS: tuple[str, ...] = (
-    "exact_recorded_blob",
-    "recorded_blob_mismatch",
-    "path_absent",
-    "entry_not_blob",
-    "recorded_object_unavailable",
-    "unsupported_locator",
-    "not_requested",
-)
 
 
 class AnchorResolution(KnowledgeModel):

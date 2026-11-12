@@ -1,29 +1,12 @@
-"""The task-context review: the source entry that needs no selected subject (ICR-R02).
+"""A task-context review carries the source comparison without selecting a subject.
 
-A review of a *task* asks a different question from a review of a subject. The subject review asks
-"what changed about this recorded invariant"; this one asks "what did this task change at all", and
-its answer is the complete source inventory of the two bound code trees plus every collected fact
-that does not depend on a selection. It exists as its own module because it is a different
-composition, not a degraded one:
-
-* **No comparison is made, and none is faked.** No selector is resolved, no dataset is opened for
-  selection and no review matrix row is read, so a task whose knowledge half does not exist yet still
-  has an openable review. The payload says so in the vocabulary's own words rather than by rendering
-  an empty statement: the knowledge pane is ``task_context`` with its reason, and the staleness state
-  is ``not_compared`` because there is no comparison binding to be current or stale against.
-* **The source half is the whole point.** The inventory arrives already measured from the pair the
-  resolution bound, and the pane renders it whether it is complete, partial or unavailable -- the
-  three states the model keeps apart.
-* **Nothing here selects, ranks or concludes.** The records the caller supplied are rendered by
-  :mod:`agents_remember.application.review_record_rendering`, the same renderer the subject review
-  uses, so an unassessed assessment collection reads identically in both. The two collections the
-  *review matrix* owns are reported ``not_selected`` rather than omitted: this composition read no
-  matrix, and a review that did not ask may not report an owner's absence (``ICR-R14@v1``).
+No knowledge operand or history judgment is invented. Unavailable knowledge sides
+keep their reasons while the independently measured code inventory remains readable.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 
 import apsw
@@ -35,6 +18,7 @@ from agents_remember.application.knowledge_before_half import (
 from agents_remember.application.knowledge_diff import open_diff_side
 from agents_remember.application.review_attribution import (
     AttributionSideInput,
+    index_incomplete_detail,
     review_attribution,
     selected_subject,
 )
@@ -44,27 +28,17 @@ from agents_remember.application.review_candidate_resolution import (
     candidate_ref,
     missing_dataset_half,
     require_current_candidate_identity,
-    review_namespace,
-    unreadable_candidate_refusal,
 )
 from agents_remember.application.review_committed_leaf import (
     closed_leaf_intent_detail,
     closed_leaf_limitations,
 )
-from agents_remember.application.review_evidence_records import without_selected_matrix
 from agents_remember.application.review_external_git_movement import external_git_movement
-from agents_remember.application.review_record_applicability import task_context_applicability
-from agents_remember.application.review_record_rendering import (
-    KNOWLEDGE_APPLICABILITY_CLASSES,
-    ReviewApplicabilityProjection,
-    ReviewRecordInputs,
-    assessment_displays,
-    evidence_pane,
-    refused,
-    signal,
-    subject_states,
-    submission,
+from agents_remember.application.review_legacy_comparison import (
+    knowledge_unavailable_detail,
+    knowledge_unavailable_limitations,
 )
+from agents_remember.application.review_record_rendering import refused, submission
 from agents_remember.application.review_source_inventory import (
     attribution_limitations,
     inventory_limitations,
@@ -85,7 +59,8 @@ from agents_remember.models.knowledge.review import (
     ReviewSurfaceRequest,
 )
 from agents_remember.models.knowledge.review_family_context import ReviewFamilyContext
-from agents_remember.models.lifecycles.review_assessment import SubjectAssessmentState
+from agents_remember.models.knowledge.review_judgment import ReviewJudgmentPane
+from agents_remember.models.knowledge.review_meaning_effects import ReviewMeaningEffects
 
 __all__ = ["pair_attribution", "task_context_review"]
 
@@ -93,7 +68,6 @@ __all__ = ["pair_attribution", "task_context_review"]
 def task_context_review(
     resolved: ReviewCandidateResolution,
     request: ReviewSurfaceRequest,
-    records: ReviewRecordInputs,
     inventory: ReviewSourceInventory,
     observed: TreePaths,
 ) -> KnowledgeReviewResult:
@@ -118,7 +92,6 @@ def task_context_review(
     moved = require_current_candidate_identity(resolved)
     if moved is not None:
         return refused(request.repository_id, moved)
-    records = without_selected_matrix(records)
     # Three ways the knowledge half can be unusable, all three *stated* here rather than raised: a
     # dataset that is present but unreadable, a candidate receipt that exists and does not validate
     # (which leaves no namespace to open either half under), and a half that is simply absent.
@@ -132,11 +105,6 @@ def task_context_review(
     unreadable = (
         unreadable_half_refusal(resolved.baseline_database, resolved.candidate_database) or receipt
     )
-    subjects = subject_states(records)
-    # A task-context review selected no subject, so nothing can be a judgment on one: the records
-    # are labelled as the candidate's own input, each with its recorded subject beside it, and the
-    # counts state the whole supplied population (ICR-R26@v1).
-    applicability = task_context_applicability(records)
     return KnowledgeReviewResult(
         state="review",
         repository_id=request.repository_id,
@@ -147,10 +115,14 @@ def task_context_review(
                 master=request.master,
             ),
             comparison=None,
-            knowledge=_task_context_pane(resolved, records, subjects, applicability, unreadable),
+            knowledge=_task_context_pane(resolved, unreadable),
             # No comparison travels beside the inventory: this review selected no subject.
             source=source_pane(None, inventory, attribution),
-            evidence=evidence_pane((), records, subjects, applicability),
+            judgment=ReviewJudgmentPane(
+                state="unavailable",
+                detail=knowledge_unavailable_detail(resolved)
+                or "No knowledge subject was selected for this review",
+            ),
             # A review that selected no subject composed no family context, and it says so with the
             # one state that claims nothing: the recorded families of a subject nobody named are not
             # an unread scope, an unavailable one or a measured zero (ICR-R31@v1).
@@ -158,16 +130,22 @@ def task_context_review(
                 state="no_subject_selected",
                 detail=(
                     "no knowledge subject was selected for this review, so no recorded family, "
-                    "guarantee or member roster was resolved; the Source pane carries the complete "
-                    "inventory of the bound source pair independently of any family membership"
+                    "guarantee or member roster was resolved; All changes, the change-set page "
+                    "the review links, carries the complete inventory of the bound source pair "
+                    "independently of any family membership"
                 ),
             ),
+            # No subject was selected, so no record's steps are covered; the field is still
+            # present, because a current build's answer without it is invalid (MIK-R43 rule 9).
+            meaning_effects=ReviewMeaningEffects(records=()),
+            # The status chip's one-sentence reason (MIK-R89 v2 rule 6): it names where the
+            # review page shows the inventory now.
             staleness=ReviewStaleness(
                 state="not_compared",
                 statement=(
                     "no knowledge subject was selected for this review, so no comparison binding "
-                    "exists to be current or stale; the Source pane carries the complete inventory "
-                    "of the bound source pair"
+                    "exists to be current or stale; All changes, the change-set page the review "
+                    "links, carries the complete inventory of the bound source pair"
                 ),
             ),
             submission=submission(stale=False),
@@ -186,6 +164,7 @@ def task_context_review(
                 # A reopened review declares which record answered and what it recorded about the
                 # intent half (ICR-R12); a live candidate contributes no token.
                 *closed_leaf_limitations(resolved),
+                *knowledge_unavailable_limitations(resolved),
             ),
         ),
     )
@@ -203,17 +182,12 @@ def unreadable_half_limitations(unreadable: ReviewRefusal | None) -> tuple[str, 
 
 def _task_context_pane(
     resolved: ReviewCandidateResolution,
-    records: ReviewRecordInputs,
-    subjects: Mapping[str, SubjectAssessmentState],
-    applicability: ReviewApplicabilityProjection,
     unreadable: ReviewRefusal | None = None,
 ) -> ReviewKnowledgePane:
     """Pane 1 for a task-context review: no operand compared, and the reason it was not.
 
     The two sides are ``unresolved`` rather than empty, because an empty statement is a statement
-    about a snapshot and this pane made none. The records the caller supplied are rendered as they
-    are in the subject path -- which assessment belongs to which subject is the applicability
-    projection's own contract, and this composition grows no second rule for it.
+    about a snapshot and this pane made none.
     """
 
     detail = task_context_detail(resolved, unreadable=unreadable)
@@ -221,14 +195,6 @@ def _task_context_pane(
     return ReviewKnowledgePane(
         before_statement=side,
         after_statement=side,
-        signals=tuple(
-            signal(entry, applicability.label_of(entry.signal_id))
-            for entry in records.signals
-            if applicability.label_of(entry.signal_id) is not None
-        ),
-        assessments=assessment_displays(records, subjects, applicability),
-        context=applicability.context_of(KNOWLEDGE_APPLICABILITY_CLASSES),
-        applicability=applicability.summaries_of(KNOWLEDGE_APPLICABILITY_CLASSES),
         selection_state="task_context",
         selection_detail=detail,
     )
@@ -250,6 +216,9 @@ def task_context_detail(
     first: it is what a review of the task alone is.
     """
 
+    unavailable = knowledge_unavailable_detail(resolved)
+    if unavailable is not None:
+        return f"No knowledge subject was selected; {unavailable}. The complete recorded source comparison remains available."
     historical = closed_leaf_intent_detail(resolved)
     if historical is not None:
         return historical
@@ -259,21 +228,22 @@ def task_context_detail(
             f"was compared -- and this pair could not have been compared anyway: {unreadable.detail}. "
             f"To act on it: {unreadable.next_action}. "
             "That state is stated here rather than raised, because this review reads no dataset and "
-            "refusing would remove the source review with it; the Source pane carries the complete "
-            "source change inventory of the bound pair"
+            "refusing would remove the source review with it; All changes, the change-set page "
+            "the review links, carries the complete source change inventory of the bound pair"
         )
     absent = missing_dataset_half(resolved)
     if absent is None:
         return (
             "no invariant or family subject was selected for this review, so no knowledge operand "
-            "was compared and none is reported as empty; the Source pane carries the complete source "
-            "change inventory of the bound pair"
+            "was compared and none is reported as empty; All changes, the change-set page the "
+            "review links, carries the complete source change inventory of the bound pair"
         )
     half, database = absent
     return (
         f"no subject was selected and the resolved {half} dataset is absent ({database.name}), so "
-        "no knowledge operand was compared; the Source pane carries the complete source change "
-        "inventory of the bound pair, which does not depend on knowledge availability"
+        "no knowledge operand was compared; All changes, the change-set page the review links, "
+        "carries the complete source change inventory of the bound pair, which does not depend on "
+        "knowledge availability"
     )
 
 
@@ -319,22 +289,49 @@ def pair_attribution(
             resolved.candidate_code_tree_id,
         ),
     )
-    try:
-        namespace = review_namespace(resolved.repository_id, resolved.candidate_database)
-    except (KnowledgeStorageError, OSError, ValueError) as error:
-        # The preflight read these same bytes a moment ago; this guard exists so that a receipt which
-        # moves between the two reads is still a stated state rather than an escaping storage error.
-        return _pair_without_namespace(
-            resolved,
-            observed,
-            selector,
-            unreadable_candidate_refusal(resolved, str(error)),
-        )
     sides = tuple(
-        _pair_side(side, database, root, tree_id, namespace)
+        _bound_pair_side(resolved, side, database, root, tree_id)
         for side, database, root, tree_id in halves
     )
     return review_attribution(observed, sides=sides, subject=selected_subject(selector))
+
+
+def index_incompleteness(resolved: ReviewCandidateResolution) -> dict[ReadSide, str]:
+    """Only actual partial tree sides constrain the completeness of their attribution reads."""
+    if resolved.trees is None:
+        return {}
+    return {
+        side.side: index_incomplete_detail(side.tree, side.problems)
+        for side in resolved.trees.sides()
+        if side.index_state == "partial"
+    }
+
+
+def _bound_pair_side(
+    resolved: ReviewCandidateResolution,
+    side: ReadSide,
+    database: Path,
+    root: Path | None,
+    tree_id: str | None,
+) -> AttributionSideInput:
+    """Bind each actual tree side independently, preserving partial-index positive mappings."""
+    for name, state, detail in resolved.knowledge_unavailable:
+        if name == side:
+            return AttributionSideInput(
+                side=side, database=database, unreadable=f"{state}: {detail}"
+            )
+    trees = resolved.trees
+    wire = None if trees is None else next(one for one in trees.sides() if one.side == side)
+    if wire is not None and wire.state != "available":
+        return AttributionSideInput(
+            side=side,
+            database=database,
+            unreadable=f"memory tree {wire.tree} is {wire.state}: {wire.detail}",
+        )
+    bound = _pair_side(side, database, root, tree_id)
+    if wire is not None and wire.index_state == "partial":
+        bound = replace(bound, incomplete=index_incomplete_detail(wire.tree, wire.problems))
+    return bound
 
 
 def _pair_without_namespace(
@@ -402,7 +399,6 @@ def _pair_side(
     database: Path,
     root: Path | None,
     tree_id: str | None,
-    namespace: str,
 ) -> AttributionSideInput:
     """One half of a resolved pair as an attribution side, or as a half nothing could be read from.
 
@@ -417,7 +413,9 @@ def _pair_side(
     if isinstance(reading, str):
         return AttributionSideInput(side=side, database=database, unreadable=reading)
     try:
-        context = open_diff_side(database, namespace, repository_root=root, code_tree_id=tree_id)
+        context = open_diff_side(
+            database, reading.repository_id, repository_root=root, code_tree_id=tree_id
+        )
     except (KnowledgeStorageError, OSError, ValueError, apsw.Error) as error:
         return AttributionSideInput(
             side=side, database=database, unreadable=f"{type(error).__name__}: {error}"

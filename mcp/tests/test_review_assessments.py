@@ -67,7 +67,7 @@ from agents_remember.models.lifecycles.review_assessment_binding import (
     assessment_currentness,
     disputed_dependencies,
     require_current_assessment_binding,
-    subject_state,
+    supplied_measurement_statuses,
 )
 from agents_remember.models.lifecycles.review_assessment_store import (
     AssessmentInputs,
@@ -144,6 +144,14 @@ def _inputs(
         resolverVersion="curator-evidence-resolver/v1",
         policyVersion="review-assessment-policy/v1",
         evidenceBytes=evidence_bytes,
+    )
+
+
+def subject_state(assessments, *, current=None):
+    """Project every stored assessment of one subject onto the distinct reportable states."""
+
+    return assessment_state_for(
+        assessments, statuses=supplied_measurement_statuses(assessments, current)
     )
 
 
@@ -846,6 +854,12 @@ class TestKnowledgeReviewSection:
 
         assert review.limitations == (STALE_BINDING,)
         assert "not reused" in "\n".join(review.lines)
+
+    def test_first_section_line_names_the_actual_gate_section(self) -> None:
+        review = knowledge_review_section(())
+        first = review.lines[2]
+        assert "gates nothing" in first
+        assert "worklist section" in first
 
     def test_an_empty_collection_renders_no_rows_rather_than_a_default(self) -> None:
         review = knowledge_review_section(())

@@ -2,7 +2,7 @@
 
 The packet's flow, in order, against the fixtures ``fresh_user_fixture`` creates:
 
-    install runtime -> memory_init (with the spear-branch choice) -> thin bootstrap (c-03)
+    install runtime -> memory_init (with the spear-branch choice) -> documented repository preparation
     -> exclusion review -> baseline adoption -> first worktree task (light leaf)
     -> citation_fix + memory_quality_check + closeout validation
 
@@ -16,33 +16,19 @@ WHAT THIS SCENARIO CERTIFIES
 It certifies the *chain* over disposable fixtures created by the harness: two repositories from
 nothing, the register persisted, the baseline adopted, the first worktree task started by the
 product's own activation, and the four chain invariants asserted on both fixtures.
-
-It also runs the **free agent**, the seat the developer ruled has no task document at all.
-``free_agent_acceptance`` opens it through the product's live route -- ``POST /api/terminal/{session}``
-with ``role='bootstrap'`` and no ``taskDocumentRef`` -- and reads the capsule back **out of the
-launch token the session was actually started with**, parsed by the product's own
-``parse_runner_config``. The capsule it receives is the ``(bootstrap, orientation)`` compilation:
-the route publishes its semantic digest, and the run asserts that the digest the route published is
-the digest on the token, and that the instruction text equals the compiler's own result for the same
-admitted seat through the same application entry point. The step reports ``completed`` or ``failed``,
-never ``blocked``: a free agent that opens without its instructions is a failure, not a deferral.
-
-The standing rule this shape exists to satisfy: a delivery claim is closed by a production path from
-producer to consumer, with the artifact read from the consumer's side -- never a seam plus a
-caller-supplied value.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[2] / "mcp" / "src"
 # A STRING, never the Path: ``sys.path`` entries that are not ``str`` are silently ignored by
@@ -57,22 +43,16 @@ from agents_remember.application.memory_tools import (  # noqa: E402
     _baseline_request,
     citation_fix_tool,
 )
-from agents_remember.application.role_capsules.launch import (  # noqa: E402
-    LaunchCapsuleRequest,
-    compile_launch_capsule,
-)
 from agents_remember.application.worktree_tool_requests import (  # noqa: E402
     StartExecution,
     TaskBases,
     TaskIdentity,
 )
 from agents_remember.application.worktree_tools import worktree_start_tool  # noqa: E402
-from agents_remember.cli.dashboard import serving_collaborators  # noqa: E402
 from agents_remember.install.runtime import (  # noqa: E402
     RuntimeInstallRequest,
     install_runtime_from_config,
 )
-from agents_remember.kernel.agentic_settings import agentic_settings_path  # noqa: E402
 from agents_remember.kernel.authority import require_repo  # noqa: E402
 from agents_remember.kernel.memory_init import initialize_memory  # noqa: E402
 from agents_remember.kernel.primitives import checkout_coordination  # noqa: E402
@@ -84,22 +64,15 @@ from agents_remember.memory_quality.check import (  # noqa: E402
     run_memory_quality_check,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef  # noqa: E402
-from agents_remember.observer import reset_ambient  # noqa: E402
-from agents_remember.serving.app import create_app  # noqa: E402
-from agents_remember.serving.harness_control_runner import parse_runner_config  # noqa: E402
-from agents_remember.serving.projector import ProjectionCadence  # noqa: E402
-from agents_remember.serving.terminal import TerminalSessionBinding  # noqa: E402
-from agents_remember.serving.terminal_catalog import TerminalCatalog  # noqa: E402
 from agents_remember.tasks import TaskDocument, write_task_doc  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-from fresh_user_fixture import (  # noqa: E402  (the harness's flat module convention)
+from e2e_harness.fresh_user_fixture import (  # noqa: E402
     FreshUserFixture,
     create_fresh_user_fixture,
     git,
     write_exclusion_register,
     write_thin_bootstrap,
 )
-from reporting import CheckpointDefinition, CheckpointRecorder  # noqa: E402
+from e2e_harness.reporting import CheckpointDefinition, CheckpointRecorder  # noqa: E402
 
 STEP_INSTALL = "install-runtime"
 STEP_MEMORY_INIT = "memory-init"
@@ -110,7 +83,6 @@ STEP_WORKTREE = "first-worktree-task"
 STEP_CITATION = "citation-fix"
 STEP_QUALITY = "memory-quality-check"
 STEP_CLOSEOUT = "closeout-validation"
-STEP_FREE_AGENT = "free-agent-bootstrap-seat"
 
 INVARIANTS = (
     CheckpointDefinition(
@@ -266,11 +238,10 @@ def _record_check(
 ) -> None:
     """Record one checkpoint without aborting the run.
 
-    ``CheckpointRecorder.check`` raises on the first failure, which would end the transcript
-    before the later steps ran. The packet is explicit that a failing scenario is a real result
-    to report with the failing step and its output, never a scenario removed to make the run
-    green -- so every step runs, every checkpoint is recorded, and the exit status carries the
-    verdict.
+    Raising on the first failure would end the transcript before the later steps ran. The
+    packet is explicit that a failing scenario is a real result to report with the failing
+    step and its output, never a scenario removed to make the run green -- so every step runs,
+    every checkpoint is recorded, and the exit status carries the verdict.
     """
     recorder.checkpoints.append(
         {
@@ -592,229 +563,233 @@ def run_fixture_scenario(
     recorder: CheckpointRecorder,
 ) -> dict[str, Any]:
     """The ordered flow for one fixture. Returns the chain facts the invariants are read from."""
-    install = _run(
-        records,
-        fixture,
-        STEP_INSTALL,
-        "install_runtime_from_config(config, RuntimeInstallRequest(install_provider_deps=False))",
-        lambda: _install_runtime(fixture),
-    )
-    _record_check(
-        recorder,
-        STEP_DEFINITIONS[0],
-        fixture=fixture.name,
-        actual={"ok": install.get("ok", install.get("state")), "error": install.get("error")},
-        passed=bool(install.get("ok", True)) and "error" not in install,
-    )
-
-    memory_init = _run(
-        records,
-        fixture,
-        STEP_MEMORY_INIT,
-        f"initialize_memory(config, repo_id={fixture.repo_id!r}, "
-        f"initial_branch={fixture.spear_branch!r})",
-        lambda: _memory_init(fixture),
-    )
-    _record_check(
-        recorder,
-        STEP_DEFINITIONS[1],
-        fixture=fixture.name,
-        actual={
-            "ok": memory_init.get("ok"),
-            "state": memory_init.get("state"),
-            "initialBranch": memory_init.get("initialBranch"),
-            "initialBranchSource": memory_init.get("initialBranchSource"),
-            "error": memory_init.get("error"),
-        },
-        passed=bool(memory_init.get("ok"))
-        and memory_init.get("initialBranch") == fixture.spear_branch,
-    )
-
-    overview = write_thin_bootstrap(fixture)
-    records.append(
-        StepRecord(
-            step=STEP_BOOTSTRAP,
-            fixture=fixture.name,
-            call="write_thin_bootstrap(fixture)  # c-03 has no runtime entry point",
-            status="emulated-outcome",
-            result={
-                "artifact": overview.as_posix(),
-                "bytes": overview.stat().st_size,
-                "note": (
-                    "c-03-repo-bootstrap is an LLM-driven procedure: it has no MCP tool, no CLI "
-                    "subcommand and no operation in the capsule vocabulary. A script can only "
-                    "produce its documented minimum artifact, which is this file; the procedure "
-                    "itself is not an executable surface at this base."
-                ),
-            },
-        )
-    )
-
-    settings = write_exclusion_register(
-        fixture,
-        excludes=("vendor/**", ".gitignore"),
-        citation_index={"maxSourceBytes": 8 * 1024 * 1024},
-    )
-    records.append(
-        StepRecord(
-            step=STEP_EXCLUSION,
-            fixture=fixture.name,
-            call="write_exclusion_register(fixture, excludes=('vendor/**', '.gitignore'), "
-            "citation_index={'maxSourceBytes': 8388608})",
-            status="persisted",
-            result={
-                "settings": settings.as_posix(),
-                "bytes": settings.read_text(encoding="utf-8"),
-                "note": (
-                    "the judgement-first review (developer ruling 2026-08-21) produces this "
-                    "file; this step is its persistence, not a substitute for the review"
-                ),
-            },
-        )
-    )
-    persisted = json.loads(settings.read_text(encoding="utf-8"))["onboarding"]
-    _record_check(
-        recorder,
-        STEP_DEFINITIONS[2],
-        fixture=fixture.name,
-        actual={
-            "pathRules": persisted["pathRules"],
-            "citationIndex": persisted.get("citationIndex"),
-        },
-        passed="vendor/**" in persisted["pathRules"]["exclude"]["paths"],
-    )
-
-    adopted = _run(
-        records,
-        fixture,
-        STEP_BASELINE,
-        f"baseline_adopt(request, accept_drift=True, source_branch={fixture.spear_branch!r})",
-        lambda: _baseline_adopt(fixture),
-    )
-    _record_check(
-        recorder,
-        STEP_DEFINITIONS[3],
-        fixture=fixture.name,
-        actual={
-            "ok": adopted.get("ok"),
-            "state": adopted.get("state"),
-            "returncode": adopted.get("returncode"),
-            "ledger": adopted.get("ledger"),
-        },
-        passed=bool(adopted.get("ok")) and adopted.get("state") in {"adopted", "already-adopted"},
-    )
-
-    series = _declare_memory_series_branch(fixture)
-    records.append(series)
-    started = _run(
-        records,
-        fixture,
-        STEP_WORKTREE,
-        "worktree_start_tool(config, TaskIdentity(task_name='fresh-user-master', "
-        "leaf_id='FRESH-USER-LEAF-1', worktree_name='leaf-1', parent_task='fresh-user-master', "
-        "workflow_kind='light-task'), bases=TaskBases(work_branch='ar/leaf-1', "
-        "memory_mode='external', stale_base_choice='proceed-stale'), "
-        "execution=StartExecution(skip_provider_setup=True))",
-        lambda: _start_leaf_worktree(fixture),
-    )
-
-    work_branch = "ar/leaf-1"
-    worktree_exists = (
-        subprocess.run(
-            ["git", "rev-parse", "--verify", work_branch],
-            cwd=fixture.code_repo,
-            capture_output=True,
-            text=True,
-            check=False,
-        ).returncode
-        == 0
-    )
-    _record_check(
-        recorder,
-        STEP_DEFINITIONS[4],
-        fixture=fixture.name,
-        actual={
-            "state": started.get("state"),
-            "branchExists": worktree_exists,
-            "nextStep": started.get("nextStep") or started.get("error"),
-            "sprintIntegrationBranch": fixture.sprint_branch,
-            "contractPath": started.get("contractPath") or started.get("contract_path"),
-            "worktreePath": started.get("worktreePath") or started.get("worktree_path"),
-        },
-        passed=worktree_exists,
-    )
-
-    contract = _contract_path(fixture, started)
-    if contract is None:
-        records.append(citation_fix_blocked(fixture, started))
-        citation: dict[str, Any] = {"reachable": False}
-    else:
-        citation = _run(
+    with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(fixture.root / "config")}):
+        install = _run(
             records,
             fixture,
-            STEP_CITATION,
-            f"citation_fix_payload(config, {fixture.repo_id!r}, contract_path=<leaf contract>, "
-            "dry_run=True)",
-            lambda: _citation_fix(fixture, contract),
+            STEP_INSTALL,
+            "install_runtime_from_config(config, RuntimeInstallRequest(install_provider_deps=False))",
+            lambda: _install_runtime(fixture),
         )
-    quality = _run(
-        records,
-        fixture,
-        STEP_QUALITY,
-        "run_memory_quality_check(onboarding, checks=BEFORE_METADATA_REFRESH_CHECKS, "
-        "drift_context=DriftCheckContext(code_repo))",
-        lambda: _citation_checks(fixture),
-    )
-    checks = quality.get("checks", {}) if isinstance(quality, dict) else {}
-    range_result = (
-        checks.get("style.citations.range_resolution", {}) if isinstance(checks, dict) else {}
-    )
-    _record_check(
-        recorder,
-        STEP_DEFINITIONS[5],
-        fixture=fixture.name,
-        actual={
-            "status": range_result.get("status"),
-            "resolvedCitations": range_result.get("resolvedCitations"),
-            "boundsStatus": (range_result.get("sourceIndex") or {}).get("bounds", {}).get("status"),
-            "skippedCount": (range_result.get("sourceIndex") or {})
-            .get("bounds", {})
-            .get("skippedCount"),
-        },
-        passed=range_result.get("status") == "checked",
-    )
-    records.append(
-        StepRecord(
-            step=STEP_CLOSEOUT,
+        _record_check(
+            recorder,
+            STEP_DEFINITIONS[0],
             fixture=fixture.name,
-            call="run_memory_quality_check(onboarding, checks=BEFORE_METADATA_REFRESH_CHECKS, ...)",
-            status="completed",
-            result={
-                "note": (
-                    "the closeout gate's citation checks are exercised through the function the "
-                    "gate calls (application/worktree_services.py MemoryQualityAdapter.run_check "
-                    "-> memory_quality/check.py run_memory_quality_check). The full closeout "
-                    "TRANSACTION is not exercised here: it requires a selected four-terminal "
-                    "code prefix and current curator coherence, which a fresh user's first hour "
-                    "does not have."
-                ),
-                "rangeResolution": _bounded(range_result),
-                "citationFixReachability": citation,
-            },
+            actual={"ok": install.get("ok", install.get("state")), "error": install.get("error")},
+            passed=bool(install.get("ok", True)) and "error" not in install,
         )
-    )
-    first_commit = _first_memory_commit(fixture)
-    chain = {
-        "firstMemoryCommit": first_commit,
-        "firstMemoryCommitPaths": _memory_commit_paths(fixture, first_commit),
-        "confidenceTagOffenders": _confidence_tag_offenders(fixture),
-        "ledger": _ledger_facts(adopted),
-        "workBranch": work_branch,
-        "workBranchExists": worktree_exists,
-        "worktreeState": started.get("state"),
-        "worktreeError": started.get("nextStep") or started.get("error"),
-    }
-    return chain
+
+        memory_init = _run(
+            records,
+            fixture,
+            STEP_MEMORY_INIT,
+            f"initialize_memory(config, repo_id={fixture.repo_id!r}, "
+            f"initial_branch={fixture.spear_branch!r})",
+            lambda: _memory_init(fixture),
+        )
+        _record_check(
+            recorder,
+            STEP_DEFINITIONS[1],
+            fixture=fixture.name,
+            actual={
+                "ok": memory_init.get("ok"),
+                "state": memory_init.get("state"),
+                "initialBranch": memory_init.get("initialBranch"),
+                "initialBranchSource": memory_init.get("initialBranchSource"),
+                "error": memory_init.get("error"),
+            },
+            passed=bool(memory_init.get("ok"))
+            and memory_init.get("initialBranch") == fixture.spear_branch,
+        )
+
+        overview = write_thin_bootstrap(fixture)
+        records.append(
+            StepRecord(
+                step=STEP_BOOTSTRAP,
+                fixture=fixture.name,
+                call="write_thin_bootstrap(fixture)  # fixture setup: the minimum onboarding artifact",
+                status="emulated-outcome",
+                result={
+                    "artifact": overview.as_posix(),
+                    "bytes": overview.stat().st_size,
+                    "note": (
+                        "Repository preparation has no runtime entry point in this build: it is a set of "
+                        "documented procedures, not an MCP tool or CLI subcommand. A script can only "
+                        "produce the minimum onboarding artifact, which is this file; the procedure "
+                        "itself is not an executable surface."
+                    ),
+                },
+            )
+        )
+
+        settings = write_exclusion_register(
+            fixture,
+            excludes=("vendor/**", ".gitignore"),
+            citation_index={"maxSourceBytes": 8 * 1024 * 1024},
+        )
+        records.append(
+            StepRecord(
+                step=STEP_EXCLUSION,
+                fixture=fixture.name,
+                call="write_exclusion_register(fixture, excludes=('vendor/**', '.gitignore'), "
+                "citation_index={'maxSourceBytes': 8388608})",
+                status="persisted",
+                result={
+                    "settings": settings.as_posix(),
+                    "bytes": settings.read_text(encoding="utf-8"),
+                    "note": (
+                        "the judgement-first review (developer ruling 2026-08-21) produces this "
+                        "file; this step is its persistence, not a substitute for the review"
+                    ),
+                },
+            )
+        )
+        persisted = json.loads(settings.read_text(encoding="utf-8"))["onboarding"]
+        _record_check(
+            recorder,
+            STEP_DEFINITIONS[2],
+            fixture=fixture.name,
+            actual={
+                "pathRules": persisted["pathRules"],
+                "citationIndex": persisted.get("citationIndex"),
+            },
+            passed="vendor/**" in persisted["pathRules"]["exclude"]["paths"],
+        )
+
+        adopted = _run(
+            records,
+            fixture,
+            STEP_BASELINE,
+            f"baseline_adopt(request, accept_drift=True, source_branch={fixture.spear_branch!r})",
+            lambda: _baseline_adopt(fixture),
+        )
+        _record_check(
+            recorder,
+            STEP_DEFINITIONS[3],
+            fixture=fixture.name,
+            actual={
+                "ok": adopted.get("ok"),
+                "state": adopted.get("state"),
+                "returncode": adopted.get("returncode"),
+                "ledger": adopted.get("ledger"),
+            },
+            passed=bool(adopted.get("ok"))
+            and adopted.get("state") in {"adopted", "already-adopted"},
+        )
+
+        series = _declare_memory_series_branch(fixture)
+        records.append(series)
+        started = _run(
+            records,
+            fixture,
+            STEP_WORKTREE,
+            "worktree_start_tool(config, TaskIdentity(task_name='fresh-user-master', "
+            "leaf_id='FRESH-USER-LEAF-1', worktree_name='leaf-1', parent_task='fresh-user-master', "
+            "workflow_kind='light-task'), bases=TaskBases(work_branch='ar/leaf-1', "
+            "memory_mode='external', stale_base_choice='proceed-stale'), "
+            "execution=StartExecution(skip_provider_setup=True))",
+            lambda: _start_leaf_worktree(fixture),
+        )
+
+        work_branch = "ar/leaf-1"
+        worktree_exists = (
+            subprocess.run(
+                ["git", "rev-parse", "--verify", work_branch],
+                cwd=fixture.code_repo,
+                capture_output=True,
+                text=True,
+                check=False,
+            ).returncode
+            == 0
+        )
+        _record_check(
+            recorder,
+            STEP_DEFINITIONS[4],
+            fixture=fixture.name,
+            actual={
+                "state": started.get("state"),
+                "branchExists": worktree_exists,
+                "nextStep": started.get("nextStep") or started.get("error"),
+                "sprintIntegrationBranch": fixture.sprint_branch,
+                "contractPath": started.get("contractPath") or started.get("contract_path"),
+                "worktreePath": started.get("worktreePath") or started.get("worktree_path"),
+            },
+            passed=worktree_exists,
+        )
+
+        contract = _contract_path(fixture, started)
+        if contract is None:
+            records.append(citation_fix_blocked(fixture, started))
+            citation: dict[str, Any] = {"reachable": False}
+        else:
+            citation = _run(
+                records,
+                fixture,
+                STEP_CITATION,
+                f"citation_fix_payload(config, {fixture.repo_id!r}, contract_path=<leaf contract>, "
+                "dry_run=True)",
+                lambda: _citation_fix(fixture, contract),
+            )
+        quality = _run(
+            records,
+            fixture,
+            STEP_QUALITY,
+            "run_memory_quality_check(onboarding, checks=BEFORE_METADATA_REFRESH_CHECKS, "
+            "drift_context=DriftCheckContext(code_repo))",
+            lambda: _citation_checks(fixture),
+        )
+        checks = quality.get("checks", {}) if isinstance(quality, dict) else {}
+        range_result = (
+            checks.get("style.citations.range_resolution", {}) if isinstance(checks, dict) else {}
+        )
+        _record_check(
+            recorder,
+            STEP_DEFINITIONS[5],
+            fixture=fixture.name,
+            actual={
+                "status": range_result.get("status"),
+                "resolvedCitations": range_result.get("resolvedCitations"),
+                "boundsStatus": (range_result.get("sourceIndex") or {})
+                .get("bounds", {})
+                .get("status"),
+                "skippedCount": (range_result.get("sourceIndex") or {})
+                .get("bounds", {})
+                .get("skippedCount"),
+            },
+            passed=range_result.get("status") == "checked",
+        )
+        records.append(
+            StepRecord(
+                step=STEP_CLOSEOUT,
+                fixture=fixture.name,
+                call="run_memory_quality_check(onboarding, checks=BEFORE_METADATA_REFRESH_CHECKS, ...)",
+                status="completed",
+                result={
+                    "note": (
+                        "the closeout gate's citation checks are exercised through the function the "
+                        "gate calls (application/worktree_services.py MemoryQualityAdapter.run_check "
+                        "-> memory_quality/check.py run_memory_quality_check). The full closeout "
+                        "TRANSACTION is not exercised here: it requires a selected four-terminal "
+                        "code prefix and current curator coherence, which a fresh user's first hour "
+                        "does not have."
+                    ),
+                    "rangeResolution": _bounded(range_result),
+                    "citationFixReachability": citation,
+                },
+            )
+        )
+        first_commit = _first_memory_commit(fixture)
+        chain = {
+            "firstMemoryCommit": first_commit,
+            "firstMemoryCommitPaths": _memory_commit_paths(fixture, first_commit),
+            "confidenceTagOffenders": _confidence_tag_offenders(fixture),
+            "ledger": _ledger_facts(adopted),
+            "workBranch": work_branch,
+            "workBranchExists": worktree_exists,
+            "worktreeState": started.get("state"),
+            "worktreeError": started.get("nextStep") or started.get("error"),
+        }
+        return chain
 
 
 def _contract_path(fixture: FreshUserFixture, started: dict[str, Any]) -> str | None:
@@ -870,172 +845,6 @@ def citation_fix_blocked(fixture: FreshUserFixture, started: dict[str, Any]) -> 
             "no leaf enclosure contract exists at this point in the run, so the citation fix "
             "surface is unreachable and the step is recorded blocked rather than completed"
         ),
-    )
-
-
-class _RecordingTerminalHost:
-    """The tmux boundary, doubled for the OPEN path only.
-
-    Declared as a boundary double, not as a value: it records the session specification the product
-    produced (cwd, argv, env) and never supplies anything the capsule is compared against. The
-    capsule itself is compiled by the product and read back out of the launched token.
-    """
-
-    def __init__(self) -> None:
-        self.ensured: list[Any] = []
-        self.known: set[str] = set()
-
-    def has_session(self, tmux_name: str) -> bool:
-        return tmux_name in self.known
-
-    def shutdown(self) -> None:
-        return None
-
-    def ensure(self, sid: str, spec: Any) -> Any:
-        self.ensured.append(spec)
-        tmux_name = spec.tmux_name_for(sid)
-        self.known.add(tmux_name)
-        return TerminalSessionBinding(
-            sid=sid,
-            tmux_name=tmux_name,
-            cwd=spec.cwd,
-            command=spec.command,
-            lifecycle_id=spec.lifecycle_id,
-            suspend_unsafe=spec.suspend_unsafe,
-        )
-
-    def last_spec(self) -> Any:
-        if not self.ensured:
-            raise AssertionError("the launch route ensured no session")
-        return self.ensured[-1]
-
-
-def _write_role_settings(fixture: FreshUserFixture, harness: str) -> Path:
-    """Point the bootstrap role at one harness: the settings-owned launch selection."""
-    path = agentic_settings_path(fixture.coordination_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "orchestration": {
-                    "roles": {
-                        "bootstrap": {
-                            "harness": harness,
-                            "model": "gpt-5.6-sol",
-                            "effort": "medium",
-                        }
-                    }
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    return path
-
-
-def free_agent_acceptance(fixture: FreshUserFixture) -> StepRecord:
-    """L14R-2: a FREE agent's compiled capsule, read back from its own first prompt.
-
-    The seat is opened the way a user opens it -- the product's registered route,
-    ``POST /api/terminal/{session}`` with ``role='bootstrap'`` and **no task document** -- and the
-    capsule is read back from the artifact that launch produced: the encoded launch token the child
-    process is started with, parsed by the product's own ``parse_runner_config``. The expected side
-    is the same application entry point the route itself calls, so neither side is hand-supplied.
-    """
-    _write_role_settings(fixture, "codex")
-    reset_ambient()
-    config = _config(fixture)
-    host = _RecordingTerminalHost()
-    catalog_path = fixture.coordination_root / "logs" / "dashboard" / "terminal-sessions.json"
-    collaborators = replace(
-        serving_collaborators(config),
-        terminal_host=host,
-        terminal_catalog=TerminalCatalog(catalog_path),
-    )
-    app = create_app(config, cadence=ProjectionCadence(interval=100), collaborators=collaborators)
-    session = "l14-free-bootstrap"
-    with TestClient(app) as client:
-        response = client.post(
-            f"/api/terminal/{session}",
-            json={
-                "kind": "harness",
-                "harness": "codex",
-                "role": "bootstrap",
-                "label": "L14 free agent",
-            },
-        )
-    body = (
-        response.json()
-        if response.headers.get("content-type", "").startswith("application/json")
-        else {}
-    )
-    if response.status_code != 200:
-        return StepRecord(
-            step=STEP_FREE_AGENT,
-            fixture=fixture.name,
-            call=f"POST /api/terminal/{session} (role=bootstrap, no taskDocumentRef)",
-            status="failed",
-            result={"statusCode": response.status_code, "body": response.text[:600]},
-        )
-
-    spec = host.last_spec()
-    token = spec.command[-1]
-    parsed = parse_runner_config(token)
-    delivery = parsed.capsule_delivery
-    launched = compile_launch_capsule(
-        config,
-        LaunchCapsuleRequest(
-            role="bootstrap", workspace_root=config.workspace_root, harness="codex"
-        ),
-    )
-    received = "" if delivery is None else delivery.trusted_instructions
-    encoded = received.encode("utf-8")
-    expected = (
-        "" if launched.codex_delivery is None else launched.codex_delivery.trusted_instructions
-    )
-    instruction_mode = body.get("instructionMode") or {}
-    matches_expected = received == expected and bool(expected)
-    digest_matches = (
-        delivery is not None
-        and bool(instruction_mode)
-        and instruction_mode.get("semanticDigest") == delivery.semantic_digest
-    )
-    passed = (
-        instruction_mode.get("mode") == "capsule"
-        and body.get("taskDocumentRef") is None
-        and matches_expected
-        and digest_matches
-    )
-    return StepRecord(
-        step=STEP_FREE_AGENT,
-        fixture=fixture.name,
-        call=(
-            f"POST /api/terminal/{session} {{'kind':'harness','harness':'codex',"
-            "'role':'bootstrap','label':'L14 free agent'}}  # no taskDocumentRef"
-        ),
-        status="completed" if passed else "failed",
-        result={
-            "routeStatus": response.status_code,
-            "taskDocumentRef": body.get("taskDocumentRef"),
-            "instructionMode": instruction_mode,
-            "sessionReceived": {
-                "characters": len(received),
-                "bytes": len(encoded),
-                "sha256": hashlib.sha256(encoded).hexdigest(),
-                "semanticDigest": None if delivery is None else delivery.semantic_digest,
-                "firstLine": received.splitlines()[0] if received else "",
-            },
-            "compiledByProduct": {
-                "mode": launched.mode.value,
-                "semanticDigest": None
-                if launched.codex_delivery is None
-                else launched.codex_delivery.semantic_digest,
-                "instructionBytes": launched.report.get("instructionBytes"),
-            },
-            "tokenCharacters": len(token),
-            "equalsCompilerResult": matches_expected,
-            "routeDigestEqualsSessionDigest": digest_matches,
-        },
     )
 
 
@@ -1164,8 +973,6 @@ def run_fresh_user_acceptance(run_root: Path) -> dict[str, Any]:
             )
         )
 
-    for fixture in fixtures.values():
-        records.append(free_agent_acceptance(fixture))
     if not all(chain.get("workBranchExists") for chain in chains.values()):
         records.append(first_worktree_task_blocked(records, chains))
     blocked = [

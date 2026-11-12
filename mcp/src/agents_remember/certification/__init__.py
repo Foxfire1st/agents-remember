@@ -71,7 +71,6 @@ from agents_remember.certification.lifecycle_admission import (
 )
 from agents_remember.certification.lifecycle_recovery import (
     authorize_finalization_leg,
-    compile_certification_recovery_record,
     compile_lifecycle_finalization,
     validate_lifecycle_finalization_currentness,
 )
@@ -277,7 +276,6 @@ __all__ = [
     "compile_certificate_refused",
     "compile_certification_admission",
     "compile_certification_plan",
-    "compile_certification_recovery_record",
     "compile_closeout_readiness",
     "compile_diagnostic_plan",
     "compile_diagnostic_started",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,6 +11,7 @@ from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_attribution import (
     code_commit_exists,
 )
+from agents_remember.worktrees.direct_execution import open_direct_leaf_name
 from agents_remember.worktrees.integration.integration_branch_authority import (
     branch_worktree_owners,
     integration_targets,
@@ -23,6 +26,10 @@ from agents_remember.worktrees.modules.git import (
     is_ancestor,
     require_clean,
     require_git,
+)
+from agents_remember.worktrees.modules.landing_commit_check import (
+    commit_check_fact,
+    run_landing_commit_check,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -100,6 +107,47 @@ class CheckoutRefresh:
     new: str
 
 
+def _require_landing_commit_check(repo: Path, commit: str, *, side: str) -> None:
+    """Prove the candidate passed the repository's commit check (MIK-R152 rule 8).
+
+    The fact is the ``Commit-Check-Pass`` trailer the landing wrote on the commit
+    itself: where it names this commit's tree, the integration knows the tree
+    passed in the landing that wrote it. Where no such fact exists (a commit
+    from before the check, a pull-request merge, a provisional direct-landing
+    commit), the check runs here too, on the candidate tree in a scratch
+    worktree; its refusal stops the master-line move.
+    """
+
+    body = require_git(repo, ["log", "-1", "--format=%B", commit])
+    tree = require_git(repo, ["rev-parse", f"{commit}^{{tree}}"])
+    fact = commit_check_fact(body)
+    if fact is not None and fact[0] == tree:
+        return
+    work_parent = Path(tempfile.mkdtemp(prefix="landing-commit-check-"))
+    work = work_parent / "candidate"
+    added = run_git(repo, ["worktree", "add", "--detach", work.as_posix(), commit])
+    if added.returncode != 0:
+        shutil.rmtree(work_parent, ignore_errors=True)
+        raise RuntimeError(
+            f"integration cannot prove the {side} candidate: "
+            f"{added.stderr.strip() or added.stdout.strip()}"
+        )
+    try:
+        run_landing_commit_check(work, tree=tree)
+        refused: BaseException | None = None
+    except BaseException as error:
+        refused = error
+    removed = run_git(repo, ["worktree", "remove", "--force", work.as_posix()])
+    shutil.rmtree(work_parent, ignore_errors=True)
+    if removed.returncode != 0:
+        raise RuntimeError(
+            f"integration cannot remove its {side} commit-check worktree {work}: "
+            f"{removed.stderr.strip() or removed.stdout.strip()}"
+        )
+    if refused is not None:
+        raise refused
+
+
 def prepare_integration_ref_move(
     contract: WorktreeContract,
     commits: IntegratedCommits,
@@ -141,7 +189,20 @@ def prepare_integration_ref_move(
             memory_source_commit=memory_head_before,
         )
 
-    _require_clean_branch_checkout(contract.code_repo_path, code_target.branch, code_head_before)
+    # MIK-R152 rule 8: the master line moves only to commits whose trees passed
+    # the repository's commit check in the landing that wrote them. The landing's
+    # own fact (the trailer on the commit) proves it; without one the check runs
+    # here, and its refusal stops the move.
+    _require_landing_commit_check(contract.code_repo_path, commits.code, side="code")
+    if external:
+        assert contract.memory_repo_path is not None
+        _require_landing_commit_check(
+            contract.memory_repo_path, commits.memory_content, side="memory"
+        )
+
+    _require_clean_branch_checkout(
+        contract.code_repo_path, code_target.branch, code_head_before, contract=contract
+    )
     if external:
         assert contract.memory_repo_path is not None
         assert memory_target is not None
@@ -150,6 +211,7 @@ def prepare_integration_ref_move(
             memory_target.branch,
             memory_head_before,
             exclude_paths=("memory.md",),
+            contract=contract,
         )
     return IntegrationRefSnapshot(
         code_branch=code_target.branch,
@@ -349,10 +411,26 @@ def _reset_derived_path(checkout: Path, old: str, path: str) -> None:
 
 
 def _require_clean_branch_checkout(
-    repo: Path, branch: str, expected: str, *, exclude_paths: tuple[str, ...] = ()
+    repo: Path,
+    branch: str,
+    expected: str,
+    *,
+    exclude_paths: tuple[str, ...] = (),
+    contract: WorktreeContract | None = None,
 ) -> None:
     for checkout in branch_worktree_owners(repo, branch):
-        require_clean(checkout, f"protected ref {branch!r} checkout", exclude_paths=exclude_paths)
+        try:
+            require_clean(
+                checkout, f"protected ref {branch!r} checkout", exclude_paths=exclude_paths
+            )
+        except RuntimeError as error:
+            leaf = open_direct_leaf_name(contract) if contract is not None else None
+            if leaf is None:
+                raise
+            raise RuntimeError(
+                f"{error}; the direct leaf {leaf} of this master has uncommitted "
+                "changes in this checkout"
+            ) from error
         if head_commit(checkout) != expected:
             raise RuntimeError(
                 f"protected ref {branch!r} checkout is not at its expected named-ref tip"

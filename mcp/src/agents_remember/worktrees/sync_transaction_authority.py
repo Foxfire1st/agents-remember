@@ -2,30 +2,58 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 from typing import Literal, cast
 
 from agents_remember.models.worktree import SyncPhase, SyncSide
-from agents_remember.worktrees.modules.git import branch_commit, head_commit, is_ancestor
+from agents_remember.worktrees.modules.git import (
+    branch_commit,
+    head_commit,
+    is_ancestor,
+    require_git,
+)
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.sync_source_strategy import (
+    source_strategy,
+    target_code_base,
+    target_memory_base,
+)
 from agents_remember.worktrees.sync_transaction_git import (
+    MAX_NAMED_SYNC_PATHS,
     SyncGitProofError,
+    applied_restore_failures,
     apply_parked_wip,
+    cancelled_wip_restored,
+    capture_retained_digests,
     content_conflicts,
     create_pinned_ref,
     delete_pinned_ref,
     discard_memory_cache_changes,
-    drop_parked_wip,
-    prove_parked_wip_restored,
+    git_status,
+    named_merge_rules,
+    parked_wip_failures,
     read_ref,
+    reapply_merge_fault,
     remove_temporary_worktree,
+    sample_paths,
     side_branch_head,
+    stash_entry_live,
+    verify_crashed_reapply,
+)
+from agents_remember.worktrees.sync_transaction_sources import (
+    default_source_refs,
+    recovered_default_branch,
 )
 from agents_remember.worktrees.sync_transaction_state import (
+    VALIDATION_REFUSAL_INLINE_LIMIT,
     SyncOperationRecord,
     SyncOperationStore,
     SyncSidePlan,
     SyncSideRecord,
+    SyncValidationRefusal,
+    SyncValidationViolation,
     operation_stamp,
     sync_side_base_ref,
     sync_side_refs,
@@ -35,13 +63,17 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def side_record(
     contract: WorktreeContract,
     side_name: SyncSide,
     source_commit: str,
+    source_branch: str | None = None,
 ) -> SyncSideRecord:
-    repository, worktree, source_branch, work_branch = side_locations(contract, side_name)
+    repository, worktree, contract_source, work_branch = side_locations(contract, side_name)
+    source_branch = source_branch or contract_source
     pre_head = (
         branch_commit(repository, work_branch)
         if contract.kind == "series"
@@ -107,34 +139,30 @@ def sync_contract_kind(contract: WorktreeContract) -> Literal["leaf", "series"]:
     return cast(Literal["leaf", "series"], contract.kind)
 
 
-def source_pair(contract: WorktreeContract) -> tuple[str, str, bool]:
-    code_tip = branch_commit(contract.code_repo_path, contract.code_source_branch)
-    external = contract.memory_mode == "external" and contract.memory_repo_path is not None
-    memory_tip = (
-        branch_commit(contract.memory_repo_path, contract.memory_source_branch)
-        if external and contract.memory_repo_path is not None
-        else ""
-    )
-    return code_tip, memory_tip, external
-
-
 def pin_authority(record: SyncOperationRecord) -> None:
+    strategy = source_strategy(record.syncSource)
     for side in participating_sides(record):
         repository = Path(side.repository)
         create_pinned_ref(repository, side.baseBackupRef, side.baseCommit)
         create_pinned_ref(repository, side.backupRef, side.preSyncHead)
         create_pinned_ref(repository, side.sourceBackupRef, side.sourceCommit)
+        default_ref = strategy.pinned_ref(record, side)
+        if default_ref is not None:
+            create_pinned_ref(repository, default_ref, side.sourceCommit)
 
 
 def require_pinned_authority(
     record: SyncOperationRecord, *, allow_expected_missing: bool = False
 ) -> None:
+    strategy = source_strategy(record.syncSource)
     for side in participating_sides(record):
         repository = Path(side.repository)
+        default_ref = strategy.pinned_ref(record, side)
         for ref, expected, label in (
             (side.baseBackupRef, side.baseCommit, "recorded-base"),
             (side.backupRef, side.preSyncHead, "pre-sync"),
             (side.sourceBackupRef, side.sourceCommit, "source"),
+            *(((default_ref, side.sourceCommit, "default-source"),) if default_ref else ()),
         ):
             current = read_ref(repository, ref)
             if current is None and allow_expected_missing:
@@ -144,8 +172,12 @@ def require_pinned_authority(
 
 
 def delete_authority(record: SyncOperationRecord) -> None:
+    strategy = source_strategy(record.syncSource)
     for side in reversed(participating_sides(record)):
         repository = Path(side.repository)
+        default_ref = strategy.pinned_ref(record, side)
+        if default_ref is not None:
+            delete_pinned_ref(repository, default_ref, side.sourceCommit)
         delete_pinned_ref(repository, side.sourceBackupRef, side.sourceCommit)
         delete_pinned_ref(repository, side.backupRef, side.preSyncHead)
         delete_pinned_ref(repository, side.baseBackupRef, side.baseCommit)
@@ -161,6 +193,8 @@ def authority_refs_exist(contract: WorktreeContract) -> bool:
         backup, source = sync_side_refs(contract.contract_path, side_name)
         base = sync_side_base_ref(contract.contract_path, side_name)
         if any(read_ref(repository, ref) is not None for ref in (base, backup, source)):
+            return True
+        if default_source_refs(repository, contract.contract_path, side_name):
             return True
     return False
 
@@ -178,11 +212,12 @@ def complete_side_from_refs(
         return None
     if pre_head is None or source_head is None or base_commit is None:
         raise SyncGitProofError(f"{side_name} sync recovery refs are incomplete")
+    pinned = recovered_default_branch(repository, contract.contract_path, side_name, source_head)
     return SyncSideRecord(
         side=side_name,
         repository=repository.resolve().as_posix(),
         worktree=worktree.resolve(strict=False).as_posix(),
-        sourceBranch=source_branch,
+        sourceBranch=pinned or source_branch,
         workBranch=work_branch,
         sourceCommit=source_head,
         preSyncHead=pre_head,
@@ -204,13 +239,15 @@ def remove_temporary_worktrees(record: SyncOperationRecord) -> None:
 
 
 def require_record_contract(contract: WorktreeContract, record: SyncOperationRecord) -> None:
+    """Compare the journal with the contract and the recorded choice only; nothing live."""
+
     if contract.contract_path.resolve() != Path(record.contractPath).resolve():
         raise SyncGitProofError("sync journal contract path changed")
     if contract.task_id != record.taskId or contract.kind != record.contractKind:
         raise SyncGitProofError("sync journal task identity changed")
-    _require_side_contract(contract, record.code)
+    _require_side_contract(contract, record, record.code)
     if record.memory is not None:
-        _require_side_contract(contract, record.memory)
+        _require_side_contract(contract, record, record.memory)
     # A partial-admission recovery may legitimately have only the code ref pair.
     elif (
         contract.memory_mode == "external"
@@ -220,8 +257,12 @@ def require_record_contract(contract: WorktreeContract, record: SyncOperationRec
         raise SyncGitProofError("active external-memory sync lost its memory authority")
 
 
-def _require_side_contract(contract: WorktreeContract, side: SyncSideRecord) -> None:
-    repository, worktree, source_branch, work_branch = side_locations(contract, side.side)
+def _require_side_contract(
+    contract: WorktreeContract, record: SyncOperationRecord, side: SyncSideRecord
+) -> None:
+    repository, worktree, contract_branch, work_branch = side_locations(contract, side.side)
+    strategy = source_strategy(record.syncSource)
+    source_branch = strategy.journal_source_branch(record, side, contract_branch)
     expected = (
         repository.resolve().as_posix(),
         worktree.resolve(strict=False).as_posix(),
@@ -235,7 +276,7 @@ def _require_side_contract(contract: WorktreeContract, side: SyncSideRecord) -> 
 
 def require_finalizable_contract(contract: WorktreeContract, record: SyncOperationRecord) -> None:
     require_record_contract(contract, record)
-    if contract.code_base_commit not in {record.codeBaseFrom, record.code.sourceCommit}:
+    if contract.code_base_commit not in {record.codeBaseFrom, target_code_base(record)}:
         raise SyncGitProofError("contract code base changed outside the sync transaction")
     memory_to = target_memory_base(record)
     if contract.memory_base_commit not in {record.memoryBaseFrom, memory_to}:
@@ -250,12 +291,6 @@ def require_contract_bases_unchanged(
         or contract.memory_base_commit != record.memoryBaseFrom
     ):
         raise SyncGitProofError("sync cancellation refuses after contract base finalization")
-
-
-def target_memory_base(record: SyncOperationRecord) -> str:
-    if record.memory is not None and record.memory.plan != "skip":
-        return record.memory.sourceCommit
-    return record.memoryBaseFrom
 
 
 def reload_contract(contract: WorktreeContract) -> WorktreeContract:
@@ -280,6 +315,114 @@ def update_record(
     updated = SyncOperationRecord.model_validate(record.model_copy(update=changes).model_dump())
     store.write(updated)
     return updated
+
+
+def record_validation_refusal(
+    store: SyncOperationStore,
+    record: SyncOperationRecord,
+    *,
+    kind: Literal["staged-merge", "fast-forward"],
+    path: str,
+    message: str,
+) -> SyncOperationRecord:
+    """Journal a validator refusal with its violations (MIK-R61 rule 5).
+
+    The validator reports its violations as one refusal text; the journal keeps
+    the validator's own per-path, per-rule entries in order — exactly the first
+    inline-limit entries — with the validator's own total, which can exceed what
+    is inline. Reads the latest journal bytes first, so a refusal journaled after
+    a digest capture (a fresh staged merge the validator refused) keeps that capture:
+    the journal holds both, and a continued sync validates again over them.
+    """
+
+    current = store.read()
+    if (
+        not isinstance(current, SyncOperationRecord)
+        or current.generation != record.generation
+        or current.contractPath != record.contractPath
+    ):
+        current = record
+    violations, total = parse_refusal_violations(message, context_path=path)
+    refusal = SyncValidationRefusal(
+        kind=kind,
+        violations=tuple(violations),
+        total=total,
+        reportedAt=operation_stamp(),
+    )
+    updated = SyncOperationRecord.model_validate(
+        current.model_copy(
+            update={"validationRefusal": refusal, "updatedAt": operation_stamp()}
+        ).model_dump()
+    )
+    store.write(updated)
+    return updated
+
+
+#: The validator's count line: ``... refuses this memory commit: N violation(s) in <tree>``.
+_REFUSAL_COUNT_RE = re.compile(r"(\d+)\s+violation\(s\)")
+
+#: One rendered validator violation: ``path: field: [rule] message``.
+_REFUSAL_VIOLATION_RE = re.compile(
+    r"^(?P<path>.+?):\s+(?P<field>.+?):\s+\[(?P<rule>[^\]]+)\]\s?(?P<message>.*)$"
+)
+
+#: Per-entry message bound (the model's own limit).
+_REFUSAL_MESSAGE_LIMIT = 8192
+
+
+def parse_refusal_violations(
+    message: str, *, context_path: str
+) -> tuple[list[SyncValidationViolation], int]:
+    """Split a validator refusal text into its structured violations and total.
+
+    The worktree layer may not import the validator, so the rendered text is the
+    contract: the count line carries the true total, and each rendered violation
+    line carries its path, field, rule and message. Lines that do not parse are
+    kept as one entry under the validator's own name, so nothing reported is
+    lost; the returned list holds exactly the first inline-limit entries.
+    """
+
+    count_match = _REFUSAL_COUNT_RE.search(message.splitlines()[0] if message else "")
+    lines = message.splitlines()[1:]
+    parsed: list[SyncValidationViolation] = []
+    for line in lines:
+        text = line.strip()
+        if not text:
+            continue
+        match = _REFUSAL_VIOLATION_RE.match(text)
+        if match is None:
+            parsed.append(
+                SyncValidationViolation(
+                    path=context_path[:4096],
+                    rule="knowledge-validator",
+                    message=text[:_REFUSAL_MESSAGE_LIMIT] or context_path[:_REFUSAL_MESSAGE_LIMIT],
+                )
+            )
+            continue
+        field = match.group("field")
+        body = match.group("message")
+        if field != "-":
+            body = f"{field}: {body}" if body else field
+        parsed.append(
+            SyncValidationViolation(
+                path=(match.group("path") or context_path)[:4096],
+                rule=(match.group("rule") or "knowledge-validator")[:256],
+                message=(body or text)[:_REFUSAL_MESSAGE_LIMIT],
+            )
+        )
+    if not parsed:
+        text = message.strip()
+        parsed.append(
+            SyncValidationViolation(
+                path=context_path[:4096],
+                rule="knowledge-validator",
+                message=(text[:8150] + "\n[truncated: refusal text exceeds the journaled limit]")
+                if len(text) > _REFUSAL_MESSAGE_LIMIT
+                else (text or context_path)[:_REFUSAL_MESSAGE_LIMIT],
+            )
+        )
+    total = int(count_match.group(1)) if count_match else len(parsed)
+    return parsed[:VALIDATION_REFUSAL_INLINE_LIMIT], total
 
 
 def participating_sides(record: SyncOperationRecord) -> tuple[SyncSideRecord, ...]:
@@ -313,6 +456,85 @@ def resolution_phase(side_name: SyncSide) -> SyncPhase:
     return "code-resolution-required" if side_name == "code" else "memory-resolution-required"
 
 
+def _restoration_failures(side: SyncSideRecord) -> tuple[tuple[str, ...], bool]:
+    """The unproven parked paths and whether the stash inventory is complete.
+
+    An unreadable stash inventory never passes: it returns the journaled sample
+    as the named failures with the inventory marked incomplete.
+    """
+
+    try:
+        return parked_wip_failures(side, side_branch_head(side)), True
+    except SyncGitProofError:
+        return sample_paths(side), False
+
+
+def _skip_apply_proven(side: SyncSideRecord) -> bool:
+    """Whether the tree already holds the parked reapply over a live stash."""
+
+    if not side.wipStash or not stash_entry_live(side):
+        return False
+    failures, complete = _restoration_failures(side)
+    return complete and not failures
+
+
+def _mark_restored(
+    store: SyncOperationStore,
+    record: SyncOperationRecord,
+    side_name: SyncSide,
+    side: SyncSideRecord,
+) -> tuple[SyncOperationRecord, SyncSideRecord, bool]:
+    """Journal a proven reapply without touching the tree or the kept stash."""
+
+    restored = side.model_copy(update={"wipState": "restored", "conflictFiles": ()})
+    record = update_record(store, record, phase=record.phase, side=restored, side_name=side_name)
+    return record, restored, False
+
+
+def _retain_crashed_reapply(
+    store: SyncOperationStore,
+    record: SyncOperationRecord,
+    side_name: SyncSide,
+    side: SyncSideRecord,
+) -> tuple[SyncOperationRecord, SyncSideRecord, bool]:
+    """Retain pre-existing unmerged paths after a crash window.
+
+    A side already carrying fingerprints is returned as-is: recapturing would
+    bless whatever the window holds. Otherwise only a scratch-verified tree
+    earns a reference; an unverified tree is retained with an empty map so a
+    later cancel refuses rather than discard owner bytes.
+    """
+
+    if side.retainedTreeDigests:
+        return record, side, True
+    if verify_crashed_reapply(side):
+        return _retain_parked_conflict(store, record, side_name, side)
+    return _retain_parked_conflict(store, record, side_name, side, digests={})
+
+
+def _apply_and_prove(
+    store: SyncOperationStore,
+    record: SyncOperationRecord,
+    side_name: SyncSide,
+    side: SyncSideRecord,
+) -> tuple[SyncOperationRecord, SyncSideRecord, bool]:
+    """Reapply the parked candidate and prove it, or retain its conflict."""
+
+    try:
+        state, _ = apply_parked_wip(side)
+    except SyncGitProofError:
+        if _skip_apply_proven(side):
+            return _mark_restored(store, record, side_name, side)
+        failures, complete = _restoration_failures(side)
+        raise _unproven_restore_error(side, failures, uninventoried=not complete) from None
+    if state == "conflict":
+        return _retain_parked_conflict(store, record, side_name, side)
+    failures, complete = _restoration_failures(side)
+    if not complete or failures:
+        raise _unproven_restore_error(side, failures, uninventoried=not complete)
+    return _mark_restored(store, record, side_name, side)
+
+
 def restore_parked_wip(
     store: SyncOperationStore,
     record: SyncOperationRecord,
@@ -321,60 +543,158 @@ def restore_parked_wip(
 ) -> tuple[SyncOperationRecord, SyncSideRecord, bool]:
     """Return one side's parked candidate to its worktree and journal the outcome.
 
-    A clean reapply is proven restored before the stash entry is dropped; a conflicted one
+    A clean reapply is proven restored before the side is marked so; a conflicted one
     becomes the retained ``*-resolution-required`` state with the stash kept. The third
     value reports that retained conflict, and the caller must not advance that side.
+    A tree that already holds the reapply (a crash after it, or an edit the carried
+    line holds) is marked without a second reapply. The stash entry itself is never
+    retired here: it stays until the transaction is terminal, so a later cancel can
+    still return every parked byte.
     """
 
     if side.wipState not in {"parked", "restore-conflict"} or not side.wipStash:
         return record, side, False
-    state, conflicts = apply_parked_wip(side)
-    if state == "conflict":
-        updated = side.model_copy(
-            update={
-                "state": "resolution-required",
-                "wipState": "restore-conflict",
-                "conflictFiles": conflicts,
-            }
-        )
-        record = update_record(
-            store,
-            record,
-            phase=resolution_phase(side_name),
-            side=updated,
-            side_name=side_name,
-        )
-        return record, updated, True
-    if not prove_parked_wip_restored(side, side_branch_head(side)):
-        raise SyncGitProofError(
-            f"{side.side} parked worktree WIP could not be proven restored; its stash is kept"
-        )
-    drop_parked_wip(side)
-    updated = side.model_copy(update={"wipState": "restored", "conflictFiles": ()})
-    record = update_record(store, record, phase=record.phase, side=updated, side_name=side_name)
-    return record, updated, False
+    if content_conflicts(side):
+        return _retain_crashed_reapply(store, record, side_name, side)
+    if _skip_apply_proven(side):
+        return _mark_restored(store, record, side_name, side)
+    if git_status(side):
+        failures, complete = _restoration_failures(side)
+        raise _unproven_restore_error(side, failures, uninventoried=not complete)
+    return _apply_and_prove(store, record, side_name, side)
+
+
+def _retain_parked_conflict(
+    store: SyncOperationStore,
+    record: SyncOperationRecord,
+    side_name: SyncSide,
+    side: SyncSideRecord,
+    digests: dict[str, str] | None = None,
+) -> tuple[SyncOperationRecord, SyncSideRecord, bool]:
+    """Journal a parked-candidate reapply the agent must resolve, keeping the stash.
+
+    A passed ``digests`` map is journaled as-is: an empty map where a crash window
+    leaves the tree unverified, so a later cancel refuses rather than bless owner
+    bytes. Otherwise every dirty path is operation output of this call — a fresh
+    reapply or a scratch-verified crash reapply — and is fingerprinted whole.
+    """
+
+    conflicts = content_conflicts(side)
+    if digests is None:
+        digests = capture_retained_digests(side, include_untracked=True)
+    updated = side.model_copy(
+        update={
+            "state": "resolution-required",
+            "wipState": "restore-conflict",
+            "conflictFiles": conflicts,
+            "retainedTreeDigests": digests,
+        }
+    )
+    record = update_record(
+        store,
+        record,
+        phase=resolution_phase(side_name),
+        side=updated,
+        side_name=side_name,
+    )
+    return record, updated, True
+
+
+def _unproven_restore_error(
+    side: SyncSideRecord, failures: tuple[str, ...], *, uninventoried: bool = False
+) -> SyncGitProofError:
+    """The failed proof: its paths, the kept stash, and the one next action.
+
+    A path the carried head's attributes give a merge of its own is named with it,
+    and a merge git could not make again is named with git's words.
+    """
+
+    logger.error(
+        "sync %s parked WIP unproven on every failed path: %s (stash %s)",
+        side.side,
+        ", ".join(failures),
+        side.wipStash,
+    )
+    named = failures[:MAX_NAMED_SYNC_PATHS]
+    rules = named_merge_rules(side, named)
+    shown = ", ".join(f"{path} (merge={rules[path]})" if path in rules else path for path in named)
+    if len(failures) > MAX_NAMED_SYNC_PATHS:
+        shown += f" and {len(failures) - MAX_NAMED_SYNC_PATHS} more"
+    count = "1 path holds" if len(failures) == 1 else f"{len(failures)} paths hold"
+    fault = reapply_merge_fault(side, side_branch_head(side), named)
+    merge_note = (
+        f" Git could not make the reapply's merge again ({fault}), so no path both sides "
+        "changed could be proven."
+        if fault
+        else ""
+    )
+    inventory_note = (
+        " The recorded stash could not be fully inventoried, so no path beyond the "
+        "journal sample was proven."
+        if uninventoried
+        else ""
+    )
+    return SyncGitProofError(
+        f"{side.side} parked worktree WIP could not be proven restored: {count} none of the "
+        f"parked bytes: {shown}.{merge_note} The parked candidate stays in stash "
+        f"{side.wipStash}; run "
+        f"worktree_sync with resolution_action='cancel' to restore the pre-sync heads and the "
+        f"parked work. Do not edit the worktree until the transaction is closed.{inventory_note}"
+    )
 
 
 def restore_cancelled_wip(
     store: SyncOperationStore, record: SyncOperationRecord
 ) -> SyncOperationRecord:
-    """Return every parked candidate after a rollback restored the pinned pre-sync heads."""
+    """Return every parked candidate after a rollback restored the pinned pre-sync heads.
+
+    Sides the sync already restored are returned again from their kept stash: the
+    cancel discards the tree copy first, so the only surviving copy is reapplied
+    here. No stash is retired here: every entry stays until the cancellation is
+    terminal, so a crash mid-cancel leaves a retry its full restoration authority.
+    """
 
     for side in (record.memory, record.code):
         if side is None or not side.wipStash:
             continue
-        if side.wipState not in {"parked", "restore-conflict"}:
+        if side.wipState not in {"parked", "restore-conflict", "restored"}:
             continue
-        state, conflicts = apply_parked_wip(side)
-        if state != "applied" or conflicts:
-            raise SyncGitProofError(
-                f"{side.side} parked worktree WIP could not be restored after cancellation: "
-                f"{', '.join(conflicts[:30]) or 'the reapply did not apply'}"
-            )
-        drop_parked_wip(side)
+        if not cancelled_wip_restored(side):
+            state, conflicts = apply_parked_wip(side)
+            if state != "applied" or conflicts:
+                raise SyncGitProofError(
+                    f"{side.side} parked worktree WIP could not be restored after cancellation: "
+                    f"{', '.join(conflicts[:30]) or 'the reapply did not apply'}"
+                )
+        _prove_cancelled_restore(side)
+        # The stash's second parent is the index as parked. Content restoration
+        # alone loses the staged/unstaged partition; the heads are now back, so
+        # give that exact index back before publishing the restoration proof.
+        require_git(Path(side.worktree), ["read-tree", f"{side.wipStash}^2"])
         updated = side.model_copy(update={"wipState": "restored", "conflictFiles": ()})
         record = update_record(store, record, phase=record.phase, side=updated, side_name=side.side)
     return record
+
+
+def _prove_cancelled_restore(side: SyncSideRecord) -> None:
+    """Prove every parked path is back before a cancel marks it restored (MIK-R61 rule 8).
+
+    A clean reapply is not proof on its own: the stash is dropped only after the full
+    stash inventory -- never the journal's path sample -- is proven restored. A failed
+    proof keeps the stash and the journal, as today.
+    """
+
+    failures = applied_restore_failures(side, side_branch_head(side))
+    if failures:
+        shown = ", ".join(failures[:MAX_NAMED_SYNC_PATHS])
+        if len(failures) > MAX_NAMED_SYNC_PATHS:
+            shown += f" and {len(failures) - MAX_NAMED_SYNC_PATHS} more"
+        count = "1 path holds" if len(failures) == 1 else f"{len(failures)} paths hold"
+        raise SyncGitProofError(
+            f"{side.side} parked worktree WIP could not be proven restored after "
+            f"cancellation: {count} none of the parked bytes: {shown}. The parked "
+            f"candidate stays in stash {side.wipStash}."
+        )
 
 
 def settle_resolved_parked_wip(
@@ -386,7 +706,9 @@ def settle_resolved_parked_wip(
     """Close a parked-candidate conflict the agent resolved in the worktree.
 
     The merge itself already committed, so the resolved candidate stays uncommitted for the
-    owner of that worktree; only the stash entry is retired once no unmerged path remains.
+    owner of that worktree. The stash entry is kept: the resolved bytes differ from the
+    parked ones, so a later cancel reads them as owner state and refuses rather than
+    discarding them.
     """
 
     conflicts = content_conflicts(side)
@@ -396,8 +718,14 @@ def settle_resolved_parked_wip(
             f"{', '.join(conflicts[:30])}"
         )
     discard_memory_cache_changes(side)
-    drop_parked_wip(side)
-    updated = side.model_copy(update={"wipState": "restored", "conflictFiles": ()})
+    updated = side.model_copy(
+        update={
+            "wipState": "restored",
+            "conflictFiles": (),
+            "omissionReport": "",
+            "omittedItems": 0,
+        }
+    )
     return update_record(store, record, phase=record.phase, side=updated, side_name=side_name)
 
 

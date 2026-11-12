@@ -32,11 +32,12 @@ exactly the uncommitted delta its name claims.
 
 from __future__ import annotations
 
+import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import JSONResponse, Response
 
 from agents_remember.errors import AuthorityError
@@ -44,32 +45,46 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
 from agents_remember.kernel.sidecar_pairing import confine_rel, route_sidecar_status
+from agents_remember.serving.changeset_cache import ChangesetCache, cached_read, observe_inputs
+from agents_remember.serving.changeset_comparison import comparison_changeset, comparison_file_diff
 from agents_remember.serving.changeset_endpoints import (
     NOT_RECORDED,
     RecordedEndpointAbsent,
     recorded_committed_range,
 )
+from agents_remember.serving.changeset_reads import change_counters as _sum
+from agents_remember.serving.changeset_reads import (
+    changed_files_with_counts,
+    commit_text_or_none,
+    head_commit,
+    master_changed_files_with_counts,
+    working_text,
+)
+from agents_remember.serving.changeset_scheduler import _BoundedReads, _read_off_the_loop
+from agents_remember.serving.master_counter import (
+    CounterRoute,
+    CounterSource,
+    MasterChangesetRef,
+    prepared_master_pins,
+)
 from agents_remember.serving.master_net_generation import (
     MASTER_NET_SCOPE,
     MasterEndpointAbsent,
     MasterNetPins,
+    MasterNetSelection,
     load_master_contract,
     master_task_root,
     select_master_net,
 )
 from agents_remember.serving.response_contract import (
-    SCOPED_READ_RESPONSES,
+    CHANGESET_READ_RESPONSES,
+    ComparisonChangeSet,
     FileDiff,
     LeafChangeSet,
     MasterChangeSet,
     TaskChangeSet,
 )
 from agents_remember.serving.scope import FileScope, language_for, run_scoped
-from agents_remember.worktrees.modules.git import (
-    changed_files_with_counts,
-    commit_text_or_none,
-    head_commit,
-)
 from agents_remember.worktrees.task_resolver import slugify
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
@@ -86,15 +101,6 @@ def _require_contract(scope: FileScope) -> WorktreeContract:
         return load_contract(scope.contract_path)
     except (ContractError, OSError) as err:
         raise FileNotFoundError(str(scope.contract_path)) from err
-
-
-def _sum(files: list[dict[str, Any]]) -> dict[str, int]:
-    """Counters for one changed set: file count + summed insertions/deletions (binary -> 0)."""
-    return {
-        "files": len(files),
-        "insertions": sum(int(f["insertions"] or 0) for f in files),
-        "deletions": sum(int(f["deletions"] or 0) for f in files),
-    }
 
 
 def task_changeset(scope: FileScope) -> dict[str, Any]:
@@ -136,7 +142,7 @@ def file_diff(scope: FileScope, kind: str, rel: str) -> dict[str, Any]:
     relp = confine_rel(root, rel)
     before = commit_text_or_none(root, base, relp) if base else None
     after_path = root / relp
-    after = after_path.read_text(errors="replace") if after_path.is_file() else None
+    after = working_text(after_path)
     return {
         "scope": scope.scope_id,
         "kind": "memory" if kind == "memory" else "code",
@@ -160,7 +166,7 @@ def _leaf_counts(contract: WorktreeContract, *, memory: bool) -> list[dict[str, 
     if live is not None and live.exists():
         return changed_files_with_counts(live, base, None)
     if repo is not None and head:
-        return changed_files_with_counts(repo, base, head)
+        return master_changed_files_with_counts(repo, base, head)
     return []
 
 
@@ -235,13 +241,83 @@ def _net_diff(
             kind="no-repository",
         )
     try:
-        return changed_files_with_counts(repo_path, base, tip)
+        return master_changed_files_with_counts(repo_path, base, tip)
     except (RuntimeError, OSError) as err:
         raise MasterEndpointAbsent(
             f"the master {master!r} net {side} range {base}..{tip} was validated but cannot "
             f"be read ({err}); the net is refused rather than reported as an empty range",
             kind="unresolvable",
         ) from err
+
+
+def _master_onboarding_root(contract: WorktreeContract | None) -> Path | None:
+    """The onboarding root whose route indexes decide the net's ``hasSidecar`` flags."""
+
+    if contract is None or contract.memory_repo_path is None:
+        return None
+    candidate = contract.memory_repo_path / "onboarding"
+    return candidate if candidate.is_dir() else None
+
+
+def _master_net(
+    repo_id: str,
+    contract: WorktreeContract | None,
+    selection: MasterNetSelection,
+    master: str,
+) -> dict[str, Any]:
+    """The endpoint-keyed net half of a master change-set: both diffs, the sidecar flags.
+
+    A diff between two commit ids is fixed by those ids, so the net is served again from
+    its endpoint digest with no observation and no native read on a hit (MIK-R176 v2
+    rule 5). What the endpoints do *not* fix is the onboarding state the ``hasSidecar``
+    flags are read from -- the memory repository's working tree, not its commits -- so
+    every path the sidecar decision consults is observed before it is read: a moved
+    route index or sidecar changes the next read's answer instead of leaving a stale
+    flag. The leaf breakdown stays per-request (see :func:`master_changeset`): a live
+    leaf's counters move with its worktree and are no part of this net.
+    """
+
+    endpoints = selection.endpoints
+    onboarding_root = _master_onboarding_root(contract)
+    observed: dict[Path, None] = {}
+
+    def observe(path: Path) -> None:
+        observed.setdefault(path, None)
+        observe_inputs((path,))
+
+    def produce() -> dict[str, Any]:
+        code = _net_diff(
+            contract.code_repo_path if contract is not None else None,
+            endpoints.code_base,
+            endpoints.code_tip,
+            side="code",
+            master=master,
+        )
+        for entry in code:
+            entry["hasSidecar"] = (
+                onboarding_root is not None
+                and route_sidecar_status(onboarding_root, str(entry["path"]), observe=observe)
+                == "present"
+            )
+        memory = _net_diff(
+            contract.memory_repo_path if contract is not None else None,
+            endpoints.memory_base,
+            endpoints.memory_tip,
+            side="memory",
+            master=master,
+        )
+        return {
+            "code": code,
+            "memory": memory,
+            "counters": {"code": _sum(code), "memory": _sum(memory)},
+        }
+
+    return cached_read(
+        ("master-net", repo_id, master, selection.digest, str(onboarding_root or "")),
+        (),
+        produce,
+        additional_inputs=lambda: tuple(observed),
+    )
 
 
 def master_changeset(
@@ -265,7 +341,12 @@ def master_changeset(
     ``leaves`` keeps the optional per-leaf counter breakdown alongside it, each row labelled
     ``committed`` or ``working``. Callers that render only the net range can skip those extra
     per-leaf git diffs. An in-flight leaf not yet integrated is excluded from the net.
+
+    The net itself is keyed by those endpoint commits (see :func:`_master_net`), so asking for
+    the same generation again recomputes nothing; only the live leaf breakdown is read per
+    request.
     """
+
     selection = select_master_net(config, repo_id, master, pins or MasterNetPins())
     if selection is None:
         return {
@@ -279,37 +360,14 @@ def master_changeset(
             "scope": MASTER_NET_SCOPE,
         }
     contract = load_master_contract(config, repo_id, master)
-    onboarding_root: Path | None = None
-    if contract is not None and contract.memory_repo_path is not None:
-        candidate = contract.memory_repo_path / "onboarding"
-        if candidate.is_dir():
-            onboarding_root = candidate
+    net = _master_net(repo_id, contract, selection, master)
     endpoints = selection.endpoints
-    code = _net_diff(
-        contract.code_repo_path if contract is not None else None,
-        endpoints.code_base,
-        endpoints.code_tip,
-        side="code",
-        master=master,
-    )
-    memory = _net_diff(
-        contract.memory_repo_path if contract is not None else None,
-        endpoints.memory_base,
-        endpoints.memory_tip,
-        side="memory",
-        master=master,
-    )
-    for entry in code:
-        entry["hasSidecar"] = (
-            onboarding_root is not None
-            and route_sidecar_status(onboarding_root, str(entry["path"])) == "present"
-        )
     return {
         "master": master,
         "leaves": _master_leaf_summaries(config, repo_id, master) if include_leaves else [],
-        "code": code,
-        "memory": memory,
-        "counters": {"code": _sum(code), "memory": _sum(memory)},
+        "code": net["code"],
+        "memory": net["memory"],
+        "counters": net["counters"],
         "generation": {
             "codeBase": endpoints.code_base,
             "codeTip": endpoints.code_tip,
@@ -442,14 +500,8 @@ def _leaf_range(
 
 def _leaf_onboarding_root(contract: WorktreeContract, mode: str) -> Path | None:
     """The onboarding root for sidecar pairing: the live worktree's for ``working``, else the repo's."""
-    if mode == "working":
-        candidates = [contract.memory_worktree, contract.memory_repo_path]
-    else:
-        candidates = [contract.memory_repo_path, contract.memory_worktree]
-    for cand in candidates:
-        if cand is not None and (cand / "onboarding").is_dir():
-            return cand / "onboarding"
-    return None
+    memory_root = contract.memory_worktree if mode == "working" else contract.memory_repo_path
+    return None if memory_root is None else memory_root / "onboarding"
 
 
 def leaf_changeset(
@@ -515,6 +567,7 @@ class ChangesetFileRef:
     master: str = ""
     leaf: str = ""
     mode: str = ""
+    comparison: int | None = None
     code_base: Annotated[str, Query(alias="codeBase")] = ""
     code_tip: Annotated[str, Query(alias="codeTip")] = ""
     memory_base: Annotated[str, Query(alias="memoryBase")] = ""
@@ -547,35 +600,6 @@ class MasterFileRef:
     kind: str = "code"
     path: str = ""
     pins: MasterNetPins = field(default_factory=MasterNetPins)
-
-
-@dataclass(frozen=True)
-class MasterChangesetRef:
-    """Which master net, at which generation, with how much leaf detail.
-
-    ``pins`` names the exact recorded endpoints a listing published; empty means the declared
-    integrated result. ``include_leaves`` keeps the per-leaf counter breakdown alongside the
-    net for callers that render it.
-    """
-
-    repo: str
-    master: str
-    include_leaves: Annotated[bool, Query(alias="includeLeaves")] = True
-    code_base: Annotated[str, Query(alias="codeBase")] = ""
-    code_tip: Annotated[str, Query(alias="codeTip")] = ""
-    memory_base: Annotated[str, Query(alias="memoryBase")] = ""
-    memory_tip: Annotated[str, Query(alias="memoryTip")] = ""
-
-
-def _pins_from_master_ref(ref: MasterChangesetRef) -> MasterNetPins:
-    """The master generation pins a change-set selector carries, if any."""
-
-    return MasterNetPins(
-        code_base=ref.code_base,
-        code_tip=ref.code_tip,
-        memory_base=ref.memory_base,
-        memory_tip=ref.memory_tip,
-    )
 
 
 def _master_json(produce: Any) -> Response:
@@ -614,7 +638,7 @@ def leaf_file_diff(config: McpRuntimeConfig, ref: ChangesetFileRef) -> dict[str,
         relp = confine_rel(worktree, rel)
         before = commit_text_or_none(worktree, head_commit(worktree, "HEAD"), relp)
         after_path = worktree / relp
-        after = after_path.read_text(errors="replace") if after_path.is_file() else None
+        after = working_text(after_path)
     else:
         recorded = recorded_committed_range(contract, memory=memory)
         relp = confine_rel(recorded.repository, rel)
@@ -630,7 +654,16 @@ def leaf_file_diff(config: McpRuntimeConfig, ref: ChangesetFileRef) -> dict[str,
     }
 
 
-def _leaf_json(produce: Any, master: str, mode: str) -> Response:
+def _comparison_mode_refusal(comparison: int | None, mode_present: bool) -> Response | None:
+    if comparison is None or not mode_present:
+        return None
+    return JSONResponse(
+        {"status": "bad-request", "detail": "comparison and mode cannot be combined"},
+        status_code=400,
+    )
+
+
+def _leaf_json(produce: Any, master: str, mode: str, comparison: int | None = None) -> Response:
     """Validate the leaf selector, then run ``produce`` with the change-set 400/404 status idiom.
 
     A leaf change-set is qualified by ``master`` (which scopes the contract search) and needs an
@@ -641,7 +674,10 @@ def _leaf_json(produce: Any, master: str, mode: str) -> Response:
         return JSONResponse(
             {"status": "bad-request", "detail": "leaf change-set needs master"}, status_code=400
         )
-    if mode not in ("committed", "working"):
+    conflict = _comparison_mode_refusal(comparison, bool(mode))
+    if conflict is not None:
+        return conflict
+    if comparison is None and mode not in ("committed", "working"):
         return JSONResponse(
             {"status": "bad-request", "detail": "leaf change-set needs mode=committed|working"},
             status_code=400,
@@ -654,66 +690,181 @@ def _leaf_json(produce: Any, master: str, mode: str) -> Response:
         return JSONResponse({"status": "not-found", "path": str(err)}, status_code=404)
 
 
-def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
+@dataclass(frozen=True)
+class ChangesetTaskRef:
+    repo: str
+    scope: str = "mainline"
+    master: str = ""
+    leaf: str = ""
+    mode: str = ""
+    comparison: int | None = None
+
+
+def _comparison_response(
+    config: McpRuntimeConfig, ref: ChangesetTaskRef | ChangesetFileRef
+) -> Response:
+    if not ref.leaf:
+        return JSONResponse(
+            {"status": "bad-request", "detail": "comparison needs master and leaf"}, status_code=400
+        )
+
+    def produce() -> dict[str, Any]:
+        contract = _load_leaf_contract(config, ref.repo, ref.master, ref.leaf)
+        if contract is None:
+            raise FileNotFoundError(f"no leaf contract for {ref.leaf!r}")
+        assert ref.comparison is not None
+        if isinstance(ref, ChangesetFileRef):
+            return comparison_file_diff(contract, ref.comparison, ref.kind, ref.path)
+        return comparison_changeset(contract, ref.comparison)
+
+    return _leaf_json(produce, ref.master, ref.mode, ref.comparison)
+
+
+def _task_response(config: McpRuntimeConfig, ref: ChangesetTaskRef) -> Response:
+    if ref.comparison is not None:
+        return _comparison_response(config, ref)
+    if ref.leaf:
+        return _leaf_json(
+            lambda: leaf_changeset(config, ref.repo, ref.master, ref.leaf, ref.mode),
+            ref.master,
+            ref.mode,
+        )
+    return run_scoped(task_changeset, config, ref.repo, ref.scope)
+
+
+def _file_response(config: McpRuntimeConfig, ref: ChangesetFileRef) -> Response:
+    if ref.comparison is not None:
+        return _comparison_response(config, ref)
+    if ref.leaf:
+        return _leaf_json(lambda: leaf_file_diff(config, ref), ref.master, ref.mode)
+    if ref.master:
+        return _master_json(
+            lambda: master_file_diff(
+                config,
+                MasterFileRef(
+                    repo=ref.repo,
+                    master=ref.master,
+                    kind=ref.kind,
+                    path=ref.path,
+                    pins=_pins_from_ref(ref),
+                ),
+            )
+        )
+    return run_scoped(lambda fs: file_diff(fs, ref.kind, ref.path), config, ref.repo, ref.scope)
+
+
+# The route family's own threads. Reading a change set can run Git for minutes, and the
+# server's default pool also carries every background loop's blocking work (MIK-R176 rule 3):
+# these reads may not take another route's threads.
+CHANGESET_READ_THREADS = 8
+# Reads admitted beyond the running threads wait in this queue; the sum is the family's
+# hard admission cap (L174-R1-03). A request past it gets an explicit refusal, and a queued
+# read whose client left never runs its work (L174-R1-02).
+CHANGESET_READ_PENDING = 8
+
+
+def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> ChangesetCache:
     """Register the read-only change-set routes. Must be called BEFORE the greedy static mount.
 
     The change-set is selected by precedence ``leaf > master > scope`` (a ``leaf`` view is the per-leaf
     committed/working delta, ``master`` the series net, ``scope`` one active enclosure). ``leaf`` is
     qualified by ``master`` and requires a ``mode``; both ``leaf`` and ``master`` go through the
     JSONResponse 400/404 idiom rather than ``run_scoped``.
+
+    The blocking read runs in this route family's own bounded pool, never on the event loop's
+    shared default executor (MIK-R176 rule 3): a slow change-set read cannot take the threads of
+    another route, and one task's read cannot delay another's. The route notices a client that
+    went away and ends the read with the Git process it started (rule 4).
     """
+
+    from agents_remember.serving.changeset_ranges import (  # noqa: PLC0415 - composition
+        runtime_master_ranges,
+    )
+
+    cache = ChangesetCache(master_ranges=runtime_master_ranges(config))
+    reads = _BoundedReads(
+        threads=CHANGESET_READ_THREADS,
+        pending=CHANGESET_READ_PENDING,
+        name="changeset-read",
+    )
+    weakref.finalize(app, reads.shutdown)
 
     # Two success shapes: the leaf view adds ``mode`` to the enclosure view's body, and the
     # ``leaf`` selector is what picks between them.
     @app.get(
         "/api/changeset/task",
-        response_model=LeafChangeSet | TaskChangeSet,
-        responses=SCOPED_READ_RESPONSES,
+        response_model=ComparisonChangeSet | LeafChangeSet | TaskChangeSet,
+        responses=CHANGESET_READ_RESPONSES,
     )
-    def api_changeset_task(
-        repo: str, scope: str = "mainline", master: str = "", leaf: str = "", mode: str = ""
+    async def api_changeset_task(
+        ref: Annotated[ChangesetTaskRef, Depends()], request: Request
     ) -> Response:
-        if leaf:
-            return _leaf_json(
-                lambda: leaf_changeset(config, repo, master, leaf, mode), master, mode
-            )
-        return run_scoped(task_changeset, config, repo, scope)
+        conflict = _comparison_mode_refusal(ref.comparison, "mode" in request.query_params)
+        if conflict is not None:
+            return conflict
+        return await _read_off_the_loop(
+            request,
+            reads,
+            lambda cancellation: cache.response(
+                request, lambda: _task_response(config, ref), abandoned=cancellation
+            ),
+        )
 
-    @app.get("/api/changeset/file-diff", response_model=FileDiff, responses=SCOPED_READ_RESPONSES)
-    def api_changeset_file_diff(ref: Annotated[ChangesetFileRef, Depends()]) -> Response:
-        if ref.leaf:
-            return _leaf_json(lambda: leaf_file_diff(config, ref), ref.master, ref.mode)
-        if ref.master:
-            # Series net diff (master base -> selected result); no enclosure scope, so it does
-            # not go through run_scoped -- the shared master mapping below carries the same
-            # status idiom. Generation pins freeze the AFTER side to the listed generation.
-            return _master_json(
-                lambda: master_file_diff(
-                    config,
-                    MasterFileRef(
-                        repo=ref.repo,
-                        master=ref.master,
-                        kind=ref.kind,
-                        path=ref.path,
-                        pins=_pins_from_ref(ref),
-                    ),
-                )
-            )
-        return run_scoped(lambda fs: file_diff(fs, ref.kind, ref.path), config, ref.repo, ref.scope)
+    @app.get(
+        "/api/changeset/file-diff", response_model=FileDiff, responses=CHANGESET_READ_RESPONSES
+    )
+    async def api_changeset_file_diff(
+        ref: Annotated[ChangesetFileRef, Depends()], request: Request
+    ) -> Response:
+        conflict = _comparison_mode_refusal(ref.comparison, "mode" in request.query_params)
+        if conflict is not None:
+            return conflict
+        return await _read_off_the_loop(
+            request,
+            reads,
+            lambda cancellation: cache.response(
+                request, lambda: _file_response(config, ref), abandoned=cancellation
+            ),
+        )
 
     # An unknown master (no series contract) degrades to empty lists rather than refusing. A
     # master the contract names but whose code endpoints are missing is refused by name instead
     # of being answered from a later branch tip.
     @app.get(
-        "/api/changeset/master", response_model=MasterChangeSet, responses=SCOPED_READ_RESPONSES
+        "/api/changeset/master", response_model=MasterChangeSet, responses=CHANGESET_READ_RESPONSES
     )
-    def api_changeset_master(ref: Annotated[MasterChangesetRef, Depends()]) -> Response:
-        return _master_json(
-            lambda: master_changeset(
-                config,
-                ref.repo,
-                ref.master,
-                include_leaves=ref.include_leaves,
-                pins=_pins_from_master_ref(ref),
-            )
+    async def api_changeset_master(
+        ref: Annotated[MasterChangesetRef, Depends()], request: Request
+    ) -> Response:
+        preparation = cache.master_preparation
+        if preparation is None:
+            raise RuntimeError("master preparation was not composed")
+        pins = await prepared_master_pins(request, preparation, ref, _master_json)
+        if isinstance(pins, Response):
+            return pins
+        return await _read_off_the_loop(
+            request,
+            reads,
+            lambda cancellation: cache.response(
+                request,
+                lambda: _master_json(
+                    lambda: master_changeset(
+                        config,
+                        ref.repo,
+                        ref.master,
+                        include_leaves=ref.include_leaves,
+                        pins=pins,
+                    )
+                ),
+                abandoned=cancellation,
+            ),
         )
+
+    from agents_remember.serving.master_preparation import (  # noqa: PLC0415 - composition
+        MasterPreparation,
+    )
+
+    counter_reader = CounterSource(_net_diff, _master_leaf_summaries).read
+    cache.master_preparation = MasterPreparation(config, cache, counter_reader)
+    CounterRoute(config, cache, reads, counter_reader, _master_json).register(app)
+    return cache

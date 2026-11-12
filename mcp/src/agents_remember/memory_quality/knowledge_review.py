@@ -85,8 +85,9 @@ def knowledge_review_section(summaries: tuple[AssessmentSummary, ...]) -> Knowle
     limitations = _limitations(summaries)
     lines = [f"## {KNOWLEDGE_REVIEW_HEADING}", ""]
     lines.append(
-        "Report-only. This section records what the curator-coherence authority holds; it adds no "
-        "finding, no gate and nothing to `curatorActionableCount`."
+        "Report-only: this section gates nothing; the gate's open items are in the worklist section. "
+        "It records what the curator-coherence authority holds and adds no finding or "
+        "`curatorActionableCount`."
     )
     lines.append("")
     lines.append(f"- Recorded assessments: {sum(item.assessmentCount for item in summaries)}")

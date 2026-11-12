@@ -22,7 +22,7 @@ from agents_remember.kernel.coordination_context_resolver import (
     resolve_storage_for_source,
 )
 from agents_remember.kernel.git_command import run_git
-from agents_remember.memory_quality.integrity.onboarding_drift_check.drift import (
+from agents_remember.memory_quality.integrity.onboarding_drift_check.inline import (
     extract_inline_onboarding_block,
 )
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
@@ -283,8 +283,6 @@ def main(argv: list[str] | None = None) -> int:
     # official memory repo, and they differ for a leaf's memory worktree, whose settings live in
     # the official repo the enclosure was cut from (D-34).
     onboarding_root = context.onboarding_root if requested_root is None else requested_root
-    if not filesystem.exists(onboarding_root):
-        parser.error(f"onboarding root does not exist: {onboarding_root}")
     result = check_missing_onboarding(
         code_repository_root=code_repository_root,
         onboarding_root=onboarding_root,

@@ -23,6 +23,9 @@ decides nothing else.
   the snapshot's identity is resolved from the file itself. That query does not expand families, so a
   path's answer cannot fail on the size of the scope around it. A half a generation did not retain is
   not read: its absence is the record's own statement, not a file to look for elsewhere.
+* **Proofs of a tree comparison.** A tree comparison's knowledge is the derived index of each memory
+  tree (MIK-R23); a proof entry anchored at the path links it too, so a proof's focused card opens its
+  full file like a realization's (MIK-R31). A dataset records no proofs and is asked nothing more.
 * **What is not a criterion.** Whether the anchor's recorded bytes still match the tree is an
   observation the realization's own read reports; the link itself is authored data, and the content
   read beside it shows the bytes the requested endpoints actually hold.
@@ -55,6 +58,12 @@ from agents_remember.application.review_comparison_generation import (
     read_manifest,
     task_root_for_review,
 )
+from agents_remember.application.review_tree_comparison import (
+    comparison_directory,
+    comparison_records,
+    reopened_trees,
+    tree_resolution,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.read_queries import fetch_realizations_at_path
@@ -85,6 +94,9 @@ class RealizationLink:
     linking_sides: tuple[KnowledgeSide, ...]
     detail: str
     determined: bool = True
+    # Every half that was not read does not exist at all: the leaf's knowledge was never created, so
+    # the remedy is to initialize it rather than to restore or repair a damaged snapshot.
+    never_initialized: bool = False
 
     @property
     def linked(self) -> bool:
@@ -96,6 +108,7 @@ class _SideReading:
     side: KnowledgeSide
     state: _SideState
     detail: str
+    absent: bool = False
 
 
 @dataclass(frozen=True)
@@ -125,30 +138,50 @@ def recorded_realization_link(
                 "not matched to a nearby spelling"
             ),
         )
-    try:
-        namespace = review_namespace(
-            bound.resolution.repository_id, bound.resolution.candidate_database
-        )
-    except KnowledgeStorageError as error:
-        return RealizationLink(
-            linking_sides=(),
-            detail=(
-                f"the namespace of {bound.description} could not be read from the record beside "
-                f"its dataset ({error}), so neither half was read"
-            ),
-            determined=False,
-        )
     readings = tuple(
-        _side_reading(side, database, namespace, request.path) for side, database in _halves(bound)
+        _bound_side_reading(bound, side, database, request.path)
+        for side, database in _halves(bound)
     )
+    return _link_of(bound, readings)
+
+
+def _bound_side_reading(
+    bound: _BoundKnowledge, side: KnowledgeSide, database: Path, path: str
+) -> _SideReading:
+    """A positive link survives a lost sibling side; unavailable/partial trees prove no absence."""
+    resolution = bound.resolution
+    for name, state, detail in resolution.knowledge_unavailable:
+        if name == side:
+            return _SideReading(side, "unread", f"the {side} knowledge side is {state}: {detail}")
+    trees = resolution.trees
+    wire = None if trees is None else next(one for one in trees.sides() if one.side == side)
+    if wire is not None and wire.state != "available":
+        return _SideReading(
+            side, "unread", f"the {side} memory tree {wire.tree} is {wire.state}: {wire.detail}"
+        )
+    namespace = review_namespace(resolution.repository_id, database)
+    reading = _side_reading(side, database, namespace, path)
+    if wire is not None and wire.index_state == "partial" and reading.state != "linked":
+        return _SideReading(
+            side,
+            "unread",
+            f"the {side} memory tree {wire.tree} has a partial index: {wire.problems}",
+        )
+    return reading
+
+
+def _link_of(bound: _BoundKnowledge, readings: tuple[_SideReading, ...]) -> RealizationLink:
+    """The answer the halves' readings give: who links, whether the negative was measured."""
+
     linking: tuple[KnowledgeSide, ...] = tuple(
         reading.side for reading in readings if reading.state == "linked"
     )
-    unread = any(reading.state == "unread" for reading in readings)
+    unread = [reading for reading in readings if reading.state == "unread"]
     return RealizationLink(
         linking_sides=linking,
         detail=_sentence(bound, readings),
         determined=bool(linking) or not unread,
+        never_initialized=bool(unread) and all(reading.absent for reading in unread),
     )
 
 
@@ -187,6 +220,20 @@ def _bound_knowledge(
             description="the knowledge this leaf's review binds to the requested pair",
         )
     task_root = task_root_for_review(config, request.repository_id, request.master)
+    if resolved.contract is not None:
+        for record in reversed(comparison_records(task_root, resolved.leaf_id)):
+            if (record.code_base.commit or record.code_base.tree, record.code_candidate.tree) != (
+                request.before_code_tree_id,
+                request.after_code_tree_id,
+            ):
+                continue
+            trees = reopened_trees(
+                config.coordination_root, record, comparison_directory(task_root, resolved.leaf_id)
+            )
+            return _BoundKnowledge(
+                resolution=tree_resolution(resolved.repository_id, resolved.contract, trees),
+                description=f"the memory trees recorded by comparison {record.number} for exactly the requested source pair",
+            )
     for ref in reversed(read_generation_refs(task_root, resolved.leaf_id)):
         try:
             manifest = read_manifest(ref.directory / COMPARISON_MANIFEST_NAME)
@@ -257,12 +304,15 @@ def _side_reading(side: KnowledgeSide, database: Path, namespace: str, path: str
     """
 
     if not database.is_file():
-        return _SideReading(side, "unread", f"the {side} snapshot is absent at {database}")
+        return _SideReading(
+            side, "unread", f"the {side} snapshot is absent at {database}", absent=True
+        )
     try:
         context = open_read_context(database, namespace)
         connection = open_read_only_database(database)
         try:
             rows = fetch_realizations_at_path(connection, context.repository_id, path)
+            proved = not rows and _proof_at_path(connection, path)
         finally:
             connection.close()
     except (KnowledgeStorageError, OSError, ValueError, apsw.Error) as error:
@@ -273,7 +323,28 @@ def _side_reading(side: KnowledgeSide, database: Path, namespace: str, path: str
         )
     if rows:
         return _SideReading(side, "linked", f"the {side} snapshot records a realization here")
+    if proved:
+        return _SideReading(side, "linked", f"the {side} snapshot records a proof here")
     return _SideReading(side, "not_linked", f"the {side} snapshot records none")
+
+
+def _proof_at_path(connection: apsw.Connection, path: str) -> bool:
+    """Whether a derived knowledge index (MIK-R23) records a proof entry anchored at ``path``.
+
+    Proof entries (MIK-R28) have no table in the store's logical schema, so a tree comparison's index
+    answers them from its own ``ix_entry``; a dataset has no such table and answers nothing here. A
+    proof's card offers its full file like every other card (MIK-R31 rule 5).
+    """
+
+    listed = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ix_entry'"
+    ).fetchall()
+    if not listed:
+        return False
+    found = connection.execute(
+        "SELECT 1 FROM ix_entry WHERE kind = 'proof' AND path = ? LIMIT 1", (path,)
+    ).fetchall()
+    return bool(found)
 
 
 def _sentence(bound: _BoundKnowledge, readings: tuple[_SideReading, ...]) -> str:

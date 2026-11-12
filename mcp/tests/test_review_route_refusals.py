@@ -185,7 +185,9 @@ def test_a_typed_refusal_travels_whole_in_the_body_of_its_own_status() -> None:
 def test_the_entry_route_maps_each_refusal_code_onto_its_own_status(code: str, status: int) -> None:
     """The client reads the body whatever the status; the status family stays the route's own."""
 
-    def refuses(_repository_id: str, _master: str, _leaf_id: str) -> ReviewEntryListResult:
+    def refuses(
+        _repository_id: str, _master: str, _leaf_id: str, _number: int | None
+    ) -> ReviewEntryListResult:
         return ReviewEntryListResult(
             state="refused",
             repository_id=TASK["repo"],
@@ -202,3 +204,28 @@ def test_the_entry_route_maps_each_refusal_code_onto_its_own_status(code: str, s
     assert body["entries"] == []
     assert body["refusal"]["code"] == code
     assert body["refusal"]["next_action"].strip()
+
+
+def test_the_entry_route_refuses_a_negative_comparison_number_by_name() -> None:
+    """MIK-R89 v2 rule 10: a number no record can carry is the route's own actionable 400."""
+
+    asked: list[int | None] = []
+
+    def lists(
+        _repository_id: str, _master: str, _leaf_id: str, number: int | None
+    ) -> ReviewEntryListResult:
+        asked.append(number)
+        return ReviewEntryListResult(
+            state="entries", repository_id=TASK["repo"], master=TASK["master"], leaf_id=TASK["leaf"]
+        )
+
+    client = served(None, lists)
+    refused = client.get(KNOWLEDGE_REVIEW_ENTRIES_ROUTE, params={**TASK, "comparison": "-1"})
+
+    assert refused.status_code == 400
+    body = refused.json()
+    assert body["status"] == "bad-request" and body["offendingInput"] == "-1"
+    assert all(body[field].strip() for field in ACTIONABLE)
+    assert asked == []
+    numbered = client.get(KNOWLEDGE_REVIEW_ENTRIES_ROUTE, params={**TASK, "comparison": "3"})
+    assert numbered.status_code == 200 and asked == [3]

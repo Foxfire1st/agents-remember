@@ -43,6 +43,7 @@ class TaskDocumentPayloadCache:
         paths: Iterable[Path],
         *,
         read_payload: PayloadReader,
+        prune: bool = True,
     ) -> list[tuple[Path, Payload]]:
         key = str(tasks_root)
         entries = self._roots.setdefault(key, {})
@@ -73,9 +74,21 @@ class TaskDocumentPayloadCache:
             else:
                 entries.pop(path, None)
             docs.append((path, payload))
-        for stale in [path for path in entries if path not in seen]:
-            del entries[stale]
+        if prune:
+            for stale in [path for path in entries if path not in seen]:
+                del entries[stale]
         return docs
+
+    def cached(self, tasks_root: Path) -> list[tuple[Path, Payload]]:
+        """Every retained payload under ``tasks_root``, with no filesystem reads (F09).
+
+        Path-directed incremental readers use this for dependency closure (master
+        graphs, leaf maps) over the corpus without re-listing it; only the affected
+        paths are stat-checked and re-parsed through :meth:`payloads`.
+        """
+        return [
+            (path, entry.payload) for path, entry in self._roots.get(str(tasks_root), {}).items()
+        ]
 
     def entry_count(self, tasks_root: Path) -> int:
         return len(self._roots.get(str(tasks_root), ()))

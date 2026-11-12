@@ -35,7 +35,7 @@ that is a programming error at the call site rather than a modeled read failure.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -71,7 +71,7 @@ from agents_remember.memory.knowledge.refusals import (
     KnowledgeStorageError,
     selected_input_unavailable_refusal,
 )
-from agents_remember.memory.knowledge.schema_generations import generation_of_database
+from agents_remember.memory.knowledge.schema import generation_of_database
 from agents_remember.models.knowledge.context import KnowledgeSchemaIdentity
 from agents_remember.models.knowledge.read import (
     KNOWLEDGE_READ_POLICY_VERSION,
@@ -93,20 +93,26 @@ from agents_remember.models.knowledge.read import (
 )
 from agents_remember.models.knowledge.result import KnowledgeRefusal
 
-__all__ = ["open_read_context", "read_knowledge_scope", "read_row_counts"]
+__all__ = [
+    "open_read_context",
+    "read_knowledge_scope",
+    "read_row_counts",
+    "select_knowledge_scope",
+]
 
 # The one statement shape this module runs that changes nothing: it counts a canonical table so a
 # caller (and the evidence) can prove a refused read persisted nothing.
 ROW_COUNT_TEMPLATE = "SELECT count(*) FROM {table}"
 
 
-def open_read_context(
+def open_read_context(  # noqa: PLR0913 -- the code source travels as its three named fields
     database_path: Path,
     repository_id: str,
     *,
     repository_root: Path | None = None,
     code_tree_id: str | None = None,
     task_ref: str | None = None,
+    code_state: Literal["commit", "working-tree"] | None = None,
 ) -> KnowledgeReadContext:
     """Resolve one read context from the identity the dataset at ``database_path`` actually holds.
 
@@ -133,6 +139,7 @@ def open_read_context(
         repository_root=None if repository_root is None else str(repository_root),
         code_tree_id=code_tree_id,
         task_ref=task_ref,
+        code_state=code_state,
     )
 
 
@@ -156,18 +163,41 @@ def read_knowledge_scope(
     signature does not have.
     """
 
-    path = Path(database_path)
+    return _guarded(
+        Path(database_path), context, lambda path: _read_inside_snapshot(path, context, request)
+    )
+
+
+def select_knowledge_scope(
+    database_path: Path, context: KnowledgeReadContext, seed: KnowledgeReadSeed
+) -> SelectedScope | KnowledgeReadResult:
+    """Select the whole recorded scope a seed names, verified as :func:`read_knowledge_scope` is.
+
+    The snapshot, namespace and schema checks, the absence refusals and the failure mapping are the
+    ones every bounded page of this selection is built under; only the paging is left to the
+    caller, which cuts the ordered ``items`` to its own bound (MIK-R02). A refusal is returned as
+    the same typed refused result the paged read returns.
+    """
+
+    return _guarded(Path(database_path), context, lambda path: _selected_scope(path, context, seed))
+
+
+def _guarded[T](
+    path: Path, context: KnowledgeReadContext, operation: Callable[[Path], T]
+) -> T | KnowledgeReadResult:
+    """Run one read of the file at ``path``, turning every modeled failure into its typed refusal."""
+
     if not path.is_file():
         return _refused(
             context,
             selected_input_unavailable_refusal(
                 "read_knowledge_scope",
-                f"the selected knowledge database is absent or is not a file: {path}",
+                f"the selected knowledge index is absent or is not a file: {path}",
                 record_id=str(path),
             ),
         )
     try:
-        return _read_inside_snapshot(path, context, request)
+        return operation(path)
     except SelectionIncomplete as error:
         return _refused(
             context, selection_incomplete_refusal(item_count=error.item_count, bound=error.bound)
@@ -186,10 +216,21 @@ def read_knowledge_scope(
             context,
             selected_input_unavailable_refusal(
                 "read_knowledge_scope",
-                f"the selected knowledge database could not be read: {error}",
+                f"the selected knowledge index could not be read: {error}",
                 record_id=str(path),
             ),
         )
+
+
+def _selected_scope(
+    path: Path, context: KnowledgeReadContext, seed: KnowledgeReadSeed
+) -> SelectedScope | KnowledgeReadResult:
+    connection = open_read_only_database(path)
+    try:
+        scope = _verified_scope(connection, path, context, seed)
+    finally:
+        connection.close()
+    return scope if isinstance(scope, SelectedScope) else _refused(context, scope)
 
 
 def _read_inside_snapshot(
@@ -234,21 +275,9 @@ def _select_and_page(
 ) -> KnowledgeReadResult:
     """Verify the declared snapshot, select, page it, and assemble the typed result."""
 
-    unusable = _snapshot_identity_refusal(connection, context, path, inspect_schema(connection))
-    if unusable is not None:
-        return _refused(context, unusable)
-
-    scope = select_recorded_scope(
-        connection,
-        SelectionQuery(
-            repository_id=context.repository_id,
-            seed=request.seed,
-            resolve_anchor=anchor_resolver_for(context),
-        ),
-    )
-    absence = _absence_refusal(connection, context.repository_id, request.seed, scope)
-    if absence is not None:
-        return _refused(context, absence)
+    scope = _verified_scope(connection, path, context, request.seed)
+    if not isinstance(scope, SelectedScope):
+        return _refused(context, scope)
 
     position = 0 if cursor is None else cursor.position
     continuation_refusal = _continuation_refusal(cursor, position, scope)
@@ -269,6 +298,26 @@ def _select_and_page(
     if small_budget is not None:
         return _refused(context, small_budget)
     return _page_result(context, request.seed, scope, page)
+
+
+def _verified_scope(
+    connection: apsw.Connection, path: Path, context: KnowledgeReadContext, seed: KnowledgeReadSeed
+) -> SelectedScope | KnowledgeRefusal:
+    """Verify the declared snapshot, then select the seed's whole scope, or name its absence."""
+
+    unusable = _snapshot_identity_refusal(connection, context, path, inspect_schema(connection))
+    if unusable is not None:
+        return unusable
+    scope = select_recorded_scope(
+        connection,
+        SelectionQuery(
+            repository_id=context.repository_id,
+            seed=seed,
+            resolve_anchor=anchor_resolver_for(context),
+        ),
+    )
+    absence = _absence_refusal(connection, context.repository_id, seed, scope)
+    return scope if absence is None else absence
 
 
 def _snapshot_identity_refusal(

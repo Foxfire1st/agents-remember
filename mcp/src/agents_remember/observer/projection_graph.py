@@ -109,6 +109,7 @@ class TaskExecutionNodeView(BaseModel):
     leafTitles: list[str] = Field(default_factory=list)
     waveIndex: int
     frontierState: FrontierState
+    cycle: bool | None = None
     executionNature: str | None = None
     predecessors: list[TaskExecutionPredecessorNode] = Field(default_factory=list)
 

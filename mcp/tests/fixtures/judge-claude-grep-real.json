@@ -1,0 +1,704 @@
+{
+  "schema": "d642-real-claude-grep/v1",
+  "provenance": "Exact parsed raw native.stdout rows from one already completed root-owned paid Claude call. Read-only source selection. Test path rebinding and duplicate views are constructed controls, not additional paid calls or original evidence edits.",
+  "source": {
+    "path": "/home/test/projects/ar-coordination/worktrees/agents-remember/62_instructions-and-documentation-descri-e8e4920fc1-ar/scratch/worker/db30bb98-270f-4b0e-aefe-8aa8f1202292/d641-post-a/d642/live/claude/rubric-judge/native.stdout",
+    "sha256": "984a40d052b9b333fbfc17e6d9363e924bf47696a5451c3a70fcd7e5d9b9a02b",
+    "sizeBytes": 1134699
+  },
+  "originalEvidenceRoot": "/home/test/projects/ar-coordination/worktrees/agents-remember/62_instructions-and-documentation-descri-e8e4920fc1-ar/scratch/worker/db30bb98-270f-4b0e-aefe-8aa8f1202292/d641-post-a/d642/live/claude/rubric-judge/evidence",
+  "manifestSource": {
+    "path": "/home/test/projects/ar-coordination/worktrees/agents-remember/62_instructions-and-documentation-descri-e8e4920fc1-ar/scratch/worker/db30bb98-270f-4b0e-aefe-8aa8f1202292/d641-post-a/d642/live/claude/rubric-judge/evidence/manifest.json",
+    "sha256": "ae0b721147458e6225d0e0ceb8ae034a923b745155151cc6f258e88666537802"
+  },
+  "manifestRows": [
+    {
+      "byteBasis": "Complete already-blinded request value; original source hash is distinct.",
+      "characters": 1274,
+      "criteria": [
+        0,
+        2,
+        3,
+        4
+      ],
+      "encoding": "utf-8",
+      "exceedsAppliedLimit": false,
+      "inline": true,
+      "kind": "action-payload",
+      "label": "observation/5",
+      "mandatory": [],
+      "mustRead": false,
+      "observationIndex": 5,
+      "path": "actions/0005-89bfff9875e301bd0d4277394996358a40ef78938cd2c7f6e6145e9522985730.json",
+      "routeReason": "inline-fit",
+      "sha256": "89bfff9875e301bd0d4277394996358a40ef78938cd2c7f6e6145e9522985730",
+      "sizeBytes": 1274,
+      "sourceSequence": 20
+    },
+    {
+      "byteBasis": "Complete already-blinded request value; original source hash is distinct.",
+      "characters": 1467,
+      "criteria": [
+        0,
+        2,
+        3,
+        4
+      ],
+      "encoding": "utf-8",
+      "exceedsAppliedLimit": false,
+      "inline": true,
+      "kind": "action-payload",
+      "label": "observation/7",
+      "mandatory": [],
+      "mustRead": false,
+      "observationIndex": 7,
+      "path": "actions/0007-bc805eb07c1897424a7a5456a80018cdfb07caa3dda7633a35640f9dacc455f1.json",
+      "routeReason": "inline-fit",
+      "sha256": "bc805eb07c1897424a7a5456a80018cdfb07caa3dda7633a35640f9dacc455f1",
+      "sizeBytes": 1467,
+      "sourceSequence": 22
+    },
+    {
+      "byteBasis": "Complete already-blinded request value; original source hash is distinct.",
+      "characters": 2759,
+      "criteria": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "encoding": "utf-8",
+      "exceedsAppliedLimit": false,
+      "inline": true,
+      "kind": "action-payload",
+      "label": "observation/24",
+      "mandatory": [],
+      "mustRead": false,
+      "observationIndex": 24,
+      "path": "actions/0024-31b7684f98e61b64fe4d8e3a8b37921ff2799079861b4a77aaa2662ed6e71979.json",
+      "routeReason": "inline-fit",
+      "sha256": "31b7684f98e61b64fe4d8e3a8b37921ff2799079861b4a77aaa2662ed6e71979",
+      "sizeBytes": 2759,
+      "sourceSequence": 50
+    },
+    {
+      "byteBasis": "Complete already-blinded request value; original source hash is distinct.",
+      "characters": 4346,
+      "criteria": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "encoding": "utf-8",
+      "exceedsAppliedLimit": false,
+      "inline": true,
+      "kind": "action-payload",
+      "label": "observation/28",
+      "mandatory": [],
+      "mustRead": false,
+      "observationIndex": 28,
+      "path": "actions/0028-a52af00b216107526ef1ba0c6d250eeb5a96bb2d9ada88cf84bf17537907b48c.json",
+      "routeReason": "inline-fit",
+      "sha256": "a52af00b216107526ef1ba0c6d250eeb5a96bb2d9ada88cf84bf17537907b48c",
+      "sizeBytes": 4346,
+      "sourceSequence": 54
+    },
+    {
+      "byteBasis": "Complete already-blinded request value; original source hash is distinct.",
+      "characters": 7958,
+      "criteria": [
+        1,
+        2,
+        4
+      ],
+      "encoding": "utf-8",
+      "exceedsAppliedLimit": false,
+      "inline": true,
+      "kind": "action-payload",
+      "label": "observation/29",
+      "mandatory": [],
+      "mustRead": false,
+      "observationIndex": 29,
+      "path": "actions/0029-be990182c5235c70ae9ad04bdd37168a0b002ad30fd7e0d751a5a3c135e9b1e5.json",
+      "routeReason": "inline-fit",
+      "sha256": "be990182c5235c70ae9ad04bdd37168a0b002ad30fd7e0d751a5a3c135e9b1e5",
+      "sizeBytes": 7958,
+      "sourceSequence": 55
+    },
+    {
+      "byteBasis": "Complete already-blinded request value; original source hash is distinct.",
+      "characters": 15196,
+      "criteria": [
+        1,
+        2,
+        4
+      ],
+      "encoding": "utf-8",
+      "exceedsAppliedLimit": false,
+      "inline": true,
+      "kind": "action-payload",
+      "label": "observation/30",
+      "mandatory": [],
+      "mustRead": false,
+      "observationIndex": 30,
+      "path": "actions/0030-c02ed7c46d13fe5f44d1795a23ec4c89888cd0cb39c617f578163853ca319fb3.json",
+      "routeReason": "inline-fit",
+      "sha256": "c02ed7c46d13fe5f44d1795a23ec4c89888cd0cb39c617f578163853ca319fb3",
+      "sizeBytes": 15196,
+      "sourceSequence": 56
+    },
+    {
+      "byteBasis": "Complete already-blinded request value; original source hash is distinct.",
+      "characters": 41285,
+      "criteria": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "encoding": "utf-8",
+      "exceedsAppliedLimit": false,
+      "inline": true,
+      "kind": "action-payload",
+      "label": "observation/31",
+      "mandatory": [],
+      "mustRead": false,
+      "observationIndex": 31,
+      "path": "actions/0031-26b8fefafdc1555d11880abed1f41d2f3a15f126af12db52f729ce2c14376a5b.json",
+      "routeReason": "inline-fit",
+      "sha256": "26b8fefafdc1555d11880abed1f41d2f3a15f126af12db52f729ce2c14376a5b",
+      "sizeBytes": 41328,
+      "sourceSequence": 57
+    },
+    {
+      "byteBasis": "Complete already-blinded request value; original source hash is distinct.",
+      "characters": 7960,
+      "criteria": [
+        1,
+        2,
+        4
+      ],
+      "encoding": "utf-8",
+      "exceedsAppliedLimit": false,
+      "inline": true,
+      "kind": "action-payload",
+      "label": "observation/109",
+      "mandatory": [],
+      "mustRead": false,
+      "observationIndex": 109,
+      "path": "actions/0109-34d90dc60206a76e61f2764d7809f72bfb838399ef821bfd368b174d9b253691.json",
+      "routeReason": "inline-fit",
+      "sha256": "34d90dc60206a76e61f2764d7809f72bfb838399ef821bfd368b174d9b253691",
+      "sizeBytes": 7960,
+      "sourceSequence": 201
+    },
+    {
+      "byteBasis": "Complete already-blinded request value; original source hash is distinct.",
+      "characters": 15197,
+      "criteria": [
+        1,
+        2,
+        4
+      ],
+      "encoding": "utf-8",
+      "exceedsAppliedLimit": false,
+      "inline": true,
+      "kind": "action-payload",
+      "label": "observation/110",
+      "mandatory": [],
+      "mustRead": false,
+      "observationIndex": 110,
+      "path": "actions/0110-ca1331303ffb085b3b385e67e7f56a2da044b97acbb76785c3c6a8c791835b99.json",
+      "routeReason": "inline-fit",
+      "sha256": "ca1331303ffb085b3b385e67e7f56a2da044b97acbb76785c3c6a8c791835b99",
+      "sizeBytes": 15197,
+      "sourceSequence": 202
+    },
+    {
+      "byteBasis": "Complete already-blinded request value; original source hash is distinct.",
+      "characters": 7960,
+      "criteria": [
+        1,
+        2,
+        4
+      ],
+      "encoding": "utf-8",
+      "exceedsAppliedLimit": false,
+      "inline": true,
+      "kind": "action-payload",
+      "label": "observation/138",
+      "mandatory": [],
+      "mustRead": false,
+      "observationIndex": 138,
+      "path": "actions/0138-a1fb81281162699a79ba7fe716e0de465ceb8e777169896c9a38f6e6d3e0f6fe.json",
+      "routeReason": "inline-fit",
+      "sha256": "a1fb81281162699a79ba7fe716e0de465ceb8e777169896c9a38f6e6d3e0f6fe",
+      "sizeBytes": 7960,
+      "sourceSequence": 243
+    },
+    {
+      "byteBasis": "Complete already-blinded request value; original source hash is distinct.",
+      "characters": 15197,
+      "criteria": [
+        1,
+        2,
+        4
+      ],
+      "encoding": "utf-8",
+      "exceedsAppliedLimit": false,
+      "inline": true,
+      "kind": "action-payload",
+      "label": "observation/139",
+      "mandatory": [],
+      "mustRead": false,
+      "observationIndex": 139,
+      "path": "actions/0139-2b57ac206897f859fead21dfefad3c6052355c29c45ce99963cbd6134a893457.json",
+      "routeReason": "inline-fit",
+      "sha256": "2b57ac206897f859fead21dfefad3c6052355c29c45ce99963cbd6134a893457",
+      "sizeBytes": 15197,
+      "sourceSequence": 244
+    },
+    {
+      "characters": 35,
+      "criteria": [],
+      "exceedsAppliedLimit": false,
+      "inline": false,
+      "kind": "read-channel-control",
+      "label": "constructed-tooling-read-control",
+      "mandatory": [],
+      "mustRead": true,
+      "path": "controls/must-read.txt",
+      "routeReason": "authorized-positive-control",
+      "sha256": "1a7311bc4cf104c114f02e248442a327685e25264379402ce89f10bed4e0e97f",
+      "sizeBytes": 35
+    }
+  ],
+  "appliedLimits": {
+    "utf8Bytes": 1692965
+  },
+  "rawRows": [
+    {
+      "rawIndex": 5,
+      "row": {
+        "type": "assistant",
+        "message": {
+          "model": "claude-opus-5-5",
+          "id": "msg_011CgYJmPKqwYVVCr1Jk6r84",
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_01Q3XDNGXQjsgZ9TeRgsTnYj",
+              "name": "Read",
+              "input": {
+                "file_path": "/home/test/projects/ar-coordination/worktrees/agents-remember/62_instructions-and-documentation-descri-e8e4920fc1-ar/scratch/worker/db30bb98-270f-4b0e-aefe-8aa8f1202292/d641-post-a/d642/live/claude/rubric-judge/evidence/controls/must-read.txt"
+              },
+              "caller": {
+                "type": "direct"
+              }
+            }
+          ],
+          "container": null,
+          "stop_reason": null,
+          "stop_sequence": null,
+          "stop_details": null,
+          "usage": {
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 789726,
+            "cache_read_input_tokens": 3223,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 789726
+            },
+            "output_tokens": 8,
+            "service_tier": "standard",
+            "inference_geo": "global",
+            "speed": "standard"
+          },
+          "input_transformations": [],
+          "diagnostics": null,
+          "context_management": null
+        },
+        "parent_tool_use_id": null,
+        "session_id": "b0b51d62-c7e6-44d8-a947-7af712d75a5f",
+        "uuid": "961438fa-30f2-4376-a198-79e5e470d338",
+        "timestamp": "2026-10-30T11:01:21.023Z",
+        "request_id": "req_011CgYJmNXxq6YfyK1aPWNAG",
+        "wire_tool_inputs": {
+          "toolu_01Q3XDNGXQjsgZ9TeRgsTnYj": {
+            "file_path": "/home/test/projects/ar-coordination/worktrees/agents-remember/62_instructions-and-documentation-descri-e8e4920fc1-ar/scratch/worker/db30bb98-270f-4b0e-aefe-8aa8f1202292/d641-post-a/d642/live/claude/rubric-judge/evidence/controls/must-read.txt"
+          }
+        }
+      }
+    },
+    {
+      "rawIndex": 6,
+      "row": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "tool_use_id": "toolu_01Q3XDNGXQjsgZ9TeRgsTnYj",
+              "type": "tool_result",
+              "content": "1\tD642 positive read-channel canary.\n2\t"
+            }
+          ]
+        },
+        "parent_tool_use_id": null,
+        "session_id": "b0b51d62-c7e6-44d8-a947-7af712d75a5f",
+        "uuid": "97b9a151-4656-4b25-b48a-ff083c964fe9",
+        "timestamp": "2026-10-30T11:01:21.056Z",
+        "tool_use_result": {
+          "type": "text",
+          "file": {
+            "filePath": "/home/test/projects/ar-coordination/worktrees/agents-remember/62_instructions-and-documentation-descri-e8e4920fc1-ar/scratch/worker/db30bb98-270f-4b0e-aefe-8aa8f1202292/d641-post-a/d642/live/claude/rubric-judge/evidence/controls/must-read.txt",
+            "content": "D642 positive read-channel canary.\n",
+            "numLines": 2,
+            "startLine": 1,
+            "totalLines": 2
+          }
+        },
+        "tool_result_meta": [
+          {
+            "id": "toolu_01Q3XDNGXQjsgZ9TeRgsTnYj",
+            "permission_decision": {
+              "decision": "accept",
+              "source": "config",
+              "reason_type": "rule"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "rawIndex": 39,
+      "row": {
+        "type": "assistant",
+        "message": {
+          "model": "claude-opus-5-5",
+          "id": "msg_011CgYJoZScSBEwTyrAycbas",
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_01JmY3LxCUWfDJT4W84LPrFm",
+              "name": "Grep",
+              "input": {
+                "pattern": "\"isError\": ?true|\"status\": ?\"failed\"|\"exit_code\": ?[1-9]|\"state\": ?\"refused\"|\\\\\"state\\\\\": ?\\\\\"refused",
+                "path": "/home/test/projects/ar-coordination/worktrees/agents-remember/62_instructions-and-documentation-descri-e8e4920fc1-ar/scratch/worker/db30bb98-270f-4b0e-aefe-8aa8f1202292/d641-post-a/d642/live/claude/rubric-judge/evidence/actions",
+                "output_mode": "count"
+              },
+              "caller": {
+                "type": "direct"
+              }
+            }
+          ],
+          "container": null,
+          "stop_reason": null,
+          "stop_sequence": null,
+          "stop_details": null,
+          "usage": {
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 199541,
+            "cache_read_input_tokens": 793734,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 199541
+            },
+            "output_tokens": 5,
+            "service_tier": "standard",
+            "inference_geo": "global",
+            "speed": "standard"
+          },
+          "input_transformations": [],
+          "diagnostics": null,
+          "context_management": null
+        },
+        "parent_tool_use_id": null,
+        "session_id": "b0b51d62-c7e6-44d8-a947-7af712d75a5f",
+        "uuid": "5f5e35fc-9acb-461d-bfb1-ed3bb916f6ec",
+        "timestamp": "2026-10-30T11:01:52.443Z",
+        "request_id": "req_011CgYJoZ1oZBLFxGP15LorC",
+        "wire_tool_inputs": {
+          "toolu_01JmY3LxCUWfDJT4W84LPrFm": {
+            "pattern": "\"isError\": ?true|\"status\": ?\"failed\"|\"exit_code\": ?[1-9]|\"state\": ?\"refused\"|\\\\\"state\\\\\": ?\\\\\"refused",
+            "path": "/home/test/projects/ar-coordination/worktrees/agents-remember/62_instructions-and-documentation-descri-e8e4920fc1-ar/scratch/worker/db30bb98-270f-4b0e-aefe-8aa8f1202292/d641-post-a/d642/live/claude/rubric-judge/evidence/actions",
+            "output_mode": "count"
+          }
+        }
+      }
+    },
+    {
+      "rawIndex": 40,
+      "row": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "tool_use_id": "toolu_01JmY3LxCUWfDJT4W84LPrFm",
+              "type": "tool_result",
+              "content": "actions/0005-89bfff9875e301bd0d4277394996358a40ef78938cd2c7f6e6145e9522985730.json:1\nactions/0031-26b8fefafdc1555d11880abed1f41d2f3a15f126af12db52f729ce2c14376a5b.json:1\nactions/0024-31b7684f98e61b64fe4d8e3a8b37921ff2799079861b4a77aaa2662ed6e71979.json:1\nactions/0030-c02ed7c46d13fe5f44d1795a23ec4c89888cd0cb39c617f578163853ca319fb3.json:1\nactions/0007-bc805eb07c1897424a7a5456a80018cdfb07caa3dda7633a35640f9dacc455f1.json:1\nactions/0029-be990182c5235c70ae9ad04bdd37168a0b002ad30fd7e0d751a5a3c135e9b1e5.json:1\nactions/0109-34d90dc60206a76e61f2764d7809f72bfb838399ef821bfd368b174d9b253691.json:1\nactions/0139-2b57ac206897f859fead21dfefad3c6052355c29c45ce99963cbd6134a893457.json:1\nactions/0028-a52af00b216107526ef1ba0c6d250eeb5a96bb2d9ada88cf84bf17537907b48c.json:1\nactions/0138-a1fb81281162699a79ba7fe716e0de465ceb8e777169896c9a38f6e6d3e0f6fe.json:1\nactions/0110-ca1331303ffb085b3b385e67e7f56a2da044b97acbb76785c3c6a8c791835b99.json:1\n\nFound 11 total occurrences across 11 files."
+            }
+          ]
+        },
+        "parent_tool_use_id": null,
+        "session_id": "b0b51d62-c7e6-44d8-a947-7af712d75a5f",
+        "uuid": "a09d079d-1979-40aa-94bc-35341a300348",
+        "timestamp": "2026-10-30T11:01:52.468Z",
+        "tool_use_result": {
+          "mode": "count",
+          "numFiles": 11,
+          "filenames": [],
+          "content": "actions/0005-89bfff9875e301bd0d4277394996358a40ef78938cd2c7f6e6145e9522985730.json:1\nactions/0031-26b8fefafdc1555d11880abed1f41d2f3a15f126af12db52f729ce2c14376a5b.json:1\nactions/0024-31b7684f98e61b64fe4d8e3a8b37921ff2799079861b4a77aaa2662ed6e71979.json:1\nactions/0030-c02ed7c46d13fe5f44d1795a23ec4c89888cd0cb39c617f578163853ca319fb3.json:1\nactions/0007-bc805eb07c1897424a7a5456a80018cdfb07caa3dda7633a35640f9dacc455f1.json:1\nactions/0029-be990182c5235c70ae9ad04bdd37168a0b002ad30fd7e0d751a5a3c135e9b1e5.json:1\nactions/0109-34d90dc60206a76e61f2764d7809f72bfb838399ef821bfd368b174d9b253691.json:1\nactions/0139-2b57ac206897f859fead21dfefad3c6052355c29c45ce99963cbd6134a893457.json:1\nactions/0028-a52af00b216107526ef1ba0c6d250eeb5a96bb2d9ada88cf84bf17537907b48c.json:1\nactions/0138-a1fb81281162699a79ba7fe716e0de465ceb8e777169896c9a38f6e6d3e0f6fe.json:1\nactions/0110-ca1331303ffb085b3b385e67e7f56a2da044b97acbb76785c3c6a8c791835b99.json:1",
+          "numMatches": 11
+        },
+        "tool_result_meta": [
+          {
+            "id": "toolu_01JmY3LxCUWfDJT4W84LPrFm",
+            "permission_decision": {
+              "decision": "accept",
+              "source": "config",
+              "reason_type": "rule"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "rawIndex": 54,
+      "row": {
+        "type": "assistant",
+        "message": {
+          "model": "claude-opus-5-5",
+          "id": "msg_011CgYJsbjst63mhJPupukac",
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_01PpmP77BuBVQDRrJhLdiZU4",
+              "name": "Grep",
+              "input": {
+                "pattern": "\"isError\": ?true|\"status\": ?\"failed\"|\"exit_code\": ?[1-9]|\"state\": ?\"refused\"|\\\\\"state\\\\\": ?\\\\\"refused",
+                "path": "/home/test/projects/ar-coordination/worktrees/agents-remember/62_instructions-and-documentation-descri-e8e4920fc1-ar/scratch/worker/db30bb98-270f-4b0e-aefe-8aa8f1202292/d641-post-a/d642/live/claude/rubric-judge/evidence/actions",
+                "output_mode": "content",
+                "-o": true
+              },
+              "caller": {
+                "type": "direct"
+              }
+            }
+          ],
+          "container": null,
+          "stop_reason": null,
+          "stop_sequence": null,
+          "stop_details": null,
+          "usage": {
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 7012,
+            "cache_read_input_tokens": 4119,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 7012
+            },
+            "output_tokens": 5,
+            "service_tier": "standard",
+            "inference_geo": "global",
+            "speed": "standard"
+          },
+          "input_transformations": [],
+          "diagnostics": {
+            "cache_miss_reason": {
+              "type": "messages_changed",
+              "cache_missed_input_tokens": 5990
+            }
+          },
+          "context_management": null
+        },
+        "parent_tool_use_id": null,
+        "session_id": "b0b51d62-c7e6-44d8-a947-7af712d75a5f",
+        "uuid": "4c2e2cc0-c017-474c-82b4-e63ddbcca8a8",
+        "timestamp": "2026-10-30T11:02:44.057Z",
+        "request_id": "req_011CgYJsawWJmEYm9BNTwaKB",
+        "wire_tool_inputs": {
+          "toolu_01PpmP77BuBVQDRrJhLdiZU4": {
+            "pattern": "\"isError\": ?true|\"status\": ?\"failed\"|\"exit_code\": ?[1-9]|\"state\": ?\"refused\"|\\\\\"state\\\\\": ?\\\\\"refused",
+            "path": "/home/test/projects/ar-coordination/worktrees/agents-remember/62_instructions-and-documentation-descri-e8e4920fc1-ar/scratch/worker/db30bb98-270f-4b0e-aefe-8aa8f1202292/d641-post-a/d642/live/claude/rubric-judge/evidence/actions",
+            "output_mode": "content",
+            "-o": true
+          }
+        }
+      }
+    },
+    {
+      "rawIndex": 55,
+      "row": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "tool_use_id": "toolu_01PpmP77BuBVQDRrJhLdiZU4",
+              "type": "tool_result",
+              "content": "actions/0005-89bfff9875e301bd0d4277394996358a40ef78938cd2c7f6e6145e9522985730.json:1:\"status\": \"failed\"\nactions/0005-89bfff9875e301bd0d4277394996358a40ef78938cd2c7f6e6145e9522985730.json:1:\"exit_code\": 1\nactions/0024-31b7684f98e61b64fe4d8e3a8b37921ff2799079861b4a77aaa2662ed6e71979.json:1:\\\"state\\\":\\\"refused\nactions/0024-31b7684f98e61b64fe4d8e3a8b37921ff2799079861b4a77aaa2662ed6e71979.json:1:\"state\": \"refused\"\nactions/0030-c02ed7c46d13fe5f44d1795a23ec4c89888cd0cb39c617f578163853ca319fb3.json:1:\"status\": \"failed\"\nactions/0030-c02ed7c46d13fe5f44d1795a23ec4c89888cd0cb39c617f578163853ca319fb3.json:1:\"status\": \"failed\"\nactions/0031-26b8fefafdc1555d11880abed1f41d2f3a15f126af12db52f729ce2c14376a5b.json:1:\\\"state\\\":\\\"refused\nactions/0109-34d90dc60206a76e61f2764d7809f72bfb838399ef821bfd368b174d9b253691.json:1:\"status\": \"failed\"\nactions/0139-2b57ac206897f859fead21dfefad3c6052355c29c45ce99963cbd6134a893457.json:1:\"status\": \"failed\"\nactions/0139-2b57ac206897f859fead21dfefad3c6052355c29c45ce99963cbd6134a893457.json:1:\"status\": \"failed\"\nactions/0007-bc805eb07c1897424a7a5456a80018cdfb07caa3dda7633a35640f9dacc455f1.json:1:\"status\": \"failed\"\nactions/0007-bc805eb07c1897424a7a5456a80018cdfb07caa3dda7633a35640f9dacc455f1.json:1:\"exit_code\": 1\nactions/0007-bc805eb07c1897424a7a5456a80018cdfb07caa3dda7633a35640f9dacc455f1.json:1:\"status\": \"failed\"\nactions/0007-bc805eb07c1897424a7a5456a80018cdfb07caa3dda7633a35640f9dacc455f1.json:1:\"exit_code\": 1\nactions/0110-ca1331303ffb085b3b385e67e7f56a2da044b97acbb76785c3c6a8c791835b99.json:1:\"status\": \"failed\"\nactions/0110-ca1331303ffb085b3b385e67e7f56a2da044b97acbb76785c3c6a8c791835b99.json:1:\"status\": \"failed\"\nactions/0028-a52af00b216107526ef1ba0c6d250eeb5a96bb2d9ada88cf84bf17537907b48c.json:1:\\\"state\\\":\\\"refused\nactions/0028-a52af00b216107526ef1ba0c6d250eeb5a96bb2d9ada88cf84bf17537907b48c.json:1:\"state\": \"refused\"\nactions/0028-a52af00b216107526ef1ba0c6d250eeb5a96bb2d9ada88cf84bf17537907b48c.json:1:\\\"state\\\":\\\"refused\nactions/0028-a52af00b216107526ef1ba0c6d250eeb5a96bb2d9ada88cf84bf17537907b48c.json:1:\"state\": \"refused\"\nactions/0138-a1fb81281162699a79ba7fe716e0de465ceb8e777169896c9a38f6e6d3e0f6fe.json:1:\"status\": \"failed\"\nactions/0029-be990182c5235c70ae9ad04bdd37168a0b002ad30fd7e0d751a5a3c135e9b1e5.json:1:\"status\": \"failed\""
+            }
+          ]
+        },
+        "parent_tool_use_id": null,
+        "session_id": "b0b51d62-c7e6-44d8-a947-7af712d75a5f",
+        "uuid": "e8e9d772-9766-4035-8030-9767adab764f",
+        "timestamp": "2026-10-30T11:02:44.076Z",
+        "tool_use_result": {
+          "mode": "content",
+          "numFiles": 0,
+          "filenames": [],
+          "content": "actions/0005-89bfff9875e301bd0d4277394996358a40ef78938cd2c7f6e6145e9522985730.json:1:\"status\": \"failed\"\nactions/0005-89bfff9875e301bd0d4277394996358a40ef78938cd2c7f6e6145e9522985730.json:1:\"exit_code\": 1\nactions/0024-31b7684f98e61b64fe4d8e3a8b37921ff2799079861b4a77aaa2662ed6e71979.json:1:\\\"state\\\":\\\"refused\nactions/0024-31b7684f98e61b64fe4d8e3a8b37921ff2799079861b4a77aaa2662ed6e71979.json:1:\"state\": \"refused\"\nactions/0030-c02ed7c46d13fe5f44d1795a23ec4c89888cd0cb39c617f578163853ca319fb3.json:1:\"status\": \"failed\"\nactions/0030-c02ed7c46d13fe5f44d1795a23ec4c89888cd0cb39c617f578163853ca319fb3.json:1:\"status\": \"failed\"\nactions/0031-26b8fefafdc1555d11880abed1f41d2f3a15f126af12db52f729ce2c14376a5b.json:1:\\\"state\\\":\\\"refused\nactions/0109-34d90dc60206a76e61f2764d7809f72bfb838399ef821bfd368b174d9b253691.json:1:\"status\": \"failed\"\nactions/0139-2b57ac206897f859fead21dfefad3c6052355c29c45ce99963cbd6134a893457.json:1:\"status\": \"failed\"\nactions/0139-2b57ac206897f859fead21dfefad3c6052355c29c45ce99963cbd6134a893457.json:1:\"status\": \"failed\"\nactions/0007-bc805eb07c1897424a7a5456a80018cdfb07caa3dda7633a35640f9dacc455f1.json:1:\"status\": \"failed\"\nactions/0007-bc805eb07c1897424a7a5456a80018cdfb07caa3dda7633a35640f9dacc455f1.json:1:\"exit_code\": 1\nactions/0007-bc805eb07c1897424a7a5456a80018cdfb07caa3dda7633a35640f9dacc455f1.json:1:\"status\": \"failed\"\nactions/0007-bc805eb07c1897424a7a5456a80018cdfb07caa3dda7633a35640f9dacc455f1.json:1:\"exit_code\": 1\nactions/0110-ca1331303ffb085b3b385e67e7f56a2da044b97acbb76785c3c6a8c791835b99.json:1:\"status\": \"failed\"\nactions/0110-ca1331303ffb085b3b385e67e7f56a2da044b97acbb76785c3c6a8c791835b99.json:1:\"status\": \"failed\"\nactions/0028-a52af00b216107526ef1ba0c6d250eeb5a96bb2d9ada88cf84bf17537907b48c.json:1:\\\"state\\\":\\\"refused\nactions/0028-a52af00b216107526ef1ba0c6d250eeb5a96bb2d9ada88cf84bf17537907b48c.json:1:\"state\": \"refused\"\nactions/0028-a52af00b216107526ef1ba0c6d250eeb5a96bb2d9ada88cf84bf17537907b48c.json:1:\\\"state\\\":\\\"refused\nactions/0028-a52af00b216107526ef1ba0c6d250eeb5a96bb2d9ada88cf84bf17537907b48c.json:1:\"state\": \"refused\"\nactions/0138-a1fb81281162699a79ba7fe716e0de465ceb8e777169896c9a38f6e6d3e0f6fe.json:1:\"status\": \"failed\"\nactions/0029-be990182c5235c70ae9ad04bdd37168a0b002ad30fd7e0d751a5a3c135e9b1e5.json:1:\"status\": \"failed\"",
+          "numLines": 22,
+          "totalLines": 22
+        },
+        "tool_result_meta": [
+          {
+            "id": "toolu_01PpmP77BuBVQDRrJhLdiZU4",
+            "permission_decision": {
+              "decision": "accept",
+              "source": "config",
+              "reason_type": "rule"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "rawIndex": 56,
+      "row": {
+        "type": "assistant",
+        "message": {
+          "model": "claude-opus-5-5",
+          "id": "msg_011CgYJsbjst63mhJPupukac",
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_01KL7gM7aH1RAtgg6yts45bM",
+              "name": "Grep",
+              "input": {
+                "pattern": "\"(tool|name|command)\": ?\"[^\"]{0,160}",
+                "path": "/home/test/projects/ar-coordination/worktrees/agents-remember/62_instructions-and-documentation-descri-e8e4920fc1-ar/scratch/worker/db30bb98-270f-4b0e-aefe-8aa8f1202292/d641-post-a/d642/live/claude/rubric-judge/evidence/actions",
+                "glob": "{0005,0007,0024,0028,0029,0030,0031,0109,0110,0138,0139}-*.json",
+                "output_mode": "content",
+                "-o": true,
+                "head_limit": 40
+              },
+              "caller": {
+                "type": "direct"
+              }
+            }
+          ],
+          "container": null,
+          "stop_reason": null,
+          "stop_sequence": null,
+          "stop_details": null,
+          "usage": {
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 7012,
+            "cache_read_input_tokens": 4119,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 7012
+            },
+            "output_tokens": 5,
+            "service_tier": "standard",
+            "inference_geo": "global",
+            "speed": "standard"
+          },
+          "input_transformations": [],
+          "diagnostics": {
+            "cache_miss_reason": {
+              "type": "messages_changed",
+              "cache_missed_input_tokens": 5990
+            }
+          },
+          "context_management": null
+        },
+        "parent_tool_use_id": null,
+        "session_id": "b0b51d62-c7e6-44d8-a947-7af712d75a5f",
+        "uuid": "b7d0f882-e013-45ec-adf4-564167cc9049",
+        "timestamp": "2026-10-30T11:02:46.444Z",
+        "request_id": "req_011CgYJsawWJmEYm9BNTwaKB",
+        "wire_tool_inputs": {
+          "toolu_01KL7gM7aH1RAtgg6yts45bM": {
+            "pattern": "\"(tool|name|command)\": ?\"[^\"]{0,160}",
+            "path": "/home/test/projects/ar-coordination/worktrees/agents-remember/62_instructions-and-documentation-descri-e8e4920fc1-ar/scratch/worker/db30bb98-270f-4b0e-aefe-8aa8f1202292/d641-post-a/d642/live/claude/rubric-judge/evidence/actions",
+            "glob": "{0005,0007,0024,0028,0029,0030,0031,0109,0110,0138,0139}-*.json",
+            "output_mode": "content",
+            "-o": true,
+            "head_limit": 40
+          }
+        }
+      }
+    },
+    {
+      "rawIndex": 57,
+      "row": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "tool_use_id": "toolu_01KL7gM7aH1RAtgg6yts45bM",
+              "type": "tool_result",
+              "content": "actions/0109-34d90dc60206a76e61f2764d7809f72bfb838399ef821bfd368b174d9b253691.json:1:\"name\": \"memory_quality_check\nactions/0109-34d90dc60206a76e61f2764d7809f72bfb838399ef821bfd368b174d9b253691.json:1:\"tool\": \"memory_quality_check\nactions/0139-2b57ac206897f859fead21dfefad3c6052355c29c45ce99963cbd6134a893457.json:1:\"tool\": \"memory_quality_check\nactions/0110-ca1331303ffb085b3b385e67e7f56a2da044b97acbb76785c3c6a8c791835b99.json:1:\"tool\": \"memory_quality_check\nactions/0030-c02ed7c46d13fe5f44d1795a23ec4c89888cd0cb39c617f578163853ca319fb3.json:1:\"tool\": \"memory_quality_check\nactions/0024-31b7684f98e61b64fe4d8e3a8b37921ff2799079861b4a77aaa2662ed6e71979.json:1:\"name\": \"knowledge_read\nactions/0024-31b7684f98e61b64fe4d8e3a8b37921ff2799079861b4a77aaa2662ed6e71979.json:1:\"tool\": \"knowledge_read\nactions/0005-89bfff9875e301bd0d4277394996358a40ef78938cd2c7f6e6145e9522985730.json:1:\"name\": \"CommandExecution\nactions/0029-be990182c5235c70ae9ad04bdd37168a0b002ad30fd7e0d751a5a3c135e9b1e5.json:1:\"name\": \"memory_quality_check\nactions/0029-be990182c5235c70ae9ad04bdd37168a0b002ad30fd7e0d751a5a3c135e9b1e5.json:1:\"tool\": \"memory_quality_check\nactions/0028-a52af00b216107526ef1ba0c6d250eeb5a96bb2d9ada88cf84bf17537907b48c.json:1:\"tool\": \"knowledge_read\nactions/0138-a1fb81281162699a79ba7fe716e0de465ceb8e777169896c9a38f6e6d3e0f6fe.json:1:\"name\": \"memory_quality_check\nactions/0138-a1fb81281162699a79ba7fe716e0de465ceb8e777169896c9a38f6e6d3e0f6fe.json:1:\"tool\": \"memory_quality_check"
+            }
+          ]
+        },
+        "parent_tool_use_id": null,
+        "session_id": "b0b51d62-c7e6-44d8-a947-7af712d75a5f",
+        "uuid": "c07ed16e-c3f3-4cda-9956-d8ea8b61c9e3",
+        "timestamp": "2026-10-30T11:02:46.475Z",
+        "tool_use_result": {
+          "mode": "content",
+          "numFiles": 0,
+          "filenames": [],
+          "content": "actions/0109-34d90dc60206a76e61f2764d7809f72bfb838399ef821bfd368b174d9b253691.json:1:\"name\": \"memory_quality_check\nactions/0109-34d90dc60206a76e61f2764d7809f72bfb838399ef821bfd368b174d9b253691.json:1:\"tool\": \"memory_quality_check\nactions/0139-2b57ac206897f859fead21dfefad3c6052355c29c45ce99963cbd6134a893457.json:1:\"tool\": \"memory_quality_check\nactions/0110-ca1331303ffb085b3b385e67e7f56a2da044b97acbb76785c3c6a8c791835b99.json:1:\"tool\": \"memory_quality_check\nactions/0030-c02ed7c46d13fe5f44d1795a23ec4c89888cd0cb39c617f578163853ca319fb3.json:1:\"tool\": \"memory_quality_check\nactions/0024-31b7684f98e61b64fe4d8e3a8b37921ff2799079861b4a77aaa2662ed6e71979.json:1:\"name\": \"knowledge_read\nactions/0024-31b7684f98e61b64fe4d8e3a8b37921ff2799079861b4a77aaa2662ed6e71979.json:1:\"tool\": \"knowledge_read\nactions/0005-89bfff9875e301bd0d4277394996358a40ef78938cd2c7f6e6145e9522985730.json:1:\"name\": \"CommandExecution\nactions/0029-be990182c5235c70ae9ad04bdd37168a0b002ad30fd7e0d751a5a3c135e9b1e5.json:1:\"name\": \"memory_quality_check\nactions/0029-be990182c5235c70ae9ad04bdd37168a0b002ad30fd7e0d751a5a3c135e9b1e5.json:1:\"tool\": \"memory_quality_check\nactions/0028-a52af00b216107526ef1ba0c6d250eeb5a96bb2d9ada88cf84bf17537907b48c.json:1:\"tool\": \"knowledge_read\nactions/0138-a1fb81281162699a79ba7fe716e0de465ceb8e777169896c9a38f6e6d3e0f6fe.json:1:\"name\": \"memory_quality_check\nactions/0138-a1fb81281162699a79ba7fe716e0de465ceb8e777169896c9a38f6e6d3e0f6fe.json:1:\"tool\": \"memory_quality_check",
+          "numLines": 13,
+          "totalLines": 13
+        },
+        "tool_result_meta": [
+          {
+            "id": "toolu_01KL7gM7aH1RAtgg6yts45bM",
+            "permission_decision": {
+              "decision": "accept",
+              "source": "config",
+              "reason_type": "rule"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "successfulCanary": {
+    "path": "controls/must-read.txt",
+    "sizeBytes": 35,
+    "characters": 35,
+    "sha256": "1a7311bc4cf104c114f02e248442a327685e25264379402ce89f10bed4e0e97f",
+    "mustRead": true,
+    "criteria": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "content": "D642 positive read-channel canary.\n",
+    "bindingNote": "Actual control file; this fixture preserves its manifest row if present, else this source-bound control binding is a constructed extension."
+  }
+}

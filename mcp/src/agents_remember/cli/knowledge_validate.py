@@ -1,0 +1,164 @@
+"""CLI adapter: the curator's standalone run of the knowledge validator (MIK-R22 rule 8).
+
+    agents-remember knowledge-validate MEMORY_ROOT --code CODE_ROOT [--code-commit REV]
+                                       [--base REV ...] [--json]
+
+``MEMORY_ROOT`` is a memory working tree; its ``knowledge/`` and ``onboarding/`` files are the
+candidate. ``--code`` is the paired code checkout (its working tree, or ``--code-commit`` in it).
+Each ``--base`` is a memory commit to compare anchors with (rule 6): K_B, or both parents of a merge.
+With no base every anchor is checked for path existence and every authored record is judged as new.
+
+Every registered rule runs; there is no option that skips one. A tree whose candidate and bases all
+lack the layout marker is unconverted and out of the validator's scope, which the command says.
+
+Exit status: 0 when the candidate passes (report-only findings are printed), or is out of scope; 1
+when a violation refuses it; 2 when an input cannot be read.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+from typing import Any
+
+from agents_remember.application.memory_quality.endpoints import (
+    requirement_endpoint_documents,
+)
+from agents_remember.memory_quality.knowledge_validator.report import ValidationReport
+from agents_remember.memory_quality.knowledge_validator.trees import (
+    CodeTree,
+    KnowledgeTreeReadError,
+    code_tree_from_git,
+    code_tree_from_working_directory,
+    knowledge_tree_from_directory,
+    knowledge_tree_from_git,
+)
+from agents_remember.memory_quality.knowledge_validator.validator import (
+    validate_tree,
+    validation_applies,
+)
+
+
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    # Keep the rule table's line breaks: the default formatter would reflow the epilog and split
+    # rule IDs across lines at narrow widths.
+    parser.formatter_class = argparse.RawDescriptionHelpFormatter
+    parser.description = (
+        "Validate a converted memory tree with every registered knowledge-validator rule. "
+        "MIK-R53 rules 10-12 decide the eleven rules that used to only report."
+    )
+    parser.epilog = """the eleven decided rules (MIK-R53 rule 11):
+
+  refuses; merge_reports (refuse at every commit and landing route, report only at a sync merge):
+    R27.2-existing-record      an existing record whose checkable admission criterion
+                               no longer holds
+    R04.1-carried-route-absent a family route whose directory is gone
+    R04.4-unrealized-family    a live family none of whose members has a realization
+    R22.6-carried-stale        an anchor at a path that is gone
+    R09-history-rows-merged    a row whose entry a merge moved (reports at the merge only;
+                               the next leaf publication refuses the row)
+  migration_debt (a base-carried finding reports until every onboarding route is migrated
+  or excluded; a new finding refuses at once):
+    R22.3-sidecar-without-markdown  a carried sidecar without Markdown, or references without their card
+    R22.3-unresolved-target         a citation the conversion could not resolve
+    R04.4-route-unassigned          an exported family with no route
+    R27.4-legacy-unassessed         an exported record nobody assessed
+                                     (one finding per record once it refuses)
+  refuses:
+    R13.3-governs              a decision that links nothing it governs
+
+The six refusing rules report inside the writer (writer_reports) and refuse at every
+commit route. Every reported finding names its reason and the route that will refuse it.
+
+MIK-R198 rule 5 adds R198.1-reference-anchor: a code or test reference anchor that does
+not name the paired code tree's blob and resolve there to its recorded content. It
+refuses at every publication route and the full quality run, and reports inside the
+writer and at a sync merge (writer_reports, merge_reports).
+"""
+    parser.add_argument("memory_root", type=Path, help="The memory working tree to validate.")
+    parser.add_argument(
+        "--code", required=True, type=Path, help="The paired code checkout (anchor paths)."
+    )
+    parser.add_argument(
+        "--code-commit", help="Check anchor paths at this commit of --code, not its working tree."
+    )
+    parser.add_argument(
+        "--base",
+        action="append",
+        default=[],
+        help="A memory commit to compare with (repeat for each merge parent); without --base "
+        "every authored record is judged as new.",
+    )
+    parser.add_argument("--json", action="store_true", help="Print the report as JSON.")
+    parser.add_argument(
+        "--coordination-root",
+        type=Path,
+        help="List requirement endpoints with their owner's state; these observations never refuse.",
+    )
+
+
+def _print(
+    report: ValidationReport,
+    *,
+    as_json: bool,
+    no_base: bool = False,
+    endpoints: list[dict[str, Any]] | None = None,
+) -> None:
+    notes = ["No --base was given: every authored record is judged as new."] if no_base else []
+    if as_json:
+        document = {**report.to_document(), "notes": notes}
+        if endpoints is not None:
+            document["requirementEndpoints"] = endpoints
+        print(json.dumps(document, indent=2, sort_keys=True))
+        return
+    for note in notes:
+        print(note)
+    if endpoints is not None:
+        print(f"requirement endpoints ({len(endpoints)}; observations, never refusals):")
+        for endpoint in endpoints:
+            archived = " (archived)" if endpoint["archived"] else ""
+            detail = f": {endpoint['detail']}" if endpoint["detail"] else ""
+            print(
+                f"  {endpoint['path']}: {endpoint['field']}: {endpoint['key']}: "
+                f"{endpoint['state']}{archived}{detail}"
+            )
+    if report.violations:
+        print(report.render())
+    verdict = "passes" if report.ok else "is refused"
+    print(
+        f"{report.candidate} {verdict}: {len(report.refusals)} violation(s), "
+        f"{len(report.reports)} report-only finding(s)"
+    )
+
+
+def run(args: argparse.Namespace) -> int:
+    memory_root: Path = args.memory_root.resolve()
+    code_root: Path = args.code.resolve()
+    try:
+        candidate = knowledge_tree_from_directory(memory_root)
+        bases = [
+            knowledge_tree_from_git(memory_root, base, label=f"base {base}") for base in args.base
+        ]
+        code: CodeTree = (
+            code_tree_from_git(code_root, args.code_commit)
+            if args.code_commit
+            else code_tree_from_working_directory(code_root)
+        )
+    except (OSError, KnowledgeTreeReadError, ValueError) as error:
+        print(f"cannot read the validator's inputs: {error}")
+        return 2
+    if not validation_applies(candidate, bases):
+        print(
+            f"{memory_root} is unconverted (no knowledge/layout.json in it or its bases); "
+            "the knowledge validator applies to converted trees only (MIK-R22 rule 8)"
+        )
+        return 0
+    report = validate_tree(candidate, bases=bases, code=code)
+    endpoints = (
+        requirement_endpoint_documents(candidate, args.coordination_root.resolve())
+        if args.coordination_root is not None
+        else None
+    )
+    _print(report, as_json=args.json, no_base=not bases, endpoints=endpoints)
+    return 0 if report.ok else 1

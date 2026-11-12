@@ -8,8 +8,12 @@ from typing import Literal
 
 from pydantic import ValidationError
 
+from agents_remember.models.task_document_ref import TaskDocumentRef
+
 from .document import DocStatus, SubTaskRef, TaskDocument
 from .readiness import completion_blockers
+from .retired_rows import refuse_retired_row
+from .sprint_rows import master_rows, sprint_census
 from .store import TaskDocSourceSnapshot, capture_task_doc_source, markdown_path_for
 
 MasterSyncStatus = Literal["none", "created", "updated", "unchanged"]
@@ -33,11 +37,13 @@ class MasterSyncPlan:
 
 
 def plan_master_sync(task_root: Path, leaf: TaskDocument) -> MasterSyncPlan:
-    """Return the master document update implied by a leaf document, if any."""
+    """Mirror a task's stage into its one authored parent row, if any."""
+    if leaf.kind == "master":
+        return _plan_sprint_sync(task_root, leaf)
     if leaf.kind != "subTask":
         return MasterSyncPlan(status="none")
     master_json_path = _master_json_path(task_root, leaf)
-    if master_json_path is None or not master_json_path.exists():
+    if master_json_path is None:
         return MasterSyncPlan(status="none")
     try:
         source_snapshot = capture_task_doc_source(master_json_path)
@@ -57,6 +63,12 @@ def plan_master_sync(task_root: Path, leaf: TaskDocument) -> MasterSyncPlan:
             f"parent master must contain at most one row {leaf.id!r}; found {len(matches)}"
         )
     existing = matches[0] if matches else None
+    refuse_retired_row(
+        master,
+        leaf.id,
+        "the master is retired; the master sync of this task document",
+        MasterSyncError,
+    )
     _validate_existing_row_path(master_json_path, task_root, leaf, existing)
     ref = subtask_ref_from_leaf(task_root, leaf, existing=existing)
     if existing == ref:
@@ -89,6 +101,60 @@ def plan_master_sync(task_root: Path, leaf: TaskDocument) -> MasterSyncPlan:
     )
 
 
+def _plan_sprint_sync(task_root: Path, master: TaskDocument) -> MasterSyncPlan:
+    """Use the native commanding-sprint census and typed/legacy row correlation."""
+    path = markdown_path_for(task_root, master).with_suffix(".json")
+    reference = TaskDocumentRef(
+        repository=task_root.parent.name, path=f"{task_root.name}/{path.name}"
+    )
+    census = sprint_census(task_root.parent, path, reference, master)
+    if census.unreadable_naming:
+        raise MasterSyncError(
+            f"cannot read possible commanding sprint: {census.unreadable_naming[0]}; "
+            "repair that task document and retry"
+        )
+    if len(census.commanding) > 1:
+        raise MasterSyncError(
+            f"master {reference.key} has several commanding sprints; keep one and retry"
+        )
+    if not census.commanding:
+        return MasterSyncPlan(status="none")
+    sprint_path = census.commanding[0]
+    source = capture_task_doc_source(sprint_path)
+    try:
+        if source.json_bytes is None:
+            raise FileNotFoundError(sprint_path)
+        sprint = TaskDocument.model_validate_json(source.json_bytes)
+    except (OSError, ValueError) as error:
+        raise MasterSyncError(f"cannot read commanding sprint: {sprint_path}") from error
+    rows = master_rows(sprint, sprint_path.parent, reference)
+    row = rows.row
+    if row is None:
+        if rows.typed or rows.legacy:
+            raise MasterSyncError(
+                f"sprint {sprint_path} has ambiguous rows for {reference.key}; keep one and retry"
+            )
+        return MasterSyncPlan(status="none")
+    refuse_retired_row(sprint, row.number, "the stage sync of this master", MasterSyncError)
+    if row.status == master.status:
+        return MasterSyncPlan(status="unchanged")
+    data = sprint.model_dump(by_alias=True)
+    data["subTasks"] = [
+        {**item.model_dump(), "status": master.status}
+        if item.number == row.number
+        else item.model_dump()
+        for item in sprint.subTasks
+    ]
+    updated = demote_completed_master_if_unresolved(TaskDocument.model_validate(data))
+    return MasterSyncPlan(
+        status="updated",
+        master=updated,
+        master_json_path=sprint_path,
+        subtask_number=row.number,
+        source_snapshot=source,
+    )
+
+
 def subtask_ref_from_leaf(
     task_root: Path, leaf: TaskDocument, *, existing: SubTaskRef | None = None
 ) -> SubTaskRef:
@@ -103,37 +169,11 @@ def subtask_ref_from_leaf(
 
 
 def derived_master_status(leaf: TaskDocument) -> DocStatus:
-    """Collapse leaf state to the master's strict status vocabulary.
+    """Mirror the document's stage; worktree tools and corrections own that stage.
 
-    A ROW IS ``Completed`` WHEN THE WORK LANDED, NOT WHEN ITS STEPS WERE MARKED. The only
-    writer that sets a leaf document's ``status`` to ``Completed`` is the task finalizer
-    (``worktrees/modules/finalize.py``), and it does so only after proving the task commit is
-    reachable from the contract's target branch and cleanup completed. Marking the last step
-    ``done`` writes no such proof, so a step-state-derived ``Completed`` published a row for
-    work still sitting uncommitted on a task branch -- recorded defect D42 of
-    ``260915_role-capsules-and-native-eve``, where a row flipped before any closeout or
-    integration had run.
-
-    The three inputs therefore keep their own meaning and none is substituted for another:
-    ``abandoned`` is a decision and stays terminal on its own; a ``Completed`` leaf document is
-    the landing the finalizer proved; and step state distinguishes "started" from "untouched".
-    A leaf whose steps are all done but whose document has not landed projects ``inProgress``,
-    which is the true state of that row and is what the finalizer overwrites when it lands.
+    Step completion is progress, not a second stage authority. Finalize still proves landing
+    before publishing Completed; start/abandon publish their own stages (MIK-R167 rule 13).
     """
-    if leaf.status == "abandoned":
-        # A leaf whose work was deliberately not taken projects that terminal row directly.
-        # Without this the partially-done check below would collapse it back to ``inProgress``,
-        # and a later master sync would silently reopen a row abandoned on purpose.
-        return "abandoned"
-    statuses = [step.status for step in leaf.steps]
-    statuses.extend(sub.status for step in leaf.steps for sub in step.substeps)
-    if leaf.status == "Completed" and statuses and not completion_blockers(leaf):
-        return "Completed"
-    if any(status in {"done", "inProgress", "blocked"} for status in statuses):
-        return "inProgress"
-    if statuses and leaf.status == "Completed":
-        # An old inconsistent leaf remains readable, but cannot project a terminal parent row.
-        return "inProgress"
     return leaf.status
 
 
@@ -162,21 +202,66 @@ def _validate_existing_row_path(
         )
 
 
-def _master_json_path(task_root: Path, leaf: TaskDocument) -> Path | None:
-    if leaf.master:
-        return _json_path_from_master_ref(task_root, leaf.master)
+def folder_master_json_path(task_root: Path, leaf: TaskDocument) -> Path | None:
+    """The master of a leaf that names none: its task folder's ``task.json``, when one exists.
+
+    ONE RULE FOR EVERY WRITER OF A LEAF'S MASTER ROW (MIK-R38). This module keeps the row current
+    on every task-document write; the finalizer (``worktrees/modules/finalize.py``) completes it
+    when the leaf lands; reopen (``worktrees/reopen.py``) resets it. The first two used to
+    disagree about a leaf without a ``master`` reference -- the sync fell back to this file, the
+    finalizer omitted its parent row -- so a master whose leaves name no master kept each
+    finished leaf's row at ``inProgress`` (260928-MIK: 15 rows, repaired by resync writes). All
+    three now resolve an unnamed leaf here, and a leaf that names its master through
+    :func:`master_json_path_from_ref`.
+
+    Only a ``subTask`` has a folder master: a ``light`` or ``master`` document *is* the folder's
+    ``task.json``.
+    """
+    if leaf.kind != "subTask" or leaf.master:
+        return None
     default = task_root / "task.json"
     return default if default.exists() else None
 
 
-def _json_path_from_master_ref(task_root: Path, master_ref: str | None) -> Path | None:
-    if not master_ref:
-        return None
-    ref = Path(master_ref)
-    json_ref = ref.with_suffix(".json") if ref.suffix else ref
-    candidate = (task_root / json_ref).resolve(strict=False)
+def _master_json_path(task_root: Path, leaf: TaskDocument) -> Path | None:
+    if leaf.master:
+        return master_json_path_from_ref(task_root, leaf_id=leaf.id, master_ref=leaf.master)
+    return folder_master_json_path(task_root, leaf)
+
+
+def master_json_path_from_ref(
+    task_root: Path,
+    *,
+    leaf_id: str,
+    master_ref: str,
+    refusal: type[ValueError] = MasterSyncError,
+) -> Path:
+    """Turn a leaf's ``master`` reference into its master JSON document path.
+
+    ONE RULE FOR A NAMED MASTER (MIK-R61 rule 2). The task-document master sync, the
+    finalizer and reopen resolve a named master here; their own copies are removed. The
+    reference names a document in the leaf's own task folder: ``task``, ``task.md`` and
+    ``task.json`` name the same document. A reference that leaves the task folder, that
+    cannot name a task document, or that names no existing document is refused by every
+    writer with one message carrying the leaf, the reference and the fix.
+    """
+
     root = task_root.resolve(strict=False)
-    # Cross-series master refs are explicit navigation metadata; automatic row sync is same-root only.
-    if not candidate.is_relative_to(root) or candidate.parent != root:
-        return None
+    ref = Path(master_ref)
+    if ref.suffix in ("", ".md", ".json"):
+        candidate = (root / ref.parent / (ref.stem + ".json")).resolve(strict=False)
+    else:
+        candidate = None
+    if candidate is None or candidate.parent != root:
+        raise refusal(
+            f"leaf {leaf_id!r} names master {master_ref!r}, which is not a document of this "
+            f"task folder ({root}): name a document of this folder (for example 'task.md'), "
+            "or remove the 'master' reference"
+        )
+    if not candidate.is_file():
+        raise refusal(
+            f"leaf {leaf_id!r} names master {master_ref!r}, but {candidate} does not exist: "
+            "name a document of this folder (for example 'task.md'), or remove the 'master' "
+            "reference"
+        )
     return candidate

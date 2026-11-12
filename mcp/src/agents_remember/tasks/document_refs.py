@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document import (
     LEAF_ROLES,
@@ -24,10 +25,12 @@ from agents_remember.tasks.document import (
     derived_leaf_placement,
 )
 from agents_remember.tasks.readiness import master_is_terminal
+from agents_remember.tasks.sprint_membership_refusal import missing_master_detail
 from agents_remember.tasks.store import (
     TaskDocSourceSnapshot,
     read_task_doc_with_source,
 )
+from agents_remember.tasks.task_paths import iter_task_documents
 
 TaskAltitude = Literal["sprint", "master", "leaf"]
 
@@ -42,6 +45,18 @@ class TaskDocumentRefError(ValueError):
     def __init__(self, status: str, detail: str) -> None:
         self.status = status
         super().__init__(detail)
+
+
+class CommandedMasterMissingError(TaskDocumentRefError):
+    """A sprint commands a master that resolves to no live master.
+
+    The detail is product-authored: it names the sprint, the master, where the master was found
+    under ``0_archive/`` and the operation that repairs the sprint. A caller that otherwise bounds
+    a topology failure to its status may therefore show this detail as it is.
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__("task-execution-graph-membership-invalid", detail)
 
 
 def refuse_segment_nodes_on_atomic_masters(
@@ -207,7 +222,7 @@ class TaskDocumentTopology:
             self.parent(ref)
             return "leaf"
         parents = self._sprint_parents(resolved)
-        if resolved.document.orchestrates:
+        if resolved.document.is_sprint:
             if parents:
                 raise TaskDocumentRefError(
                     "task-document-altitude-ambiguous",
@@ -237,7 +252,7 @@ class TaskDocumentTopology:
             return self._leaf_parent(resolved).ref
         parents = self._sprint_parents(resolved)
         if (
-            resolved.document.orchestrates or resolved.document.executionNature != "organizational"
+            resolved.document.is_sprint or resolved.document.executionNature != "organizational"
         ) and not parents:
             # Standalone sprint, or a standalone master: an explicit atomic nature
             # or the atomic-sequential default (L13-R5e) — either way no parent edge.
@@ -248,8 +263,11 @@ class TaskDocumentTopology:
         raise TaskDocumentRefError(status, f"cannot resolve one parent for {ref.key}")
 
     def validate_role(self, ref: TaskDocumentRef, role: str) -> TaskAltitude:
+        role = canonical_role(role)
         expected = (
-            REVIEWER_ALTITUDES
+            frozenset({"sprint", "master"})
+            if role == "investigator"
+            else REVIEWER_ALTITUDES
             if role == "reviewer"
             else frozenset({"sprint"})
             if role in SPRINT_ROLES
@@ -318,12 +336,16 @@ class TaskDocumentTopology:
 
         candidates = overrides or {}
         sprint = self.resolve(sprint_ref, candidates)
-        if sprint.document.kind != "master" or not sprint.document.orchestrates:
+        if not sprint.document.is_sprint:
             raise TaskDocumentRefError(
                 "task-execution-graph-sprint-required",
                 f"execution graph requires an orchestration sprint: {sprint_ref.key}",
             )
         graph = sprint.document.executionGraph
+        if graph is None and not sprint.document.orchestrates:
+            # A sprint that lost its last master commands nothing: there is no membership to
+            # validate and no graph to migrate to until a master is attached again.
+            return ()
         if graph is None:
             raise TaskDocumentRefError(
                 "task-execution-topology-migration-required",
@@ -388,7 +410,7 @@ class TaskDocumentTopology:
                     f"row {row.number!r} links outside the sprint repository: {ref.key}",
                 )
             resolved = self.resolve(ref, candidates)
-            if resolved.document.kind != "master" or resolved.document.orchestrates:
+            if resolved.document.kind != "master" or resolved.document.is_sprint:
                 raise TaskDocumentRefError(
                     "task-sprint-linkage-target-not-a-master",
                     f"row {row.number!r} masterRef must name a commanded master document, "
@@ -539,11 +561,17 @@ class TaskDocumentTopology:
         root = self._repo_root(repository)
         refs: set[TaskDocumentRef] = set()
         if root.is_dir():
-            for path in sorted(root.rglob("task.json")):
-                relative = path.relative_to(root)
-                if "0_archive" in relative.parts or "enclosures" in relative.parts:
-                    continue
-                refs.add(TaskDocumentRef(repository=repository, path=relative.as_posix()))
+            # Canonical masters live exactly at ``tasks/<repo>/<task>/task.json``,
+            # and the one walker of MIK-R83 rule 1 yields those task folders: a
+            # copy under notes/, reports/ or an enclosure folder is never met, so
+            # a valid-schema historical copy is never admitted as a live master.
+            for candidate in iter_task_documents(root):
+                refs.add(
+                    TaskDocumentRef(
+                        repository=repository,
+                        path=(candidate.relative_to(root)).as_posix(),
+                    )
+                )
         for ref in overrides or {}:
             parts = Path(ref.path).parts
             if (
@@ -619,10 +647,20 @@ class TaskDocumentTopology:
                     candidate.document.title,
                 }
             ]
+            if not matches:
+                raise CommandedMasterMissingError(
+                    missing_master_detail(self.coordination_root, sprint.ref, commanded_name)
+                )
             if len(matches) != 1:
+                found = ", ".join(sorted(candidate.ref.key for candidate in matches))
                 raise TaskDocumentRefError(
                     "task-execution-graph-membership-invalid",
-                    f"orchestrates entry {commanded_name!r} resolves to {len(matches)} masters",
+                    f"orchestrates entry {commanded_name!r} of sprint {sprint.ref.key} resolves "
+                    f"to {len(matches)} masters ({found}); an entry names exactly one. Give the "
+                    "master that is not meant an id and a title of its own (task_doc.set_field "
+                    "on that master), or replace the entry by the folder name of the master that "
+                    "is meant (task_doc.set_field with fields={orchestrates:[...]} on the "
+                    "sprint), before topology use",
                 )
             resolved.append(matches[0])
         refs = [master.ref for master in resolved]
@@ -632,6 +670,19 @@ class TaskDocumentTopology:
                 "orchestrates contains multiple aliases for the same commanded master",
             )
         return tuple(resolved)
+
+
+def _sorted_directories(directory: Path) -> list[Path]:
+    """The child directories of ``directory``, sorted, without following symlinks.
+
+    A folder that cannot be listed contributes nothing, exactly as the recursive
+    glob this bounded walk replaced behaved.
+    """
+    try:
+        entries = sorted(directory.iterdir())
+    except OSError:
+        return []
+    return [entry for entry in entries if entry.is_dir() and not entry.is_symlink()]
 
 
 def repository_master_documents(

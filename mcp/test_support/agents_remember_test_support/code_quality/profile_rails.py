@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from dataclasses import replace
@@ -11,12 +10,6 @@ from pathlib import Path
 
 from agents_remember.certification.repository_profiles.selection_results import (
     RepositorySelectionResult,
-)
-from agents_remember.certification.repository_profiles.source_selection.models import (
-    RailSourceSelection,
-)
-from agents_remember.certification.repository_profiles.source_selection.reader import (
-    read_rail_source_selection,
 )
 
 from agents_remember_test_support.code_quality import (
@@ -42,10 +35,6 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("python-suite", "python-crap", "python-diff-coverage"):
         command = commands.add_parser(name)
         _common_arguments(command, reports=True)
-    teardown = commands.add_parser("verify-teardown")
-    teardown.add_argument("--summary", type=Path, required=True)
-    teardown.add_argument("--proof", type=Path, required=True)
-    teardown.add_argument("--source-selection", type=Path, required=True)
     return parser
 
 
@@ -250,122 +239,11 @@ def _run_post_coverage(config: check.CheckConfig, *, rail: str) -> int:
     )
 
 
-def _verify_teardown(summary: Path, proof: Path, source_selection: Path) -> int:
-    decision = read_rail_source_selection(source_selection)
-    if decision.declaration.selectorId != "ambient-role-dependencies":
-        raise RuntimeError("teardown source selection belongs to another scenario")
-    if decision.applicability.status == "not-applicable":
-        if summary.exists() or summary.is_symlink():
-            raise RuntimeError("an unstarted ambient scenario unexpectedly published a summary")
-        _write_unstarted_teardown(proof, decision)
-        print("result: teardown-process-cleanliness PASS (admitted scenario has zero starts)")
-        return 0
-    return _verify_started_teardown(summary, proof, decision)
-
-
-def _write_unstarted_teardown(proof: Path, decision: RailSourceSelection) -> None:
-    payload = {
-        "schemaVersion": "teardown-proof/v1",
-        "status": "passed",
-        "scenarioApplicability": "not-applicable",
-        "scenarioZeroStart": True,
-        "sourceDecisionDigest": decision.decisionDigest,
-        "replications": [],
-    }
-    proof.parent.mkdir(parents=True, exist_ok=True)
-    proof.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def _verify_started_teardown(summary: Path, proof: Path, decision: RailSourceSelection) -> int:
-    try:
-        summary_bytes = summary.read_bytes()
-        payload = json.loads(summary_bytes)
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise RuntimeError("clean-room summary is unavailable or malformed") from error
-    if not isinstance(payload, dict) or payload.get("schema") != (
-        "ar-ambient-role-chat-e2e-summary/v1"
-    ):
-        raise RuntimeError("clean-room summary has the wrong schema")
-    observations: list[dict[str, object]] = []
-    _require_summary_selection(payload, decision)
-    runs = payload.get("runs")
-    if payload.get("status") != "passed" or not isinstance(runs, list) or len(runs) != 2:
-        raise RuntimeError("clean-room summary does not prove successful teardown")
-    root = summary.parent
-    for index, run in enumerate(runs, start=1):
-        if not isinstance(run, dict) or run.get("status") != "passed" or run.get("run") != index:
-            raise RuntimeError("clean-room replication did not pass")
-        reference = run.get("report")
-        if not isinstance(reference, str) or Path(reference).name != reference:
-            raise RuntimeError("clean-room replication reference is unsafe")
-        report_bytes = (root / reference).read_bytes()
-        detail = json.loads(report_bytes)
-        if (
-            not isinstance(detail, dict)
-            or detail.get("run") != index
-            or detail.get("retry") is not False
-        ):
-            raise RuntimeError("clean-room replication is not the selected fresh run")
-        _require_summary_selection(detail, decision)
-        checkpoints = detail.get("checkpoints")
-        cleanup = (
-            next(
-                (
-                    item
-                    for item in checkpoints
-                    if isinstance(item, dict) and item.get("id") == "L5-C10"
-                ),
-                None,
-            )
-            if isinstance(checkpoints, list)
-            else None
-        )
-        if not isinstance(cleanup, dict) or cleanup.get("status") != "passed":
-            raise RuntimeError("clean-room replication lacks a passing teardown checkpoint")
-        observations.append(
-            {
-                "report": reference,
-                "sha256": hashlib.sha256(report_bytes).hexdigest(),
-                "checkpoint": cleanup,
-            }
-        )
-    _write_teardown_proof(summary_bytes, proof, "passed", observations)
-    print("result: teardown-process-cleanliness PASS")
-    return 0
-
-
-def _require_summary_selection(payload: dict, decision: RailSourceSelection) -> None:
-    candidate = payload.get("candidate")
-    if (
-        not isinstance(candidate, dict)
-        or candidate.get("tree") != decision.sourceSelection.candidateTree
-        or payload.get("diffBase") != decision.sourceSelection.baseCommit
-        or payload.get("mode") != decision.mode
-        or payload.get("selectedPaths") != list(decision.selectedPaths)
-    ):
-        raise RuntimeError("clean-room evidence differs from the frozen scenario selection")
-
-
-def _write_teardown_proof(
-    summary_bytes: bytes, proof: Path, status: str, observations: list[dict[str, object]]
-) -> None:
-    payload = {
-        "schemaVersion": "teardown-proof/v1",
-        "status": status,
-        "summarySha256": hashlib.sha256(summary_bytes).hexdigest(),
-        "replications": observations,
-    }
-    proof.parent.mkdir(parents=True, exist_ok=True)
-    proof.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
-
-
 def main(argv: list[str] | None = None) -> int:
     try:
         admission = require_dagger_admission(subject="repository certification rail")
         args = build_parser().parse_args(argv)
-        if args.rail == "verify-teardown":
-            result = _verify_teardown(args.summary, args.proof, args.source_selection)
-        elif args.rail == "quality-config":
+        if args.rail == "quality-config":
             quality_scope.validate_quality_config(args.project_root.resolve())
             _require_exact_scope(args)
             print("result: quality-config-scope PASS")

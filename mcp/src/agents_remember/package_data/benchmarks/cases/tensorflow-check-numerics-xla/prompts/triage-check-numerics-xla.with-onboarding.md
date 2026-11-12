@@ -11,9 +11,9 @@ complete the primary task in one final answer.
 
 Constraints:
 - Do not edit source files.
-- Follow the active benchmark-local Agents Remember workflow from
-  `ar-coordination/AGENTS.md` normally, using the available MCP tools when that
-  workflow calls for them.
+- Before triaging, resolve the benchmark-local context through the available MCP tools.
+  Read the resolved memory layer's `system/settings.md` and `system/tools.md`
+  for its instructions and commands.
 - Use the benchmark-local memory repo only; do not use any parent workspace
   memory.
 - Do not final-answer with only setup, resolver, drift, or memory-status notes.

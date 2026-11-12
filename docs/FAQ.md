@@ -1,127 +1,185 @@
 # FAQ
 
-Common questions and objections about Agents Remember.
+Common questions and objections about Agents Remember. [Concepts](concepts.md) defines the terms
+the answers use.
 
 ## Design Principles
 
 ### What is the product: memory or workflow?
 
-The memory layer is the product. The workflow modes exist to protect that memory layer from stale or speculative content.
+The memory is the product: cards and knowledge records in a Git repository of their own. The role
+agents, the task documents and the checks exist to keep stale or speculative content out of that
+memory.
 
 The core rules are:
 
-1. onboarding is path-derived
-2. onboarding is checked for drift before planning
-3. implementation waits for developer approval
-4. onboarding records approved current state, not plans
+1. the card of a source file lies at a path derived from the path of the source file
+2. the tools measure the anchors of a card against the code, so staleness is reported and not
+   guessed
+3. the build of a task waits for the user's approval
+4. cards and knowledge records hold approved current state, not plans
 
-Research-only answers, minimal `w-02-light-task-workflow` tasks, and master + light sub-task series are different weights of the same discipline.
+A question that changes no code is answered in a chat and needs no task. Every code change belongs
+to a task under a master; the Architect writes the task from the
+[leaf-task](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/templates/leaf-task.md)
+template, which names the parts of a task document: objective, requirements, design, acceptance,
+steps and proposed code examples.
 
 ### How does an agent find the right memory?
 
 Three ways, matched to what the agent already knows:
 
-- **By path** — when it has the file in hand, the note is at a deterministic path (`src/foo/bar.ts` → `<memory-root>/onboarding/src/foo/bar.ts.md`). No ranking, embedding threshold, or index step — the path is the address, so reads stay predictable.
-- **By meaning** — when it knows the concept but not the file, semantic search over the memory returns candidate notes.
-- **By relationship** — when it knows an anchor but not its connections, a code graph answers callers, callees, and dependencies.
+- **By path**: when it has the file in hand, the card is at a deterministic path (`src/foo/bar.ts` → `<memory-root>/onboarding/src/foo/bar.ts.md`). Nothing is searched or ranked: the path is the address, so reads stay predictable.
+- **By tool**: `read_ar_files` names the governing card and the knowledge records of up to 20
+  paths, and `knowledge_read` names the invariants and families attributed to one source file.
+  Both return names and locations; the agent opens the named files itself.
+- **By text search**: when it knows a concept but no file, the agent searches the code and the
+  cards as text.
 
-By-path needs nothing extra; meaning and relationship are opt-in providers. See [Concepts](concepts.md) and [Providers](guides/providers.md).
+See [Concepts](concepts.md#how-an-agent-finds-memory).
 
 ### Is this just documentation?
 
 It is documentation with stricter placement, verification, and promotion rules.
 
-READMEs and architecture docs orient people. File-level onboarding answers a different question: what will an agent probably miss if it changes this file? That includes invariants, naming contracts, operational scars, cross-repo edges, and intent that code alone does not expose.
+READMEs and architecture docs orient people. A card answers a different question: what will an agent probably miss if it changes this file? That includes invariants, naming contracts, operational scars, edges to other repositories, and intent that code alone does not expose.
 
 ## Memory Layer
 
 ### Does memory get slower as it grows?
 
-File-level onboarding is loaded by path, so the cost of *reading* it is proportional to the files in scope for a task, not the size of the repository. The optional semantic index grows with the memory like any corpus, but it only helps *find* notes — the notes themselves are still read by path.
+A card is loaded by path, so the cost of *reading* memory is proportional to the files in scope for a task, not the size of the repository. The [knowledge index](concepts.md#knowledge-index) is a cache that Agents Remember derives from one memory tree and rebuilds when it is absent; it helps the tools find records, and the cards themselves are still read by path.
 
-Large repos can still accumulate a lot of memory, but the agent does not need to read all of it. It reads the repo overview, relevant route-local overview when one exists, and onboarding for the files it is touching.
+A large code repository can still accumulate a lot of memory, but the agent does not need to read all of it. It reads the root overview of the repository, the [route overview](concepts.md#route-overview) of the folder when one exists, and the cards for the files it is touching.
 
-### What stops onboarding files from bloating?
+### What stops cards from bloating?
 
-Scope. Onboarding should capture what code cannot say clearly on its own. It should not restate the implementation, duplicate type signatures, or become a dumping ground for task notes.
+Scope. A card should capture what code cannot say clearly on its own. It should not restate the implementation, duplicate type signatures, or become a dumping ground for task notes.
 
-When an onboarding unit grows too large, that is often a signal that the source file has too much coupling or that a route-local overview should hold shared context while file-specific notes stay small.
+When a card grows too large, that is often a signal that the source file has too much coupling or that a route overview should hold shared context while file-specific notes stay small.
 
 ### How does the agent know memory is not stale?
 
-File-level sidecar onboarding records verification metadata. `c-02-memory-quality-control` compares the source file against that verification point before the agent plans against onboarding.
+The JSON sidecar of a card records an [anchor](concepts.md#anchor) for each reference,
+[realization](concepts.md#realization-and-proof) and proof. These tools compare those anchors with
+a selected code tree or repair them; the [MCP tool reference](reference/mcp-tools.md) describes
+each:
 
-Typical outcomes are `up to date`, `drifted`, `missing verification`, `missing`, `orphaned`, `disabled`, or `unsupported`.
+- `context_packet` with `include_drift` counts the reference anchors as `current` or `stale` and
+  names unreadable sidecars and validator findings. Without the argument nothing is measured.
+- `knowledge_read` reports the currentness of an invariant as `current`, `stale`, `unverifiable`
+  or `unrealized`.
+- `citation_fix` repairs an anchor whose content only moved. The Curator writes a stale anchor
+  anew.
 
-Drifted onboarding can still be useful historical context, but the agent must treat it as directional rather than verified current behavior.
+Staleness alone blocks nothing. A stale card can still be read as a direction, but the agent must
+not treat it as verified current behavior. At closeout the [knowledge gate](concepts.md#knowledge-gate)
+judges the exact code and memory trees of the task, and open findings block the commit.
 
 ### What happens when a file moves?
 
-The onboarding should move with the source path. If it does not, drift detection can classify the old onboarding as orphaned. The `c-05-create-or-update-onboarding-files` skill owns file-level onboarding relocation, while structural route changes can route through the `c-03-repo-bootstrap` skill.
+The card moves with the source path. When a task renames or deletes a source file, the Curator of
+that task moves or retires the card and re-points or removes every reference to the old path. The
+Curator follows the [card procedure](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md), the skill's rules for the layout of cards and for checking their citations, for the move. A reference that still names the old path is
+reported as `stale`, because its path is absent from the code tree.
 
-### How does this handle cross-file or cross-repo coupling?
+### How does this handle cross-file or cross-repository coupling?
 
-File-level onboarding can include explicit docs references and cross-repo references. The agent follows those edges when they matter instead of eagerly loading a transitive closure.
+A card can include explicit docs references and references to other repositories. The agent follows those edges when they matter instead of eagerly loading a transitive closure.
 
-Repo-wide context belongs in `overview.md`. Larger repos can use route-local overviews in the mirrored onboarding hierarchy. Recurring entities and naming contracts can live in `entities.md`.
+Context for the whole repository belongs in the root `overview.md`. Larger repositories can use route overviews in the mirrored folders under `onboarding/`. Recurring entities and naming contracts can live in `entities.md`. A truth that several files share stands once in a knowledge record.
+
+The context of one code repository can include another repository. The memory settings file lists
+the other repositories under `crossRepo.allow`, each with the branch it must be on in the key
+`expectedBranch`; the [settings reference](reference/settings-json.md#memory-settings-file-keys)
+lists the keys of an entry.
 
 ## Workflow Layer
 
-### Do I need a durable task?
+### Do I need a task?
 
-Yes, but it can be thin. Chat is never a build route: every code change lives under an approved task document, and a change that fits in one session takes the minimal `w-02-light-task-workflow` artifact — a thin doc with a title and a few steps.
-
-Use a full `w-02-light-task-workflow` light task when the work needs a durable task file or checklist. When it outgrows a single-page plan — broad, high-risk, or many distinct slices — escalate to a master + light sub-task series.
+Yes, for every code change. Chat is never a build route: every code change belongs to a task
+document under a master, also a change of one file. The Architect writes the task from the
+[leaf-task](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/templates/leaf-task.md)
+template with the tool `task_doc`; the template names the parts of the task document, from the
+objective to the proposed code examples. A question that changes no code needs no task; a chat
+answers it.
 
 ### Is this overengineered?
 
-The memory layer is intentionally small: Markdown files, Git metadata, and deterministic paths. The workflow layer can be heavier, but it is optional and should match task risk.
+The memory itself is small: Markdown files, JSON files, Git metadata, and deterministic paths. The
+work around it is heavier. A code change is a task, a Worker builds it, a Reviewer reviews it, a
+Curator updates the memory, and the knowledge gate checks the result before the commit.
 
-If a change fits in one session, use a minimal `w-02-light-task-workflow` task. If it needs a durable plan, use a full `w-02-light-task-workflow` light task. If it outgrows one page or spans several slices, use a master + light sub-task series.
+The weight has one adjustable part. A task normally runs in an enclosure of its own; with a
+direct-execution grant it runs in the checkouts of the master's branch.
+[Workflows](workflows.md) describes both routes.
 
 ### What happens when the agent discovers something during implementation?
 
-The agent should route the discovery to the right artifact instead of quietly changing requirements or memory.
+The agent routes the discovery to the right place instead of quietly changing requirements or memory.
 
-Durable current-state findings can go through the `c-05-create-or-update-onboarding-files` skill. Requirement or architecture changes need explicit developer approval. The `c-01-findings-capture` skill keeps that routing visible.
+The Worker does not widen the requirements and does not repair memory. It names what it met in its
+[hand-off list](concepts.md#hand-off-list) for the Curator, including weaknesses of code outside
+its task. The Curator writes durable current-state findings into memory through the
+[curation operation](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/operations/curation.md),
+the skill's instructions for reconciling a task's intent, code and memory. Requirement or
+architecture changes need the user's explicit approval: the Architect revises the requirement
+packets and briefs the affected tasks again.
 
-### Why keep task files separate from onboarding?
+### Why keep task documents separate from cards?
 
-Task files contain plans, decisions, proposed examples, and in-progress notes. Onboarding contains approved current-state knowledge.
+Task documents contain plans, decisions, proposed examples, and in-progress notes. Cards and knowledge records contain approved current-state knowledge.
 
-Mixing them would pollute memory with speculation. The separation is what lets agents reason from onboarding without wondering whether it describes reality or merely a plan.
+Mixing them would pollute memory with speculation. The separation is what lets agents reason from memory without wondering whether it describes reality or merely a plan.
 
-## External Memory
+## The Memory Repository
 
-### Why use external memory?
+### Why is the memory a repository of its own?
 
-External memory is the supported topology: durable memory lives in its own repo per code
-repository, so it can be branched, committed and reviewed separately, and code and memory stay
-aligned through the ledger. It adds commit and ledger discipline, and that discipline is what
-makes a memory update attributable.
+The memory of each code repository lies in a Git repository of its own. It is branched, committed
+and reviewed separately from the code, and the memory commit of a closeout names the code commit
+that it describes. This adds commit discipline, and that discipline is what makes a memory update
+attributable.
 
 ### What is `memory.md`?
 
-`memory.md` is the external-memory ledger. It records which memory commit was verified against which code commit. The `c-12-closeout` skill writes it during closeout and the `c-09-git-worktree-manager` skill uses it during worktree integration, so code and memory do not drift apart silently.
+`memory.md` is a file at the root of the memory repository. Agents Remember computes it from the
+`Code-Commit` trailers of the memory commits: it lists each pair of code commit and memory commit,
+newest first. Git ignores the file, because Agents Remember adds the line `/memory.md` to the
+memory repository's `.gitignore`, and no memory commit holds it.
+
+Worktree start, closeout and landing take the pairs from the commits. A missing or outdated
+`memory.md` does not block them. Baseline adoption, closeout, `worktree_sync` and `direct_landing`
+write the file anew after their memory commit.
+
+These reads use the content of the file:
+
+- `context_packet` with `include_freshness` reports whether the file maps the checked-out code
+  commit.
+- The [cross-repository context](concepts.md#cross-repository-context) includes the memory of
+  another repository only when, among the other conditions of its entry, that repository's
+  `memory.md` can be read; an unreadable `memory.md` leaves that repository's code only.
+- Closeout reports in `memory_ledger_repair` how the file differed from the pairs it computed.
+- The dashboard's server reads the newest pairs of the file.
+
+The Manager or the Orchestrator performs the closeout of a task ([closeout operation](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/operations/closeout.md)); at the landing, the worktree tools take the pairs of code commit and memory commit from the `Code-Commit` trailers of the memory commits, so code and memory do not drift apart silently.
 
 ### How is a repository's memory located?
 
-The `c-08-ar-coordination-context-resolver` skill resolves it per target repository: each
-configured repository binds to `<coordination-root>/memory-repos/ar-<repo>/`, and one
-repository's memory never moves a sibling's. Repo-local internal memory under
-`<repo>/ar-memory/` was removed from the product; a repository that still carries that layout is
-refused by name with the exact path, together with the route to re-point it at its external
-memory root.
+The tool server resolves it per code repository: each
+listed code repository binds to `<coordination-root>/memory-repos/ar-<id>/`, and one
+repository's memory never moves another's.
 
 ## Comparisons
 
 ### How is this different from task workflow systems?
 
-Task workflow systems organize work. Agents Remember primarily preserves codebase knowledge across work. The workflows in this repository are useful, but they sit on top of the memory layer.
+Task workflow systems organize work. Agents Remember primarily preserves codebase knowledge across work. Its role agents and task documents organize work too, and they exist to keep that knowledge current.
 
 ### How is this different from vector memory or graph memory?
 
-It isn't an alternative to them — it uses them. Semantic search over the memory and a code-relationship graph are first-class (opt-in) substrates for *finding* memory. What's distinctive is what memory *is*: durable notes that are versioned, reviewable, diffable, drift-checked against source, and updated only after approved work lands — independent of how they were found.
+Vector memory and graph memory are ways to *find* text. Agents Remember defines what the memory *is*: cards and knowledge records that are versioned, reviewable, diffable, measured against the source, and updated only after approved work has passed review. An agent finds a card by the path of its source file, by the tools that name the knowledge of a path, or by text search.
 
 ## What This Is Not
 
@@ -131,6 +189,6 @@ The durable memory of record is not:
 - a database you query instead of reading files
 - a general knowledge base
 - a replacement for READMEs, docstrings, or architecture docs
-- a reason to skip human approval
+- a reason to skip the user's approval
 
-It is a Markdown and Git based memory convention with skills that help agents follow it consistently. The optional providers (semantic search, code graph) build derived indexes *over* that memory and code to help find it — they do not replace it as the source of truth.
+It is memory as Markdown and JSON files in Git, with a tool server, role agents and checks that keep it current.

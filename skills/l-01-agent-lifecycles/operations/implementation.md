@@ -1,80 +1,95 @@
+<!-- ar:roles all -->
 # Operation — Implementation
 
-**What it covers:** building the assigned scope inside the leaf's code worktree, and producing the
-builder artifacts the next seats consume.
+The Worker uses this operation to implement the selected leaf's primary requirement and explicit constraints in the supplied code root. It defines the implementation report, freeze and direct handover procedure.
 
-**When it is selected:** a leaf (or a flat/solo owner wearing the worker discipline) is building
-code or docs against an approved leaf plan.
+## Establish the inputs
 
-## Who carries it, and their job
+Before reading the task inputs, follow [Establish the assignment](../roles/worker.md#establish-the-assignment) for the exact handover file locations and native file reads. The inputs are the selected requirement packet, rendered leaf task and code worktree for edits. The memory root is read-only context.
 
-| Role | Its job in this operation |
-| --- | --- |
-| worker | implement exactly the leaf plan; run targeted checks; write the turn report |
-| architect (solo/flat only) | the same discipline when it builds hands-on at session scale |
+Before editing a canonical task document or marking your own completed step, read [Confirm the assignment](orientation.md#confirm-the-assignment) for the primary tool, `task_doc` on `agents-remember-task`, and rendered-copy rules.
 
-No other seat implements. A manager, orchestrator, curator, reviewer, strategist, or designer that
-finds itself implementing has crossed a boundary in its own role file.
+Implementation does not expand scope or edit task status, the contract, memory or onboarding state.
 
-## Required inputs
+## Outputs
 
-- The leaf `task_doc` and its one owned primary requirement revision (stable ID + version, approved
-  packet, durable corpus ruling), plus the adjacent revisions as dependency/preservation
-  constraints only.
-- The code worktree the brief names — the seat's only write area besides its report path.
-- The resolved memory layer's `system/coding-guidelines.md` and `system/tools.md` **before the first
-  edit**. A conflict between those guidelines and the leaf plan is an escalation, never a silent
-  choice.
-- Retrieval evidence as the brief requires: paired `read_ar_files` reads for orientation, plus
-  `grepai_search` / `cgc_*` when the leaf needs semantics or relationships.
+### Verify the final candidate
 
-## Normal workflow
+Before each freeze, pass the coding guidelines' handover checks on a clean copy of the final candidate. Name each check, the copy's tree and its result in the freeze report. Repair failures before freezing.
 
-1. **Orient (see `orientation.md`), then read before editing.** Read the files you will touch paired
-   with their onboarding, and read the current bytes natively inside the worktree. **Native read is
-   the edit precondition.**
-2. **Implement exactly the leaf plan.** Fill small, unambiguous blanks a competent implementer would
-   fill; do not fill important gaps silently.
-3. **Keep the change to the named surfaces.** Nothing outside the brief's writable areas, and no
-   unrelated cleanup.
-4. **Produce the next seat's input as you go**: changed paths, a diff summary, the tests you ran,
-   and any route/onboarding observations — marked as **observations or candidates**, never as
-   current truth. The curator, not the builder, writes onboarding.
-5. **Run the targeted checks** required by the leaf brief and by the **targeted-check contract** in
-   `closeout.md` § The targeted-check contract, then write the turn report. The builder owns the
-   checks; the owning seat consumes them as handoff evidence.
+Choose a freeze's focused tests by searching the repository's tracked test files for each touched path or bare name and each touched rule, tool or record identifier. Add tests using a matching test-support file, the knowledge-lookup proofs, and yours. Record names and files in the checks and run them; repairs follow the same rule.
 
-## Authority gates
+These fast deterministic checks are distinct from full code-quality operations, which require the developer's explicit request.
 
-- **Never `git commit`, merge, push, or integrate.** All changes stay uncommitted in both worktrees;
-  the owning seat commits at closeout after reviewing the report.
-- **No curator writes, no self-approval, no closeout, no task-doc bookkeeping.**
-- A plan delta beyond blank-filling escalates to the owning seat — never straight to the developer,
-  and never a reshape of the seat's own.
-- The memory worktree is read-only context unless the brief explicitly says otherwise.
-- Generated route indexes are regenerated with their owning tool from the memory worktree; a
-  builder does not regenerate the official indexes.
+### Make the measurement handover
 
-## Failure handling
+For measurement tooling, send the candidate and case-set identity to the Manager. Await the Manager's go on the same route. This simple handover is not a review freeze and starts no seat.
 
-- **A red targeted check the seat cannot fix inside the leaf's scope is an escalation, not a
-  workaround.** Report it; never relabel a failure or a not-run check as green.
-- **A guideline conflict** (coding guidelines vs leaf plan) escalates to the owning seat.
-- **A claimed requirement problem** is diagnosed and proposed, never rewritten: report it as a
-  contradiction for architect/developer revision authority.
-- **A blocked attempt** is reported with exactly one failure class: `implementation defect`,
-  `evidence gap`, `requirement contradiction/overconstraint`, `test/tool defect`, or
-  `external blocker`.
+### Write the report
 
-## Handoff / exit
+Write one report at the canonical task path. Include:
 
-The implementation operation exits when the change is complete, the targeted checks are run and
-truthfully reported, and the durable builder artifacts exist:
+- the change and changed files;
+- requirement and invariant evidence;
+- exact checks and results;
+- relevant checks not run and why;
+- your agent identifier as the `senderLine` of `role_message` on `agents-remember-task` names it, or "agent ID not known" if you sent no message;
+- open limitations.
 
-- the **turn report** at the brief's report path, in the shape of `../templates/turn-report.md`,
-  including the one acceptance block for the owned primary revision;
-- the **Requirement Attempt Journal** records, when an exact candidate is being handed to
-  independent review;
-- the builder input the curator needs (changed paths, diff summary, observations).
+Do not invent fields for a nonexistent data consumer.
 
-Then stop. Ending the turn once the artifact exists is safe — see `../core/acceptance.md`.
+For every repaired finding, record its identifier, what was wrong, the files and line ranges changed, and the test that fails before the repair and passes after it, with the result. List a change that answers no finding too.
+
+A check or evidence run carries over only when the files it exercises are byte-identical to those of its last run. Name each carried run with that comparison. For each rerun, name the changed file that required it.
+
+### Hand over the frozen candidate
+
+1. Freeze the candidate and tell the Manager to start the Reviewer.
+2. Once the Reviewer exists, send it the freeze directly with `role_message` on `agents-remember-task`. Name the leaf, the report path and the whole next stretch of work. The report names the head and change hash.
+3. Repair sealed findings and return a new freeze directly to the same Reviewer.
+4. After code review returns `PASS` and the Manager has started the Curator, send the Curator your hand-off list for that freeze directly. Name the same entries and changed paths so the changed-memory pass reads them.
+
+The freeze travels as a file: the message names the freeze report file, never its pasted text. This is a factual handover, not a review brief. Use the sibling role and exact leaf task references in the handover; keep product-supplied identifiers whole and unchanged.
+
+The Manager receives the first-freeze notice so it can start the Reviewer, plus its authority or recovery matters. Do not send it routine report notices or ask it to relay handover contents.
+
+## Boundaries
+
+### Keep the Worker role
+
+Before handing over or attempting a role-start, acceptance or publication action, read [Preserve role and task boundaries](../roles/worker.md#preserve-role-and-task-boundaries) for the Worker's restrictions. An uncertain result does not change the assignment. Follow the role's developer-question rule.
+
+### Repair defects and report a refused handover
+
+#### Report a costly small repair
+
+Fix every measured defect within the task's aim. When one small item costs about an hour, a second repair round or a second freeze, tell the Manager immediately. Give the hours and a proposal to carry or bound its complete repair, then continue the rest. Dropping applies only to nondefect polish.
+
+#### Repair a sealed own-file finding
+
+A sealed finding in this task's own files is repaired directly in your worktree: no plan, account, census or approval goes ahead of the repair, and the Manager gives no go-ahead for it. The full supported commit check and the freeze still apply. The freeze report carries one entry per repaired finding, with its failing-before and passing-after test.
+
+#### Report a refused handover
+
+Report non-work replies and empty or doubled-seat refusals to the Manager once, with the seat and quoted text. Never pick a candidate yourself. When the Manager gives the occasion, send the handover yourself; it relays none of the contents.
+
+For a Worker, Curator or Reviewer whose required Manager notice fails delivery, record it as pending, continue independent work and retry the notice through `role_message` on `agents-remember-task`. Do not turn that delivery failure into a question to the developer in your own chat.
+
+### Synchronize the leaf
+
+When the master line moves, run the supported sync of your leaf.
+
+- When no path changed on both sides, run the focused tests once more and tell the Manager. The tools derive the mechanical checks again, and the Manager's closeout preview decides. Send no new freeze to the Reviewer and begin no round. Request no Reviewer confirmation or receipt.
+- When a path changed on both sides or a focused test fails, repair exactly that and send the same Reviewer one look at the repair.
+
+Route memory-file conflicts to the Curator. Ask the Manager only for a sync step the operation reserves to it.
+
+For a native memory-file conflict, the Curator repairs only memory content inside its admitted write surface. The Manager captures, verifies and stages the resolution. Then the Worker calls `worktree_sync` on `agents-remember-task` with the exact contract and `resolution_action="continue"`. The continuation refuses unmerged or unstaged content. The Curator stages no files and changes no transaction authority. The Worker repairs no transaction authority, stages no files and takes none of the Manager's closeout writes.
+
+### Respect permissions and the message procedure
+
+Before acting on a denied or unanswered harness request, read [Honor harness permission decisions](orientation.md#honor-harness-permission-decisions) for the waiting, denial and non-bypass rules.
+
+### Handle delivery receipts
+
+Before responding to a full-store refusal, read [Handle a full-store refusal](../reference/message-handover.md#handle-a-full-store-refusal) for the pending handover, single retry and second-refusal report.

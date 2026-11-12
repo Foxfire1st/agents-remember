@@ -1,0 +1,191 @@
+"""The files Agents Remember owns inside the Paseo daemon home.
+
+Everything lives under ``<home>/agents-remember/``: the installed copy of the AR plugin, the
+embed list the plugin reads, and a stamp of what the running plugin last loaded. The plugin is
+installed from the copy and never from the build's source tree, so the daemon references only
+paths inside its own home and its content changes only when provision replaces the copy.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import shutil
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.kernel.file_lock import exclusive_file_lock
+from agents_remember.observer.host_activity import (
+    HOST_ACTIVITY_FILE,
+    PublishedAgentActivity,
+    read_host_activity_publication,
+)
+
+PLUGIN_ID = "ar-plugin"
+AR_HOME_DIRECTORY = "agents-remember"
+_SKIPPED_DIRECTORIES = frozenset({"node_modules", "__pycache__"})
+
+
+def plugin_source_root() -> Path:
+    """The AR plugin source directory that ships inside the package."""
+    return Path(__file__).resolve().parents[2] / "package_data" / "paseo_plugin"
+
+
+def installed_plugin_path(home: Path) -> Path:
+    return home / AR_HOME_DIRECTORY / "plugin"
+
+
+def embed_path(home: Path) -> Path:
+    return home / AR_HOME_DIRECTORY / "embed.json"
+
+
+def role_agents_path(home: Path) -> Path:
+    """Where role starts publish per-agent facts for the plugin (MIK-R117 rule 11)."""
+    return home / AR_HOME_DIRECTORY / "role-agents.json"
+
+
+def loaded_stamp_path(home: Path) -> Path:
+    return home / AR_HOME_DIRECTORY / "plugin-loaded.json"
+
+
+def tree_digest(root: Path) -> str | None:
+    """SHA-256 over the relative path and bytes of every plugin file; ``None`` when absent."""
+    if not root.is_dir():
+        return None
+    digest = hashlib.sha256()
+    for path in _plugin_files(root):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0")
+        digest.update(hashlib.sha256(path.read_bytes()).digest())
+    return digest.hexdigest()
+
+
+def sync_plugin_copy(source: Path, target: Path) -> bool:
+    """Make ``target`` hold exactly the plugin files of ``source``; report whether it changed."""
+    if tree_digest(source) == tree_digest(target):
+        return False
+    staging = target.with_name(target.name + ".next")
+    shutil.rmtree(staging, ignore_errors=True)
+    for path in _plugin_files(source):
+        destination = staging / path.relative_to(source)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(path, destination)
+    shutil.rmtree(target, ignore_errors=True)
+    staging.rename(target)
+    return True
+
+
+def write_embed(home: Path, entries: list[dict[str, str]]) -> bool:
+    """Publish the embed list for the plugin; report whether the file changed."""
+    if read_embed(home) == entries:
+        return False
+    atomic_write_text(embed_path(home), json.dumps({"embed": entries}, indent=2) + "\n")
+    return True
+
+
+def read_embed(home: Path) -> list[dict[str, str]] | None:
+    """The embed list the plugin reads from this home; ``None`` when none was published."""
+    document = _read_json(embed_path(home))
+    entries = document.get("embed") if isinstance(document, dict) else None
+    return entries if isinstance(entries, list) else None
+
+
+def read_loaded_stamp(home: Path) -> Any:
+    return _read_json(loaded_stamp_path(home))
+
+
+def read_role_agents(home: Path) -> dict[str, dict[str, str]]:
+    """The per-agent facts the plugin reads; empty when none were published."""
+    document = _read_json(role_agents_path(home))
+    agents = document.get("agents") if isinstance(document, dict) else None
+    if not isinstance(agents, dict):
+        return {}
+    facts: dict[str, dict[str, str]] = {}
+    for agent_id, record in agents.items():
+        if (
+            isinstance(record, dict)
+            and isinstance(record.get("role"), str)
+            and isinstance(record.get("task"), str)
+            and isinstance(record.get("reportPath"), str)
+        ):
+            facts[str(agent_id)] = {
+                "role": record["role"],
+                "task": record["task"],
+                "reportPath": record["reportPath"],
+            }
+            if isinstance(record.get("registration"), str):
+                facts[str(agent_id)]["registration"] = record["registration"]
+    return facts
+
+
+def _registration_survives_end(
+    record: dict[str, str], boot_id: str, end: PublishedAgentActivity
+) -> bool:
+    try:
+        boundary = json.loads(record.get("registration", "null"))
+        if not isinstance(boundary, list) or len(boundary) != 2 or boundary[0] != boot_id:
+            return False
+        registered_at = datetime.fromisoformat(boundary[1])
+    except (TypeError, ValueError):
+        return False
+    # A boot's initial listing has no close time: it describes the session that
+    # existed before this registration. Later native end events carry their time.
+    return registered_at.tzinfo is not None and (
+        end.eventAt is None or end.eventAt <= registered_at
+    )
+
+
+def publish_role_agent(home: Path, agent_id: str, record: dict[str, str]) -> bool:
+    """Merge one agent's facts for the plugin; report whether the file changed.
+
+    Never raises for filesystem trouble: a start the plugin cannot read about
+    is simply silent, and the next start rewrites the file.
+    """
+    try:
+        path = role_agents_path(home)
+        with exclusive_file_lock(path, "Paseo role-agent facts"):
+            agents = read_role_agents(home)
+            publication = read_host_activity_publication(path.with_name(HOST_ACTIVITY_FILE))
+            merged = dict(agents)
+            if publication is not None:
+                merged = {
+                    key: value
+                    for key, value in agents.items()
+                    if key not in publication.agents
+                    or publication.agents[key].state != "ended"
+                    or _registration_survives_end(
+                        value, publication.bootId, publication.agents[key]
+                    )
+                }
+            registered = dict(record)
+            if publication is not None:
+                registered["registration"] = json.dumps(
+                    [publication.bootId, datetime.now(UTC).isoformat()]
+                )
+            merged[agent_id] = registered
+            if merged == agents:
+                return False
+            atomic_write_text(path, json.dumps({"agents": merged}, indent=2) + "\n")
+            return True
+    except OSError:
+        return False
+
+
+def write_loaded_stamp(home: Path, stamp: dict[str, str | None]) -> None:
+    atomic_write_text(loaded_stamp_path(home), json.dumps(stamp, indent=2) + "\n")
+
+
+def _plugin_files(root: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_file() and _SKIPPED_DIRECTORIES.isdisjoint(path.relative_to(root).parts)
+    )
+
+
+def _read_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None

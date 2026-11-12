@@ -11,6 +11,7 @@ import pytest
 from agents_remember_test_support.testing.global_state import (
     begin_pytest_process,
     end_pytest_process,
+    reset_process_mutable_state,
     restore_owned_mutable_state,
     snapshot_owned_mutable_state,
 )
@@ -68,3 +69,24 @@ def reject_owned_global_state_leaks() -> Iterator[None]:
             + "\n".join(changed),
             pytrace=False,
         )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def reset_process_state_at_module_boundaries() -> Iterator[None]:
+    def reset() -> None:
+        reset_process_mutable_state()
+        # The worktree services' holder (kernel.worktree_service_binding) is one object, not a
+        # module-level collection the state scanner can see. The base's register row for the
+        # module it replaced cleared the binding here; a server built by one module must not
+        # answer the next module's operation through its supplier (MIK-R204 rule 3).
+        from agents_remember.kernel.worktree_service_binding import (  # noqa: PLC0415
+            reset_worktree_services,
+        )
+
+        reset_worktree_services()
+
+    reset()
+    try:
+        yield
+    finally:
+        reset()

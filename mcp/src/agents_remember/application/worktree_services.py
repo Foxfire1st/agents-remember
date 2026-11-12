@@ -7,21 +7,29 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application import provider_runtime as provider_runtime_api
-from agents_remember.application.prepared_certification import (
-    PreparedMemoryCertificationAdapter,
+from agents_remember.application.knowledge_gate import KnowledgeGate
+from agents_remember.application.knowledge_worklist import LeafWorklistRecompute
+from agents_remember.application.memory_quality.converted_base import (
+    context_check_base,
+    leaf_base_port,
+    leaf_base_request_for_context,
 )
+from agents_remember.application.review_artifact_cleanup import ReviewArtifactCleanup
+from agents_remember.memory.conversion.base import GitBaseConverter
+from agents_remember.memory.conversion.crossing_port import GitKnowledgeCrossing
 from agents_remember.memory_quality import check as memory_quality_check_api
 from agents_remember.memory_quality.gate_five_rails import gate_five_memory_rails
 from agents_remember.memory_quality.incremental_scope.candidate import observe_contract_task
+from agents_remember.memory_quality.knowledge_validator.commit_route import (
+    GitKnowledgeValidation,
+)
 from agents_remember.memory_quality.style.citations import (
     source_index_cache as citation_cache_api,
 )
 from agents_remember.models.task_document import CanonicalTaskObservation
 from agents_remember.providers import provider_setup as provider_setup_api
-from agents_remember.worktrees.integration.closeout.preparation.continuation import (
-    PreparedCloseoutContinuation,
-)
 from agents_remember.worktrees.services import (
+    LeafAgentArchivePort,
     ProviderSetupRequestSpec,
     TerminalGuard,
     WorktreeServices,
@@ -164,11 +172,14 @@ class MemoryQualityAdapter:
         *,
         unstamped_code_commit: str | None = None,
     ) -> Any:
+        leaf_request = leaf_base_request_for_context(context)
         return memory_quality_check_api.DriftCheckContext(
             code_repository_root=code_repository_root,
             context=context,
             detail_limit=detail_limit,
             unstamped_code_commit=unstamped_code_commit,
+            knowledge_base=context_check_base(code_repository_root, context),
+            landing_base=(None if leaf_request is None else leaf_base_port(leaf_request)),
         )
 
     def run_check(
@@ -193,21 +204,29 @@ class CitationGuardAdapter:
         contract: WorktreeContract,
         *,
         requested_contract_path: Path,
+        completed_contract_with_remains: bool = False,
     ) -> AbstractContextManager[TerminalGuard]:
         return citation_cache_api.terminal_namespace_guard(
             contract,
             requested_contract_path=requested_contract_path,
+            completed_contract_with_remains=completed_contract_with_remains,
         )
 
 
-def build_default_worktree_services() -> WorktreeServices:
+def build_default_worktree_services(
+    *, leaf_agent_archive: LeafAgentArchivePort | None = None
+) -> WorktreeServices:
     return WorktreeServices(
         provider_lifecycle=ProviderLifecycleAdapter(),
         memory_quality=MemoryQualityAdapter(),
         citation_guard=CitationGuardAdapter(),
         certification_memory_rails=CertificationMemoryRailsAdapter(),
-        certification_continuation=PreparedCloseoutContinuation(),
-        prepared_memory_certification=PreparedMemoryCertificationAdapter(),
+        knowledge_validation=GitKnowledgeValidation(base_converter=GitBaseConverter()),
+        knowledge_crossing=GitKnowledgeCrossing(),
+        knowledge_worklist=LeafWorklistRecompute(),
+        knowledge_gate=KnowledgeGate(),
+        review_artifact_cleanup=ReviewArtifactCleanup(),
+        leaf_agent_archive=leaf_agent_archive,
     )
 
 

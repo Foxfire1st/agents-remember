@@ -1,4 +1,4 @@
-"""The five views rendered deterministically over the reader port, with their provenance classes.
+"""The three views rendered deterministically over the reader port, with their provenance classes.
 
 This is the module the whole leaf exists for. Everything before it settles vocabulary and everything
 after it transports bytes; here a view decides what it selects, how it orders it, and -- the clause
@@ -35,7 +35,7 @@ renderer that will lose the fourth:
 **Where the authored side comes from.** ``CR20-6`` records the intake decision this module
 implements: an authored no-consequence claim must be a *stored* record while the packet's Exclusions
 forbid a new canonical record kind, so it is carried inside an **already-registered** kind -- the
-``decision`` facet of ``KS-R11@v1`` (``models/knowledge/facet.py::DecisionPayload``), whose
+``decision`` facet of ``KS-R11@v1`` (a decision record in the text store), whose
 ``decider`` is the author, whose ``reason`` is the rationale, and whose ``outcome`` carries the
 determination. The same kind carries a declared priority, whose ``outcome`` is required to be the
 canonical decimal position; a ``decision`` facet whose ``outcome`` is not canonical is not read as a
@@ -61,16 +61,9 @@ from agents_remember.models.knowledge.classification import (
 )
 from agents_remember.models.knowledge.source import SourceLocator
 from agents_remember.models.knowledge.view import (
-    CurationQueueRow,
-    CuratorDisposition,
-    FamilyRow,
-    InvariantRow,
     KnowledgeViewReader,
-    MachineWorkItem,
     NoConsequenceStatement,
     OrderedPosition,
-    ReviewMatrixRow,
-    SourceContextRow,
     SubjectRef,
     UnresolvedLimitation,
     ViewRequest,
@@ -87,11 +80,6 @@ __all__ = [
     "UnadmittedOrderingInput",
     "authored_decision",
     "order_candidates",
-    "render_curation_queue",
-    "render_family",
-    "render_invariant",
-    "render_review_matrix",
-    "render_source_context",
 ]
 
 # The registered facet kind that carries an authored determination, and the two canonical outcome
@@ -102,7 +90,6 @@ NO_CONSEQUENCE_OUTCOME_PREFIX = "no_consequence: "
 PRIORITY_OUTCOME_PREFIX = "declared_priority: "
 
 # The rule every generated row's *content* is classified under when its own record is mechanical.
-DETECTION_RULE = ("ordering.trigger-rule", 1)
 CONSEQUENCE_RULE = ("consequence.record-payload-byte-equal", 1)
 REGISTERED_ROLE_RULE = ("ordering.registered-role", 1)
 
@@ -720,8 +707,6 @@ def _family_candidates(reader: KnowledgeViewReader, request: ViewRequest) -> tup
         )
     members = _family_members(reader, request, candidates)
     _member_locations(reader, members, candidates)
-    for row in reader.rows("detection_signal"):
-        candidates.append(_signal_candidate(row))
     return tuple(candidates)
 
 
@@ -799,94 +784,6 @@ def _member_locations(
         )
 
 
-def _signal_candidate(row: object) -> Candidate:
-    """One recorded detection signal as a mechanically-determined family row."""
-
-    payload = row.payload  # type: ignore[attr-defined]
-    condition = _string(payload.get("condition")) or "recorded_condition"
-    return Candidate(
-        subject=SubjectRef(
-            record_kind="detection_signal",
-            record_id=str(row.record_id),  # type: ignore[attr-defined]
-            revision_id=row.revision_id,  # type: ignore[attr-defined]
-        ),
-        label=condition,
-        authored=None,
-        mechanical_rule_id=DETECTION_RULE,
-        trigger=condition,
-        fact_kind="detection_signal",
-        change_locus="attributed_source",
-        lifecycle=row.lifecycle,  # type: ignore[attr-defined]
-    )
-
-
-def _review_candidates(reader: KnowledgeViewReader, request: ViewRequest) -> tuple[Candidate, ...]:
-    """The review matrix: requirements, effects, preservation claims, evidence and findings."""
-
-    kinds = request.record_kinds or (
-        "requirement_revision",
-        "invariant_effect_claim",
-        "preservation_claim",
-        "unresolved_question",
-        "evidence_claim",
-        "verification_observation",
-    )
-    candidates: list[Candidate] = []
-    for kind in kinds:
-        for row in reader.rows(kind):
-            candidates.append(_record_candidate(row, kind))
-    return tuple(candidates)
-
-
-def _record_candidate(row: object, kind: str) -> Candidate:
-    """One envelope record as a review-matrix row, with its recorded references preserved."""
-
-    payload = row.payload  # type: ignore[attr-defined]
-    refs = _references(payload)
-    return Candidate(
-        subject=SubjectRef(
-            record_kind=kind,
-            record_id=str(row.record_id),  # type: ignore[attr-defined]
-            revision_id=row.revision_id,  # type: ignore[attr-defined]
-        ),
-        label=kind,
-        authored=None,
-        mechanical_rule_id=CONSEQUENCE_RULE,
-        fact_kind=kind,
-        statement=_string(payload.get("explanation")) or _string(payload.get("rationale")),
-        lifecycle=row.lifecycle,  # type: ignore[attr-defined]
-        assessment_status="assessed" if refs else "missing",
-        assessment_ids=refs,
-        extra=refs,
-    )
-
-
-def _curation_candidates(
-    reader: KnowledgeViewReader, request: ViewRequest
-) -> tuple[Candidate, ...]:
-    """Machine work items, and curator dispositions, kept as two separate row sets."""
-
-    candidates: list[Candidate] = []
-    for row in reader.rows("detection_signal"):
-        candidates.append(_signal_candidate(row))
-    if request.family_revision_id:
-        for decision in _decisions_for(reader, "family_revision", request.family_revision_id):
-            candidates.append(
-                Candidate(
-                    subject=SubjectRef(
-                        record_kind="curator_disposition",
-                        record_id=decision.facet_revision_id,
-                    ),
-                    label=decision.decider,
-                    authored=decision,
-                    fact_kind="curator_disposition",
-                    statement=decision.reason,
-                    trigger=decision.facet_revision_id,
-                )
-            )
-    return tuple(candidates)
-
-
 # ---------------------------------------------------------------------------
 # Per-view row assembly.
 # ---------------------------------------------------------------------------
@@ -914,303 +811,3 @@ def _conditions(value: object) -> tuple[str, ...]:
     if isinstance(value, (list, tuple)):
         return tuple(str(item) for item in value)
     return () if value is None else (str(value),)
-
-
-def _references(payload: Mapping[str, object]) -> tuple[str, ...]:
-    """Every recorded assessment reference on one payload, in recorded order."""
-
-    found: list[str] = []
-    for field in (
-        "assessment_refs",
-        "requirement_revision_refs",
-        "candidate_realization_claim_ids",
-    ):
-        value = payload.get(field)
-        if isinstance(value, (list, tuple)):
-            found.extend(str(item) for item in value)
-        elif isinstance(value, str):
-            found.append(value)
-    return tuple(found)
-
-
-def _render(candidates: Sequence[Candidate], request: ViewRequest, offset: int) -> Page:
-    """Order the candidates, take the page that starts at ``offset``, and bound it.
-
-    The offset is the one the seam admitted from the caller's continuation. No token is read here, so
-    there is no second parse and no fallback to the start of the walk: a page is a function of the
-    selection, the limit and the cursor alone.
-    """
-
-    ordered = order_candidates(candidates, request.ordering_input)
-    rows, next_position = _page(ordered.ordered, request.limit, offset)
-    return Page(ordered=ordered, rows=rows, start=offset, next_position=next_position)
-
-
-def render_source_context(
-    reader: KnowledgeViewReader, request: ViewRequest, offset: int
-) -> tuple[
-    tuple[SourceContextRow, ...],
-    tuple[UnresolvedLimitation, ...],
-    tuple[str, ...],
-    int,
-    int,
-]:
-    """The source-context view's rows, its limitations, its rule ids, its selection's size and the
-    position the next page starts at."""
-
-    page = _render(_source_context_candidates(reader, request), request, offset)
-    rows: list[SourceContextRow] = []
-    for index, candidate in enumerate(page.rows):
-        provenance = _classified(candidate)
-        assert provenance is not None
-        rows.append(
-            SourceContextRow(
-                subject=candidate.subject,
-                fact_kind=candidate.fact_kind,  # type: ignore[arg-type]
-                statement=candidate.statement,
-                role=candidate.role,  # type: ignore[arg-type]
-                path=candidate.path,
-                locator=candidate.locator,
-                order=_position(page.start + index, provenance, request.ordering_input),
-                provenance=provenance,
-            )
-        )
-    return (
-        tuple(rows),
-        page.ordered.limitations,
-        page.ordered.rule_ids,
-        len(page.ordered.ordered),
-        page.next_position,
-    )
-
-
-def render_invariant(
-    reader: KnowledgeViewReader, request: ViewRequest, offset: int
-) -> tuple[
-    tuple[InvariantRow, ...],
-    tuple[UnresolvedLimitation, ...],
-    tuple[str, ...],
-    int,
-    int,
-]:
-    """The invariant view's rows, its limitations, its rule ids, its selection's size and the
-    position the next page starts at.
-
-    A realization row carries its own recorded location, exactly as the source-context and family
-    views report it. ``_invariant_candidates`` set the role, path and locator on that candidate from
-    the start -- this projection copied none of them, so the view that answers "where is this
-    invariant realized" reported the claim, its revision and its authored rationale and no place.
-    Nothing is derived here: the fields the candidate already holds are the ones that travel, so the
-    three views cannot disagree about one claim's location.
-    """
-
-    page = _render(_invariant_candidates(reader, request), request, offset)
-    rows: list[InvariantRow] = []
-    for index, candidate in enumerate(page.rows):
-        provenance = _classified(candidate)
-        assert provenance is not None
-        rows.append(
-            InvariantRow(
-                subject=candidate.subject,
-                fact_kind=candidate.fact_kind,  # type: ignore[arg-type]
-                statement=candidate.statement,
-                role=candidate.role,  # type: ignore[arg-type]
-                path=candidate.path,
-                locator=candidate.locator,
-                essential_conditions=candidate.essential_conditions,
-                conditions_omitted=candidate.conditions_omitted,
-                lifecycle=candidate.lifecycle,
-                order=_position(page.start + index, provenance, request.ordering_input),
-                provenance=provenance,
-            )
-        )
-    return (
-        tuple(rows),
-        page.ordered.limitations,
-        page.ordered.rule_ids,
-        len(page.ordered.ordered),
-        page.next_position,
-    )
-
-
-DISPOSITION_VOCABULARY_VERSION = "curator-disposition/v1"
-
-
-def render_family(
-    reader: KnowledgeViewReader, request: ViewRequest, offset: int
-) -> tuple[
-    tuple[FamilyRow, ...],
-    tuple[UnresolvedLimitation, ...],
-    tuple[str, ...],
-    int,
-    int,
-]:
-    """The family view's rows, with each row's change locus left as the field it was recorded as.
-
-    A member's location travels with the row, exactly as the source-context view reports it. The
-    candidate carried the recorded path and locator from the start; the projection copied neither,
-    so a family read answered "where is this realized" with a claim id, an invariant revision id
-    and an authored rationale -- and the rationale is authored prose, which is not a location even
-    when a filename happens to appear in it. Both views decode the one recorded locator through the
-    same adapter, so the two cannot disagree about one claim's place.
-    """
-
-    page = _render(_family_candidates(reader, request), request, offset)
-    rows: list[FamilyRow] = []
-    for index, candidate in enumerate(page.rows):
-        provenance = _classified(candidate)
-        assert provenance is not None
-        rows.append(
-            FamilyRow(
-                subject=candidate.subject,
-                fact_kind=candidate.fact_kind,  # type: ignore[arg-type]
-                statement=candidate.statement,
-                role=candidate.role,  # type: ignore[arg-type]
-                path=candidate.path,
-                locator=candidate.locator,
-                change_locus=candidate.change_locus,  # type: ignore[arg-type]
-                lifecycle=candidate.lifecycle,
-                order=_position(page.start + index, provenance, request.ordering_input),
-                provenance=provenance,
-            )
-        )
-    return (
-        tuple(rows),
-        page.ordered.limitations,
-        page.ordered.rule_ids,
-        len(page.ordered.ordered),
-        page.next_position,
-    )
-
-
-def render_review_matrix(
-    reader: KnowledgeViewReader, request: ViewRequest, offset: int
-) -> tuple[
-    tuple[ReviewMatrixRow, ...],
-    tuple[UnresolvedLimitation, ...],
-    tuple[str, ...],
-    int,
-    int,
-]:
-    """The review matrix: the surface ``KS-R22@v1`` mounts, with its classification fields.
-
-    The no-consequence statement is attached to a row exactly when a registered mechanical rule or a
-    stored authored claim establishes one, and the two are distinguishable at the payload level
-    because the statement model refuses any mixture of author and rule.
-    """
-
-    page = _render(_review_candidates(reader, request), request, offset)
-    rows: list[ReviewMatrixRow] = []
-    for index, candidate in enumerate(page.rows):
-        provenance = _classified(candidate)
-        assert provenance is not None
-        rows.append(
-            ReviewMatrixRow(
-                subject=candidate.subject,
-                requirement_record_id=_only_if(candidate, "requirement_revision"),
-                requirement_revision_id=(
-                    candidate.subject.revision_id
-                    if candidate.subject.record_kind == "requirement_revision"
-                    else None
-                ),
-                proposed_effect_claim_id=_only_if(candidate, "invariant_effect_claim"),
-                preservation_claim_id=_only_if(candidate, "preservation_claim"),
-                evidence_claim_ids=(
-                    (candidate.subject.record_id,)
-                    if candidate.subject.record_kind == "evidence_claim"
-                    else ()
-                ),
-                record_ids=candidate.extra,
-                assessment_ids=candidate.assessment_ids,
-                assessment_status=candidate.assessment_status,  # type: ignore[arg-type]
-                unresolved_findings=(
-                    candidate.extra
-                    if candidate.subject.record_kind == "unresolved_question"
-                    else ()
-                ),
-                consequence=_consequence(candidate),
-                order=_position(page.start + index, provenance, request.ordering_input),
-                provenance=provenance,
-            )
-        )
-    return (
-        tuple(rows),
-        page.ordered.limitations,
-        page.ordered.rule_ids,
-        len(page.ordered.ordered),
-        page.next_position,
-    )
-
-
-def _only_if(candidate: Candidate, record_kind: str) -> str | None:
-    """The candidate's own record id, but only when it is the kind this field is about."""
-
-    return candidate.subject.record_id if candidate.subject.record_kind == record_kind else None
-
-
-def render_curation_queue(
-    reader: KnowledgeViewReader, request: ViewRequest, offset: int
-) -> tuple[
-    tuple[CurationQueueRow, ...],
-    tuple[UnresolvedLimitation, ...],
-    tuple[str, ...],
-    int,
-    int,
-]:
-    """The curation queue: machine items and curator dispositions, separate in the shape of the data.
-
-    This view computes no actionable count. ``design/retrieval-review-design.md:348`` keeps the
-    factual review section report-only, and a count of "actionable" work would be the semantic
-    conclusion this leaf is forbidden to generate.
-    """
-
-    page = _render(_curation_candidates(reader, request), request, offset)
-    rows: list[CurationQueueRow] = []
-    for index, candidate in enumerate(page.rows):
-        provenance = _classified(candidate)
-        assert provenance is not None
-        position = _position(page.start + index, provenance, request.ordering_input)
-        rows.append(_queue_row(candidate, position, provenance))
-    return (
-        tuple(rows),
-        page.ordered.limitations,
-        page.ordered.rule_ids,
-        len(page.ordered.ordered),
-        page.next_position,
-    )
-
-
-def _queue_row(
-    candidate: Candidate, position: OrderedPosition, provenance: Provenance
-) -> CurationQueueRow:
-    """One queue row: either a machine work item or a separately attributed disposition."""
-
-    if candidate.fact_kind == "curator_disposition":
-        assert candidate.authored is not None
-        return CurationQueueRow(
-            item=MachineWorkItem(
-                work_item_id=candidate.subject.record_id,
-                condition_code="curator_disposition_recorded",
-                condition_vocabulary_version=DISPOSITION_VOCABULARY_VERSION,
-                matched_facts=(),
-            ),
-            disposition=CuratorDisposition(
-                disposition_id=candidate.subject.record_id,
-                disposition=candidate.authored.outcome,
-                rationale=candidate.authored.reason,
-                author_ref=candidate.authored.decider,
-                state_at_origin="recorded",
-                provenance=provenance,
-            ),
-            order=position,
-        )
-    return CurationQueueRow(
-        item=MachineWorkItem(
-            work_item_id=candidate.subject.record_id,
-            condition_code=candidate.trigger or candidate.fact_kind,
-            condition_vocabulary_version="detection-condition/v1",
-            matched_facts=candidate.extra,
-            registered_scope_status=candidate.statement,
-        ),
-        order=position,
-    )

@@ -1,12 +1,10 @@
 # Turn-Report Template
 
-The **mandatory** artifact a worker writes at **every** hand-off (`roles/worker.md`). It is how the
-leaf's work survives the session's death and how a respawned successor onboards from **state, not the
-transcript**. The relay never inspects it: it derives and delivers the worker's turn-ended state
-signal, and the manager — never a seat-local watcher — detects a missing report after that wake and
-nudges (uniform-mechanism ruling 2026-07-07). The truth boundary this template obeys is authored once
-in `../core/acceptance.md`; the check duty it records is authored in
-`../operations/closeout.md` § The targeted-check contract.
+The Worker uses this template for the mandatory report at every handoff. The Manager, Reviewer, developer and a successor use it to inspect the leaf's work and continue from recorded state without the transcript.
+
+In this template, AR means Agents Remember and ID means identifier.
+
+This template supplies the report and journal authoring shapes. The [acceptance reference](../core/acceptance.md) owns acceptance, and [final-candidate verification](../operations/implementation.md#verify-the-final-candidate) owns targeted handover checks.
 
 ## Rules
 
@@ -14,34 +12,21 @@ in `../core/acceptance.md`; the check duty it records is authored in
    a sub-agent (it is the leaf's single artifact of record).
 2. State facts, not a narrative: what changed, what broke, what is proven green, what remains.
 3. The **Respawn State** section must let a fresh successor continue **without reading any transcript**.
-4. Keep it durable and in the series notes; reference it from the leaf `task_doc`.
-5. Default path: `notes/reports/<leaf-id>-worker-report.md`. The control-plane helper exposes this
-   convention so manager nudges and respawn onboarding can point at the same artifact.
-6. Include one complete **Requirement Acceptance Envelope** block for the leaf-owned primary stable
-   requirement ID + version in the brief. List dependency/preservation checks separately; they are
-   not closure claims. General prose or an aggregate completion statement is invalid.
-7. Include the explicit **Checks** section even when no check ran. The header row is only a summary;
-   it never replaces exact commands, results, and durable evidence references.
-8. Keep the **Durable-Evidence Promotion Hold Point** separate from requirement acceptance. Neither
-   can substitute for the other.
-9. The report and the detailed **Requirement Attempt Journal** are distinct artifacts. The report
-   links the records appended at a review handoff; the journal at
-   `notes/reports/<leaf-id>-requirement-attempt-journal.md` is the single physical append-only
-   authority shared as an ordered record stream. Advance an attempt only when an exact candidate is
-   handed to independent review, or after reviewer rejection. Independent reviewers append separate
-   adjudication records to that same journal without changing earlier bytes. Never edit or delete
-   an earlier attempt; a rejected attempt's repair is a successor attempt.
-10. Bind every attempt to one exact candidate. Use a Git tree/commit for code delivery and an
-    artifact digest plus durable anchors for non-code-only delivery. Branch names or “latest” are
-    not candidate identities.
-11. Internal implementation, test, and evidence reruns are experimental protocol events, not
-    delivery attempts. Preserve them separately with candidate identity, command, result, failure
-    cause, repair made, and expected proof for the next run.
-12. Record the review mode. A baseline report supports the complete agreed-scope baseline; a
-    fix-verification report carries the sealed baseline, immediately preceding result, and
-    exact outstanding IDs, then records a fixed/unfixed disposition for every preceding ID. A
-    successor may not add, rewrite, reintroduce, or omit an issue, add a route, or reopen a resolved
-    ID; an outside-list observation is an owner/developer decision item.
+4. Write the durable report at the local path the handover names, reference it from the leaf `task_doc`, and retain its canonical destination in the record.
+5. Before writing the primary acceptance block, read [Bind acceptance to one requirement revision](../core/acceptance.md#bind-acceptance-to-one-requirement-revision) for its required fields; use the shape below.
+6. Include the explicit **Checks** section even when no check ran. Its summary never replaces exact commands, results and durable evidence references.
+7. Before recording retained evidence, read [Record how retained evidence will be maintained](../core/acceptance.md#record-how-retained-evidence-will-be-maintained) for the contract-or-expiry information, separate from acceptance.
+8. Before appending the leaf journal, read [Keep requirement revisions and attempts distinct](../core/acceptance.md#keep-requirement-revisions-and-attempts-distinct) for advancement, internal-run and immutable-record rules. The report links its journal anchors.
+9. Record harness sub-agent contributions and the seat's verification of them. The seat owns
+    boundary messages and records; its helpers hold no AR seat and supply no independent review.
+10. Record each handover's recipient seat, exact candidate head/change hash, report path, requested
+    whole stretch, and the reply/report evidence that identifies it and shows work or its start.
+    Mark busy/unresolved handovers pending; quote the refusal or non-work reply and its Manager
+    notice. An `accepted` delivery alone does not mean the stretch started.
+11. Before reporting successor dispositions, read [review Boundaries](../operations/review.md#boundaries) for the sealed-list and admission rules. Record the mode, baseline, preceding result, exact identifiers, Reviewer rulings and round authority in the fields below.
+12. Hand the report over as a file. Before composing a message, read [Send a message that names the files](../reference/message-handover.md#send-a-message-that-names-the-files) for the sender and payload rules.
+
+Before handling a full-store refusal, read [full-store receipt handling](../reference/message-handover.md#handle-a-full-store-refusal) for the pending record, one resend and second-refusal report.
 
 ## Shape
 
@@ -54,11 +39,11 @@ in `../core/acceptance.md`; the check duty it records is authored in
 | master       | <master id>                             |
 | worker seat  | <leaf task_doc path> + worker           |
 | worktree     | <branch / worktree>                     |
-| status       | in-progress | leaf-complete | blocked    |
-| checks       | green | failing:<which> | not-yet-run    |
-| review mode | baseline | fix-verification |
+| status       | in-progress \| leaf-complete \| blocked    |
+| checks       | green \| failing:<which> \| not-yet-run    |
+| review mode | baseline \| fix-verification |
 | sealed baseline / preceding result | <sealed baseline ref> / <prior result ref or N/A> |
-| outstanding IDs | <exact IDs and prior remaining-set digest | none for baseline> |
+| outstanding IDs | <exact IDs and prior remaining-set digest \| none for baseline> |
 | written      | <YYYY-MM-DDTHH:MM>                       |
 | attempt journal | <path + exact worker attempt anchors appended for this handoff> |
 
@@ -67,16 +52,7 @@ in `../core/acceptance.md`; the check duty it records is authored in
 
 ## Requirement Attempt Journal Records Appended For This Handoff
 
-At a review handoff, append this lightweight block to the single physical leaf journal once per
-exact requirement revision and leaf manifestation. In this turn report, link each resulting journal
-anchor instead of copying the record and creating a second authority. A non-review handoff records
-`none — no candidate handed to review`. Prior blocks are immutable.
-
-Validate the complete record before append. Append plus exact-candidate review handoff is one
-logical formal-attempt boundary. A malformed pre-handoff row remains preserved with an append-only
-`non-attempt-correction`/void reference, consumes no attempt ID, and the corrected record uses the
-same next ID at handoff. A malformed handed-off row requires independent reviewer rejection before
-the next candidate may appear as a successor attempt.
+Before appending the journal record, follow [requirement revisions and attempts](../core/acceptance.md#keep-requirement-revisions-and-attempts-distinct) for immutable records, advancement and internal-run distinctions. Link each resulting journal anchor rather than copying the authoritative record. A non-review handoff records `none — no candidate handed to review`.
 
 | Requirement revision | Leaf manifestation | Worker attempt ID | Authoritative journal record |
 | -------------------- | ------------------ | ----------------- | ---------------------------- |
@@ -108,13 +84,9 @@ anchor in the table above. It must never remain as a duplicate `Worker Attempt R
 | ---------- | ----------- | -------------------------- | ----------------------------- |
 | <id or none> | <one exact failure class> | <resolution state> | <exact anchor> |
 
-For `fix-verification`, this table is the required disposition for every preceding
-outstanding ID. Its remaining IDs must be a subset of the preceding set and the sealed baseline;
-an omitted or unknown ID is a protocol failure, not an implicit closure.
+For `fix-verification`, fill this table for every preceding outstanding identifier under [review boundaries](../operations/review.md#boundaries) for the sealed list and admitted successor findings.
 
-Allowed classes are exactly `implementation defect`, `evidence gap`, `requirement
-contradiction/overconstraint`, `test/tool defect`, and `external blocker`. Resolution state is
-`fixed`, `still-open`, or `revision-requested`.
+Before assigning a failure class, read [Append the independent review record](../core/acceptance.md#append-the-independent-review-record) for the five classes. Resolution state is `fixed`, `still-open`, or `revision-requested`.
 
 The referenced frozen expanded-evidence artifact carries shared definitions, the complete
 acceptance-envelope corpus, and complete command results. Do not duplicate that corpus or the
@@ -123,12 +95,12 @@ experimental-protocol log inside every attempt record.
 ## Requirement Acceptance Envelope (exactly once for the owned primary stable ID + version)
 
 This complete envelope belongs in the expanded handoff evidence and is frozen once with a content
-digest. Each lightweight worker attempt cites its exact requirement anchor in that artifact.
+digest. Each lightweight worker attempt cites its exact requirement anchor in that artifact. Before inspecting the canonical packet, read [the approval-record definition](../core/every-role.md#requirements-and-limits) for the approved manifest entry, its content hash and the corpus hash.
 
 ### <stable requirement ID> @ <version> — <exact requirement label>
 
 - Canonical packet inspected: <version-addressed path + matching ID/version + approved state +
-  durable corpus-ruling citation>
+  durable approval record citation>
 
 - Status: `satisfied` | `blocked` | `approved-change`
 - Delivery/implementation rationale: <what was delivered and why it satisfies the requirement>
@@ -152,8 +124,7 @@ digest. Each lightweight worker attempt cites its exact requirement anchor in th
 
 ## Experimental Protocol Events (separate from delivery attempts)
 
-Use one row for each internal implementation, test, or evidence run that materially informs the
-next run. These rows never consume a worker-attempt ID and never appear as reviewer adjudications.
+Record internal implementation, test and evidence runs in the following fields under [requirement revisions and attempts](../core/acceptance.md#keep-requirement-revisions-and-attempts-distinct) for internal-run and immutable-record rules.
 
 | Event | Candidate identity | Exact command | Result | Failure cause | Repair made | Expected proof next run |
 | ----- | ------------------ | ------------- | ------ | ------------- | ----------- | ----------------------- |
@@ -167,9 +138,7 @@ next run. These rows never consume a worker-attempt ID and never appear as revie
 
 For a code handoff, this table records the relevant targeted tests selected by the worker and all
 applicable repository-prescribed lint, formatting, typing, and structural checks, with their exact
-scope, commands, and results. Explicitly list any relevant test or check not run and why, and report
-failures accurately. After a failure and code repair, repeat the failed tests and every affected
-targeted check before another handoff, documenting final results; if one is not rerun, record why.
+scope, commands, and results. Explicitly list any relevant test or check not run and why.
 These are diagnostic worker checks, separate from certification and review-round accounting.
 
 ## Durable-Evidence Promotion Hold Point (separate concern)
@@ -188,6 +157,15 @@ These are diagnostic worker checks, separate from certification and review-round
 ## What Is Left
 - [ ] <remaining step from the leaf plan>
 
+## Direct Handovers
+
+| Recipient seat | Candidate head + change hash | Report/verdict path | Whole next stretch | Reply/report proves work or start | Pending/refusal/recovery |
+| -------------- | ---------------------------- | ------------------- | ------------------ | ------------------------------- | ------------------------ |
+| <reviewer or curator + canonical leaf refs> | <exact identity> | <path> | <requested work> | <exact identity and evidence, or pending> | <quoted refusal/reply and notice, or none> |
+
+## Harness Contributions
+- <work done by sub-agents, how the Worker verified it | none>
+
 ## Curator Handoff
 - Changed paths: <exact list>
 - Material routes and surrounding owners: <exact list>
@@ -195,11 +173,11 @@ These are diagnostic worker checks, separate from certification and review-round
 
 ## Retrieval Evidence
 
-| Strategy | Calls | Files/anchors inspected | Remaining gap |
+| Retrieval action | Calls | Files/anchors inspected | Remaining gap |
 | -------- | ----- | ----------------------- | ------------- |
-| Intent (`read_ar_files`) | <count> | <paths> | <none or gap> |
-| Semantics (`grepai_search`) | <count> | <results> | <none, gap, or unavailable> |
-| Relationship (`cgc_*`) | <count> | <symbols/routes> | <none, gap, or unavailable> |
+| Name governing knowledge (`read_ar_files`) | <count> | <paths> | <none or gap> |
+| Onboarding (native reads) | <count> | <results> | <none, gap, or unavailable> |
+| Inspect route indexes | <count> | <symbols/routes> | <none, gap, or unavailable> |
 
 ## Escalations
 - <plan delta beyond blank-filling raised to the manager> | none

@@ -95,10 +95,14 @@ def memory_mode_for_repository(code_repo: Path, memory_root: Path | None) -> str
     A memory root inside the code repository is the removed repo-sidecar layout, and it is
     refused by its own path: this function used to *derive* ``internal`` from it, which is how
     a repository could silently keep a mode the product no longer supports.
+
+    A missing memory root no longer derives ``disabled`` (MIK-R50): every configured
+    repository implies ``external``, and a start without a memory repository fails with
+    the existing "memory is missing" error before anything is created.
     """
 
     if memory_root is None:
-        return "disabled"
+        return "external"
     if memory_root.resolve() == legacy_internal_memory_root(code_repo):
         refuse_removed_memory_mode("internal", artifact=memory_root.resolve().as_posix())
     return "external"
@@ -119,12 +123,18 @@ def _master_series_admission_refusal(
             bounded_observed_detail = bounded_activation_detail(observed_detail)
             assert bounded_observed_detail is not None
             public_observed = {**public_observed, "detail": bounded_observed_detail}
-    public_summary = bounded_activation_detail(
-        f"Master-series startup refused ({error.status}): {public_detail} "
-        "Inspect the supplied worktree_status address and correct the named edge "
-        "before retrying."
-    )
-    assert public_summary is not None
+    public_summary = {
+        "atomic-series-contract-unreadable": (
+            "The parent series contract is unreadable; inspect its parser diagnosis in the log."
+        ),
+        "atomic-series-contract-kind-mismatch": "The parent task contract is not a series contract.",
+        "atomic-series-contract-edge-mismatch": (
+            "The existing master series contract does not match the task's declared edge."
+        ),
+        REOPEN_REQUIRED_STATUS: (
+            "The master series generation is terminal and archived; preview task_reopen before a new start."
+        ),
+    }.get(error.status, "Master-series startup refused; inspect worktree_status before retrying.")
     requested_master: TaskDocumentRef | None = None
     repository_root = (spec.coordination_root / "tasks" / spec.repo_name).resolve(strict=False)
     task_path = (spec.task_root / "task.json").resolve(strict=False)
@@ -340,7 +350,10 @@ def _same_master_task_edge(
             existing.contract_path.resolve() == path.resolve(),
             existing.task_artifact.resolve() == expected_task_artifact.resolve(),
             existing.worktree_group.resolve() == expected_worktree_group.resolve(),
-            existing.parent_task_name == spec.parent_task_name,
+            # ``parent_task_name`` is deliberately not an edge: a master's parent is its sprint,
+            # and a contract written before 2026-09-29 records the master's own name there. The
+            # field stays on the contract for the readers that resolve it (a leaf's master edge,
+            # the leaf-id lookup), but it cannot decide whether a start is this master's.
             existing.parent_contract_path is None,
             existing.leaf_id == "",
             existing.lifecycle_id == "",
@@ -404,7 +417,6 @@ def _master_series_expected_edges(
             "contractPath": path.resolve().as_posix(),
             "taskArtifact": expected_task_artifact.resolve().as_posix(),
             "worktreeGroup": expected_worktree_group.resolve().as_posix(),
-            "parentTaskName": spec.parent_task_name,
             "parentContractPath": None,
             "leafId": "",
             "lifecycleId": "",
@@ -442,7 +454,6 @@ def _master_series_observed_edges(existing: WorktreeContract) -> dict[str, objec
             "contractPath": existing.contract_path.resolve().as_posix(),
             "taskArtifact": existing.task_artifact.resolve().as_posix(),
             "worktreeGroup": existing.worktree_group.resolve().as_posix(),
-            "parentTaskName": existing.parent_task_name,
             "parentContractPath": (
                 existing.parent_contract_path.resolve().as_posix()
                 if existing.parent_contract_path is not None

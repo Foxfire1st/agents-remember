@@ -17,6 +17,7 @@ import pytest
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
@@ -60,7 +61,7 @@ from repository_profile_test_support import install_fixture_profile
 class SourceLineageTests(unittest.TestCase):
     def test_leaf_identity_proves_code_and_memory_transitively(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            fixture = _fixture(Path(tmp), external_memory=True)
+            fixture = _fixture(Path(tmp))
 
             projection = source_lineage_for_task(fixture.coordination, fixture.leaf_ref)
 
@@ -95,7 +96,7 @@ class SourceLineageTests(unittest.TestCase):
 
     def test_start_rechecks_exact_source_tips_before_start_effects(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            fixture = _organizational_fixture(Path(tmp), external_memory=True)
+            fixture = _organizational_fixture(Path(tmp))
             contract = fixture.leaf_contract
             args = WorktreeArgs(dry_run=False, stale_base_choice="proceed-stale")
             context = SimpleNamespace(
@@ -451,25 +452,35 @@ class _Fixture:
 def _fixture(
     root: Path,
     *,
-    external_memory: bool = False,
+    external_memory: bool = True,
     publish_locations: bool = True,
     selected_profile: bool = False,
+    converted_memory: bool = False,
 ) -> _Fixture:
+    """One task world with external memory: every task runs with a memory repository.
+
+    The removed ``disabled`` mode has no fixture path here (MIK-R50): a task that
+    runs with no memory can be neither closed out, synced, integrated nor landed.
+    ``external_memory`` stays accepted so existing callers keep reading; the world
+    is external either way.
+    """
+    assert external_memory, "this fixture builds an external-memory world only (MIK-R50)"
     coordination = root / "coordination"
     code_repo = _repo(root / "code", selected_profile=selected_profile)
-    memory_repo = _repo(root / "memory") if external_memory else None
+    code_base = _git(code_repo, "rev-parse", "super")
+    memory_repo = _repo(
+        root / "memory",
+        converted=converted_memory,
+        pair_code=code_base if converted_memory else None,
+    )
     task_root = coordination / "tasks" / "repo" / "master"
     _write_task_tree(coordination)
-    memory_mode = "external" if external_memory else "disabled"
-    memory_plan = (
-        RepoBranchPlan(
-            memory_repo,
-            "super",
-            "ar/master",
-            _git(memory_repo, "rev-parse", "super"),
-        )
-        if memory_repo is not None
-        else None
+    memory_mode = "external"
+    memory_plan = RepoBranchPlan(
+        memory_repo,
+        "super",
+        "ar/master",
+        _git(memory_repo, "rev-parse", "super"),
     )
     master = default_series_contract(
         ContractTask("master", "repo", coordination, "light-task", memory_mode),
@@ -488,15 +499,11 @@ def _fixture(
             master,
             contract_text=contract_publication_text(master.contract_path, master),
         )
-    leaf_memory = (
-        RepoBranchPlan(
-            memory_repo,
-            "ar/master",
-            "leaf",
-            _git(memory_repo, "rev-parse", "ar/master"),
-        )
-        if memory_repo is not None
-        else None
+    leaf_memory = RepoBranchPlan(
+        memory_repo,
+        "ar/master",
+        "leaf",
+        _git(memory_repo, "rev-parse", "ar/master"),
     )
     leaf = default_contract(
         ContractTask(
@@ -532,10 +539,9 @@ def _fixture(
     )
 
 
-def _organizational_fixture(root: Path, *, external_memory: bool = False) -> _Fixture:
+def _organizational_fixture(root: Path) -> _Fixture:
     fixture = _fixture(
         root,
-        external_memory=external_memory,
         publish_locations=False,
     )
     master_path = fixture.coordination / "tasks" / "repo" / "master"
@@ -550,7 +556,7 @@ def _organizational_fixture(root: Path, *, external_memory: bool = False) -> _Fi
         parent_contract_path=None,
         code_source_branch="super",
         code_base_commit=_git(fixture.code_repo, "rev-parse", "super"),
-        memory_source_branch="super" if external_memory else "",
+        memory_source_branch="super",
         memory_base_commit=(
             _git(fixture.leaf_contract.memory_repo_path, "rev-parse", "super")
             if fixture.leaf_contract.memory_repo_path is not None
@@ -612,7 +618,13 @@ def _doc(**values: object) -> TaskDocument:
     )
 
 
-def _repo(path: Path, *, selected_profile: bool = False) -> Path:
+def _repo(
+    path: Path,
+    *,
+    selected_profile: bool = False,
+    converted: bool = False,
+    pair_code: str | None = None,
+) -> Path:
     path.mkdir(parents=True)
     _git(path, "init", "-b", "super")
     _git(path, "config", "user.email", "test@example.invalid")
@@ -622,7 +634,20 @@ def _repo(path: Path, *, selected_profile: bool = False) -> Path:
     if selected_profile:
         profile = install_fixture_profile(path, "repo")
         _git(path, "add", profile.relative_to(path).as_posix())
-    _git(path, "commit", "-m", "base")
+    message = "base"
+    if converted:
+        # Converted memory: the marker rides the base commit and the base pairs with the
+        # code base, so lifecycles under test run the converted routes under the gate.
+        marker = path / "knowledge" / "layout.json"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(
+            canonical_text({"schema": "ar-memory-layout/v2", "conversion": "1"}),
+            encoding="utf-8",
+        )
+        _git(path, "add", marker.relative_to(path).as_posix())
+        if pair_code is not None:
+            message = f"base\n\nCode-Commit: {pair_code}"
+    _git(path, "commit", "-m", message)
     _git(path, "branch", "main", "super")
     _git(path, "branch", "ar/master")
     _git(path, "branch", "leaf", "ar/master")
@@ -647,7 +672,12 @@ def _commit_base_on_source(repo: Path, branch: str) -> None:
 
 
 def _live_leaf_worktree(fixture: _Fixture) -> Path:
-    """Check the leaf work branch out where a real sync transaction can merge into it."""
+    """Check the leaf work branches out where a real sync transaction can merge into them.
+
+    An external leaf is live on both sides: the code work branch and the memory work
+    branch each get a worktree, exactly as a real start leaves them. Without the memory
+    side the closeout-time sync has nowhere to merge and refuses instead of healing.
+    """
     worktree = fixture.leaf_contract.code_worktree
     worktree.parent.mkdir(parents=True, exist_ok=True)
     _git(
@@ -656,6 +686,16 @@ def _live_leaf_worktree(fixture: _Fixture) -> Path:
         "add",
         str(worktree),
         fixture.leaf_contract.code_work_branch,
+    )
+    memory_worktree = fixture.leaf_contract.memory_worktree
+    memory_repo = fixture.leaf_contract.memory_repo_path
+    assert memory_worktree is not None and memory_repo is not None
+    _git(
+        memory_repo,
+        "worktree",
+        "add",
+        str(memory_worktree),
+        fixture.leaf_contract.memory_work_branch,
     )
     return worktree
 

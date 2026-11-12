@@ -6,9 +6,9 @@ configured gate policy, may the corresponding server-side mutation proceed? --
 kept free of I/O so mutating tools share one policy and it is unit-testable
 without a store.
 
-The load-bearing rule is the **anti-self-approval** invariant: the agent's own
-``gate_decide`` is attributed ``decidedBy="model"`` (see ``application/gate_tools.py``),
-so a model-decided ``approved`` snapshot does **not** satisfy enforcement. A
+The load-bearing rule is the **anti-self-approval** invariant: a decision an agent
+recorded itself is attributed ``decidedBy="model"``, so a model-decided ``approved``
+snapshot does **not** satisfy enforcement. A
 human approval is always binding; a non-human orchestration approval is binding
 only when the policy explicitly delegates that gate kind to the deciding role and
 the decider is not the gate-owning lifecycle. A lifecycle with no gate of the
@@ -80,13 +80,7 @@ def evaluate_gate(
             return GateGuard(kind, True, f"{kind} gate approved by policy-valid decider", gate.id)
         return GateGuard(kind, False, failure, gate.id)
     if gate.state == "open":
-        return GateGuard(
-            kind,
-            False,
-            f"{kind} gate {gate.id} is open; await a policy-valid decision "
-            "through the lifecycle gate channel",
-            gate.id,
-        )
+        return GateGuard(kind, False, f"{kind} gate {gate.id} is open", gate.id)
     if gate.state == "applied":
         recovering = operation_key is not None and gate.appliedOperation == operation_key
         return GateGuard(
@@ -95,7 +89,7 @@ def evaluate_gate(
             (
                 f"{kind} gate {gate.id} is already bound to this recovering operation"
                 if recovering
-                else f"{kind} gate {gate.id} was already applied; open a fresh gate for a new mutation"
+                else f"{kind} gate {gate.id} was already applied"
             ),
             gate.id,
         )

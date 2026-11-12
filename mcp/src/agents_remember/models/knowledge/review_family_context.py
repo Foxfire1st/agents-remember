@@ -43,6 +43,7 @@ from agents_remember.models.knowledge.base import (
     KnowledgeModel,
 )
 from agents_remember.models.knowledge.read import KnowledgeReadCounts
+from agents_remember.models.knowledge.review_change_kinds import ReviewFamilyChanges
 from agents_remember.models.knowledge.review_family_source import (
     ReviewFamilyMemberSource,
     ReviewSourceLocatorState,
@@ -111,10 +112,6 @@ FAMILY_CONTEXT_JOIN_KEY = "invariant_revision_id"
 # name to the collection rather than reading a second-hand sentence about it here.
 RELATIONSHIP_UNION_OWNER = "source.relationships"
 SOURCE_INVENTORY_OWNER = "source.inventory"
-EVIDENCE_LINKS_OWNER = "evidence.evidence_links"
-OBSERVATIONS_OWNER = "evidence.observations"
-ASSESSMENTS_OWNER = "evidence.assessments"
-APPLICABILITY_OWNER = "knowledge.applicability"
 
 
 class ReviewFamilyGuarantee(KnowledgeModel):
@@ -202,9 +199,9 @@ class ReviewFamilyRosterPage(KnowledgeModel):
     ``counts`` is the read operation's own count value carried whole, so the walk's arithmetic
     (``primary_items_returned`` plus ``primary_items_remaining`` equals ``primary_items_total``) is
     checked by the owner's own validator rather than restated here. ``complete`` is the owner's own
-    ``enumeration_complete``: a page is either the whole selected scope or a position in it with the
-    cursor that reaches the rest, and the validator refuses the two from disagreeing -- a truncated
-    roster must never be presentable as a complete one. ``members_total`` is the owner's measured
+    ``enumeration_complete``: it means the end of enumeration. Every member was returned when
+    ``counts.primary_items_returned`` equals ``counts.primary_items_total``. A final page may carry
+    only its share of the roster; completeness never states that this one page holds every member. ``members_total`` is the owner's measured
     count of the family revision's recorded membership rows, which is the number a reader needs in
     order to see how much of the roster this page actually carried.
 
@@ -349,6 +346,24 @@ class ReviewFamilyContextEntry(KnowledgeModel):
     candidates: tuple[ReviewFamilyGuarantee, ...] = ()
     state: ReviewFamilyEntryState
     detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    # The change facts of a tree comparison (MIK-R33); a review with no tree comparison carries none.
+    change_kinds: ReviewFamilyChanges | None = None
+
+    @model_validator(mode="after")
+    def _require_change_facts_for_exactly_the_returned_members(self) -> ReviewFamilyContextEntry:
+        if self.change_kinds is None:
+            return self
+        returned = {
+            member.member_id for side in (self.before, self.after) for member in side.members
+        }
+        described = {member.member_id for member in self.change_kinds.members}
+        if described != returned:
+            raise ValueError(
+                "change facts describe exactly the member occurrences this page returned: a "
+                "returned member without facts would read as unbadged, and facts for a member no "
+                "page returned would describe a population the roster did not carry"
+            )
+        return self
 
     @model_validator(mode="after")
     def _require_the_entry_to_describe_one_family(self) -> ReviewFamilyContextEntry:
@@ -421,17 +436,12 @@ class ReviewFamilyContextReferences(KnowledgeModel):
     """Where each independent fact beside this context is owned, and the key that joins them.
 
     The guarantee text, the member statements, the recorded relationships, the mechanical source
-    changes, the execution observations and the authored assessments keep their own owners and their
-    own status dimensions; this context copies none of them and concludes nothing from them. A
+    changes keep their own owners and their own status dimensions; this context copies none of them and concludes nothing from them. A
     rendering follows these names into the payload's own collections, joined on ``join_key``.
     """
 
     relationship_union: str = RELATIONSHIP_UNION_OWNER
     source_inventory: str = SOURCE_INVENTORY_OWNER
-    evidence_links: str = EVIDENCE_LINKS_OWNER
-    observations: str = OBSERVATIONS_OWNER
-    assessments: str = ASSESSMENTS_OWNER
-    applicability: str = APPLICABILITY_OWNER
     join_key: str = FAMILY_CONTEXT_JOIN_KEY
     detail: str = (
         "each of these collections is published by its own owner in this payload and keeps its own "

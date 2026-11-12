@@ -3,25 +3,93 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_cache import refresh_memory_cache
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
+from agents_remember.models.lifecycles.mutation_evidence import GitMutationSnapshot
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
+from agents_remember.worktrees.integration.integration_branch_repository import (
+    canonical_local_branch,
+)
 from agents_remember.worktrees.integration.mutation_evidence import (
     begin_git_mutation,
     prove_git_commit,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.git import (
+    CommitPublicationRefusal,
     branch_commit,
-    commit_verified_staged,
     head_commit,
     is_ancestor,
+    publish_tree_commit,
     require_clean,
     require_git,
     worktree_dirty,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
+
+
+@dataclass(frozen=True)
+class AdmittedTip:
+    """What a closeout's publication is bound to: the contract's work branch and its tip.
+
+    ``head`` is the commit the branch named when the tree the closeout commits was read (the
+    judged tree of the memory side, the accepted candidate tree of the code side), so the
+    published commit's only parent is the commit that tree was judged on. ``None`` when the route
+    recorded no head with its tree; the branch is bound all the same.
+    """
+
+    side: str
+    branch: str
+    head: str | None
+
+
+def observe_admitted_tip(repository: Path, work_branch: str, *, side: str) -> AdmittedTip:
+    """Read the tip a publication is bound to, before the tree it commits is read.
+
+    Read in this order, a commit that moves the branch at any later moment refuses the publication
+    instead of silently becoming the parent of a tree that was judged without it. A checkout that
+    is not on the contract's work branch (another branch, a detached ``HEAD``) refuses here.
+    """
+
+    admitted = AdmittedTip(side, canonical_local_branch(repository, work_branch), None)
+    require_admitted_tip(repository, admitted)
+    return AdmittedTip(side, admitted.branch, head_commit(repository))
+
+
+def require_admitted_tip(
+    repository: Path, admitted: AdmittedTip, *, snapshot: GitMutationSnapshot | None = None
+) -> None:
+    """Refuse a publication that would not move the admitted branch from the admitted tip.
+
+    ``snapshot`` is the Git state the publication is bound to (its mutation intent); without one
+    the repository is read now, which is the check made before an intent is recorded. The
+    snapshot alone is taken after the gate ran, so a ``HEAD`` switched to another
+    branch, or a branch moved by someone else's commit, in between would otherwise be published
+    to, on, or over.
+    """
+
+    if snapshot is None:
+        head_ref = run_git(repository, ["symbolic-ref", "--quiet", "HEAD"]).stdout.strip()
+        head = head_commit(repository)
+    else:
+        head_ref, head = snapshot.headRef, snapshot.head
+    expected = f"refs/heads/{admitted.branch}"
+    if not head_ref or canonical_local_branch(repository, head_ref) != admitted.branch:
+        raise CommitPublicationRefusal(
+            f"the {admitted.side} worktree's HEAD names "
+            f"{head_ref or 'no branch (it is detached)'}, not the contract's work branch "
+            f"{expected} this closeout admitted, so nothing was published; return to {expected} "
+            "and rerun the closeout"
+        )
+    if admitted.head is not None and head != admitted.head:
+        raise CommitPublicationRefusal(
+            f"{expected} moved from {admitted.head} to {head} after this closeout read the "
+            f"{admitted.side} tree it judged, so nothing was published; rerun the closeout and it "
+            "judges the tree on the new tip"
+        )
 
 
 @dataclass(frozen=True)
@@ -107,16 +175,31 @@ def accepted_code_commit(
         code_commit = head_commit(contract.code_worktree)
     else:
         created_commit = True
+        assert args.candidate_tree is not None
+        # The publication is bound to what the closeout admitted: the contract's work branch, and
+        # the head the candidate tree was read on (the closeout's admission has just checked the
+        # branch; the snapshot the publication uses is checked for both).
+        admitted = AdmittedTip(
+            "code",
+            canonical_local_branch(contract.code_worktree, contract.code_work_branch),
+            args.candidate_head,
+        )
         intent = begin_git_mutation(
             args,
             leg="code",
             repository=contract.code_worktree,
-            expected_output_tree=None,
-            use_current_candidate=True,
+            expected_output_tree=args.candidate_tree,
         )
-        require_git(contract.code_worktree, ["add", "-A"])
-        code_commit = commit_verified_staged(
-            contract.code_worktree, effective_input.message_for("code")
+        assert intent.before is not None
+        require_admitted_tip(contract.code_worktree, admitted, snapshot=intent.before)
+        # The commit is the accepted candidate tree itself, whatever was written to the worktree
+        # since it was read; such a file stays an uncommitted change. Staging, publication and the
+        # index restore after a refusal are one step of the shared primitive.
+        code_commit = publish_tree_commit(
+            contract.code_worktree,
+            effective_input.message_for("code"),
+            tree=args.candidate_tree,
+            before=intent.before,
         )
         prove_git_commit(
             args,

@@ -18,7 +18,7 @@ Two things happen here and nothing else:
   requirement names, so the code that could do it does not exist.
 
 The canonical packet shape comes from
-``skills/w-02-light-task-workflow/requirement-packet-template.md``; the shipped
+``skills/l-01-agent-lifecycles/templates/requirement-packet.md``; the shipped
 packets spell several headings in sentence case, so a heading *role* accepts
 either spelling. A heading outside the table is never dropped -- every section is
 carried in :attr:`RequirementPacketProjection.sections`, and a role with no

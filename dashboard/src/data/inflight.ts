@@ -1,11 +1,9 @@
 // Shared single-flight for idempotent boot GET reads: React
-// StrictMode double-fires every mount effect, and several always-mounted layers read the
-// same resource at boot (File Viewer -> /api/files/repos, the rails -> /api/harnesses, the
-// catalog poll -> /api/terminal/sessions). Concurrent callers of one key share the SAME
+// StrictMode double-fires every mount effect, and an always-mounted layer reads its
+// resource at boot (File Viewer -> /api/files/repos). Concurrent callers of one key share the SAME
 // in-flight promise — result AND rejection — so error behavior is identical for every
 // caller. The slot is released on settle (success or failure): this is a single-flight,
 // not a cache — a later read re-fires and a rejected read never blocks a retry.
-// (Per-key mirror of the single-flight idiom in data/capabilityCatalog.ts.)
 //
 // Every `run` MUST be bounded at the transport (data/fetchWithTimeout.ts): a shared promise
 // makes an unbounded hung socket fatal to every caller, not just the first — a timeout here

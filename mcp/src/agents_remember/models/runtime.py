@@ -1,4 +1,4 @@
-"""Models for runtime installation and coordination context tools."""
+"""Models for runtime installation tools."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from agents_remember.models.base import FlexibleToolResponse, ToolResponse
+from agents_remember.models.base import FlexibleToolResponse
+from agents_remember.models.core import RunningServerPayload
 
 
 class RuntimeInstallResponse(FlexibleToolResponse):
@@ -16,6 +17,9 @@ class RuntimeInstallResponse(FlexibleToolResponse):
     includeBenchmarks: bool | None = None
     installProviderDeps: bool | None = None
     summary: dict[str, Any] | None = None
+    host: dict[str, Any] | None = None
+    runningServers: list[RunningServerPayload] = Field(default_factory=list)
+    dashboard: dict[str, Any] | None = None
     messages: list[str] = Field(default_factory=list)
     reportPath: str | None = Field(
         default=None,
@@ -25,9 +29,3 @@ class RuntimeInstallResponse(FlexibleToolResponse):
             "payload keeps counts and a compact rebind digest."
         ),
     )
-
-
-class ResolveContextResponse(ToolResponse):
-    operation: Literal["resolve_context"] = "resolve_context"
-    repoId: str
-    context: dict[str, Any]

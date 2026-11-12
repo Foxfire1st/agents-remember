@@ -10,7 +10,7 @@
 // had removed the enclosure could not be reviewed at all. The historical target is what the entry
 // now carries, and the provenance line is what tells a reader the panes are the recorded comparison
 // rather than whatever the repository holds now.
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ReviewResult } from "../../data/review";
@@ -18,11 +18,15 @@ import { ReviewSurface } from "./ReviewSurface";
 
 // Comparison-focused cases isolate the catalogue. The normal catalogue-to-review journey is
 // exercised through both real readers in ReviewSurface.navigation.test.tsx.
-vi.mock("../../data/useReviewCatalogue", () => ({
+vi.mock("../../data/useReviewCatalogue", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../data/useReviewCatalogue")>();
+  return {
+    ...actual,
   useReviewCatalogue: () => ({
     loading: false, entries: [], empty: true, stale: false, facts: "test", refresh: () => undefined,
   }),
-}));
+  };
+});
 
 const REPO = "agents-remember";
 const MASTER = "260921_complete-code-and-intent-review";
@@ -63,8 +67,14 @@ function serving(body: unknown): void {
   );
 }
 
+// The subject's review read. The page's other opening reads (the summary, the outline, the trees)
+// are made beside it (MIK-R89 v2 rule 2), so the review read is found by its route, not its turn.
 function requestUrl(fetchMock: ReturnType<typeof vi.fn>): string {
-  return String(fetchMock.mock.calls[0][0]);
+  const review = fetchMock.mock.calls
+    .map((call) => String(call[0]))
+    .find((url) => new URL(url, "http://localhost").pathname === "/api/review/intent");
+  if (review === undefined) throw new Error("the surface made no review read");
+  return review;
 }
 
 afterEach(() => {
@@ -98,9 +108,11 @@ describe("ReviewSurface historical target (ICR-R12)", () => {
     );
 
     // The record the caller named is the one the client asks for: the live read is a different
-    // question and the surface must not silently answer it instead.
-    expect(requestUrl(fetchFn)).toContain("history=recorded");
-    expect(requestUrl(fetchFn)).toContain(`selectorId=${SUBJECT}`);
+    // question and the surface must not silently answer it instead. The read starts a microtask
+    // after its owner mounts, so a StrictMode remount reuses it (reviewTransport.ts, MIK-R211 rule 10).
+    const asked = await waitFor(() => requestUrl(fetchFn));
+    expect(asked).toContain("history=recorded");
+    expect(asked).toContain(`selectorId=${SUBJECT}`);
     const provenance = await view.findByTestId("review-history");
     expect(provenance.textContent).toContain("Historical task comparison");
     expect(view.getByTestId("review-surface").dataset.reviewHistory).toBe("recorded");
@@ -126,7 +138,7 @@ describe("ReviewSurface historical target (ICR-R12)", () => {
       />,
     );
 
-    expect(requestUrl(fetchMock)).not.toContain("history=");
+    expect(await waitFor(() => requestUrl(fetchMock))).not.toContain("history=");
     await view.findByTestId("review-refusal");
     expect(view.queryByTestId("review-history")).toBeNull();
     expect(view.getByTestId("review-surface").dataset.reviewHistory).toBe("live");
