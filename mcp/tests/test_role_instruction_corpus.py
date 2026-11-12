@@ -37,7 +37,7 @@ from agents_remember.tasks import write_task_doc
 from agents_remember_test_support.testing import task_document_instruction_contracts
 from agents_remember_test_support.testing.instruction_consistency import (
     assert_public_command_reference,
-    command_reference_inputs,
+    command_reference,
     misplace_command_documentation,
     public_commands,
 )
@@ -1277,12 +1277,12 @@ def _require_worklist_fields_and_knowledge_command_owners() -> None:
     ):
         assert f"| `{field}` |" in gate, field
     assert "an absent block is not a passing judgment or an empty result" in detail
-    reference, documents = command_reference_inputs(REPOSITORY_ROOT)
+    reference = command_reference(REPOSITORY_ROOT)
     for column in ("What it does", "Who and when", "Example"):
         assert column in reference
     for tool in (name for name in PUBLIC_TOOLS if name.startswith("knowledge_")):
         assert f"| `{tool}` |" in reference
-    assert_public_command_reference(reference, documents)
+    assert_public_command_reference(reference)
     for role in ROLE_ORDER:
         text = (LIFECYCLE_ROOT / f"roles/{role}.md").read_text()
         assert "{{detail:reference/knowledge/commands.md}}" in text, role
@@ -1384,11 +1384,10 @@ def test_knowledge_gate_and_worklist_explanations_cover_actual_landing_steps() -
 
 @pytest.mark.parametrize("command", sorted(public_commands()))
 def test_each_public_command_requires_its_documentation_owner(command: str) -> None:
-    reference, documents = command_reference_inputs(REPOSITORY_ROOT)
-    assert_public_command_reference(reference, documents)
-    reference, documents = misplace_command_documentation(reference, documents, command)
+    reference = command_reference(REPOSITORY_ROOT)
+    assert_public_command_reference(reference)
     with pytest.raises(AssertionError):
-        assert_public_command_reference(reference, documents)
+        assert_public_command_reference(misplace_command_documentation(reference, command))
 
 
 def test_root_instructions_name_no_retired_job_lens_or_phase() -> None:

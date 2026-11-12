@@ -1,78 +1,135 @@
 # Adopt Existing Memory
 
-Use this guide when an external memory repo already exists and should become the first ledgered memory baseline.
+Use this guide when a memory repository exists and its content shall become the first baseline.
+The baseline is one commit of the memory repository's content. The message of that commit records
+which commit of the code the content describes.
 
-Convert first: when the memory is still in the legacy format (no `knowledge/layout.json`), every ordinary memory operation refuses it with the code `legacy-format`. Follow [Make the First Conversion](first-conversion.md) before adopting — case A for memory with no attributed baseline, case B for memory with an official line. `memory_baseline_status` answers the state `legacy-format` until the conversion is done.
+The Bootstrap role agent follows this procedure in a first setup. A memory repository that
+`memory_init` just created is adopted in the same way.
 
 ## Purpose
 
-Baseline adoption turns the current external-memory onboarding into the first `memory.md` baseline. It does not refresh stale onboarding. It records that the current memory content is accepted as matching a code commit.
+Baseline adoption commits the content of the memory repository and records the code commit that
+the content describes. The record is the trailer `Code-Commit:` in the message of the memory
+commit. Adoption repairs no card. The agent of your harness, or the Bootstrap role agent, makes the
+call at your request; the call records that you accept the content as the description of that
+code commit.
 
-Adoption commits real memory content and then computes the ledger cache; it never commits the cache. A missing, stale or malformed `memory.md` is a cache state, not evidence that a baseline exists or is absent.
-
-## Before Adoption
-
-Resolve the target repository through `context_packet` and classify drift with
-`context_packet(include_drift=true)`, using the
-[knowledge command and tool reference](../../skills/l-01-agent-lifecycles/reference/knowledge/commands.md).
-The classification is returned in the packet and files no temporary report. In a leaf enclosure,
-the contract-scoped result is the checklist `memory_quality_check` replaces at the `reportPath`
-it returns, the enclosure's `reports/curator-memory-quality.md`.
-
-If drift is actionable, choose one path:
-
-- have the Curator refresh affected onboarding through the [card procedure](../../skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md) before adoption
-- explicitly accept directional drift when the developer decides the current memory is factual enough to baseline
-
-Do not use adoption to hide uncertainty. Use `memory_baseline_status` first, and use
-`memory_baseline_adopt` only after the developer approves the baseline decision.
+Only a reachable commit with the trailer decides whether a baseline exists. The file
+`<memory-root>/memory.md` is a cache: Agents Remember computes it from the trailers and never
+commits it. A missing, old or malformed `memory.md` says nothing about the baseline.
 
 ## Status Check
 
-Ask the agent to run the baseline status for the target repository. Inspect the reachable memory
-commits for an existing `Code-Commit:` attribution. The states are:
+Ask the agent of your harness for the state:
 
-- `ready`: no attributed memory baseline exists and drift is clean enough to adopt.
-- `blocked-drift`: drift has actionable findings and `accept_drift=true` was not supplied.
-- `unavailable`: a current memory HEAD exists but its history cannot be read; adoption waits for
-  readable Git history.
-- `already-adopted`: reachable memory history already carries code attribution.
-- `would-adopt`: a dry run would create the baseline. It reports this only when the staged-tree
-  validation would pass; a refusal or a dry run leaves the index, the refs and every file as
-  they were.
-- `adopted`: the attributed memory-content baseline was committed and the cache refresh was
-  attempted.
+```text
+memory_baseline_status(repo_id="<repo-id>")
+```
 
-Cache presence does not determine adoption: only reachable `Code-Commit:` attribution does. A
-missing, stale or malformed `memory.md` does not contradict an `already-adopted` answer.
+The call changes nothing. The field `state` of its answer has one of these values:
+
+| State | Meaning | What you do |
+| --- | --- | --- |
+| `ready` | No reachable memory commit carries a `Code-Commit:` trailer, and no check blocks. | Adopt. |
+| `already-adopted` | A reachable memory commit carries a `Code-Commit:` trailer. | Nothing. Adoption is valid only before such a commit exists. |
+| `unavailable` | The memory repository has a commit, and its history cannot be read. | Restore a readable Git history. |
+| `blocked-legacy-cards` | A card under `onboarding/` holds a metadata row `doc_type`, `lastVerifiedCommitHash` or `lastVerifiedCommitDate`, or the heading of an append-only change history. The field `legacyCards` lists those cards. | Correct the listed cards. `accept_drift` does not lift this state. |
+| `blocked-invalid` | The [knowledge validator](../concepts.md#validator) refuses the memory tree. The block `drift` gives `violationCount` and `violationSample`. | Correct the files that the sample names. |
+| `blocked-drift` | Reference anchors of cards are stale. The block `drift` gives `actionableCount` and `actionableSample`. | Repair the anchors; see [Repair Before Adoption](#repair-before-adoption). |
+| `legacy-format` | The memory repository has no layout marker `knowledge/layout.json`. The call measures nothing else. | Convert it with `agents-remember knowledge-convert`; see [Onboard An Existing Repository](onboard-existing-repo.md#2-create-the-memory-repository). |
+
+The answer names `legacy-format` before every other state. When more than one other condition
+holds, it names the first of `already-adopted`, `unavailable`, `blocked-legacy-cards`,
+`blocked-invalid` and `blocked-drift`, in this order. The answer carries `ok: true` for `ready`
+and `already-adopted`, and `ok: false` for every other state.
+
+## Repair Before Adoption
+
+A stale anchor cites a place in the code repository that is absent, or whose content differs from
+the content that the card recorded. Two repairs exist:
+
+- `citation_fix` records an anchor again when the cited content is unchanged and only its
+  position moved. Inside a task, a call names the task's
+  [worktree contract](../concepts.md#worktree-contract) in `contract_path`. While the memory
+  repository has no baseline, the tool also accepts a call without `contract_path` and then works
+  on the memory repository itself. Name the cards in `documents`, each as a path relative to
+  `<memory-root>/onboarding/`; a call without it works on every card. Preview with
+  `dry_run=true`.
+- For every other stale anchor, a person or a Curator reads the source and corrects the card.
+
+The argument `accept_drift=true` of `memory_baseline_adopt` lifts the state `blocked-drift` and
+nothing else. It does not make a stale anchor acceptable: the validation of the next section
+still refuses a stale anchor into a code or test file, with the state `blocked-invalid` and the
+rule `R198.1-reference-anchor`, the rule of the validator that requires each such anchor to name <!-- docs-check: identifier: the product prints this code -->
+the file's blob in the code commit and to find its recorded content there.
+
+To see the anchors before you decide, call `context_packet(repo_id="<repo-id>", include_drift=true)`.
+[Memory Quality Control](../reference/drift-c02.md#measuring-drift) describes the result.
 
 ## Adopt
 
-When ready, preview and then adopt:
+Preview, then adopt:
 
 ```text
-memory_baseline_adopt(repo_id="<repo-id>", accept_drift=false, dry_run=true)   # preview
-memory_baseline_adopt(repo_id="<repo-id>")                                     # apply
+memory_baseline_adopt(repo_id="<repo-id>", dry_run=true)
+memory_baseline_adopt(repo_id="<repo-id>")
 ```
 
-Adoption commits the memory content on the configured memory default branch. Existing
-`onboarding/`, `system/` and `docs/` become one memory-content commit with a `Code-Commit:`
-trailer; `memory.md` is computed afterward without another commit. `accept_drift=true` lifts the
-drift gate only; a validator violation still refuses.
+| Argument | Meaning |
+| --- | --- |
+| `repo_id` | Required. The id of the code repository in the settings file. |
+| `dry_run` | `true` validates what an adoption would commit and changes nothing. The default is `false`. |
+| `accept_drift` | `true` lifts the state `blocked-drift`. The default is `false`. |
+| `source_branch` | The branch of the code repository whose newest commit the baseline records. Without the argument, the call takes the branch that the code repository has checked out. |
+| `work_branch` | The branch of the memory repository that receives the commit. Without the argument, the call takes the name of the source branch. |
 
-Read `memory_baseline_status` before adoption, put the drift-acceptance decision to the
-developer rather than assuming it, adopt through `memory_baseline_adopt`, then read
-`memory_baseline_status` again and report both answers. Baseline adoption is valid only before
-attributed memory exists, so an `already-adopted` report means this half is already done.
+The memory branch must be the default branch that `memory_init` recorded, and the memory
+repository must have it checked out. The call refuses any other branch. It creates no branch and
+switches to none.
 
-The `onboarding/bootstrap/` working files ship with the first baseline commit as the run's audit
-trail: adoption stages the whole onboarding tree. Whether they are removed beforehand is the
-developer's decision; adoption carries them either way. Only a memory-root-level `bootstrap/`
-staging directory is transient and excluded from every memory commit.
+The call fails with an error, and changes nothing, when the memory root does not exist, is not a
+Git repository, or holds none of the folders `onboarding/`, `docs/` and `system/`.
+
+The adoption takes these steps:
+
+1. It stages the whole working tree of the memory repository. It leaves out the file `memory.md`
+   and a folder `bootstrap/` at the root of the memory repository. Agents Remember creates no
+   such folder and leaves it out of every memory commit.
+2. The knowledge validator checks the staged tree against the code commit. A violation refuses
+   the adoption with the state `blocked-invalid`.
+3. The pre-commit hook of the memory repository runs on the staged tree. A failing hook refuses
+   the adoption.
+4. The call commits exactly the validated tree. The subject of the message is
+   `[adopt-<repo-id>-memory-baseline] Adopt external memory content`, and the message carries the
+   `Code-Commit:` trailer.
+5. The call computes `<memory-root>/memory.md`.
+
+When the working tree holds nothing to commit, the call validates the tree of the newest commit
+and creates no commit.
+
+The field `state` of the answer has one of these values:
+
+| State | Meaning |
+| --- | --- |
+| `would-adopt` | A dry run, and the validation of the staged tree passed. |
+| `adopted` | The adoption passed. The block `bootstrap` names in `memoryContentCommit` the new commit, or the newest commit when the working tree held nothing to commit. |
+| `already-adopted` | A baseline exists. Nothing changed. |
+| `blocked-legacy-cards`, `blocked-invalid`, `blocked-drift`, `unavailable`, `legacy-format` | As in the status check. Nothing changed. |
+| `refused` | The memory repository has no recorded default branch. The answer carries `status: "memory-baseline-precondition-unavailable"` and names `memory_init` as the next tool. |
+
+A refusal and a dry run leave the index, the branches and every file as they were.
+
+Advice: read `memory_baseline_status` before and after the adoption, and keep both answers.
+After an adoption that created the commit, the second answer reads `already-adopted`.
 
 ## After Adoption
 
-Future external-memory work runs in paired worktrees through the [authorized lifecycle operation](../../skills/l-01-agent-lifecycles/operations/closeout.md). The ledger gives that flow a known baseline for code-memory compatibility.
+Later work on the memory runs in tasks. A task has a code worktree and a memory worktree in its
+enclosure, and its closeout commits both as a pair; see
+[Use The Memory Repository](use-external-memory.md#closeout).
 
-Adopting a baseline is not the same as recording the repository's knowledge foundation. Report
-the foundation's state separately, and hand its making to the user-started Architect.
+A baseline is not the repository's [knowledge foundation](../concepts.md#knowledge-foundation).
+The answer of `memory_init` and the report of Bootstrap say whether the repository has recorded
+knowledge. An Architect plans the knowledge foundation as a task; see
+[Onboard An Existing Repository](onboard-existing-repo.md#4-start-the-knowledge-foundation).

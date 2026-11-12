@@ -1,121 +1,128 @@
-# Onboard An Existing Repo
+# Onboard An Existing Repository
 
-You do not need full coverage before Agents Remember becomes useful. Start small, then let onboarding grow as work touches new files.
+This guide sets up one code repository that has no memory yet. You create the memory repository,
+choose which files are eligible for cards, and start the first knowledge.
 
-## 1. Install The Runtime
+A repository needs no full coverage before Agents Remember is useful. Cards and knowledge records
+grow as tasks touch files.
 
-Configure the Agents Remember MCP server, then request:
+The Bootstrap role agent makes the calls of step 2 in a chat with you; see
+[Set up a repository with Bootstrap](../getting-started.md#set-up-a-repository-with-bootstrap).
+Use this guide to make the calls from a chat of your harness, or to read what Bootstrap did.
+
+## 1. Install Agents Remember
+
+Follow the install steps in [Getting started](../getting-started.md). This guide needs three of
+their results: the settings file lists the code repository under `repositories` (step 2), your
+harness has the tool server registered (step 3), and the coordination root exists (step 4, the
+[Bootstrap call](../concepts.md#bootstrap-call), creates it).
+
+## 2. Create The Memory Repository
+
+Each code repository has one memory repository under the coordination root:
 
 ```text
-runtime_install()
+<coordination-root>/memory-repos/ar-<repo-id>/
 ```
 
-Skills are served by the tool server from its packaged copy; do not install a skill folder in a
-project or in the coordination root. Follow the relevant [install guide](../README.md#install-guides)
-for the registration.
-
-## 2. Initialize Memory
-
-External memory is the only supported topology, and it creates one memory repo per code repository:
+The tool `memory_init` creates it. Ask the agent in a chat of the harness in which you registered
+the tool server to preview the call and then to make it:
 
 ```text
-<coordination-root>/memory-repos/ar-<repo>/
-  memory.md
-  onboarding/
+memory_init(repo_id="<repo-id>", dry_run=true)
+memory_init(repo_id="<repo-id>", initial_branch="<branch>")
+```
+
+| Argument | Meaning |
+| --- | --- |
+| `repo_id` | Required. The id of the code repository in the settings file. |
+| `dry_run` | `true` reports what the call would create and writes nothing. The default is `false`. |
+| `initialize_git` | `true` makes the memory root a Git repository. The default is `true`. |
+| `initial_branch` | The branch of the code repository that the memory describes. |
+
+`initial_branch` gives the first branch of the memory repository its name. Without the argument,
+the call takes the branch that the code repository has checked out. When neither gives a name,
+the call refuses with `ok: false` and writes no file; it creates at most the empty folder of the
+memory root, which `createdDirs` names. The call records the name in the Git configuration of the
+memory repository, under `agents-remember.defaultBranch`. Baseline adoption and the worktree tools
+compare against that name.
+
+A call on a repository without memory creates this tree:
+
+```text
+<coordination-root>/memory-repos/ar-<repo-id>/
+  .git/
   docs/
+  knowledge/
+    layout.json
+  onboarding/
   system/
     settings.md
-    settings.json
     sources.md
     tools.md
 ```
 
-`memory_init` takes the configured `repo_id` for a normal installed run, or the code repository
-root for source debugging. Ask for the `initial_branch` first: default it to the branch the code
-repository has checked out and give the developer the absolute memory path. When neither the
-argument nor the checked-out branch exists, the call refuses rather than inventing a name. Pass
-the answer as `initial_branch`; the memory repository's own first branch is given that name and
-recorded for later comparisons.
+| Path | What it holds |
+| --- | --- |
+| `<memory-root>/onboarding/` | The cards. The call creates the folder empty. |
+| `<memory-root>/knowledge/layout.json` | The layout marker. It names the format of the memory files, and the memory tools need it. |
+| `<memory-root>/docs/` | Documents about the repository that you or a role agent add. The call creates the folder empty. |
+| `<memory-root>/system/settings.md` | Your instructions for people and agents who work on this repository. |
+| `<memory-root>/system/tools.md` | The repository's commands for tests and checks. Workers and Reviewers read it. |
+| `<memory-root>/system/sources.md` | The list of domain documents and outside references that research and curation read. |
 
-Preview, then apply:
+Each of the three files in `<memory-root>/system/` starts as one heading line. You fill them in.
 
-```text
-memory_init(repo_id="<repo-id>", dry_run=true, initialize_git=true)   # preview
-memory_init(repo_id="<repo-id>", initialize_git=true, initial_branch="<foundation branch>")
-```
+The call creates what is missing and overwrites no file that exists. Its answer names the result:
 
-The default mode creates what is missing. Use `repair` only when the developer explicitly asks
-to fix existing scaffold files. Never overwrite an existing memory file without that approval,
-and create only the directories and files that are absent.
+| Field | Meaning |
+| --- | --- |
+| `memoryRoot` | The absolute path of the memory repository. |
+| `initialBranch`, `initialBranchSource` | The branch name and its origin: `explicit`, `code-repository-current-branch` or `unresolved`. |
+| `createdDirs`, `createdFiles` | The folders and files this call created. Both are empty when the tree was complete. |
+| `layoutMarker` | `created` on a new memory root; `present` when the marker exists; `unconverted-existing-memory` when the memory root holds Markdown files under `onboarding/` or a knowledge database, but no marker; `existing-repository-unchanged` when the memory root is a Git repository without the marker; `not-created` when the call would have created the marker and refused first (`ok: false`). Only `created` writes a marker. A memory root in the state `unconverted-existing-memory` needs the conversion `agents-remember knowledge-convert` that this section describes below. |
+| `git` | Whether the call ran `git init`, and Git's result. |
+| `knowledge` | Whether the repository has recorded knowledge: `state` is `not-recorded`, `recorded`, `unusable` or `context-not-admitted`. |
 
-Inspect the memory root before changing anything:
+The call fails with an error when the coordination root is missing. The error names
+`runtime_install`, the tool that creates the coordination root. Finish step 1 first: its Bootstrap
+call creates the coordination root.
 
-```text
-system/settings.md
-system/settings.json
-system/sources.md
-system/tools.md
-onboarding/
-docs/
-.git/
-```
+To use a memory repository that exists already, clone it to the path above and follow
+[Adopt Existing Memory](adopt-existing-memory.md).
 
-Also check the code repository for a repo-local `ar-memory/` directory. That layout was removed
-from the product and is refused by name; report its exact path and never recreate it. Never
-create a memory root inside the code repository. If the resolved memory or coordination root
-points outside the intended workspace, state the absolute path before writing.
+When the folder at the memory path is a Git repository without the layout marker, for example a
+clone of an empty repository that you created on a hosting site, `memory_init` creates the folders
+and the three files under `system/` and writes no marker. `memory_baseline_status` and
+`memory_baseline_adopt` then answer `ok: false` with the state `legacy-format`, and their
+`nextAction` names the conversion below. Two ways lead to a memory repository that the tools
+accept:
 
-Create only the missing `system/`, `onboarding/` and `docs/` folders. Ensure
-`<coordination-root>/memory-repos/` exists first. Do not create or modify coordinator runtime
-directories such as `tasks/`, `worktrees/`, `notes/` or `temp/`, and do not create a `skills/`
-directory: the runtime carries none, and the tool server serves the skills. When Git would
-otherwise commit an empty directory, add `docs/.gitkeep`.
+- Call `memory_init` while no folder stands at the memory path. The call creates the repository
+  with the marker. Add the remote afterwards, in the memory root, with
+  `git remote add origin <address>`.
+- In a repository that is already cloned to the memory path, call `memory_init` and then run
+  `agents-remember knowledge-convert <memory-root> --code <code-repository>`. It writes
+  `knowledge/layout.json`, and `memory_baseline_status` then answers `ready`.
 
-Create only absent starter files, with generic content:
+Neither way commits anything.
 
-- `system/settings.md` names the memory root's purpose and its scaffold table, and points
-  machine-readable storage, path rules and cross-repository settings at `system/settings.json`.
-  It must not duplicate active `pathRules` as an authoritative machine source.
-- `system/settings.json` holds the storage mode, path rules and cross-repository allow list; see
-  [Path Rules](../reference/path-rules.md).
-- `system/sources.md` registers the domain documentation and external references later research
-  may use, and says to record what was checked when no relevant source exists.
-- `system/tools.md` holds the repository's own checks, commands and runtime notes.
+`memory_init` writes no card and no knowledge record, and it commits nothing. The first commit of
+a new memory repository is its baseline: adopt it as [Adopt Existing Memory](adopt-existing-memory.md)
+describes.
 
-Expected outcomes:
+## 3. Choose The Eligible Files
 
-- **Fresh memory repo:** the memory root exists at the absolute path, Git is initialized when
-  requested, `system/`, `onboarding/` and `docs/` exist, and the developer is told the memory is
-  ready for the optional knowledge foundation.
-- **Partial scaffold:** only missing directories and files are created; existing `docs/`,
-  `system/` and onboarding content are preserved.
-- **Complete scaffold:** nothing changes, and the report says the memory root is already
-  initialized.
+Path rules decide which files of the code repository are eligible for cards. They stand in the
+memory settings file, `<memory-root>/system/settings.json`. `memory_init` does not create that
+file. Without it, the repository has no path rules of its own.
 
-Report the resolved topology and memory root, the coordination root, whether Git was
-initialized, any repo-local `ar-memory/` root found, the directories and files created, the files
-left untouched, and the next step. The next step is not a bootstrap skill: ask the Architect for
-the repository's first knowledge foundation.
-
-To use an existing memory repo instead, clone or check it out at the resolved memory location
-and adopt it as the first Git-attributed baseline; see
-[Adopt Existing Memory](adopt-existing-memory.md). Its onboarding already exists. Do not skip the
-knowledge state: report whether the repository has a recorded foundation, because an existing
-memory can hold onboarding and none.
-
-## 3. Configure Path Eligibility
-
-Review `<coordination-root>/memory-repos/ar-<repo>/system/settings.json`.
-
-Start with a small eligible surface:
+Advice: start with few files eligible for a card and add paths as tasks reach them. Create the
+file with content of this shape:
 
 ```json
 {
-  "version": 2,
   "onboarding": {
-    "storage": {
-      "mode": "memory-repo"
-    },
     "pathRules": {
       "include": {
         "paths": ["README.md", "docs/**", "src/**"],
@@ -133,33 +140,52 @@ Start with a small eligible surface:
 }
 ```
 
-See [Path Rules](../reference/path-rules.md) for the fuller exclusion baseline. When the resolved
-rules lack the common excludes, record that during source review and repair `settings.json`
-rather than filtering inside an agent.
+[Path Rules](../reference/path-rules.md) gives a fuller list of excludes. The
+[settings reference](../reference/settings-json.md#memory-settings-file-keys) describes every key
+of the file, and its [example](../reference/settings-json.md#memory-repo-example) shows a complete
+file. The repository carries an example file at
+[`system/defaults/examples/memory-repo/settings.json`](https://github.com/Foxfire1st/agents-remember/blob/main/system/defaults/examples/memory-repo/settings.json).
 
 ## 4. Start The Knowledge Foundation
 
-Ask the developer to start an Architect and give it this repository. The Architect opens a
-registered foundation task under a master; its Curator reads the current knowledge state,
-inventories the agreed sources, and authors the first invariants, families and realizations
-through the curator writer. The foundation needs no onboarding file to start.
+The [knowledge foundation](../concepts.md#knowledge-foundation) is the repository's first set of
+knowledge records, invariants and families, with their
+[realizations](../concepts.md#realization-and-proof) in the code. An Architect plans it as a
+regular task.
 
-An Investigator may research the repository for that foundation; its report path is recorded in
-the foundation task document so the Curator finds the evidence. Research produces evidence and
-writes no memory.
+1. Open the dashboard on the tab "Chats" and start an Architect; see
+   [Start your first task](../getting-started.md#start-your-first-task).
+2. Tell the Architect that you want the knowledge foundation of this repository.
 
-Onboarding cards are separate: the Curator authors them inside a task when work touches a file,
-following [the card procedure](../../skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md).
-There is no separate onboarding-bootstrap skill.
+The Architect opens a task for the knowledge foundation under a master. The Curator of that task
+reads the state of the knowledge, lists the agreed sources, and writes the first records through
+the tool `knowledge_write`. The knowledge foundation needs no card to start.
+
+The Architect may start an Investigator to research the repository first. The Investigator
+reports evidence and writes no memory. The task document of the foundation task names the report,
+so the Curator finds it.
+
+Cards are separate from the knowledge foundation. A Curator writes the card of a file inside the
+task that touches the file, by the
+[card procedure](https://github.com/Foxfire1st/agents-remember/blob/main/skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md),
+the Curator's instructions on the format of a card and its numbered citations.
+[The Cost Of A Repository's First Memory](cost-aware-bootstrap.md) gives advice on the cost of
+this first work.
 
 ## 5. Let Coverage Grow From Work
 
-When a task touches a file, the agent should:
+Each task adds memory for the files it touches:
 
-1. resolve context with `context_packet` using the [tool reference](../../skills/l-01-agent-lifecycles/reference/knowledge/commands.md)
-2. check drift with the [memory-quality tools](../../skills/l-01-agent-lifecycles/reference/knowledge/commands.md)
-3. read or create the relevant onboarding
-4. implement approved work
-5. have the Curator refresh onboarding through the [card procedure](../../skills/l-01-agent-lifecycles/reference/curator/card-formats-and-citations.md)
+1. The role agent resolves the repository with `context_packet(repo_id="<repo-id>")`: the
+   answer names the folders of the code and of the memory that the agent works in; see
+   [Context resolution](../concepts.md#context-resolution).
+2. It asks `read_ar_files` for the cards and records of the files it will read. The tool names
+   where each one lies, and the agent reads those files beside the source.
+3. The Worker builds the approved change.
+4. The Curator of the task writes or updates the cards and knowledge records of the touched
+   files.
+5. Closeout commits the code and the memory together.
 
-This avoids a giant up-front documentation project. The first task on a file pays the onboarding cost; later tasks benefit.
+The first task on a file pays for its card. Later tasks read the card and keep it current.
+[Workflows](../workflows.md) describes a task from the request to the landing, and
+[Memory Quality Control](../reference/drift-c02.md) describes the checks on the cards.

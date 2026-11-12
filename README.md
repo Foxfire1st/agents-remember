@@ -1,360 +1,234 @@
 <h1 align="center">
   Agents Remember
-</h1>  
+</h1>
 <h3 align="center">
   Git-verified records for what your coding agents know. A control plane for what they do.
 </h3>
 
 <p align="center">
-  <img alt="NPM License" src="https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2FFoxfire1st%2Fagents-remember%2Fmain%2Fmcp%2Fpyproject.toml">
-</p>
-
-<p align="center"> 
-  📖 <b>Current docs:</b> https://foxfire1st.github.io/agents-remember/</br>
-  🤖 <b>Machine-readable summary:</b> https://foxfire1st.github.io/agents-remember/llms.txt</br>
-  <i>Note: caches and search snippets may serve an outdated copy of this README — the docs site above is canonical and always current.</i>
+  <img alt="Python version that the package requires" src="https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2FFoxfire1st%2Fagents-remember%2Fmain%2Fmcp%2Fpyproject.toml">
 </p>
 
 <p align="center">
-  <img src="./agents-remember-welcome.png" alt="Agents Remember mission-control welcome screen: Agents orchestrate attention, Tasks commit intent, and Memory preserves truth." width="833">
+  <img src="assets/agents-remember-welcome.png" alt="Agents Remember banner. Mission control: one mission, many agents, coherence survives. Agents orchestrate attention, tasks commit intent, memory preserves truth." width="833">
 </p>
 
-##
+A coding agent fixes the bug it was shown and misses the other places that hold the same rule,
+because a search sees only the path it follows. Agents Remember gives the repository a memory in
+a Git repository of its own: a note at the path of each file, records that tie each rule to all
+the code that expresses it, and role agents that let a change land only when code and memory
+agree. It is for developers and teams who work with coding agents on codebases too large for one
+context window.
 
-## Table of Contents
+https://github.com/user-attachments/assets/87d905c4-cfe6-455e-9210-46da1fd39247
 
-1. [Why It Exists](#why-it-exists)
-2. [Core Features](#core-features)
-3. [What It Looks Like In Practice](#what-it-looks-like-in-practice)
-4. [Live Demo](#live-demo)
-5. [Requirements](#requirements)
-6. [Quickstart](#quickstart)
-7. [Run The Dashboard](#run-the-dashboard)
-8. [Documentation](#documentation)
-9. [Repository Layout](#repository-layout)
-10. [Status](#status)
-11. [Stability](#stability)
-12. [Contributing](#contributing)
+<p align="center">
+  <a href="assets/agents-remember-explainer.mp4">Watch the explainer video</a> (2 min 34 s, with music, no narration).
+</p>
 
-## Why It Exists
+The documentation is in [`docs/`](docs/README.md); start with
+[Getting started](docs/getting-started.md). The site
+https://foxfire1st.github.io/agents-remember/ shows the folder `docs/` of the branch `main`, and
+https://foxfire1st.github.io/agents-remember/llms.txt is its summary for machine readers.
 
-Modern coding agents can make clean, plausible edits while missing the project-specific rules that make those edits safe. A top-level instruction file can help, but it does not naturally reappear when the agent is deep in a file and deciding what to change.
+## Contents
 
-Agents Remember fixes that: the matching note is reachable at the moment of the edit — most often by the very path the agent is already working in — so project rules surface exactly when a change is being made, not buried in a top-level file.
+1. [The problem](#the-problem)
+2. [What Agents Remember does](#what-agents-remember-does)
+3. [Where it is heading](#where-it-is-heading)
+4. [What you need](#what-you-need)
+5. [Install steps](#install-steps)
+6. [Start and stop the dashboard and the host](#start-and-stop-the-dashboard-and-the-host)
+7. [Documentation](#documentation)
+8. [A live example](#a-live-example)
+9. [Status](#status)
+10. [Stability](#stability)
+11. [Contributing](#contributing)
 
-## Core Features
+## The problem
 
-**Agents Remember gives coding agents project memory they can verify and act on.** It turns local invariants, naming rules, migration scars, cross-repo contracts, and "this looks safe but is not" facts into versioned Markdown and JSON in an external memory repository, checks that memory against Git before use, and curates it alongside approved code changes.
+Code that belongs together often lies in different folders, under different names, written months
+apart. An agent that searches from the top of the tree opens some paths and never sees the others.
+It fixes one place, the tests pass, and three other places still break the same rule.
 
-```text
-src/orchestrator/core_editor.py
-memory-repos/ar-agents-remember/onboarding/src/orchestrator/core_editor.py.md
-```
+The rules that make an edit safe are not in the file the agent edits. An instruction file at the
+top of the repository is read at the start of a session. It is not at hand later, at the moment
+the agent decides how to change one file deep in the tree.
 
-- **Path-addressed memory:** A source file's note lives at a deterministic mirror path, so an agent holding a file can reach the right context without search, ranking, or guesswork.
-- **Git-proven freshness:** File notes, route overviews, and entity catalogs are drift-checked against source commits, route scopes, or deterministic fingerprints before they are trusted.
-- **Retrieval that names its evidence:** By-path reads name cards and recorded knowledge; agents read those files beside source. The former semantic and code-graph providers are retired.
-- **Memory that lands with code:** External memory repos pair code and memory worktrees. Converted memory holds current cards, structured records and Curator judgment rows; closeout and landing judge the exact candidate trees. `memory.md` is an ignored cache derived from memory commits’ `Code-Commit` attribution.
-- **Repo-owned agent behavior:** Each memory repo carries `system/` files for path rules, tools, coding guidelines, documentation sources, branch policy, and reporting shape, so the same project rules load across harnesses.
-- **Harness-ready first run:** Register the MCP server with your harness. The server serves skills from its installed package; server registration does not install a second skill tree.
+## What Agents Remember does
 
-The setup stores durable memory in a memory repository of its own, under `ar-coordination/memory-repos/ar-<repo>/`. Repo-local internal memory under `<repo>/ar-memory/` was removed from the product and is refused with the exact path. For the full tour, see [Features](docs/features.md).
+Everything in this section describes the product as it is in this repository.
 
-## What It Looks Like In Practice
+- **A card at the path of the file.** The memory repository holds a card for a source file at the
+  file's own path. An agent that holds a file reaches its card without a search and without a
+  ranking. In this example the folder `ar-<id>` is the memory repository of the code repository:
 
-A source file has an onboarding note beside it, reached by path:
+  ```text
+  <code-repository>/src/orchestrator/core_editor.py
+  <coordination-root>/memory-repos/ar-<id>/onboarding/src/orchestrator/core_editor.py.md
+  ```
 
-```text
-mcp/src/agents_remember/mcp/server.py
-memory-repos/ar-agents-remember/onboarding/mcp/src/agents_remember/mcp/server.py.md
-```
+- **Rules with all their places.** A knowledge record states one rule, called an
+  [invariant](docs/concepts.md#invariant). Cards name the code that realizes it and the tests
+  that prove it, and a [family](docs/concepts.md#family) groups the invariants that give one
+  guarantee together. From one file an agent reaches the rule, and from the rule every other
+  place that holds it.
+- **Decisions with what was rejected.** A decision record keeps the alternatives that were
+  rejected or deferred, each with its reason and the condition under which to reconsider it.
+- **Checked against the code.** Each card anchors its statements to lines and symbols of the
+  code. A check finds every [anchor](docs/concepts.md#anchor) whose code has changed, and a task
+  neither closes out nor lands with memory that holds a stale anchor.
+- **Memory that lands with the code.** The memory is a Git repository of its own, outside the code
+  repository. A task works in a code worktree and a memory worktree side by side. Closeout commits
+  both, after the [knowledge gate](docs/concepts.md#knowledge-gate) has compared the changed
+  code with the changed memory. The gate has no waiver.
+- **Roles with separate duties.** An Architect writes the requirement with you. A Worker builds
+  the change, a Reviewer judges it, and a Curator records what the change means for the memory. A
+  Manager coordinates the tasks of one [master](docs/concepts.md#master), which is a group of
+  tasks.
+- **A host that runs the role agents.** Agents Remember installs and starts the host, Paseo. The
+  host runs each role agent in a harness such as Claude Code or Codex and shows its chat.
+- **The intent review.** The button "⇄ Intent review" on a task's page opens the review of that
+  task. The review compares the code and the memory before and after the change and shows the
+  change by the rules it touches: the invariants and families that the change added, changed or
+  removed, the code and the proofs recorded for each, and the changed files that no knowledge
+  record covers. You ask questions on the page. An explainer agent answers in a chat or with a
+  page of its own, and on request it grades the parts of the change, so that you read the
+  important parts first. To publish a page, the explainer needs Playwright and its browser on
+  your machine: see
+  [what the explainer needs](docs/guides/review-page-and-explainer.md#what-the-explainer-needs-before-it-can-publish). Nothing starts on a new task until its task document records your `go`.
+- **A dashboard.** A local web page shows the chats of the role agents, the tasks with their steps
+  and reviews, the knowledge of a repository and its files. From it you start a role agent, read
+  a task document and open the intent review.
+- **The repository's own instructions.** The folder `system/` of the memory repository holds the
+  path rules, tools, coding guidelines and sources of one code repository, so each harness works
+  by the same rules. Its settings can name another repository, whose code and memory the context
+  of this repository then includes while that repository is on the branch the entry expects.
+- **A benchmark runner.** The package holds a benchmark runner, and the repository holds one case
+  for it. For a case the runner prepares one environment with the source only and one with the
+  memory, so that a run with the memory can be compared with a run without it.
 
-At task start the agent orients and checks memory health:
+[Features](docs/features.md) gives the tour, and [Concepts](docs/concepts.md) defines the terms.
 
-```text
-context_packet(repo_id="my-app")
-memory_quality_check(request={"mode":"sync", "repo_id":"my-app"})
-```
+## Where it is heading
 
-It then reads the source file and its onboarding note together before proposing a change. In a leaf worktree, the Curator reconciles cards, JSON sidecars and shared knowledge records against the changed code. A recomputed worklist, validator and exact-tree gate check the candidate before publication. See the [knowledge-system reference](docs/reference/knowledge-system.md) for file formats, commands and the reader/review surfaces.
+The model that Agents Remember applies to code can be adapted to other subjects. Three directions
+lie beyond code:
 
-## Live Demo
+- **Research.** A versioned map of a field's claims, hypotheses, experiments and evidence, built
+  toward a goal and updated by each new publication.
+- **Model weights.** A checked, versioned map of what the parts of a neural network do, for
+  networks that fit in no context window.
+- **Organisations.** Decisions that keep their reasons, their assumptions and the conditions for
+  opening them again.
 
-Agents Remember runs on itself. The companion memory repo is:
-https://github.com/Foxfire1st/ar-agents-remember
+The product does none of the three today. The [Roadmap](ROADMAP.md) gives one picture for each
+direction, names the part of today's product that it builds on, and lists the nearer directions
+for code. It holds directions and ideas, not commitments.
 
-That repo contains the live onboarding layer, so you can inspect how by-path memory, drift-aware updates, and contribution-time onboarding look in practice.
+## What you need
 
-## Requirements
+- A Linux x86_64 machine. WSL 2 on Windows counts as Linux.
+- Python 3.14 (`>=3.14,<3.15`), [uv](https://docs.astral.sh/uv/) and Git.
+- One harness, installed and logged in: Claude Code, Codex, Cursor, Hermes, Pi or OpenClaw. The
+  host starts no role agent on Cursor or OpenClaw.
+- Network access during the setup, and the free ports 8765 and 8766 on the loopback address.
 
-The requirements here describe the current checkout and wheels built from it: Python 3.14 (`>=3.14,<3.15`), with 3.14.8 pinned only for managed development and CI. The published `3.0.0rc8` release is historical and requires Python 3.13 (`>=3.13,<3.14`). An official release of the Python 3.14 build is pending; use a locally built wheel for this checkout.
+Docker is not needed. [Getting started](docs/getting-started.md#what-you-need) gives the details.
 
-Before the Quickstart, make sure the host has:
+## Install steps
 
-- **[uv](https://docs.astral.sh/uv/)** (for `uvx`) or pip, and **Python 3.14** — the package supports `>=3.14,<3.15`; repository development uses the verified source-built 3.14.8 contract documented in the MCP README.
-- **Git**, with `user.name` / `user.email` configured (memory and worktree commits need an author; otherwise a placeholder identity is used).
+[Getting started](docs/getting-started.md) tells these five steps in full. The page
+[Install](docs/install/README.md) links the page of each harness.
 
-The former semantic and code-graph providers are retired; setup does not enable
-them or require Docker, Ollama, or an embedding-model download.
-Full detail and troubleshooting live in the
-[current MCP README](mcp/README.md).
+1. **Install the package.** Install the published package with one command:
 
-## Quickstart
-
-This is the short path for a new workspace. The detailed walkthrough lives in [Getting Started](docs/getting-started.md).
-
-Set up the server, then ask your agent to make the call:
-
-1. **Write the MCP authority settings** — Copy `examples/mcp/settings.example.json`
-   to `~/.config/agents-remember/agents-remember-settings.json` (under
-   `XDG_CONFIG_HOME` when set) and replace its paths with absolute ones: the
-   coordination folder (it may not exist yet), the workspace root, the transcript
-   folder, and one entry per code repository. The server reads that file at boot
-   and resolves workspace paths from it.
-2. **Register the MCP server** — Build this checkout's wheel with `uv build --wheel mcp`
-   and register that local artifact with `uvx`, or use the published package:
-
-   ```text
-   uvx --python 3.14 --from /absolute/path/to/built-wheel.whl agents-remember-mcp --config /absolute/user-config/agents-remember/agents-remember-settings.json
+   ```bash
+   uv tool install --python 3.14 agents-remember-mcp
    ```
 
-   Adapt the [common registration example](examples/mcp/server.example.json) using
-   the configuration envelope in your [harness guide](docs/install/README.md). Then **restart the harness once** so it
-   starts the server.
-3. **Make one call** — In a chat of that harness, name no task, sprint or
-   repository:
+   [Getting started](docs/getting-started.md#1-install-the-package) also tells how to build and
+   install the package from a checkout of this repository.
 
-   ```text
-   role_start(role="bootstrap", request_id="<a UUID you generate>")
+2. **Write the settings file.** Create `~/.config/agents-remember/agents-remember-settings.json`.
+   It names the workspace root, the coordination root and your code repositories:
+
+   ```json
+   {
+     "coordinationRoot": "/home/<you>/projects/ar-coordination",
+     "workspaceRoot": "/home/<you>/projects",
+     "repositories": { "my-repo": {} }
+   }
    ```
 
-   That call prepares the runtime scaffold, provisions and starts the Paseo host,
-   verifies the Agents Remember plug-in, starts one instructed Bootstrap seat, and
-   returns that seat's dashboard address. Continue setup there: choose the
-   repository and memory root, initialize or read the memory baseline, adopt its
-   content, and pick the harness each role should use (model and effort may stay
-   unset, so the harness keeps its own defaults). Bootstrap writes the user
-   settings file during installation and reports an existing one instead of
-   overwriting it. Then it tells you to start the Architect, which organises the
-   knowledge foundation as ordinary task work.
+3. **Register the tool server in your harness.** The harness starts the command
+   `agents-remember-mcp` with the arguments `--config` and the full path of the settings file.
+   Restart the harness.
+4. **Start the setup.** In a chat of that harness, ask the agent to make one call:
 
-That is the whole first-run path. No skill folder, starter package or rendered
-settings is copied into a harness: the tool server serves the canonical skills to
-a harness as MCP resources, so the skills a session reads belong to exactly one
-installed build. There is no separate skill-install route to run.
+   ```text
+   role_start(role="bootstrap", request_id="<a new UUID>")
+   ```
 
-After that, normal work runs through the `l-01-agent-lifecycles` skill: developer-facing free chat answers a question inline and, for work on a managed repository, creates or resolves the sprint document, writes the request of the developer into it, starts an Architect with `role_start` (the call for an Architect names no document), and tells the developer that the agent is in the dashboard and which sprint document holds the request. Another role is started this way only when the developer names the role and the task. Role agents follow their handovers. The agent resolves the active context with `context_packet`, checks memory quality through [knowledge commands](skills/l-01-agent-lifecycles/reference/knowledge/commands.md), reads relevant onboarding beside code, and updates onboarding after approved changes.
+   The call creates the coordination root, installs and starts the host, starts one role agent
+   in the role Bootstrap and starts the dashboard.
+5. **Open the dashboard.** Open the address that the answer names, by default
+   `http://127.0.0.1:8765/`, and continue the setup in the chat of the Bootstrap role agent.
 
-## Run The Dashboard
+## Start and stop the dashboard and the host
 
-The mission-control dashboard ships inside a wheel containing its built bundle.
-For this checkout, build and sync the dashboard bundle before building the wheel
-(run `npm --prefix dashboard run build`, then `python3 scripts/sync-dashboard.py`). Install that local wheel
-with uv, then start the cockpit from your workspace:
+The setup starts both. Afterwards these commands start, check and stop them:
 
-```text
-uv tool install --python 3.14 /absolute/path/to/built-wheel.whl
-agents-remember dashboard --daemon --config /absolute/user-config/agents-remember/agents-remember-settings.json
+```bash
+agents-remember dashboard --daemon    # start the dashboard and the installed host
+agents-remember dashboard --status    # state of both; exit 0 when both run
+agents-remember dashboard --stop      # stop the dashboard; the host keeps running
+agents-remember paseo status --config ~/.config/agents-remember/agents-remember-settings.json
+agents-remember paseo stop --config ~/.config/agents-remember/agents-remember-settings.json
 ```
 
-The install brings the build-pinned Paseo host and its whole locked tree on the
-product's checked Node (Linux x86_64). One shared paseoRuntime block in
-<coordinationRoot>/system/settings.json supplies its facts. Each dashboard start
-ensures the installed host without installing/upgrading; dashboard stop/restart
-keeps host sessions running. Explicit paseo stop ends running turns and pending
-prompts, with sessions resumable after a new start. --status prints both states
-with a five-second host limit. Both --status and --daemon exit 0 when the
-dashboard and host are up (or host unconfigured), 1 when the dashboard is down,
-and 3 when a configured host is down.
-
-`--config` is optional: the CLI reads
-`~/.config/agents-remember/agents-remember-settings.json` (under `XDG_CONFIG_HOME`
-when set), independently of the working directory. An explicit path overrides discovery.
-
-Start from the installation that is actually registered as the tool server, not from a bare
-command found on `PATH`. A `uvx` registration uses
-`uvx --from "agents-remember-mcp==<served-version>" agents-remember dashboard --daemon --config "<absolute active MCP settings file>"`;
-a local-wheel registration uses that exact wheel after `--from`; a uv tool install uses the
-installed command; a source registration uses its registered interpreter and environment with
-`-m agents_remember.cli`. Replace both values in the reported command. The one start ensures the
-installed host and dashboard, and it never installs or upgrades. `dashboard --status` reports both
-with a five-second host query limit: exit 0 when both are up or the host is unconfigured, exit 1
-when the dashboard is down, and exit 3 when a configured host is down.
-
-For a dashboard that survives closing the terminal, use daemon mode:
-
-```text
-agents-remember dashboard --daemon    # detach; state + log under <coordinationRoot>/logs/dashboard/
-agents-remember dashboard --status    # exit 0 both up/unconfigured, 1 dashboard down, 3 configured host down
-agents-remember dashboard --stop
-```
-
-Or let the MCP server supervise it: set `"dashboard": {"autoStart": true}` in
-the MCP settings JSON and every server boot ensures the daemon — adopting a
-healthy one, starting a missing one, and restarting on version mismatch so an
-upgrade is picked up by the next session
-([Settings Reference](docs/reference/settings-json.md)).
-
-For a reproducible checkout build, retain the exact local wheel and its hash.
-Published `3.0.0rc8` is the historical Python 3.13 artifact, so its pip/uv pin is
-not an installation example for the current Python 3.14 build.
+`paseo stop` stops the host. Open sessions close, and running turns and open permission prompts
+are lost. `agents-remember dashboard --daemon` starts the host again.
+[The Host](docs/host.md) describes the commands, the ports and an update of the install.
+[The Dashboard](docs/dashboard.md) describes every tab.
 
 ## Documentation
 
-- [Features](docs/features.md) - the concentrated tour of what Agents Remember gives users.
-- [Getting Started](docs/getting-started.md) - a fuller first-run setup.
-- [Concepts](docs/concepts.md) - onboarding units, memory roots, drift, and approval gates.
-- [Knowledge system](docs/reference/knowledge-system.md) - records, sidecars, judgment history, worklists and exact-tree gates.
-- [Architecture](docs/architecture.md) - runtime, coordination, and memory repos.
-- [Workflows](docs/workflows.md) - the `l-01-agent-lifecycles` skill and its build modes (research-only exit / durable task / master + light sub-task series), and when to use each.
-- [Benchmark Methodology](docs/benchmarks-methodology.md) - how paired `codex exec --json` runs are captured and compared.
-- [FAQ](docs/FAQ.md) - design principles, objections, and comparisons.
-- [External Memory Guide](docs/guides/use-external-memory.md) - separate memory repos for selected code repos.
-- [Cost-aware Bootstrap](docs/guides/cost-aware-bootstrap.md) - model and wave-sizing choices for token-heavy repository bootstrap.
-- [Settings Reference](docs/reference/settings-json.md) - memory-layer `system/settings.json` and MCP authority settings.
-- [Skills Reference](docs/reference/skills.md) - the served skill families and the one generated copy that serves them.
+- [Agents Remember Documentation](docs/README.md): the index of every page.
+- [Getting started](docs/getting-started.md): the install steps in full, the setup of a
+  repository and the first task.
+- [Install](docs/install/README.md): the page of each harness and what the harness needs.
+- [The Host](docs/host.md) and [The Dashboard](docs/dashboard.md).
+- [Roles and role agents](docs/roles.md) and [Workflows](docs/workflows.md): who does what, and
+  how a request becomes a landed change.
+- [Concepts](docs/concepts.md) and [Features](docs/features.md).
+- [Guides](docs/guides/README.md) and [Reference](docs/reference/README.md), with the
+  [MCP Tool Reference](docs/reference/mcp-tools.md) and the
+  [Settings Reference](docs/reference/settings-json.md).
+- [FAQ](docs/FAQ.md).
 
-## Repository Layout
+## A live example
 
-```text
-agents-remember/
-  AGENTS.md                         # source checkout instructions
-  README.md                         # public front door
-  skills/                           # canonical skill source tree
-  scripts/sync-skills.py            # sync skills into the served package copy
-  scripts/sync-runtime.py           # sync runtime assets into package data
-  agents-md-files/                  # canonical installed AGENTS.md templates
-  benchmarks/                       # canonical optional benchmark package source
-  providers/                        # canonical provider runtime assets
-  system/defaults/examples/         # canonical scaffold examples
-  mcp/                              # package-local MCP server and services
-    src/agents_remember/package_data/
-      runtime/
-        agents-md-files/            # generated copy of root agents-md-files/
-        skills/                     # generated package copy of root skills/, served to harnesses
-        providers/                  # generated copy of root providers/
-        system/defaults/examples/   # generated copy of root system/defaults/examples/
-      benchmarks/                   # generated copy of root benchmarks/
-  docs/                             # user-facing documentation
-```
-
-Edit skills in root `skills/`, then run `python3 scripts/sync-skills.py` to
-refresh the MCP package data. The packaged copy is the only generated skill copy:
-the tool server serves it to a harness as MCP resources, and no harness folder
-receives a skill tree. The pre-commit and pre-push hooks run
-`python3 scripts/sync-skills.py --check`.
-
-Edit runtime assets in root `agents-md-files/`, `benchmarks/`, `providers/`,
-and `system/`, then run `python3 scripts/sync-runtime.py` to refresh MCP package
-data only. The pre-commit and pre-push hooks run
-`python3 scripts/sync-runtime.py --check`.
-
-Use the [common MCP registration example](examples/mcp/server.example.json), adapted to your
-harness as described in [docs/install](docs/install/README.md). Product installation leaves
-existing harness folders alone; server settings use the user-config directory.
-
-The hooks are tiered, and both are thin wrappers over `.githooks/_gate.sh`.
-pre-commit runs the fast tier over the **staged** content: the generated-copy
-checks above, plus Ruff, `ruff format --check`, Pyright, and deterministic dashboard
-checks. pre-push repeats those non-test checks against current-checkout bytes and
-records the pushed refs. It does not run acceptance. GitHub runs its deterministic
-non-test checks once per pull request, not once again for every branch push. A
-pinned Dagger v0.21.8 graph rebuilds the exact Git candidate
-in a clean Ubuntu container, installs from scratch, runs a bundled real Codex
-read-only protocol probe, and executes the accepting wrapper. Targeted Dagger runs
-once when each leaf closeout creates its commit. Leaf integration lands that exact
-certified commit without a rerun. Full Dagger runs once when each master integrates
-into super. PR validation, tagging, and publishing do not rerun acceptance. See
-CONTRIBUTING.md for the tier table and staged-content contract.
-
-Agents Remember declares that Dagger graph in its repository-owned
-`mcp/certification-profile-v1.json`, selected explicitly by
-`repositories.agents-remember.certificationProfile` in the MCP authority settings. The framework
-does not discover a wrapper or carry an Agents Remember command/report inventory. Ordinary Python development uses pytest directly, without Dagger admission, coverage,
-repository certification, or an autouse application service graph:
-
-```bash
-mcp/.venv/bin/python -m pytest                         # default unit loop
-mcp/.venv/bin/python -m pytest mcp/tests/test_example.py # one changed behavior
-mcp/.venv/bin/python -m pytest -m integration           # delivery boundary checks
-```
-
-The default excludes the `integration` marker. Local inputs, temporary resources, and
-explicit test doubles remain ordinary tests; real publication/recovery, competing writers,
-application wiring, and whole-repository observations run separately. Imported test classes
-are exercised only in their defining module. Four workers are the default; use `-n=0` for
-serial debugging. Tests use disposable home/config/cache directories and scrub inherited
-Git selectors, live opt-ins and credentials. They never declare a daemon identity.
-
-Delivery runs both populations together (`-m ""`) in the existing shared Dagger environment.
-Only explicit `--certify` loads the retained certification plugins and requires genuine
-Dagger admission. Combined branch coverage supplies diagnostic changed-code coverage and
-the **CRAP review threshold of 20**; these scores do not block delivery. Tests and verification-only support are excluded
-from production scoring. Coverage and CRAP are not part of the ordinary unit command.
-Direct targeted Vitest unit/component commands also remain available.
-
-The full evidence taxonomy, lifecycle metadata, fixture-authority rule, dependency-owned
-selection/retry behavior, stress cadence, and causal-failure contract are documented in
-[`docs/design/python-evidence-system.md`](docs/design/python-evidence-system.md).
-Leaf/focused acceptance is Dagger `mode=targeted`, while the single master-altitude
-full-repository acceptance is Dagger `mode=full`. Both require an explicit Git
-`diff-base`; the public Dagger function refuses an empty base instead of comparing
-the candidate to Git's empty tree. Run `dagger call quality --help` to see the
-current modes and argument contract. There is no direct-Docker or host fallback:
-an unavailable Dagger engine fails explicitly.
-The graph receives a separate Git ancestry bundle plus the exact staged source,
-never the live coordination root, credentials, or container socket. Its live
-trace and final pytest, coverage, Codex-probe, and result artifacts replace the
-corresponding files under the task enclosure's `reports/` directory.
-
-Inside the nonce-attested Dagger graph, the wrapper orders cheap deterministic rails before the
-expensive test rail: Ruff, formatting, file size, Pyright, Radon reports, then pytest. CRAP and
-changed-lines coverage score that run's branch-coverage artifact last. Content-addressed exact or
-test-only retry proof is an internal Dagger optimization; any source, configuration, selected-suite,
-runtime, environment, or artifact drift runs the ordinary selection in the same graph. There is no
-host retry path or fallback. Lifecycle acceptance disables proof reuse by default with
-`AR_QUALITY_NO_RETRY=1`.
-
-Every Dagger rail prints one provenance line naming its actual input, resolved config, and unit
-count. The deterministic pre-push hook separately forwards Git's ref updates and checks
-current-checkout bytes at index-known paths; it runs no tests and never claims acceptance for the
-pushed commit range.
-
-The installed runtime lives in `ar-coordination/` — by default `<workspace>/ar-coordination/`,
-inside the workspace (never your home directory) — not in the source checkout. The one Bootstrap
-call creates that scaffold when the configured root does not exist yet, and
-[Getting Started](docs/getting-started.md) shows every other install path as a workspace-first
-default you can accept or override:
-
-```text
-ar-coordination/
-  AGENTS.md
-  system/
-  memory-repos/
-  providers/                        # provider runtimes (images, runners, indexes)
-  benchmarks/                       # optional, installed with --include-benchmarks
-  tasks/
-  notes/
-  worktrees/
-  temp/
-```
-
-No `skills/` folder is created there: the tool server serves the packaged skill copy as MCP
-resources, so the coordination root carries no second skill tree to keep current.
+Agents Remember is developed with Agents Remember. The memory repository of this repository is
+public: https://github.com/Foxfire1st/ar-agents-remember. Its folder `onboarding/` holds the cards
+of this repository's files.
 
 ## Status
 
-The source package version remains `3.0.0rc8` while this Python 3.14 candidate awaits an official release. The published artifact with that version is the historical Python 3.13 release. Agents Remember is actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump; the internals beneath them may still evolve, so pin a version and read the notes for your target version in [GitHub Releases](https://github.com/Foxfire1st/agents-remember/releases) — the repository's canonical changelog — before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
+The version of the package in this repository is `3.0.0rc8`. It requires Python 3.14.
 
-The 3.0 arc: the working session itself is now observable and steerable — a system-managed agent lifecycle with durable approval gates and an event/projection layer, served as the mission-control browser cockpit directly from the MCP package (`agents-remember dashboard`; [#2](https://github.com/Foxfire1st/agents-remember/issues/2), [#43](https://github.com/Foxfire1st/agents-remember/issues/43)). The `rc` tag means the cockpit surface is still settling toward the final 3.0.0 contract; the architecture beneath it is the one described above.
+Agents Remember is under active development. The contracts listed under [Stability](#stability)
+change only with a major version. Everything else may change between versions, so read the notes
+of your target version in [GitHub Releases](https://github.com/Foxfire1st/agents-remember/releases)
+before an update. Each harness page says what was verified on an installed version of the harness
+and what is taken from the vendor's documentation.
 
 ## Stability
 
-Following semantic versioning from `1.0.0`, these public contracts will not change without a **major** version bump: **skill IDs** (e.g. the `l-01-agent-lifecycles` skill), **MCP tool names and their inputs/outputs**, the **`ar-coordination/` and `memory-repos/ar-<repo>/` layout**, and the **settings schema**. Internal modules, provider internals, and prompt wording are not part of this promise and may change in minor releases.
+Following semantic versioning from `1.0.0`, these public contracts will not change without a **major** version bump: **skill IDs** (e.g. the `l-01-agent-lifecycles` [skill](docs/concepts.md#skill)), **MCP tool names and their inputs/outputs**, the **layout of the coordination root and of the memory repositories under `memory-repos/ar-<id>/`**, and the **settings schema**. Internal modules, provider internals, and prompt wording are not part of this promise and may change in minor releases.
 
 ## Contributing
 
-Contributions should make the memory layer clearer, safer, and easier to apply consistently. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and keep the core rules intact: drift check before planning, approval before implementation, and onboarding updates only after approved changes.
-
-Agents Remember runs on itself, so the best way to contribute is with the memory layer active. Download or clone this project's own memory at [Foxfire1st/ar-agents-remember](https://github.com/Foxfire1st/ar-agents-remember) and use it as the Agents Remember memory for your checkout: you get the project's by-path onboarding at the moment you edit, and your onboarding updates land alongside your code changes — the same loop this repo asks of every contribution.
-
+[Contributing to Agents Remember](CONTRIBUTING.md) describes the development setup, the checks and
+the rules for a change. The [code of conduct](CODE_OF_CONDUCT.md) and the
+[security policy](SECURITY.md) apply. The license is [MIT](LICENSE).

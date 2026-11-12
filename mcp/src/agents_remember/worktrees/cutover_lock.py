@@ -42,7 +42,6 @@ from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 __all__ = [
     "CUTOVER_LOCK_CODE",
     "FIRST_CONVERSION_COMMAND",
-    "FIRST_CONVERSION_GUIDE",
     "LEGACY_FORMAT_CODE",
     "CutoverProbeError",
     "LegacyFormatCase",
@@ -62,8 +61,6 @@ _WORKTREE_PREFIX: Final = "worktree "
 FIRST_CONVERSION_COMMAND: Final = (
     "agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY"
 )
-#: The guide page that describes the first-conversion procedure.
-FIRST_CONVERSION_GUIDE: Final = "docs/guides/first-conversion.md"
 
 
 def first_conversion_procedure() -> str:
@@ -72,13 +69,9 @@ def first_conversion_procedure() -> str:
     Memory with no attributed baseline converts in place with the conversion command, then
     adopts the baseline; memory with an official line converts inside one new leaf's memory
     worktree as that leaf's first memory change, then closes out and lands like any leaf.
-    The guide carries the full procedure.
     """
 
-    return (
-        f"make its first conversion with `{FIRST_CONVERSION_COMMAND}`, as the "
-        f"{FIRST_CONVERSION_GUIDE} describes (MIK-R46 rule 6)"
-    )
+    return f"make its first conversion with `{FIRST_CONVERSION_COMMAND}` (MIK-R46 rule 6)"
 
 
 class CutoverProbeError(RuntimeError):
@@ -267,10 +260,9 @@ def legacy_format_refusal(
     open. The refusal names the operation, the memory root or line, that the memory has no
     ``knowledge/layout.json``, and how it converts: ``worktree_sync`` with ``merge-memory``
     when the line it syncs from is converted; otherwise the first conversion of MIK-R46 rule 6
-    (``agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY``, as
-    ``docs/guides/first-conversion.md`` describes). When Git can say, it names the line of
-    ``repository`` that already holds converted memory. It decides nothing; the caller
-    established the legacy input. It carries the code ``legacy-format``.
+    (``agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY``). When Git can
+    say, it names the line of ``repository`` that already holds converted memory. It decides
+    nothing; the caller established the legacy input. It carries the code ``legacy-format``.
 
     The probe case travels on the returned value (:class:`LegacyFormatRefusal`): the sentence
     and any next step are both built from that one value, and no code reads the sentence to

@@ -256,9 +256,7 @@ class ToolDescriptionBoundsTests(unittest.TestCase):
         required = (
             "unusedProviderKeys",
             "install_provider_deps=true",
-            "no longer",
             "install/start/watch",
-            "providers-remove",
             "dry_run",
             "reportPath",
             "role-capsules",

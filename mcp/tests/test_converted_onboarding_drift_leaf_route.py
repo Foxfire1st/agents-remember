@@ -76,7 +76,9 @@ _HARNESS_SKILL_ROOTS: tuple[str, ...] = ()
 #: staleness duty with its repair route, and that nothing is repaired here.
 _MEASUREMENT = ("reference anchors of onboarding cards", "validity of the tree")
 _CURRENTNESS = ("knowledge_read", "knowledge_integrity_check")
-_ADVISORY = ("never blocks by itself", "MIK-R30", "citation_fix", "curator")
+_ADVISORY = ("never blocks by itself", "citation_fix", "curator")
+#: The served description also names the staleness duty by an identifier. No public page repeats it.
+_DUTY_IDENTIFIER = "MIK-R30"
 
 
 @pytest.fixture
@@ -136,7 +138,7 @@ def test_descriptions_say_what_the_check_is() -> None:
     assert "docs/tool-details.md" in core, (
         "the surviving description must name where the longer explanation is (R112 rule 7)"
     )
-    for phrase in (*_MEASUREMENT, *_CURRENTNESS, *_ADVISORY):
+    for phrase in (*_MEASUREMENT, *_CURRENTNESS, *_ADVISORY, _DUTY_IDENTIFIER):
         assert phrase in core, phrase
 
     documentation = _normalized_text(REPO_ROOT / "docs/tool-details.md")

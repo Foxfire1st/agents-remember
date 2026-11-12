@@ -92,24 +92,22 @@ class Finding:
         return f"{self.path}:{self.line}: {self.kind}: {self.name}"
 
 
-# Exact documentation homes for commands outside the role instruction table.
-COMMAND_DOCUMENTATION = {
-    "knowledge-convert": (
-        "docs/guides/first-conversion.md",
-        "## Case A — Memory with no attributed baseline",
-    ),
-    "knowledge-census": ("docs/tool-details.md", "## `knowledge-census` (CLI)"),
-    "knowledge-census inventory": ("docs/tool-details.md", "## `knowledge-census` (CLI)"),
-    "knowledge-census report": ("docs/tool-details.md", "## `knowledge-census` (CLI)"),
-    "knowledge-copies": ("docs/tool-details.md", "## `knowledge-copies` (CLI)"),
-    "memory-backfill": ("docs/tool-details.md", "## `memory-backfill` (CLI)"),
-    "upgrade-user-settings": (
-        "docs/reference/settings-json.md",
-        "### The user's file is closed to writing",
-    ),
-    "providers-remove": ("docs/guides/providers.md", "## What remains"),
-    "removed-stores": ("docs/reference/settings-json.md", "### orchestration.gateDelegation"),
-}
+# Commands outside the role instruction table. The check demands no row and no mention for
+# them and refuses a row for one of them in that table. `knowledge-convert` is told on two
+# guide pages, for a memory repository that was cloned before `memory_init`.
+UNDOCUMENTED_COMMANDS = frozenset(
+    {
+        "knowledge-convert",
+        "knowledge-census",
+        "knowledge-census inventory",
+        "knowledge-census report",
+        "knowledge-copies",
+        "memory-backfill",
+        "upgrade-user-settings",
+        "providers-remove",
+        "removed-stores",
+    }
+)
 
 
 def public_commands() -> frozenset[str]:
@@ -127,21 +125,9 @@ def public_commands() -> frozenset[str]:
     return frozenset(commands)
 
 
-def command_reference_inputs(root: Path) -> tuple[str, dict[str, str]]:
-    """Read the instruction table and each exact command-documentation owner."""
-    reference = root / "skills/l-01-agent-lifecycles/reference/knowledge/commands.md"
-    documents = {path: (root / path).read_text() for path, _ in COMMAND_DOCUMENTATION.values()}
-    return reference.read_text(), documents
-
-
-def _command_documentation_section(text: str, heading: str) -> str:
-    match = re.search(rf"(?m)^{re.escape(heading)}\n", text)
-    if match is None:
-        return ""
-    level = len(heading) - len(heading.lstrip("#"))
-    following = re.search(rf"(?m)^#{{1,{level}}} ", text[match.end() :])
-    end = match.end() + following.start() if following else len(text)
-    return text[match.start() : end]
+def command_reference(root: Path) -> str:
+    """Read the role instruction table of commands."""
+    return (root / "skills/l-01-agent-lifecycles/reference/knowledge/commands.md").read_text()
 
 
 def _instruction_command_row(reference: str, command: str) -> str:
@@ -152,34 +138,23 @@ def _instruction_command_row(reference: str, command: str) -> str:
     return rows[0]
 
 
-def assert_public_command_reference(reference: str, documents: dict[str, str]) -> None:
-    """Require every public command at its declared documentation owner."""
+def assert_public_command_reference(reference: str) -> None:
+    """Require one row for every public command, and none for an undocumented command."""
     commands = public_commands()
-    assert COMMAND_DOCUMENTATION.keys() <= commands
+    assert commands >= UNDOCUMENTED_COMMANDS
     for command in sorted(commands):
-        if command not in COMMAND_DOCUMENTATION:
+        if command not in UNDOCUMENTED_COMMANDS:
             _instruction_command_row(reference, command)
             continue
         assert f"| `{command}` |" not in reference, command
-    surfaces = tuple(Surface(path, text) for path, text in documents.items())
-    findings = command_documentation_findings(surfaces, commands)
-    assert not findings, "\n".join(str(finding) for finding in findings)
 
 
-def misplace_command_documentation(
-    reference: str, documents: dict[str, str], command: str
-) -> tuple[str, dict[str, str]]:
-    """Move the real text away from its owner to expose permissive union checks."""
-    changed = dict(documents)
-    if command in COMMAND_DOCUMENTATION:
-        path, heading = COMMAND_DOCUMENTATION[command]
-        section = _command_documentation_section(changed[path], heading)
-        assert section, command
-        changed[path] = changed[path].replace(section, "", 1)
-        return reference + "\n" + section, changed
+def misplace_command_documentation(reference: str, command: str) -> str:
+    """Take the command's row away, or give a row to a command that has none."""
+    if command in UNDOCUMENTED_COMMANDS:
+        return f"{reference}\n| `{command}` | What it does | Who and when | Example |\n"
     row = _instruction_command_row(reference, command)
-    changed["docs/tool-details.md"] += "\n" + row
-    return reference.replace(row, "", 1), changed
+    return reference.replace(row, "", 1)
 
 
 def load_registry(root: Path) -> Registry:
@@ -529,31 +504,14 @@ def _surface_findings(root: Path, surface: Surface, registry: Registry) -> set[F
     return findings
 
 
-def command_documentation_findings(
-    surfaces: tuple[Surface, ...], commands: frozenset[str]
-) -> list[Finding]:
-    """Require registered migration commands at their exact declared document sections."""
-    findings = []
-    for command in sorted(commands & COMMAND_DOCUMENTATION.keys()):
-        path, heading = COMMAND_DOCUMENTATION[command]
-        text = "\n".join(surface.text for surface in surfaces if surface.path == path)
-        section = _command_documentation_section(text, heading)
-        if not re.search(
-            r"(?<![\w-])agents-remember " + re.escape(command) + r"(?![\w-])", section
-        ):
-            findings.append(Finding(path, 0, "undocumented-command-owner", command))
-    return findings
-
-
 def check_consistency(
     root: Path, surfaces: tuple[Surface, ...], registry: Registry
 ) -> list[Finding]:
     """Return every invalid reference and every missing bidirectional knowledge mention."""
     findings = set().union(*(_surface_findings(root, surface, registry) for surface in surfaces))
-    findings.update(command_documentation_findings(surfaces, registry.commands))
     for prefix in ("skills/", "docs/reference/"):
         text = "\n".join(surface.text for surface in surfaces if surface.path.startswith(prefix))
-        for name in registry.knowledge_names - COMMAND_DOCUMENTATION.keys():
+        for name in registry.knowledge_names - UNDOCUMENTED_COMMANDS:
             if not re.search(r"(?<![\w-])" + re.escape(name) + r"(?![\w-])", text):
                 findings.add(Finding(prefix, 0, "undocumented-knowledge-name", name))
     return sorted(findings)

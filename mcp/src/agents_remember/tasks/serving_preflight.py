@@ -22,7 +22,6 @@ from agents_remember.tasks.document import SubTaskRef, TaskDocument
 TOPOLOGY_SCHEMA_VERSION = "ar-execution-topology/v1"
 
 _TOPOLOGY_MODEL_FIELDS = ("executionNature", "executionGraph")
-_MIGRATION_GUIDE = "docs/reference/execution-topology-migration.md"
 
 
 class TopologyServingBuildError(AgentsRememberError):
@@ -37,8 +36,7 @@ def require_serving_topology_schema() -> None:
         raise TopologyServingBuildError(
             "task-execution-topology-serving-build-unsupported: the running build's "
             f"TaskDocument model lacks topology field(s) {missing!r}; upgrade the served "
-            "build before authoring an execution graph -- see "
-            f"{_MIGRATION_GUIDE} (served-build preflight)"
+            "build before authoring an execution graph"
         )
 
 

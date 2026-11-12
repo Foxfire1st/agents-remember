@@ -1,100 +1,157 @@
-# Use External Memory
+# Use The Memory Repository
 
-External memory is the supported topology: durable memory lives in its own repo per code repository. Repo-local internal memory under `<repo>/ar-memory/` was removed from the product and is refused rather than migrated.
+The memory of a code repository lies in a Git repository of its own, under the coordination
+root. This guide shows where that memory lies, how the product finds it, and how a closeout
+keeps the code and the memory in step.
 
-## When External Memory Helps
+## What The Separation Gives
 
-External memory is useful when:
-
-- code and memory should be reviewed or permissioned separately
-- several code repositories share one coordination root
-- long-running branches need matching code and memory versions
-- the [authorized worktree closeout](../../skills/l-01-agent-lifecycles/operations/closeout.md) should record code-memory ledger mappings
+- The code and the memory have separate Git histories. You review each one on its own and give
+  each one its own permissions.
+- One coordination root holds the memory repositories of several code repositories.
+- Each memory commit names the code commit that it describes.
 
 ## Layout
 
 ```text
-projects/
-  agents-remember/
-  ar-coordination/
-    AGENTS.md
-    skills/
-    memory-repos/
-      ar-my-app/
-        memory.md
-        onboarding/
-        docs/
-        system/
-  my-app/
+<workspace-root>/
+  my-repo/                  the code repository
+<coordination-root>/
+  memory-repos/
+    ar-my-repo/             the memory repository of my-repo
+      docs/
+      knowledge/
+      onboarding/
+      system/
 ```
 
-Each selected code repository gets one memory repo:
+Each code repository has exactly one memory repository. Its path follows from the id of the code
+repository in the settings file:
 
 ```text
-ar-coordination/memory-repos/ar-<repo-name>/
+<coordination-root>/memory-repos/ar-<repo-id>/
 ```
 
-## Initialize
+[Runtime Layout](../reference/runtime-layout.md) lists the other folders of the coordination
+root.
 
-Install the runtime first through the MCP server:
+## Set Up
+
+Install Agents Remember as [Getting started](../getting-started.md) describes. Its step 4, the
+[Bootstrap call](../concepts.md#bootstrap-call), starts the Bootstrap role agent, which then
+creates the memory repository in a chat with you; see
+[Set up a repository with Bootstrap](../getting-started.md#set-up-a-repository-with-bootstrap).
+
+To create it yourself, ask the agent of your harness to call `memory_init`:
 
 ```text
-runtime_install()
+memory_init(repo_id="<repo-id>", dry_run=true)
+memory_init(repo_id="<repo-id>", initial_branch="<branch>")
 ```
 
-Before ordinary task execution, initialize missing external memory for the selected repository through `memory_init` on `agents-remember-task`. This belongs to setup, including the Bootstrap role's permitted setup procedure; it is not a task-worktree repair.
+The call creates the folders, the files `settings.md`, `sources.md` and `tools.md` under `system/`
+and the layout marker `knowledge/layout.json`, and it makes the folder a Git repository.
+It writes no card and no knowledge record, and it overwrites no file that exists.
+When the memory path already holds a Git repository without the marker, the call writes no marker;
+[Onboard An Existing Repository](onboard-existing-repo.md#2-create-the-memory-repository) tells the
+two ways that work.
+[Onboard An Existing Repository](onboard-existing-repo.md) describes each argument and the answer.
 
-Preview with `dry_run: true`, naming the configured repository with `repo_id`. Use `initial_branch` for the chosen foundation branch, or let the initializer inherit the code checkout's current branch. If neither supplies a branch, resolve that decision rather than guessing one. Run the agreed setup without dry run, then read its returned memory root, Git result and knowledge-foundation state. Initialization scaffolds memory; it does not author onboarding cards or knowledge records. Existing files remain intact. Follow an actual refusal or returned next action rather than treating an existing unconverted root as initialized.
+For a memory repository that exists already, follow
+[Adopt Existing Memory](adopt-existing-memory.md).
 
 ## Configure
 
-External memory uses memory-repo storage:
+The memory settings file of a repository is `<memory-root>/system/settings.json`. It holds the
+path rules, the list of other repositories whose content may be read, and the landing workflow.
+The path rules decide which source files are eligible for a card.
 
-```json
-{
-  "version": 2,
-  "onboarding": {
-    "storage": {
-      "mode": "memory-repo"
-    },
-    "pathRules": {
-      "include": {
-        "paths": ["README.md", "docs/**", "src/**"],
-        "fileTypes": [".md", ".py", ".ts", ".tsx"]
-      },
-      "exclude": {
-        "paths": ["node_modules/**", "vendor/**", "dist/**", "build/**", ".env", ".env.*"],
-        "fileTypes": [".png", ".zip"]
-      }
-    }
-  },
-  "crossRepo": {
-    "allow": []
-  }
-}
-```
-
-In a one-repo memory repo, unscoped path rules are fine. In shared coordinator settings, scope rules by repository path when one settings file covers more than one repo.
+[Onboard An Existing Repository](onboard-existing-repo.md#3-choose-the-eligible-files) shows a
+first file. The [settings reference](../reference/settings-json.md#memory-settings-file-keys)
+describes every key, and [Path Rules](../reference/path-rules.md) describes the rules.
 
 ## Resolve
 
-Product context resolution maps the selected repository to its memory repo; use `context_packet` under the [mounted tool contract](../../skills/l-01-agent-lifecycles/reference/knowledge/commands.md):
+The tool `context_packet` resolves a code repository to its memory repository:
 
 ```text
-<ar-coordination>/memory-repos/ar-<repo>/
+context_packet(repo_id="<repo-id>")
 ```
 
-A repository that still carries the removed repo-local `<repo>/ar-memory/` root is refused with
-that exact path and the route to re-point it. Resolution is per target repository.
+The field `roots` of the answer names the two folders: `code` and `memory`. Outside a task they
+are the code repository and the memory repository. For a task they are the two worktrees of the
+task's enclosure, and `roots` also names the `enclosure` and the rendered `taskDocument`. `code`
+is an absolute path; each other entry is relative to `code` where that form is shorter, and
+absolute otherwise. [Product Context Resolution](../reference/resolver-c08.md) describes the whole
+answer.
+
+## How Code And Memory Stay Mapped
+
+Every memory commit that a closeout or a baseline adoption makes carries a trailer in its
+message:
+
+```text
+Code-Commit: <commit of the code repository>
+```
+
+The trailer is the record of which code a memory commit describes. The file
+`<memory-root>/memory.md` lists these pairs, newest first. The file is a cache: Agents Remember
+computes it from the trailers at each closeout and each baseline adoption, and keeps it out of
+every commit. Do not edit it.
 
 ## Closeout
 
-External-memory changes need code and memory to stay mapped. The [authorized closeout owner](../../skills/l-01-agent-lifecycles/operations/closeout.md) coordinates that sequence through the existing tools for both direct edits in the current checkout and worktree-backed tasks:
+A closeout commits the code and the memory of one task as a pair. It needs your approval of that
+commit; [Workflows](../workflows.md#closeout) says which role agent runs it and which authority
+can stand in for your approval. The apply records the approval in its required argument
+`intent_note`. The closeout has two calls; `<contract>` is the path of the task's
+[worktree contract](../concepts.md#worktree-contract):
 
-1. for Agents Remember source changes, run the leaf change-set-scoped quality contract (`--targeted`); the full wrapper runs once per master at the master integration gate
-2. commit code
-3. refresh onboarding metadata against the code commit
-4. commit memory content
-5. update `memory.md`
+```text
+worktree_closeout_preview(contract_path="<contract>")
+worktree_closeout_apply(contract_path="<contract>", intent_note="<the reason for this commit>")
+```
 
-Do not manually update the ledger unless you are deliberately repairing memory history.
+The preview judges the candidate and changes nothing. It answers `would-closeout` or a refusal:
+`knowledge-gate-refused` (step 1 below), `closeout-gate-blocked`, `blocked`, or
+`memory-opt-out-refused` when the worktree contract names a memory mode other than `external`.
+The apply answers `closed`, `blocked` or `closeout-gate-blocked`, and it takes these steps in this
+order:
+
+1. **The [knowledge gate](../concepts.md#knowledge-gate) judges the pair.** The gate computes the
+   [worklist](../concepts.md#worklist-and-knowledge-gate) and validates the exact code tree and
+   the exact memory tree of the task. An open worklist item or a validator violation refuses the
+   closeout as `knowledge-gate-refused`, before any commit.
+2. **The pre-commit hook of the code repository runs.** The closeout runs the hook on exactly the
+   tree it is about to commit. The closeout is refused when the hook fails, when the hook changes
+   a file, or when the hook runs longer than the setting
+   `orchestration.landing.commitCheckTimeoutSeconds` allows (default 900 seconds). The closeout
+   reads the setting from the user settings file, from `system/settings.json` of the checkout in
+   which the hook runs and, for a worktree, from that of its main checkout; a later file wins.
+3. **The code commit.** The closeout commits the judged code tree on the branch of the task.
+4. **The memory update.** The closeout refreshes the [route indexes](../concepts.md#route-index)
+   and the fingerprints of the [entity catalog](../concepts.md#entity-catalog): for each entity a
+   hash over the Git blobs of the files that define it, at the new code commit. It closes the
+   history file of the task. The gate then judges the resulting memory tree against the new code
+   commit.
+5. **The memory commit.** The closeout runs the pre-commit hook of the memory repository on that
+   tree and commits it with the `Code-Commit:` trailer of step 3.
+6. **The cache.** The closeout computes `<memory-root>/memory.md` again. The file is not
+   committed.
+
+A commit that passed the hook check carries the trailer
+`Commit-Check-Pass: tree=<tree> hook=<hook>`. For a repository without a pre-commit hook, `hook`
+is `none`.
+
+The closeout starts no test suite, no code-quality run, no certification and no review. The
+Worker and the Reviewer run the checks of a task before the closeout.
+
+When step 4 or step 5 refuses, the code commit exists and the memory commit does not. Repair what
+the refusal names and run the closeout again: the second run completes the pair.
+
+A task with a direct-execution grant has no enclosure. The tool `direct_landing` commits its work
+with the same gate and the same hook check; see [Workflows](../workflows.md#direct-execution).
+
+[Worktrees And Closeout](../reference/worktrees-c09.md#closeout-and-recovery) is the reference of
+the closeout, and the [knowledge system](../reference/knowledge-system.md#worklist-validator-and-gate)
+describes the gate.

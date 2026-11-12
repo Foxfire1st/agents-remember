@@ -109,8 +109,7 @@ def _register_knowledge_commands(sub: argparse._SubParsersAction) -> None:
         ),
         description=(
             "Convert a memory tree and its knowledge database into the text knowledge format. "
-            "This command is the first step of the first-conversion procedure (MIK-R46 rule 6), "
-            "described by docs/guides/first-conversion.md and the install guide: "
+            "This command is the first step of the first-conversion procedure (MIK-R46 rule 6): "
             "memory with no attributed baseline converts in place, then adopts the baseline; "
             "memory with an official line converts inside one new leaf's memory worktree as that "
             "leaf's first memory change. The converter stays: the command, its read-only reader "

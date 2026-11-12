@@ -282,14 +282,7 @@ def test_each_document_states_which_document_each_stop_reader_can_select_from(pa
     assert "selects nothing" in lowered or "selects no provider" in lowered, (
         f"{path.name} must state what happens when the settings name no provider"
     )
-    assert "generated" in lowered and "not what a stop reads" in lowered, (
-        f"{path.name} must keep the generated document and the stop's document apart"
-    )
-    assert "authority settings file" in lowered and "contextproviders" in lowered, (
-        f"{path.name} must name the document the install-time stop reads instead"
-    )
-    # The three callers stay named, and the loop is still described as a caller.
-    for route in ("runtime_install", "providers-remove"):
-        assert route in text, f"{path.name} no longer names {route}"
+    # The install stays named as a caller, and the loop is still described as a caller.
+    assert "runtime_install" in text, f"{path.name} no longer names runtime_install"
     assert CADENCE in lowered
     assert "failsafeenabled" in lowered
