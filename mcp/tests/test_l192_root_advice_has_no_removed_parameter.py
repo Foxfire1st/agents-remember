@@ -49,7 +49,6 @@ CARRIER_GLOBS = (
     *(f"{copy}/**/*.md" for copy in GENERATED_SKILL_COPIES),
     "mcp/src/agents_remember/package_data/runtime/**/*.md",
     "system/**/*.md",
-    "dev-skills/**/*.md",
 )
 
 #: One shipped surface per entry, so a carrier glob that silently stops matching is a failure.

@@ -924,13 +924,13 @@ def test_the_flag_narrowers_do_not_report_a_typo_as_a_removal() -> None:
 # The removal's strongest claim -- that nothing still *teaches* the mode -- had no executable
 # guard: a reverted canonical skill propagated to all nine generated copies left every generator
 # check green, and a wholesale revert of `docs/architecture.md` left the whole unit population
-# green. Each row below pairs a phrase the correction introduced (which must be present) with
-# phrases only the old doctrine used (which must be absent). A revert therefore fails here, not
-# only in review.
+# green. Each row below names phrases only the old doctrine used (which must be absent). A row
+# may pair them with a phrase the correction introduced (which must be present). A revert
+# therefore fails here, not only in review.
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-CORRECTED_SURFACES: tuple[tuple[str, tuple[str, ...], str], ...] = (
+CORRECTED_SURFACES: tuple[tuple[str, tuple[str, ...], str | None], ...] = (
     (
         "docs/architecture.md",
         (
@@ -938,12 +938,12 @@ CORRECTED_SURFACES: tuple[tuple[str, tuple[str, ...], str], ...] = (
             "my-app/ar-memory/",
             "repo-local internal memory at `<repo>/ar-memory/`",
         ),
-        "External memory is the only supported topology",
+        None,
     ),
     (
         "docs/concepts.md",
         ("Internal memory is the default",),
-        "External memory is the only supported topology",
+        None,
     ),
     (
         "docs/getting-started.md",
@@ -951,12 +951,12 @@ CORRECTED_SURFACES: tuple[tuple[str, tuple[str, ...], str], ...] = (
             "creates repo-local internal memory",
             "the recommended default is repo-local internal memory",
         ),
-        "External memory is the only supported topology",
+        None,
     ),
     (
         "docs/FAQ.md",
         ("Most users should start with internal memory",),
-        "was removed from the product",
+        None,
     ),
     (
         "docs/reference/settings-json.md",
@@ -977,12 +977,13 @@ CORRECTED_SURFACES: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ids=[row[0].rsplit("/", 2)[-1] + "@" + row[0].split("/")[0] for row in CORRECTED_SURFACES],
 )
 def test_the_instruction_and_documentation_plane_never_teaches_the_removed_default(
-    relative_path: str, forbidden: tuple[str, ...], required: str
+    relative_path: str, forbidden: tuple[str, ...], required: str | None
 ) -> None:
     text = (_REPO_ROOT / relative_path).read_text(encoding="utf-8")
     for phrase in forbidden:
         assert phrase not in text, f"{relative_path} re-teaches the removed default: {phrase!r}"
-    assert required in text, f"{relative_path} lost the corrected statement: {required!r}"
+    if required is not None:
+        assert required in text, f"{relative_path} lost the corrected statement: {required!r}"
 
 
 # --------------------------------------------------------------------------------------

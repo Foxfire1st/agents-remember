@@ -188,12 +188,11 @@ def test_shared_writing_profile_teaches_preservation_and_detectable_meaning_drif
         assert clause in " ".join(section.split()), clause
 
 
-def test_authored_handoff_conversion_and_walkthrough_reach_one_profile() -> None:
+def test_authored_handoff_and_walkthrough_reach_one_profile() -> None:
     """Follow actual authoring links; a profile isolated beside the roles is not delivered."""
     profile = (ROOT / "reference/writing/technical-english-profile.md").resolve()
     sources = (
         ROOT / "templates/curator-handoff-list.md",
-        ROOT.parents[1] / "docs/guides/first-conversion.md",
         ROOT / "reference/writing/visual-explainers.md",
     )
     for source in sources:

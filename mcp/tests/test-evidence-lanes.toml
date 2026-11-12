@@ -417,6 +417,7 @@ unit-regression = [
   "mcp/tests/test_provider_limits.py",
   "mcp/tests/test_provider_setup_retired.py",
   "mcp/tests/test_providers_remove.py",
+  "mcp/tests/test_public_docs_check.py",
   "mcp/tests/test_publication_merge_admission.py",
   "mcp/tests/test_publication_merge_shape.py",
   "mcp/tests/test_quality_diagnostics.py",

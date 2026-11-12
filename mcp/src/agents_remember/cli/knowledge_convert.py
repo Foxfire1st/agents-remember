@@ -15,8 +15,7 @@ and reports without writing. A tree that already holds ``knowledge/layout.json``
 The command commits nothing: committing the conversion is the first-conversion procedure's
 business (MIK-R46 rule 6) -- in place, then adopt the baseline, for memory with no attributed
 baseline; inside one new leaf's memory worktree as that leaf's first memory change, then close
-out and land like any leaf, for memory with an official line. The install guide in
-skill and ``docs/guides/first-conversion.md`` describe that procedure.
+out and land like any leaf, for memory with an official line.
 
 The conversion command, its read-only reader of the legacy database
 (``memory/conversion/legacy_db.py``) and conversion-format version 1 are permanent parts of

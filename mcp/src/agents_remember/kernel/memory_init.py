@@ -322,8 +322,7 @@ def initialize_memory(
         # the new one); the root converts first (MIK-R46 rule 6).
         result["nextStep"] = (
             "this memory root is unconverted (no knowledge/layout.json): convert first with "
-            "`agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY`, as the "
-            "docs/guides/first-conversion.md and the install guide describe "
+            "`agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY` "
             "(MIK-R46 rule 6)"
         )
     return result

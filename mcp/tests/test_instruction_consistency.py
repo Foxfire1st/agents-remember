@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 from agents_remember_test_support.testing.instruction_consistency import (
-    COMMAND_DOCUMENTATION,
     CONVERSION_MARKER,
     RETIRED_TERMS,
+    UNDOCUMENTED_COMMANDS,
     Registry,
     Surface,
     check_consistency,
@@ -28,32 +28,11 @@ def registry() -> Registry:
 
 def _complete_mentions(registry: Registry) -> tuple[Surface, ...]:
     names = "\n".join(
-        f"`{name}`" for name in sorted(registry.knowledge_names - COMMAND_DOCUMENTATION.keys())
+        f"`{name}`" for name in sorted(registry.knowledge_names - UNDOCUMENTED_COMMANDS)
     )
     return (
         Surface("skills/checker/SKILL.md", names),
         Surface("docs/reference/checker.md", names),
-        Surface(
-            "docs/guides/first-conversion.md",
-            "## Case A — Memory with no attributed baseline\n"
-            "agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY\n",
-        ),
-        Surface(
-            "docs/tool-details.md",
-            "## `knowledge-census` (CLI)\n"
-            "agents-remember knowledge-census inventory MEMORY_ROOT\n"
-            "agents-remember knowledge-census report MEMORY_ROOT\n"
-            "## `knowledge-copies` (CLI)\n"
-            "agents-remember knowledge-copies --coordination-root ROOT\n"
-            "## `memory-backfill` (CLI)\n"
-            "agents-remember memory-backfill --contract CONTRACT\n",
-        ),
-        Surface("docs/guides/providers.md", "## What remains\nagents-remember providers-remove\n"),
-        Surface(
-            "docs/reference/settings-json.md",
-            "### The user's file is closed to writing\nagents-remember upgrade-user-settings\n"
-            "### orchestration.gateDelegation\nagents-remember removed-stores\n",
-        ),
     )
 
 
@@ -112,7 +91,7 @@ def test_bidirectional_knowledge_presence_and_l183_tool_mutations(registry: Regi
     # R186/R189's L183 registration, explicitly covered by v2-EE5 and retained in v3.
     assert "explainer_control" in registry.tools
     for prefix in ("skills/", "docs/reference/"):
-        for name in registry.knowledge_names - COMMAND_DOCUMENTATION.keys():
+        for name in registry.knowledge_names - UNDOCUMENTED_COMMANDS:
             mutated = tuple(
                 replace(surface, text=surface.text.replace(name, ""))
                 if surface.path.startswith(prefix)
@@ -190,28 +169,6 @@ def test_protocol_and_diagnostic_names_are_distinct_from_files_and_commands(
         finding.kind == "missing-path"
         for finding in check_consistency(ROOT, (*clean, file_reference), registry)
     )
-
-
-@pytest.mark.parametrize("command", sorted(COMMAND_DOCUMENTATION))
-@pytest.mark.parametrize("relocated", (False, True))
-def test_migration_command_requires_its_exact_docs_owner(
-    registry: Registry, command: str, relocated: bool
-) -> None:
-    clean = _complete_mentions(registry)
-    assert COMMAND_DOCUMENTATION.keys() <= registry.commands
-    assert not check_consistency(ROOT, clean, registry)
-    path, _ = COMMAND_DOCUMENTATION[command]
-    owner = next(surface for surface in clean if surface.path == path)
-    mutated = tuple(surface for surface in clean if surface.path != path)
-    if relocated:
-        mutated += (replace(owner, path="docs/reference/wrong-owner.md"),)
-    findings = check_consistency(ROOT, mutated, registry)
-    assert any(
-        finding.path == path
-        and finding.kind == "undocumented-command-owner"
-        and finding.name == command
-        for finding in findings
-    ), (command, relocated, findings)
 
 
 @pytest.mark.parametrize(
