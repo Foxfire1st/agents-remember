@@ -1,6 +1,6 @@
 """Served-build preflight for execution-topology schema writes.
 
-The 3.0.0rc7 failure class (ar-coordination l9-issues.md:9-19): the cutover data
+The 3.0.0 release-candidate failure class (ar-coordination l9-issues.md:9-19): the cutover data
 write emitted ``executionNature``/``executionGraph`` into the persistent task tree
 while the served build could not parse the new fields (its ``TaskDocument`` model
 predates them and uses ``extra="forbid"``), which forced a snapshot restore and a
