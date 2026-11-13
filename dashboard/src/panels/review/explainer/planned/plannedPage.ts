@@ -15,6 +15,10 @@
 /** The payload's one top line, as the product writes it. */
 export const PLANNED_TOP_LINE = 'planned · no changes';
 
+/** The truth line above the top line: a planning task has nothing built yet (BUG-R02 rule 1). */
+export const PLANNED_TRUTH_LINE =
+  'planned · nothing built yet — this task is in planning; the explainer reads its requirement and planned effects.';
+
 /** Every diagram or claim of planned behaviour carries this notice (MIK-R189 rule 6). */
 export const INTENDED_NOTICE = 'Intended, not a fact about the code';
 

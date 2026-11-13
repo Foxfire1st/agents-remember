@@ -60,8 +60,9 @@ A task that has landed and has no worktree opens on the comparison it delivered.
 comparisons of that task stay in the list. When the comparison on screen is another one, the page
 says so and offers "Open the delivered comparison #n".
 
-A task that has not started has no worktree and no comparison. Its review page reads "the review
-unavailable", where "the review" names what the page could not open: the review of the task. See
+A task that has not started has no worktree and no comparison. Its review page shows its planned
+view: the task's intended knowledge effects, its requirement packets, its Prepared context and its
+reference files, under the top line "planned · no changes". See
 [The intent review before work starts](#the-intent-review-before-work-starts).
 
 ## The layout
@@ -789,13 +790,23 @@ Until the field says `go`, Agents Remember refuses every start of the task with
 `intent-review-open`. The refusal covers the start of the task's worktrees and the start of a role
 agent on the task. A master has no intent review.
 
-A task that has not started has no worktree, so its review page has no comparison to show. The
-page reads "the review unavailable · candidate_unresolved" and gives the reason: "no readable leaf
-enclosure contract records this leaf under the named master". What the task is meant to do stands
-in its task document and in its [requirement packets](../concepts.md#requirement-packet), the
-approved requirement texts that the task is built against. The page of the task in the tab
-"Operations" shows the task document. The start that follows the `go` creates the worktrees, and
-the review page then shows the change set of the task.
+A task that has not started has no worktree, so its review page has no comparison to show. The page
+then shows its planned view. Its top line reads "planned · no changes", the header's status chip reads
+"planned" and the left change-set panel says "planned · nothing built yet": nothing is wrong, the task
+is in planning. The reading column lists what the task is meant to produce: its knowledge effects as
+"planned · <effect>" rows under "Planned effects", its [requirement packets](../concepts.md#requirement-packet)
+under "Packets", its Prepared context and the files in its reference folder. Each packet is shown as
+rendered Markdown — its headings, tables, code and lists — not as raw text. Nothing there is a fact
+about the code; the line "Intended, not a fact about the code" says so. What the task is meant to do
+also stands in its task document and in its requirement packets, the approved requirement texts that
+the task is built against. The page of the task in the tab "Operations" shows the task document.
+
+The planned view is where you plan before the work starts. On the tab "Explanation" you can start
+the explainer and ask it, as on the review page of a started task: "✦ Explain the change set" opens
+the first-request form. On a task in planning the form's empty request asks for the task's requirement
+and its planned effects, one sentence, and the explainer presents the plan the page lists. When you
+agree a revision with your `go`, the Architect records that revision together with the `go`, and it is
+pinned in the revision list. The page and its revisions change nothing of the task.
 
 ## Presentation questions and system changes
 

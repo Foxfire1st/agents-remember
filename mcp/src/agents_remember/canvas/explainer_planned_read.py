@@ -26,10 +26,41 @@ from agents_remember.memory.knowledge_index.cache import (
 from agents_remember.memory.knowledge_index.query import KnowledgeIndex
 from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
 
-__all__ = ["planned_payload", "subject_statements"]
+__all__ = ["PLANNED_FOLDER", "planned_documents", "planned_payload", "subject_statements"]
 
 #: The task-relative folder a leaf's reference files live in (MIK-R189 rule 9).
 REFERENCE_FOLDER = Path("notes") / "reference"
+#: The folder a planned binding's own documents are written to, inside the explainer's folder.
+PLANNED_FOLDER = "planned"
+
+
+def planned_documents(document: Mapping[str, Any], task_root: Path) -> dict[str, str]:
+    """The requirement packets and the declared planned effects as text, for the explainer.
+
+    A planned leaf has no changed tree to read, so the plan itself must be in the explainer's
+    folder: every packet the task document names, and the effects it declares (or the one line
+    that it declares none). The page already shows these; this is their content for the seat.
+    """
+
+    files: dict[str, str] = {}
+    for path, text in _packet_texts(document, task_root).items():
+        files[f"requirement-{Path(path).name}"] = text
+    entries = [
+        entry
+        for entry in document.get("expectedKnowledgeEffects") or ()
+        if isinstance(entry, Mapping)
+    ]
+    lines = ["# Planned effects", ""]
+    if entries:
+        lines += [
+            f"- `{entry.get('subject', '')}` — `{entry.get('effect', '')}`"
+            f" ({entry.get('requirementRef', '')})"
+            for entry in entries
+        ]
+    else:
+        lines.append("This leaf declares no expected knowledge effect.")
+    files["effects.md"] = "\n".join(lines) + "\n"
+    return files
 
 
 def planned_payload(

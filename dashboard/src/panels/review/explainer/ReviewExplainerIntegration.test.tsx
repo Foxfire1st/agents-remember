@@ -24,6 +24,7 @@ import {
 import { publishLeafJudgments } from '../reading/useChangeSet';
 import { treeOrderStore } from '../triageOrderPreference';
 import { treeViewStore } from '../triageViewPreference';
+import { PLANNED_LINE } from '../../../explainer/model';
 import { PLANNED_SORTS, PLANNED_TOP_LINE } from './planned/plannedPage';
 
 const EXPLAINER_BASE = `/api/explainer/${PLACE.repo}/${PLACE.master}/${PLACE.leaf}`;
@@ -70,6 +71,94 @@ function staleAnswerOf(state: Record<string, unknown>): Response {
 
 const explainerReads = (urls: readonly URL[], route: string) =>
   urls.filter((url) => url.pathname === `${EXPLAINER_BASE}/${route}`).length;
+
+// The planned page the route answers for a leaf in planning: its effects, packets, prepared context
+// and reference files, as `/planned` builds them from the task document and its packets.
+function plannedAnswer() {
+  return {
+    state: 'ok',
+    planned: {
+      mode: 'planned',
+      topLine: PLANNED_TOP_LINE,
+      intendedNotice: 'Intended, not a fact about the code',
+      authority: 'intended',
+      binding: {
+        owner: 'planned',
+        number: 0,
+        reference: `review-comparison:${PLACE.master}/${PLACE.leaf}/planned`,
+        label: 'planned',
+      },
+      tips: {
+        code: 'a'.repeat(40),
+        codeTree: 'b'.repeat(40),
+        memory: 'c'.repeat(40),
+        memoryTree: 'd'.repeat(40),
+        recordedAt: 'planned-master-tip',
+      },
+      rows: [
+        {
+          subject: 'invariant:INV-1ZKP4R',
+          kind: 'existing',
+          effect: 'strengthen',
+          title: 'planned · strengthen',
+          statement: 'Current statement at memory tip.',
+          label: null,
+          statementState: 'statement',
+          requirement: 'MIK-R189@v2',
+          part: 'effects',
+        },
+      ],
+      packets: [
+        {
+          ref: 'MIK-R189@v2',
+          path: 'requirements/MIK-R189-v2.md',
+          title: 'MIK-R189 @ v2 — An intent review before the work starts',
+          body: 'Requirement packet body content.',
+          state: 'rendered',
+          part: 'packets',
+          scope: [
+            {
+              path: 'dashboard/src/panels/review/ReviewSurface.tsx',
+              state: 'resolved',
+              resolvedPath: 'dashboard/src/panels/review/ReviewSurface.tsx',
+            },
+          ],
+        },
+      ],
+      preparedContext: {
+        heading: 'Prepared context',
+        state: 'present',
+        body: 'Prepared context details.',
+        part: 'prepared-context',
+      },
+      referenceFiles: [
+        {
+          path: `notes/reference/${PLACE.leaf}/design.md`,
+          name: 'design.md',
+          part: 'reference-files',
+        },
+      ],
+      sorts: PLANNED_SORTS,
+      parts: [],
+      actions: [],
+      modelTurns: 0,
+      agentStarts: 0,
+      reads: { taskDocuments: 1, knowledgeStatements: 1, packets: 1, scopePaths: 1 },
+    },
+  };
+}
+
+// The leaf's own answer when its enclosure cannot be resolved: no worktree exists yet, so there is
+// no candidate for the ordinary review read.
+const CANDIDATE_REFUSAL = {
+  state: 'refused',
+  refusal: {
+    code: 'candidate_unresolved',
+    detail: 'no readable leaf enclosure contract records this leaf under the named master',
+    offending_input: 'candidate',
+    next_action: 'Start the task, then open the review.',
+  },
+};
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -356,80 +445,10 @@ describe('mounted ReviewSurface with ExplanationSwitch, ExplanationView, and Pla
       vi.fn(async (address: string | URL, init?: RequestInit) => {
         const url = new URL(String(address), 'http://localhost');
         if (url.pathname === `${EXPLAINER_BASE}/planned`) {
-          return new Response(
-            JSON.stringify({
-              state: 'ok',
-              planned: {
-                mode: 'planned',
-                topLine: PLANNED_TOP_LINE,
-                intendedNotice: 'Intended, not a fact about the code',
-                authority: 'intended',
-                binding: {
-                  owner: 'planned',
-                  number: 0,
-                  reference: `review-comparison:${PLACE.master}/${PLACE.leaf}/planned`,
-                  label: 'planned',
-                },
-                tips: {
-                  code: 'a'.repeat(40),
-                  codeTree: 'b'.repeat(40),
-                  memory: 'c'.repeat(40),
-                  memoryTree: 'd'.repeat(40),
-                  recordedAt: 'planned-master-tip',
-                },
-                rows: [
-                  {
-                    subject: 'invariant:INV-1ZKP4R',
-                    kind: 'existing',
-                    effect: 'strengthen',
-                    title: 'planned · strengthen',
-                    statement: 'Current statement at memory tip.',
-                    label: null,
-                    statementState: 'statement',
-                    requirement: 'MIK-R189@v2',
-                    part: 'effects',
-                  },
-                ],
-                packets: [
-                  {
-                    ref: 'MIK-R189@v2',
-                    path: 'requirements/MIK-R189-v2.md',
-                    title: 'MIK-R189 @ v2 — An intent review before the work starts',
-                    body: 'Requirement packet body content.',
-                    state: 'rendered',
-                    part: 'packets',
-                    scope: [
-                      {
-                        path: 'dashboard/src/panels/review/ReviewSurface.tsx',
-                        state: 'resolved',
-                        resolvedPath: 'dashboard/src/panels/review/ReviewSurface.tsx',
-                      },
-                    ],
-                  },
-                ],
-                preparedContext: {
-                  heading: 'Prepared context',
-                  state: 'present',
-                  body: 'Prepared context details.',
-                  part: 'prepared-context',
-                },
-                referenceFiles: [
-                  {
-                    path: `notes/reference/${PLACE.leaf}/design.md`,
-                    name: 'design.md',
-                    part: 'reference-files',
-                  },
-                ],
-                sorts: PLANNED_SORTS,
-                parts: [],
-                actions: [],
-                modelTurns: 0,
-                agentStarts: 0,
-                reads: { taskDocuments: 1, knowledgeStatements: 1, packets: 1, scopePaths: 1 },
-              },
-            }),
-            { status: 200, headers: { 'content-type': 'application/json' } },
-          );
+          return new Response(JSON.stringify(plannedAnswer()), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
         }
         return baseFetch(address, init);
       }),
@@ -444,6 +463,112 @@ describe('mounted ReviewSurface with ExplanationSwitch, ExplanationView, and Pla
       'Requirement packet body content.',
     );
     expect(within(planned).getByTestId('planned-scope-address')).toBeTruthy();
+  });
+
+  it('shows the planned view for a planning leaf whose review read is refused (no worktree)', async () => {
+    // A leaf in planning has no worktree, so the ordinary review read answers `candidate_unresolved`.
+    // The planned view is the page a task in planning has; waiting for the review read to succeed
+    // left this page showing the refusal alone.
+    stubIntersection();
+    servePage();
+    seedTaskEntries([
+      taskEntry({
+        id: PLACE.leaf,
+        stage: 'planned',
+        reference: {
+          repository: PLACE.repo,
+          path: `${PLACE.master}/201_the-explainer-builds-on-real-data-previewed-live.json`,
+        },
+      }),
+    ]);
+    const baseFetch = globalThis.fetch;
+    const intentReads: string[] = [];
+    const plannedState = {
+      state: 'ok',
+      binding: {
+        comparison_owner: 'planned',
+        comparison_number: 0,
+        comparison_reference: `review-comparison:${PLACE.master}/${PLACE.leaf}/planned`,
+      },
+      seat: { state: 'missing' },
+      retired: false,
+      retiredAt: null,
+      explanation: null,
+      stale: { total: 0, parts: [] },
+      parts: [],
+      claims: [],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (address: string | URL, init?: RequestInit) => {
+        const url = new URL(String(address), 'http://localhost');
+        if (url.pathname === `${EXPLAINER_BASE}/planned`) {
+          return new Response(JSON.stringify(plannedAnswer()), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.pathname === `${EXPLAINER_BASE}/state`) {
+          return new Response(JSON.stringify(plannedState), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.pathname === `${EXPLAINER_BASE}/stale`) return staleAnswerOf(plannedState);
+        if (url.pathname === `${EXPLAINER_BASE}/revisions`) {
+          return new Response(JSON.stringify({ state: 'ok', pinned: null, revisions: [] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.pathname === '/api/review/intent') intentReads.push(url.pathname);
+        if (url.pathname === '/api/review/intent') {
+          return new Response(JSON.stringify(CANDIDATE_REFUSAL), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return baseFetch(address, init);
+      }),
+    );
+
+    renderPage();
+    const planned = await screen.findByTestId('planned-review');
+    expect(within(planned).getByTestId('planned-top-line').textContent).toBe(PLANNED_TOP_LINE);
+    expect(within(planned).getByTestId('planned-row-title').textContent).toBe(
+      'planned · strengthen',
+    );
+    expect(within(planned).getByTestId('planned-packet-body').textContent).toContain(
+      'Requirement packet body content.',
+    );
+    expect(intentReads.length).toBeGreaterThan(0);
+    // The refusal is not shown as the page: the planned view replaces it.
+    expect(screen.queryByTestId('review-page-refusal')).toBeNull();
+    // The chip, the left panel and the centre say what is true for a task in planning (rule 1):
+    // not "unavailable", not the leaf-enclosure refusal, and not the review-unavailable block.
+    expect(screen.getByTestId('review-status-label').textContent).toBe('planned');
+    expect(screen.getByTestId('review-change-status').textContent).toContain(
+      'planned · nothing built yet',
+    );
+    const note = within(planned).getByTestId('review-planned-note');
+    expect(note.textContent).toContain('planned · nothing built yet');
+    // The new line stands directly above the old "planned · no changes".
+    expect(note.nextElementSibling?.getAttribute('data-testid')).toBe('planned-top-line');
+    expect(screen.queryByTestId('review-refusal')).toBeNull();
+    // The Explanation tab's centre says the same; the review's refusal is not its opening line.
+    fireEvent.click(screen.getByTestId('switch-explanation'));
+    expect(screen.getByTestId('review-planned-note')).toBeTruthy();
+    expect(screen.queryByTestId('review-refusal')).toBeNull();
+    // The form's heading and its empty request speak of the plan, not of a change set (BUG-R02).
+    const explain = await within(screen.getByTestId('explanation-view')).findByTestId(
+      'explain-change-set',
+    );
+    fireEvent.click(explain);
+    const form = await screen.findByTestId('explanation-request-form');
+    expect(within(form).getByTestId('explanation-request-heading').textContent?.trim()).toBe(
+      'Ask the explainer to read this plan',
+    );
+    expect(within(form).getByTestId('explanation-request-line').textContent).toBe(PLANNED_LINE);
   });
 
   it('asks no leaf for the planned view unless the task list says it is planning', async () => {
