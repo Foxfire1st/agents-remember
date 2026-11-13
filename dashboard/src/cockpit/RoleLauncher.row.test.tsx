@@ -198,7 +198,7 @@ describe('the row holds controls only', () => {
     fireEvent.change(view.getByLabelText('Role'), { target: { value: 'orchestrator' } });
     const sprint = view.getByLabelText('AR sprint') as HTMLSelectElement;
     expect(sprint.getAttribute('title')).toBe('Sprint');
-    expect(sprint.options[0]?.textContent).toBe('Select sprint…');
+    expect(sprint.options[0]?.textContent).toBe('No sprint');
   });
 });
 

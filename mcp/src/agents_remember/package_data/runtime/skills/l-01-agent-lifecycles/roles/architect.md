@@ -149,7 +149,7 @@ After the handover, release execution coordination to the Orchestrator or Manage
 
 When the developer answers or gives a ruling, send that actual answer or ruling to the requesting Manager or Orchestrator with `role_message` on `agents-remember-task`, addressed by its recorded agent ID. A reply to a coordinating agent's wait that repeats its question is not the developer's decision; relay the decision only once you have obtained the developer's actual answer or ruling.
 
-When an Investigator is needed, start it with `role_start` on `agents-remember-task` without a task reference, on a sprint, or on a sprint and master. Send the scoped concern as your first `role_message` on `agents-remember-task` to the returned agent ID. A Manager or Orchestrator may also start an Investigator within its own scope.
+When an Investigator is needed, start it with `role_start` on `agents-remember-task` without a task reference, on a sprint, a standalone master, or both. Send the scoped concern as your first `role_message` on `agents-remember-task` to the returned agent ID. A Manager or Orchestrator may also start an Investigator within its own scope.
 
 Research may go to an Investigator whose role settings suit it; weigh what each provider's usage costs. Private helpers remain available for internal work of any size; they are not restricted to short mechanical help.
 

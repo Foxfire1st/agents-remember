@@ -219,10 +219,22 @@ function childOptions(entries: TaskEntry[], parent: TaskEntry | undefined): Role
   );
 }
 
-export function masterOptionsForSprint(
+/** A master the served tree places outside every sprint: one that no sprint commands. */
+export function isStandaloneMaster(entry: TaskEntry): boolean {
+  return entry.summary?.form === 'master' && entry.parent === undefined;
+}
+
+/** The masters the served tree places outside every sprint: a master no sprint commands. */
+export function standaloneMasterOptions(entries: TaskEntry[]): RoleTaskOption[] {
+  return taskOptionsForEntries(entries.filter(isStandaloneMaster));
+}
+
+/** The masters a chosen sprint commands, or the standing-alone masters when none is chosen. */
+export function masterOptionsFor(
   entries: TaskEntry[],
   sprint: TaskEntry | undefined,
 ): RoleTaskOption[] {
+  if (!sprint) return standaloneMasterOptions(entries);
   return childOptions(entries, sprint).filter((option) => option.entry.summary?.form === 'master');
 }
 
@@ -253,6 +265,11 @@ export function taskRefIdentity(ref: TaskDocumentRef | undefined): string | unde
 
 export function roleNeedsSprint(role: LauncherRole): boolean {
   return role !== 'architect' && role !== 'investigator' && role !== 'system-specialist';
+}
+
+/** Only the Orchestrator names a sprint on its own; every master-naming role may omit it. */
+export function sprintRequiredForLaunch(role: LauncherRole): boolean {
+  return role === 'orchestrator';
 }
 
 export function isTasklessRole(selection: LauncherRole | RoleDocumentScope): boolean {
@@ -379,7 +396,7 @@ export function roleOptionsScope(selection: RoleLaunchSelection): RoleOptionsSco
 
 export function launchSelectionComplete(selection: RoleLaunchSelection): boolean {
   return (
-    (!roleNeedsSprint(selection.role) || Boolean(selection.sprintDocumentRef)) &&
+    (!sprintRequiredForLaunch(selection.role) || Boolean(selection.sprintDocumentRef)) &&
     (!roleNeedsMaster(selection.role) || Boolean(selection.masterDocumentRef)) &&
     (!roleNeedsTask(selection.role) || Boolean(selection.taskDocumentRef))
   );

@@ -765,7 +765,11 @@ def _authorized_publisher(
         sprint_ref = topology.parent(master_ref) if master_ref is not None else None
     except TaskDocumentRefError as exc:
         raise CuratorCoherenceError(exc.status, str(exc), next_action="task_doc") from exc
-    expected = observation.candidate.ref if caller.role == "curator" else sprint_ref
+    expected = (
+        observation.candidate.ref
+        if caller.role == "curator"
+        else (sprint_ref if sprint_ref is not None else master_ref)
+    )
     resolved = _resolve_caller_ref(caller.task_document_ref, expected)
     if expected is not None and resolved == expected:
         return DeclaredCaller(role=caller.role, task_document_ref=resolved)

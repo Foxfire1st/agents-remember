@@ -30,10 +30,15 @@ __all__ = [
 
 # What may be started without a parent (MIK-R113 rule 6): the selections the
 # dashboard's start accepts, per role as (sprint, master, task) with True =
-# required and False = forbidden. The investigator takes no leaf and at least
-# one of sprint/master; that row reads (True, None, False) with None = accepted
-# but not required. The dashboard's start and a chat without a role use this
-# one table: the dispatch endpoint checks it for a start with no starter, and
+# required, False = forbidden and None = accepted but not required. A master
+# that no sprint commands is a master in its own right, so the sprint is only
+# ever conditionally required: the resolver below requires it exactly when the
+# selected master is commanded by a sprint, and refuses one when the master
+# stands on its own. The investigator takes no leaf and needs its sprint, its
+# master, or both; that row therefore reads (None, None, False) and
+# ``parentless_selection_violation`` states the one-of rule itself. The
+# dashboard's start and a chat without a role use this one table: the dispatch
+# endpoint checks it for a start with no starter, and
 # ``resolve_role_launch_context`` below reads it too, so the two cannot drift
 # apart and a refused selection is refused with the same reason either way.
 PARENTLESS_START_SELECTIONS: dict[str, tuple[bool | None, bool | None, bool | None]] = {
@@ -42,12 +47,12 @@ PARENTLESS_START_SELECTIONS: dict[str, tuple[bool | None, bool | None, bool | No
     # task document, worktree or enclosure is invented for it, and a repository is chosen
     # inside its dashboard conversation rather than by its launch.
     "bootstrap": (False, False, False),
-    "investigator": (True, None, False),
+    "investigator": (None, None, False),
     "orchestrator": (True, False, False),
-    "manager": (True, True, False),
-    "worker": (True, True, True),
-    "reviewer": (True, True, True),
-    "curator": (True, True, True),
+    "manager": (None, True, False),
+    "worker": (None, True, True),
+    "reviewer": (None, True, True),
+    "curator": (None, True, True),
 }
 
 
@@ -65,22 +70,21 @@ def parentless_selection_violation(
             "name the leaf in the first message."
         )
     if role == "investigator":
-        required: tuple[bool | None, bool | None, bool | None] = (
-            bool(sprint_ref or master_ref),
-            bool(master_ref),
-            False,
-        )
-    else:
-        required = PARENTLESS_START_SELECTIONS[role]
+        # An Investigator may start in the shared Projects workspace with no document, on a
+        # sprint, on a master (a standalone master is a document in its own right), or on a
+        # sprint and one of its masters. The resolver requires the sprint exactly when the
+        # named master is commanded by one.
+        return None
+    required = PARENTLESS_START_SELECTIONS[role]
     for label, ref, needed in zip(
         ("sprint", "master", "task"),
         (sprint_ref, master_ref, task_ref),
         required,
         strict=True,
     ):
-        if needed and ref is None:
+        if needed is True and ref is None:
             return f"{role} requires a canonical {label} selection."
-        if not needed and ref is not None:
+        if needed is False and ref is not None:
             return f"{role} does not accept a {label} selection."
     return None
 
@@ -121,7 +125,22 @@ def resolve_role_launch_context(
     if master:
         if master.document.kind != "master" or master.document.orchestrates:
             raise ValueError("The selected master is not a canonical non-sprint master document.")
-        if sprint is None or topology.parent(master.ref) != sprint.ref:
+        commanding_sprint = topology.parent(master.ref)
+        if commanding_sprint is None:
+            # A master that no sprint commands is a master in its own right (an atomic
+            # standalone master); naming a sprint for it would bind the role to a document
+            # that has no authority over it.
+            if sprint is not None:
+                raise ValueError(
+                    f"The selected master {master.ref.key} stands on its own: no sprint "
+                    "commands it, so a start names no sprint for it."
+                )
+        elif sprint is None:
+            raise ValueError(
+                f"The selected master {master.ref.key} is commanded by sprint "
+                f"{commanding_sprint.key}; name that sprint as the sprint selection."
+            )
+        elif commanding_sprint != sprint.ref:
             raise ValueError("The selected master is not commanded by the selected sprint.")
     if task and (
         task.document.kind != "subTask" or master is None or topology.parent(task.ref) != master.ref

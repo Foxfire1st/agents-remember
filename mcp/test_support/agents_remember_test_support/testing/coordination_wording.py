@@ -84,7 +84,7 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "actual answer or ruling.",
         "When an Investigator is needed, start it with `role_start` "
         "on `agents-remember-task` without a task reference, on a "
-        "sprint, or on a sprint and master. Send the scoped concern "
+        "sprint, a standalone master, or both. Send the scoped concern "
         "as your first `role_message` on `agents-remember-task` to "
         "the returned agent ID. A Manager or Orchestrator may also "
         "start an Investigator within its own scope.",
@@ -297,8 +297,8 @@ CURRENT_COORDINATION_CLAUSES: dict[str, list[str]] = {
         "source.",
         "After a harness, loader or capture fault, you may order one rerun on the same operands.",
         "A second failure of one cause goes upward with the attempts already made.",
-        "Assign a check or investigation that belongs to no leaf to "
-        "an Investigator on your own sprint and master.",
+        "Assign a check or investigation belonging to no leaf to "
+        "an Investigator on your master and sprint if commanded.",
         "Never select a leaf for this role.",
         "Send the scoped concern as your first `role_message` on "
         "`agents-remember-task` to the returned agent identifier.",

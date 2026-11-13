@@ -477,10 +477,13 @@ every role with that role's selection, as the role launcher of the dashboard doe
 it starts has no parent, and such a call cannot replace a role agent.
 
 Each role takes one selection of task documents. An Architect and a Bootstrap name no document.
-An Orchestrator names a sprint. A Manager names a sprint and a master. A Worker, a Reviewer and a
-Curator name a sprint, a master and a task. An Investigator names no document, a sprint, or a
-sprint and a master, and never a task. One selection carries at most eight Investigators that are
-not closed; a further start is refused `investigator-capacity`.
+An Orchestrator names a sprint. A Manager names a master, and its sprint when a sprint commands
+that master. A Worker, a Reviewer and a Curator name a master and a task, and the master's sprint
+when a sprint commands it. An Investigator names no document, a sprint, a master, or a sprint and a
+master, and never a task. A master that no sprint commands is named alone; a sprint named for such
+a master is refused, and the refusal says that the master stands on its own. One selection carries
+at most eight Investigators that are not closed; a further start is refused
+`investigator-capacity`.
 
 Starts run one at a time. A call waits up to 60 seconds for another start to end; then it is
 refused, and its `nextAction` says to call again with the same arguments. Only the role agent that
