@@ -282,10 +282,12 @@ is answered, and a call that supplies a list both ways is refused.
 non-null. `semantic_requirement_revision` names the task's requirement packet as `<ID>@v<N>`, and
 `delivery_attempt` names the Worker's delivery attempt. The six `expected_…` values hold what
 `prepare` saw: the digest of the record that the publication replaces (empty for the first), the
-code tree and the memory tree, a digest of the task's place in its master and sprint, the task's
+code tree and the memory tree, a digest of the task's place in its master (and in its sprint, when
+one commands the master), the task's
 intent, and the SHA-256 of the attestation of the [Curator's checklist](concepts.md#curators-checklist).
-`caller` names the caller's role and a task document: the task's own document for a Curator, the
-sprint's document for any other role. Each action takes only its own arguments, so `status`,
+`caller` names the caller's role and a task document: the task's own document for a Curator; for
+any other role the sprint's document when one commands the master, otherwise the master's
+document. Each action takes only its own arguments, so `status`,
 `prepare` and `validate` refuse a call that supplies any of these nine. `publish` rejects missing,
 extra, duplicate, malformed, or stale judgments and publishes atomically; with
 `freeze_snapshot=true` it also writes an unchangeable snapshot that ties the delivery attempt to

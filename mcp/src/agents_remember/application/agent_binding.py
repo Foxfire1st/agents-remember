@@ -211,9 +211,9 @@ def read_agent_binding(environment: Mapping[str, str] | None = None) -> AgentBin
         binding.task_ref is not None,
     )
     valid = (
-        given in {(False, False, False), (True, False, False), (True, True, False)}
+        given in _INVESTIGATOR_SHAPES
         if binding.role == "investigator"
-        else given == _references_of(binding.role)
+        else given in _shapes_of(binding.role)
     )
     if not valid:
         raise ValueError(
@@ -228,6 +228,28 @@ def _references_of(role: str) -> tuple[bool, bool, bool]:
 
     role = canonical_role(role)
     return (role not in TASKLESS_ROLES, role == "manager" or role in LEAF_ROLES, role in LEAF_ROLES)
+
+
+# Which references an investigator's binding may carry: none, a sprint, a master that no sprint
+# commands, or a sprint and master. It never carries a leaf.
+_INVESTIGATOR_SHAPES = frozenset(
+    {(False, False, False), (True, False, False), (False, True, False), (True, True, False)}
+)
+
+
+def _shapes_of(role: str) -> frozenset[tuple[bool, bool, bool]]:
+    """Which task-reference shapes a role's binding may carry.
+
+    A role that names a master names its sprint only when a sprint commands that master. A
+    master that no sprint commands stands on its own, and the launch then gives the binding no
+    sprint reference; that shape belongs to the role beside its sprint-bound one. A
+    sprint-bound role keeps its one shape.
+    """
+
+    required = _references_of(role)
+    if not required[1]:
+        return frozenset({required})
+    return frozenset({required, (False, required[1], required[2])})
 
 
 def _text(source: Mapping[str, str], name: str) -> str:

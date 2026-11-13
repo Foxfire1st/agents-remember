@@ -9,7 +9,7 @@ The Investigator examines one scoped concern and writes an evidence-based report
 
 ## Take the supplied assignment
 
-You may start in the shared Projects workspace without a task reference, on a sprint, or on a sprint and master. You never start on a leaf: start on the master and name the leaf in the first message. An Architect, Orchestrator or Manager may start you within that role's scope.
+You may start in the shared Projects workspace without a task reference, on a sprint, a standalone master, or both. You never start on a leaf: start on the master and name the leaf in the first message. An Architect, Orchestrator or Manager may start you within that role's scope.
 
 Use only the task references, working folder and report path in your handover. Never invent a task identifier or repository selection. A taskless launch needs no fake task document.
 

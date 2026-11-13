@@ -4,6 +4,8 @@ import {
   chatSprint as sprint,
   chatMaster as master,
   chatLeaf as leaf,
+  chatStandaloneMaster as soloMaster,
+  chatStandaloneLeaf as soloLeaf,
 } from '../../test/fixtures/documentChat';
 import { DocumentChat } from './DocumentChat';
 import { boundTasklessRequest, readTasklessActiveRequests } from '../roleLaunchModel';
@@ -540,8 +542,51 @@ describe("the document's native chat and the shared bound launcher", () => {
         tasks={[sprint, master, leaf]}
       />,
     );
-    expect(getByRole('status').textContent).toContain('commanding sprint document');
+    expect(getByRole('status').textContent).toContain('holds no master');
     expect(queryByRole('button', { name: 'Start role' })).toBeNull();
+  });
+
+  it('binds a master that no sprint commands and its task without a sprint', async () => {
+    const requests: object[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/options')) requests.push(JSON.parse(String(init?.body)));
+        const value = url.endsWith('/frame')
+          ? {
+              available: true,
+              frameBaseUrl: 'https://host.example',
+              serverId: 'server',
+              projectsWorkspaceId: 'projects',
+            }
+          : url.endsWith('/document-chats')
+            ? { agents: [] }
+            : { roleDefaults: {}, agents: [] };
+        return new Response(JSON.stringify(value));
+      }),
+    );
+    const tasks = [sprint, master, leaf, soloMaster, soloLeaf];
+    const { container, findByTestId, rerender } = render(
+      <DocumentChat active taskDocumentRef={soloMaster.reference} tasks={tasks} />,
+    );
+    await findByTestId('role-launcher');
+    expect(
+      [...container.querySelectorAll('#launcher-role option')].map((item) => item.textContent),
+    ).toEqual(['Investigator', 'Manager']);
+    await waitFor(() =>
+      expect(requests).toContainEqual({
+        role: 'manager',
+        masterDocumentRef: soloMaster.reference,
+      }),
+    );
+    rerender(<DocumentChat active taskDocumentRef={soloLeaf.reference} tasks={tasks} />);
+    await waitFor(() =>
+      expect(requests).toContainEqual({
+        role: 'worker',
+        masterDocumentRef: soloMaster.reference,
+        taskDocumentRef: soloLeaf.reference,
+      }),
+    );
   });
 
   it('admits exactly the roles for Projects, sprint, commanded master and leaf', () => {
@@ -554,9 +599,7 @@ describe("the document's native chat and the shared bound launcher", () => {
       'reviewer',
       'curator',
     ]);
-    expect(documentChatBinding(ref('orphan/task.json'), docs).problem).toContain(
-      'commanding sprint',
-    );
+    expect(documentChatBinding(ref('orphan/task.json'), docs).problem).toContain('holds no master');
     expect(
       documentChatAgent(undefined, [
         architect,

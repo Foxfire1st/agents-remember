@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import type { TaskEntry } from '../../types/projection';
 import { sameTaskDocumentRef } from '../../data/taskIdentity';
 import {
-  masterOptionsForSprint,
+  masterOptionsFor,
   sprintOptionsForEntries,
   taskOptionsForMaster,
   type RoleLaunchSelection,
@@ -36,7 +36,7 @@ function pruneSeededMaster(
   const currentSprint = currentSprints.find((option) =>
     sameTaskDocumentRef(option.ref, sprintDocumentRef),
   )?.entry;
-  const currentMasters = masterOptionsForSprint(tasks, currentSprint);
+  const currentMasters = masterOptionsFor(tasks, currentSprint);
   if (
     masterDocumentRef &&
     !currentMasters.some((option) => sameTaskDocumentRef(option.ref, masterDocumentRef))
@@ -58,7 +58,7 @@ function pruneSeededTask(
   const currentSprint = currentSprints.find((option) =>
     sameTaskDocumentRef(option.ref, sprintDocumentRef),
   )?.entry;
-  const currentMasters = masterOptionsForSprint(tasks, currentSprint);
+  const currentMasters = masterOptionsFor(tasks, currentSprint);
   const currentMaster = currentMasters.find((option) =>
     sameTaskDocumentRef(option.ref, masterDocumentRef),
   )?.entry;

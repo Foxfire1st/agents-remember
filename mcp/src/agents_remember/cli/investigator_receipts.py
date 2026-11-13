@@ -45,6 +45,18 @@ def matches_selection(receipt: dict[str, Any], selection: RoleSelection) -> bool
     )
 
 
+def investigator_has_document(selection: RoleSelection) -> bool:
+    """Whether an Investigator selection names a task document: its sprint or its master.
+
+    An Investigator may be started on the Projects workspace with no document at all, on a
+    sprint, on a master that no sprint commands, or on a sprint and one of its masters. Only
+    the document-less start is taskless; every other start keeps its receipts in the notes of
+    the document it names.
+    """
+
+    return selection.sprint_document_ref is not None or selection.master_document_ref is not None
+
+
 def _directories(config: McpRuntimeConfig, selection: RoleSelection) -> tuple[Path, ...]:
 
     task = resolve_role_launch_context(config, selection).effective_task
@@ -60,7 +72,7 @@ def _directories(config: McpRuntimeConfig, selection: RoleSelection) -> tuple[Pa
 def _earlier_singletons(config: McpRuntimeConfig, selection: RoleSelection) -> tuple[Path, ...]:
     from agents_remember.cli.role_launch_receipts import digest  # noqa: PLC0415
 
-    if selection.sprint_document_ref is not None:
+    if investigator_has_document(selection):
         return ()
     root = config.coordination_root / "notes" / "reports" / EXECUTIONS_DIRECTORY
     return tuple(
@@ -130,7 +142,7 @@ def investigator_listing(config: McpRuntimeConfig, selection: RoleSelection) -> 
     def newest(row: tuple[Path, dict[str, Any]]) -> tuple[str, str]:
         return (str(row[1].get("createdAt", "")), str(row[1]["requestId"]))
 
-    if selection.sprint_document_ref is None:
+    if not investigator_has_document(selection):
         # Taskless listing retains its existing ownership; its bound is a separate change.
         return InvestigatorListing(sorted(counted(), key=newest, reverse=True), 0)
     rows = heapq.nlargest(LIST_LIMIT, counted(), key=newest)
@@ -165,7 +177,7 @@ def investigator_start_capacity(
     )
     from agents_remember.cli.role_launch_receipts import _read_receipt  # noqa: PLC0415
 
-    if request.role != "investigator" or request.sprint_document_ref is None:
+    if request.role != "investigator" or not investigator_has_document(request):
         yield
         return
     directory = _directories(config, request)[0]

@@ -99,6 +99,11 @@ class ParentlessChatStartTests(RoleToolsTestCase):
                 {"sprint": SPRINT_REF, "master": MASTER_REF},
                 None,
             ),
+            # A master that no sprint commands is a selection of its own: the sprint is
+            # optional wherever a master is named, and the resolver requires it exactly
+            # when the selected master is commanded by a sprint.
+            ("investigator", {"master": MASTER_REF}, None),
+            ("manager", {"master": MASTER_REF}, None),
             ("orchestrator", {"sprint": SPRINT_REF}, None),
             ("manager", {"sprint": SPRINT_REF, "master": MASTER_REF}, None),
             ("worker", full, None),
@@ -112,8 +117,8 @@ class ParentlessChatStartTests(RoleToolsTestCase):
             ("investigator", full, "does not accept a leaf selection"),
             (
                 "investigator",
-                {"master": MASTER_REF},
-                "investigator requires a canonical sprint selection.",
+                {},
+                None,
             ),
             (
                 "manager",
@@ -128,7 +133,7 @@ class ParentlessChatStartTests(RoleToolsTestCase):
             (
                 "curator",
                 {},
-                "curator requires a canonical sprint selection.",
+                "curator requires a canonical master selection.",
             ),
         ]
         for role, refs, said in cases:

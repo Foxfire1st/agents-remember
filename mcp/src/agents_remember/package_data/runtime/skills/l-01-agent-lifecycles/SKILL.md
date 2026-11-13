@@ -13,7 +13,7 @@ The role launcher supports these eight role IDs: `architect`, `investigator`, `o
 
 For a task-bound launch, use only the canonical task reference and paired workspace supplied in the handover. Follow that role and operation's exact task-read arguments. Do not manufacture task IDs or parent relationships. Projects is a shared execution workspace, not a repository identity; leaf roles use the selected Agents Remember (AR) paired task enclosure already bound by the launcher.
 
-Architect and Investigator may be started manually at Projects altitude without task references. A taskless Architect asks only for missing outcome or registered repository details. An Investigator takes any scoped concern from its parent's first message and asks that parent for missing scope; without a parent it asks the developer in its own chat. It may also be selected on a sprint or on a sprint and master, never on a leaf. Neither role creates a fake sprint, master, or task.
+Architect and Investigator may be started manually at Projects altitude without task references. A taskless Architect asks only for missing outcome or registered repository details. An Investigator takes any scoped concern from its parent's first message and asks that parent for missing scope; without a parent it asks the developer in its own chat. It may also be selected on a sprint, on a master that no sprint commands, or on a sprint and master, never on a leaf. Neither role creates a fake sprint, master, or task.
 
 ## Host, tools and decisions
 

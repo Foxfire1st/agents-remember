@@ -4,7 +4,7 @@ The Orchestrator or Architect uses this template to prepare a Manager’s master
 
 In this template, ID means identifier.
 
-Start through `role_start` with role `manager` and the sprint and master references. The call carries no brief: the Manager's first message is compiled from the documents.
+Start through `role_start` with role `manager` and the master reference; name its sprint when a sprint commands it. The call carries no brief: the Manager's first message is compiled from the documents.
 
 The [Manager role](../roles/manager.md) owns its duties. [Coordination](../operations/coordination.md) and [closeout](../operations/closeout.md) own their procedures, and [acceptance](../core/acceptance.md) owns the completion boundary.
 

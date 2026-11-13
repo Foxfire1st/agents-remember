@@ -89,15 +89,17 @@ Every start names a role. The role decides which task documents the start select
 | --- | --- | --- | --- |
 | Architect | no | no | no |
 | Bootstrap | no | no | no |
-| Investigator | optional | optional, with its sprint | never |
+| Investigator | optional | optional, alone or with its sprint | never |
 | Orchestrator | yes | no | no |
-| Manager | yes | yes | no |
-| Worker, Reviewer, Curator | yes | yes | yes |
+| Manager | when it commands the master | yes | no |
+| Worker, Reviewer, Curator | when it commands the master | yes | yes |
 
-The selected master must belong to the selected sprint, and the selected task must be a task of
-the selected master. A start of a Worker, a Reviewer or a Curator is refused with
-`intent-review-open` until the task's intent review is `go`; see
-[Workflows](workflows.md#the-intent-review-before-a-task-starts).
+A master that no sprint commands is a master in its own right: its start names the master and no
+sprint. When a sprint commands the selected master, the start names that sprint, and no other. A
+sprint named for a master that no sprint commands is refused, and the refusal says that the master
+stands on its own. The selected task must be a task of the selected master. A start of a Worker, a
+Reviewer or a Curator is refused with `intent-review-open` until the task's intent review is `go`;
+see [Workflows](workflows.md#the-intent-review-before-a-task-starts).
 
 A start may name the harness (argument `agent`), the model, the effort and feature values for this
 one role agent, or ask for the role's step-up. A start cannot set the permission mode. Where a
