@@ -224,6 +224,7 @@ function RequestFields({
   message,
   sendable,
   sending,
+  planned,
   onCancel,
   onSend,
 }: {
@@ -233,6 +234,7 @@ function RequestFields({
   message: string;
   sendable: boolean;
   sending: boolean;
+  planned: boolean;
   onCancel: () => void;
   onSend: () => void;
 }) {
@@ -243,7 +245,11 @@ function RequestFields({
         className={wish}
         rows={4}
         aria-label="What do you want explained?"
-        placeholder="What do you want explained? Leave it empty for the end-to-end review."
+        placeholder={
+          planned
+            ? 'What do you want explained? Leave it empty for the requirement and planned effects.'
+            : 'What do you want explained? Leave it empty for the end-to-end review.'
+        }
         value={message}
         onChange={(event) => trayStore.getState().setText(event.target.value)}
       />
@@ -255,7 +261,7 @@ function RequestFields({
         onSend={onSend}
       />
       <p className={line} data-testid="explanation-request-line">
-        {firstRequestLine(references, message)}
+        {firstRequestLine(references, message, planned)}
       </p>
     </>
   );
@@ -562,12 +568,31 @@ interface RequestView {
   phase: string;
 }
 
-function requestViewOf(sent: ExplainerBuild | null, fromRead: ExplainerBuild | null): RequestView {
+function requestViewOf(
+  sent: ExplainerBuild | null,
+  fromRead: ExplainerBuild | null,
+  planned: boolean,
+): RequestView {
   const build = sent ?? fromRead;
   if (!build) {
-    return { build: null, stopped: null, title: 'Ask the explainer to read this change set', phase: 'form' };
+    return {
+      build: null,
+      stopped: null,
+      title: planned
+        ? 'Ask the explainer to read this plan'
+        : 'Ask the explainer to read this change set',
+      phase: 'form',
+    };
   }
   return { build, stopped: buildFailure(build), title: 'Building the explainer', phase: build.state };
+}
+
+/** The request is planned when either the read binding or the comparison on screen says so. */
+function isPlannedRequest(
+  binding: ExplainerBinding | null,
+  comparison: ExplanationRequestProps['comparison'],
+): boolean {
+  return binding?.owner === 'planned' || comparison?.owner === 'planned';
 }
 
 export function ExplanationRequest({
@@ -593,14 +618,17 @@ export function ExplanationRequest({
     history,
     onBuilt,
   });
-  const view = requestViewOf(sent, fromRead);
+  const planned = isPlannedRequest(binding, comparison);
+  const view = requestViewOf(sent, fromRead, planned);
   useBuildRead(address, view.build, setSent, setRefusal, onBuilt);
   const stop = useRequestStop(address, view.build, setSent, onBuilt, resetRequestId);
   const sendable = !sending && canSend(references, message);
 
   return (
     <section className={panel} data-testid="explanation-request-form" data-phase={view.phase}>
-      <h3 className={heading}>{view.title}</h3>
+      <h3 className={heading} data-testid="explanation-request-heading">
+        {view.title}
+      </h3>
       {view.build ? (
         <BuildProgress
           build={view.build}
@@ -630,6 +658,7 @@ export function ExplanationRequest({
           message={message}
           sendable={sendable}
           sending={sending}
+          planned={planned}
           onCancel={onCancel}
           onSend={() => {
             stop.clear();

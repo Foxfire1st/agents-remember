@@ -75,12 +75,14 @@ def test_the_capability_text_is_read_from_the_package_data_copy(tmp_path: Path) 
     assert loaded.canonical_path == CANONICAL_PATH
     assert installed.resolve() == (PACKAGE_ROOT / PACKAGED_PATH).resolve()
     assert installed.read_text(encoding="utf-8") == loaded.text
-    # The D566 review-presenter text: 1,072 words. It carries the architect's first-reads order from
+    # The D566 review-presenter text: 1,090 words. It carries the architect's first-reads order from
     # generation 6's measurement. L201 (MIK-R211 v5) describes the explainer's normal workspace and
     # its harness's own tools in place of the confinement and the eighteen removed tools, says where
     # each render's run folder is (renders/run-NNN/), instructs grading for the page's Sort menu,
-    # and reports to the architect with the role_message call D607 proved (D602-D608).
-    assert loaded.words == 1072
+    # and reports to the architect with the role_message call D607 proved (D602-D608). It also names
+    # the planned binding's folder, which carries the requirement packets the task names and its
+    # declared planned effects as text.
+    assert loaded.words == 1090
     assert loaded.words <= loaded.word_budget == 1100
     assert len(loaded.digest) == 64 and loaded.revision == f"sha256:{loaded.digest}"
     for clause in REQUIRED_WORDING:
