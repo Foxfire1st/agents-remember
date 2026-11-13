@@ -1,6 +1,10 @@
 import { sameTaskDocumentRef } from '../../data/taskIdentity';
 import type { TaskDocumentRef, TaskEntry } from '../../types/projection';
-import { type LauncherRole, type RoleLaunchSelection } from '../roleLaunchModel';
+import {
+  isStandaloneMaster,
+  type LauncherRole,
+  type RoleLaunchSelection,
+} from '../roleLaunchModel';
 
 export interface DocumentChatBinding {
   selection: RoleLaunchSelection;
@@ -24,11 +28,14 @@ export interface DocumentBinding {
 
 function masterBindings(
   master: TaskEntry,
-  sprintDocumentRef: TaskDocumentRef,
+  sprintDocumentRef: TaskDocumentRef | undefined,
   entries: Map<string, TaskEntry>,
 ): DocumentBinding[] {
   if (!master.reference || master.summary?.form !== 'master') return [];
-  const scope = { sprintDocumentRef, masterDocumentRef: master.reference };
+  const scope = {
+    ...(sprintDocumentRef ? { sprintDocumentRef } : {}),
+    masterDocumentRef: master.reference,
+  };
   const bindings: DocumentBinding[] = [
     {
       ref: master.reference,
@@ -67,6 +74,10 @@ export function documentBindings(entries: TaskEntry[]): DocumentBinding[] {
       if (master) tree.push(...masterBindings(master, sprint.reference, byReference));
     }
   }
+  // A master the tree places outside every sprint stands on its own and binds without one.
+  for (const master of entries.filter(isStandaloneMaster)) {
+    tree.push(...masterBindings(master, undefined, byReference));
+  }
   return tree;
 }
 
@@ -80,8 +91,7 @@ export function bindingInTree(
     tree.find((row) => sameTaskDocumentRef(row.ref, ref))?.binding ?? {
       selection: { role: 'worker' },
       roles: [],
-      problem:
-        'No role can start here: a leaf needs a master commanded by a sprint, and a master needs its commanding sprint document.',
+      problem: 'No role can start here: the task tree holds no master for this document.',
     }
   );
 }

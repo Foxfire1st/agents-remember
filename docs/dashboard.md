@@ -120,8 +120,8 @@ for the [host profile](concepts.md#host-profile) of the role, or "host default".
 | Control | Accessible name | What it offers | When it shows |
 | --- | --- | --- | --- |
 | Role | "Role" | "Architect", "Investigator", "Orchestrator", "Manager", "Worker", "Reviewer", "Curator". The launcher opens on "Architect". | Always. |
-| Sprint | "AR sprint" | The sprint documents; "Select sprint…", or "No sprint documents". | For Orchestrator, Manager, Worker, Reviewer and Curator. |
-| Master | "AR master" | The masters of the chosen sprint; "Select master…", or "No linked masters". | For Manager, Worker, Reviewer and Curator, after a sprint is chosen. |
+| Sprint | "AR sprint" | The sprint documents, and "No sprint" for a master that no sprint commands. | For Orchestrator, Manager, Worker, Reviewer and Curator. |
+| Master | "AR master" | The masters of the chosen sprint, or, while "No sprint" is chosen, the masters that no sprint commands; "Select master…", or "No linked masters". | For Manager, Worker, Reviewer and Curator. |
 | Task | "AR task" | The tasks of the chosen master; "Select task…", or "No leaf tasks". | For Worker, Reviewer and Curator, after a master is chosen. |
 | Agent | "Role agent override" | First "<agent> · default" or "Role default", the role's default harness; then every harness that the host knows. | Always. |
 | Model | "Role model override" | First "<model> · default", "Role default" or "Agent default"; then the models of the selected harness. | Always. |
@@ -528,8 +528,8 @@ launcher the selected role reads "(running)" after its name while the run of tha
 document runs, and "(held)" while that run is [held](concepts.md#held). The other roles show no
 such word.
 
-For a document that no role can start on, the right rail says "No role can start here: a leaf
-needs a master commanded by a sprint, and a master needs its commanding sprint document."
+For a document that no role can start on, the right rail says "No role can start here: the task
+tree holds no master for this document."
 
 After a start of the host, the dashboard's server loads the agents of the listed documents in
 the background, two at a time, while at least 6 GiB of memory are available. It loads no

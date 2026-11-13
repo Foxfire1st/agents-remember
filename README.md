@@ -215,7 +215,7 @@ of this repository's files.
 
 ## Status
 
-The version of the package in this repository is `3.0.0`. It requires Python 3.14.
+The version of the package in this repository is `3.0.1`. It requires Python 3.14.
 
 Agents Remember is under active development. The contracts listed under [Stability](#stability)
 change only with a major version. Everything else may change between versions, so read the notes

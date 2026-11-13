@@ -12,7 +12,7 @@ import {
   usesRequestReceipts,
   roleAgentOverrideFor,
   roleDocumentScope,
-  masterOptionsForSprint,
+  masterOptionsFor,
   matchesChoice,
   optionIndex,
   refAtOptionIndex,
@@ -176,7 +176,7 @@ function docSelectTitle(
 function referenceFields(bound: boolean, selection: RoleLaunchSelection) {
   return {
     sprint: !bound && roleNeedsSprint(selection.role),
-    master: !bound && roleNeedsMaster(selection.role) && Boolean(selection.sprintDocumentRef),
+    master: !bound && roleNeedsMaster(selection.role),
     task: !bound && roleNeedsTask(selection.role) && Boolean(selection.masterDocumentRef),
   };
 }
@@ -269,7 +269,7 @@ function SprintSelect({
           sprintOptions,
           sprintDocumentRef,
           'Sprint',
-          sprintOptions.length ? 'Select sprint…' : 'No sprint documents',
+          'No sprint',
         )}
         disabled={busy || optionsLoading || retryLocked}
         onChange={(event) => {
@@ -277,7 +277,7 @@ function SprintSelect({
           onSelectionChange({ role, ...(selected ? { sprintDocumentRef: selected } : {}) });
         }}
       >
-        <option value="">{sprintOptions.length ? 'Select sprint…' : 'No sprint documents'}</option>
+        <option value="">No sprint</option>
         {sprintOptions.map((option, index) => (
           <option key={index} value={index} title={taskRefIdentity(option.ref)}>
             {option.entry.title || option.entry.id}
@@ -1097,7 +1097,7 @@ function launcherDocuments(
   const selectedSprint = sprintOptions.find((option) =>
     sameTaskDocumentRef(option.ref, sprintDocumentRef),
   )?.entry;
-  const masterOptions = masterOptionsForSprint(tasks, selectedSprint);
+  const masterOptions = masterOptionsFor(tasks, selectedSprint);
   const selectedMaster = masterOptions.find((option) =>
     sameTaskDocumentRef(option.ref, masterDocumentRef),
   )?.entry;

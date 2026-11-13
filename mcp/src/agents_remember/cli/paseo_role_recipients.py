@@ -15,7 +15,10 @@ from agents_remember.application.role_launch_context import (
     resolve_role_launch_context,
     selection_binding,
 )
-from agents_remember.cli.investigator_receipts import open_investigator_receipts
+from agents_remember.cli.investigator_receipts import (
+    investigator_has_document,
+    open_investigator_receipts,
+)
 from agents_remember.cli.paseo_role_caller import _host_unreachable
 from agents_remember.cli.paseo_status import read_agent
 from agents_remember.cli.role_launch_preparation import ROLE_START_TOOL
@@ -239,7 +242,7 @@ def _live_agents(
 def _selection_receipts(config: McpRuntimeConfig, selection: RoleSelection) -> list[dict[str, Any]]:
     """The selection's executions, the current one first, then earlier ones newest first."""
 
-    if selection.role == "investigator" and selection.sprint_document_ref is not None:
+    if selection.role == "investigator" and investigator_has_document(selection):
         return open_investigator_receipts(config, selection)
     if selection.role in TASKLESS_ROLES:
         return [receipt for _path, receipt in _taskless_execution_receipts(config, selection)]

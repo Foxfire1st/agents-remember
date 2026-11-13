@@ -9,14 +9,21 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from agents_remember.application.role_launch_context import RoleLaunchContext, selection_binding
+from agents_remember.application.role_launch_context import (
+    RoleLaunchContext,
+    parentless_selection_violation,
+    resolve_role_launch_context,
+    selection_binding,
+)
 from agents_remember.application.skill_resources.provider import shipped_composition_corpus
 from agents_remember.cli import (
     role_launch_liveness,
     role_launch_preparation,
     role_launch_receipts,
     role_launch_routes,
+    role_launch_workspace,
 )
+from agents_remember.cli.paseo_role_start import _set_selections
 from agents_remember.cli.role_handover_file import planned_handover_file
 from agents_remember.cli.role_launch_preparation import (
     ROLE_START_OPERATIONS,
@@ -25,9 +32,16 @@ from agents_remember.cli.role_launch_receipts import _bind_task_report_access
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.role_agents import RoleStartSetCall
 from agents_remember.models.role_capsules.manifest import parse_composition_manifest
-from agents_remember.models.role_launcher import RoleDispatchRequest
+from agents_remember.models.role_launcher import (
+    LauncherRole,
+    RoleDispatchRequest,
+    RoleSelection,
+)
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks.document import TaskDocument
+from agents_remember.tasks.store import write_task_doc
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from paseo_runtime_test_support import write_runtime_block
@@ -578,6 +592,207 @@ class TasklessExecutionIdentityTests(unittest.TestCase):
             self.assertFalse((history / f"{archived_id}.json").exists())
             self.assertTrue((history / f"{foreign_id}.json").is_file())
             self.assertTrue((history / f"{system_id}.json").is_file())
+
+
+def _write_task_tree(tasks: Path) -> None:
+    """A standalone master, a sprint-commanded master, and a sprint that commands neither."""
+
+    def write_master(
+        folder: str,
+        document_id: str,
+        *,
+        orchestrates: tuple[str, ...] | None = None,
+        leaves: tuple[str, ...] = (),
+    ) -> None:
+        write_task_doc(
+            tasks / folder,
+            TaskDocument.model_validate(
+                {
+                    "id": document_id,
+                    "slug": "task",
+                    "title": document_id,
+                    "kind": "master",
+                    "repo": "repo",
+                    "createdAt": "2026-11-12T00:00:00+00:00",
+                    **(
+                        {"orchestrates": list(orchestrates)}
+                        if orchestrates is not None
+                        else {"executionNature": "atomic"}
+                    ),
+                    "subTasks": [
+                        {
+                            "number": leaf,
+                            "name": leaf,
+                            "file": f"{leaf}.md",
+                            "status": "inProgress",
+                        }
+                        for leaf in leaves
+                    ],
+                }
+            ),
+        )
+
+    def write_leaf(folder: str, leaf: str) -> None:
+        write_task_doc(
+            tasks / folder,
+            TaskDocument.model_validate(
+                {
+                    "id": leaf,
+                    "slug": leaf,
+                    "title": leaf,
+                    "kind": "subTask",
+                    "repo": "repo",
+                    "createdAt": "2026-11-12T00:01:00+00:00",
+                    "status": "inProgress",
+                    "master": "task.json",
+                }
+            ),
+        )
+
+    write_leaf("lonely", "01_leaf")
+    write_master("lonely", "LONELY", leaves=("01_leaf",))
+    write_leaf("commanded", "01_leaf")
+    write_master("commanded", "COMMANDED", leaves=("01_leaf",))
+    write_master("sprint", "SPRINT", orchestrates=("commanded",))
+    write_master("other", "OTHER", orchestrates=("elsewhere",))
+
+
+class StandaloneMasterSelectionTests(unittest.TestCase):
+    """A master that no sprint commands is a selection every role that may work it can name."""
+
+    def setUp(self) -> None:
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.config = _runtime_config(Path(temporary.name))
+        self.repo = "repo"
+        _write_task_tree(self.config.coordination_root / "tasks" / self.repo)
+        self.lonely = TaskDocumentRef(repository=self.repo, path="lonely/task.json")
+        self.lonely_leaf = TaskDocumentRef(repository=self.repo, path="lonely/01_leaf.json")
+        self.commanded = TaskDocumentRef(repository=self.repo, path="commanded/task.json")
+        self.commanded_leaf = TaskDocumentRef(repository=self.repo, path="commanded/01_leaf.json")
+        self.sprint = TaskDocumentRef(repository=self.repo, path="sprint/task.json")
+        self.other_sprint = TaskDocumentRef(repository=self.repo, path="other/task.json")
+
+    def resolve(self, role: LauncherRole, **references: TaskDocumentRef) -> RoleLaunchContext:
+        return resolve_role_launch_context(self.config, RoleSelection(role=role, **references))
+
+    def assert_effective(self, context: RoleLaunchContext, ref: TaskDocumentRef) -> None:
+        effective = context.effective_task
+        assert effective is not None
+        self.assertEqual(effective.ref, ref)
+
+    def test_a_manager_resolves_a_standalone_master_with_no_sprint(self) -> None:
+        context = self.resolve("manager", masterDocumentRef=self.lonely)
+        self.assertIsNone(context.sprint)
+        master = context.master
+        assert master is not None
+        self.assertEqual(master.ref, self.lonely)
+        self.assert_effective(context, self.lonely)
+
+    def test_the_leaf_roles_resolve_a_leaf_of_a_standalone_master(self) -> None:
+        roles: tuple[LauncherRole, ...] = ("worker", "reviewer", "curator")
+        for role in roles:
+            with self.subTest(role=role):
+                context = self.resolve(
+                    role, masterDocumentRef=self.lonely, taskDocumentRef=self.lonely_leaf
+                )
+                self.assertIsNone(context.sprint)
+                self.assert_effective(context, self.lonely_leaf)
+
+    def test_the_set_selections_admit_a_leaf_of_a_standalone_master(self) -> None:
+        """role_start_set's three seats resolve on a master that no sprint commands."""
+
+        call = RoleStartSetCall(
+            request_id=uuid.uuid4(),
+            master_document_ref=self.lonely,
+            task_document_ref=self.lonely_leaf,
+        )
+        selections = _set_selections(call)
+        self.assertEqual(
+            [selection.role for selection in selections], ["worker", "reviewer", "curator"]
+        )
+        for selection in selections:
+            with self.subTest(role=selection.role):
+                context = resolve_role_launch_context(self.config, selection)
+                self.assertIsNone(context.sprint)
+                self.assert_effective(context, self.lonely_leaf)
+
+    def test_an_investigator_resolves_a_standalone_master(self) -> None:
+        context = self.resolve("investigator", masterDocumentRef=self.lonely)
+        self.assertIsNone(context.sprint)
+        master = context.master
+        assert master is not None
+        self.assertEqual(master.ref, self.lonely)
+        self.assert_effective(context, self.lonely)
+
+    def test_a_sprint_given_for_a_standalone_master_is_refused_as_its_own(self) -> None:
+        with self.assertRaisesRegex(ValueError, "stands on its own"):
+            self.resolve(
+                "manager", sprintDocumentRef=self.other_sprint, masterDocumentRef=self.lonely
+            )
+
+    def test_a_commanded_master_still_requires_its_sprint(self) -> None:
+        with self.assertRaisesRegex(ValueError, "is commanded by sprint repo/sprint/task.json"):
+            self.resolve("manager", masterDocumentRef=self.commanded)
+
+    def test_a_foreign_sprint_is_still_refused(self) -> None:
+        with self.assertRaisesRegex(ValueError, "not commanded by the selected sprint"):
+            self.resolve(
+                "manager",
+                sprintDocumentRef=self.other_sprint,
+                masterDocumentRef=self.commanded,
+            )
+
+    def test_a_master_under_its_own_sprint_starts_as_before(self) -> None:
+        context = self.resolve(
+            "worker",
+            sprintDocumentRef=self.sprint,
+            masterDocumentRef=self.commanded,
+            taskDocumentRef=self.commanded_leaf,
+        )
+        sprint = context.sprint
+        assert sprint is not None
+        self.assertEqual(sprint.ref, self.sprint)
+        self.assert_effective(context, self.commanded_leaf)
+
+    def test_the_parentless_table_admits_a_master_without_a_sprint(self) -> None:
+        self.assertIsNone(parentless_selection_violation("manager", None, self.lonely, None))
+        self.assertIsNone(
+            parentless_selection_violation("worker", None, self.lonely, self.lonely_leaf)
+        )
+        self.assertIsNone(parentless_selection_violation("investigator", None, self.lonely, None))
+        self.assertIn(
+            "requires a canonical master selection",
+            parentless_selection_violation("worker", None, None, self.lonely_leaf) or "",
+        )
+        self.assertIsNone(parentless_selection_violation("investigator", None, None, None))
+
+    def test_a_leaf_return_address_names_the_standalone_master_alone(self) -> None:
+        context = self.resolve(
+            "worker", masterDocumentRef=self.lonely, taskDocumentRef=self.lonely_leaf
+        )
+        self.assertEqual(
+            role_launch_preparation._return_address(None, context),
+            {
+                "role": "manager",
+                "master_document_ref": {"repository": self.repo, "path": "lonely/task.json"},
+            },
+        )
+
+    def test_a_standalone_masters_leaf_records_the_master_as_its_outer_task(self) -> None:
+        context = self.resolve(
+            "worker", masterDocumentRef=self.lonely, taskDocumentRef=self.lonely_leaf
+        )
+        self.assertEqual(role_launch_workspace._recorded_parent(context), "lonely")
+
+    def test_a_commanded_masters_leaf_still_records_the_sprint(self) -> None:
+        context = self.resolve(
+            "worker",
+            sprintDocumentRef=self.sprint,
+            masterDocumentRef=self.commanded,
+            taskDocumentRef=self.commanded_leaf,
+        )
+        self.assertEqual(role_launch_workspace._recorded_parent(context), "sprint")
 
 
 if __name__ == "__main__":

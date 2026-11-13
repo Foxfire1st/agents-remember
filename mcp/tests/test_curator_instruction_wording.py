@@ -282,7 +282,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                 (
                     (
                         "roles/architect.md",
-                        "When an Investigator is needed, start it with `role_start` on `agents-remember-task` without a task reference, on a sprint, or on a sprint and master. Send the scoped concern as your first `role_message` on `agents-remember-task` to the returned agent ID. A Manager or Orchestrator may also start an Investigator within its own scope.",
+                        "When an Investigator is needed, start it with `role_start` on `agents-remember-task` without a task reference, on a sprint, a standalone master, or both. Send the scoped concern as your first `role_message` on `agents-remember-task` to the returned agent ID. A Manager or Orchestrator may also start an Investigator within its own scope.",
                     ),
                 ),
             ),
@@ -538,7 +538,7 @@ class CuratorInstructionWordingTests(unittest.TestCase):
                     ("roles/manager.md", "you decide the gate"),
                     (
                         "roles/manager.md",
-                        "Assign a check or investigation that belongs to no leaf to an Investigator on your own sprint and master. Never select a leaf for this role. Send the scoped concern as your first `role_message` on `agents-remember-task` to the returned agent identifier.",
+                        "Assign a check or investigation belonging to no leaf to an Investigator on your master and sprint if commanded. Never select a leaf for this role. Send the scoped concern as your first `role_message` on `agents-remember-task` to the returned agent identifier.",
                     ),
                 ),
             ),

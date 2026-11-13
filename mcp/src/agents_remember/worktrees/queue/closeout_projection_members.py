@@ -188,7 +188,7 @@ def scheduling_source_fact(
 
 
 def candidate_task_topology_fingerprint(
-    sprint: ResolvedTaskDocument,
+    sprint: ResolvedTaskDocument | None,
     master: ResolvedTaskDocument,
     candidate: ResolvedTaskDocument,
     *,
@@ -210,7 +210,7 @@ def candidate_task_topology_fingerprint(
 
 
 def semantic_topology_projection(
-    sprint: ResolvedTaskDocument,
+    sprint: ResolvedTaskDocument | None,
     master: ResolvedTaskDocument,
     candidate: ResolvedTaskDocument,
     *,
