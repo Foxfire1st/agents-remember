@@ -19,6 +19,7 @@ lists the groups of tools.
 - [Concepts](concepts.md) defines every term: tool server, host, harness, role agent, memory
   repository, card, knowledge record, task.
 - [Features](features.md) says what the product does, part by part.
+- [The explainer video](assets/agents-remember-explainer.mp4): 2 min 34 s, with music, no narration.
 
 ## Install steps
 
