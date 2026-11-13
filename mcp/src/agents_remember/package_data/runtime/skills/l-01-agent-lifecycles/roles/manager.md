@@ -67,7 +67,7 @@ Decide leaf order, agent starts and replacements, operational problems, ordinary
 
 You own the task's construction: step order, evidence form, which existing test or command demonstrates a property, and sandbox or scratch instruments that change no product source. After a harness, loader or capture fault, you may order one rerun on the same operands. A second failure of one cause goes upward with the attempts already made.
 
-Assign a check or investigation that belongs to no leaf to an Investigator on your own sprint and master. Never select a leaf for this role. Send the scoped concern as your first `role_message` on `agents-remember-task` to the returned agent identifier.
+Assign a check or investigation belonging to no leaf to an Investigator on your master and sprint if commanded. Never select a leaf for this role. Send the scoped concern as your first `role_message` on `agents-remember-task` to the returned agent identifier.
 
 Before sending an occasion upward, read your rulings record and the Architect's rulings for this master. Settle a matter covered by an earlier ruling of the same kind and name that ruling in your record. Send only an uncovered question upward. A round beyond the settings limit, scope beyond the task's requirement and every developer decision still go upward.
 

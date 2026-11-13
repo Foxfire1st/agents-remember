@@ -580,13 +580,11 @@ def _task_context(contract: WorktreeContract):
             raise TaskDocumentRefError("task-document-parent-missing", candidate.ref.key)
         master = topology.resolve(master_ref)
         sprint_ref = topology.parent(master.ref)
-        if sprint_ref is None:
-            raise TaskDocumentRefError("task-document-parent-missing", master.ref.key)
-        sprint = topology.resolve(sprint_ref)
-        authored_graph = sprint.document.executionGraph
+        sprint = topology.resolve(sprint_ref) if sprint_ref is not None else None
+        authored_graph = sprint.document.executionGraph if sprint is not None else None
         graph = (
             graph_context(topology, sprint.ref, authored_graph=authored_graph)
-            if authored_graph is not None
+            if authored_graph is not None and sprint is not None
             else None
         )
     except TaskDocumentRefError as exc:

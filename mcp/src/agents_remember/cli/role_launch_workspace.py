@@ -41,22 +41,25 @@ from agents_remember.worktrees.worktree_contract import (
 
 
 def _recorded_parent(context: RoleLaunchContext) -> str:
-    """The task folder that commands the leaf's master: its sprint.
+    """The task folder that commands the leaf's master: its sprint, or the master itself.
 
     A master's parent is its sprint. A series contract written before 2026-09-29 records the
     master's *own* name in ``parent_task_name``, and feeding that back as the nested task folder
     resolves the leaf under ``<master>/<master>`` -- a folder that does not exist. The recorded
     value is therefore used only when it names a folder other than the master's own, and the
-    sprint's folder is the answer otherwise.
+    sprint's folder is the answer otherwise. A master that no sprint commands is the leaf's
+    outer folder itself, so its own name is the answer then.
     """
 
-    assert context.master is not None and context.sprint is not None
+    assert context.master is not None
     master_folder = context.master.path.parent.name
     path = series_contract_path(context.master.path.parent)
     if path.exists():
         recorded = load_contract(path).parent_task_name
         if recorded and recorded != master_folder:
             return recorded
+    if context.sprint is None:
+        return master_folder
     return context.sprint.path.parent.name
 
 
@@ -294,7 +297,7 @@ def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> 
 
     if context.role not in LEAF_ROLES:
         return workspace_folder(config.workspace_root)
-    assert context.task is not None and context.sprint is not None
+    assert context.task is not None
     _refuse_open_intent_review(context.task)
     direct = _direct_leaf_grant(config, context.task)
     if direct:

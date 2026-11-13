@@ -85,7 +85,7 @@ BINDING_VARIABLES = (
 SEAT_VARIABLES = ("AR_SPAWN_ROLE", "AR_HOSTED_SESSION_ID")
 
 
-def binding(role: str = "worker", *references: TaskDocumentRef) -> AgentBinding:
+def binding(role: str = "worker", *references: TaskDocumentRef | None) -> AgentBinding:
     sprint, master, task = (*references, None, None, None)[:3]
     return AgentBinding(
         agent_id="f3c1a2b4-5d6e-4f70-8a91-b2c3d4e5f607",
@@ -214,6 +214,15 @@ class ToolServerDefinitionTests(unittest.TestCase):
                 )
                 self.assertEqual([environment[name] for name in SEAT_VARIABLES], ["", ""])
                 self.assertEqual(read_agent_binding(environment), bound)
+        for role in ("manager", "worker", "reviewer", "curator"):
+            with self.subTest(
+                "a master that no sprint commands carries no sprint reference", role=role
+            ):
+                standalone = binding(role, None, *ROLE_REFERENCES[role][1:])
+                self.assertEqual(read_agent_binding(standalone.environment()), standalone)
+        with self.subTest("an investigator may name a master that no sprint commands"):
+            master_only = binding("investigator", None, MASTER)
+            self.assertEqual(read_agent_binding(master_only.environment()), master_only)
         self.assertIsNone(read_agent_binding({"AR_ROLE": "worker"}))
 
         complete = binding("worker", SPRINT, MASTER, LEAF).environment()
@@ -257,6 +266,10 @@ class ToolServerDefinitionTests(unittest.TestCase):
             ),
             "a sprint-bound role with a master": (
                 {"AR_ROLE": "orchestrator", "AR_TASK_REF": ""},
+                "the task references of a orchestrator",
+            ),
+            "a sprint-bound role without its sprint": (
+                {"AR_ROLE": "orchestrator", "AR_SPRINT_REF": ""},
                 "the task references of a orchestrator",
             ),
             "a master-bound role without its master": (

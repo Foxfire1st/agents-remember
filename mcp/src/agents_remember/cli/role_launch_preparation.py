@@ -842,13 +842,20 @@ def _compile_handover(
         ),
     }
     if context.role in LEAF_ROLES and context.task is not None:
+        seat_selection = ar_binding["selection"]
         handover["leafSeats"] = {
             "roles": ["worker", "reviewer", "curator"],
             "roleMessageArguments": {
                 role: {
                     "role": role,
-                    "sprint_document_ref": ar_binding["selection"]["sprintDocumentRef"],
-                    "master_document_ref": ar_binding["selection"]["masterDocumentRef"],
+                    # A leaf of a standalone master has no sprint to name; the master and
+                    # the leaf are the whole selection then.
+                    **(
+                        {"sprint_document_ref": seat_selection["sprintDocumentRef"]}
+                        if seat_selection.get("sprintDocumentRef") is not None
+                        else {}
+                    ),
+                    "master_document_ref": seat_selection["masterDocumentRef"],
                     "task_document_ref": context.task.ref.model_dump(mode="json"),
                 }
                 for role in ("worker", "reviewer", "curator")
@@ -908,12 +915,14 @@ def _return_address(
     def dumped(reference: Any) -> dict[str, Any] | None:
         return reference.model_dump(mode="json") if reference is not None else None
 
-    if context.role in LEAF_ROLES and context.sprint is not None and context.master is not None:
-        return {
+    if context.role in LEAF_ROLES and context.master is not None:
+        address = {
             "role": "manager",
-            "sprint_document_ref": dumped(context.sprint.ref),
             "master_document_ref": dumped(context.master.ref),
         }
+        if context.sprint is not None:
+            address["sprint_document_ref"] = dumped(context.sprint.ref)
+        return address
     # A leaf without its master in context still names its starter's role;
     # the references ride along where they are known.
     if started_by is None:

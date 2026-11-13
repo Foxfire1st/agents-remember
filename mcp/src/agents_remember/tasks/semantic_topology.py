@@ -114,7 +114,7 @@ class SemanticTopologyV2(_StrictProjection):
         default=SEMANTIC_TOPOLOGY_SCHEMA,
         alias="schema",
     )
-    sprint: SemanticTopologyRef
+    sprint: SemanticTopologyRef | None
     master: SemanticTopologyRef
     leaf: SemanticTopologyRef
     parentRow: SemanticTopologyParentRow
@@ -126,7 +126,7 @@ class SemanticTopologyV2(_StrictProjection):
 
 
 def semantic_topology_projection(
-    sprint: ResolvedTaskDocument,
+    sprint: ResolvedTaskDocument | None,
     master: ResolvedTaskDocument,
     candidate: ResolvedTaskDocument,
     *,
@@ -146,7 +146,7 @@ def semantic_topology_projection(
 
 
 def semantic_topology_projection_with_work(
-    sprint: ResolvedTaskDocument,
+    sprint: ResolvedTaskDocument | None,
     master: ResolvedTaskDocument,
     candidate: ResolvedTaskDocument,
     *,
@@ -158,7 +158,7 @@ def semantic_topology_projection_with_work(
     _require_schema_version(schema_version)
     projector = _validate_document_taxonomy(sprint, master, candidate)
     row = _owning_parent_row(master, candidate)
-    authored_graph = sprint.document.executionGraph
+    authored_graph = sprint.document.executionGraph if sprint is not None else None
     work: SemanticTopologyCandidateWork | None = None
     if authored_graph is None:
         if graph_index is not None:
@@ -182,7 +182,11 @@ def semantic_topology_projection_with_work(
         nature = _dag_execution_nature(master)
         placement, work = _dag_placement(graph_index, master.ref, row)
     projection = SemanticTopologyV2(
-        sprint=_structural_projection(SemanticTopologyRef, sprint.ref, projector),
+        sprint=(
+            _structural_projection(SemanticTopologyRef, sprint.ref, projector)
+            if sprint is not None
+            else None
+        ),
         master=_structural_projection(SemanticTopologyRef, master.ref, projector),
         leaf=_structural_projection(SemanticTopologyRef, candidate.ref, projector),
         parentRow=_structural_projection(SemanticTopologyParentRow, row, projector),
@@ -193,7 +197,7 @@ def semantic_topology_projection_with_work(
 
 
 def semantic_topology_fingerprint(
-    sprint: ResolvedTaskDocument,
+    sprint: ResolvedTaskDocument | None,
     master: ResolvedTaskDocument,
     candidate: ResolvedTaskDocument,
     *,
@@ -213,7 +217,7 @@ def semantic_topology_fingerprint(
 
 
 def semantic_topology_fingerprint_with_work(
-    sprint: ResolvedTaskDocument,
+    sprint: ResolvedTaskDocument | None,
     master: ResolvedTaskDocument,
     candidate: ResolvedTaskDocument,
     *,
@@ -247,13 +251,17 @@ def _require_schema_version(schema_version: str) -> None:
 
 
 def _validate_document_taxonomy(
-    sprint: ResolvedTaskDocument,
+    sprint: ResolvedTaskDocument | None,
     master: ResolvedTaskDocument,
     candidate: ResolvedTaskDocument,
 ) -> TaskDocumentFieldEffectProjector:
     try:
         projector = TaskDocumentFieldEffectProjector()
-        for document in (sprint.document, master.document, candidate.document):
+        for document in (
+            *([sprint.document] if sprint is not None else []),
+            master.document,
+            candidate.document,
+        ):
             projector.validate(document)
     except TaskDocumentFieldEffectTaxonomyError as exc:
         raise SemanticTopologyError("semantic-topology-schema-unclassified", str(exc)) from exc

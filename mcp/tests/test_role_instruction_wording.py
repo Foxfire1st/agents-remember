@@ -339,7 +339,7 @@ class InstructionFileWordingTests(unittest.TestCase):
         investigator = role_text("investigator")
         for clause in (
             "Investigate one concern of any kind",
-            "without a task reference, on a sprint, or on a sprint and master",
+            "without a task reference, on a sprint, a standalone master, or both",
             "its first `role_message` on `agents-remember-task` supplies the concern",
             "ask that parent once and wait; do not invent either",
             "Without a parent, use the developer's request",
