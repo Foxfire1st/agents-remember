@@ -31,6 +31,7 @@ import pytest
 from agents_remember.application.review_frame_store import frame_scope, reopen_frame
 from agents_remember.canvas import presenter_tools, prospective
 from agents_remember.canvas.explainer_answer_bounds import answer_tokens
+from agents_remember.canvas.explainer_browser import PLAYWRIGHT_VERSION, BrowserReady
 from agents_remember.canvas.presenter import Presenter, PresenterRefused
 from agents_remember.canvas.prospective import (
     BrowserProspectiveLoad,
@@ -528,6 +529,7 @@ def test_each_render_keeps_its_pictures_whole_in_its_own_run_folder_and_resumes_
             )
 
     monkeypatch.setattr(presenter_tools, "BrowserProspectiveLoad", Browser)
+    monkeypatch.setattr(presenter_tools, "browser_missing", lambda: ())  # the browser is here
     drafts = tmp_path / "drafts"
     drafts.mkdir()
     authoring = presenter_tools.AuthoringTools(
@@ -628,3 +630,279 @@ def test_the_render_reply_fits_1000_tokens_in_total_and_names_what_moved() -> No
             "coverage": "2 of 5 passes",
         }
     assert "readiness" not in reply and "allErrors" not in reply  # the rest stays in the file
+
+
+# ---------------------------------------------------------------------------------------------
+# The browser the load runs on: this installation's own, and no fetch for an instrument
+# ---------------------------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the fake node relies on a POSIX shebang")
+def test_the_load_runs_on_the_product_node_with_the_products_browser_folder(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Fact 2 and 3: the product's Node and the fetched browser, handed to the one child run.
+
+    The child is the fake node, standing where the product's Node would stand; what it reports is
+    the environment it was given, which is how the load's two names reach Playwright.
+    """
+
+    capture = tmp_path / "seen.json"
+    body = (
+        "import json, os\n"
+        f"json.dump(dict(os.environ), open({str(capture)!r}, 'w'))\n"
+        f"print(json.dumps({CLEAN!r}))\n"
+    )
+    fake = _fake_node(tmp_path, body)
+    module = tmp_path / "data/agents-remember/explainer-browser/node_modules/playwright/index.js"
+    browsers = tmp_path / "data/agents-remember/explainer-browser/browsers"
+    monkeypatch.setattr(prospective, "node_executable", lambda: fake)
+    monkeypatch.setattr(
+        prospective,
+        "browser_environment",
+        lambda: {
+            "AR_PLAYWRIGHT": module.as_posix(),
+            "PLAYWRIGHT_BROWSERS_PATH": browsers.as_posix(),
+        },
+    )
+    monkeypatch.setattr(
+        prospective,
+        "ensure",
+        lambda **_: BrowserReady(state="ready", module=module, browsers=browsers),
+    )
+    script = tmp_path / "runner.mjs"
+    script.write_text("// stand-in\n", encoding="utf-8")
+
+    result = BrowserProspectiveLoad(script=script).load(
+        assets={"index.html": PAGE}, entrypoint="index.html", packet=packet(record())
+    )
+
+    assert (result.state, result.kind) == ("loaded", "browser")
+    seen = json.loads(capture.read_text(encoding="utf-8"))
+    assert seen["AR_PLAYWRIGHT"] == module.as_posix()
+    assert seen["PLAYWRIGHT_BROWSERS_PATH"] == browsers.as_posix()
+    browser_record = result.browser
+    assert browser_record is not None
+    assert browser_record["state"] == "ready"
+    assert browser_record["playwright"] == PLAYWRIGHT_VERSION
+    assert browser_record["module"] == module.as_posix()
+    assert browser_record["browsers"] == browsers.as_posix()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the fake node relies on a POSIX shebang")
+def test_a_load_that_names_its_own_node_fetches_no_browser(tmp_path: Path, monkeypatch) -> None:
+    """Fact 2: naming a Node is an instrument; it brings its own browser and nothing is fetched."""
+
+    def refuse(**_kwargs):
+        raise AssertionError("an instrumented load must not fetch a browser")
+
+    monkeypatch.setattr(prospective, "ensure", refuse)
+    result = _load_with(tmp_path, f"import json\nprint(json.dumps({CLEAN!r}))\n")
+
+    assert result.state == "loaded"
+    assert result.browser is None
+
+
+def test_a_load_whose_browser_cannot_be_made_ready_is_unavailable_and_loads_nothing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Fact 4: the fetch's own refusal is the load's answer, at the place the page was asked for."""
+
+    detail = (
+        "npm ERR! EAI_AGAIN registry.npmjs.org. Playwright 1.65.0 and its Chromium are missing. "
+        "Fetch them with `agents-remember explainer-browser --fetch`"
+    )
+    monkeypatch.setattr(
+        prospective,
+        "ensure",
+        lambda **_: (_ for _ in ()).throw(
+            prospective.ExplainerRefused("browser-fetch-failed", detail)
+        ),
+    )
+    script = tmp_path / "runner.mjs"
+    script.write_text("// never executed\n", encoding="utf-8")
+
+    result = BrowserProspectiveLoad(script=script).load(
+        assets={"index.html": PAGE}, entrypoint="index.html", packet=packet(record())
+    )
+
+    assert (result.state, result.kind) == ("unavailable", "browser")
+    assert result.errors == (f"browser-fetch-failed: {detail}",)
+    assert "nothing was published" in result.detail
+    assert result.browser == {"state": "missing", "detail": detail}
+
+
+def test_a_render_answer_carries_the_browser_the_page_was_loaded_with(tmp_path: Path) -> None:
+    """Fact 1: the answer at the place the page was asked for says a fetch happened, within its bound.
+
+    The record is an identity item of the answer, never trimmed: the user is told at the first
+    explanation which Playwright and Chromium were fetched and where they are.
+    """
+
+    fetched = {
+        "state": "fetched",
+        "playwright": "1.65.0",
+        "module": "/data/agents-remember/explainer-browser/node_modules/playwright/index.js",
+        "browsers": "/data/agents-remember/explainer-browser/browsers",
+        "detail": "Playwright 1.65.0 and its Chromium were missing, so this installation fetched "
+        "them into /data/agents-remember/explainer-browser before the load, in 12.5 s.",
+    }
+    reply = render_answer(
+        {
+            "state": "loaded",
+            "browser": fetched,
+            "run": "renders/run-001",
+            "reportPath": "renders/run-001/report.json",
+            "picture": "renders/run-001/page.png",
+            "publication": {"state": "published", "revision": 1},
+            "interactive": {"pictureFolder": None, "pictureCount": 0},
+            "allErrors": [],
+        }
+    )
+
+    assert reply["browser"] == fetched
+    assert answer_tokens(reply) <= 1000
+
+
+def test_a_first_render_with_a_missing_browser_announces_and_fetches_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rule 1's route: the tool server names the missing browser and the sentence; the fetch waits.
+
+    No shell command, no silent fetch: the first render answers the state, the sentence the user
+    reads, and asks for the call again; the second call renders, and only it fetches.
+    """
+
+    class ExplodingBrowser:
+        def __init__(self, **_kwargs) -> None:
+            raise AssertionError("the first render must not start the load")
+
+    monkeypatch.setattr(presenter_tools, "browser_missing", lambda: ("Playwright 1.65.0 at /x",))
+    monkeypatch.setattr(presenter_tools, "BrowserProspectiveLoad", ExplodingBrowser)
+    drafts = tmp_path / "drafts"
+    drafts.mkdir()
+    authoring = presenter_tools.AuthoringTools(
+        drafts, host=tmp_path / "instructions", grants={"working": str(drafts), "inputs": {}}
+    )
+
+    report = authoring.render(packet=packet(record()), assets={"index.html": PAGE})
+
+    assert report["state"] == "announce"
+    assert report["notice"] == presenter_tools.BROWSER_NOTICE
+    assert report["browser"] == {
+        "state": "missing",
+        "missing": ["Playwright 1.65.0 at /x"],
+        "notice": presenter_tools.BROWSER_NOTICE,
+    }
+    assert "call render again" in report["next"]
+    assert not (tmp_path / "renders").exists()
+    assert (tmp_path / "state" / "browser-announced.json").is_file()
+
+
+def test_an_announced_browser_no_longer_blocks_the_next_render(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The announcement is one call; with the browser present the same draft renders and publishes."""
+
+    class Browser:
+        def __init__(self, *, screenshot, **_kwargs) -> None:
+            self.picture = screenshot
+
+        def resuming(self, _report):
+            return self
+
+        def load(self, **_kwargs) -> ProspectiveResult:
+            self.picture.write_bytes(b"d" * 16)
+            return ProspectiveResult(state="loaded", kind="browser")
+
+    monkeypatch.setattr(presenter_tools, "BrowserProspectiveLoad", Browser)
+    drafts = tmp_path / "drafts"
+    drafts.mkdir()
+    authoring = presenter_tools.AuthoringTools(
+        drafts, host=tmp_path / "instructions", grants={"working": str(drafts), "inputs": {}}
+    )
+    monkeypatch.setattr(presenter_tools, "browser_missing", lambda: ("Playwright 1.65.0 at /x",))
+    assert (
+        authoring.render(packet=packet(record()), assets={"index.html": PAGE})["state"]
+        == "announce"
+    )
+
+    monkeypatch.setattr(presenter_tools, "browser_missing", lambda: ())
+    report = authoring.render(packet=packet(record()), assets={"index.html": PAGE})
+    assert report["state"] == "loaded"
+    assert report["run"] == "renders/run-001"
+
+
+def test_a_render_that_ended_unavailable_for_a_missing_browser_is_kept_for_the_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rule 4: the page reads the last render's own words — what is missing and the command."""
+
+    detail = (
+        "npm could not install playwright@1.65.0: npm error code ECONNREFUSED. Playwright 1.65.0 and "
+        "its Chromium are missing from /x. Fetch them with `agents-remember explainer-browser --fetch`"
+    )
+
+    class RefusingBrowser:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def resuming(self, _report):
+            return self
+
+        def load(self, **_kwargs) -> ProspectiveResult:
+            return ProspectiveResult(
+                state="unavailable",
+                kind="browser",
+                browser={"state": "missing", "detail": detail},
+                errors=(f"load: browser-fetch-failed: {detail}",),
+            )
+
+    monkeypatch.setattr(presenter_tools, "BrowserProspectiveLoad", RefusingBrowser)
+    monkeypatch.setattr(presenter_tools, "browser_missing", lambda: ())
+    drafts = tmp_path / "drafts"
+    drafts.mkdir()
+    authoring = presenter_tools.AuthoringTools(
+        drafts, host=tmp_path / "instructions", grants={"working": str(drafts), "inputs": {}}
+    )
+
+    report = authoring.render(packet=packet(record()), assets={"index.html": PAGE})
+    kept = json.loads((tmp_path / "state" / "last-render.json").read_text(encoding="utf-8"))
+
+    assert report["state"] == "unavailable"
+    assert kept["state"] == "unavailable"
+    assert kept["browser"]["state"] == "missing"
+    assert "agents-remember explainer-browser --fetch" in kept["browser"]["detail"]
+    assert kept["run"] == report["run"]
+
+
+def test_a_published_render_clears_the_page_failure_the_last_one_left(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The page's message goes with the next published page, not with a later failure alone."""
+
+    class Browser:
+        def __init__(self, *, screenshot, **_kwargs) -> None:
+            self.picture = screenshot
+
+        def resuming(self, _report):
+            return self
+
+        def load(self, **_kwargs) -> ProspectiveResult:
+            self.picture.write_bytes(b"d" * 16)
+            return ProspectiveResult(state="loaded", kind="browser")
+
+    monkeypatch.setattr(presenter_tools, "browser_missing", lambda: ())
+    monkeypatch.setattr(presenter_tools, "BrowserProspectiveLoad", Browser)
+    drafts = tmp_path / "drafts"
+    drafts.mkdir()
+    authoring = presenter_tools.AuthoringTools(
+        drafts, host=tmp_path / "instructions", grants={"working": str(drafts), "inputs": {}}
+    )
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "last-render.json").write_text('{"state": "unavailable"}', encoding="utf-8")
+
+    authoring.render(packet=packet(record()), assets={"index.html": PAGE})
+
+    assert not (state / "last-render.json").exists()

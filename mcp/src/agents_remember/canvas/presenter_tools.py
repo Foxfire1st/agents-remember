@@ -15,6 +15,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from agents_remember.canvas.explainer_browser import BROWSER_NOTICE, browser_missing
 from agents_remember.canvas.explainer_paths import RENDERS_DIRECTORY
 from agents_remember.canvas.presenter_assets import collect_assets
 from agents_remember.canvas.presenter_files import ensure_child, open_binary, write_output
@@ -30,6 +31,12 @@ RUN_REPORT = "report.json"
 RUN_PICTURE = "page.png"
 #: The folder of one render's interaction pictures: several pictures of one call get their own.
 RUN_INTERACTIONS = "interactions"
+#: The workspace folder where a render keeps what the next call and the page need.
+STATE_DIRECTORY = "state"
+#: The browser announcement: this workspace's seat was given the sentence for a missing browser.
+BROWSER_ANNOUNCED = "browser-announced.json"
+#: The last render's failure, kept while it ended unavailable for a missing browser.
+LAST_RENDER = "last-render.json"
 
 
 def _next_run(base: Path) -> str:
@@ -89,8 +96,32 @@ class AuthoringTools:
 
         A run whose interaction observation ran out of time names what it did not visit; the next
         render of the same draft resumes it (``resume``), visiting only what is left.
+
+        The browser is the load's own business (``canvas.prospective``): when Playwright or its
+        Chromium is missing, the first render does not fetch -- it answers ``announce`` with the
+        missing part, the sentence the user reads and a request for the call again (rule 1: nothing
+        is fetched before the seat could say it). The next call fetches at this first explanation,
+        the run starts, and its ``browser`` record says ``fetched``; a fetch that fails is an
+        ``unavailable`` load whose errors name what is missing and the command that gets it, and
+        nothing publishes. That last answer is kept in ``state/last-render.json`` so the review page
+        can say it (rule 4), and a later published render clears it.
         """
 
+        missing = browser_missing()
+        if missing and not self._announced():
+            self._announce(missing)
+            return {
+                "state": "announce",
+                "kind": "browser",
+                "browser": {
+                    "state": "missing",
+                    "missing": list(missing),
+                    "notice": BROWSER_NOTICE,
+                },
+                "notice": BROWSER_NOTICE,
+                "next": "call render again to fetch the browser and publish the page",
+                "errors": [],
+            }
         if packet is None:
             packet = EvidencePacket.model_validate_json(self.read("evidence.json"))
         if assets is None:
@@ -124,7 +155,7 @@ class AuthoringTools:
                 result.interactive["pictureCount"] = count
                 result.interactive["picturesComplete"] = not picture_errors
                 result.interactive["pictureErrors"] = picture_errors
-        return {
+        report = {
             **asdict(result),
             "assetDigests": digests,
             "viewport": [1280, 720],
@@ -132,6 +163,59 @@ class AuthoringTools:
             "picture": None if picture_problem else f"{run}/{RUN_PICTURE}",
             "pictureError": picture_problem or None,
         }
+        self._remember(report)
+        return report
+
+    @property
+    def state(self) -> Path:
+        """The workspace's own state folder: the browser announcement and the last render."""
+
+        return self.renders.parent / STATE_DIRECTORY
+
+    def _announced(self) -> bool:
+        """Whether the seat was already given the sentence for a missing browser, in this workspace."""
+
+        return (self.state / BROWSER_ANNOUNCED).is_file()
+
+    def _announce(self, missing: tuple[str, ...]) -> None:
+        """Keep the announcement, so the next call renders instead of announcing again."""
+
+        self.state.mkdir(parents=True, exist_ok=True)
+        (self.state / BROWSER_ANNOUNCED).write_text(
+            json.dumps({"missing": list(missing), "notice": BROWSER_NOTICE}, indent=1) + "\n",
+            encoding="utf-8",
+        )
+
+    def _remember(self, report: Mapping[str, Any]) -> None:
+        """Keep the last render's failure for the page, or clear it once a page is published.
+
+        Rule 4: when the last render ended ``unavailable`` for a missing browser, the review page's
+        own empty block says what is missing and the command; that message goes with the next
+        published page, so any other outcome removes the record.
+        """
+
+        kept = self.state / LAST_RENDER
+        published = report.get("state") in {"loaded", "published"}
+        if published:
+            # The page answers the sentence and any failure both: it is published now.
+            (self.state / BROWSER_ANNOUNCED).unlink(missing_ok=True)
+        if published or (report.get("browser") or {}).get("state") != "missing":
+            kept.unlink(missing_ok=True)
+            return
+        self.state.mkdir(parents=True, exist_ok=True)
+        kept.write_text(
+            json.dumps(
+                {
+                    "state": report.get("state"),
+                    "run": report.get("run"),
+                    "browser": report.get("browser"),
+                    "errors": list(report.get("errors") or []),
+                },
+                indent=1,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
     def _keep(self, relative: str, source: Path) -> str:
         """Write one picture into the run folder; answer an empty string, or why it was not kept."""
@@ -179,10 +263,17 @@ class AuthoringTools:
             }
         return None
 
-    def keep_report(self, report: dict[str, Any]) -> str:
-        """Write one render's whole report into its run folder, naming its own path."""
+    def keep_report(self, report: dict[str, Any]) -> str | None:
+        """Write one render's whole report into its run folder, naming its own path.
 
-        relative = f"{report['run']}/{RUN_REPORT}"
+        An answer that began no run -- the announce of a missing browser -- has no folder to write
+        into and nothing to file; it is answered as it stands.
+        """
+
+        run = report.get("run")
+        if run is None:
+            return None
+        relative = f"{run}/{RUN_REPORT}"
         report["reportPath"] = relative
         write_output(
             self.renders,

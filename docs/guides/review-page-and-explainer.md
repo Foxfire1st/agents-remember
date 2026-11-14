@@ -494,42 +494,52 @@ offers "Retry".
 
 ### What the explainer needs before it can publish
 
-The explainer publishes a page only after a browser on your machine has loaded its draft. The
-load needs three things that an installation of Agents Remember does not bring:
+The explainer publishes a page only after a browser on your machine has loaded its draft. That
+load needs Playwright and its Chromium, which are not part of the installation — and you install
+neither.
 
-- the program `node` on the search path;
-- the Playwright module. The dashboard's server reads the path of the module's file `index.js`
-  from the environment variable `AR_PLAYWRIGHT` when it starts the explainer. Without the variable
-  it looks for `dashboard/node_modules/playwright/index.js` in a checkout of the repository; an
-  installation from the package has no such folder;
-- the browser that Playwright installs, in Playwright's own folder: the folder that
-  `PLAYWRIGHT_BROWSERS_PATH` names, else `$XDG_CACHE_HOME/ms-playwright`, else
-  `~/.cache/ms-playwright`.
+At the first explanation that publishes a page, the product fetches Playwright and its Chromium
+into its own folder, `<data>/agents-remember/explainer-browser`. `<data>` is the folder
+`XDG_DATA_HOME` names, else `~/.local/share`; it is the same folder that holds the Node the
+product installs for the host. The fetch uses that Node, so there is no Node of your own to
+install. Nothing is fetched when the package or the host is installed, and later explanations
+fetch nothing: the two are reused as they are.
 
-On an installation from the package these commands give the load the module and the browser.
-`<folder>` is a folder of your choice.
+Before that first page, the explainer's first call to its render tool fetches nothing: the answer
+is `announce`, naming the missing part and carrying one sentence. The Explanation tab shows that
+sentence in one line — that this installation fetches its browser once, that this first page takes
+a minute or two, and that later pages are immediate — and the explainer calls the tool again; that
+call fetches and publishes. Nothing is fetched before you could be told, and no shell command of
+yours is involved. The fetch needs access to the npm registry and to Playwright's download host
+once, on that first explanation.
+
+When the fetch cannot run — no network to those hosts, or a folder that cannot be written — it is
+said on that page, in the render's own words: with no page yet, the tab "Explanation" keeps
+"No explanation yet" and that block names what is missing and the command that gets it; with an
+earlier page still on screen, the same words stand in one line above it, and that line says the page
+below is an earlier revision, not an answer to this request. The command does the same fetch on its
+own:
 
 ```bash
-npm install --prefix <folder> playwright
-cd <folder> && npx playwright install chromium
-export AR_PLAYWRIGHT=<folder>/node_modules/playwright/index.js
+agents-remember explainer-browser --fetch
 ```
 
-The dashboard's server keeps the environment of its start. Start it from a shell that holds the
-variable: `agents-remember dashboard --stop`, then `agents-remember dashboard --daemon`.
+`agents-remember explainer-browser` without `--fetch` only reports what is present and what is
+missing, and where. Until the two are there, nothing is published: the previous revision stays on
+screen and no page is shown as the current one.
 
-In a checkout, `npm ci` in the folder `dashboard/` brings the module, and
-`node dashboard/node_modules/playwright/cli.js install chromium-headless-shell` installs the
-browser. The Playwright version of the checkout, 1.60.0, installs no browser on Ubuntu 26.04: the
-call ends with "Playwright does not support chromium-headless-shell on ubuntu26.04-x64". With
-`PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64` in front of it, the call installs the browser
-for Ubuntu 24.04, and the load works with that browser.
+`AR_PLAYWRIGHT` keeps working for a user who sets it: it names the Playwright module's
+`index.js`, and that module is used instead, with the browser folder Playwright's own defaults
+name — `PLAYWRIGHT_BROWSERS_PATH` when it is set, else `$XDG_CACHE_HOME/ms-playwright`, else
+`~/.cache/ms-playwright`. Nothing is fetched or replaced behind a module you name.
 
-Without the module, without the browser or without `node`, the load answers the explainer
-`unavailable` with the reason, and nothing is published. The review page shows no word about it:
-the tab "Explanation" keeps "No explanation yet", and the header state reads "live · idle". Only
-the explainer's answer in the chat tells you that its page is not published. Once the three are
-in place, the next request publishes.
+In a checkout, `npm ci` in the folder `dashboard/` brings Playwright 1.65.0, and
+`node dashboard/node_modules/playwright/cli.js install chromium` installs its browser on Ubuntu
+26.04 without any override. The fetch the product performs pins that same version.
+
+macOS is not measured for this path: the fetch runs where the product installs its own Node, which
+is Linux x86_64. On another system, name a Playwright module in `AR_PLAYWRIGHT` and install its
+Chromium in the browser folder Playwright uses there.
 
 ### Later requests
 

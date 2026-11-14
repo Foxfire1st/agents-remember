@@ -211,13 +211,16 @@ keeps the durable attempt records readable and publishes through the confined fr
   workspace, with `report.json`, `page.png` and `interactions/`; the reply names the folder and
   carries no picture. The load answers `loaded`, `failed` or `unavailable`, and only `loaded`
   lets a revision become ready. The node script of the load imports the Playwright module that
-  `AR_PLAYWRIGHT` names. The start of the explainer sets the variable for the explainer: from the
-  dashboard server's environment, else from the file `node_modules/playwright/index.js` in the
-  folder `dashboard/` of a checkout. An installation from the package has no such folder;
+  `AR_PLAYWRIGHT` names, and the load runs on the Node the product installs for the host. The
+  module and its Chromium are the product's own (`canvas/explainer_browser.py`): when either is
+  missing at that first load, the load fetches both into `<data>/agents-remember/explainer-browser`
+  and its result records that they were fetched, so the answer at the place the page was asked for
+  says so. A user who sets `AR_PLAYWRIGHT` keeps their module and its browser folder, and nothing is
+  fetched behind it; an instrumented load, which names its own Node, fetches nothing either.
   [What the explainer needs before it can publish](../guides/review-page-and-explainer.md#what-the-explainer-needs-before-it-can-publish)
-  tells how to provide the module. An installation without that module gets `unavailable`, and nothing is
-  published. Documentation that the explainer reads is separately bounded and labeled; it is never
-  review evidence.
+  tells the user's side. A load whose browser cannot be made ready is `unavailable` with the reason
+  and the command that gets the browser, and nothing is published. Documentation that the explainer
+  reads is separately bounded and labeled; it is never review evidence.
 
 ## The panel
 

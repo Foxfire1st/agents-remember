@@ -17,6 +17,7 @@ from typing import Any, Protocol
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from agents_remember.canvas.explainer_browser import BROWSER_COMMAND
 from agents_remember.canvas.explainer_capsule import capability_text
 from agents_remember.canvas.explainer_grades import grades_path, read_grades
 from agents_remember.canvas.explainer_paths import (
@@ -739,6 +740,44 @@ def _explanation_view(manifest: FrameManifest | None) -> dict[str, Any] | None:
     }
 
 
+def _last_render_view(workspace: Path) -> dict[str, Any] | None:
+    """Rule 4: the last render's own words, when it ended unavailable for a missing browser.
+
+    ``canvas.presenter_tools`` keeps the record in the leaf's workspace and clears it on a published
+    page; the review page's empty block reads it here, so the message arrives with the state and no
+    new control is added to the page.
+    """
+
+    try:
+        kept = json.loads((workspace / "state" / "last-render.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    browser = kept.get("browser") or {}
+    if browser.get("state") != "missing":
+        return None
+    return {
+        "state": kept.get("state"),
+        "missing": list(browser.get("missing") or []),
+        "detail": browser.get("detail"),
+        "command": BROWSER_COMMAND,
+    }
+
+
+def _browser_notice_view(workspace: Path) -> dict[str, Any] | None:
+    """Rule 1: the sentence the page says before the first fetch, from the render's own record."""
+
+    try:
+        kept = json.loads(
+            (workspace / "state" / "browser-announced.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return None
+    notice = kept.get("notice")
+    if not isinstance(notice, str) or not notice:
+        return None
+    return {"notice": notice, "missing": list(kept.get("missing") or [])}
+
+
 def _query_int(request: Request, *names: str) -> int | None:
     for name in names:
         raw = request.query_params.get(name)
@@ -803,6 +842,12 @@ def _state_payload(
         "retired": state.retired is not None,
         "retiredAt": None if state.retired is None else state.retired.get("at"),
         "explanation": _explanation_view(manifest),
+        # Rule 4: the review page's own empty block repeats the last render's words when it ended
+        # unavailable for a missing browser; a published page clears it (canvas.presenter_tools).
+        "lastRender": _last_render_view(state.workspace),
+        # Rule 1, at the place where the user asked: before the fetch, or while it runs, the page
+        # says the browser is fetched once and this first page takes that long.
+        "browserNotice": _browser_notice_view(state.workspace),
         "building": active_building,
         "build": build_state,
         "stale": stale,
