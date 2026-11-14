@@ -17,7 +17,7 @@ from agents_remember.serving.background_accounting import BackgroundLedger
 from agents_remember.serving.build_info import ServingBuild
 from agents_remember.serving.explainer_comparison import ComparisonPreparationPort
 from agents_remember.serving.intent_summary_cache import ReviewIntentSummaryPort
-from agents_remember.serving.knowledge_reader import KnowledgeReaderPort
+from agents_remember.serving.knowledge_reader import KnowledgeBytesPort, KnowledgeReaderPort
 from agents_remember.serving.projections.host_activity import (
     HostActivityReconcile,
     UsageReadPort,
@@ -265,6 +265,13 @@ class ServingCollaborators:
 
     It needs no task, so it is its own port rather than a mode of the review adapter. Omitting it
     refuses the reader route by name.
+    """
+
+    knowledge_bytes: KnowledgeBytesPort | None = None
+    """The code reader's media read: the bytes of a picture or video at the selected code tree.
+
+    Beside ``knowledge_reader`` because it resolves the same selection; omitting it refuses
+    the reader's bytes route by name.
     """
 
     explainer_host: Any = None

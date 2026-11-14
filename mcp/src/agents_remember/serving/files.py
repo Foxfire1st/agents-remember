@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
 from agents_remember.kernel.coordination_context_resolver import mirror_onboarding_path
@@ -43,10 +43,19 @@ from agents_remember.kernel.sidecar_pairing import (
     sidecar_body,
     source_path_from_sidecar,
 )
+from agents_remember.serving.media import (
+    MEDIA_BYTE_LIMIT,
+    looks_binary,
+    media_answer,
+    media_response,
+    media_type_for,
+    working_media,
+)
 from agents_remember.serving.response_contract import (
     SCOPED_READ_RESPONSES,
     DirectoryListing,
     FileContents,
+    FileResolution,
     OnboardingResolution,
     RepoCatalog,
 )
@@ -57,6 +66,7 @@ from agents_remember.serving.scope import (
     decode_capped,
     language_for,
     run_scoped,
+    run_scoped_response,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -194,16 +204,35 @@ def read_file(scope: FileScope, rel: str) -> dict[str, Any]:
     src = _resolve_within(scope.code_root, rel)
     if not src.is_file():
         raise FileNotFoundError(rel)
+    rel_posix = src.relative_to(scope.code_root.resolve()).as_posix()
+    size = src.stat().st_size
+    media_type = media_type_for(src)
+    if media_type is not None:
+        # A picture or video has no text to show: the viewer draws it from the bytes route. Never
+        # read its bytes here -- a 16 MiB video would otherwise be loaded to answer "binary".
+        return {
+            "scope": scope.scope_id,
+            "path": rel_posix,
+            "language": "binary",
+            "size": size,
+            "truncated": size > _MAX_FILE_BYTES,
+            "content": "",
+            "mediaType": media_type,
+            "tooLarge": size > MEDIA_BYTE_LIMIT,
+            "onboarding": _onboarding_meta(scope, rel_posix),
+        }
     raw = src.read_bytes()
     truncated = len(raw) > _MAX_FILE_BYTES
-    try:
-        # Cut at a UTF-8 codepoint boundary so an oversize text file whose multi-byte char straddles
-        # the cap returns its first ~2 MiB with truncated=True, never an empty "binary".
-        content, truncated = decode_capped(raw, _MAX_FILE_BYTES)
-        language = language_for(src)
-    except UnicodeDecodeError:
+    if looks_binary(raw):
+        # NUL bytes mean binary even when the bytes happen to decode as UTF-8; never show the
+        # control characters as a text file.
         content, language = "", "binary"
-    rel_posix = src.relative_to(scope.code_root.resolve()).as_posix()
+    else:
+        try:
+            content, truncated = decode_capped(raw, _MAX_FILE_BYTES)
+            language = language_for(src)
+        except UnicodeDecodeError:
+            content, language = "", "binary"
     return {
         "scope": scope.scope_id,
         "path": rel_posix,
@@ -211,8 +240,43 @@ def read_file(scope: FileScope, rel: str) -> dict[str, Any]:
         "size": len(raw),
         "truncated": truncated,
         "content": content,
+        # A suffix outside the fixed media table has no bytes route; it stays a text or binary read.
+        "mediaType": None,
+        "tooLarge": False,
         "onboarding": _onboarding_meta(scope, rel_posix),
     }
+
+
+def resolve_file_path(scope: FileScope, rel: str) -> dict[str, Any]:
+    """Answer whether one repository path exists, and what a viewer would do with it.
+
+    A rendered document's relative link asks this before it is drawn as a link: a path the
+    repository does not hold is text that says so, never a click that lands nowhere. The
+    answer is a fact, not a failure, so a missing path is a 200 with ``exists: false``.
+    """
+
+    src = _resolve_within(scope.code_root, rel)
+    resolved = src.relative_to(scope.code_root.resolve()).as_posix()
+    if src.is_dir():
+        return {"exists": True, "kind": "dir", "path": resolved}
+    if not src.is_file():
+        return {"exists": False, "path": resolved}
+    media_type = media_type_for(src)
+    return {
+        "exists": True,
+        "kind": "file",
+        "path": resolved,
+        # A picture or video is not source text; the suffix's media type is what draws it.
+        "language": "binary" if media_type is not None else language_for(src),
+        "mediaType": media_type,
+    }
+
+
+def read_media_file(scope: FileScope, rel: str, range_header: str | None) -> Response:
+    """The bytes of one repository media file, whole or as one HTTP byte range."""
+
+    src = _resolve_within(scope.code_root, rel)
+    return media_response(working_media(src), range_header)
 
 
 def _onboarding_meta(scope: FileScope, rel: str) -> dict[str, Any]:
@@ -311,6 +375,27 @@ def register_files_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
     @app.get("/api/files/read", response_model=FileContents, responses=SCOPED_READ_RESPONSES)
     def api_files_read(repo: str, scope: str = "mainline", path: str = "") -> Response:
         return run_scoped(lambda fs: read_file(fs, path), config, repo, scope)
+
+    # A picture or video's own bytes. The same confinement as the text reads; only the fixed
+    # media table is served, and a byte range is answered with that range so a video can be
+    # moved without sending the whole file again.
+    @app.get("/api/files/bytes", responses=SCOPED_READ_RESPONSES)
+    def api_files_bytes(
+        request: Request, repo: str, scope: str = "mainline", path: str = ""
+    ) -> Response:
+        return run_scoped_response(
+            lambda fs: media_answer(
+                lambda: read_media_file(fs, path, request.headers.get("range"))
+            ),
+            config,
+            repo,
+            scope,
+        )
+
+    # A rendered document's relative link asks this before it is drawn as one.
+    @app.get("/api/files/resolve", response_model=FileResolution, responses=SCOPED_READ_RESPONSES)
+    def api_files_resolve(repo: str, scope: str = "mainline", path: str = "") -> Response:
+        return run_scoped(lambda fs: resolve_file_path(fs, path), config, repo, scope)
 
     # Five success shapes, because ``direction`` picks the pairing direction and each direction
     # discriminates further -- the union is the honest declaration, not a convenience.

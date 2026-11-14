@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CockpitShell } from '../../cockpit/Cockpit';
 import { dashboardStore } from '../../data/store';
-import type { FolderEntry, NoteContent } from '../../data/notes';
+import type { FolderEntry } from '../../data/notes';
 import { projection, taskEntry, taskSummary } from '../../test/fixtures/wire';
 import type { TaskEntry } from '../../types/projection';
 import { NotesReaderViewer } from './NotesReaderViewer';
@@ -16,186 +16,7 @@ vi.mock('../file-viewer/FilePane', () => ({
   FilePane: ({ content }: { content: string }) => <pre data-testid="file-pane">{content}</pre>,
 }));
 
-const REPO = 'agents-remember';
-const MASTER = '260703_agent-orchestration';
-
-function entry(path: string, over: Partial<FolderEntry> = {}): FolderEntry {
-  const isDir = path.endsWith('/');
-  const clean = isDir ? path.slice(0, -1) : path;
-  return {
-    name: clean.split('/').pop() ?? clean,
-    path: clean,
-    kind: isDir ? 'dir' : 'file',
-    size: isDir ? null : 100,
-    language: isDir ? '' : 'markdown',
-    ...over,
-  };
-}
-function content(path: string, over: Partial<NoteContent> = {}): NoteContent {
-  return {
-    repo: REPO,
-    master: MASTER,
-    path,
-    language: 'markdown',
-    size: 100,
-    truncated: false,
-    content: `# ${path}`,
-    ...over,
-  };
-}
-
-// /api/notes/folder → the seeded level in parts of two (so the next-part row is exercised);
-// /api/notes/read → the seeded per-path content (404 otherwise); /api/notes/resolve and
-// /api/role-launch/reports answer empty so task surfaces stay inert.
-// opts.gone answers exists:false with the given reason for those folders; opts.vanish
-// answers exists:false from the given offset on (a folder disappearing mid-pagination);
-// opts.pageSize overrides the part size.
-function stubNotesApi(
-  folders: Record<string, FolderEntry[]>,
-  contents: Record<string, NoteContent> = {},
-  opts: {
-    gone?: Record<string, string>;
-    vanish?: { folder: string; fromOffset: number; reason: string };
-    pageSize?: number;
-  } = {},
-) {
-  const urls: string[] = [];
-  const pageSize = opts.pageSize ?? 2;
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (url: string) => {
-      urls.push(url);
-      const params = new URLSearchParams(url.split('?')[1] ?? '');
-      if (url.startsWith('/api/task-document')) {
-        const docPath = params.get('path') ?? '';
-        const doc = dashboardStore.getState().tasks[docPath]?.summary;
-        return new Response(JSON.stringify(doc ?? null), { status: doc ? 200 : 404 });
-      }
-      if (url.startsWith('/api/notes/folder')) {
-        const folder = params.get('path') ?? '';
-        const offset = Number(params.get('offset') ?? '0');
-        const goneReason = opts.gone?.[folder];
-        if (goneReason !== undefined) {
-          return new Response(
-            JSON.stringify({
-              repo: REPO,
-              master: MASTER,
-              path: folder,
-              entries: [],
-              total: 0,
-              offset,
-              limit: 200,
-              remaining: 0,
-              exists: false,
-              reason: goneReason,
-            }),
-            { status: 200 },
-          );
-        }
-        if (opts.vanish && opts.vanish.folder === folder && offset >= opts.vanish.fromOffset) {
-          return new Response(
-            JSON.stringify({
-              repo: REPO,
-              master: MASTER,
-              path: folder,
-              entries: [],
-              total: 0,
-              offset,
-              limit: 200,
-              remaining: 0,
-              exists: false,
-              reason: opts.vanish!.reason,
-            }),
-            { status: 200 },
-          );
-        }
-        const all = folders[folder] ?? [];
-        const page = all.slice(offset, offset + pageSize);
-        return new Response(
-          JSON.stringify({
-            repo: REPO,
-            master: MASTER,
-            path: folder,
-            entries: page,
-            total: all.length,
-            offset,
-            limit: 200,
-            remaining: Math.max(0, all.length - offset - page.length),
-            exists: true,
-            reason: null,
-          }),
-          { status: 200 },
-        );
-      }
-      if (url.startsWith('/api/notes/read')) {
-        const body = contents[params.get('path') ?? ''];
-        if (body) return new Response(JSON.stringify(body), { status: 200 });
-        return new Response(JSON.stringify({ status: 'not-found' }), { status: 404 });
-      }
-      if (url.startsWith('/api/notes/resolve')) {
-        return new Response(JSON.stringify({ repo: REPO, master: MASTER, resolutions: [] }), {
-          status: 200,
-        });
-      }
-      if (url.startsWith('/api/role-launch/reports')) {
-        return new Response(
-          JSON.stringify({
-            repo: REPO,
-            master: MASTER,
-            doc: '',
-            reports: [],
-            total: 0,
-            explorer: null,
-          }),
-          { status: 200 },
-        );
-      }
-      // Unrelated cockpit fetches (e.g. the hidden File Viewer layer's repo catalog) — a `{repos:[]}`
-      // shape keeps that panel happy without a network hit.
-      return new Response(JSON.stringify({ repos: [] }), { status: 200 });
-    }),
-  );
-  return urls;
-}
-
-function stubRequirementsApi(path: string, contentBody: string) {
-  const fetch = vi.fn(async (url: string) => {
-    const params = new URLSearchParams(url.split('?')[1] ?? '');
-    if (url.startsWith('/api/requirements/list')) {
-      return new Response(
-        JSON.stringify({
-          repo: REPO,
-          master: MASTER,
-          document: params.get('document'),
-          registered: true,
-          requirements: [
-            { name: path, path, address: `requirements/${path}`, size: 100, sha256: 'abc' },
-          ],
-        }),
-        { status: 200 },
-      );
-    }
-    if (url.startsWith('/api/requirements/read')) {
-      return new Response(
-        JSON.stringify({
-          repo: REPO,
-          master: MASTER,
-          document: params.get('document'),
-          name: path,
-          path,
-          address: `requirements/${path}`,
-          size: contentBody.length,
-          sha256: 'abc',
-          content: contentBody,
-        }),
-        { status: 200 },
-      );
-    }
-    return new Response(JSON.stringify({ status: 'not-found' }), { status: 404 });
-  });
-  vi.stubGlobal('fetch', fetch);
-  return fetch;
-}
+import { MASTER, REPO, content, entry, stubNotesApi, stubRequirementsApi } from './notesReaderTestSupport';
 
 beforeEach(() => vi.stubGlobal('CSS', { escape: (value: string) => value }));
 
@@ -613,6 +434,52 @@ describe('NotesReaderViewer content pane (reuses the File Viewer DualPane)', () 
     await view.findByTestId('sidecar-pane');
     expect((await view.findByText('F-M')).tagName.toLowerCase()).toBe('strong'); // formatted, not raw
     expect(view.queryByText('The **F-M** row.')).toBeNull();
+  });
+
+  it('follows a markdown note link to another note of the master', async () => {
+    const onSelect = vi.fn();
+    stubNotesApi(
+      { '': [entry('a.md'), entry('b.md')] },
+      { 'a.md': content('a.md', { content: 'See [b](b.md).' }) },
+      { resolve: { 'b.md': 'b.md' } },
+    );
+    const view = render(
+      <NotesReaderViewer
+        kind="notes"
+        repo={REPO}
+        master={MASTER}
+        path="a.md"
+        onSelectNote={onSelect}
+        onBack={vi.fn()}
+      />,
+    );
+    fireEvent.click(await view.findByTestId('document-file-link'));
+    expect(onSelect).toHaveBeenCalledWith('b.md');
+  });
+
+  it('does not parse raw HTML in a note, while keeping its links', async () => {
+    stubNotesApi(
+      { '': [entry('a.md'), entry('b.md')] },
+      {
+        'a.md': content('a.md', {
+          content: '<details><summary>folded</summary>body</details>\n\nSee [b](b.md).',
+        }),
+      },
+      { resolve: { 'b.md': 'b.md' } },
+    );
+    const view = render(
+      <NotesReaderViewer
+        kind="notes"
+        repo={REPO}
+        master={MASTER}
+        path="a.md"
+        onSelectNote={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+    await view.findByTestId('sidecar-pane');
+    expect(view.container.querySelector('details')).toBeNull();
+    expect(await view.findByTestId('document-file-link')).not.toBeNull();
   });
 
   it('renders a non-markdown text note through the shared file pane (the text fallback)', async () => {

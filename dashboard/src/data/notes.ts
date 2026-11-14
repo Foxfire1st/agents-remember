@@ -10,6 +10,7 @@
 // holding the document's references; folder answers never grow with the tree.
 
 import { getJson, qs } from "./files";
+import { noteMediaUrl } from "./media";
 import { abortedRead } from "./abortableRead";
 
 export interface FolderEntry {
@@ -39,6 +40,11 @@ export interface NoteContent {
   size: number;
   truncated: boolean;
   content: string;
+  // A picture or video note is drawn from the notes bytes route; the URL is built here because
+  // this read already knows the repo/master/path it names.
+  mediaType?: string | null;
+  tooLarge?: boolean;
+  mediaUrl?: string;
 }
 export interface NoteResolution {
   reference: string;
@@ -61,7 +67,10 @@ export const readNote = (
   path: string,
   base = "",
 ): Promise<NoteContent> =>
-  getJson<NoteContent>(`${base}/api/notes/read?${qs({ repo, master, path })}`);
+  getJson<NoteContent>(`${base}/api/notes/read?${qs({ repo, master, path })}`).then((note) => ({
+    ...note,
+    mediaUrl: note.mediaType ? noteMediaUrl(repo, master, note.path, base) : undefined,
+  }));
 
 export const resolveNoteReferences = async (
   repo: string,

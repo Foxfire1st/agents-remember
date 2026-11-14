@@ -6,7 +6,10 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 
 import { css } from "../../../styled-system/css";
 import type { FileContent } from "../../data/files";
+import { MediaView } from "../../grammar/Media";
 import { Markdown } from "../../grammar/Markdown";
+import type { DocumentContext } from "../../grammar/DocumentMarkdown";
+import { mediaForType } from "../../data/media";
 import { EmptyStateBackdrop } from "../EmptyStateBackdrop";
 import { FilePane } from "./FilePane";
 
@@ -47,6 +50,13 @@ const handle = css({
   _hover: { background: "amber" },
 });
 const sidecarBox = css({ height: "100%", overflow: "auto", padding: "0.6rem 0.8rem", background: "bgPanel" });
+// The rendered code file's scroll box: the reader's one scrolling surface for a document.
+const documentScroll = css({
+  height: "100%",
+  overflow: "auto",
+  padding: "0.8rem 1.1rem",
+  background: "bg",
+});
 
 function Placeholder({ label }: { label: string }) {
   return (
@@ -56,16 +66,67 @@ function Placeholder({ label }: { label: string }) {
   );
 }
 
+function MediaCodeSide({ code, mediaUrl }: { code: FileContent; mediaUrl?: string | null }) {
+  const media = code.mediaType ? mediaForType(code.mediaType) : null;
+  if (!media) return null;
+  return (
+    <div className={fill} data-pane-scroll="true">
+      <MediaView
+        src={mediaUrl ?? ""}
+        media={media}
+        kind={media.kind}
+        size={code.size}
+        tooLarge={code.tooLarge}
+        testId="code-media"
+      />
+    </div>
+  );
+}
+
+function RenderedDocument({
+  code,
+  document,
+}: {
+  code: FileContent;
+  document: DocumentContext;
+}) {
+  return (
+    <div className={documentScroll} data-pane-scroll="true" data-testid="document-rendered">
+      {code.truncated ? (
+        <div className={banner} data-testid="truncation-banner">
+          Showing the first 2 MiB of {code.size.toLocaleString()} bytes
+        </div>
+      ) : null}
+      <Markdown document={document}>{code.content}</Markdown>
+    </div>
+  );
+}
+
 // `repository` names the File Viewer's repository: its pane carries the line gutter's ⊕ (MIK-R188
 // rule 1). Without it the pane has no tray gutter.
-function CodeSide({ code, repository }: { code: FileContent | null; repository?: string }) {
+function CodeSide({
+  code,
+  repository,
+  mediaUrl,
+  rendered = false,
+  document: documentContext,
+}: {
+  code: FileContent | null;
+  repository?: string;
+  mediaUrl?: string | null;
+  rendered?: boolean;
+  document?: DocumentContext;
+}) {
   if (!code) return <Placeholder label="Select a code file from the tree" />;
+  if (code.mediaType) return <MediaCodeSide code={code} mediaUrl={mediaUrl} />;
   if (code.language === "binary")
     return <Placeholder label={`Binary file — ${code.size.toLocaleString()} bytes (not shown)`} />;
+  if (rendered && code.language === "markdown" && documentContext)
+    return <RenderedDocument code={code} document={documentContext} />;
   return (
     <div className={fill}>
       {code.truncated ? (
-        <div className={banner}>Showing the first 2 MiB of {code.size.toLocaleString()} bytes</div>
+        <div className={banner} data-testid="truncation-banner">Showing the first 2 MiB of {code.size.toLocaleString()} bytes</div>
       ) : null}
       <FilePane
         content={code.content}
@@ -76,12 +137,18 @@ function CodeSide({ code, repository }: { code: FileContent | null; repository?:
   );
 }
 
-function SidecarSide({ sidecar }: { sidecar: SidecarView }) {
+function SidecarSide({
+  sidecar,
+  document: documentContext,
+}: {
+  sidecar: SidecarView;
+  document?: DocumentContext;
+}) {
   switch (sidecar.state) {
     case "markdown":
       return (
-        <div className={sidecarBox} data-testid="sidecar-pane">
-          <Markdown>{sidecar.body}</Markdown>
+        <div className={sidecarBox} data-testid="sidecar-pane" data-pane-scroll="true">
+          <Markdown document={documentContext}>{sidecar.body}</Markdown>
         </div>
       );
     case "overview":
@@ -98,11 +165,19 @@ export function DualPane({
   sidecar,
   split,
   repository,
+  mediaUrl,
+  rendered,
+  document,
+  sidecarDocument,
 }: {
   code: FileContent | null;
   sidecar: SidecarView;
   split: boolean;
   repository?: string;
+  mediaUrl?: string | null;
+  rendered?: boolean;
+  document?: DocumentContext;
+  sidecarDocument?: DocumentContext;
 }) {
   // Nothing opened yet: a faint effects-gated boomerang backdrop fills the whole pane (mirrors the
   // Operations / Chats empty states), replacing the per-side "select a file" placeholders until a code
@@ -124,18 +199,18 @@ export function DualPane({
   if (!split || overviewOnly) {
     return (
       <div className={fill} data-testid="dual-pane">
-        {overviewOnly ? <SidecarSide sidecar={sidecar} /> : <CodeSide code={code} repository={repository} />}
+        {overviewOnly ? <SidecarSide sidecar={sidecar} document={sidecarDocument} /> : <CodeSide code={code} repository={repository} mediaUrl={mediaUrl} rendered={rendered} document={document} />}
       </div>
     );
   }
   return (
     <PanelGroup direction="horizontal" autoSaveId="fileviewer.dualpane" data-testid="dual-pane">
       <Panel defaultSize={62} minSize={25}>
-        <CodeSide code={code} repository={repository} />
+        <CodeSide code={code} repository={repository} mediaUrl={mediaUrl} rendered={rendered} document={document} />
       </Panel>
       <PanelResizeHandle className={handle} />
       <Panel defaultSize={38} minSize={20}>
-        <SidecarSide sidecar={sidecar} />
+        <SidecarSide sidecar={sidecar} document={sidecarDocument} />
       </Panel>
     </PanelGroup>
   );

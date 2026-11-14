@@ -354,6 +354,10 @@ export interface CodeAnswer extends ReaderAnswer {
   blob?: string;
   language?: string;
   text?: string;
+  // A picture or video at the code tree: drawn from the reader's bytes route with its type and
+  // measured size instead of being decoded as text.
+  mediaType?: string;
+  size?: number;
   locator?: { state: 'resolved' | 'unresolved'; lines?: [number, number]; detail?: string };
 }
 

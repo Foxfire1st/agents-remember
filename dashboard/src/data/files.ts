@@ -56,7 +56,21 @@ export interface FileContent {
   size: number;
   truncated: boolean;
   content: string;
+  // A picture or video has no text: the viewer draws it from /api/files/bytes. `tooLarge`
+  // states the serving layer's measured refusal before any bytes are requested.
+  mediaType?: string | null;
+  tooLarge?: boolean;
   onboarding: OnboardingMeta;
+}
+
+// One repository path's existence and what a viewer would do with it. A rendered document's
+// relative link asks this before it is drawn as a link.
+export interface FileResolution {
+  exists: boolean;
+  path: string;
+  kind?: "file" | "dir";
+  language?: string;
+  mediaType?: string | null;
 }
 
 // Forward pairing: a code path -> its sidecar (status + markdown body).
@@ -131,6 +145,47 @@ export const readFile = (
   path: string,
   base = "",
 ): Promise<FileContent> => getJson<FileContent>(`${base}/api/files/read?${qs({ repo, scope, path })}`);
+
+export const resolvePath = (
+  repo: string,
+  scope: Scope,
+  path: string,
+  base = "",
+): Promise<FileResolution> =>
+  getJson<FileResolution>(`${base}/api/files/resolve?${qs({ repo, scope, path })}`);
+
+// The repository-relative path a relative link in `documentPath` names, or null when the link
+// is not a repository path (an absolute address, a scheme, or a path that climbs out of the root).
+export function resolveRepositoryPath(from: string, href: string): string | null {
+  const withoutFragment = href.split("#")[0].split("?")[0];
+  if (!withoutFragment || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(withoutFragment)) return null;
+  if (withoutFragment.startsWith("//")) return null;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(withoutFragment);
+  } catch {
+    return null;
+  }
+  if (decoded.includes("\0")) return null;
+  const base = from.includes("/") ? from.slice(0, from.lastIndexOf("/")) : "";
+  return normaliseRepositoryPath(
+    decoded.startsWith("/") ? decoded.slice(1) : `${base}/${decoded}`,
+  );
+}
+
+function normaliseRepositoryPath(combined: string): string | null {
+  const parts: string[] = [];
+  for (const part of combined.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (parts.length === 0) return null;
+      parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+  return parts.join("/");
+}
 
 export const resolveForward = (
   repo: string,
