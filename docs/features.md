@@ -317,7 +317,8 @@ four Git trees, the code and the memory before and after, and names each recorde
 
 The user asks questions on the page. The first request creates the task's explainer, an agent
 that answers with a chat reply or with a page of its own. Each published page is a numbered
-revision; to publish one, the explainer needs Playwright and its browser on the machine
+revision; to publish one, the explainer loads it in a browser that the product fetches itself at
+the first explanation, so nothing is installed by hand
 ([what the explainer needs](guides/review-page-and-explainer.md#what-the-explainer-needs-before-it-can-publish)). On request the explainer grades the blocks of the change set, and the page sorts by its
 grades. The explainer changes no code, no memory and no task document.
 

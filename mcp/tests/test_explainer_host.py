@@ -809,6 +809,28 @@ def test_the_launch_environment_carries_the_browser_module_when_the_host_has_one
     assert carried[host_module.WORKSPACE_MARKER] == str(workspace)
 
 
+def test_the_launch_environment_carries_the_module_the_product_fetched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The module the product fetched into its data folder is the one its seats are launched with.
+
+    A seat that starts after the first explanation must be handed the same module the fetch placed,
+    or its own render would look for a module of its own and find none.
+    """
+
+    module = tmp_path / "data/agents-remember/explainer-browser/node_modules/playwright/index.js"
+    module.parent.mkdir(parents=True)
+    module.write_text("// playwright\n", encoding="utf-8")
+    monkeypatch.delenv(host_module.PLAYWRIGHT_ENV, raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", (tmp_path / "data").as_posix())
+
+    assert host_module.browser_module() == module.as_posix()
+    workspace = tmp_path / "leaf"
+    binding = {"schema": "ar-explainer-binding/v1", "binding": {"leaf_id": "SBX-M1-L1"}}
+    env = host_module._launch_env(agent_id="a", workspace=workspace, binding=binding)
+    assert env[host_module.PLAYWRIGHT_ENV] == module.as_posix()
+
+
 def test_a_resume_carries_the_settings_roles_model_effort_and_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

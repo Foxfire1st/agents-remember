@@ -14,6 +14,19 @@ refuses at its host stage, the part of the call that installs and starts the hos
 agent starts. [Platforms without a host](../host.md#platforms-without-a-host) tells what the call
 does there.
 
+## The explainer's browser
+
+The review page's explainer publishes a page only after a browser has loaded it, and no step here
+installs that browser. At the first explanation that publishes a page, the product fetches
+Playwright and its Chromium into its own folder under the user's data home, with the Node it
+installs for the host: no Node, no Playwright and no browser command is yours to install. That one
+fetch needs access to the npm registry and to Playwright's download host; later explanations fetch
+nothing. A fetch that fails says on the review page — the Explanation tab, its "No explanation yet"
+block or the line above an earlier page — what is missing and the command that gets it,
+`agents-remember explainer-browser --fetch`; the chat may say it as well. This path is measured on Ubuntu 26.04; macOS is
+not measured for it. [What the explainer needs](../guides/review-page-and-explainer.md#what-the-explainer-needs-before-it-can-publish)
+tells it in full.
+
 ## Install steps
 
 1. **Install the package.** Install the published package `agents-remember-mcp` with uv.

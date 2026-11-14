@@ -46,6 +46,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, Protocol, TypeGuard
 
+from agents_remember.canvas.explainer_browser import (
+    browser_environment,
+    ensure,
+    node_executable,
+)
+from agents_remember.canvas.explainer_errors import ExplainerRefused
 from agents_remember.canvas.readiness import (
     check_page,
     claim_basis_problem,
@@ -102,6 +108,7 @@ class ProspectiveResult:
     claim_ids: tuple[str, ...] = ()
     detail: str = ""
     interactive: dict[str, object] | None = None
+    browser: dict[str, object] | None = None
 
     @property
     def loaded(self) -> bool:
@@ -188,13 +195,18 @@ class BrowserProspectiveLoad:
     the child prints one JSON object. A missing ``node``, a missing script, a run that did not
     finish, or an answer this module cannot read are all ``unavailable``: the load did not happen,
     and publication must not treat that as success.
+
+    ``node`` defaults to the Node this installation owns (``canvas.explainer_browser``), and the
+    module and browser folder are the ones it fetches at the first explanation. A caller that names
+    a ``node`` keeps its own; naming one is what an instrumented load does, so it brings its own
+    browser and nothing is fetched for it.
     """
 
     def __init__(
         self,
         *,
         script: Path | None = None,
-        node: str = "node",
+        node: str | None = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         screenshot: Path | None = None,
         interactive_directory: Path | None = None,
@@ -205,6 +217,19 @@ class BrowserProspectiveLoad:
         self._screenshot = screenshot
         self._interactive_directory = interactive_directory
         self._interactive_resume: Path | None = None
+        self._browser: dict[str, object] | None = None
+
+    @property
+    def node(self) -> str:
+        """The Node this load runs on: the caller's, else the product's own, else ``node``."""
+
+        return self._node or node_executable()
+
+    @property
+    def environment(self) -> dict[str, str]:
+        """The browser names this child needs, over its inherited environment."""
+
+        return browser_environment()
 
     def resuming(self, report: Path | None) -> BrowserProspectiveLoad:
         """Resume the earlier run whose interactive report is ``report`` (MIK-R211 v5).
@@ -238,6 +263,9 @@ class BrowserProspectiveLoad:
                     "publication is refused rather than passed on the static check alone"
                 ),
             )
+        unready = self._browser_unready()
+        if unready is not None:
+            return unready
         directory = Path(tempfile.mkdtemp(prefix="ar-prospective-load-"))
         try:
             try:
@@ -270,17 +298,44 @@ class BrowserProspectiveLoad:
                 errors=(invocation.problem,),
                 detail="the load did not run, so nothing about the page was observed",
             )
-        result = replace(_read_result(invocation), interactive=interactive)
+        result = replace(_read_result(invocation), interactive=interactive, browser=self._browser)
         return _validate_rendered_citations(
             result, assets=assets, entrypoint=entrypoint, packet=packet
         )
+
+    def _browser_unready(self) -> ProspectiveResult | None:
+        """Make this installation's browser ready, or answer why the load cannot run.
+
+        Only a load that runs on the product's own Node is a product load: an instrumented load
+        names its ``node`` (and, with it, the browser it brought), and nothing is fetched for it.
+        The fetch happens here rather than at installation, and its record travels in the result so
+        the answer at the place the page was asked for can say what was fetched.
+        """
+
+        if self._node is not None:
+            return None
+        try:
+            self._browser = ensure().record()
+        except ExplainerRefused as refused:
+            return ProspectiveResult(
+                state="unavailable",
+                kind="browser",
+                errors=(f"{refused.reason}: {refused.detail}",),
+                detail=(
+                    "the browser the load needs could not be made ready, so no page was loaded; "
+                    "nothing was published"
+                ),
+                browser={"state": "missing", "detail": refused.detail},
+            )
+        return None
 
     def _invoke(
         self, directory: Path, entrypoint: str, *, interactive: bool = False, comparison: int = 0
     ) -> _Invocation:
         """Run the child once, answering ``ran=False`` with a named reason when it did not."""
 
-        command = [self._node, str(self._script), "--dir", str(directory), "--entry", entrypoint]
+        node = self.node
+        command = [node, str(self._script), "--dir", str(directory), "--entry", entrypoint]
         if interactive:
             command.extend(
                 [
@@ -305,13 +360,13 @@ class BrowserProspectiveLoad:
                 errors="replace",
                 timeout=self._timeout,
                 check=False,
+                env={**os.environ, **self.environment},
             )
         except FileNotFoundError:
             return _Invocation(
                 ran=False,
                 problem=(
-                    f"no node executable at {self._node!r}, so the browser load could not be "
-                    "started"
+                    f"no node executable at {node!r}, so the browser load could not be started"
                 ),
             )
         except subprocess.TimeoutExpired:
@@ -499,6 +554,7 @@ def _consistent(result: ProspectiveResult) -> ProspectiveResult:
         unresolved_references=result.unresolved_references,
         detail=f"the load called itself loaded while naming {', '.join(faults)}; {detail}",
         interactive=result.interactive,
+        browser=result.browser,
     )
 
 
