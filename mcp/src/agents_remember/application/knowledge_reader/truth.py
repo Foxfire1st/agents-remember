@@ -33,6 +33,8 @@ from agents_remember.application.knowledge_currentness import Currentness
 from agents_remember.application.knowledge_reader.files import (
     FileRead,
     ReaderRequestError,
+    _blob_size,
+    _code_blob,
     census_files,
     code_text,
     normal_path,
@@ -57,6 +59,7 @@ from agents_remember.memory_quality.knowledge_census import census_reports, read
 from agents_remember.models.knowledge_files.documents import RECORD_DIRECTORIES
 from agents_remember.models.knowledge_files.history import membership_subject
 from agents_remember.models.knowledge_files.records import RECORD_MODELS
+from agents_remember.serving.media import media_type_for
 from agents_remember.serving.scope import language_for
 
 __all__ = ["census_view", "code_view", "record_list", "record_view"]
@@ -325,6 +328,21 @@ def code_view(
 
     path = normal_path(raw_path)
     parsed = None if not locator else _parse_locator(locator)
+    # A picture or video has no text to show: classify it from the fixed media table before any
+    # decode, so a UTF-8 SVG is still a picture (not source text) and a NUL-bearing binary is not
+    # reported as text. The reader draws it from the bytes route with its type and measured size.
+    media_type = media_type_for(path)
+    if media_type is not None:
+        located = _code_blob(selection, path)
+        if not isinstance(located, FileRead):
+            blob, repository = located
+            return {
+                "state": "media",
+                "path": path,
+                "blob": blob,
+                "mediaType": media_type,
+                "size": _blob_size(repository, blob),
+            }
     read = code_text(selection, path)
     if isinstance(read, FileRead):
         return {"state": read.state, "path": path, "detail": read.detail}

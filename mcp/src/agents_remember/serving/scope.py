@@ -233,6 +233,24 @@ def run_scoped(
     scope_id: str,
 ) -> Response:
     """Resolve the scope, run ``op``, and map domain errors to the serving status idiom."""
+
+    return run_scoped_response(
+        lambda scope: JSONResponse(op(scope), status_code=200), config, repo_id, scope_id
+    )
+
+
+def run_scoped_response(
+    op: Callable[[FileScope], Response],
+    config: McpRuntimeConfig,
+    repo_id: str,
+    scope_id: str,
+) -> Response:
+    """Resolve the scope, run a response-producing ``op``, and map the serving status idiom.
+
+    The response-returning form exists for the bytes routes, whose answer is the file itself
+    rather than a JSON document; the error map is the one implementation both forms share.
+    """
+
     try:
         scope = resolve_scope(config, repo_id, scope_id)
     except AuthorityError:
@@ -240,7 +258,7 @@ def run_scoped(
     except _UnknownScope:
         return JSONResponse({"status": "unknown-scope", "scope": scope_id}, status_code=404)
     try:
-        return JSONResponse(op(scope), status_code=200)
+        return op(scope)
     except (AuthorityError, ValueError) as err:
         # ValueError: Path.resolve() rejects malformed input (e.g. an embedded null
         # byte) before confinement even runs — same wire answer as a confinement breach.
