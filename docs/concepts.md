@@ -620,8 +620,10 @@ copy beside it. The tool `task_doc` writes both files. The JSON file is the sour
 Markdown copy is lost at the next write. The task documents of a code repository lie under
 `<coordination-root>/tasks/<id>/`. A task document has one of the statuses `planning`,
 `inProgress`, `Completed` and `abandoned`. A new document has the status `planning`. No agent has
-to set the status: `worktree_start` sets `inProgress`, `lifecycle_finalize_task` sets `Completed`
-and `worktree_abandon` sets `abandoned`. The dashboard shows the status as the stage of the
+to set the status: `worktree_start` sets `inProgress` and `lifecycle_finalize_task` sets
+`Completed`. `worktree_abandon` sets `abandoned` for a task; an atomic master's document must
+already read `abandoned` or `Completed` before the call, which otherwise refuses
+`abandon-master-not-terminal` (the reference states the rule and its route). The dashboard shows the status as the stage of the
 document: `planning` as "planned", `inProgress` as "started", `Completed` as "completed" and
 `abandoned` as "aborted".
 

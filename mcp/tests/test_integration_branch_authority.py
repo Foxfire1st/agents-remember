@@ -47,6 +47,7 @@ from integration_branch_authority_test_support import (
     _authority_fixture,
     _closed_external_leaf_worktrees,
 )
+from test_landing_commit_check import _hook
 from test_source_lineage import _commit_on, _git
 
 
@@ -288,3 +289,58 @@ def test_the_accepted_code_commit_must_exist_even_when_memory_is_current(tmp_pat
             IntegratedCommits(code="c" * 40, memory_content=head),
             memory_source_commit=head,
         )
+
+
+def test_a_code_side_that_lands_nothing_is_not_checked_again(tmp_path: Path) -> None:
+    """No code commit moves, so the repository's hook is not run for it.
+
+    The measured case: the task changed no code, its code commit is the tip the master's line
+    already stands on -- a merge commit made on GitHub whose body carries no commit-check fact --
+    and only its memory moved. Before the bound, integration ran the repository's commit check in
+    a fresh temporary worktree, where the hook fails for want of `dashboard/node_modules`, so a
+    task that lands nothing lost its landing. Here the hook is made to fail on purpose: if the
+    code side were checked again, the call would raise.
+    """
+
+    root = tmp_path / "nothing-landed"
+    fixture = _authority_fixture(root, external_memory=True)
+    closed = _closed_external_leaf_worktrees(fixture, root, publish_closeout_evidence=False)
+    code = fixture.code_repo
+    assert closed.memory_repo_path is not None
+    memory = closed.memory_repo_path
+    marker = code / "hook-ran.txt"
+    _hook(code, f"#!/bin/sh\ntouch {marker.as_posix()}\nexit 1\n")
+
+    # A merge commit with no commit-check fact, whose tree is the task's own.
+    tree = _git(code, "rev-parse", f"{closed.code_commit}^{{tree}}")
+    side = _git(code, "commit-tree", tree, "-p", closed.code_commit, "-m", "the other side")
+    merge = _git(
+        code,
+        "commit-tree",
+        tree,
+        "-p",
+        closed.code_commit,
+        "-p",
+        side,
+        "-m",
+        "Merge pull request #19 from Foxfire1st/ar/the-task",
+    )
+    _git(code, "update-ref", "refs/heads/ar/master", merge)
+    # The task changed no code: the commit its contract records as its own is the merge
+    # commit its master line already reaches.
+    landed = replace(closed, code_commit=merge)
+
+    snapshot = prepare_integration_ref_move(
+        landed,
+        IntegratedCommits(code=merge, memory_content=closed.memory_content_commit),
+        WorktreeArgs(),
+        IntegrationSources(
+            current_code_source=merge,
+            current_memory_source=_git(memory, "rev-parse", "ar/master"),
+            code_replay_required=False,
+            memory_replay_required=False,
+        ),
+    )
+
+    assert snapshot.code_before == merge
+    assert not marker.exists(), "the code side lands nothing; its commit check must not run"

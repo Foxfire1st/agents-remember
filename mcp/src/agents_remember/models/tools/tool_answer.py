@@ -17,6 +17,7 @@ Rule references below are MIK-R108@v1 rules.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 # Rule 4: one constant bounds every answer, counted with the product's counter
@@ -440,29 +441,46 @@ def _fixed_short_part(
         short["code"] = answer["code"] if is_valid_tool_code(answer["code"]) else "invalid-code"
     if "buildCurrentness" in answer:
         short["buildCurrentness"] = answer["buildCurrentness"]
+    if isinstance(answer.get("runningOperation"), str):
+        # A live lifecycle operation is never traded away for space. The status
+        # answer says which operation this enclosure is running, and the closeout tool's
+        # description tells its caller to poll that answer for progress, so the sentence
+        # rides the short form whole -- a short string cannot crowd out the fixed part.
+        short["runningOperation"] = answer["runningOperation"][:TOOL_ANSWER_SHORT_STRING_MAX]
     short["overflow"] = True
     short["answerTokens"] = answer_tokens
     return short
 
 
-def _fit_location(
-    short: dict[str, Any],
-    log: str | None,
-    count: Callable[[Mapping[str, Any]], int],
-) -> None:
-    """Admit the exact log location only while the form with it fits (rule 4).
+def _fit_location(short: dict[str, Any], log: str | None) -> None:
+    """Preserve the exact log location whenever the result was recorded.
 
-    ``log`` rides when the form with it is within
-    ``TOOL_ANSWER_OVERFLOW_FIXED_MAX_TOKENS``. A location that does not fit
-    is not shortened and not replaced by another path: the answer carries
-    the fixed no-path ``logError`` and no ``log``.
+    The answer sheds other fields first so a reader can still find the whole result after
+    the answer is cut.
     """
     if log is None:
         return
-    if count({**short, "log": log}) <= TOOL_ANSWER_OVERFLOW_FIXED_MAX_TOKENS:
-        short["log"] = log
-    else:
-        short["logError"] = LOG_ERROR_LOCATION_OMITTED
+    short["log"] = log
+
+
+def _cut_hint(log: str | None, log_error: str | None) -> dict[str, Any]:
+    """The last field of every cut answer: that it was cut, and where the whole result is.
+
+    Where the result was recorded, the hint names its file. Otherwise it says why no file
+    holds the result, so a reader is never sent to an empty location.
+    """
+    if log is not None:
+        return {
+            "cut": True,
+            "log": log,
+            "readIt": "the whole result is in this file; read it there",
+        }
+    return {
+        "cut": True,
+        "log": None,
+        "readIt": "no file holds the whole result",
+        "why": log_error or LOG_ERROR_BUDGET_DETAIL,
+    }
 
 
 def _fit_error(
@@ -609,24 +627,73 @@ def short_form(
         short["log"] = log
         short["logError"] = log_error
     else:
-        _fit_location(short, log, count)
+        _fit_location(short, log)
     if (notice := _document_notice(answer)) is not None:
         short["staleDocuments"] = notice
     error_cut = prior_error_cut
     if "error" in answer:
         error_cut = _fit_error(short, answer["error"], count) or prior_error_cut
     dropped, kept = _fit_scalars(short, _eligible_short_scalars(answer, short), count)
+    # Measure the form with its complete final hint; scalars and then the error make room
+    # for it rather than displacing it.
+    hint = _cut_hint(log, log_error)
+
     dropped += prior_dropped_count
+    dropped, error_cut = _fit_the_cut_hint(
+        short, _CutFitting(kept, dropped, hint, count, error_cut)
+    )
+    short["cut"] = hint
+    return short, dropped, error_cut
+
+
+@dataclass(frozen=True)
+class _CutFitting:
+    """What the measurement of a cut form needs besides the form itself."""
+
+    kept: list[str]
+    dropped: int
+    hint: Mapping[str, Any]
+    count: Callable[[Mapping[str, Any]], int]
+    error_cut: bool
+
+
+def _fit_the_cut_hint(short: dict[str, Any], fitting: _CutFitting) -> tuple[int, bool]:
+    """Measure the form with its hint (and its ``droppedFields``) and shed until it fits.
+
+    The full-result hint is never dropped. Scalars go first, then the error shrinks from its
+    end until the form including the hint fits ``TOOL_ANSWER_OVERFLOW_MAX_TOKENS``. If nothing
+    else can be shed, keep the hint even above the bound so the reader can find the result.
+    """
+
+    kept, dropped, hint, count, error_cut = (
+        fitting.kept,
+        fitting.dropped,
+        fitting.hint,
+        fitting.count,
+        fitting.error_cut,
+    )
+
+    def measured(dropped_now: int = dropped) -> int:
+        form = {**short, "cut": hint}
+        if dropped_now:
+            form["droppedFields"] = dropped_now
+        return count(form)
+
+    while kept and measured() > TOOL_ANSWER_OVERFLOW_MAX_TOKENS:
+        del short[kept.pop()]
+        dropped += 1
+    if measured() > TOOL_ANSWER_OVERFLOW_MAX_TOKENS and "error" in short:
+        _fit_error(
+            short,
+            short["error"],
+            lambda form: count(
+                {**form, "cut": hint, **({"droppedFields": dropped} if dropped else {})}
+            ),
+        )
+        error_cut = True
     if dropped:
         short["droppedFields"] = dropped
-        while kept and count(short) > TOOL_ANSWER_OVERFLOW_MAX_TOKENS:
-            del short[kept.pop()]
-            dropped += 1
-            short["droppedFields"] = dropped
-        if count(short) > TOOL_ANSWER_OVERFLOW_MAX_TOKENS and "error" in short:
-            _fit_error(short, short["error"], count)
-            error_cut = True
-    return short, dropped, error_cut
+    return dropped, error_cut
 
 
 # Rule 6: the framework keys every answer may carry beside its row's result
@@ -648,6 +715,8 @@ FRAMEWORK_ANSWER_KEYS = frozenset(
         "droppedFields",
         "errorCut",
         "buildCurrentness",
+        "runningOperation",
+        "cut",
     }
 )
 

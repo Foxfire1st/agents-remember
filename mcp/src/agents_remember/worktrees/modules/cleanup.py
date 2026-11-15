@@ -787,6 +787,26 @@ def _cleanup_integration_refusal(
     """
     if contract.integration_status == "completed":
         return None
+    if contract.kind == "series":
+        # A master's work often lands as a merged pull request without a local ref move.
+        # The refusal names that route first; it records the landing
+        # (and keeps any stale entries it finds as the record's debt) so cleanup can proceed.
+        return state_refusal_result(
+            contract,
+            state="blocked",
+            code="integration-incomplete",
+            error=(
+                "cleanup requires integration.status completed; a master whose work already "
+                "landed by a merged pull request records it with worktree_record_landing "
+                "(landed_code_commit), and a master whose work lands through this product uses "
+                "worktree_integrate"
+            ),
+            next=RefusalNext(
+                tool="worktree_record_landing",
+                args={"contract_path": contract.contract_path.as_posix()},
+                summary="Record the landed pull-request commit, then clean up again.",
+            ),
+        )
     return state_refusal_result(
         contract,
         state="blocked",

@@ -25,6 +25,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     RepositoryScope,
 )
+from agents_remember.kernel.route_index import sidecar_status
 from agents_remember.mcp.tools.memory import memory_quality_check_payload
 from agents_remember.memory_quality.check import AVAILABLE_CHECKS
 from agents_remember.models.memory import MemoryQualityStartRequest, MemoryQualitySyncRequest
@@ -267,6 +268,56 @@ def test_quality_builds_only_missing_route_index_caches(tmp_path: Path) -> None:
     assert result.stale_indexes == ["pkg/overview.index.json"]
     assert (onboarding / "overview.index.json").is_file()
     assert stale.read_text() == "stale bytes"
+
+
+def test_an_entry_half_alone_is_listed_as_a_covered_card(tmp_path: Path) -> None:
+    """The built index lists a source whose card stands in its entry half alone.
+
+    The mapper strips the half's own suffix (``.json`` → the source, ``.md`` → the source), so the
+    entry half reaches the index at all; the sidecar-only card is then listed as covered and the
+    status answers ``present`` without the mirror fallback.
+    """
+
+    code = tmp_path / "code"
+    init_repo(code)
+    (code / "README.md").write_text("# readme\n", encoding="utf-8")
+    (code / "pkg").mkdir()
+    (code / "pkg" / "a.py").write_text("VALUE = 1\n", encoding="utf-8")
+    git(code, "add", "-A")
+    git(code, "commit", "-q", "-m", "sources")
+    onboarding = tmp_path / "memory" / "onboarding"
+    (onboarding / "pkg").mkdir(parents=True)
+    (onboarding / "overview.md").write_text("# Root\n", encoding="utf-8")
+    (onboarding / "pkg" / "overview.md").write_text("# Package\n", encoding="utf-8")
+    for source in ("README.md", "pkg/a.py"):
+        half = onboarding / f"{source}.json"
+        half.write_text(
+            json.dumps(
+                {
+                    "schema": "ar-onboarding-file/v1",
+                    "path": source,
+                    "references": {},
+                    "realizes": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    controller.build_route_indexes(
+        code_root=code,
+        onboarding_root=onboarding,
+        repository="fixture",
+        storage=StorageSettings(),
+    )
+
+    root_index = json.loads((onboarding / "overview.index.json").read_text(encoding="utf-8"))
+    package_index = json.loads(
+        (onboarding / "pkg" / "overview.index.json").read_text(encoding="utf-8")
+    )
+    assert "README.md" in root_index["coveredFiles"]
+    assert "pkg/a.py" in package_index["coveredFiles"]
+    assert sidecar_status("pkg/a.py", package_index) == "present"
+    assert sidecar_status("README.md", root_index) == "present"
 
 
 def test_quality_reports_a_missing_cache_that_cannot_be_rendered(tmp_path: Path) -> None:

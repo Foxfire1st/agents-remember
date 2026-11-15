@@ -25,11 +25,25 @@ A tool answer holds the outcome, what the caller needs for its next step and, wh
 larger, `log`: the place of the file that holds the whole result. An answer is bounded at 1,500
 tokens, or at the lower bound of its tool; a few tools have a higher bound of at most 4,000 tokens.
 A list in an answer is cut at 20 entries, or at 10 in a status answer, and carries its count. An
-answer over its bound arrives as a short form of at most 400 tokens. It always holds
-`overflow: true`, `answerTokens` and `log` (or `logError` where the place cannot be given), and
-`ok`, `code` and `buildCurrentness` where the answer has them. It then adds `error`, cut when long
+answer over its bound arrives as a short form of at most 400 tokens. If the recorded result's
+path cannot fit after the other droppable fields are removed, the full path and final hint remain
+and the short form exceeds 400 tokens. It always holds
+`overflow: true`, `answerTokens` and `log`, and `ok`, `code` and `buildCurrentness` where the
+answer has them. A recorded result's place is always named: where the path did not fit beside the
+other fields, the short form drops those fields first, so `log` rides whenever the whole result was
+written (`resultKept: false` and `logError` say why it was not). It then adds `error`, cut when long
 (`errorCut`), and the answer's other numbers, booleans and short texts while they fit;
 `droppedFields` counts the fields left out.
+
+Every cut answer ends with one last field, `cut`: it says that the answer was cut and names the file
+that holds the whole result (`log`), with `readIt` telling the reader to read the rest there. Where
+nothing was recorded, `cut.log` is `null` and `cut.why` names the reason, so no reader is sent to a
+path that holds nothing.
+
+The status tool keeps its list of lifecycle operations out of its answer: the answer carries
+`lifecycleOperationCount` and, while an operation is queued or running, `runningOperation` with the
+one sentence that names it. The whole list is in the file that holds the result. A status answer
+with one running closeout is therefore not cut.
 
 A worktree, closeout or landing answer names the state reached and the next call in `nextTool`
 with `nextArgs`. A refusal that follows from the state of a task answers `ok: false` with the
@@ -163,6 +177,8 @@ The views `invariant` and `family` accept the text ID of a record in `recordId`,
 revision IDs. The view `record` answers one record of any kind: its state, its links with the
 state of each target, the records that link to it and its [judgment rows](../concepts.md#judgment-row).
 
+A task closes its own weakness with the task and a reason, and the reader supplies the code commit from the closing memory commit's `Code-Commit` trailer after closeout or says that the commit comes with the task's closeout beforehand; a closure by another task names a real commit of the code repository.
+
 `knowledge_integrity_check` also answers, in `routes`, one row for each family: the routes that
 the family records (the code folders in which its members are realized), the routes that the
 product suggests from the files that hold those realizations, and whether the two differ.
@@ -184,13 +200,22 @@ lists command callers, timing and examples.
 | `worktree_start` | Create or load the worktree contract of a task with its code worktree and its memory worktree; `task_name` is the folder name of the master, `leaf_id` is the id of the task, and `parent_task` names the folder of the master or of the sprint that commands it. A dry run changes no task document, contract, Git ref or worktree; it returns the start preview even for the first task of a master whose own contract does not exist yet. The tool does not read the dependencies that a requirement packet names: tasks start in parallel, and the order of landing is the Manager's decision. | `repo_id`, `task_name`, `worktree_name`, `leaf_id`, `parent_task`, `workflow_kind="light-task"`, `source_branch`, `work_branch`, `memory_choice`, `stale_base_choice`, `dry_run=false` |
 | `worktree_enclosure_adopt` | Give one exact readable enclosure that has no [enclosure locator](../concepts.md#enclosure) its locator. The call validates the configured contract/root pair and writes the locator with an audit record; no other tool calls it. Dry-run by default. | `contract_path`, `expected_worktree_group`, nonblank `rationale`, `dry_run=true`, `approved=false`, optional `expected_publication_request_id` |
 | `worktree_attach` | Re-attach to an existing worktree contract of a task without changing Git. | `repo_id`, `task_name` or `contract_path`, `leaf_id`, `parent_task` |
-| `worktree_status` | Report the lifecycle status of one task by its address, without reading the closeout queue. While the task's enclosure locator is live, the status comes from the enclosure's manifest and [operation journal](../concepts.md#operation-journal), with the controls that can run now. Once cleanup or abandon has archived the enclosure, the locator is terminal: the status comes from the archive outside the enclosure, its [archive record](../concepts.md#archive-record) and the worktree contract; it tells `archive-ready` (the archive stands, the contract does not yet record the cleanup) from `cleanup-completed` and returns the archived `cleanupArguments` with the exact `nextArgs` of the retry. It also reports one line when copies of task documents differ from their sources. | `repo_id`, `task_name` or `contract_path`, `leaf_id`, `parent_task`, `caller` |
+| `worktree_status` | Report the lifecycle status of one task by its address, without reading the closeout queue. While the task's enclosure locator is live, the status comes from the enclosure's manifest and [operation journal](../concepts.md#operation-journal), with the controls that can run now. While an operation of that enclosure is `queued` or `running`, the answer carries `runningOperation`, one sentence naming the kind, its generation and its state: it is part of the answer the size guard keeps whole, so polling this tool after a closeout call tells the caller that the closeout is still alive even when `lifecycleOperations` is too large to ride the answer. Once cleanup or abandon has archived the enclosure, the locator is terminal: the status comes from the archive outside the enclosure, its [archive record](../concepts.md#archive-record) and the worktree contract; it tells `archive-ready` (the archive stands, the contract does not yet record the cleanup) from `cleanup-completed` and returns the archived `cleanupArguments` with the exact `nextArgs` of the retry. It also reports one line when copies of task documents differ from their sources. | `repo_id`, `task_name` or `contract_path`, `leaf_id`, `parent_task`, `caller` |
 | `worktree_sync` | Pull the moved official line into a live worktree: fetch, merge code, fast-forward or merge memory under the admitted sync plan, and advance the recorded base pair. With `sync_source="repository-default"` it pulls each repository's default branch instead: the base pair stays, the journal records the resolved branches and pinned tips, and one sync-log entry names the sources, incoming tips and produced heads; resume and cancel use the journal alone, and `continue` refuses with `sync-source-moved` when the default changed. Knowledge merges structurally and is validated; conflicts retain the advertised `continue` / `cancel` route. | `contract_path`, `memory_sync_choice`, `sync_source`, `resolution_action`, `dry_run=false` |
 | `worktree_pause` | Pause an atomic master and hand control back to the user; publishes nothing. | `contract_path` |
 
-The lifecycle sets the status of a task document itself. `worktree_start` sets `inProgress`,
-`worktree_abandon` sets `abandoned`, and `lifecycle_finalize_task` sets `Completed`. No agent has
-to set the status; the `task_doc` operation `set_status` serves a correction.
+The lifecycle sets the status of a task document itself. `worktree_start` sets `inProgress`, and
+`lifecycle_finalize_task` sets `Completed`. `worktree_abandon` sets `abandoned` for a leaf. An
+atomic master is the exception: its document must read `abandoned` or `Completed` before the call.
+For any other status, the call refuses `abandon-master-not-terminal`; set the status first with the
+`task_doc` operation `set_status`. A master whose work landed through a pull request records that
+landing with `worktree_record_landing`, which is what lets the terminal routes read the work as
+landed instead of requiring the abandon.
+
+Both terminal routes retire each work branch, and both refuse `branch-checked-out-elsewhere` while
+that branch is checked out in a checkout other than the task's own two worktrees -- which is where
+a master's branch normally is, because the repository's primary checkout sits on it. The refusal
+names the checkouts; move each of them to another branch and repeat the call.
 
 A sync that stopped on a conflict continues with `resolution_action: "continue"` after the
 conflict is resolved. When the sync had parked uncommitted work and the resolution leaves some of
@@ -244,7 +269,9 @@ the closeout, and no ref moves. A pass is recorded on the commit as the trailer
 `Commit-Check-Pass: tree=<tree> hook=<hook>`, where `<hook>` is the path of the hook in the
 repository, and `hook=none` for a repository without a hook. A
 landing reads that trailer; for a commit that carries none, the landing runs the hook itself on
-the candidate tree. Neither closeout nor landing runs a certification of the repository;
+the candidate tree — except for a side whose commit the landing line already stands on: a task that
+changed no code lands no code commit, so that side is not checked again. Neither closeout nor
+landing runs a certification of the repository;
 [Repository certification profile](repository-certification-profile.md) describes the
 certification.
 

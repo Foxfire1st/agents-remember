@@ -450,7 +450,9 @@ class WorktreeAttachResponse(WorktreeCommandResponse):
 
 class WorktreeStatusResponse(WorktreeCommandResponse):
     operation: Literal["worktree_status"] = "worktree_status"
+    # Serialization feeds the saved result before the compact answer drops the operation list.
     lifecycleOperations: list[LifecycleOperationProjection] = Field(default_factory=list)
+    lifecycleOperationCount: int = 0
     syncOperation: SyncOperationProjection | None = None
 
 

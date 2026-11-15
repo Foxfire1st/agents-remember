@@ -316,9 +316,15 @@ def _role_of(receipt: dict[str, Any], fallback: str) -> str:
 def _scan_seat_records(
     config: McpRuntimeConfig, agent_id: str
 ) -> tuple[list[tuple[Path, dict[str, Any]]], list[tuple[Path, dict[str, Any]]]]:
-    """All launch records naming one agent: current ones, then history ones."""
+    """All launch records naming one agent: current ones, then history ones.
 
-    from agents_remember.cli.role_launch_receipts import _read_receipt  # noqa: PLC0415
+    These folders also hold JSON documents that are not launch records -- message attachments
+    are filed beside them -- so each file is asked what it is, and one that is not a receipt of
+    this line is passed over. Only a file that cannot be read as JSON keeps the refusal, because
+    it may be a receipt recorded part-way.
+    """
+
+    from agents_remember.cli.role_launch_receipts import read_enumerated_receipt  # noqa: PLC0415
 
     roots = [config.coordination_root / "notes" / "reports" / EXECUTIONS_DIRECTORY]
     roots.extend(
@@ -334,10 +340,7 @@ def _scan_seat_records(
         for path in sorted(root.rglob("*.json")):
             if "message-bindings" in path.relative_to(root).parts:
                 continue
-            try:
-                receipt = _read_receipt(path)
-            except ValueError:
-                continue
+            receipt = read_enumerated_receipt(path)
             if receipt is None or receipt.get("agentId") != agent_id:
                 continue
             if path.parent.name == "history":

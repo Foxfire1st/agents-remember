@@ -573,12 +573,20 @@ def test_the_closeout_preview_answers_what_the_apply_will_do(
     refused = _public_preview(world)
     assert (refused.returncode, refused.payload["state"]) == (2, "knowledge-gate-refused")
     verdict = refused.payload["knowledge_gate"]
+    # The invariant and family rows are owed, and the edited land body retains its old anchor.
     assert (verdict["state"], verdict["findingCount"], verdict["truncated"]) == (
         "refused",
-        2,
+        3,
         False,
     )
     assert any("touched_invariant INV-AAAAAA" in one for one in verdict["findings"])
+    assert any("reached_family FAM-F00001" in one for one in verdict["findings"])
+    stale = [one for one in verdict["findings"] if "[knowledge-stale-at-landing]" in one]
+    assert len(stale) == 1
+    assert "pkg/a.py: [knowledge-stale-at-landing] RLZ-A00001 of INV-AAAAAA" in stale[0]
+    assert "content differs from the recorded content" in stale[0]
+    assert "at the candidate code tree" in stale[0]
+    assert "the net code diff changed its path" in stale[0]
     assert refused.payload["commit_approval_required"] is False
     assert "nothing would be committed" in refused.payload["nextStep"]["summary"]
     assert "nextTool" not in refused.payload and _sides(world) == before  # no apply is offered

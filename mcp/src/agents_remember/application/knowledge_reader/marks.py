@@ -1,13 +1,13 @@
 """The two record kinds whose state is read off the code: weaknesses and dependents.
 
-**A weakness (MIK-R118).** The record is read as written, and its anchor is observed at the
+**A weakness.** The record is read as written, and its anchor is observed at the
 selection's code tree with the same rule every entry uses
 (:func:`~agents_remember.application.knowledge_currentness.observe.observe_entry`): the row says
 ``anchorState: current`` when the recorded content still stands at the symbol, ``stale`` when it
 moved or the symbol no longer resolves, and ``unverifiable`` when no code tree was resolved, naming
 why. Nothing is refused for a stale anchor; the row is marked.
 
-**A dependent (MIK-R124 rule 3).** Whether a document is stale is *derived and never stored*. A
+**A dependent.** Whether a document is stale is *derived and never stored*. A
 link has moved when
 
 * an ``anchor`` link's recorded content no longer stands at its anchor at the read's code tree (the
@@ -23,21 +23,26 @@ Nothing here writes, and no byte of a record changes when its document becomes s
 
 from __future__ import annotations
 
+import re
 import subprocess
+import tomllib
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from packaging.version import VERSION_PATTERN
 from pydantic import ValidationError
 
 from agents_remember.application.knowledge_currentness.observe import (
     CodeTree,
     EntryObservation,
+    OpenedCodeTree,
     observe_entry,
     open_code_tree,
 )
 from agents_remember.application.knowledge_reader.selection import READ_FAILURES, ReaderSelection
+from agents_remember.application.knowledge_reader.weakness_closure import closure_document
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
     GitRunnerOptions,
@@ -45,9 +50,12 @@ from agents_remember.kernel.git_command import (
 )
 from agents_remember.memory.knowledge_index import Entry, KnowledgeIndex
 from agents_remember.models.knowledge_files.records import (
+    DependentFileLink,
     DependentRecord,
     WeaknessRecord,
 )
+
+PRODUCT_VERSION_FILE = "mcp/pyproject.toml"
 
 __all__ = [
     "DEPENDENT_VIEW",
@@ -150,7 +158,7 @@ def weakness_list(
         if record.measurement is not None:
             row["measurement"] = record.measurement.to_document()
         if record.closed is not None:
-            row["closed"] = record.closed.to_document()
+            row["closed"] = closure_document(selection, record)
         if observe:
             row["anchorState"] = _anchor_observation(
                 selection.code_tree, path, record.anchor.to_document(), cache
@@ -168,8 +176,8 @@ def open_weakness_counts(selection: ReaderSelection) -> dict[str, int]:
 def open_weakness_counts_in(index: KnowledgeIndex) -> dict[str, int]:
     """How many open weaknesses each file of one index's tree carries; a file with none is absent.
 
-    The reviewer's card read counts at the bound after-side index it already holds open (MIK-R89
-    v2 rule 3), so the count is one function whichever reader asks.
+    The card reader counts at the bound after-side index it already holds open, so the
+    count is one function whichever reader asks.
     """
 
     counts: dict[str, int] = {}
@@ -215,6 +223,7 @@ class _Observe:
     code: Any
     tree: Any
     cache: dict[str, Any]
+    confirmed_version: str | None = None
 
 
 def dependent_movement(
@@ -230,7 +239,18 @@ def dependent_movement(
     value no longer stands where it was recorded (rule 3). Nothing is written.
     """
 
-    observe = _Observe(revision_of=revision_of, code=code, tree=tree, cache={})
+    confirmation = record.confirmed
+    revision = confirmation.codeTree
+    if revision is None and not confirmation.uncommitted:
+        revision = confirmation.commit
+    confirmed_version = None if revision is None else _product_version(code, revision)
+    observe = _Observe(
+        revision_of=revision_of,
+        code=code,
+        tree=tree,
+        cache={},
+        confirmed_version=confirmed_version,
+    )
     moved: list[dict[str, Any]] = []
     unverifiable: list[dict[str, Any]] = []
     for position, link in enumerate(record.stands_on, start=1):
@@ -249,7 +269,7 @@ def dependent_movement(
 
 
 def _moving_commit(opened: Any, path: str) -> dict[str, Any]:
-    """The commit that last changed ``path`` to the value this read observed (F15).
+    """The commit that last changed ``path`` to the value this read observed.
 
     A stale row says what moved, not only which values differ: the link's movement is attributed
     to the code commit that made it -- including the commit that **deleted** the file, which is the
@@ -300,7 +320,7 @@ def _movement_attribution(commit: str, path: str, opened: Any, tree: Any) -> dic
 
 
 def _anchor_moving_commit(opened: Any, anchor: Any) -> dict[str, Any]:
-    """The commit that last changed the *anchored content*, not the last commit on its path (F15).
+    """The commit that last changed the *anchored content*, not the last commit on its path.
 
     A commit that edits an unrelated constant in the same file is not the commit that moved an
     anchor whose bytes it left alone. So the attribution walks the path's commits newest-first and
@@ -438,7 +458,7 @@ def _moved_link(
     if observe.code.problem is not None:
         return {**where, "state": "unverifiable", "reason": observe.code.problem}
     if link.kind == "file":
-        moved = _file_link_moved(observe.code, where, link)
+        moved = _file_link_moved(observe.code, where, link, observe.confirmed_version)
         return None if moved is None else {**moved, **_moving_commit(observe.code, link.path)}
     moved = _anchor_link_moved(observe.tree, where, link, observe.cache)
     if moved is None or moved.get("state") != "stale":
@@ -465,13 +485,87 @@ def _record_link_moved(
     return None
 
 
-def _file_link_moved(code: Any, where: dict[str, Any], link: Any) -> dict[str, Any] | None:
-    """A whole-file link stands while the path's blob is the recorded blob."""
+def _differs_only_by_the_product_version(
+    code: OpenedCodeTree, old_blob: str, new_blob: str, old_version: str | None
+) -> bool:
+    """True when the two blobs differ only where the product's own version number stands.
+
+    The exact old and new identities come from package metadata at the confirmation and selected
+    trees. Each occurrence may stay unchanged or replace the old identity with the new one; every
+    other byte must stay unchanged. Complete version tokens include epochs and release suffixes,
+    so an owned version inside a different version is no exception. A leading v stays unchanged.
+    Missing provenance excuses no changed blob.
+    """
+
+    trees = getattr(code, "trees", None)
+    if old_blob == new_blob or trees is None or not old_version:
+        return False
+    version = _product_version(code)
+    if not version:
+        return False
+    try:
+        old = trees._blob(old_blob).decode("utf-8")
+        new = trees._blob(new_blob).decode("utf-8")
+    except (subprocess.SubprocessError, OSError, UnicodeDecodeError, ValueError):
+        return False
+    pattern = re.compile(
+        rf"(?<![\d.])(?:{VERSION_PATTERN})(?![0-9A-Za-z+_!-]|\.[0-9A-Za-z])",
+        re.VERBOSE | re.IGNORECASE,
+    )
+    replacements = {prefix + old_version: prefix + version for prefix in ("", "v", "V")}
+    old_matches = list(pattern.finditer(old))
+    new_matches = list(pattern.finditer(new))
+    if len(old_matches) != len(new_matches):
+        return False
+    old_end = new_end = 0
+    for before, after in zip(old_matches, new_matches, strict=True):
+        if old[old_end : before.start()] != new[new_end : after.start()] or (
+            before.group() != after.group() and replacements.get(before.group()) != after.group()
+        ):
+            return False
+        old_end, new_end = before.end(), after.end()
+    return old[old_end:] == new[new_end:]
+
+
+def _product_version(code: OpenedCodeTree, revision: str | None = None) -> str | None:
+    """Read project.version at the selected tree or one exact confirmation revision."""
+
+    blob = code.files.get(PRODUCT_VERSION_FILE)
+    trees = getattr(code, "trees", None)
+    if revision is not None:
+        selected_tree = getattr(code, "tree", None)
+        if selected_tree is None:
+            return None
+        blob = _blob_at(selected_tree.repository, revision, PRODUCT_VERSION_FILE)
+    if blob is None or trees is None:
+        return None
+    try:
+        text = trees._blob(blob).decode("utf-8")
+        project = tomllib.loads(text).get("project")
+    except (subprocess.SubprocessError, OSError, UnicodeDecodeError, ValueError):
+        return None
+    version = project.get("version") if isinstance(project, dict) else None
+    return version if isinstance(version, str) and version else None
+
+
+def _file_link_moved(
+    code: OpenedCodeTree,
+    where: dict[str, Any],
+    link: DependentFileLink,
+    old_version: str | None,
+) -> dict[str, Any] | None:
+    """A whole-file link stands while the path's blob is the recorded blob.
+
+    A pure substitution of the product's confirmed version with its selected version preserves
+    the link. Every other changed byte counts, including a changed dependency version.
+    """
 
     observed = code.files.get(link.path)
     if observed is None:
         return {**where, "path": link.path, "state": "stale", "reason": "the file is gone"}
-    if observed != link.blob:
+    if observed != link.blob and not _differs_only_by_the_product_version(
+        code, link.blob, observed, old_version
+    ):
         return {
             **where,
             "path": link.path,

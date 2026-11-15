@@ -207,6 +207,9 @@ class ContractCells:
     # delete (MIK-R82 rule 5 no-remains exception). Free text, not vocabulary:
     # ``None`` leaves the cell alone, a value replaces it wholesale.
     terminal_note: str | None = None
+    # The stale entries a recorded landing kept as debt, each
+    # ``"<path>#<entry id>"``. ``None`` leaves the cell alone; a tuple replaces it.
+    stale_entries: tuple[str, ...] | None = None
 
 
 def amend_contract(contract: WorktreeContract, cells: ContractCells) -> WorktreeContract:
@@ -239,6 +242,9 @@ def amend_contract(contract: WorktreeContract, cells: ContractCells) -> Worktree
         cleanup=cells.cleanup or contract.cleanup,
         terminal_note=(
             cells.terminal_note if cells.terminal_note is not None else contract.terminal_note
+        ),
+        stale_entries=(
+            cells.stale_entries if cells.stale_entries is not None else contract.stale_entries
         ),
     )
 
@@ -283,6 +289,9 @@ class WorktreeContract:
     # ``lifecycle_id``: contracts written before this field existed parse to
     # ``""``, and only a terminal no-remains publication ever sets it.
     terminal_note: str = ""
+    stale_entries: tuple[str, ...] = ()
+    """The entries a recorded landing left stale at its own code tree, each
+    ``"<path>#<entry id>"``: named in the recording's answer and kept here as the master's debt."""
     kind: str = "leaf"
     leaf_id: str = ""
     parent_task_name: str = ""
@@ -796,6 +805,10 @@ def _integration_lines(contract: WorktreeContract) -> list[str]:
     if contract.integrated_memory_content_commit:
         lines.append(f"  memory_content_commit: {contract.integrated_memory_content_commit}")
     lines.append(f"  cleanup: {contract.cleanup}")
+    if contract.stale_entries:
+        # Single-line by construction: each entry is ``<path>#<id>`` and the separator is `` | ``,
+        # so the limited front-matter parser round-trips the list without a new shape.
+        lines.append(f"  stale_entries: {' | '.join(contract.stale_entries)}")
     if contract.terminal_note:
         # Single-line by construction: the only writer records the fixed
         # no-remains reason, so the limited front-matter parser round-trips it.
@@ -1206,6 +1219,9 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         integrated_memory_content_commit=integration.get("memory_content_commit", ""),
         cleanup=vocabulary.cleanup,
         terminal_note=integration.get("terminal_note", ""),
+        stale_entries=tuple(
+            part.strip() for part in integration.get("stale_entries", "").split("|") if part.strip()
+        ),
         leaf_id=coordination.get("leaf_id", ""),
         parent_task_name=coordination.get("parent_task_name", ""),
         parent_contract_path=_optional_path(coordination.get("parent_contract_path", "")),

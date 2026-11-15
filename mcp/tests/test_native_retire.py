@@ -1,5 +1,6 @@
 """The starter retires the agent in its leaf seat (MIK-R100 rule 8, evidence 3)."""
 
+import json
 import shutil
 import unittest
 import uuid
@@ -95,6 +96,37 @@ class NativeRetireTests(RoleToolsTestCase):
         again = retire(self, manager, worker)
         self.assertEqual((again["ok"], again["status"]), (True, "already-retired"))
         self.assertIn("nothing changed", again["detail"])
+
+    def test_a_message_attachment_is_not_read_as_a_launch_record(self) -> None:
+        """A JSON document filed beside the receipts is not a receipt and blocks no retirement.
+
+        Message attachments are filed under the same report folders, so an enumeration that took
+        every ``*.json`` as a launch record refused any retirement in the root with "the role
+        execution receipt is malformed".
+        """
+
+        manager = binding("manager")
+        worker = self.start(manager, "worker")["agentId"]
+        self.runtime.agents[worker].update(status="idle")
+        messages = (
+            self.config.coordination_root
+            / "notes"
+            / "reports"
+            / "paseo-native-executions"
+            / "manager"
+            / "messages"
+        )
+        messages.mkdir(parents=True, exist_ok=True)
+        (messages / "20261113T000000Z_manager-to-worker.attach-1-report.json").write_text(
+            json.dumps({"schema": "ar-some-other-document/v1", "rows": []}), encoding="utf-8"
+        )
+
+        result = retire(self, manager, worker)
+        self.assertEqual(
+            (result["ok"], result["operation"], result["status"]),
+            (True, "retire_child", "retired"),
+        )
+        self.assertTrue(self.runtime.agents[worker]["archivedAt"])
 
     def test_another_role_agent_is_refused_naming_the_starter(self) -> None:
         manager = binding("manager")

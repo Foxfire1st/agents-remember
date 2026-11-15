@@ -110,11 +110,14 @@ def route_sidecar_status(
         if status in {"present", "absent"}:
             return status
         # out-of-scope: try the next (more general) governing index.
-    # No governing index covered the path. Fall back to the mirror probe.
+    # No governing index covered the path. Probe both mirror halves because a knowledge
+    # write may place the entry half before the Markdown half.
     mirror = mirror_onboarding_path(onboarding_root, rel)
+    entries = mirror.with_suffix(".json")
     if observe is not None:
         observe(mirror)
-    return "present" if mirror.is_file() else "absent"
+        observe(entries)
+    return "present" if mirror.is_file() or entries.is_file() else "absent"
 
 
 def _governing_indexes(

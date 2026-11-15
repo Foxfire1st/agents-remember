@@ -204,20 +204,22 @@ def _master_recorded_refusal(
     if isinstance(request, str):
         return request
     refusal = landing_gate_refusal(request)
-    if refusal is not None:
+    if refusal is not None and not _stale_only_findings(refusal.splitlines()):
         return refusal
+    # Stale debt may be recorded only after the independent landing-chain proof also passes.
     try:
         converted = converted_memory(repository, memory_commit, contract.memory_base_commit)
     except GateProbeError as error:
         return str(error)
     if not converted:
-        return None
-    return landed_chain_refusal(
+        return refusal
+    chain_refusal = landed_chain_refusal(
         contract,
         code_tip=code_commit,
         memory_tip=memory_commit,
         require_all=False,
     )
+    return chain_refusal or refusal
 
 
 def _judged_master_code(contract: WorktreeContract, code_commit: str) -> str:
@@ -435,50 +437,121 @@ def _identity_payload(contract: WorktreeContract) -> dict[str, str]:
     }
 
 
+def _stale_key(finding: str) -> str:
+    """``"<path>#<entry id>"`` for one finding line, as the contract record keeps it."""
+
+    text = finding.removeprefix("- ")
+    path, _, rest = text.partition(": [")
+    after = rest.partition("] ")[2]
+    entry = after.partition(" of ")[0]
+    return f"{path}#{entry}"
+
+
+def _stale_answer(findings: list[str]) -> dict[str, object]:
+    """The stale entries a recorded landing keeps, named in its answer.
+
+    The work is already on its source line, so the record names the debt instead of refusing: the
+    count, the entries' own sentences, and the one remedy the gate names for them.
+    """
+
+    return {
+        "count": len(findings),
+        "entries": findings,
+        "record": [_stale_key(one) for one in findings],
+        "remedy": (
+            "a knowledge-maintenance leaf re-anchors each entry; this record keeps them until it "
+            "does, and the cleanup guard reads this record as landed"
+        ),
+    }
+
+
+def _stale_only_findings(lines: list[str]) -> list[str]:
+    """The stale-entry findings of a refusal that names nothing else, or ``[]``.
+
+    A gate refusal is a header line, one ``- <path>: [<code>] <message>`` line per finding, and a
+    ``- ... and N more`` line when it is truncated. Only a refusal whose every finding is a stale
+    entry, and whose findings are all shown, can be kept as debt: anything else refuses as before.
+    """
+
+    # Deferred: the gate layer imports this module's own gate entry points.
+    from agents_remember.application.knowledge_gate.landing import (  # noqa: PLC0415
+        STALE_AT_LANDING,
+    )
+
+    findings = [line for line in lines if line.startswith("- ")]
+    if not findings or any(line.startswith("- ...") for line in findings):
+        return []
+    if not all(f"[{STALE_AT_LANDING}]" in line for line in findings):
+        return []
+    return findings
+
+
 def _record_preconditions(
     contract: WorktreeContract, commit: str, memory_commit: str
-) -> tuple[WorktreeCommandResult | None, list[str]]:
+) -> tuple[WorktreeCommandResult | None, list[str], list[str]]:
     """The commit, target and gate preconditions before the first write.
 
     Returns the refusal where one fails -- the check's own sentence, answered
     instead of raised (MIK-R111 rule 7) -- else ``None``, plus the verified
-    landing targets the record claims.
+    landing targets the record claims, plus the named stale-entry debt that remains
+    after every other admission check passes.
     """
 
     if not commit:
-        return state_refusal_result(
-            contract,
-            state="refused",
-            code="commit-missing",
-            error=(
-                "record_landing requires landed_code_commit: the commit the pull request "
-                "landed on the protected branch"
+        return (
+            state_refusal_result(
+                contract,
+                state="refused",
+                code="commit-missing",
+                error=(
+                    "record_landing requires landed_code_commit: the commit the pull request "
+                    "landed on the protected branch"
+                ),
             ),
-        ), []
+            [],
+            [],
+        )
     targets = _landing_targets(contract)
     if not targets:
-        return state_refusal_result(
-            contract,
-            state="refused",
-            code="landing-target-missing",
-            error=(
-                "record_landing refused: neither the recorded source branch "
-                f"{contract.code_source_branch!r} nor a local default branch exists, so the "
-                "landing cannot be verified"
+        return (
+            state_refusal_result(
+                contract,
+                state="refused",
+                code="landing-target-missing",
+                error=(
+                    "record_landing refused: neither the recorded source branch "
+                    f"{contract.code_source_branch!r} nor a local default branch exists, so the "
+                    "landing cannot be verified"
+                ),
             ),
-        ), []
+            [],
+            [],
+        )
     if not any(is_ancestor(contract.code_repo_path, commit, target) for target in targets):
-        return state_refusal_result(
-            contract,
-            state="refused",
-            code="commit-not-on-landing-target",
-            error=(
-                f"record_landing refused: {commit} is not reachable from any landing target "
-                f"({', '.join(targets)}). Pull the protected branch locally after the merge, "
-                "then record the commit it landed."
+        return (
+            state_refusal_result(
+                contract,
+                state="refused",
+                code="commit-not-on-landing-target",
+                error=(
+                    f"record_landing refused: {commit} is not reachable from any landing target "
+                    f"({', '.join(targets)}). Pull the protected branch locally after the merge, "
+                    "then record the commit it landed."
+                ),
             ),
-        ), []
+            [],
+            [],
+        )
     gate_refusal = _knowledge_gate_refusal(contract, commit, memory_commit)
+    stale: list[str] = []
+    if gate_refusal is not None:
+        lines = gate_refusal.splitlines()
+        named = _stale_only_findings(lines)
+        if named and contract.kind != "leaf":
+            # Reachability and the independent chain proof passed. Stale entries alone cannot
+            # undo a landing already on its source line, so the answer and record keep the debt.
+            stale = named
+            gate_refusal = None
     if gate_refusal is not None:
         lines = gate_refusal.splitlines()
         # Architect ruling L111-A-LEGACY-FORMAT (R6): a legacy-format refusal of a
@@ -510,11 +583,15 @@ def _record_preconditions(
             error=lines[0] if lines else gate_refusal,
             next=next_step,
         )
-        return WorktreeCommandResult(
-            refusal.returncode,
-            {**refusal.payload, "detail": gate_refusal[:8192]},
-        ), []
-    return None, list(targets)
+        return (
+            WorktreeCommandResult(
+                refusal.returncode,
+                {**refusal.payload, "detail": gate_refusal[:8192]},
+            ),
+            [],
+            [],
+        )
+    return None, list(targets), stale
 
 
 def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
@@ -553,7 +630,7 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
             },
         )
     commit = args.landed_code_commit.strip()
-    refusal, claimed = _record_preconditions(
+    refusal, claimed, stale = _record_preconditions(
         contract, commit, args.landed_memory_content_commit.strip()
     )
     if refusal is not None:
@@ -566,6 +643,7 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
                 "state": "would-record",
                 "landedCodeCommit": commit,
                 "landingTargets": claimed,
+                **({"staleEntries": _stale_answer(stale)} if stale else {}),
                 "summary": f"Would record {commit} as landed on {', '.join(claimed)}.",
             },
         )
@@ -576,6 +654,7 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
             code_commit=commit,
             memory_content_commit=args.landed_memory_content_commit.strip(),
         ),
+        stale_entries=tuple(_stale_key(one) for one in stale),
     )
     # The integration result says whether the landing is empty (MIK-R61 rule 1), as the
     # ordinary integration route does; named only when empty.
@@ -590,6 +669,7 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
         "landedCodeCommit": commit,
         "landingTargets": claimed,
         **({"emptyLanding": True} if empty_landing else {}),
+        **({"staleEntries": _stale_answer(stale)} if stale else {}),
         "summary": (
             f"Recorded integration of {commit} on {', '.join(claimed)} via the pull-request "
             "route. Cleanup and the series abandon guard now read this work as landed."

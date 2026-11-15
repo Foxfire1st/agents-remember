@@ -386,6 +386,36 @@ def _evaluate(
     return replace(result, findings=(*unreadable, *result.findings)) if unreadable else result
 
 
+def _entry_currentness(trees: GateTrees, owner: str | None) -> list[GateFinding]:
+    """Run the same stale-entry check for a task's closeout and its master's landing.
+
+    The candidate is a tree, so compare the contract's recorded code base to that tree without
+    a merge base. An unconverted or unpaired leaf has nothing to judge and answers no finding.
+    """
+
+    base = trees.base_code_commit
+    if not base or not trees.code_repository or not trees.memory_repository:
+        return []
+    # Deferred: ``landing`` imports this module's context types, so a module-scope import cycles.
+    from agents_remember.application.knowledge_gate.landing import (  # noqa: PLC0415
+        LandingGateRequest,
+        net_stale_entries,
+    )
+
+    return net_stale_entries(
+        LandingGateRequest(
+            memory_repository=trees.memory_repository,
+            memory_commit=trees.memory_tree,
+            memory_bases=(),
+            code_repository=trees.code_repository,
+            code_commit=trees.code_tree,
+            code_base=base,
+            leaf_owner=owner,
+        ),
+        merge=False,
+    )
+
+
 def judge(
     document: Mapping[str, Any], path: str | None, trees: GateTrees, owner: str | None
 ) -> GateResult:
@@ -407,6 +437,10 @@ def judge(
         item_findings, advisory = _item_findings(document.get("items") or (), trees, owner)
         findings += item_findings
     refusing, reports = validation_findings(trees)
+    if document.get("state") == "complete":
+        # Entry currentness is judged only for a complete worklist; an incomplete run has
+        # already refused with its own findings.
+        refusing = [*refusing, *_entry_currentness(trees, owner)]
     return GateResult(
         owner=owner,
         worklist=document,

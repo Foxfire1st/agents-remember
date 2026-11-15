@@ -180,6 +180,47 @@ def _scrub(value: Any, roots: list[str]) -> Any:
     return value
 
 
+# The two landing rows that name a line are labelled from the contract: `origin-feat` carries the
+# contract's work branch (the PR head) and `origin-main` carries its source branch. A baseline whose
+# product said the source branch on the first row and a hardcoded `origin/main` on the second is
+# ported to that shape here — the same treatment its route-index counts already get above — so the
+# parity keeps comparing the fact both worlds mean, field by field:
+# `origin-feat` <- `contract.code_work_branch`, `origin-main` <- `contract.code_source_branch`.
+# Nothing else in either answer is touched; the state, factState and detail of every row stay
+# whatever the product wrote.
+LANDING_LABEL_FIELD = {
+    "origin-feat": "code_work_branch",
+    "origin-main": "code_source_branch",
+}
+
+
+def _port_landing_labels(response: Any) -> Any:
+    """Set the baseline's two landing labels from the contract that answer names."""
+
+    if not isinstance(response, dict):
+        return response
+    # Closeout answers name the contract `contractPath`; integration answers name the same file
+    # `contract_path` (and `enclosure_path`), so either spelling identifies it.
+    contract_path = response.get("contractPath") or response.get("contract_path")
+    rows = response.get("landing")
+    if not isinstance(contract_path, str) or not isinstance(rows, list):
+        return response
+    try:
+        contract = load_contract(Path(contract_path))
+    except (OSError, ValueError):
+        return response
+    ported: list[Any] = []
+    for row in rows:
+        kind = row.get("kind") if isinstance(row, dict) else None
+        field_name = LANDING_LABEL_FIELD.get(kind) if isinstance(kind, str) else None
+        if field_name is None:
+            ported.append(row)
+            continue
+        branch = getattr(contract, field_name, None) or "main"
+        ported.append({**row, "label": f"origin/{branch}"})
+    return {**response, "landing": ported}
+
+
 def _complete_master_documents(task_root: Path) -> None:
     """Mark a master and every canonical leaf row Completed, as the plan requires."""
 
@@ -458,6 +499,9 @@ class NoGrantCloseoutParityTest(unittest.TestCase):
                     for world, marker_commits in worlds
                 ]
                 taken[0] = _without_seat_fields(taken[0])
+                # The baseline's landing labels are ported to the contract's own labels, field by
+                # field; see LANDING_LABEL_FIELD for which field feeds which row.
+                taken[0] = _port_landing_labels(taken[0])
                 scrubbed = [_scrub(taken_world, roots) for taken_world in taken]
                 # The grant world stays exact against the current world on every phase,
                 # taken out or not; the world of before is compared after the take-out.

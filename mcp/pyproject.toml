@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,7 @@ name = "agents-remember-mcp"
 version = "3.0.1"
 description = "Model Context Protocol server for Agents Remember."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.14,<3.15"
 # The supported minor line and platforms live here so consumers do not need to clone the
 # repository to discover them. Pyright, GitHub quality/release, and Dagger target
@@ -74,6 +75,15 @@ dev = [
 [project.scripts]
 agents-remember = "agents_remember.cli.__main__:main"
 agents-remember-mcp = "agents_remember.mcp.__main__:main"
+
+# The project links an index shows beside the package. They are a table of their own because
+# the package's page on PyPI reads this table and nothing else; a link that lives only in the
+# description renders as prose in the body, not as a project link in the side column.
+[project.urls]
+Homepage = "https://github.com/Foxfire1st/agents-remember"
+Documentation = "https://foxfire1st.github.io/agents-remember/"
+Repository = "https://github.com/Foxfire1st/agents-remember"
+Issues = "https://github.com/Foxfire1st/agents-remember/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
