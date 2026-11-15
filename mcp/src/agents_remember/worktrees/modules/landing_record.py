@@ -43,6 +43,7 @@ def record_landed_integration(
     *,
     landed: LandedIntegration,
     checkpoint: bool = False,
+    stale_entries: tuple[str, ...] = (),
 ) -> WorktreeContract:
     """Publish that this contract's code landed, and return the updated contract.
 
@@ -54,9 +55,11 @@ def record_landed_integration(
     """
 
     cells = (
-        ContractCells(integration_status="checkpointed")
+        ContractCells(integration_status="checkpointed", stale_entries=stale_entries or None)
         if checkpoint
-        else ContractCells(integration_status="completed", cleanup="pending")
+        else ContractCells(
+            integration_status="completed", cleanup="pending", stale_entries=stale_entries or None
+        )
     )
     updated = amend_contract(
         replace(

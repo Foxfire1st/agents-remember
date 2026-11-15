@@ -715,12 +715,28 @@ def _build_slots(
 
 
 def _collect_readiness(request: SprintLinkageRequest, slots: list[_MasterSlot]) -> tuple[str, ...]:
-    """Precondition (c): every still-live commanded master passes the retire readiness check."""
+    """Precondition (c): every still-live commanded master passes the retire readiness check.
+
+    Every master is surveyed before the answer is given: one sprint with several masters that
+    each hold open work names all of them in one refusal, so the clearing actions can be worked
+    through in one pass instead of one archive attempt per master.
+    """
 
     facts: list[str] = []
+    blocked: list[str] = []
     for slot in slots:
-        if slot.live.is_dir():
+        if not slot.live.is_dir():
+            continue
+        try:
             facts.extend(_require_ready(request, slot.master))
+        except SprintLinkageError as refusal:
+            blocked.append(str(refusal))
+    if blocked:
+        raise SprintLinkageError(
+            f"{len(blocked)} commanded master(s) of this sprint are not ready to archive; each is "
+            "named here with its open work, so every clearing action can be worked through before "
+            "the next attempt: " + " | ".join(blocked)
+        )
     return tuple(facts)
 
 
@@ -906,6 +922,106 @@ def _require_archive_targets(
             )
 
 
+# -- enclosure retirement and read-only row survey ------------------------------------------------
+
+
+def _row_survey(plan: ArchivePlan) -> dict[str, object]:
+    """Report missing or mismatched master rows without changing the sprint or masters."""
+
+    document = plan.sprint.document
+    live_dir = plan.live_dir
+    without: list[str] = []
+    differ: list[dict[str, str]] = []
+    for slot in plan.slots:
+        if not slot.live.is_dir():
+            continue
+        ref = slot.master.ref
+        found = master_rows(document, live_dir, ref)
+        row = found.row
+        if row is None:
+            without.append(ref.key)
+            continue
+        recorded = str(getattr(row, "status", "") or "")
+        actual = slot.master.document.status
+        if recorded and recorded != actual:
+            differ.append(
+                {
+                    "master": ref.key,
+                    "row": str(getattr(row, "number", "") or ""),
+                    "recorded": recorded,
+                    "document": actual,
+                }
+            )
+    return {
+        "mastersWithoutRow": without,
+        "rowsThatDiffer": differ,
+        "repaired": False,
+    }
+
+
+def _enclosure_contracts(master_folder: Path) -> list[Path]:
+    """The series contracts an archived master's enclosures hold, or ``[]``."""
+
+    return sorted(master_folder.glob("enclosures/*/series-contract.md"))
+
+
+def _retire_enclosures(slots: tuple[_MasterSlot, ...], *, dry_run: bool) -> list[dict[str, object]]:
+    """Retire moving masters' enclosures through abandonment's existing removal checks.
+
+    Keeping ``force=False`` preserves child enclosures and applies the same logs, lifecycle and
+    outside-scratch cleanup as abandonment. Staying masters remain untouched; a missing contract
+    is reported rather than inferred from a directory name.
+    """
+
+    # Deferred: the worktree layer imports this module's task-document helpers.
+    from agents_remember.worktrees.modules.abandon import _abandon_directories  # noqa: PLC0415
+    from agents_remember.worktrees.worktree_contract import load_contract  # noqa: PLC0415
+
+    retired: list[dict[str, object]] = []
+    for slot in slots:
+        if slot.staying:
+            continue
+        folder = slot.archive if plan_folder_archived(slot.live, slot.archive) else slot.live
+        contracts = _enclosure_contracts(folder)
+        if not contracts:
+            retired.append({"master": slot.master.ref.key, "state": "no-enclosure"})
+            continue
+        for path in contracts:
+            try:
+                contract = load_contract(path)
+            except (OSError, ValueError) as error:
+                retired.append(
+                    {
+                        "master": slot.master.ref.key,
+                        "contractPath": path.as_posix(),
+                        "state": "unreadable",
+                        "detail": f"{type(error).__name__}: {error}",
+                    }
+                )
+                continue
+            try:
+                directories = _abandon_directories(contract, dry_run=dry_run, force=False)
+            except Exception as error:  # the routine's own checks refuse; the answer names it
+                retired.append(
+                    {
+                        "master": slot.master.ref.key,
+                        "contractPath": path.as_posix(),
+                        "state": "refused",
+                        "detail": f"{type(error).__name__}: {error}",
+                    }
+                )
+                continue
+            retired.append(
+                {
+                    "master": slot.master.ref.key,
+                    "contractPath": path.as_posix(),
+                    "state": "would-retire" if dry_run else "retired",
+                    "directories": directories,
+                }
+            )
+    return retired
+
+
 def _require_ready(request: SprintLinkageRequest, master: ResolvedTaskDocument) -> list[str]:
     """The retire-operation readiness of one commanded master, in this operation's words."""
 
@@ -969,6 +1085,7 @@ def _preview(
     request: SprintLinkageRequest, plan: ArchivePlan, result: dict[str, Any]
 ) -> dict[str, Any]:
     folders = _pending_folders(plan)
+    result["taskArchive"]["enclosures"] = _retire_enclosures(plan.slots, dry_run=True)
     if plan.state == "folders-archived":
         return _preview_archived(request, result, folders)
     return _preview_pending(request, plan, result, folders)
@@ -982,12 +1099,19 @@ def _preview_archived(
     cleanups = [_dry_cleanup(request, live, archive) for live, archive in folders]
     result["taskArchive"]["cleanups"] = cleanups
     failed = any(item["failed"] for item in cleanups)
+    enclosure_changes = [
+        f"enclosure of {entry['master']}: retire {row['path']}"
+        for entry in result["taskArchive"]["enclosures"]
+        for row in entry.get("directories", {}).values()
+        if row.get("would_remove")
+    ]
     exact_changes = [
         f"review artifacts of {archive.as_posix()}: delete "
         f"{item['remainder']} (listed under taskArchive.cleanups)"
         for item, (_, archive) in zip(cleanups, folders, strict=True)
         if item["remainder"]
     ]
+    exact_changes.extend(enclosure_changes)
     exact_written: list[Path] = []
     for item in cleanups:
         exact_written.extend(item["receipts"])
@@ -1003,6 +1127,11 @@ def _preview_archived(
         result["wouldWrite"] = [path.as_posix() for path in exact_written]
     else:
         result["wouldChange"] = _summarized_cleanup_changes(cleanups, failed)
+        if enclosure_changes:
+            result["wouldChange"].append(
+                f"enclosures: retire {len(enclosure_changes)} directories "
+                "(exact masters and paths under taskArchive.enclosures)"
+            )
         result["wouldWrite"] = _summarized_cleanup_writes(cleanups)
     if exact_changes:
         result["state"] = "would-clean-up"
@@ -1039,6 +1168,7 @@ def _preview_pending(
     move_changes = [
         f"task folder: move {live.as_posix()} to {archive.as_posix()}" for live, archive in pending
     ]
+    result["rowSurvey"] = _row_survey(plan)
     cleanups = [_dry_cleanup(request, live, archive) for live, archive in pending]
     result["taskArchive"]["cleanups"] = [
         {
@@ -1177,6 +1307,8 @@ def _phase_two(
             }
         )
     result["taskArchive"]["cleanups"] = cleanups
+    # Contracts have moved with their masters before enclosure cleanup starts.
+    result["taskArchive"]["enclosures"] = _retire_enclosures(plan.slots, dry_run=False)
     result["archiveState"] = "hook-finished"
     if any(hook_failed(entry["reviewArtifacts"]) for entry in cleanups):
         result["ok"] = False

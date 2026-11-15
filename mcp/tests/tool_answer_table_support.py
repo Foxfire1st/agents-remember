@@ -45,6 +45,7 @@ ROW_CASE_FRAMEWORK_KEYS = frozenset(
         "log",
         "logError",
         "resultKept",
+        "cut",
         "error",
         "errorCut",
         "droppedFields",

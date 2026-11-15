@@ -370,6 +370,31 @@ class NamingTests(unittest.TestCase):
         self.assertTrue(row["exists"])
         self.assertIsNone(row["card"])
 
+    def test_a_card_whose_markdown_half_is_absent_is_read_from_its_sidecar(self) -> None:
+        """A card with its entry half and no Markdown is readable, not "no readable file".
+
+        The writer may place entries on a source whose prose card is not written yet, and the
+        integrity check reports that state as migration debt. The naming read still answers what
+        governs the path: it names the readable half and says which half is missing.
+        """
+
+        before = self._read([CODE_FILE])["files"][0]
+        sidecar = self.memory / "onboarding" / f"{CODE_FILE}.json"
+        self.assertTrue(sidecar.is_file())
+        (self.memory / "onboarding" / f"{CODE_FILE}.md").unlink()
+
+        row = self._read([CODE_FILE])["files"][0]
+
+        self.assertEqual(row["cardStatus"], "sidecar-only")
+        # The route index counts the entry half as a card, so the row reports a current index.
+        self.assertFalse(row.get("routeIndexStale"), row.get("routeIndexStale"))
+        self.assertTrue(row["card"].endswith(f"onboarding/{CODE_FILE}.json"), row["card"])
+        self.assertTrue((self._dir / row["card"]).is_file())
+        self.assertEqual(row["recordCounts"], before["recordCounts"])
+        self.assertEqual(row["cardState"], before["cardState"])
+        self.assertNotIn("no readable file", row["statesProblem"])
+        self.assertIn("has no Markdown half", row["statesProblem"])
+
     def test_memory_states_travel_with_the_answer(self) -> None:
         result = self._read([CODE_FILE])
         self.assertEqual(result["memoryState"], "converted")

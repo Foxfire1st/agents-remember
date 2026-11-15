@@ -132,10 +132,23 @@ def parse_code_commit_trailer(message: str) -> str | None:
     an attribution, and a caller cannot append a second one and have it read as the first.
     """
 
+    paragraphs = re.split(r"\n(?:[ \t]*\n)+", "\n".join(message.splitlines()).rstrip())
+    if len(paragraphs) < 2:
+        return None
+
+    trailers: list[list[str]] = []
+    for line in paragraphs[-1].splitlines():
+        if line.startswith((" ", "\t")) and trailers:
+            trailers[-1].append(line.strip())
+        elif re.fullmatch(r"[^:\s]+[ \t]*:.*", line):
+            trailers.append([line])
+        else:
+            return None
+
     attributed = [
         match.group("value")
-        for line in message.splitlines()
-        if (match := _TRAILER_LINE.match(line.strip()))
+        for parts in trailers
+        if (match := _TRAILER_LINE.match(" ".join(parts).strip()))
     ]
     return attributed[-1] if attributed else None
 

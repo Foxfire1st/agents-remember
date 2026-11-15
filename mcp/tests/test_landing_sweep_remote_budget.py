@@ -1,8 +1,8 @@
 """MIK-R81 rule 6 (F12): one ls-remote per repository and ref per landing sweep.
 
 Contracts that watch the same origin branches share one probe per sweep -- the count
-scales with repositories x refs (feature branch, origin HEAD, protected base), not with
-contracts -- failures included. The next sweep probes again, because a remote moves.
+scales with repositories x refs (the work branch and the branch the work lands into), not
+with contracts -- failures included. The next sweep probes again, because a remote moves.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ class LandingSweepRemoteBudgetTests(unittest.IsolatedAsyncioTestCase):
         return len(calls)
 
     async def test_shared_origin_branches_probe_once_per_sweep_at_two_fleet_sizes(self) -> None:
-        """Two and four finishing contracts on one origin: three ls-remote per sweep each."""
+        """Two and four finishing contracts on one origin: two ls-remote per sweep each."""
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -89,9 +89,9 @@ class LandingSweepRemoteBudgetTests(unittest.IsolatedAsyncioTestCase):
                 count = await self._sweep_ls_remote_count(root, code, fleet)
                 self.assertEqual(
                     count,
-                    3,
-                    f"fleet {fleet}: one origin/super, one origin/HEAD and one origin/main "
-                    "probe per sweep",
+                    2,
+                    f"fleet {fleet}: one origin/ar/leaf probe for the work branch and one "
+                    "origin/super probe for the branch the work lands into, per sweep",
                 )
                 # Fresh contracts per fleet size: drop any freeze files the success wrote so
                 # the next fleet measures its own sweep (open arcs freeze nothing, but a
@@ -100,10 +100,10 @@ class LandingSweepRemoteBudgetTests(unittest.IsolatedAsyncioTestCase):
                     stale.unlink()
 
     async def test_broken_remote_fails_once_per_sweep_and_refreshes_next_sweep(self) -> None:
-        """Three live contracts on a dead origin: three failed probes per sweep, re-run per sweep.
+        """Three live contracts on a dead origin: two failed probes per sweep, re-run per sweep.
 
         Live arcs probe every sweep (the one-attempt budget covers finishing arcs only), so
-        two sweeps show the memo refreshing: the same three probes, never nine.
+        two sweeps show the memo refreshing: the same two probes, never six.
         """
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -142,5 +142,5 @@ class LandingSweepRemoteBudgetTests(unittest.IsolatedAsyncioTestCase):
                 first = len(calls)
                 await refresher.refresh_once()
                 second = len(calls) - first
-            self.assertEqual(first, 3, "one failed probe per (repo, ref), not per contract")
-            self.assertEqual(second, 3, "the next sweep probes again: a remote moves")
+            self.assertEqual(first, 2, "one failed probe per (repo, ref), not per contract")
+            self.assertEqual(second, 2, "the next sweep probes again: a remote moves")

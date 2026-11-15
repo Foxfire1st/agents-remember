@@ -51,7 +51,10 @@ class NamedFile(StrictResponseModel):
     path: str
     exists: bool | None = None
     card: str | None = None
-    cardStatus: Literal["found", "missing"] | None = None
+    # "found" is a card whose two halves are readable where it stands; "sidecar-only" is a card
+    # whose Markdown half is absent while its entry half (`<card>.json`) is a readable file, which
+    # the row names so the records are never reported as unreadable; "missing" is no card at all.
+    cardStatus: Literal["found", "missing", "sidecar-only"] | None = None
     cardState: str | None = None
     recordCounts: dict[str, int] | None = None
     # MIK-R118 rule 5 and MIK-R124 rule 7: one short line, a number, and no more. The count of open

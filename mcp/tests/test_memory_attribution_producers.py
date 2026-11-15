@@ -188,6 +188,64 @@ def _parsed_trailer(repository: Path, commit: str, scratch: Path) -> str:
     return git(repository, "interpret-trailers", "--parse", message.as_posix())
 
 
+def _assert_parser_agrees_with_git(
+    scratch: Path, message: str, expected_commit: str | None, expected_trailers: str
+) -> None:
+    repository = scratch / "memory"
+    init_repo(repository)
+    message_file = scratch / "message.txt"
+    message_file.write_text(message, encoding="utf-8")
+    git_trailers = git(repository, "interpret-trailers", "--parse", message_file.as_posix())
+    parsed = parse_code_commit_trailer(message)
+    comparison = {"message": message, "gitTrailers": git_trailers, "parserCommit": parsed}
+    print(json.dumps(comparison, sort_keys=True))
+    assert git_trailers == expected_trailers, comparison
+    assert parsed == expected_commit, comparison
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        pytest.param(
+            f"Update memory\n\nCode-Commit: {CODE_ONE}\n\n"
+            "The change is described here without an attribution trailer.\n",
+            id="middle-paragraph",
+        ),
+        pytest.param(
+            f"Update memory\n\nThis paragraph explains the change.\nCode-Commit: {CODE_ONE}\n",
+            id="final-paragraph-prose-before",
+        ),
+        pytest.param(
+            f"Update memory\n\nCode-Commit: {CODE_ONE}\nThis paragraph explains the change.\n",
+            id="final-paragraph-prose-after",
+        ),
+    ],
+)
+def test_the_parser_ignores_body_only_attribution(message: str, tmp_path: Path) -> None:
+    _assert_parser_agrees_with_git(tmp_path, message, None, "")
+
+
+def test_the_parser_reads_the_final_trailer_after_a_body_mention(tmp_path: Path) -> None:
+    message = (
+        f"Update memory\n\nCode-Commit: {CODE_ONE}\n\n"
+        "The earlier line is quoted from the investigation.\n\n"
+        f"Code-Commit: {CODE_TWO}\n"
+    )
+    _assert_parser_agrees_with_git(tmp_path, message, CODE_TWO, f"Code-Commit: {CODE_TWO}")
+
+
+def test_the_parser_reads_a_trailer_beside_the_commit_check(tmp_path: Path) -> None:
+    trailers = f"Code-Commit: {CODE_TWO}\nCommit-Check-Pass: deterministic checks passed"
+    _assert_parser_agrees_with_git(tmp_path, f"Update memory\n\n{trailers}\n", CODE_TWO, trailers)
+
+
+def test_the_parser_reads_the_product_renderers_final_trailer(tmp_path: Path) -> None:
+    message = render_memory_content_message(
+        "Update memory\n\nThe authored content is ready.\n", CODE_TWO
+    )
+    _assert_parser_agrees_with_git(tmp_path, message, CODE_TWO, f"Code-Commit: {CODE_TWO}")
+
+
 def test_the_attribution_key_is_named_and_rendered_in_exactly_one_module() -> None:
     """One key, one interpolation, one module -- the guard the whole transition rests on.
 

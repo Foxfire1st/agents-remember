@@ -20,6 +20,7 @@ from agents_remember.serving.app import (
 )
 from agents_remember.serving.projections import landing_state as landing
 from agents_remember.serving.projector import DEFAULT_PROJECTION_CADENCE, LIVE_PROJECTION_CLOCK
+from agents_remember.worktrees.modules import landing as landing_module
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
@@ -37,6 +38,22 @@ def _live(root: Path, leaf: str = "live"):
             ContractTask("task", "repo", root, "light-task", "external"),
             leaf=LeafIdentity(leaf),
             code=RepoBranchPlan(root / "code", "main", "work", "a" * 40),
+            memory=RepoBranchPlan(root / "memory", "main", "work", "a" * 40),
+        ),
+        closeout_status="completed",
+    )
+    write_contract(contract.contract_path, contract)
+    return contract
+
+
+def _live_on(root: Path, source_branch: str, leaf: str = "live"):
+    """A live contract whose work lands on ``source_branch`` rather than origin's default."""
+
+    contract = replace(
+        default_contract(
+            ContractTask("task", "repo", root, "light-task", "external"),
+            leaf=LeafIdentity(leaf),
+            code=RepoBranchPlan(root / "code", source_branch, "work", "a" * 40),
             memory=RepoBranchPlan(root / "memory", "main", "work", "a" * 40),
         ),
         closeout_status="completed",
@@ -221,3 +238,87 @@ class LandingPageCadenceTests(unittest.IsolatedAsyncioTestCase):
                             await task
                     for stream in streams:
                         await stream.aclose()
+
+
+class LandingTargetFactTests(unittest.TestCase):
+    """The landing rows name the branch this work lands into, not origin's default branch.
+
+    A task whose source is a master's line lands on that line. Naming ``origin/main`` in its
+    landing facts describes a landing that is not the task's, and a reader acts on it -- the fact
+    here is the contract's own source branch.
+    """
+
+    def test_the_observed_target_row_names_the_contract_source_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            contract = _live_on(root, "ar/the-master-line")
+            with (
+                mock.patch.object(
+                    landing_module, "_remote_branch", return_value=("observed", "b" * 40)
+                ),
+                mock.patch.object(landing_module, "_pr_for", return_value={}),
+            ):
+                refs = landing_module.landing_refs(contract)
+            assert refs is not None
+            target = [row for row in refs if row["kind"] == "origin-main"]
+            self.assertEqual(len(target), 1)
+            self.assertEqual(target[0]["label"], "origin/ar/the-master-line")
+            self.assertEqual(target[0]["state"], "planned")
+            self.assertEqual(target[0]["factState"], "observed")
+
+    def test_the_pull_request_row_says_absent_where_no_pull_request_is_part_of_the_route(
+        self,
+    ) -> None:
+        """A route without a pull request uses the absent status.
+
+        A landing the product performs itself records a strategy other than ``pr``; that record is
+        the route's own fact, so the row for a pull request says the route has none.
+        """
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            contract = replace(
+                _live_on(root, "ar/the-master-line"), integration_strategy="direct-replay"
+            )
+            with (
+                mock.patch.object(
+                    landing_module, "_remote_branch", return_value=("observed", "b" * 40)
+                ),
+                mock.patch.object(landing_module, "_pr_for", return_value={}),
+            ):
+                refs = landing_module.landing_refs(contract)
+            assert refs is not None
+            pr = [row for row in refs if row["kind"] == "pr"]
+            self.assertEqual(len(pr), 1)
+            self.assertEqual(pr[0]["state"], "absent")
+            self.assertEqual(pr[0]["factState"], "observed")
+            self.assertIn("no pull request is part of this route", str(pr[0]["detail"]))
+
+    def test_the_pull_request_row_still_reads_planned_on_a_pull_request_route(self) -> None:
+        """A pull-request route stays planned until its pull request exists."""
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            contract = replace(_live_on(root, "ar/the-master-line"), integration_strategy="pr")
+            with (
+                mock.patch.object(
+                    landing_module, "_remote_branch", return_value=("observed", "b" * 40)
+                ),
+                mock.patch.object(landing_module, "_pr_for", return_value={}),
+            ):
+                refs = landing_module.landing_refs(contract)
+            assert refs is not None
+            pr = [row for row in refs if row["kind"] == "pr"]
+            self.assertEqual(pr[0]["state"], "planned")
+            self.assertEqual(pr[0]["detail"], "no PR opened yet")
+
+    def test_the_unobserved_target_row_names_the_contract_source_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            contract = _live_on(root, "ar/the-master-line")
+            rows = landing_module.unobserved_landing_refs(contract)
+            assert rows is not None
+            target = [row for row in rows if row["kind"] == "origin-main"]
+            self.assertEqual(len(target), 1)
+            self.assertEqual(target[0]["label"], "origin/ar/the-master-line")
+            self.assertEqual(target[0]["factState"], "missing")

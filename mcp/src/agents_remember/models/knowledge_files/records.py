@@ -324,14 +324,20 @@ class SeenBy(FileModel):
 
 
 class Closure(FileModel):
-    """``{ task, commit, reason? }``: the change that removed a weakness' cause (rule 7).
+    """The task that closed a weakness, with its commit when that commit is known.
 
-    ``reason`` is the one sentence a task writes when it finds a weakness does not stand.
+    A closure without a commit carries the task's reason for closing it.
     """
 
     task: Label
-    commit: GitBlobId
+    commit: GitBlobId | None = None
     reason: Text | None = None
+
+    @model_validator(mode="after")
+    def _require_reason_without_commit(self) -> Closure:
+        if self.commit is None and self.reason is None:
+            raise ValueError("a closure without a commit names its reason")
+        return self
 
 
 class WeaknessRecord(_Record):
@@ -340,8 +346,8 @@ class WeaknessRecord(_Record):
     The ``kind`` is one of :data:`WEAKNESS_KINDS`. ``anchor`` names the file and, where it has one,
     the symbol: the same anchor a realization entry carries, recorded at the commit that saw it.
     ``measurement`` is present only where there is one. ``seen`` is who saw it. ``state`` is
-    ``open`` or ``closed``; a closed record names the ``task`` and ``commit`` that removed its
-    cause. ``links`` may carry ``burdens`` towards an invariant or a family. There is no priority
+    ``open`` or ``closed``; a closed record names the ``task`` and its commit or reason.
+    ``links`` may carry ``burdens`` towards an invariant or a family. There is no priority
     field and no proposal field: a weakness that belongs to no file is not recorded here.
     """
 
@@ -365,7 +371,7 @@ class WeaknessRecord(_Record):
             raise ValueError("a weakness anchors to a file: 'anchor.path' is required")
         if (self.state == "closed") != (self.closed is not None):
             raise ValueError(
-                "a closed weakness names its 'closed' task and commit, and an open one carries none"
+                "a closed weakness names its 'closed' task, and an open one carries no closure"
             )
         return self
 

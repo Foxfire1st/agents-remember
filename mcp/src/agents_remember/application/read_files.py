@@ -365,9 +365,35 @@ def _name_one(
     memory_root = context.onboarding_root.parent
     card_absolute = memory_root / "onboarding" / f"{card_rel}.md"
     if not card_absolute.is_file():
-        # The route index still covers the path but the card file is gone or
-        # not a file (stale index): the row names the absence instead of an
-        # unopenable location, and the valid siblings are still answered.
+        # A card whose Markdown half is absent is still readable when its entry half is a file:
+        # a knowledge write may place entries on a source whose prose card is not written yet
+        # when that entry sidecar has no references to missing prose. The row
+        # names the readable half and says which one is missing, instead of answering that the
+        # card has no readable file and naming no records.
+        sidecar_absolute = memory_root / "onboarding" / f"{card_rel}.json"
+        if sidecar_absolute.is_file():
+            result["card"] = _locate(sidecar_absolute, scope.working_folder)
+            result["cardStatus"] = "sidecar-only"
+            result["statesProblem"] = (
+                f"the governing card {card_rel} has no Markdown half; its entries and references "
+                f"are read from {card_rel}.json"
+            )
+            result.update(
+                _record_fields(
+                    _NamedCard(
+                        code_root=code_root,
+                        rel=rel,
+                        card_rel=card_rel,
+                        card_absolute=sidecar_absolute,
+                        card_text=None,
+                    ),
+                    scope,
+                )
+            )
+            return result
+        # The route index still covers the path but neither half is a file (stale index): the row
+        # names the absence instead of an unopenable location, and the valid siblings are still
+        # answered.
         result["card"] = None
         result["cardStatus"] = "missing"
         result["statesProblem"] = (
@@ -465,13 +491,17 @@ def _mark_counts(
 
 @dataclass(frozen=True)
 class _NamedCard:
-    """One card, its path and the code root whose records it is measured against."""
+    """One card, its path and the code root whose records it is measured against.
+
+    ``card_text`` is ``None`` for a card whose Markdown half is absent and whose entries are read
+    from its sidecar: the headings then fall back to the card title, and no text is invented.
+    """
 
     code_root: Path
     rel: str
     card_rel: str
     card_absolute: Path
-    card_text: str
+    card_text: str | None
 
 
 def _record_fields(card: _NamedCard, scope: _BatchScope) -> dict[str, Any]:
@@ -534,11 +564,16 @@ def _governing_card(context: CoordinationContext, rel: str) -> tuple[str | None,
         return None, False
     if _route_sidecar_status(context.onboarding_root, rel) == "present":
         return rel, False
+    # A card governs its path when either half stands at the card's own place: its Markdown card,
+    # or the entry half (`<rel>.json`) that a knowledge write may place before the prose is
+    # written. A card with only its entry half is read from that half (`_name_one`), never
+    # reported as no card at all.
     try:
         card_exists = (context.onboarding_root / f"{rel}.md").is_file()
+        entries_exist = (context.onboarding_root / f"{rel}.json").is_file()
     except OSError:
-        card_exists = False
-    return (rel, True) if card_exists else (None, False)
+        card_exists = entries_exist = False
+    return (rel, True) if card_exists or entries_exist else (None, False)
 
 
 def _sidecar_references(card_absolute: Path) -> Mapping[str, Any] | None:

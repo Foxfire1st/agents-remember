@@ -699,9 +699,17 @@ def test_the_memory_quality_controller_persists_the_worklist_and_renders_it_in_t
     assert "gates nothing" in first_line and "worklist section" in first_line
     assert WORKLIST_SECTION_HEADING in rendered
     assert "| touched_invariant | INV-AAAAAA |" in rendered
-    # MIK-R09: each open item is one repair finding, so the four open items now count.
-    assert response["curatorActionableCount"] == 4
-    assert cast(dict[str, Any], response["knowledgeGate"])["openItemCount"] == 4
+    # Four unresolved worklist items and the changed land body's old anchor need repair.
+    assert response["curatorActionableCount"] == 5
+    gate = cast(dict[str, Any], response["knowledgeGate"])
+    assert (gate["openItemCount"], gate["findingCount"]) == (4, 5)
+    repairs = cast(list[dict[str, Any]], response["repairFindings"])
+    stale = [one for one in repairs if one["code"] == "knowledge-stale-at-landing"]
+    assert len(stale) == 1
+    assert stale[0]["path"] == "pkg/a.py"
+    assert "RLZ-A00001 of INV-AAAAAA" in stale[0]["message"]
+    assert "content differs from the recorded content" in stale[0]["message"]
+    assert "at the candidate code tree" in stale[0]["message"]
 
 
 def test_the_recompute_never_raises_and_a_failure_never_fails_a_completed_sync(

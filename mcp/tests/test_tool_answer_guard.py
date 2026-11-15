@@ -31,7 +31,6 @@ from agents_remember.application.tool_response import complete_tool_response
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import (
     ENVELOPE_STRIPPED_FIELDS,
-    LOG_ERROR_LOCATION_OMITTED,
     TOOL_ANSWER_ERROR_MAX_CHARS,
     TOOL_ANSWER_EXCEPTION_MAX_TOKENS,
     TOOL_ANSWER_LIST_MAX,
@@ -150,21 +149,25 @@ class ToolAnswerGuardTests(unittest.TestCase):
             )
             self.assertLessEqual(count_response_tokens(short), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
 
-    def test_location_over_the_fixed_bound_is_omitted_not_substituted(self) -> None:
-        # Rule 4: a location that does not fit is not shortened and not
-        # replaced by another path: the fixed no-path logError rides, with
-        # no log.
+    def test_a_location_longer_than_the_bound_is_still_named_with_the_cut_hint(self) -> None:
+        # A recorded result's path is never traded for space. The answer sheds other fields
+        # first and ends with the file hint. If the path alone exceeds the bound, the hint
+        # remains so the reader can still find the result.
         log = "/coord/" + "x" * 2000 + "/ar-tools-2026-10-08/1-ping-abcdef12.json"
-        short, _dropped, _cut = short_form(
-            {"ok": False, "code": "start-blocked", "error": "what to do."},
+        short, dropped, _cut = short_form(
+            {"ok": False, "code": "start-blocked", "error": "what to do.", "note": "y" * 150},
             answer_tokens=99999,
             log=log,
             count=count_response_tokens,
         )
-        self.assertNotIn("log", short)
-        self.assertEqual(short["logError"], LOG_ERROR_LOCATION_OMITTED)
-        self.assertNotIn("resultKept", short)
-        self.assertLessEqual(count_response_tokens(short), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
+        self.assertEqual(short["log"], log)
+        self.assertEqual(list(short)[-1], "cut")
+        self.assertEqual(
+            short["cut"],
+            {"cut": True, "log": log, "readIt": "the whole result is in this file; read it there"},
+        )
+        self.assertNotIn("note", short)
+        self.assertGreaterEqual(dropped, 1)
 
     def test_short_form_is_measured_six_hundred_multi_token_char_error(self) -> None:
         # Rule 4, E2: an error of 600 characters that are several tokens
@@ -322,15 +325,14 @@ class ToolAnswerGuardTests(unittest.TestCase):
             self.assertEqual(lines[0]["answerTokens"], count_response_tokens(answer))
 
     def test_over_budget_root_path_through_the_choke(self) -> None:
-        # Rule 4, E2: a transcript root whose path alone is over the bound.
-        # The answer is within the bound and carries the fixed logError, the
-        # detail file exists in that folder, and the line names it. The path
-        # is neither cut nor substituted nor capped.
+        # Varied path components stay expensive in tokens instead of compressing repeated text.
+        # The recorded path and final hint remain when nothing else can make the form fit.
         with tempfile.TemporaryDirectory() as tmp:
             coord = Path(tmp)
             deep = coord
             for index in range(10):
-                deep = deep / f"level-{index:02d}-{'y' * 180}"
+                component = "-".join(f"{index:02d}{part:02d}" for part in range(40))
+                deep = deep / f"level-{index:02d}-{component}"
             deep.mkdir(parents=True)
             self.assertGreater(len(deep.as_posix()), 1900)
             config = _stub_config(coord, transcript_root=deep)
@@ -339,9 +341,13 @@ class ToolAnswerGuardTests(unittest.TestCase):
                     "memory_quality_check", {"ok": True, "blob": _big_blob()}
                 )
             self.assertTrue(answer["overflow"])
-            self.assertNotIn("log", answer)
-            self.assertEqual(answer["logError"], LOG_ERROR_LOCATION_OMITTED)
-            self.assertLessEqual(count_response_tokens(answer), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
+            self.assertEqual(list(answer)[-1], "cut")
+            self.assertEqual(answer["cut"]["log"], answer["log"])
+            self.assertTrue(Path(answer["log"]).is_file())
+            self.assertGreater(
+                count_response_tokens(answer["cut"]), TOOL_ANSWER_OVERFLOW_MAX_TOKENS
+            )
+            self.assertGreater(count_response_tokens(answer), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
             details = list(deep.glob("ar-tools-*/*.json"))
             self.assertEqual(len(details), 1)
             self.assertEqual(details[0].parent.parent, deep)

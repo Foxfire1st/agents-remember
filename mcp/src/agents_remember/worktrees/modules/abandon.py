@@ -54,6 +54,7 @@ from agents_remember.worktrees.modules.cleanup import (
     remove_empty_dir,
     remove_registered_worktree,
 )
+from agents_remember.worktrees.modules.git import branch_exists, is_ancestor
 from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.state_refusals import (
@@ -160,9 +161,59 @@ def _abandon_series_release_refusal(
 
 
 def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
-    """Abandon the worktree, with the automatic outside-scratch reconcile (MIK-R207)."""
+    """Abandon the worktree and reconcile its outside scratch root automatically.
 
-    return with_outside_scratch_reconcile(_abandon_result(args), dry_run=args.dry_run)
+    The work's standing on its own landing line is measured before anything is removed, because
+    the removal deletes the very branch the measurement reads.
+    """
+
+    landed = _landed_work_fact(args)
+    result = with_outside_scratch_reconcile(_abandon_result(args), dry_run=args.dry_run)
+    return _with_landed_work_answer(result, landed)
+
+
+def _landed_work_fact(args: WorktreeArgs) -> dict[str, object] | None:
+    """What stands on this task's landing line already, by ancestry rather than by record.
+
+    A master's work may already be on its source line while the recorded landing cells are
+    stale. Measure that fact from Git -- the work branch's tip reachable from the line --
+    rather than from the recorded cells, so the abandon answer can report it accurately.
+    """
+
+    if args.contract_path is None:
+        return None
+    try:
+        contract = load_contract(args.contract_path)
+    except (OSError, ValueError):
+        return None
+    work, line = contract.code_work_branch, contract.code_source_branch
+    if not work or not line or work == line:
+        return None
+    repo = contract.code_repo_path
+    if not branch_exists(repo, work) or not is_ancestor(repo, work, line):
+        return None
+    return {"state": "on-source-line", "branch": work, "line": line}
+
+
+def _with_landed_work_answer(
+    result: WorktreeCommandResult, landed: dict[str, object] | None
+) -> WorktreeCommandResult:
+    """Say in an abandon answer that the work already stands on the line it would land on."""
+
+    if landed is None or result.returncode != 0:
+        return result
+    payload = dict(result.payload)
+    payload["landedWork"] = landed
+    summary = payload.get("summary")
+    sentence = (
+        f"Its work is already on {landed['line']}: the branch {landed['branch']} is an "
+        f"ancestor of {landed['line']}, so nothing of it is lost by abandoning."
+    )
+    if isinstance(summary, str) and summary.strip():
+        payload["summary"] = f"{summary.rstrip()} {sentence}"
+    else:
+        payload["summary"] = sentence
+    return WorktreeCommandResult(result.returncode, payload)
 
 
 def _abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:

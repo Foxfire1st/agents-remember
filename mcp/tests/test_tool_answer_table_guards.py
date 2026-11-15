@@ -9,13 +9,14 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
+from agents_remember.application.agent_binding import AgentBinding
 from agents_remember.application.tool_answer_log import TOOL_LOG_BASENAME_PREFIX, tool_call_context
 from agents_remember.application.tool_response import complete_tool_response
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import (
     ENVELOPE_STRIPPED_FIELDS,
-    LOG_ERROR_LOCATION_OMITTED,
     TOOL_ANSWER_ERROR_MAX_CHARS,
     TOOL_ANSWER_EXCEPTION_MAX_TOKENS,
     TOOL_ANSWER_LIST_MAX,
@@ -30,6 +31,7 @@ from agents_remember.models.tools.tool_answer import (
     truncate_lists,
 )
 from tool_answer_table_support import _big_blob, _server_info_case, _stub_config
+from tool_entry_point_sweep_support import EntryPointWorld, classify
 
 
 class ToolAnswerGuardTests(unittest.TestCase):
@@ -140,21 +142,25 @@ class ToolAnswerGuardTests(unittest.TestCase):
             )
             self.assertLessEqual(count_response_tokens(short), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
 
-    def test_location_over_the_fixed_bound_is_omitted_not_substituted(self) -> None:
-        # Rule 4: a location that does not fit is not shortened and not
-        # replaced by another path: the fixed no-path logError rides, with
-        # no log.
+    def test_a_location_longer_than_the_bound_is_still_named_with_the_cut_hint(self) -> None:
+        # A recorded result's path is never traded for space. The answer sheds other fields
+        # first and ends with the file hint. If the path alone exceeds the bound, the hint
+        # remains so the reader can still find the result.
         log = "/coord/" + "x" * 2000 + "/ar-tools-2026-10-08/1-ping-abcdef12.json"
-        short, _dropped, _cut = short_form(
-            {"ok": False, "code": "start-blocked", "error": "what to do."},
+        short, dropped, _cut = short_form(
+            {"ok": False, "code": "start-blocked", "error": "what to do.", "note": "y" * 150},
             answer_tokens=99999,
             log=log,
             count=count_response_tokens,
         )
-        self.assertNotIn("log", short)
-        self.assertEqual(short["logError"], LOG_ERROR_LOCATION_OMITTED)
-        self.assertNotIn("resultKept", short)
-        self.assertLessEqual(count_response_tokens(short), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
+        self.assertEqual(short["log"], log)
+        self.assertEqual(list(short)[-1], "cut")
+        self.assertEqual(
+            short["cut"],
+            {"cut": True, "log": log, "readIt": "the whole result is in this file; read it there"},
+        )
+        self.assertNotIn("note", short)
+        self.assertGreaterEqual(dropped, 1)
 
     def test_short_form_is_measured_six_hundred_multi_token_char_error(self) -> None:
         # Rule 4, E2: an error of 600 characters that are several tokens
@@ -340,9 +346,11 @@ class ToolAnswerGuardTests(unittest.TestCase):
                     "memory_quality_check", {"ok": True, "blob": _big_blob()}
                 )
             self.assertTrue(answer["overflow"])
-            self.assertNotIn("log", answer)
-            self.assertEqual(answer["logError"], LOG_ERROR_LOCATION_OMITTED)
-            self.assertLessEqual(count_response_tokens(answer), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
+            # The cut answer ends with the full-result file even when its path exceeds the
+            # bound; the detail file is in that folder and the tool line names it.
+            self.assertEqual(list(answer)[-1], "cut")
+            self.assertEqual(answer["cut"]["log"], answer["log"])
+            self.assertTrue(Path(answer["log"]).is_file())
             details = list(deep.glob("ar-tools-*/*.json"))
             self.assertEqual(len(details), 1)
             self.assertEqual(details[0].parent.parent, deep)
@@ -396,3 +404,36 @@ class ToolAnswerGuardTests(unittest.TestCase):
                 "args": {"repo_id": "agents-remember"},
             },
         )
+
+
+class EntryPointOverflowGuardTests(unittest.TestCase):
+    def test_the_sweep_accepts_a_direct_grant_answer_that_overflows_on_purpose(self) -> None:
+        world = EntryPointWorld()
+        self.addCleanup(world.close)
+        binding = AgentBinding(
+            agent_id="11111111-1111-4111-8111-111111111111",
+            role="architect",
+            request_id="22222222-2222-4222-8222-222222222222",
+            report_path=(world.root / "report.md").as_posix(),
+        )
+        action = "unsupported-action-" + "long " * 500
+        with patch.dict("os.environ", binding.environment()):
+            outcome = world.call(
+                "direct_execution_grant",
+                {"task_document_ref": world.leaf_ref, "action": action},
+            )
+
+        kind, answer = outcome
+        self.assertEqual(kind, "RETURNED", answer)
+        assert answer is not None
+        self.assertFalse(answer["ok"])
+        self.assertTrue(answer["overflow"])
+        self.assertGreater(answer["answerTokens"], bound_for("direct_execution_grant"))
+        self.assertEqual(list(answer)[-1], "cut")
+        self.assertTrue(answer["cut"]["cut"])
+        self.assertEqual(answer["cut"]["log"], answer["log"])
+        whole = json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
+        self.assertEqual(whole["status"], "direct-grant-action-unknown")
+        self.assertIn(action, whole["detail"])
+        self.assertNotIn("cut", whole)
+        self.assertEqual(classify("direct_execution_grant", outcome)[0], "refusal")

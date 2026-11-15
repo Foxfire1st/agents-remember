@@ -784,6 +784,34 @@ def _read_receipt(path: Path) -> dict[str, Any] | None:
     return receipt
 
 
+def read_enumerated_receipt(path: Path) -> dict[str, Any] | None:
+    """One file met while enumerating a report folder that also holds other JSON documents.
+
+    Message attachments and other JSON documents are filed under the same report folders as
+    launch receipts, so an enumeration cannot assume every ``*.json`` there is one. A file whose
+    text parses as JSON but is not an object carrying this line's receipt schema is not a launch
+    record and answers ``None``. A file that cannot be read at all keeps the ordinary refusal: it
+    may be a receipt that was written part-way, and no seat may be retired over a guess.
+    """
+
+    try:
+        return _read_receipt(path)
+    except HTTPException:
+        if _names_another_document(path):
+            return None
+        raise
+
+
+def _names_another_document(path: Path) -> bool:
+    """Whether the file's JSON is something other than a receipt of this line."""
+
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return False
+    return not (isinstance(value, dict) and value.get("schema") == RECEIPT_SCHEMA)
+
+
 def _write_receipt(path: Path, receipt: dict[str, Any], *, archive_update: bool = False) -> None:
     with exclusive_file_lock(path, "role execution receipt"):
         current = _read_receipt(path)

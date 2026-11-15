@@ -53,12 +53,13 @@ from agents_remember.application.knowledge_reader.records import (
 )
 from agents_remember.application.knowledge_reader.selection import READ_FAILURES, ReaderSelection
 from agents_remember.application.knowledge_reader.timeline import record_timeline
+from agents_remember.application.knowledge_reader.weakness_closure import closure_document
 from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees
 from agents_remember.memory.knowledge_index import Entry, HistoryRow, KnowledgeIndex, Record
 from agents_remember.memory_quality.knowledge_census import census_reports, read_censuses
 from agents_remember.models.knowledge_files.documents import RECORD_DIRECTORIES
 from agents_remember.models.knowledge_files.history import membership_subject
-from agents_remember.models.knowledge_files.records import RECORD_MODELS
+from agents_remember.models.knowledge_files.records import RECORD_MODELS, WeaknessRecord
 from agents_remember.serving.media import media_type_for
 from agents_remember.serving.scope import language_for
 
@@ -79,12 +80,17 @@ def record_view(
     decisions = Decisions(index)
     outgoing, unreadable = _outgoing(selection, record)
     summary = summary_of(record)
+    record_document = dict(record.document)
+    closed = None
+    if record.kind == "weakness" and record.document.get("closed") is not None:
+        closed = closure_document(selection, WeaknessRecord.model_validate(record.document))
+        record_document["closed"] = closed
     document: dict[str, Any] = {
         "record": {
             **summary,
             "path": record.path,
             "heading": summary["title"],
-            "document": record.document,
+            "document": record_document,
         },
         "prose": read_memory_file(selection, _prose_path(record.path)).to_document(),
         "outgoing": outgoing,
@@ -96,6 +102,8 @@ def record_view(
         # The record's own links could not be read: named, never shown as "no outgoing link".
         document["outgoingState"] = {"state": "unavailable", "detail": unreadable}
     part, entries = _kind_part(selection, record, decisions)
+    if closed is not None:
+        part["facet"]["closed"] = closed
     document.update(part)
     document["timeline"] = record_timeline(
         selection,
