@@ -181,7 +181,9 @@ within `orchestration.landing.commitCheckTimeoutSeconds` of the
 after a passed check carries the trailer `Commit-Check-Pass: tree=<tree> hook=<hook>`; `hook` is
 `none` for a repository without a pre-commit hook. `worktree_integrate` accepts a commit whose
 trailer names the tree of that commit, and it runs the hook itself on a candidate without such a
-trailer. The commit of `memory_baseline_adopt` passes the same check and carries the trailer
+trailer. A landing checks every side whose commit it publishes: a side whose commit the landing
+line already stands on adds no commit, so the hook is not run for it. The commit of
+`memory_baseline_adopt` passes the same check and carries the trailer
 `Code-Commit:` only. No argument of these tools skips the check.
 
 `worktree_closeout_apply` first validates every enabled explicit nonblank commit message. Then it
@@ -192,7 +194,14 @@ there is nothing to poll. The closeout reads no [closeout door](../concepts.md#c
 no tool of the tool server creates one.
 
 `worktree_status` reports the state of the task and, for a direct landing, its current generation
-in the operation journal with the `worktree_operation_control` action that it names. That tool
+in the operation journal with the `worktree_operation_control` action that it names. Its landing
+facts name the line the task lands on, which is its master's line whenever the task belongs to one,
+and they list every participant of that landing as a row with its `state` and the `factState` of
+that state. A pull-request row's state is `absent`, with the detail that no pull request is part of
+this route, where the contract's integration strategy is set and is not the pull-request one; a
+route without a strategy, and a pull-request route whose pull request is not opened yet, reads
+`planned`, and a route whose observation needs `gh` reads `unknown` with `factState` `missing` while
+`gh` is unavailable. That tool
 controls one run that the journal records (`operation_kind` `closeout`, `integrate` or
 `direct-landing`): its `action` is `retry`, `recover`, `resume`, `cancel`, `retire` or
 `supersede`, and it also takes `contract_path`, `expected_generation` and `intent_note` (see
@@ -286,6 +295,15 @@ ordinary landing is not refused for stale documents or for a state it could not 
 landing that finishes a master is refused: with `knowledge-dependents-stale-at-master-end` while a
 document that this master made stale is still stale, and with `knowledge-worklist-incomplete` or
 `knowledge-unverifiable-at-landing` when that state could not be computed or established.
+
+A master's recorded landing is not refused for stale knowledge entries either. When the landing
+chain's own proof passes and the only findings are entries that a changed path left stale, the
+answer of `worktree_record_landing` carries `staleEntries`: the `count`, the entries' own
+sentences, the record of each entry and the one remedy. The worktree contract keeps them as the
+master's debt, and a cleanup that refuses because the integration is incomplete names
+`worktree_record_landing` as its next step. A leaf closeout and an ordinary landing still refuse
+such an entry; see
+[Knowledge System](knowledge-system.md#worklist-validator-and-gate).
 
 ## Terminal Cleanup
 

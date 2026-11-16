@@ -23,6 +23,7 @@ The owner validates and applies the paired transaction. Do not reproduce its log
 For converted memory:
 
 - Closeout preview and apply judge the exact candidate code and memory trees through the invariant gate.
+- The closeout also refuses an entry at a path in the task's own code diff that is not current, as the master's landing does.
 - Leaf integration judges the closeout pair again.
 - A master or checkpoint landing validates the master's memory commit against the parent line's memory tip. It also checks that entries at paths in the master's net code diff are current at its code commit.
 - Final master landing proves that every non-abandoned leaf landed. A checkpoint proves the chain already landed.

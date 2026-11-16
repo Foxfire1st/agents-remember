@@ -180,6 +180,19 @@ The keys of Agents Remember stand in the user settings file. That file can be re
   - Who: Agents Remember.
   - Checked: the instruction and the plug-in's question, in the code of Agents Remember. The
     behaviour of Hermes was not reproduced.
+- **A role agent on Hermes can leave one browser helper behind for each browser session it opened.**
+  A session starts the helper `browser_harness.daemon`, which has no timer of its own. A normal end
+  of the Hermes process stops the session and that helper; a process that is killed or crashes
+  leaves one helper for each session it had open, and the orphan reaper does not reach it, because
+  that reaper scans only the `agent-browser-<session>` folders.
+  - Setting: none acts on that helper. `browser.inactivity_timeout` in `~/.hermes/config.yaml` (120
+    seconds as shipped; `BROWSER_INACTIVITY_TIMEOUT` is its legacy environment fallback) closes an
+    idle session that a living process still holds. `AGENT_BROWSER_IDLE_TIMEOUT_MS` sets the timer of
+    the other daemon, `agent-browser`.
+  - Who: you.
+  - Checked: the helper and its missing timer, the normal-exit stop of the sessions and the harness
+    daemons, the reaper's folder pattern and the two settings, in the source of Hermes at the
+    installed version (commit `6e7b83a2`).
 - **Temporary files appear under `~/.hermes/cache/scratch`.** That folder is Hermes' default.
   - Setting: none. A role agent's instructions name the scratch folder of its task.
   - Who: nobody sets anything. Hermes chooses that folder; Agents Remember only names the role

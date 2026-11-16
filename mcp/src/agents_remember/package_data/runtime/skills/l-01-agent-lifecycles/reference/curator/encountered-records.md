@@ -9,3 +9,5 @@ A producer entry of kind `weakness` becomes a `WKN-` record, or the report expla
 A producer entry of kind `dependent` becomes a `DPD-` record.
 
 Answer the worklist row for a weakness by deciding whether it stands, with its anchor moving with the code, or is closed. For a changed document, only the confirmed dependent record answers the row. Neither record refuses a task.
+
+A weakness that your own task removes closes with that task: name the running task's ID as the closure's `task` and one sentence as its `reason`, and write no commit. A closure without a commit that names another task is refused. A closure by another task names that task's real code commit, and the writer refuses a value that is no commit of the code repository. After the closeout, the read of the closed record gives the code commit from the `Code-Commit` trailer of the memory commit that closed it; before it, the read says that the commit comes with the task's closeout.

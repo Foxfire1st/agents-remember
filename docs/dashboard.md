@@ -67,13 +67,16 @@ The tab bar holds four tabs in this order. The dashboard opens on "Chats".
 | "Chats" | The role launcher and the [chat frame](concepts.md#chat-frame). |
 | "Operations" | The task list, the task document, and the event river or the chat of the selected document. The review page opens inside this tab. |
 | "Knowledge" | The reader of a repository's knowledge. |
-| "File Viewer" | A code file beside its card. |
+| "File Viewer" | A code file, a picture or a video beside its card. |
 
 Beside the tabs stands the button "Tray (n)", where n is the number of picks in the tray. It is
 not a tab; see [The tray](#the-tray).
 
 Each tab keeps its page loaded while another tab shows. A user who returns to a tab finds the
-page as it was left: the chat, the selected task, the knowledge view and the open file.
+page as it was left: the chat, the selected task, the knowledge view, the open file, the change
+set of the Operations page with the file and the filter it had, and the notes document it showed.
+A view whose task the task list does not hold gives way to the task view, and a press on
+"Operations" while that tab is open returns to the task view.
 
 ### Sidebar toggles
 
@@ -554,6 +557,10 @@ The whole decision log is headed "Decisions" with "N decisions, newest first". E
 shows its number, its time, its text and its reason. The records the product wrote itself stand
 folded in one line "N product records" at the end.
 
+A note that is a picture or a video shows as one. A note is drawn without the HTML that a document
+of the code repository draws. A link between the notes the reader can open is followed, and no link
+of a drawn note moves the dashboard's own tab.
+
 ### The review page
 
 The review page shows the intent review of one task, which is the review of the task's change.
@@ -629,19 +636,51 @@ A copied address opens the same view.
 
 ## File Viewer
 
-The "File Viewer" page shows a code file beside its card.
+The "File Viewer" page shows a code file, a picture or a video beside its card.
 
 | Control | What it does |
 | --- | --- |
 | "Repo" | Selects the code repository. |
 | "Scope" | Selects the main line of the repository or the enclosure of an active task. |
 | "▣ Split" / "▢ Single" | Shows the code beside its card, or the code alone. |
+| "Rendered" / "Source" | Draws a Markdown file of the repository as a document, or shows its source. |
 
 The explorer on the left holds two trees, "Code" and "Onboarding". A code file that has a card
 carries the mark "◖".
 
 A click on a code file shows the code on the left and its card on the right. A click on a card
 opens the code file it describes. A card without a code file fills the page.
+
+A Markdown file of the code repository opens rendered: its headings, tables, lists and pictures,
+with the HTML that a repository document holds, cleaned by the rules GitHub applies to a rendered
+README. The switch "Rendered" / "Source" changes between the rendered document and the file's
+read-only source. The change-set page has its own toggle, "rendered", which draws the after side of
+a changed Markdown file rendered; its line diff is the default.
+
+A picture opens as a picture and a video as a player that plays and can be moved forward and
+back; under it stand the type and the size. The same part draws them wherever the dashboard shows
+the content of a file: the File Viewer, the change-set page, the notes reader and the code view of
+the Knowledge page. The pictures are PNG, JPEG, GIF, WebP and SVG, and the videos MP4 and WebM. In
+the File Viewer and the notes reader a file above the 16 MiB bound of the route that answers its
+bytes is not requested: the line states its type, its size and that it is too large to show. The
+change-set page and the code view of the Knowledge page ask for such a file, and the route refuses
+it. A file that is no text, no picture and no video reads "Binary file — N bytes (not shown)" in the
+File Viewer and "binary file · N bytes" in the change-set page.
+
+A rendered document draws a picture that names a path of its own repository, and one at an outside
+address that begins with `https`, which is fetched without a referrer; the same holds for the other
+pictures, posters and video sources a document names. A picture that is neither is not fetched, and
+its alternative text stands in its place. A note is drawn without the HTML that a repository
+document draws.
+
+In the rendered view a link to another file of the same repository opens that file in the viewer:
+a document rendered, a code file as source, a picture or a video as its kind. A link with an
+anchor opens the file at that heading, and an anchor alone scrolls to it. A link to an outside
+address opens a new browser tab, and a link that names no file of the repository is drawn as text
+that says so. No link moves the dashboard's own tab. The arrows "←" and "→" in the head, titled
+"Back" and "Forward", lead through the files the viewer opened, whether from a link or from the
+tree, and bring each back at the place the reader had scrolled to; an arrow with nowhere to go is
+disabled.
 
 Resting the pointer on a line of code shows "⊕" in the gutter. A click on it adds the line to
 the tray, and a click with Shift adds the range from the last added line. A line in the tray

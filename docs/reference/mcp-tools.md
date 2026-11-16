@@ -75,6 +75,11 @@ of that task. Every answer names whose worktrees it read: `worktreeScope` is `le
 worktrees of a task, or `official-line` for the checkouts of the code repository and the memory
 repository themselves that the settings name; `sourceRoot` and `memoryRoot` name the two folders.
 
+A card whose Markdown half is absent is still read from its entry half, the file `<path>.json`
+beside it: the row names that file, its `cardStatus` says `sidecar-only`, and the answer sets no
+`routeIndexStale`, because the route index lists a source whose card has only its entry half as
+covered. The row's `cardState` is the card's currentness.
+
 [Tool details](../tool-details.md) lists the answer fields of `server_info` and
 `runtime_install` and explains each argument of the install.
 
@@ -212,6 +217,10 @@ For any other status, the call refuses `abandon-master-not-terminal`; set the st
 landing with `worktree_record_landing`, which is what lets the terminal routes read the work as
 landed instead of requiring the abandon.
 
+A master whose work already stands on its source line may still be abandoned: the call measures
+that by ancestry, not by the recorded landing cells, and its answer carries `landedWork` as
+`{state, branch, line}`; the answer's `summary` says that nothing of the work is lost.
+
 Both terminal routes retire each work branch, and both refuse `branch-checked-out-elsewhere` while
 that branch is checked out in a checkout other than the task's own two worktrees -- which is where
 a master's branch normally is, because the repository's primary checkout sits on it. The refusal
@@ -254,7 +263,7 @@ See [Worktrees And Closeout](worktrees-c09.md) for the lifecycle and its gates.
 | `worktree_closeout_apply` | Judge the exact candidate trees with the knowledge gate; `knowledge-gate-refused` carries its findings. Validate every enabled explicit nonblank input, then run the whole closeout inside the call: spend the approval of the closeout, commit the code, commit the memory and record the closeout in the worktree contract. The answer is the state reached, `closed` or a refusal such as `blocked` or `closeout-gate-blocked`; nothing runs after the call returns, and there is nothing to poll. The call reads no [closeout door](../concepts.md#closeout-door), the record by which a task waits for closeout; no tool of the tool server creates one. Before a commit, the code repository's own pre-commit hook runs on the tree to be committed; the paragraph below this table describes that check. | `contract_path`, `intent_note`, explicit message for each enabled commit leg (`code_commit_message`, `memory_commit_message`), `dry_run=false`, `corrective_dispositions` |
 | `worktree_integrate` | Land a closed-out task (`ff-only` or `replay`) inside the call and answer the state reached: `integrated`, `would-integrate` for a dry run, or a refusal such as `blocked-non-ff`, `blocked` or `handover-gate-blocked`. Nothing runs after the call returns, and the call leaves no record in the operation journal. | `contract_path`, `strategy="ff-only"`, `dry_run=false` |
 | `worktree_checkpoint_landing` | Land the work gathered on the branch of an unfinished atomic master onto the branch that the master itself lands on, and keep the master open; requires the user's approval. It is not a pause: `worktree_pause` pauses a master. | `contract_path`, `strategy="ff-only"`, `dry_run=false` |
-| `worktree_record_landing` | Record a commit the landing target already holds. | `contract_path`, `landed_code_commit`, optional `landed_memory_content_commit`, `dry_run=false` |
+| `worktree_record_landing` | Record a commit the landing target already holds. When the landing chain's own proof passes and the only findings are entries that a changed path left stale, the answer carries `staleEntries` with their count, sentences, record and remedy, and the contract keeps them as the master's debt; any other refusal stands. | `contract_path`, `landed_code_commit`, optional `landed_memory_content_commit`, `dry_run=false` |
 | `worktree_operation_control` | Execute one currently advertised task-addressed control for an exact generation in the operation journal. Only a direct landing leaves a generation there: for `operation_kind` `closeout` or `integrate`, a request that passes the checks of its shape, its contract and its caller is refused with `lifecycle-operation-missing`. Retry/recover preserve accepted input; cancellation proves worker exit and Git safety; retire/supersede are evidence-aware. | `contract_path`, `operation_kind` (`closeout`, `integrate`, `direct-landing`), `action` (`retry`, `recover`, `resume`, `cancel`, `retire`, `supersede`), `expected_generation`, nonblank `intent_note`, action-specific inputs, `dry_run=false` |
 | `direct_landing` | Grant-gated landing, from the master's branch, of a named task that holds a [direct-execution grant](../concepts.md#direct-execution), without an enclosure for that task. Verifies the code commit at the HEAD of the master's branch, or creates it from the task's uncommitted changes with `code_commit_message`; persists a durable direct-landing generation before Git mutation and recovers it through `worktree_operation_control`. | `contract_path` (the worktree contract of the master), `leaf_task_document_ref`, optional `code_commit` (verify) or `code_commit_message` (create), explicit enabled-leg messages, `intent_note`, optional gated `candidate_tree`, `leaf_id`, `dry_run=false` |
 | `direct_execution_grant` | Give, take back, or reclaim direct-execution grants before work starts. Only a caller bound to the Architect role can call it. The user gives the same record with the dashboard's switch "Direct execution"; `task_doc` has no operation that gives, changes, or removes a grant. | `task_document_ref`, `action` (`give`, `revoke`, or `reclaim` — reclaim takes back only abandoned tasks' grants with clean checkouts and reports what was preserved and why; started tasks keep their grants) |
@@ -431,7 +440,13 @@ that differs is refused. A master is archived by this operation or, together wit
 - `archive_sprint` archives a completed sprint together with the masters it commands. It takes
 `fields={reason}` and requires the sprint to be `Completed` and every row to be `Completed`,
 `abandoned` or the row of a retired master, which carries `retirement`. A dry run reports
-exactly what would change. The sprint and then its masters move under `tasks/<repository>/0_archive/` of the coordination root. When a cleanup step
+exactly what would change, and lists every master whose row is missing or differs from its
+document without repairing any of them. The call retires the enclosures of each commanded
+master that moves with the sprint, through the routine that abandonment uses, with that
+routine's own checks, and names what it retired. A master that another live sprint also
+commands stays where it is and is not touched.
+A sprint whose commanded masters are not all ready answers one refusal that names each
+of them with its open work. The sprint and then its masters move under `tasks/<repository>/0_archive/` of the coordination root. When a cleanup step
 fails, the answer says `archived-with-hook-failures`, and a repeat of the same request runs the
 remaining cleanup.
 - `linkage_report` reports drift without changing task documents (`seat-doc-row` rows, which are

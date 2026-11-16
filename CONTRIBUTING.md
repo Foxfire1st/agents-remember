@@ -356,7 +356,9 @@ both steps run two checks on the exact trees they publish:
 A commit that passed carries the trailer `Commit-Check-Pass: tree=<tree> hook=<hook>`.
 `<tree>` is the Git id of the tree that the hook checked, and `<hook>` is the path of the hook
 from the repository's top folder, here `.githooks/pre-commit`. In a repository without a
-pre-commit hook the trailer says `hook=none`. No landing route skips the hook.
+pre-commit hook the trailer says `hook=none`. A landing checks every side whose commit it
+publishes: a side whose commit the landing line already stands on adds no commit, so the hook is
+not run for it.
 
 A closeout and a landing run no test suite and no certification.
 [Worktrees And Closeout](docs/reference/worktrees-c09.md) describes both steps.

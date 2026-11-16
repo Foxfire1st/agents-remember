@@ -12,7 +12,7 @@
   "acceptedGrowthSha256": "290cc7660b079836d72cb47cc428380d719a1b5735bdb2beae708242a55105f1",
   "acceptedSourceTableSha256": "569cf499db1aff4fee718ab08477830f7c89e2000e4600429926111018780b10",
   "predecessorD694HelperSha256": "67f0a0af5fcf232ce76336cfed0c5f9a8c185eca3f258dde09ab3f246e5a4b8d",
-  "currentDigestMapSha256": "dcaabb958c850e21c4dec029c36505845c4eb803aa45bb7ea0d04bf0fa3d420c",
+  "currentDigestMapSha256": "53fa2070848ed2566274938e51ef0a0112abcf9b1b33d73478e76ad6b5458fb7",
   "currentRenewal": {
    "authority": "D696 standing remaining-repair growth; Manager081129 instruction-only >100 notice",
    "repair": "Explicit tool-server qualifier in existing closeout paragraph; no authority or duty change",
@@ -5100,7 +5100,6 @@
   },
   "measuredCurrentRenewalWaitsAndCodingGuidelines": {
    "authority": "D750 (the developer, 2026-11-11: a seat cannot say it waits for a background process; 'wire this into L60') and D751 ('was shown as inactive despite being a claude seat') with D656 (a capsule budget that refuses agreed text is raised, the rule is not shortened); MIK-R60 v8 and v9 part D",
-   "current": true,
    "predecessorRecordSha256": "e9c10b0e4ca06e189d84babb880b17eb6480bd9032affee371b6574dfe615413",
    "predecessorFingerprint": "feefb73b261e5d8c271bbb453dadb990662c4c05a80ac795d9f5caa3dc580a37",
    "historicalSubRecords": {
@@ -6148,6 +6147,196 @@
       }
      }
     }
+   },
+   "historicalTree": "cb321e2ad3b69d960c4ca1ddf9442663278f429c",
+   "historicalTreeBasis": "the tree of the line the record stood on before this renewal; the record's bytes at that tree are this renewal's predecessorRecordSha256"
+  },
+  "measuredCurrentRenewalBug07": {
+   "authority": "BUG-R07 v1 rule 3 (a changed role text asks for the size record again); the Manager's table check, code review rounds 1 and 2 (L7-R1-F05), and the architect's ruling of 16:15 that no limit is lowered",
+   "current": true,
+   "predecessorRecordSha256": "a6f37ebae00993fee337bb78b66cbb1c7f0c50b5d9442a9fc103e05c592b0fa3",
+   "predecessorFingerprint": "e63ad120b648f0470cb15ccd77ec8503a711225b282f5a5381ebb89c95345a09",
+   "predecessorBasis": "the record as committed at the base tree cb321e2a (commit edfa0e40); this renewal is measured from it in one step",
+   "change": "Five instruction texts changed and one shared master-state detail grew: the Curator's encountered-records closure rule; the closeout's entry rule; the closeout-recovery sentence, which tells the generation for a queued or running operation, for a stopped one, and where the list stands for a cut answer; the read_ar_files sidecar-only state; the manager's master-state pointer, which now sends the Manager to the abandon rule beside master updates and completion; the master-state rule itself, which now says the abandon writes abandoned to the master's document; the manager's pointer sentence now naming both abandoning tools in the pointing sentence, and the digest map's pin of lines 50 to 60 of the manager's role file, moved to the new lines, with the record's own `currentDigestMapSha256` following the map. Per the architect's ruling no limit is lowered: every limit this renewal would have narrowed keeps its base value, and only the three authorized-closeout limits that rose stay at the measured size.",
+   "membership": {
+    "changedSources": [
+     "skills/l-01-agent-lifecycles/core/digest-map.json",
+     "skills/l-01-agent-lifecycles/operations/closeout.md",
+     "skills/l-01-agent-lifecycles/operations/coordination.md",
+     "skills/l-01-agent-lifecycles/roles/manager.md",
+     "skills/l-01-agent-lifecycles/reference/curator/encountered-records.md",
+     "skills/l-01-agent-lifecycles/reference/knowledge/commands.md",
+     "skills/l-01-agent-lifecycles/reference/coordination/shared/master-state.md"
+    ],
+    "changedDetails": [
+     "reference/coordination/shared/master-state.md",
+     "reference/curator/encountered-records.md",
+     "reference/knowledge/commands.md"
+    ],
+    "changedCapsules": [
+     "architect/authorized-closeout",
+     "architect/coordination",
+     "manager/authorized-closeout",
+     "manager/coordination",
+     "manager/curation",
+     "manager/orientation",
+     "manager/recovery",
+     "manager/review",
+     "orchestrator/authorized-closeout",
+     "orchestrator/coordination"
+    ]
+   },
+   "capsuleChanges": {
+    "architect/authorized-closeout": {
+     "before": 3978,
+     "after": 4003
+    },
+    "architect/coordination": {
+     "before": 5472,
+     "after": 5473
+    },
+    "manager/authorized-closeout": {
+     "before": 2871,
+     "after": 2897
+    },
+    "manager/coordination": {
+     "before": 4559,
+     "after": 4561
+    },
+    "orchestrator/authorized-closeout": {
+     "before": 2228,
+     "after": 2253
+    },
+    "orchestrator/coordination": {
+     "before": 3741,
+     "after": 3742
+    },
+    "manager/orientation": {
+     "before": 3453,
+     "after": 3454
+    },
+    "manager/review": {
+     "before": 3048,
+     "after": 3049
+    },
+    "manager/curation": {
+     "before": 3287,
+     "after": 3288
+    },
+    "manager/recovery": {
+     "before": 2800,
+     "after": 2801
+    }
+   },
+   "limitChanges": {
+    "architect/authorized-closeout": {
+     "before": 3979,
+     "after": 4003
+    },
+    "manager/authorized-closeout": {
+     "before": 2871,
+     "after": 2897
+    },
+    "orchestrator/authorized-closeout": {
+     "before": 2235,
+     "after": 2253
+    },
+    "manager/orientation": {
+     "before": 3453,
+     "after": 3454
+    },
+    "manager/review": {
+     "before": 3048,
+     "after": 3049
+    },
+    "manager/curation": {
+     "before": 3287,
+     "after": 3288
+    },
+    "manager/recovery": {
+     "before": 2800,
+     "after": 2801
+    }
+   },
+   "detailChanges": {
+    "reference/coordination/shared/master-state.md": {
+     "before": 133,
+     "after": 289
+    },
+    "reference/curator/encountered-records.md": {
+     "before": 141,
+     "after": 244
+    },
+    "reference/knowledge/commands.md": {
+     "before": 2327,
+     "after": 2350
+    }
+   },
+   "detailLimitChanges": {
+    "reference/coordination/shared/master-state.md": {
+     "before": 133,
+     "after": 290
+    },
+    "reference/curator/encountered-records.md": {
+     "before": 141,
+     "after": 244
+    },
+    "reference/knowledge/commands.md": {
+     "before": 2327,
+     "after": 2350
+    }
+   },
+   "sourceChanges": {
+    "skills/l-01-agent-lifecycles/operations/closeout.md": {
+     "before": 427,
+     "after": 452
+    },
+    "skills/l-01-agent-lifecycles/operations/coordination.md": {
+     "before": 2218,
+     "after": 2219
+    },
+    "skills/l-01-agent-lifecycles/reference/coordination/shared/master-state.md": {
+     "before": 133,
+     "after": 289
+    },
+    "skills/l-01-agent-lifecycles/reference/curator/encountered-records.md": {
+     "before": 141,
+     "after": 244
+    },
+    "skills/l-01-agent-lifecycles/reference/knowledge/commands.md": {
+     "before": 2327,
+     "after": 2350
+    },
+    "skills/l-01-agent-lifecycles/roles/manager.md": {
+     "before": 2463,
+     "after": 2464
+    }
+   },
+   "compilerInputChanges": {
+    "operations/closeout.md": {
+     "before": "sha256:c2f5de0efb06134f6edc9ba655863667b983906e7024a9231cdf99fba3c464e5",
+     "after": "sha256:f9142dc78a06d5161689df432b2853591820987c143d246b08ea71baa2b6dc20"
+    },
+    "operations/coordination.md": {
+     "before": "sha256:b6cb58b5b29d70ba2cd7cc2d1e57338ce572548f8f27dd51f914bb62ef55cb01",
+     "after": "sha256:88a01dcb7dbda8adb7eb9754736b5852b88bd23e2804a37cf9c620a597e1e6af"
+    },
+    "reference/coordination/shared/master-state.md": {
+     "before": "sha256:621ff3703a6348e32d2bad9f2c9af5dcd045de781414e7f8ce8d0c813ddd4691",
+     "after": "sha256:c26e608713a4ac2a96f4f8550ff55a668be56dcc854819f14f9183a5095533d0"
+    },
+    "reference/curator/encountered-records.md": {
+     "before": "sha256:932041c3ceaebf70baca6ff255494dbb2f29a41250fb077e3ec757976416b09b",
+     "after": "sha256:3fefd82dfb08692310928635d6b0d4981314c1783fb264e053a229ea87d854a6"
+    },
+    "reference/knowledge/commands.md": {
+     "before": "sha256:0f20287007cee174ad351879dc97a6eed2cbcb16182d0d333b0e75e2e1a9bf2f",
+     "after": "sha256:83ae949d3b960a069bb7b0fba8ca06bfa89780ce85d7e2a70355b52d0977ff1d"
+    },
+    "roles/manager.md": {
+     "before": "sha256:6f6b42d2d6623436255e515ef153053e58a2b93e7cb586f7d23c8586629209e9",
+     "after": "sha256:6d36410ee6f3108a0b01f4f66864dea6dc420e7538a25f9d2f757c250ec4c491"
+    }
    }
   }
  },
@@ -6157,20 +6346,20 @@
    "architect/planning": 4437,
    "architect/review": 4589,
    "architect/coordination": 5474,
-   "architect/authorized-closeout": 3979,
+   "architect/authorized-closeout": 4003,
    "architect/recovery": 3908,
    "orchestrator/orientation": 2840,
    "orchestrator/planning": 2170,
    "orchestrator/review": 2406,
    "orchestrator/coordination": 3742,
-   "orchestrator/authorized-closeout": 2235,
+   "orchestrator/authorized-closeout": 2253,
    "orchestrator/recovery": 2161,
-   "manager/orientation": 3453,
-   "manager/review": 3048,
-   "manager/curation": 3287,
+   "manager/orientation": 3454,
+   "manager/review": 3049,
+   "manager/curation": 3288,
    "manager/coordination": 4562,
-   "manager/authorized-closeout": 2871,
-   "manager/recovery": 2800,
+   "manager/authorized-closeout": 2897,
+   "manager/recovery": 2801,
    "worker/orientation": 3200,
    "worker/implementation": 3274,
    "worker/recovery": 2532,
@@ -6203,7 +6392,7 @@
    "reference/knowledge/use.md": 697,
    "reference/curator/repository-foundation.md": 388,
    "templates/turn-report.md": 1708,
-   "reference/knowledge/commands.md": 2327,
+   "reference/knowledge/commands.md": 2350,
    "reference/tasks/document-authoring.md": 591,
    "reference/review-baseline.md": 268,
    "reference/coordination/shared/requirement-design.md": 528,
@@ -6212,7 +6401,7 @@
    "reference/coordination/architect/models-and-settings.md": 176,
    "reference/coordination/architect/process-decisions.md": 217,
    "reference/coordination/architect/claim-verification.md": 173,
-   "reference/coordination/shared/master-state.md": 133,
+   "reference/coordination/shared/master-state.md": 290,
    "reference/coordination/shared/third-rejected-round.md": 223,
    "reference/coordination/shared/seat-recovery.md": 281,
    "reference/sandbox-actors.md": 234,
@@ -6220,7 +6409,7 @@
    "reference/curator/change-routing.md": 193,
    "reference/curator/coherence-judgments.md": 249,
    "reference/curator/current-prose-and-history.md": 228,
-   "reference/curator/encountered-records.md": 141,
+   "reference/curator/encountered-records.md": 244,
    "reference/curator/family-obligations.md": 223,
    "reference/curator/governing-sources.md": 177,
    "reference/curator/knowledge-ingest.md": 237,
@@ -6237,21 +6426,21 @@
    "architect/orientation": 4664,
    "architect/planning": 4434,
    "architect/review": 4588,
-   "architect/coordination": 5472,
-   "architect/authorized-closeout": 3978,
+   "architect/coordination": 5473,
+   "architect/authorized-closeout": 4003,
    "architect/recovery": 3907,
    "orchestrator/orientation": 2810,
    "orchestrator/planning": 2144,
    "orchestrator/review": 2405,
-   "orchestrator/coordination": 3741,
-   "orchestrator/authorized-closeout": 2228,
+   "orchestrator/coordination": 3742,
+   "orchestrator/authorized-closeout": 2253,
    "orchestrator/recovery": 2157,
-   "manager/orientation": 3453,
-   "manager/review": 3048,
-   "manager/curation": 3287,
-   "manager/coordination": 4559,
-   "manager/authorized-closeout": 2871,
-   "manager/recovery": 2800,
+   "manager/orientation": 3454,
+   "manager/review": 3049,
+   "manager/curation": 3288,
+   "manager/coordination": 4561,
+   "manager/authorized-closeout": 2897,
+   "manager/recovery": 2801,
    "worker/orientation": 3200,
    "worker/implementation": 3274,
    "worker/recovery": 2532,
@@ -6284,7 +6473,7 @@
    "reference/knowledge/use.md": 690,
    "reference/curator/repository-foundation.md": 388,
    "templates/turn-report.md": 1708,
-   "reference/knowledge/commands.md": 2327,
+   "reference/knowledge/commands.md": 2350,
    "reference/tasks/document-authoring.md": 591,
    "reference/review-baseline.md": 268,
    "reference/coordination/shared/requirement-design.md": 528,
@@ -6293,7 +6482,7 @@
    "reference/coordination/architect/models-and-settings.md": 176,
    "reference/coordination/architect/process-decisions.md": 217,
    "reference/coordination/architect/claim-verification.md": 173,
-   "reference/coordination/shared/master-state.md": 133,
+   "reference/coordination/shared/master-state.md": 289,
    "reference/coordination/shared/third-rejected-round.md": 223,
    "reference/coordination/shared/seat-recovery.md": 281,
    "reference/sandbox-actors.md": 234,
@@ -6301,7 +6490,7 @@
    "reference/curator/change-routing.md": 193,
    "reference/curator/coherence-judgments.md": 249,
    "reference/curator/current-prose-and-history.md": 228,
-   "reference/curator/encountered-records.md": 141,
+   "reference/curator/encountered-records.md": 244,
    "reference/curator/family-obligations.md": 223,
    "reference/curator/governing-sources.md": 177,
    "reference/curator/knowledge-ingest.md": 237,
@@ -6401,7 +6590,7 @@
   },
   "skills/l-01-agent-lifecycles/core/digest-map.json": {
    "size_words": 17137,
-   "sha256": "dcaabb958c850e21c4dec029c36505845c4eb803aa45bb7ea0d04bf0fa3d420c",
+   "sha256": "53fa2070848ed2566274938e51ef0a0112abcf9b1b33d73478e76ad6b5458fb7",
    "kind": "changed"
   },
   "skills/l-01-agent-lifecycles/core/every-role.md": {
@@ -6460,13 +6649,13 @@
    "kind": "changed"
   },
   "skills/l-01-agent-lifecycles/operations/closeout.md": {
-   "size_words": 427,
-   "sha256": "c2f5de0efb06134f6edc9ba655863667b983906e7024a9231cdf99fba3c464e5",
+   "size_words": 452,
+   "sha256": "f9142dc78a06d5161689df432b2853591820987c143d246b08ea71baa2b6dc20",
    "kind": "changed"
   },
   "skills/l-01-agent-lifecycles/operations/coordination.md": {
-   "size_words": 2218,
-   "sha256": "b6cb58b5b29d70ba2cd7cc2d1e57338ce572548f8f27dd51f914bb62ef55cb01",
+   "size_words": 2219,
+   "sha256": "88a01dcb7dbda8adb7eb9754736b5852b88bd23e2804a37cf9c620a597e1e6af",
    "kind": "changed"
   },
   "skills/l-01-agent-lifecycles/operations/curation.md": {
@@ -6540,8 +6729,8 @@
    "kind": "current"
   },
   "skills/l-01-agent-lifecycles/reference/coordination/shared/master-state.md": {
-   "size_words": 133,
-   "sha256": "621ff3703a6348e32d2bad9f2c9af5dcd045de781414e7f8ce8d0c813ddd4691",
+   "size_words": 289,
+   "sha256": "c26e608713a4ac2a96f4f8550ff55a668be56dcc854819f14f9183a5095533d0",
    "kind": "current"
   },
   "skills/l-01-agent-lifecycles/reference/coordination/shared/requirement-design.md": {
@@ -6585,8 +6774,8 @@
    "kind": "current"
   },
   "skills/l-01-agent-lifecycles/reference/curator/encountered-records.md": {
-   "size_words": 141,
-   "sha256": "932041c3ceaebf70baca6ff255494dbb2f29a41250fb077e3ec757976416b09b",
+   "size_words": 244,
+   "sha256": "3fefd82dfb08692310928635d6b0d4981314c1783fb264e053a229ea87d854a6",
    "kind": "current"
   },
   "skills/l-01-agent-lifecycles/reference/curator/family-obligations.md": {
@@ -6635,8 +6824,8 @@
    "kind": "current"
   },
   "skills/l-01-agent-lifecycles/reference/knowledge/commands.md": {
-   "size_words": 2327,
-   "sha256": "0f20287007cee174ad351879dc97a6eed2cbcb16182d0d333b0e75e2e1a9bf2f",
+   "size_words": 2350,
+   "sha256": "83ae949d3b960a069bb7b0fba8ca06bfa89780ce85d7e2a70355b52d0977ff1d",
    "kind": "current"
   },
   "skills/l-01-agent-lifecycles/reference/knowledge/serving-build.md": {
@@ -6710,8 +6899,8 @@
    "kind": "current"
   },
   "skills/l-01-agent-lifecycles/roles/manager.md": {
-   "size_words": 2463,
-   "sha256": "6f6b42d2d6623436255e515ef153053e58a2b93e7cb586f7d23c8586629209e9",
+   "size_words": 2464,
+   "sha256": "6d36410ee6f3108a0b01f4f66864dea6dc420e7538a25f9d2f757c250ec4c491",
    "kind": "current"
   },
   "skills/l-01-agent-lifecycles/roles/orchestrator.md": {
@@ -6826,8 +7015,8 @@
   "core/lifecycle-frame.md": "sha256:661f7438655f25d884b1596b31cfcc04ba609633dd8e5906acc6f0b839cca405",
   "core/loop.md": "sha256:1f3cb72d010a174c059358504b072d04527fb38ae8dc7675f9ab2c59e2e020ad",
   "operations/bootstrap.md": "sha256:c988052b9a104b4206086b55f10178c308a38eebe091cac422d7b5976a73b96f",
-  "operations/closeout.md": "sha256:c2f5de0efb06134f6edc9ba655863667b983906e7024a9231cdf99fba3c464e5",
-  "operations/coordination.md": "sha256:b6cb58b5b29d70ba2cd7cc2d1e57338ce572548f8f27dd51f914bb62ef55cb01",
+  "operations/closeout.md": "sha256:f9142dc78a06d5161689df432b2853591820987c143d246b08ea71baa2b6dc20",
+  "operations/coordination.md": "sha256:88a01dcb7dbda8adb7eb9754736b5852b88bd23e2804a37cf9c620a597e1e6af",
   "operations/curation.md": "sha256:1857e1beb8ca9269588a3c811ad6b395f112edd2e0ddc81dc5bbb03b504b5a3a",
   "operations/implementation.md": "sha256:47244c585ee85f98726122e926fdb820910baf2a3f0c1fc7486e89f298e37ad5",
   "operations/orientation.md": "sha256:3120f8aea8dbc2fafb10fd9722e54e4e58c03f87dbe630a343e44bdb87f5cd30",
@@ -6842,7 +7031,7 @@
   "reference/coordination/architect/models-and-settings.md": "sha256:203b006e5f8735d91a4128dc8b2000ed08a9dbb016858afabcadaf71f48c03dd",
   "reference/coordination/architect/process-decisions.md": "sha256:8f4cb8c55c84c4fd634f6e2684f57fade67e1dc210806803c42d2439a4cc1855",
   "reference/coordination/shared/child-questions.md": "sha256:c830497d927f8713c19780acced74ba7f32d0f0fabce19356f579191ee32e8e9",
-  "reference/coordination/shared/master-state.md": "sha256:621ff3703a6348e32d2bad9f2c9af5dcd045de781414e7f8ce8d0c813ddd4691",
+  "reference/coordination/shared/master-state.md": "sha256:c26e608713a4ac2a96f4f8550ff55a668be56dcc854819f14f9183a5095533d0",
   "reference/coordination/shared/requirement-design.md": "sha256:58967d36620ae35297a9bf022b050ebc21f0e5c2d9115aeff612d382877236ea",
   "reference/coordination/shared/seat-recovery.md": "sha256:062b3893433cc314402a206843ccd5dd514353bb9216356a85ea36252b898ef0",
   "reference/coordination/shared/third-rejected-round.md": "sha256:241c3869bdbdfba0ed7f9e690c7192fb1a1bdacb37c36a2470bc56da59b9369d",
@@ -6851,7 +7040,7 @@
   "reference/curator/change-routing.md": "sha256:a17858f4a703d3287bab8e9f93bb1e1583eb59ce74cc9ff64aa1657b89cbfd49",
   "reference/curator/coherence-judgments.md": "sha256:07d09eaf62642c3b3688e53c7df42ebffb491f915fba382d33e4e91a3c0e9439",
   "reference/curator/current-prose-and-history.md": "sha256:5715af2f9084a039826ea608fad21e54829e261e28be27a993aa6c6b10902211",
-  "reference/curator/encountered-records.md": "sha256:932041c3ceaebf70baca6ff255494dbb2f29a41250fb077e3ec757976416b09b",
+  "reference/curator/encountered-records.md": "sha256:3fefd82dfb08692310928635d6b0d4981314c1783fb264e053a229ea87d854a6",
   "reference/curator/family-obligations.md": "sha256:c0c559f82a60f18bec5323046940341169b94ae22612ae40fcdca1ec326a302d",
   "reference/curator/governing-sources.md": "sha256:d14844fb396358b801c68a39daf47a4fdbac82ba5365ff4bf916f9ec58a6beb2",
   "reference/curator/intent-reconciliation.md": "sha256:e6736202e3464d93063d7147f61dfa8672b68d41ab5a6f0c3c6b1c437f4a8a8f",
@@ -6861,7 +7050,7 @@
   "reference/curator/repository-foundation.md": "sha256:cedcdbd5cf960e1ec08e535abc2e8d739e43963cb736ad9bbcb1faed388ca748",
   "reference/curator/worklist.md": "sha256:87ff6b06a9658a1970c33565317c9bb81a3adef800aaebbc6da6551c681155c8",
   "reference/instruction-shortfall-review.md": "sha256:445d398f29d81662c2c82584b04d96cdf7ff23a3b758880f092a9cf0e286a703",
-  "reference/knowledge/commands.md": "sha256:0f20287007cee174ad351879dc97a6eed2cbcb16182d0d333b0e75e2e1a9bf2f",
+  "reference/knowledge/commands.md": "sha256:83ae949d3b960a069bb7b0fba8ca06bfa89780ce85d7e2a70355b52d0977ff1d",
   "reference/knowledge/serving-build.md": "sha256:51389e0ea154c66cd67bfc9fe836f05d427d91cf6acfa1c1d0ad55a53fdd7517",
   "reference/knowledge/use.md": "sha256:a2f200e015552f4154eb20cacac572f5bf482aeecaef79037567a5cac8ba7c21",
   "reference/message-handover.md": "sha256:5c1f0ccf7f823e73345cfc96fdd37088e28dea92e00c7dcfc62cdec065d64ce7",
@@ -6875,7 +7064,7 @@
   "roles/bootstrap.md": "sha256:11994559aec49ff91c037d4b276c7870c355754696cf062692a875802ca61d3f",
   "roles/curator.md": "sha256:eb1985fff70e4ce8c1c6f564b173837d76ef976bd2ea2840f8f8b24df9e525b3",
   "roles/investigator.md": "sha256:a9568fd887bbc7b34443e94f060623a43689a42abbde634c18c7157f8cabea9a",
-  "roles/manager.md": "sha256:6f6b42d2d6623436255e515ef153053e58a2b93e7cb586f7d23c8586629209e9",
+  "roles/manager.md": "sha256:6d36410ee6f3108a0b01f4f66864dea6dc420e7538a25f9d2f757c250ec4c491",
   "roles/orchestrator.md": "sha256:10ca8084d12e5052765acdbc50bb94b7c39d96caf81f080cf3e7d52bcb2ca623",
   "roles/reviewer.md": "sha256:0bbe37a5e6fd93f99727d3907de9738083bdfd350a92af88445ad2129520458d",
   "roles/worker.md": "sha256:8391f7e20f53dc2e4087a2f40c76d748a99f961b044f4c5eeb3992955771f144",
