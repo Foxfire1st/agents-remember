@@ -9,3 +9,9 @@ In the same turn as each start, role handover and landing, update the master doc
 ## Finish documentation before master completion
 
 Before completing a master, check that its documentation task has changed or confirmed every document made stale by the master's tasks. Do not report the master complete while that documentation remains stale.
+
+## Abandon a master and settle a landing's debt
+
+Set an atomic master's document to `abandoned` or `Completed` before `worktree_abandon`: the call refuses `abandon-master-not-terminal` while the document reads anything else, and it writes `abandoned` there, whatever it read. A master whose work already stands on its source line may still be abandoned; the answer measures that by ancestry, not by the recorded landing cells, and carries `landedWork` as `{state, branch, line}` with a sentence in its `summary` that nothing of the work is lost.
+
+A recorded landing of a master that leaves entries stale at a path the master changed answers `staleEntries`: the count, the entries' own sentences, the record of each entry and the one remedy, a knowledge-maintenance leaf that re-anchors each entry. The contract keeps them as the master's debt. A cleanup that refuses because the integration is incomplete names `worktree_record_landing` as its next step, and a leaf closeout still refuses such an entry.

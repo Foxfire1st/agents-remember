@@ -53,7 +53,7 @@ Read each leaf's reports and task records yourself. Before directing handovers, 
 
 Before responding to gate findings from closeout preview or any landing route, read [Repair a gate refusal through its owner](../operations/closeout.md#repair-a-gate-refusal-through-its-owner) for the exact candidate findings, Curator repair and owning-route retry.
 
-Before updating master state through completion, read [master updates]({{detail:reference/coordination/shared/master-state.md}}#update-the-master-after-starts-handovers-and-landings) for the master fields to change through `task_doc` on `agents-remember-task` and [master completion]({{detail:reference/coordination/shared/master-state.md}}#finish-documentation-before-master-completion) for the documentation completion check.
+Before updating master state through completion, read [master updates]({{detail:reference/coordination/shared/master-state.md}}#update-the-master-after-starts-handovers-and-landings) for the fields through `task_doc` on `agents-remember-task`, [master completion]({{detail:reference/coordination/shared/master-state.md}}#finish-documentation-before-master-completion) for the documentation check, and [abandoning]({{detail:reference/coordination/shared/master-state.md}}#abandon-a-master-and-settle-a-landings-debt) for `worktree_abandon` and `worktree_record_landing`.
 
 Start, finalize and abandon already publish the task stage and mirror it into the master’s row; do not follow them with a separate status write. Use `task_doc set_status` for an explicit correction and for organizational-master completion. That completion act remains yours.
 

@@ -342,7 +342,7 @@ OPERATION_POINTER_ACTIONS = {
 ORDINARY_DETAIL_LINK_COUNTS = {
     # P5-18 (round 6): planning.md, coordination.md, curation.md and closeout.md no longer repeat
     # the role files' handover pointer; curation.md no longer links the reviewed-trees section
-    # (curator.md:93 names it); manager.md:56 reaches master state's two sections in one sentence.
+    # (curator.md:93 names it); manager.md:56 reaches master state's three sections in one sentence.
     "architect/authorized-closeout": {"reference/message-handover.md": 1},
     "architect/coordination": {"reference/message-handover.md": 2},
     "architect/orientation": {"reference/message-handover.md": 2},
@@ -369,28 +369,28 @@ ORDINARY_DETAIL_LINK_COUNTS = {
     "investigator/orientation": {"reference/message-handover.md": 2},
     "investigator/recovery": {"reference/message-handover.md": 1},
     "manager/authorized-closeout": {
-        "reference/coordination/shared/master-state.md": 1,
+        "reference/coordination/shared/master-state.md": 2,
         "reference/message-handover.md": 1,
     },
     "manager/coordination": {
-        "reference/coordination/shared/master-state.md": 1,
+        "reference/coordination/shared/master-state.md": 2,
         "reference/message-handover.md": 2,
     },
     "manager/curation": {
-        "reference/coordination/shared/master-state.md": 1,
+        "reference/coordination/shared/master-state.md": 2,
         "reference/message-handover.md": 1,
     },
     "manager/orientation": {
         "operations/orientation.md": 1,
-        "reference/coordination/shared/master-state.md": 1,
+        "reference/coordination/shared/master-state.md": 2,
         "reference/message-handover.md": 2,
     },
     "manager/recovery": {
-        "reference/coordination/shared/master-state.md": 1,
+        "reference/coordination/shared/master-state.md": 2,
         "reference/message-handover.md": 1,
     },
     "manager/review": {
-        "reference/coordination/shared/master-state.md": 1,
+        "reference/coordination/shared/master-state.md": 2,
         "reference/message-handover.md": 2,
     },
     "orchestrator/authorized-closeout": {"reference/message-handover.md": 1},
@@ -413,8 +413,8 @@ D656_OPERATION_SHA256 = {
     "implementation": "bf4fc5b611fabe7612934c58db459b0f291a9e3913b94adf1118509910eb2bd8",
     "review": "88fba52076f3f7d9e7b4148fc218b64ff9f241bc60a367d695dec096ca500eac",
     "curation": "21f27c8c6dc62274cb6f72363fee217b1594a21c63302b128fd37320f37d919d",
-    "coordination": "0087aa0dbd1e322454046dae01d4a8d230205831f22abeebabc7da644424b9d4",
-    "authorized-closeout": "3e6725c0730cc1456dd5ba1bbcfe7edc1a53203e05f65dd58dac0ed842eb0035",
+    "coordination": "6632ef75216968f20519012c038b9f8fa95553b6fee03d9ded1545fd1c313bd4",
+    "authorized-closeout": "ff015323b5061eae86418af057b9695da9ac91ec37313b5e402f3e8129782b66",
     "recovery": "e5707af48d38d94eafcc9458cf6a7dc87c094c9563eb3b899efc527171abe69f",
     "bootstrap": "673691f0b744343bfb0be5e08506a8ebec19bd4d7e7a81438f48306c930efe9e",
 }
@@ -437,12 +437,12 @@ D656_STAGE_SHA256 = {
     "review/architect": "066fcb1673508bfdfdbdd632047938b3b0377545004c7e179e2d8e71efe6c729",
     "curation/curator": "f1327be96dca213b4dfaf5531c8bbe8c87c1f5bf08dfd2dcf6694c7e900ad3e6",
     "curation/manager": "c89da0e26c3b686ea7c0c2922389db33acd9cd80904224d3a553aa8f2f7d5801",
-    "coordination/architect": "c1af86abc34b8eba28ec4cfd114f71ed19fe780f00ea18fa0c4ed140a8cc0985",
-    "coordination/orchestrator": "fd4056642278d53100077fd4aa30109dbbb1a02dec6388c8a369db64766ee21f",
-    "coordination/manager": "529c0871c328a56a349d892a89cc3db56c95b5002cd12137f4715ff83737b547",
-    "authorized-closeout/manager": "3e6725c0730cc1456dd5ba1bbcfe7edc1a53203e05f65dd58dac0ed842eb0035",
-    "authorized-closeout/orchestrator": "3e6725c0730cc1456dd5ba1bbcfe7edc1a53203e05f65dd58dac0ed842eb0035",
-    "authorized-closeout/architect": "3e6725c0730cc1456dd5ba1bbcfe7edc1a53203e05f65dd58dac0ed842eb0035",
+    "coordination/architect": "9308cbc27bae88da12c58f17aec28294fbdbae63798313a661eabf1210d9eabb",
+    "coordination/orchestrator": "a34729d0c5451ba9db9023df628b265fac096520854ce79b90921b87620fa30f",
+    "coordination/manager": "727aa405a0d0dff8308a9015f824df822943184a1fca48c356d6c39734682b5d",
+    "authorized-closeout/manager": "ff015323b5061eae86418af057b9695da9ac91ec37313b5e402f3e8129782b66",
+    "authorized-closeout/orchestrator": "ff015323b5061eae86418af057b9695da9ac91ec37313b5e402f3e8129782b66",
+    "authorized-closeout/architect": "ff015323b5061eae86418af057b9695da9ac91ec37313b5e402f3e8129782b66",
     "recovery/architect": "48ce2a62c747c3393e05a52acdbf8cb74c07cb9a00533008c17be6c11b37d664",
     "recovery/orchestrator": "48ce2a62c747c3393e05a52acdbf8cb74c07cb9a00533008c17be6c11b37d664",
     "recovery/manager": "48ce2a62c747c3393e05a52acdbf8cb74c07cb9a00533008c17be6c11b37d664",

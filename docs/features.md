@@ -284,7 +284,8 @@ start.
   task that landed or was abandoned. The review page opens from a task's page.
 - **Knowledge** reads a memory tree: the records by kind, the invariants without proof and the
   knowledge of a path.
-- **File Viewer** shows a source file beside its card.
+- **File Viewer** shows a source file, a picture or a video beside its card, and switches a
+  Markdown file between the rendered document and its source.
 
 The button "Tray (n)" beside the tabs opens the tray, which collects picked lines and files and
 sends them to a chat. [The dashboard](dashboard.md) describes every tab and control.

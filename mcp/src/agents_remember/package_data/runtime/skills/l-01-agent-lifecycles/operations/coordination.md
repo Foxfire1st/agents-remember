@@ -132,7 +132,7 @@ The recipient reads the message and, when a filed message includes a `body` or a
 <!-- ar:roles architect,orchestrator,manager -->
 ## Recover an unfinished closeout
 
-For an unfinished closeout, such as an interrupted one, read its generation number from `worktree_status` on `agents-remember-task` (`lifecycleOperations`). The operation stays addressable even when the closeout queue is absent or invalid-empty. Act on it through `worktree_operation_control`, with `operation_kind="closeout"`, `expected_generation` set to that number, and one of retry, recover, resume, cancel, retire or supersede. A mismatched generation is refused; read the status again rather than guessing.
+Read the generation from `runningOperation` while queued or running, else `lifecycleOperations` (a stopped one has none), in the answer or the file a cut answer names. The operation stays addressable when the queue is absent or invalid-empty. Act on it through `worktree_operation_control` on `agents-remember-task`, with `operation_kind="closeout"`, that `expected_generation`, and one of retry, recover, resume, cancel, retire or supersede. A mismatched generation is refused; re-read the status.
 
 After a closeout claim, lifecycle, worker, commit and recovery evidence belongs only to the enclosure-root operation journal. Observe it with `worktree_status` on `agents-remember-task` and execute only advertised `worktree_operation_control` actions. Queue absence or invalidation never strands that journal.
 

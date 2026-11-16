@@ -336,9 +336,12 @@ the places of the comparison that it rests on.
 | A claim in the explainer's page | The tab "Review" with the place of the evidence selected, when the evidence resolves in the comparison on screen. Otherwise nothing opens. | The tab "Explanation". |
 
 The change-set page has the filters "All (n)", "Changes without an invariant (n)" and "Unknown
-attribution (n)". On return the review page is as you left it, and the keyboard focus is on
-the control that opened the change-set page. When the changed files cannot be read the page says
-"All changes unavailable".
+attribution (n)". A changed picture or a changed video shows before and after side by side, and one
+that was added or removed shows its one side with a line that says the other side does not exist; a
+changed Markdown file opens as a line diff, and its toggle "rendered" draws the after side of the
+file rendered. On return the review page is as you left it, and the
+keyboard focus is on the control that opened the change-set page. When the changed files cannot be
+read the page says "All changes unavailable".
 
 A press on a claim of the explainer's page opens its evidence only when the evidence resolves in
 the comparison on screen. When it does not resolve there, the press opens nothing and the page

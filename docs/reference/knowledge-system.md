@@ -58,6 +58,13 @@ record is no finding and refuses nothing. `knowledge_read` with the view `weakne
 open ones, selected by folder (`sourcePath`) or by kind (`weaknessKind`); `includeClosed` adds
 the closed ones.
 
+A weakness closes with the task whose change removed its cause. A closure names that task's code
+commit or, where the closing task removes the cause itself, one sentence of reason and the
+running task; the writer refuses a commit that is not the full ID of a real commit of the code
+repository. The reading tool gives the commit from the `Code-Commit` trailer of the memory commit
+that closed the record, and before the closeout it says that the commit comes with the task's
+closeout.
+
 A decision record holds its `context` and at least two `alternatives`, of which exactly one has
 the status `chosen`. Each alternative gives its `reason`, and each `rejected` or `deferred`
 alternative states a `reconsider_when` condition. The decision links each record, route, anchor
@@ -69,6 +76,12 @@ refuses a decision that breaks one of these rules.
 A dependent record names one document of the code repository and each place the document stands
 on: an anchor in a file, a whole file, or a revision of an invariant or family. The record holds no
 text of the document. Whether the document is stale is derived from these links and never stored.
+
+A file link has not moved when its recorded blob and the blob at the selected tree differ only
+where `project.version` of `mcp/pyproject.toml` in the code tree stands: the version named at the
+record's confirmation, replaced by the version of the selected tree, at complete version tokens and
+with an optional `v` before them. Every other changed byte moves the link, and a changed dependency
+version is such a byte.
 
 A record is never deleted. It leaves use by `status: retired`. The validator refuses at every
 route a tree that lacks a record its comparison base holds (`R27.4-record-kept`). <!-- docs-check: identifier: the product prints this code -->
@@ -194,10 +207,14 @@ and combines open items, unreadable inputs and refusing validator violations.
 Each open item is one repair finding. The closeout preview (`worktree_closeout_preview`, which
 commits nothing) and the closeout itself (`worktree_closeout_apply`) judge the exact trees; a
 refusal is `knowledge-gate-refused` with findings.
-The landing of a task judges the closed-out pair again. Master and checkpoint landing
-validate their selected memory commit against the parent line and check current
-realizations at paths changed by the master's net code diff. The gate has no
-waiver. A clean structural report does not supply a missing semantic judgment or
+The landing of a task judges the closed-out pair again. The closeout judges the currentness of
+the entries at the paths the task's own code diff changed, exactly as the master's landing does.
+Master and checkpoint landing validate their selected memory commit against the parent line and
+check current realizations at paths changed by the master's net code diff. A master's recorded
+landing keeps an entry at such a path as the master's debt instead of refusing, when the landing
+chain's own proof passes and that stale entry is its only finding; [Worktrees And
+Closeout](worktrees-c09.md) tells that answer and the cleanup that follows it. The gate itself has
+no waiver. A clean structural report does not supply a missing semantic judgment or
 a validated [coherence record](../concepts.md#coherence-record), the record that the Curator
 publishes with the tool `curator_coherence`.
 
