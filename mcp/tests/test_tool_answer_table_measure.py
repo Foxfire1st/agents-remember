@@ -62,6 +62,31 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
         self.assertEqual(len(files), 1)
         return json.loads(files[0].read_text(encoding="utf-8").splitlines()[-1])
 
+    def test_sparse_cut_hint_stays_last_after_the_first_line_failure(self) -> None:
+        real_write = tool_log_module.os.write
+        failed: list[int] = []
+
+        def flaky_once(fd: int, data: Any) -> int:
+            if b'"answerTokens"' in bytes(data) and not failed:
+                failed.append(1)
+                raise OSError("forced line failure")
+            return real_write(fd, data)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            whole = {"ok": True, "blob": {f"k{i}": "x" * 40 for i in range(2000)}}
+            with mock.patch.object(tool_log_module.os, "write", side_effect=flaky_once):
+                answer, seen = self._complete(Path(tmp), "memory_quality_check", whole)
+            self.assertEqual(failed, [1])
+            self.assertTrue(answer["overflow"])
+            self.assertEqual(list(answer)[-1], "cut")
+            self.assertEqual(answer["cut"]["log"], answer["log"])
+            self.assertTrue(Path(answer["cut"]["log"]).is_file())
+            stored = json.loads(Path(answer["cut"]["log"]).read_text(encoding="utf-8"))
+            self.assertEqual(stored["blob"], whole["blob"])
+            delivered = count_response_tokens(answer)
+            self.assertEqual(self._read_line(Path(tmp))["answerTokens"], delivered)
+            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
+
     def test_exact_edge_answer_guarded_by_its_log_location(self) -> None:
         bound = bound_for("memory_quality_check")
         whole: dict[str, Any] = {"ok": True, "blob": ""}
@@ -169,6 +194,8 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
                 "the tool call was not recorded: the log file cannot be written.",
             )
             self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
+            self.assertEqual(list(answer)[-1], "cut")
+            self.assertTrue(Path(answer["cut"]["log"]).is_file())
 
     def test_ordinary_exact_edge_with_line_failure_is_reguarded(self) -> None:
         real_write = tool_log_module.os.write
@@ -266,6 +293,8 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             self.assertEqual(line["answerTokens"], delivered)
             self.assertTrue(line["guardCut"])
             self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
+            self.assertEqual(list(answer)[-1], "cut")
+            self.assertTrue(Path(answer["cut"]["log"]).is_file())
 
     def test_line_failure_overflow_stays_in_bound_and_counts_agree(self) -> None:
         real_write = os.write

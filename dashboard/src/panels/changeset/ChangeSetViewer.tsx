@@ -16,12 +16,7 @@ import {
   type FileDiff,
   type LeafMode,
   type MasterChangeset,
-  type MasterNetPins,
   type TaskChangeset,
-  comparisonFileDiff,
-  fileDiff,
-  leafFileDiff,
-  masterFileDiff,
 } from '../../data/changeset';
 import { type ReviewFailure, reviewProblemFromCause } from '../../data/review';
 import { useInspectionCounter } from './useInspectionCounter';
@@ -30,47 +25,18 @@ import { useChangesetLoad } from './useInspectionChangeset';
 import { useWorkingChangesetPoll } from './useWorkingChangeset';
 import { EmptyStateBackdrop } from '../EmptyStateBackdrop';
 import { SidebarToggle, sidebarHandleProps, sidebarPanelProps, useSidebar } from '../../grammar/SidebarToggle';
-import type { ReviewSelectorKind } from '../../data/review';
 import {
   reviewFileBadges,
   filteredChangeSet,
   type ReviewChangeContext,
   type ReviewChangeFilter,
 } from './reviewChangeSet';
-import { ChangeSetPane } from './ChangeSetPane';
+import { ChangeSetPane, type ChangeSetMediaSelector } from './ChangeSetPane';
 import { ReviewFilters } from './ReviewFilters';
+import { type ActiveFile, type ChangeSetTarget, type ViewerProps } from './changeSetTarget';
+import { diffRequestFor, mediaSelectorFor } from './changeSetSelection';
 
-export interface ChangeSetTarget {
-  repo: string;
-  scope?: string; // one active enclosure (full base->worktree diff)
-  master?: string; // a series master (net base->selected result); also QUALIFIES a `leaf`
-  leaf?: string; // a single leaf (committed/working), resolved by leaf-id; needs `master` + `mode`
-  mode?: LeafMode; // committed = landed delta (base->code_commit), working = uncommitted delta (live)
-  // The master net's generation pins: the exact recorded endpoints a listing published. Empty /
-  // absent means the declared integrated result. Carried into the list request (a pinned list
-  // reopens the recorded net after the branch advances) and -- via the list response -- into
-  // each file expansion, so an opened entry stays bound to its generation (R03's idiom).
-  generation?: MasterNetPins;
-  comparison?: number;
-  // The Intent Reviewer's own selector: the reviewed subject's recorded identity, when the server
-  // offered one. Its PRESENCE is what marks this target as a review and the cockpit's takeover
-  // dispatch is what reads it -- the change-set viewer is never mounted for one, so no change-set
-  // request is made from a review. An EMPTY object is the task-context entry: the review is opened
-  // from the task alone and lists the complete source inventory, which is what a task with no
-  // recorded invariant still has.
-  //
-  // `historical` says which record that review is read from (ICR-R12): absent is the live candidate,
-  // and true is the leaf's own recorded comparison -- the entry a closed leaf offers, where the
-  // worktree is gone and the durable generation is the only comparison there is.
-  review?: { selectorKind?: ReviewSelectorKind; selectorId?: string; historical?: boolean };
-}
-
-type ViewerProps = ChangeSetTarget & {
-  onBack: () => void;
-  onOpenLeaf?: (target: ChangeSetTarget) => void;
-  reviewContext?: ReviewChangeContext;
-};
-type ActiveFile = { kind: 'code' | 'memory'; path: string; hasSidecar?: boolean };
+export type { ChangeSetTarget } from './changeSetTarget';
 
 const screen = css({
   height: '100%',
@@ -240,26 +206,6 @@ function partnerCodePath(memPath: string): string | null {
   return base;
 }
 
-function diffRequestFor(
-  repo: string,
-  scope: string | undefined,
-  master: string | undefined,
-  leaf: string | undefined,
-  mode: LeafMode | undefined,
-  generation: MasterNetPins | undefined,
-  kind: 'code' | 'memory',
-  path: string,
-  comparison?: number,
-): Promise<FileDiff | null> {
-  if (comparison !== undefined)
-    return comparisonFileDiff(repo, master ?? '', leaf ?? '', comparison, kind, path);
-  return leaf
-    ? leafFileDiff(repo, master ?? '', leaf, kind, path, mode ?? 'committed')
-    : master
-      ? masterFileDiff(repo, master, kind, path, generation ?? {})
-      : fileDiff(repo, scope ?? '', kind, path);
-}
-
 function partnerTargetFor(
   kind: 'code' | 'memory',
   path: string,
@@ -424,15 +370,20 @@ function ChangeSetMainPane({
   error,
   narrow,
   filtered,
+  mediaSelector,
 }: {
   diff: FileDiff | null;
   changed: number;
   filtered?: boolean;
   error?: ReviewFailure | null;
   narrow?: boolean;
+  mediaSelector?: ChangeSetMediaSelector;
 }) {
   if (error) return <ChangeSetRefusal error={error} />;
-  if (diff) return <ChangeSetPane diff={diff} keyPrefix="changeset.main" narrow={narrow} />;
+  if (diff)
+    return (
+      <ChangeSetPane diff={diff} keyPrefix="changeset.main" narrow={narrow} mediaSelector={mediaSelector} />
+    );
   if (changed === 0) {
     return (
       <div className={emptyNotice} data-testid="changeset-empty">
@@ -495,53 +446,46 @@ function ChangeSetRail({
   );
 }
 
-function ChangeSetWorkspace({
-  diffError,
+function workspaceSizes(narrow?: boolean) {
+  return narrow
+    ? { defaultSize: 35, minSize: 10, maxSize: 40 }
+    : { defaultSize: 26, minSize: 16 };
+}
+
+function WorkspacePanels({
   narrow,
-  error,
+  railOpen,
   data,
   active,
   diff,
+  diffError,
   partner,
   onOpen,
   leaves,
   onOpenLeaf,
   reviewContext,
-  railOpen = true,
+  mediaSelector,
 }: {
-  // The changed-file list's shared toggle hid it (MIK-R89 v2 rule 8): it stays mounted, out of
-  // the row, and the diff takes its width. Narrow, it is the stacked list above the diff.
-  railOpen?: boolean;
-  error: ReviewFailure | null;
-  data: TaskChangeset | MasterChangeset | null;
+  narrow?: boolean;
+  railOpen: boolean;
+  data: TaskChangeset | MasterChangeset;
   active: { kind: 'code' | 'memory'; path: string; hasSidecar?: boolean } | null;
   diff: FileDiff | null;
   diffError?: ReviewFailure | null;
-  narrow?: boolean;
   partner: FileDiff | null;
   onOpen: (kind: 'code' | 'memory', file: ChangedFile, withPartner?: boolean) => void;
   leaves: MasterChangeset['leaves'];
   onOpenLeaf?: (leaf: string, mode: LeafMode) => void;
   reviewContext?: ReviewChangeContext;
+  mediaSelector?: ChangeSetMediaSelector;
 }) {
-  if (error) return <ChangeSetRefusal error={error} />;
-  if (!data) {
-    return (
-      <div className={placeholder} data-testid="pane-placeholder">
-        Loading change-set…
-      </div>
-    );
-  }
-  const railSize = narrow
-    ? { defaultSize: 35, minSize: 10, maxSize: 40 }
-    : { defaultSize: 26, minSize: 16 };
   return (
     <PanelGroup
       direction={narrow ? 'vertical' : 'horizontal'}
       autoSaveId={narrow ? 'changeset.narrow' : 'changeset.outer'}
       className={css({ flex: '1', minHeight: '0' })}
     >
-      <Panel {...railSize} {...sidebarPanelProps(railOpen)}>
+      <Panel {...workspaceSizes(narrow)} {...sidebarPanelProps(railOpen)}>
         <ChangeSetRail
           data={data}
           active={active}
@@ -559,13 +503,19 @@ function ChangeSetWorkspace({
           narrow={narrow}
           changed={data.code.length + data.memory.length}
           filtered={Boolean(reviewContext && reviewContext.page.filter !== 'all')}
+          mediaSelector={mediaSelector}
         />
       </Panel>
       {partner ? (
         <>
           <PanelResizeHandle className={handle} />
           <Panel minSize={20}>
-            <ChangeSetPane diff={partner} keyPrefix="changeset.partner" narrow={narrow} />
+            <ChangeSetPane
+              diff={partner}
+              keyPrefix="changeset.partner"
+              narrow={narrow}
+              mediaSelector={mediaSelector}
+            />
           </Panel>
         </>
       ) : null}
@@ -573,17 +523,81 @@ function ChangeSetWorkspace({
   );
 }
 
-function useChangesetState({
-  repo,
-  scope,
-  master,
-  leaf,
-  mode,
-  generation,
-  comparison,
+function ChangeSetWorkspace({
+  diffError,
+  narrow,
+  error,
+  data,
+  active,
+  diff,
+  partner,
+  onOpen,
+  leaves,
+  onOpenLeaf,
   reviewContext,
-  onBack,
-}: ViewerProps) {
+  railOpen = true,
+  mediaSelector,
+}: {
+  // The changed-file list's shared toggle hid it (MIK-R89 v2 rule 8): it stays mounted, out of
+  // the row, and the diff takes its width. Narrow, it is the stacked list above the diff.
+  railOpen?: boolean;
+  error: ReviewFailure | null;
+  data: TaskChangeset | MasterChangeset | null;
+  active: { kind: 'code' | 'memory'; path: string; hasSidecar?: boolean } | null;
+  diff: FileDiff | null;
+  diffError?: ReviewFailure | null;
+  narrow?: boolean;
+  partner: FileDiff | null;
+  onOpen: (kind: 'code' | 'memory', file: ChangedFile, withPartner?: boolean) => void;
+  leaves: MasterChangeset['leaves'];
+  onOpenLeaf?: (leaf: string, mode: LeafMode) => void;
+  reviewContext?: ReviewChangeContext;
+  mediaSelector?: ChangeSetMediaSelector;
+}) {
+  if (error) return <ChangeSetRefusal error={error} />;
+  if (!data) {
+    return (
+      <div className={placeholder} data-testid="pane-placeholder">
+        Loading change-set…
+      </div>
+    );
+  }
+  return (
+    <WorkspacePanels
+      narrow={narrow}
+      railOpen={railOpen}
+      data={data}
+      active={active}
+      diff={diff}
+      diffError={diffError}
+      partner={partner}
+      onOpen={onOpen}
+      leaves={leaves}
+      onOpenLeaf={onOpenLeaf}
+      reviewContext={reviewContext}
+      mediaSelector={mediaSelector}
+    />
+  );
+}
+
+function useDiffOpener(
+  props: ViewerProps,
+  boundGeneration: ViewerProps['generation'],
+  setters: {
+    setActive: (file: ActiveFile | null) => void;
+    setDiff: (diff: FileDiff | null) => void;
+    setPartner: (diff: FileDiff | null) => void;
+    setDiffError: (error: ReviewFailure | null) => void;
+  },
+) {
+  const { repo, scope, master, leaf, mode, comparison } = props;
+  const loadDiff = (kind: 'code' | 'memory', path: string) =>
+    diffRequestFor(repo, scope, master, leaf, mode, boundGeneration, kind, path, comparison);
+  return useChangedFileOpen([leaf, master, scope].some(Boolean), loadDiff, setters);
+}
+
+function useChangesetState(props: ViewerProps) {
+  const { repo, scope, master, leaf, mode, generation, comparison, reviewContext, onBack } = props;
   const [data, setData] = useState<TaskChangeset | MasterChangeset | null>(null);
   const [error, setError] = useState<ReviewFailure | null>(null);
   const [active, setActive] = useState<ActiveFile | null>(null);
@@ -598,6 +612,7 @@ function useChangesetState({
   // (qualified by `master`); `master` alone is the series net; otherwise an enclosure `scope`.
   const counter = useInspectionCounter({ repo, master, leaf, generation }, data, error);
   const { seriesMeta, leaves, boundGeneration } = counter;
+  const mediaSelector = mediaSelectorFor(props, boundGeneration);
 
   useChangesetLoad(
     repo,
@@ -634,10 +649,7 @@ function useChangesetState({
   // Each selector diffs its own range, all into the same MergeView: a leaf its committed/working
   // range, `master` the NET series range between the bound generation's endpoints, an enclosure
   // `scope` its base -> worktree.
-  const loadDiff = (kind: 'code' | 'memory', path: string) =>
-    diffRequestFor(repo, scope, master, leaf, mode, boundGeneration, kind, path, comparison);
-
-  const { open, clear } = useChangedFileOpen([leaf, master, scope].some(Boolean), loadDiff, {
+  const { open, clear } = useDiffOpener(props, boundGeneration, {
     setActive,
     setDiff,
     setPartner,
@@ -671,6 +683,7 @@ function useChangesetState({
     shown,
     counters,
     headerLabel,
+    mediaSelector,
   };
 }
 
@@ -817,6 +830,7 @@ export function ChangeSetViewer(
     counters,
     counterAttribution,
     headerLabel,
+    mediaSelector,
   } = useChangesetState(props);
   const rail = useSidebar('changeset', 'left');
   return (
@@ -852,6 +866,7 @@ export function ChangeSetViewer(
         partner={partner}
         onOpen={open}
         leaves={leaves}
+        mediaSelector={mediaSelector}
         onOpenLeaf={
           onOpenLeaf
             ? (id, leafMode) => onOpenLeaf({ repo, master, leaf: id, mode: leafMode })

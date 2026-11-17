@@ -1,9 +1,24 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { FileContent } from "../../data/files";
+import type { DocumentContext } from "../../grammar/DocumentMarkdown";
 import { DualPane } from "./DualPane";
 
 afterEach(cleanup);
+
+function code(overrides: Partial<FileContent>): FileContent {
+  return {
+    scope: "mainline",
+    path: "pkg/pic.png",
+    language: "binary",
+    size: 1234,
+    truncated: false,
+    content: "",
+    onboarding: { status: "missing" },
+    ...overrides,
+  };
+}
 
 describe("DualPane empty-state backdrop", () => {
   it("fills the pane with the siege-tank boomerang backdrop when nothing is selected", () => {
@@ -17,6 +32,90 @@ describe("DualPane empty-state backdrop", () => {
     // The siege-tank loop reads darker, so it gets a brighter wash than the shared 0.14 default.
     expect((video as HTMLElement | null)?.style.opacity).toBe("0.18");
     expect(queryByTestId("pane-placeholder")).toBeNull();
+  });
+});
+
+describe("DualPane media and rendered documents", () => {
+  it("draws a picture from its bytes route, with its type and size under it", () => {
+    const { getByTestId } = render(
+      <DualPane
+        code={code({ mediaType: "image/png" })}
+        sidecar={{ state: "empty" }}
+        split={true}
+        mediaUrl="/api/files/bytes?repo=R&scope=mainline&path=pkg%2Fpic.png"
+      />,
+    );
+    const image = getByTestId("media-image") as HTMLImageElement;
+    expect(image.getAttribute("src")).toBe(
+      "/api/files/bytes?repo=R&scope=mainline&path=pkg%2Fpic.png",
+    );
+    expect(getByTestId("media-caption").textContent).toContain("PNG");
+    expect(getByTestId("media-caption").textContent).toContain("1,234");
+  });
+
+  it("states a video above the bytes bound instead of requesting it", () => {
+    const { getByTestId } = render(
+      <DualPane
+        code={code({ path: "media/demo.mp4", mediaType: "video/mp4", tooLarge: true })}
+        sidecar={{ state: "empty" }}
+        split={false}
+        mediaUrl="/api/files/bytes?repo=R&path=media%2Fdemo.mp4"
+      />,
+    );
+    expect(getByTestId("media-too-large").textContent).toContain("too large");
+    expect(getByTestId("media-too-large").textContent).toContain("MP4");
+  });
+
+  it("keeps the truncation warning in rendered document mode", () => {
+    const document: DocumentContext = {
+      repo: "R",
+      scope: "mainline",
+      path: "README.md",
+      openFile: () => undefined,
+    };
+    const view = render(
+      <DualPane
+        code={code({
+          path: "README.md",
+          language: "markdown",
+          size: 3_000_000,
+          truncated: true,
+          content: "# Long\n",
+        })}
+        sidecar={{ state: "empty" }}
+        split={false}
+        document={document}
+        rendered
+      />,
+    );
+    expect(view.getByTestId("truncation-banner").textContent).toContain("first 2 MiB");
+  });
+
+  it("renders a repository document only in document mode; source mode stays source", () => {
+    const document: DocumentContext = {
+      repo: "R",
+      scope: "mainline",
+      path: "README.md",
+      openFile: () => undefined,
+    };
+    const markdown = code({
+      path: "README.md",
+      language: "markdown",
+      size: 30,
+      content: "# Read me\n\n<script>alert(1)</script>\n",
+    });
+    const rendered = render(
+      <DualPane code={markdown} sidecar={{ state: "empty" }} split={false} document={document} rendered />,
+    );
+    const heading = rendered.getByRole("heading", { name: "Read me" });
+    expect(heading.id).toBe("read-me");
+    expect(rendered.container.querySelector("script")).toBeNull();
+    rendered.unmount();
+    const source = render(
+      <DualPane code={markdown} sidecar={{ state: "empty" }} split={false} document={document} />,
+    );
+    expect(source.queryByTestId("document-rendered")).toBeNull();
+    expect(source.getByTestId("dual-pane")).not.toBeNull();
   });
 });
 

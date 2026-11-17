@@ -22,7 +22,7 @@ vulnerability as the [Security Policy](SECURITY.md) says, not in a public issue.
 | `system/`, `providers/`, `benchmarks/` | The source of the runtime assets that the package carries. |
 | `examples/mcp/` | Example settings files. |
 | `docs/` | The user documentation. `docs/design/` holds design pages for contributors. |
-| `assets/` | The image and the video that `README.md` shows. |
+| `docs/assets/` | The pictures and the video that `README.md` shows. |
 | `scripts/` | Development scripts: the environment bootstrap, the generators of the copies, the documentation check, the sandbox. |
 | `.githooks/`, `setup-hooks.sh` | The Git hooks and the script that enables them. |
 | `.dagger/`, `dagger.json` | The Dagger module that runs certification. |
@@ -356,7 +356,9 @@ both steps run two checks on the exact trees they publish:
 A commit that passed carries the trailer `Commit-Check-Pass: tree=<tree> hook=<hook>`.
 `<tree>` is the Git id of the tree that the hook checked, and `<hook>` is the path of the hook
 from the repository's top folder, here `.githooks/pre-commit`. In a repository without a
-pre-commit hook the trailer says `hook=none`. No landing route skips the hook.
+pre-commit hook the trailer says `hook=none`. A landing checks every side whose commit it
+publishes: a side whose commit the landing line already stands on adds no commit, so the hook is
+not run for it.
 
 A closeout and a landing run no test suite and no certification.
 [Worktrees And Closeout](docs/reference/worktrees-c09.md) describes both steps.
@@ -475,7 +477,7 @@ lists, such as `docs/guides/README.md`. The check refuses:
 | `missing-anchor` | A link to an anchor that is no heading of its target. |
 | `missing-path` | A repository path, in code form or in a code block, that does not exist. A path that Git ignores is a build product and passes. |
 | `outside-docs` | A page under `docs/` that links by a relative path to a file outside `docs/`. |
-| `unreached` | A file under `docs/` that no chain of links from `docs/README.md` reaches, and a page that is more than two links away from `docs/README.md`, that is, reached only through more than one index page. |
+| `unreached` | A file under `docs/` that no chain of links from `docs/README.md` reaches; a file that is no page also counts as reached when `README.md` shows or links it by a relative path. Also a page that is more than two links away from `docs/README.md`, that is, reached only through more than one index page. |
 | `entry-link` | A link that an entry point owes and lacks: `README.md` links `docs/README.md`, `docs/getting-started.md`, `docs/install/README.md` and `ROADMAP.md`; `mcp/README.md` the first three; a harness page `docs/install/README.md` and `docs/getting-started.md`. Also a relative link in `mcp/README.md`. |
 | `install-steps` | An entry point whose install steps differ from those of `docs/getting-started.md` in number, order, title or command line. |
 | `identifier` | An identifier of a task, a requirement or a decision of this project's own planning. |

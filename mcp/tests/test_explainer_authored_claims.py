@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from agents_remember.application.review_frame_store import frame_scope, reopen_frame
+from agents_remember.canvas import presenter_tools
 from agents_remember.canvas.explainer_errors import ExplainerRefused
 from agents_remember.canvas.explainer_paths import EXPLAINER_FRAME
 from agents_remember.canvas.explainer_server import render_and_publish
@@ -14,6 +15,19 @@ from agents_remember.canvas.explainer_state import ExplainerBinding, write_bindi
 from agents_remember.canvas.presenter_store import PresenterRefused
 from agents_remember.canvas.prospective import BrowserProspectiveLoad, ProspectiveResult
 from canvas_host_test_support import LEAF
+
+
+@pytest.fixture(autouse=True)
+def _browser_is_here(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These suites exercise the authored claims and their publication; the browser is here.
+
+    The first fetch and its announce have their own suites, so every render in this file starts
+    from an installation whose browser sits in its folder.
+    """
+
+    monkeypatch.setattr(presenter_tools, "browser_missing", lambda: ())
+
+
 from explainer_server_test_support import _world
 
 

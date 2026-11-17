@@ -140,4 +140,14 @@ describes what the check refuses.
       installs the wheel in a clean environment, starts the tool server with `--help`, and
       publishes the two files to PyPI. It runs no test and no certification.
 - [ ] The release job passed, and PyPI lists `<version>`.
+- [ ] The index answers `<version>` in the form the installer reads, not only in its JSON record.
+      Run `python3 -m pip index versions agents-remember-mcp` and repeat it until `<version>` is the
+      newest version it names. A wheel published from the job's clean environment proves the
+      upload; the index's own copy for installers can still trail it, and an install started
+      before it catches up fails with "No matching distribution found" although the upload
+      succeeded.
+- [ ] A scratch install of the published version works after that:
+      `python3 -m venv <scratch-folder>/venv` and
+      `<scratch-folder>/venv/bin/python -m pip install agents-remember-mcp==<version>`, then
+      `<scratch-folder>/venv/bin/agents-remember-mcp --help`.
 - [ ] The GitHub release of the tag exists and holds the release notes.

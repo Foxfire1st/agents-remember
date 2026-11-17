@@ -193,12 +193,18 @@ def prepare_integration_ref_move(
     # the repository's commit check in the landing that wrote them. The landing's
     # own fact (the trailer on the commit) proves it; without one the check runs
     # here, and its refusal stops the move.
-    _require_landing_commit_check(contract.code_repo_path, commits.code, side="code")
+    #
+    # When the protected ref already points at the candidate, that side moves no commit.
+    # A fresh checkout lacks `dashboard/node_modules`, so rerunning its check there can
+    # refuse a landing without judging any new tree on that side.
+    if code_head_before != commits.code:
+        _require_landing_commit_check(contract.code_repo_path, commits.code, side="code")
     if external:
         assert contract.memory_repo_path is not None
-        _require_landing_commit_check(
-            contract.memory_repo_path, commits.memory_content, side="memory"
-        )
+        if memory_head_before != commits.memory_content:
+            _require_landing_commit_check(
+                contract.memory_repo_path, commits.memory_content, side="memory"
+            )
 
     _require_clean_branch_checkout(
         contract.code_repo_path, code_target.branch, code_head_before, contract=contract

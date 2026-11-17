@@ -14,6 +14,7 @@ import {
   canRetire,
   canSend,
   END_TO_END_LINE,
+  PLANNED_LINE,
   changeSetPick,
   columnSelection,
   firstRequestLine,
@@ -151,6 +152,13 @@ describe('the first request’s form (rule 3)', () => {
     expect(canSend([], 'what changed?')).toBe(true);
     // The form's line says what an empty Send asks for (the developer's F1).
     expect(firstRequestLine([], '')).toBe(END_TO_END_LINE);
+  });
+
+  it('sends an empty request on a planned task as its requirement and planned effects', () => {
+    // BUG-R02 rule 2: a planning task has no change set and no invariants that hold yet; the button
+    // asks for the requirement and the planned effects, in one sentence.
+    expect(firstRequestLine([], '', true)).toBe(PLANNED_LINE);
+    expect(firstRequestLine([], '', false)).toBe(END_TO_END_LINE);
   });
 
   it('pre-fills the stale parts of a Regenerate with no seat', () => {

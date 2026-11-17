@@ -6,7 +6,8 @@ maintenance and migration commands, the knowledge file writer's ``knowledge-inge
 formatter, ``knowledge-convert`` conversion, ``knowledge-validate`` validator, ``knowledge-index``
 derived index, ``knowledge-worklist`` change-to-knowledge worklist and read-only
 ``knowledge-routes`` family-route report, the migration census's ``knowledge-census`` inventory
-and report, ``knowledge-copies`` for retired dataset cleanup, and the Paseo runtime commands,
+and report, ``knowledge-copies`` for retired dataset cleanup, ``explainer-browser`` for the
+Playwright module and Chromium the explainer publishes with, and the Paseo runtime commands,
 as subparsers. The MCP server keeps its own ``agents-remember-mcp``
 console script -- harness configs launch the server by that exact name, so it is never folded in
 here.
@@ -19,6 +20,7 @@ import sys
 
 from agents_remember.cli import (
     dashboard,
+    explainer_browser,
     handoff_check,
     knowledge_bootstrap,
     knowledge_census,
@@ -158,6 +160,13 @@ def _register_knowledge_commands(sub: argparse._SubParsersAction) -> None:
     )
     knowledge_copies.add_arguments(copies)
     copies.set_defaults(func=knowledge_copies.run)
+
+    browser = sub.add_parser(
+        "explainer-browser",
+        help="Report the Playwright module and Chromium the explainer publishes with, or fetch them.",
+    )
+    explainer_browser.add_arguments(browser)
+    browser.set_defaults(func=explainer_browser.run)
 
 
 def _register_runtime_commands(sub: argparse._SubParsersAction) -> None:

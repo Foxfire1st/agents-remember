@@ -39,6 +39,8 @@ import { readSubjectOf } from './useReviewSelection';
 export interface PageProps {
   reads: PageReads;
   page: ReviewPageState;
+  /** The task list says this leaf is in planning: the page is planned, not a review that failed. */
+  planned?: boolean;
 }
 
 const sameSubject = (left: ReviewSubjectRef, right: ReviewSubjectRef | undefined) =>
@@ -209,7 +211,9 @@ export function PageTree({ props, traversal }: { props: PageProps; traversal: st
   const { workspace, navigation } = reads;
   // While a generation's catalogue is read, the tree says so, and no earlier titles stand in it.
   const loading = navigation.catalogue.loading ? 'Reading families and invariants for this comparison…' : undefined;
-  const status = [traversal, page.walk?.notice, loading ?? outlineUnavailableReason(navigation.catalogue)];
+  const status = props.planned
+    ? ['planned · nothing built yet']
+    : [traversal, page.walk?.notice, loading ?? outlineUnavailableReason(navigation.catalogue)];
   const { changeSet } = page;
   const open = useContext(ReviewChangeSetNavigation);
   const total = changedTotal(changeSet.summary);
@@ -295,6 +299,7 @@ export function TopLineControls({ props }: { props: PageProps }) {
     comparison: changeSet.comparison,
     latest: changeSet.resolved ?? null,
     now,
+    planned: props.planned,
   });
   const repository = repositoryOf(reads.repo, changeSet.leafTrees, changeSet.number);
   // The status popover hangs from the comparison's button, as the mockup's does (D401).

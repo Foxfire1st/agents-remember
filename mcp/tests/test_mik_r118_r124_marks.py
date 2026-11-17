@@ -1653,7 +1653,7 @@ def test_the_writer_records_a_history_row_about_a_weakness_and_a_dependent(tmp_p
             _weakness_record(
                 record_id=weakness["id"],
                 state="closed",
-                closed={"task": WRITER_LEAF, "commit": "c" * 40},
+                closed={"task": WRITER_LEAF, "commit": git(world.code, "rev-parse", "HEAD")},
             )
         ],
         rows=[

@@ -4,7 +4,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
@@ -13,11 +12,12 @@ import { motion } from 'motion/react';
 
 import { cx } from '../../styled-system/css';
 import { shell, topbar, title, statusRow, dim, effectsToggle, railToggle, railToggleButton, caution, connBadge, bodyGrid, rail, RailResizeHandle, viewport, chatsLayer, takeoverBody, useNarrowCockpit, sidebarStrip, LEFT_RAIL_ID, RIGHT_RAIL_ID } from './layout';
-import { reviewChatTask, useReviewChat, type ReviewChatColumn } from './reviewChat';
+import { useReviewChat, type ReviewChatColumn } from './reviewChat';
+import { useCockpitShellActions } from './shellActions';
 import { ReviewChatClose, ReviewMain, reviewRailView } from './reviewPage';
 import { useReviewHash, parseReviewHash } from './reviewHash';
 import { RoleChatsPane } from './RoleChats';
-import { seatChatTarget, type AgentChatTarget } from './roleChatTarget';
+import type { AgentChatTarget } from './roleChatTarget';
 import { topBarCountsLine } from './topBarCounts';
 import { startScreenWakeLock } from '../data/screenWakeLock';
 import { selectHostActivityUnknown, selectQueue } from '../data/selectors';
@@ -176,12 +176,13 @@ interface CockpitShellState {
 const FULL_BLEED_VIEWS: ReadonlySet<CockpitView> = new Set<CockpitView>(['files', 'knowledge', 'engine', 'topology', 'chats']);
 
 // Which screen the shell shows. A change-set target with a review is the review page inside the
-// railed grid; any other change-set target, and the notes reader, still take the screen over.
+// railed grid; any other change-set target, and the notes reader, take the screen over — but only
+// while Operations is the tab on screen. Another tab keeps them mounted and hidden.
 function shellFlags(view: CockpitView, changeSet: ChangeSetTarget | null, notesOpen: boolean) {
   const review = changeSet?.review ? changeSet : null;
   return {
     fullBleed: FULL_BLEED_VIEWS.has(view),
-    takeover: Boolean(changeSet && !review) || notesOpen,
+    takeover: view === 'operations' && (Boolean(changeSet && !review) || notesOpen),
     review,
     reviewShown: review !== null && view === 'operations',
   };
@@ -257,174 +258,31 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
   };
 }
 
-// What a bottom tab change needs of the shell: the tab on screen, the review it holds, and its address.
-interface TabMemory {
-  view: CockpitView;
-  changeSet: ChangeSetTarget | null;
-  address: { park: () => void; unpark: () => void };
-}
-
-// A bottom tab change (D575). Every tab keeps the page it was last on: Chats, Knowledge and the File
-// Viewer stay mounted, and so does a review open in Operations, hidden while another tab is on
-// screen; returning restores its address. A review whose leaf the task list no longer holds is gone,
-// and Operations falls back to the task document. Pressing Operations on the review itself still
-// leaves it for the task document, and any other change set closes on a tab change, as before.
-function useTabChange(
-  tab: TabMemory,
-  setChangeSet: (target: ChangeSetTarget | null) => void,
-  setNotesOpen: (open: boolean) => void,
-  setView: (view: CockpitView) => void,
-): (next: CockpitView) => void {
-  // One identity for the session: the mode bar is behind a memo gate (tab-switch CPU).
-  const latest = useRef(tab);
-  latest.current = tab;
-  return useCallback(
-    (next: CockpitView) => {
-      const { view, changeSet, address } = latest.current;
-      setNotesOpen(false);
-      if (!changeSet?.review || (view === 'operations' && next === 'operations')) {
-        setChangeSet(null);
-      } else if (view === 'operations') {
-        address.park();
-      } else if (next === 'operations') {
-        if (reviewLeafGone(changeSet)) setChangeSet(null);
-        else address.unpark();
-      }
-      setView(next);
-    },
-    [setChangeSet, setNotesOpen, setView],
-  );
-}
-
-function reviewLeafGone(review: ChangeSetTarget): boolean {
-  const { tasks, generatedAt } = dashboardStore.getState();
-  return reviewChatTask(review, tasks, generatedAt !== null).state === 'unknown';
-}
-
-// The Operations page's own way in: a row's document key, and the view a document is read in.
-function useOpenDocument(
-  setChangeSet: (target: ChangeSetTarget | null) => void,
-  setNotesOpen: (open: boolean) => void,
-  setSelectedId: (id: string | null) => void,
-  setView: (view: CockpitView) => void,
-): (id: string) => void {
-  return useCallback(
-    (id: string) => {
-      setChangeSet(null);
-      setNotesOpen(false);
-      setSelectedId(id);
-      setView('operations');
-    },
-    [setChangeSet, setNotesOpen, setSelectedId, setView],
-  );
-}
-
-// The bell's way into a chat (L190-R1-F09). It is the shell's one agent navigation: the row's
-// exact seat becomes the Chats view's request, and the view it needs is Chats — through the same
-// `changeView` every tab uses. The request is what the Chats pane's frame target is built from;
-// nothing here writes the observed-chat channel, so the chat on screen changes only when the
-// frame answers that it shows the agent.
-function useOpenAgentChat(
-  changeView: (next: CockpitView) => void,
-  setAgentChat: (target: AgentChatTarget | null) => void,
-): (seat: AttentionAgentTarget) => void {
-  // One identity for the whole session: the handler crosses two memo gates (the rail's list and
-  // the bell panel), so a function rebuilt per render would re-render both on every shell state
-  // change — the tab-switch cost the 260721 memo gate exists to prevent.
-  const latest = useRef({ changeView, setAgentChat });
-  latest.current = { changeView, setAgentChat };
-  return useCallback((seat: AttentionAgentTarget) => {
-    latest.current.setAgentChat(seatChatTarget(seat));
-    latest.current.changeView('chats');
-  }, []);
-}
-
-function useCockpitShellActions(
-  setChatRail: (value: boolean) => void,
-  setChangeSet: (target: ChangeSetTarget | null) => void,
-  setNotes: (
-    target:
-      NotesReaderTarget | null | ((cur: NotesReaderTarget | null) => NotesReaderTarget | null),
-  ) => void,
-  setNotesOpen: (open: boolean) => void,
-  setView: (view: CockpitView) => void,
-  setSelectedId: (id: string | null) => void,
-  setAgentChat: (target: AgentChatTarget | null) => void,
-  tab: TabMemory,
-): {
-  setRailView: (next: 'river' | 'chat') => void;
-  open: (id: string) => void;
-  openAgentChat: (seat: AttentionAgentTarget) => void;
-  changeView: (next: CockpitView) => void;
-  openChangeSet: (target: ChangeSetTarget) => void;
-  openNotes: (target: NotesReaderTarget) => void;
-  closeChangeSet: () => void;
-  closeNotes: () => void;
-  selectNote: (path: string) => void;
-} {
-  const setRailView = useCallback(
-    (next: 'river' | 'chat') => setChatRail(next === 'chat'),
-    [setChatRail],
-  );
-  const open = useOpenDocument(setChangeSet, setNotesOpen, setSelectedId, setView);
-  const changeView = useTabChange(tab, setChangeSet, setNotesOpen, setView);
-  // The bell's way into a chat (L190-R1-F09).
-  const openAgentChat = useOpenAgentChat(changeView, setAgentChat);
-  const openChangeSet = useCallback(
-    (target: ChangeSetTarget) => {
-      setNotesOpen(false);
-      setChangeSet(target);
-    },
-    [setChangeSet, setNotesOpen],
-  );
-  const openNotes = useCallback(
-    (target: NotesReaderTarget) => {
-      setChangeSet(null);
-      setNotes(target);
-      setNotesOpen(true);
-    },
-    [setChangeSet, setNotes, setNotesOpen],
-  );
-  const closeChangeSet = useCallback(() => setChangeSet(null), [setChangeSet]);
-  const closeNotes = useCallback(() => setNotesOpen(false), [setNotesOpen]);
-  const selectNote = useCallback(
-    (path: string) =>
-      setNotes((cur) => {
-        // A note selection leaves the folder-open state: the reader shows the note.
-        if (cur?.kind === 'notes') return { ...cur, path, folder: false };
-        if (cur?.kind === 'requirements') return { ...cur, path };
-        return cur;
-      }),
-    [setNotes],
-  );
-  return {
-    setRailView,
-    open,
-    openAgentChat,
-    changeView,
-    openChangeSet,
-    openNotes,
-    closeChangeSet,
-    closeNotes,
-    selectNote,
-  };
-}
 
 function ChangeSetTakeover({
   target,
+  hidden,
   onBack,
   onOpenChangeSet,
 }: {
   target: ChangeSetTarget;
+  hidden: boolean;
   onBack: () => void;
   // Re-targeting this one takeover is how a leaf becomes reachable FROM the master's net listing
   // (ICR-R33.3): the row names a leaf, the cockpit opens that leaf's own committed change-set, and
   // the reader stays in the same screen instead of having to find the leaf somewhere else.
   onOpenChangeSet: (target: ChangeSetTarget) => void;
 }) {
-  // A review target never reaches this takeover: it is the review page inside the railed grid.
+  // A review target never reaches this takeover: it is the review page inside the railed grid. A
+  // change set that is still open while another tab is on screen stays mounted (its selected file
+  // and filter survive) and is hidden, never unmounted.
   return (
-    <div className={cx(bodyGrid({ bleed: true }), takeoverBody, 'shell__body')} data-fullbleed={true}>
+    <div
+      className={cx(bodyGrid({ bleed: true }), takeoverBody, 'shell__body')}
+      data-fullbleed={true}
+      style={hidden ? { display: 'none' } : undefined}
+      aria-hidden={hidden ? true : undefined}
+    >
       <main className={cx(viewport, 'viewport')} data-view="changeset">
         <ChangeSetViewer {...target} onBack={onBack} onOpenLeaf={onOpenChangeSet} />
       </main>
@@ -730,7 +588,7 @@ function RailedBody({
   actions,
 }: {
   state: CockpitShellState;
-  actions: ReturnType<typeof useCockpitShellActions>;
+  actions: ReturnType<typeof useCockpitShellActions<CockpitView>>;
 }) {
   const narrow = useNarrowCockpit();
   return (
@@ -845,7 +703,7 @@ export function CockpitShell({ initialView = 'chats' }: { initialView?: CockpitV
     state.setView,
     state.setSelectedId,
     state.setAgentChat,
-    { view: state.view, changeSet: state.changeSet, address: state.reviewAddress },
+    { view: state.view, changeSet: state.changeSet, notes: state.notes, notesOpen: state.notesOpen, address: state.reviewAddress },
   );
   const page = shownPage(state);
   usePublishShownPage(page.page, page.repository);
@@ -857,6 +715,7 @@ export function CockpitShell({ initialView = 'chats' }: { initialView?: CockpitV
         {state.changeSet && !state.review ? (
           <ChangeSetTakeover
             target={state.changeSet}
+            hidden={state.view !== 'operations'}
             onBack={actions.closeChangeSet}
             onOpenChangeSet={actions.openChangeSet}
           />
@@ -867,7 +726,7 @@ export function CockpitShell({ initialView = 'chats' }: { initialView?: CockpitV
         {state.notes ? (
           <NotesTakeover
             target={state.notes}
-            hidden={Boolean(state.changeSet) || !state.notesOpen}
+            hidden={Boolean(state.changeSet) || !state.notesOpen || state.view !== 'operations'}
             onSelectNote={actions.selectNote}
             onBack={actions.closeNotes}
           />

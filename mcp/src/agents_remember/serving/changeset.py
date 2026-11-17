@@ -55,12 +55,11 @@ from agents_remember.serving.changeset_endpoints import (
 from agents_remember.serving.changeset_reads import change_counters as _sum
 from agents_remember.serving.changeset_reads import (
     changed_files_with_counts,
-    commit_text_or_none,
     head_commit,
     master_changed_files_with_counts,
-    working_text,
 )
 from agents_remember.serving.changeset_scheduler import _BoundedReads, _read_off_the_loop
+from agents_remember.serving.diff_side import committed_side, side_or_none, working_side
 from agents_remember.serving.master_counter import (
     CounterRoute,
     CounterSource,
@@ -76,6 +75,7 @@ from agents_remember.serving.master_net_generation import (
     master_task_root,
     select_master_net,
 )
+from agents_remember.serving.media import media_answer, media_response
 from agents_remember.serving.response_contract import (
     CHANGESET_READ_RESPONSES,
     ComparisonChangeSet,
@@ -84,7 +84,7 @@ from agents_remember.serving.response_contract import (
     MasterChangeSet,
     TaskChangeSet,
 )
-from agents_remember.serving.scope import FileScope, language_for, run_scoped
+from agents_remember.serving.scope import FileScope, language_for, run_scoped, run_scoped_response
 from agents_remember.worktrees.task_resolver import slugify
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
@@ -130,7 +130,8 @@ def file_diff(scope: FileScope, kind: str, rel: str) -> dict[str, Any]:
 
     ``kind`` selects the tree: ``"memory"`` diffs the memory worktree, anything else the
     code worktree. ``before`` is ``None`` for an added file, ``after`` is ``None`` for a
-    deleted one -- the L4 MergeView renders those as a pure add/delete.
+    deleted one -- the L4 MergeView renders those as a pure add/delete. A side that is not
+    text is marked binary with its media type and size instead of being decoded.
     """
     contract = _require_contract(scope)
     if kind == "memory":
@@ -140,16 +141,15 @@ def file_diff(scope: FileScope, kind: str, rel: str) -> dict[str, Any]:
     if root is None:
         raise FileNotFoundError(rel)
     relp = confine_rel(root, rel)
-    before = commit_text_or_none(root, base, relp) if base else None
-    after_path = root / relp
-    after = working_text(after_path)
+    before = committed_side(root, base, relp) if base else None
+    after = working_side(root / relp, relp)
     return {
         "scope": scope.scope_id,
         "kind": "memory" if kind == "memory" else "code",
         "path": relp,
         "language": language_for(Path(relp)),
-        "before": {"content": before} if before is not None else None,
-        "after": {"content": after} if after is not None else None,
+        "before": side_or_none(before),
+        "after": side_or_none(after),
     }
 
 
@@ -402,15 +402,15 @@ def master_file_diff(config: McpRuntimeConfig, ref: MasterFileRef) -> dict[str, 
     if repo_path is None or not base or not tip:
         raise FileNotFoundError(ref.path)
     relp = confine_rel(repo_path, ref.path)
-    before = commit_text_or_none(repo_path, base, relp)
-    after = commit_text_or_none(repo_path, tip, relp)
+    before = committed_side(repo_path, base, relp)
+    after = committed_side(repo_path, tip, relp)
     return {
         "scope": ref.master,
         "kind": "memory" if ref.kind == "memory" else "code",
         "path": relp,
         "language": language_for(Path(relp)),
-        "before": {"content": before} if before is not None else None,
-        "after": {"content": after} if after is not None else None,
+        "before": side_or_none(before),
+        "after": side_or_none(after),
     }
 
 
@@ -636,21 +636,20 @@ def leaf_file_diff(config: McpRuntimeConfig, ref: ChangesetFileRef) -> dict[str,
         if worktree is None or not worktree.exists():
             raise FileNotFoundError("no live worktree for the working change-set")
         relp = confine_rel(worktree, rel)
-        before = commit_text_or_none(worktree, head_commit(worktree, "HEAD"), relp)
-        after_path = worktree / relp
-        after = working_text(after_path)
+        before = committed_side(worktree, head_commit(worktree, "HEAD"), relp)
+        after = working_side(worktree / relp, relp)
     else:
         recorded = recorded_committed_range(contract, memory=memory)
         relp = confine_rel(recorded.repository, rel)
-        before = commit_text_or_none(recorded.repository, recorded.base_commit, relp)
-        after = commit_text_or_none(recorded.repository, recorded.head_commit, relp)
+        before = committed_side(recorded.repository, recorded.base_commit, relp)
+        after = committed_side(recorded.repository, recorded.head_commit, relp)
     return {
         "scope": contract.leaf_id,
         "kind": "memory" if memory else "code",
         "path": relp,
         "language": language_for(Path(relp)),
-        "before": {"content": before} if before is not None else None,
-        "after": {"content": after} if after is not None else None,
+        "before": side_or_none(before),
+        "after": side_or_none(after),
     }
 
 
@@ -753,6 +752,73 @@ def _file_response(config: McpRuntimeConfig, ref: ChangesetFileRef) -> Response:
     return run_scoped(lambda fs: file_diff(fs, ref.kind, ref.path), config, ref.repo, ref.scope)
 
 
+def _selector_bytes(
+    config: McpRuntimeConfig, ref: ChangesetFileRef, side: str, range_header: str | None
+) -> Response:
+    """The bytes answer for the leaf/master/comparison selectors."""
+
+    from agents_remember.serving import changeset_media  # noqa: PLC0415 - this module's selectors
+
+    def produce() -> Response:
+        location = changeset_media.selector_side_location(config, ref, side)
+        return media_response(changeset_media.media_for_location(location), range_header)
+
+    try:
+        return media_answer(produce)
+    except AuthorityError as err:
+        return JSONResponse({"status": "bad-path", "detail": str(err)}, status_code=400)
+    except FileNotFoundError as err:
+        return JSONResponse({"status": "not-found", "path": str(err)}, status_code=404)
+    except ValueError as err:
+        return JSONResponse({"status": "bad-path", "detail": str(err)}, status_code=400)
+
+
+def _file_bytes_answer(
+    config: McpRuntimeConfig, ref: ChangesetFileRef, side: str, range_header: str | None
+) -> Response:
+    """Answer one change-set file side with its bytes, or the named refusal.
+
+    The scope selector resolves its own confinement through ``run_scoped_response``; the
+    leaf, master and comparison selectors resolve the tree the diff route resolves.
+    """
+
+    from agents_remember.serving import changeset_media  # noqa: PLC0415 - this module's selectors
+
+    try:
+        changeset_media.require_selector(ref, side)
+    except ValueError as err:
+        return JSONResponse({"status": "bad-request", "detail": str(err)}, status_code=400)
+    if ref.leaf or ref.comparison is not None or ref.master:
+        if ref.leaf or ref.comparison is not None:
+            if not ref.master:
+                return JSONResponse(
+                    {"status": "bad-request", "detail": "leaf change-set needs master"},
+                    status_code=400,
+                )
+            if ref.comparison is None and ref.mode not in ("committed", "working"):
+                return JSONResponse(
+                    {
+                        "status": "bad-request",
+                        "detail": "leaf change-set needs mode=committed|working",
+                    },
+                    status_code=400,
+                )
+        return _selector_bytes(config, ref, side, range_header)
+    return run_scoped_response(
+        lambda scope: media_answer(
+            lambda: media_response(
+                changeset_media.media_for_location(
+                    changeset_media.scope_side_location(scope, ref.kind, ref.path, side)
+                ),
+                range_header,
+            )
+        ),
+        config,
+        ref.repo,
+        ref.scope,
+    )
+
+
 # The route family's own threads. Reading a change set can run Git for minutes, and the
 # server's default pool also carries every background loop's blocking work (MIK-R176 rule 3):
 # these reads may not take another route's threads.
@@ -824,6 +890,21 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> Changes
             reads,
             lambda cancellation: cache.response(
                 request, lambda: _file_response(config, ref), abandoned=cancellation
+            ),
+        )
+
+    # A picture or video's own bytes for one side of a change-set file. It takes the same
+    # selectors as ``file-diff`` and one side name, and resolves the revision itself -- the
+    # client names no commit and no revision.
+    @app.get("/api/changeset/file-bytes", responses=CHANGESET_READ_RESPONSES)
+    async def api_changeset_file_bytes(
+        ref: Annotated[ChangesetFileRef, Depends()], request: Request, side: str = "after"
+    ) -> Response:
+        return await _read_off_the_loop(
+            request,
+            reads,
+            lambda _cancellation: _file_bytes_answer(
+                config, ref, side, request.headers.get("range")
             ),
         )
 

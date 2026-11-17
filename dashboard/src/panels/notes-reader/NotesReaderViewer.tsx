@@ -23,7 +23,9 @@ import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { css } from '../../../styled-system/css';
 import { SidebarToggle, sidebarHandleProps, sidebarPanelProps, useSidebar } from '../../grammar/SidebarToggle';
 import type { FileContent } from '../../data/files';
-import { readNote, type NoteContent } from '../../data/notes';
+import { readNote, resolveNoteReferences, type NoteContent } from '../../data/notes';
+import { noteMediaUrl } from '../../data/media';
+import type { DocumentContext } from '../../grammar/DocumentMarkdown';
 import {
   listRequirements,
   readRequirement,
@@ -139,7 +141,8 @@ const truncBanner = css({
 type ArtifactContent = RoleReportContent | NoteContent | (RequirementContent & { language: "markdown"; truncated: false });
 
 function noteAsFileContent(note: ArtifactContent): FileContent {
-  // CodeSide reads only language/size/truncated/content; scope/onboarding are inert for a note.
+  // CodeSide reads only language/size/truncated/content/media; scope/onboarding are inert for a note.
+  const media = 'mediaType' in note ? note.mediaType : undefined;
   return {
     scope: '',
     path: note.path,
@@ -147,14 +150,24 @@ function noteAsFileContent(note: ArtifactContent): FileContent {
     size: note.size,
     truncated: note.truncated,
     content: note.content,
+    mediaType: media ?? null,
+    tooLarge: 'tooLarge' in note ? note.tooLarge : false,
     onboarding: { status: 'missing' },
   };
 }
 
-function dualPaneProps(note: ArtifactContent): { code: FileContent | null; sidecar: SidecarView } {
+function dualPaneProps(note: ArtifactContent): {
+  code: FileContent | null;
+  sidecar: SidecarView;
+  mediaUrl?: string;
+} {
   return note.language === 'markdown'
     ? { code: null, sidecar: { state: 'markdown', body: note.content } }
-    : { code: noteAsFileContent(note), sidecar: { state: 'empty' } };
+    : {
+        code: noteAsFileContent(note),
+        sidecar: { state: 'empty' },
+        mediaUrl: 'mediaUrl' in note ? note.mediaUrl : undefined,
+      };
 }
 
 function NotesTree({
@@ -240,10 +253,11 @@ function RequirementsRail({
   );
 }
 
-function NotePane({ failed, note, kind }: {
+function NotePane({ failed, note, kind, documentContext }: {
   failed: boolean;
   note: ArtifactContent | null;
   kind: TaskArtifactReaderTarget["kind"] | "role-report";
+  documentContext?: DocumentContext;
 }) {
   if (failed) {
     return (
@@ -267,7 +281,11 @@ function NotePane({ failed, note, kind }: {
         </div>
       ) : null}
       <div className={paneBody}>
-        <DualPane {...dualPaneProps(note)} split={false} />
+        <DualPane
+          {...dualPaneProps(note)}
+          split={false}
+          sidecarDocument={note.language === "markdown" ? documentContext : undefined}
+        />
       </div>
     </div>
   );
@@ -381,6 +399,23 @@ function NotesTargetReader({
   onBack: () => void;
 }) {
   const { failed, content } = useArtifactContent(repo, master, undefined, folder ? undefined : path);
+  const documentContext: DocumentContext | undefined = path
+    ? {
+        repo,
+        scope: "",
+        path,
+        openFile: (target) => onSelectNote(target),
+        // A note's link names another note of this master, not a repository path.
+        resolveLink: async (target) => {
+          const resolved = await resolveNoteReferences(repo, master, [target]);
+          return { exists: resolved.has(target), kind: "file" };
+        },
+        mediaUrl: (target) => noteMediaUrl(repo, master, target),
+        // The notes reader has never rendered raw HTML; a note's links and pictures use the
+        // document components, but its HTML tags remain text.
+        allowHtml: false,
+      }
+    : undefined;
   return (
     <ReaderLayout
       kind="notes"
@@ -389,6 +424,7 @@ function NotesTargetReader({
       onBack={onBack}
       failed={failed}
       content={content}
+      documentContext={documentContext}
       rail={<NotesTree key={`${repo}\0${master}`} repo={repo} master={master} current={path} onSelectNote={onSelectNote} />}
     />
   );
@@ -509,7 +545,7 @@ function NotesReaderViewerImpl(
   }
 }
 
-function ReaderLayout({ kind, heading, path, onBack, failed, content, rail, decisions }: {
+function ReaderLayout({ kind, heading, path, onBack, failed, content, rail, decisions, documentContext }: {
   kind: TaskArtifactReaderTarget["kind"] | "role-report";
   heading: string;
   path: string;
@@ -518,6 +554,7 @@ function ReaderLayout({ kind, heading, path, onBack, failed, content, rail, deci
   content: ArtifactContent | null;
   rail?: ReactNode;
   decisions?: TaskDecisionNode[];
+  documentContext?: DocumentContext;
 }) {
   // MIK-R89 v2 rule 8: the rail's shared toggle, only where the reader has a rail.
   const railSide = useSidebar('notes', 'left');
@@ -554,7 +591,7 @@ function ReaderLayout({ kind, heading, path, onBack, failed, content, rail, deci
           {decisions ? (
             <DecisionsPane decisions={decisions} />
           ) : (
-            <NotePane failed={failed} note={content} kind={kind} />
+            <NotePane failed={failed} note={content} kind={kind} documentContext={documentContext} />
           )}
         </Panel>
       </PanelGroup>

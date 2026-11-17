@@ -34,6 +34,7 @@ import {
   type ExplainerRevision,
   type ExplainerState,
   type ExplainerTarget,
+  type LastRenderFailure,
   type RefusalInfo,
 } from './explainerApi';
 import { limitRefusal, useExplainer, type ExplainerRead } from './explainerRead';
@@ -328,6 +329,11 @@ export function ExplanationView(props: ExplanationViewProps) {
   const model = useExplanationView(props);
   return (
     <section className={view} data-testid="explanation-view" data-phase={model.phase}>
+      {statusLine(model) ? (
+        <p className={standfirst} data-testid="explanation-browser-notice">
+          {statusLine(model)}
+        </p>
+      ) : null}
       <ExplanationBody model={model} props={props} />
     </section>
   );
@@ -404,7 +410,34 @@ function NoRevisionBody({ model, props }: { model: Model; props: ExplanationView
     );
   }
   if (kind === 'placeholder') return <BuildingPlaceholder />;
-  return <EmptyExplanation taskLabel={taskLabel} onExplain={model.openRequest} />;
+  return (
+    <EmptyExplanation
+      taskLabel={taskLabel}
+      onExplain={model.openRequest}
+      failure={model.read.state?.lastRender ?? null}
+    />
+  );
+}
+
+/** The failure's own words, and the page below named for what it is. */
+function failureLine(failure: LastRenderFailure): string {
+  const missing = failure.missing.length > 0 ? `${failure.missing.join('; ')}. ` : '';
+  const said = `The last explanation could not be published. ${missing}${failure.detail ?? ''}`.trim();
+  const command = (failure.detail ?? '').includes(failure.command)
+    ? ''
+    : ` Run \`${failure.command}\` once, then ask again.`;
+  return `${said}${command} The page below is an earlier revision, not an answer to this request.`;
+}
+
+/**
+ * The one line the panel says about the browser, over an earlier page (rule 1 while a fetch runs,
+ * rule 4 when it failed): the failure's own words win, and nothing is said when no page is drawn —
+ * the empty block says it instead.
+ */
+function statusLine(model: Model): string | null {
+  const failure = model.read.state?.lastRender ?? null;
+  if (failure) return model.shown === null ? null : failureLine(failure);
+  return model.read.state?.browserNotice?.notice ?? null;
 }
 
 /** What the view draws once a revision exists: the page, or the still placeholder while it builds. */
@@ -443,13 +476,32 @@ function Unreadable({ problem, onRetry }: { problem: RefusalInfo | null; onRetry
   );
 }
 
-function EmptyExplanation({ taskLabel, onExplain }: { taskLabel: string; onExplain: () => void }) {
+function EmptyExplanation({
+  taskLabel,
+  onExplain,
+  failure,
+}: {
+  taskLabel: string;
+  onExplain: () => void;
+  failure: LastRenderFailure | null;
+}) {
   return (
     <div className={card} data-testid="explanation-empty">
       <h3 className={title}>No explanation yet</h3>
       <p className={bodyText}>
         {`The explainer reads the whole change set of ${taskLabel} and writes one end-to-end review of it here. It can also grade the blocks, so the tree can sort by its judgment.`}
       </p>
+      {failure ? (
+        <p className={bodyText} data-testid="explanation-empty-browser">
+          {`The last explanation could not be published. ${
+            failure.missing.length > 0 ? `${failure.missing.join('; ')}. ` : ''
+          }${failure.detail ?? ''}${
+            (failure.detail ?? '').includes(failure.command)
+              ? ''
+              : ` Run \`${failure.command}\` once, then ask again.`
+          }`}
+        </p>
+      ) : null}
       <p className={bodyText}>Nothing runs until you ask.</p>
       <button type="button" className={primary} data-testid="explain-change-set" onClick={onExplain}>
         ✦ Explain the change set

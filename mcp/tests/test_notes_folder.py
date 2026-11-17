@@ -50,6 +50,40 @@ def _write(path: Path, data: bytes) -> None:
     path.write_bytes(data)
 
 
+def test_a_picture_note_is_named_and_served_by_range(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    root = _notes_root(tmp_path)
+    _write(root / "media" / "pic.png", b"0123456789")
+    params = {"repo": REPO, "master": MASTER, "path": "media/pic.png"}
+    read = client.get("/api/notes/read", params=params).json()
+    assert read["mediaType"] == "image/png"
+    assert read["language"] == "binary"
+    assert read["content"] == ""
+    assert read["size"] == 10
+    whole = client.get("/api/notes/bytes", params=params)
+    assert whole.status_code == 200 and whole.content == b"0123456789"
+    part = client.get("/api/notes/bytes", params=params, headers={"range": "bytes=2-4"})
+    assert part.status_code == 206 and part.content == b"234"
+    refused = client.get("/api/notes/bytes", params={**params, "path": "media/plain.md"})
+    assert refused.status_code == 415
+    _write(root / "media" / "plain.md", b"text\n")
+    refused = client.get("/api/notes/bytes", params={**params, "path": "media/plain.md"})
+    assert refused.status_code == 415
+    assert refused.json()["status"] == "unsupported-type"
+
+
+def test_a_nul_bearing_note_is_binary_not_control_text(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    _write(_notes_root(tmp_path) / "media" / "nul.txt", b"abc\x00def")
+    read = client.get(
+        "/api/notes/read",
+        params={"repo": REPO, "master": MASTER, "path": "media/nul.txt"},
+    ).json()
+    assert read["language"] == "binary"
+    assert read["content"] == ""
+    assert read["size"] == 7
+
+
 def _folder(client: TestClient, params: dict[str, Any]) -> Any:
     return client.get("/api/notes/folder", params=params)
 

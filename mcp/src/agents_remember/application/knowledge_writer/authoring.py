@@ -72,6 +72,7 @@ from agents_remember.application.knowledge_writer.report import (
     RecordOutcome,
     RowOutcome,
 )
+from agents_remember.application.knowledge_writer.weakness_authoring import author_weakness
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
     GitRunnerOptions,
@@ -456,7 +457,7 @@ class Authoring(RepointRowAuthoring):
         if request.kind in _STATUS_KINDS and "status" not in document:
             document["status"] = "active" if request.kind == "decision" else "proposed"
         if request.kind == "weakness":
-            self._weakness_anchor(document, where, before)
+            author_weakness(self, document, where, before)
         elif request.kind == "dependent":
             self._confirm_dependent(document, record_id, where, fields)
         evidence = entry.evidence if entry is not None else ()
@@ -517,46 +518,6 @@ class Authoring(RepointRowAuthoring):
                 request.handoff_entry,
             )
         )
-
-    def _weakness_anchor(
-        self, document: dict[str, Any], where: str, before: Mapping[str, Any] | None
-    ) -> None:
-        """MIK-R118 rule 2: the weakness' file and symbol anchor, recorded at C.
-
-        The curator authors ``{path, locator}``; ``blob`` and ``content`` are the candidate's own
-        values and are filled here. A weakness without a file is refused with its field: there is
-        no place to record it.
-
-        An anchor C cannot resolve keeps the place it was recorded at -- the file or symbol the
-        cause was removed from, which is exactly when a weakness is closed (MIK-R118 rule 7). The
-        stored ``anchor`` and ``seen`` data are never rewritten to make a resolution succeed, and
-        a *new* open mark still refuses: it names a place that must resolve at C.
-        """
-
-        anchor = document.get("anchor")
-        if not isinstance(anchor, Mapping):
-            self.problem(f"{where}.anchor", "a weakness anchors to a file: {path, locator}")
-            return
-        path = anchor.get("path")
-        if not isinstance(path, str) or not path:
-            self.problem(f"{where}.anchor.path", "a weakness names the file it occurs in")
-            return
-        locator = read_locator(anchor.get("locator"))
-        if isinstance(locator, str):
-            self.problem(f"{where}.anchor.locator", locator)
-            return
-        try:
-            resolved = self.code.resolve(path, locator.document)
-        except AnchorResolutionError as error:
-            stored = before.get("anchor") if isinstance(before, Mapping) else None
-            if isinstance(stored, Mapping) and stored.get("path") == path:
-                # The place this weakness was recorded at, kept as recorded: the file may have
-                # been deleted or the symbol removed, and a closure still names where it was.
-                document["anchor"] = dict(stored)
-                return
-            self.problem(f"{where}.anchor", f"{path} ({locator.describe()}): {error}")
-            return
-        document["anchor"] = {**resolved.to_document(), "path": path}
 
     def _confirm_dependent(
         self,

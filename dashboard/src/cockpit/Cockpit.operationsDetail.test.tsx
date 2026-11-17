@@ -141,8 +141,8 @@ function stubTaskPage() {
         repo: REPO,
         master: MASTER,
         path: '',
-        entries: [],
-        total: 0,
+        entries: [{ name: 'report.md', path: 'report.md', kind: 'file', size: 100, language: 'markdown' }],
+        total: 1,
         offset: 0,
         limit: 200,
         remaining: 0,
@@ -153,6 +153,12 @@ function stubTaskPage() {
     [
       '/api/changeset/',
       {
+        mode: 'working',
+        repo: REPO,
+        master: MASTER,
+        leaf: 'leaf-one',
+        code: [],
+        memory: [],
         counters: {
           code: { files: 0, insertions: 0, deletions: 0 },
           memory: { files: 0, insertions: 0, deletions: 0 },
@@ -219,5 +225,82 @@ describe('Operations detail without a selection', () => {
     expect(bodyRequests).toHaveLength(1);
     expect(bodyRequests[0]).toContain(encodeURIComponent(LEAF_PATH));
     expect(requestsTo(fetchMock, '/api/role-launch/reports')).toHaveLength(1);
+  });
+
+  it('keeps its selected task view across a visit to another tab', async () => {
+    seedOperations();
+    const fetchMock = stubTaskPage();
+    const view = render(<CockpitShell initialView="operations" />);
+    fireEvent.click(view.getByText('Leaf One'));
+    const page = await view.findByTestId('skeleton-task');
+    const reads = requestsTo(fetchMock, '/api/task-document').length;
+
+    fireEvent.click(view.getByRole('radio', { name: 'Chats' }));
+    expect(view.queryByTestId('skeleton-task')).toBe(page); // mounted, never removed
+
+    fireEvent.click(view.getByRole('radio', { name: 'Operations' }));
+    expect(view.queryByTestId('skeleton-task')).toBe(page);
+    expect(requestsTo(fetchMock, '/api/task-document')).toHaveLength(reads);
+  });
+
+  it('keeps the notes reader across a visit to another tab', async () => {
+    seedOperations();
+    stubTaskPage();
+    const view = render(<CockpitShell initialView="operations" />);
+    fireEvent.click(view.getByText('Leaf One'));
+    await view.findByTestId('skeleton-task');
+    fireEvent.click(await view.findByTestId('notes-root-link'));
+    const reader = await view.findByTestId('notes-reader-viewer');
+
+    fireEvent.click(view.getByRole('radio', { name: 'Chats' }));
+    expect(view.queryByTestId('notes-reader-viewer')).toBe(reader); // mounted, never removed
+
+    fireEvent.click(view.getByRole('radio', { name: 'Operations' }));
+    expect(view.queryByTestId('notes-reader-viewer')).toBe(reader);
+  });
+
+  it('keeps its open diff viewer across a visit to another tab', async () => {
+    seedOperations();
+    stubTaskPage();
+    const view = render(<CockpitShell initialView="operations" />);
+    fireEvent.click(view.getByText('Leaf One'));
+    await view.findByTestId('skeleton-task');
+
+    fireEvent.click((await view.findAllByTestId('open-changeset'))[0]);
+    const viewer = await view.findByTestId('changeset-viewer');
+
+    fireEvent.click(view.getByRole('radio', { name: 'Chats' }));
+    expect(view.queryByTestId('changeset-viewer')).toBe(viewer); // mounted, never removed
+    expect((viewer.closest('[data-fullbleed="true"]') as HTMLElement).style.display).toBe('none');
+
+    fireEvent.click(view.getByRole('radio', { name: 'Operations' }));
+    expect(view.queryByTestId('changeset-viewer')).toBe(viewer); // the same view, its file kept
+    expect((viewer.closest('[data-fullbleed="true"]') as HTMLElement).style.display).not.toBe('none');
+  });
+
+  it('dismisses a retained plain diff when its task is gone', async () => {
+    seedOperations();
+    stubTaskPage();
+    const view = render(<CockpitShell initialView="operations" />);
+    fireEvent.click(view.getByText('Leaf One'));
+    await view.findByTestId('skeleton-task');
+    fireEvent.click((await view.findAllByTestId('open-changeset'))[0]);
+    await view.findByTestId('changeset-viewer');
+
+    fireEvent.click(view.getByRole('radio', { name: 'Chats' }));
+    // The base closes this view on a tab change; the repair must retain it until the task is gone.
+    expect(view.queryByTestId('changeset-viewer')).not.toBeNull();
+    // The task list hydrates without the leaf that the retained diff belongs to.
+    seedTaskEntries([
+      taskEntry({
+        id: 'ops-master',
+        reference: taskReference(`${REPO}/${MASTER}/task.json`),
+        stage: 'started',
+        title: 'Ops Master',
+        summary: taskSummary({ kind: 'master', form: 'master' }),
+      }),
+    ]);
+    fireEvent.click(view.getByRole('radio', { name: 'Operations' }));
+    expect(view.queryByTestId('changeset-viewer')).toBeNull();
   });
 });

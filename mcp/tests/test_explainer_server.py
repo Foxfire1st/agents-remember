@@ -12,15 +12,18 @@ import time
 from pathlib import Path
 from typing import Any
 
+import pytest
 from agents_remember.application.review_evidence_packet import (
     comparison_reference,
 )
 from agents_remember.application.review_frame_store import frame_scope, reopen_frame
+from agents_remember.canvas import presenter_tools
 from agents_remember.canvas.explainer_access import binding_claim
 from agents_remember.canvas.explainer_answer_bounds import (
     EXPLAINER_ANSWER_BOUNDS,
     answer_tokens,
 )
+from agents_remember.canvas.explainer_browser import BROWSER_NOTICE
 from agents_remember.canvas.explainer_grades import grades_path, read_grades
 from agents_remember.canvas.explainer_inputs import ExplainerInputs  # the canonical owner
 from agents_remember.canvas.explainer_paths import (
@@ -50,6 +53,7 @@ from agents_remember.mcp.registration.explainer_tools import (
 )  # the entry
 from agents_remember.mcp.tools import PUBLIC_TOOLS
 from agents_remember.models.knowledge.review_frame import FrameBinding
+from agents_remember.serving.explainer import _browser_notice_view, _last_render_view
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from canvas_host_test_support import LEAF, REPO, TASK, config, packet, task
 from explainer_server_test_support import (
@@ -76,6 +80,17 @@ from mcp.types import ImageContent
 # ---------------------------------------------------------------------------------------------
 # 1-4. The grade tools
 # ---------------------------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _browser_is_here(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These suites exercise the render itself; the first fetch and its sentence have their own.
+
+    ``test_canvas_prospective`` owns the announcement and ``test_explainer_browser`` the fetch, so
+    every render here starts from an installation whose browser is already in its folder.
+    """
+
+    monkeypatch.setattr(presenter_tools, "browser_missing", lambda: ())
 
 
 def test_a_grade_write_waits_on_the_lock_a_build_holds(tmp_path: Path) -> None:
@@ -869,3 +884,103 @@ def _assert_a_moved_binding_refuses_and_keeps_the_revision(
     assert refused_render["report"] == "renders/run-006/report.json"  # its own run (the sixth)
     reopened = reopen_frame(scope)
     assert reopened.manifest is not None and reopened.manifest.binding.comparison_number == 7
+
+
+def test_the_render_tool_tells_the_explainer_to_say_the_fetch_is_coming(tmp_path: Path) -> None:
+    """Rule 1's route: the tool server itself answers the state; the seat runs no shell command.
+
+    The first call fetches nothing and answers ``announce`` with the missing browser and the one
+    sentence; the seat says it and calls render again, which fetches. The description names no
+    command of the user's shell, and the sentence's wording is kept.
+    """
+
+    server = FastMCP("review-explainer")
+    register_bound_explainer_tools(server, workspace=tmp_path, seat="seat-1")
+    tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
+
+    description = " ".join((tools["render"].description or "").split())
+    lowered = description.lower()
+    assert "announce" in lowered
+    assert "say that sentence" in lowered
+    assert "before the fetch" in lowered  # at the place they asked, before the fetch
+    assert "explainer-browser" not in description
+    assert "agents-remember" not in description
+
+
+def test_the_serving_path_answers_announce_on_a_browserless_installation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The announce answer travels through render_and_publish: nothing is filed, nothing raises."""
+
+    world = _world(tmp_path)
+    page = world.workspace / "drafts" / "assets" / "index.html"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "<!doctype html><p data-evidence-claim='c-present'>the change</p>", encoding="utf-8"
+    )
+    monkeypatch.setattr(presenter_tools, "browser_missing", lambda: ("Playwright 1.65.0 at /x",))
+
+    answer = _call(_server(world), "render")
+
+    assert answer["state"] == "announce"
+    assert answer["notice"] == BROWSER_NOTICE
+    assert answer["browser"]["missing"] == ["Playwright 1.65.0 at /x"]
+    assert not (world.workspace / "renders").exists()
+
+
+def test_the_page_reads_the_last_render_that_ended_for_a_missing_browser(tmp_path: Path) -> None:
+    """Rule 4: the state answer carries the last render's words while its browser is missing."""
+
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "last-render.json").write_text(
+        json.dumps(
+            {
+                "state": "unavailable",
+                "run": "renders/run-001",
+                "browser": {
+                    "state": "missing",
+                    "detail": "npm could not install playwright@1.65.0: npm error code ECONNREFUSED",
+                    "missing": ["Playwright 1.65.0 at /data/agents-remember/explainer-browser"],
+                },
+                "errors": ["load: browser-fetch-failed: ..."],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    view = _last_render_view(tmp_path)
+
+    assert view is not None
+    assert view["state"] == "unavailable"
+    assert view["missing"] == ["Playwright 1.65.0 at /data/agents-remember/explainer-browser"]
+    assert "ECONNREFUSED" in (view["detail"] or "")
+    assert view["command"] == "agents-remember explainer-browser --fetch"
+
+    (state / "last-render.json").write_text(
+        json.dumps({"state": "loaded", "browser": {"state": "ready"}}), encoding="utf-8"
+    )
+    assert _last_render_view(tmp_path) is None
+
+
+def test_the_page_carries_the_sentence_before_the_first_fetch(tmp_path: Path) -> None:
+    """Rule 1 at the place where the user asked: the announcement becomes the page's own sentence."""
+
+    assert _browser_notice_view(tmp_path) is None
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "browser-announced.json").write_text(
+        json.dumps(
+            {
+                "missing": ["Playwright 1.65.0 at /data/agents-remember/explainer-browser"],
+                "notice": BROWSER_NOTICE,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    view = _browser_notice_view(tmp_path)
+
+    assert view is not None
+    assert view["notice"] == BROWSER_NOTICE
+    assert view["missing"] == ["Playwright 1.65.0 at /data/agents-remember/explainer-browser"]

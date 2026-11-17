@@ -7,6 +7,7 @@ refuses instead of waiting, and a Retire that waits and leaves a finished receip
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -49,6 +50,7 @@ from agents_remember.canvas.explainer_service import (
     END_TO_END_REQUEST,
     IN_TURN,
     MISSING,
+    PLANNED_REQUEST,
     BoundComparison,
     ExplainerDeps,
     ExplainerRefused,
@@ -62,6 +64,7 @@ from agents_remember.canvas.explainer_service import (
     cancel_build,
 )
 from agents_remember.canvas.explainer_state import (
+    PlannedIdentity,
     agent_id,
     generation,
     raise_generation,
@@ -435,9 +438,118 @@ def test_a_send_builds_one_environment_and_one_seat_after_the_lock(
         assert os.access(copied, os.W_OK)  # a plain writable copy, not the task's read-only file
     assert (workspace / "drafts" / "assets" / "index.html").read_text() == "<p>2</p>"
     assert not any(workspace.glob("snapshot-*")) and not (workspace / "drafts" / "host").exists()
+    assert not (workspace / "planned").exists()  # a recorded binding copies no planned documents
     assert sorted(child.name for child in workspace.parent.iterdir()) == [LEAF]
     counter = generation_path(runtime, REPO, TASK, LEAF)
     assert counter.is_relative_to(task) and generation(counter) == 1
+
+
+def test_a_planned_send_puts_the_requirement_and_planned_effects_in_the_folder(
+    tmp_path: Path,
+) -> None:
+    """BUG-R02 rule 2: a planned seat receives the plan as content, not as digests or paths.
+
+    The task document's packet is copied into ``planned/`` with its text, and its declared
+    planned effects are written beside it, so the explainer can explain the plan from its own
+    folder without asking the user for the documents or searching outside it.
+    """
+
+    runtime, bound = _world(tmp_path)
+    task = tmp_path / "tasks" / REPO / TASK
+    (task / "requirements").mkdir(parents=True)
+    (task / "requirements" / "REQ-v1.md").write_text(
+        "# REQ @ v1 — Count words\n\n`count_words(text)` counts the words.\n", encoding="utf-8"
+    )
+    (task / "plan.json").write_text(
+        json.dumps(
+            {
+                "schema": "ar-task-document/v1",
+                "id": LEAF,
+                "slug": "plan",
+                "title": "Count words",
+                "kind": "subTask",
+                "status": "planning",
+                "repo": REPO,
+                "requirements": [
+                    {"kind": "approved-requirement-packet", "path": "requirements/REQ-v1.md"}
+                ],
+                "expectedKnowledgeEffects": [
+                    {
+                        "subject": "invariant:EXAMPLE",
+                        "effect": "adds the word-counting behavior",
+                        "requirementRef": "REQ@v1",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    planned_binding = bound.binding.model_copy(
+        update={"comparison_owner": "planned", "comparison_number": 0}
+    )
+    planned = PlannedIdentity(
+        code_tip="a" * 40, memory_tip="b" * 40, code_tree="c" * 40, memory_tree="d" * 40
+    )
+    planned_bound = BoundComparison(binding=planned_binding, planned=planned, record_digest=None)
+    deps = _deps(runtime, FakeHost(), planned_bound, comparison=record(7))
+
+    outcome = build_seat(deps, _scope(), request_id="r1", message="explain this")
+
+    workspace = leaf_workspace(runtime, REPO, TASK, LEAF)
+    assert outcome.built and outcome.message_sent
+    requirement = workspace / "planned" / "requirement-REQ-v1.md"
+    assert (
+        requirement.read_text()
+        == "# REQ @ v1 — Count words\n\n`count_words(text)` counts the words.\n"
+    )
+    effects = (workspace / "planned" / "effects.md").read_text()
+    assert "invariant:EXAMPLE" in effects and "adds the word-counting behavior" in effects
+    assert "REQ@v1" in effects
+
+
+def test_an_empty_send_on_a_planned_leaf_asks_for_the_requirement_and_planned_effects(
+    tmp_path: Path,
+) -> None:
+    """BUG-R02 rule 2: the button on a task in planning asks for the requirement and the planned
+    effects, in one sentence — not for a change set and the invariants it touches."""
+
+    runtime, bound = _world(tmp_path)
+    task = tmp_path / "tasks" / REPO / TASK
+    task.mkdir(parents=True, exist_ok=True)
+    (task / "plan.json").write_text(
+        json.dumps(
+            {
+                "schema": "ar-task-document/v1",
+                "id": LEAF,
+                "slug": "plan",
+                "title": "Count words",
+                "kind": "subTask",
+                "status": "planning",
+                "repo": REPO,
+                "requirements": [],
+                "expectedKnowledgeEffects": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    planned_binding = bound.binding.model_copy(
+        update={"comparison_owner": "planned", "comparison_number": 0}
+    )
+    planned = PlannedIdentity(
+        code_tip="a" * 40, memory_tip="b" * 40, code_tree="c" * 40, memory_tree="d" * 40
+    )
+    planned_bound = BoundComparison(binding=planned_binding, planned=planned, record_digest=None)
+    host = FakeHost()
+    deps = _deps(runtime, host, planned_bound, comparison=record(7))
+
+    outcome = build_seat(
+        deps, _scope(), request_id="r-planned-empty", message="", history="planned"
+    )
+
+    assert outcome.built and outcome.message_sent
+    assert host.sent[0][1] == PLANNED_REQUEST
+    assert "requirement" in PLANNED_REQUEST and "planned effects" in PLANNED_REQUEST
+    assert "change set" not in PLANNED_REQUEST and "invariant" not in PLANNED_REQUEST
 
 
 def test_a_repeated_request_reconciles_the_same_build(tmp_path: Path) -> None:

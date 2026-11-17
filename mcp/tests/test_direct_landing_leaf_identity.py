@@ -169,7 +169,16 @@ def test_direct_landing_without_leaf_id_names_leaf_id_in_the_open_file_refusal(
         _land(world, config, series, dry_run=True)
     assert refused.value.status == "direct-landing-knowledge-gate-refused"
     assert LEAF in refused.value.detail
-    assert "4 finding(s)" in refused.value.detail
+    # The four missing judgment rows do not make the changed function's old anchor current.
+    assert "5 finding(s)" in refused.value.detail
+    stale = [
+        one for one in refused.value.detail.splitlines() if "[knowledge-stale-at-landing]" in one
+    ]
+    assert len(stale) == 1
+    assert f"{A}: [knowledge-stale-at-landing] RLZ-A00001 of INV-AAAAAA" in stale[0]
+    assert "content differs from the recorded content" in stale[0]
+    assert "at the candidate code tree" in stale[0]
+    assert "the net code diff changed its path" in stale[0]
 
 
 def test_recovery_through_operation_control_settles_the_kept_closing_receipt(

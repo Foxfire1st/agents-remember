@@ -279,7 +279,21 @@ class FileContents(WireResponse):
     size: int
     truncated: bool
     content: str
+    # A picture or video has no text: the viewer draws it from ``/api/files/bytes``. Above
+    # the bytes route's bound the viewer states the size instead of requesting it.
+    media_type: str | None = None
+    too_large: bool = False
     onboarding: OnboardingMeta
+
+
+class FileResolution(WireResponse):
+    """``GET /api/files/resolve``: whether one repository path exists, and what it is."""
+
+    exists: bool
+    path: str
+    kind: Literal["file", "dir"] | None = None
+    language: str | None = None
+    media_type: str | None = None
 
 
 class OnboardingForwardMissing(WireResponse):
@@ -403,6 +417,10 @@ class NoteContents(WireResponse):
     size: int
     truncated: bool
     content: str
+    # A picture or video note is drawn from ``/api/notes/bytes``; above that route's bound
+    # the viewer states the size instead of requesting it.
+    media_type: str | None = None
+    too_large: bool = False
 
 
 class TaskReportRow(WireResponse):
@@ -599,9 +617,17 @@ class MasterChangeSet(WireResponse):
 
 
 class DiffSide(WireResponse):
-    """One side of a file diff. Absent entirely (``null``) for a pure add or delete."""
+    """One side of a file diff. Absent entirely (``null``) for a pure add or delete.
 
-    content: str
+    A text side carries ``content``. A side that is not text carries no decoded bytes at
+    all: ``binary`` is true, ``media_type`` names a served picture or video type when the
+    file is one, and ``size`` is the file's byte count.
+    """
+
+    content: str | None = None
+    binary: bool = False
+    media_type: str | None = None
+    size: int | None = None
 
 
 class FileDiff(WireResponse):

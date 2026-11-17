@@ -55,7 +55,10 @@ from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.explainer import ExplainerWiring, explainer_composition
 from agents_remember.serving.explainer_routes import register_explainer_routes
 from agents_remember.serving.files import register_files_routes
-from agents_remember.serving.knowledge_reader import register_knowledge_reader_route
+from agents_remember.serving.knowledge_reader import (
+    register_knowledge_bytes_route,
+    register_knowledge_reader_route,
+)
 from agents_remember.serving.notes import register_notes_routes
 from agents_remember.serving.projections.landing_state import LandingStateRefresher
 from agents_remember.serving.projector import (
@@ -241,6 +244,7 @@ def create_app(
     # One observation per open of the review page, shared by that open's reads (D569).
     install_review_open(app)
     register_knowledge_reader_route(app, collaborators.knowledge_reader)
+    register_knowledge_bytes_route(app, collaborators.knowledge_bytes)
     if collaborators.extra_api_routes is not None:
         collaborators.extra_api_routes(app)
     # The generated page's host (MIK-R104) and the presenter's start/session surface (MIK-R105).

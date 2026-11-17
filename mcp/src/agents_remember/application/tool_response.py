@@ -282,6 +282,8 @@ def _write_delivered_line(
             headroom=_ROLE_MESSAGE_REPLY_HEADROOM_TOKENS
             + count_response_tokens({"logError": answer["logError"]}),
         )
+    if "cut" in answer:
+        answer["cut"] = answer.pop("cut")
     guarded, cut_now, delivered_tokens = _apply_answer_guard(
         answer,
         final_tokens=count_response_tokens(answer),

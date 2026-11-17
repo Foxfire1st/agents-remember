@@ -60,8 +60,9 @@ A task that has landed and has no worktree opens on the comparison it delivered.
 comparisons of that task stay in the list. When the comparison on screen is another one, the page
 says so and offers "Open the delivered comparison #n".
 
-A task that has not started has no worktree and no comparison. Its review page reads "the review
-unavailable", where "the review" names what the page could not open: the review of the task. See
+A task that has not started has no worktree and no comparison. Its review page shows its planned
+view: the task's intended knowledge effects, its requirement packets, its Prepared context and its
+reference files, under the top line "planned · no changes". See
 [The intent review before work starts](#the-intent-review-before-work-starts).
 
 ## The layout
@@ -335,9 +336,12 @@ the places of the comparison that it rests on.
 | A claim in the explainer's page | The tab "Review" with the place of the evidence selected, when the evidence resolves in the comparison on screen. Otherwise nothing opens. | The tab "Explanation". |
 
 The change-set page has the filters "All (n)", "Changes without an invariant (n)" and "Unknown
-attribution (n)". On return the review page is as you left it, and the keyboard focus is on
-the control that opened the change-set page. When the changed files cannot be read the page says
-"All changes unavailable".
+attribution (n)". A changed picture or a changed video shows before and after side by side, and one
+that was added or removed shows its one side with a line that says the other side does not exist; a
+changed Markdown file opens as a line diff, and its toggle "rendered" draws the after side of the
+file rendered. On return the review page is as you left it, and the
+keyboard focus is on the control that opened the change-set page. When the changed files cannot be
+read the page says "All changes unavailable".
 
 A press on a claim of the explainer's page opens its evidence only when the evidence resolves in
 the comparison on screen. When it does not resolve there, the press opens nothing and the page
@@ -493,42 +497,52 @@ offers "Retry".
 
 ### What the explainer needs before it can publish
 
-The explainer publishes a page only after a browser on your machine has loaded its draft. The
-load needs three things that an installation of Agents Remember does not bring:
+The explainer publishes a page only after a browser on your machine has loaded its draft. That
+load needs Playwright and its Chromium, which are not part of the installation — and you install
+neither.
 
-- the program `node` on the search path;
-- the Playwright module. The dashboard's server reads the path of the module's file `index.js`
-  from the environment variable `AR_PLAYWRIGHT` when it starts the explainer. Without the variable
-  it looks for `dashboard/node_modules/playwright/index.js` in a checkout of the repository; an
-  installation from the package has no such folder;
-- the browser that Playwright installs, in Playwright's own folder: the folder that
-  `PLAYWRIGHT_BROWSERS_PATH` names, else `$XDG_CACHE_HOME/ms-playwright`, else
-  `~/.cache/ms-playwright`.
+At the first explanation that publishes a page, the product fetches Playwright and its Chromium
+into its own folder, `<data>/agents-remember/explainer-browser`. `<data>` is the folder
+`XDG_DATA_HOME` names, else `~/.local/share`; it is the same folder that holds the Node the
+product installs for the host. The fetch uses that Node, so there is no Node of your own to
+install. Nothing is fetched when the package or the host is installed, and later explanations
+fetch nothing: the two are reused as they are.
 
-On an installation from the package these commands give the load the module and the browser.
-`<folder>` is a folder of your choice.
+Before that first page, the explainer's first call to its render tool fetches nothing: the answer
+is `announce`, naming the missing part and carrying one sentence. The Explanation tab shows that
+sentence in one line — that this installation fetches its browser once, that this first page takes
+a minute or two, and that later pages are immediate — and the explainer calls the tool again; that
+call fetches and publishes. Nothing is fetched before you could be told, and no shell command of
+yours is involved. The fetch needs access to the npm registry and to Playwright's download host
+once, on that first explanation.
+
+When the fetch cannot run — no network to those hosts, or a folder that cannot be written — it is
+said on that page, in the render's own words: with no page yet, the tab "Explanation" keeps
+"No explanation yet" and that block names what is missing and the command that gets it; with an
+earlier page still on screen, the same words stand in one line above it, and that line says the page
+below is an earlier revision, not an answer to this request. The command does the same fetch on its
+own:
 
 ```bash
-npm install --prefix <folder> playwright
-cd <folder> && npx playwright install chromium
-export AR_PLAYWRIGHT=<folder>/node_modules/playwright/index.js
+agents-remember explainer-browser --fetch
 ```
 
-The dashboard's server keeps the environment of its start. Start it from a shell that holds the
-variable: `agents-remember dashboard --stop`, then `agents-remember dashboard --daemon`.
+`agents-remember explainer-browser` without `--fetch` only reports what is present and what is
+missing, and where. Until the two are there, nothing is published: the previous revision stays on
+screen and no page is shown as the current one.
 
-In a checkout, `npm ci` in the folder `dashboard/` brings the module, and
-`node dashboard/node_modules/playwright/cli.js install chromium-headless-shell` installs the
-browser. The Playwright version of the checkout, 1.60.0, installs no browser on Ubuntu 26.04: the
-call ends with "Playwright does not support chromium-headless-shell on ubuntu26.04-x64". With
-`PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64` in front of it, the call installs the browser
-for Ubuntu 24.04, and the load works with that browser.
+`AR_PLAYWRIGHT` keeps working for a user who sets it: it names the Playwright module's
+`index.js`, and that module is used instead, with the browser folder Playwright's own defaults
+name — `PLAYWRIGHT_BROWSERS_PATH` when it is set, else `$XDG_CACHE_HOME/ms-playwright`, else
+`~/.cache/ms-playwright`. Nothing is fetched or replaced behind a module you name.
 
-Without the module, without the browser or without `node`, the load answers the explainer
-`unavailable` with the reason, and nothing is published. The review page shows no word about it:
-the tab "Explanation" keeps "No explanation yet", and the header state reads "live · idle". Only
-the explainer's answer in the chat tells you that its page is not published. Once the three are
-in place, the next request publishes.
+In a checkout, `npm ci` in the folder `dashboard/` brings Playwright 1.65.0, and
+`node dashboard/node_modules/playwright/cli.js install chromium` installs its browser on Ubuntu
+26.04 without any override. The fetch the product performs pins that same version.
+
+macOS is not measured for this path: the fetch runs where the product installs its own Node, which
+is Linux x86_64. On another system, name a Playwright module in `AR_PLAYWRIGHT` and install its
+Chromium in the browser folder Playwright uses there.
 
 ### Later requests
 
@@ -789,13 +803,23 @@ Until the field says `go`, Agents Remember refuses every start of the task with
 `intent-review-open`. The refusal covers the start of the task's worktrees and the start of a role
 agent on the task. A master has no intent review.
 
-A task that has not started has no worktree, so its review page has no comparison to show. The
-page reads "the review unavailable · candidate_unresolved" and gives the reason: "no readable leaf
-enclosure contract records this leaf under the named master". What the task is meant to do stands
-in its task document and in its [requirement packets](../concepts.md#requirement-packet), the
-approved requirement texts that the task is built against. The page of the task in the tab
-"Operations" shows the task document. The start that follows the `go` creates the worktrees, and
-the review page then shows the change set of the task.
+A task that has not started has no worktree, so its review page has no comparison to show. The page
+then shows its planned view. Its top line reads "planned · no changes", the header's status chip reads
+"planned" and the left change-set panel says "planned · nothing built yet": nothing is wrong, the task
+is in planning. The reading column lists what the task is meant to produce: its knowledge effects as
+"planned · <effect>" rows under "Planned effects", its [requirement packets](../concepts.md#requirement-packet)
+under "Packets", its Prepared context and the files in its reference folder. Each packet is shown as
+rendered Markdown — its headings, tables, code and lists — not as raw text. Nothing there is a fact
+about the code; the line "Intended, not a fact about the code" says so. What the task is meant to do
+also stands in its task document and in its requirement packets, the approved requirement texts that
+the task is built against. The page of the task in the tab "Operations" shows the task document.
+
+The planned view is where you plan before the work starts. On the tab "Explanation" you can start
+the explainer and ask it, as on the review page of a started task: "✦ Explain the change set" opens
+the first-request form. On a task in planning the form's empty request asks for the task's requirement
+and its planned effects, one sentence, and the explainer presents the plan the page lists. When you
+agree a revision with your `go`, the Architect records that revision together with the `go`, and it is
+pinned in the revision list. The page and its revisions change nothing of the task.
 
 ## Presentation questions and system changes
 

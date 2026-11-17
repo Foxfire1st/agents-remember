@@ -327,14 +327,20 @@ def _discover_covered_files(
     route_set = set(routes)
     covered: dict[str, list[str]] = {route: [] for route in route_set}
 
-    for sidecar in onboarding_root.rglob("*.md"):
+    # An entry sidecar with no references needs no Markdown half, so either half counts as
+    # the card the index lists.
+    for sidecar in [*onboarding_root.rglob("*.md"), *onboarding_root.rglob("*.json")]:
         if not sidecar.is_file() or not _is_file_sidecar(sidecar, onboarding_root):
             continue
         source_rel = _source_path_from_sidecar(sidecar, onboarding_root)
         if source_rel not in repository_files:
             continue
         route = _nearest_route(source_rel, route_set)
-        covered.setdefault(route, []).append(source_rel)
+        # A path no route covers belongs to the root route, which a memory with no routes
+        # does not list yet, so create the entry rather than assume it exists.
+        bucket = covered.setdefault(route, [])
+        if source_rel not in bucket:
+            bucket.append(source_rel)
 
     for values in covered.values():
         values.sort()
@@ -597,12 +603,24 @@ def _is_file_sidecar(path: Path, onboarding_root: Path) -> bool:
         return False
     if rel.startswith("bootstrap/"):
         return False
+    if rel.endswith(".json"):
+        # The entry half of a card, named `<source>.json`. The entity catalog and the index are
+        # excluded above; anything else under onboarding is a card half.
+        return not rel.endswith(f"/{ENTITY_CATALOG_NAME}") and not rel.endswith(
+            f"/{INDEX_FILE_NAME}"
+        )
     return rel.endswith(".md")
 
 
 def _source_path_from_sidecar(path: Path, onboarding_root: Path) -> str:
+    """The source a card half names: `<source>.md` or `<source>.json` -> `<source>`.
+
+    Each half strips its own suffix. Removing three characters from an entry half would map
+    `README.md.json` to `README.md.`, omitting that source from the built index.
+    """
+
     rel = _relative_posix(path, onboarding_root)
-    return rel[:-3]
+    return rel[:-5] if rel.endswith(".json") else rel[:-3]
 
 
 def _route_from_overview_rel(overview_rel: str) -> str:

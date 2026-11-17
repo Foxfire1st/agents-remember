@@ -100,4 +100,86 @@ describe("File Viewer center tab", () => {
     fireEvent.click(getByRole("radio", { name: "File Viewer" }));
     await waitFor(() => expect(filesReads()).toContain("/api/files/repos"));
   });
+
+  it("opens a document rendered, and Back and Forward lead through opened files", async () => {
+    const documents: Record<string, string> = {
+      "a.md": "# Alpha\n\n[beta](b.md#beta)\n\nfirst document\n",
+      "b.md": "# Beta\n\nsecond document\n",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (location: string) => {
+        const url = new URL(location, "http://localhost");
+        const path = url.searchParams.get("path") ?? "";
+        const reply = (body: unknown) =>
+          ({ ok: true, status: 200, json: async () => body }) as unknown as Response;
+        if (url.pathname === "/api/files/repos")
+          return reply({
+            repos: [
+              {
+                repo: "R",
+                mainline: { scope: "mainline", label: "R", exists: true },
+                worktrees: [],
+              },
+            ],
+          });
+        if (url.pathname === "/api/files/list")
+          return reply({
+            scope: "mainline",
+            dir: "",
+            code: ["a.md", "b.md"].map((name) => ({
+              name,
+              path: name,
+              kind: "file",
+              language: "markdown",
+            })),
+            onboarding: [],
+          });
+        if (url.pathname === "/api/files/read")
+          return reply({
+            scope: "mainline",
+            path,
+            language: "markdown",
+            size: (documents[path] ?? "").length,
+            truncated: false,
+            content: documents[path] ?? "",
+            onboarding: { status: "missing" },
+          });
+        if (url.pathname === "/api/files/onboarding")
+          return reply({ status: "missing", codePath: path, body: null });
+        if (url.pathname === "/api/files/resolve")
+          return reply({ exists: path === "b.md", path, kind: "file", language: "markdown" });
+        return reply({ exists: false, path });
+      }),
+    );
+
+    const view = render(<FileViewer active={true} />);
+    fireEvent.click(await view.findByText("a.md"));
+    await waitFor(() => expect(view.getByRole("heading", { name: "Alpha" })).not.toBeNull());
+    expect(view.getByTestId("file-viewer-rendered").getAttribute("aria-pressed")).toBe("true");
+
+    // The document's link opens b.md at its heading, then the reader scrolls away from it.
+    fireEvent.click(await view.findByTestId("document-file-link"));
+    await waitFor(() => expect(view.getByRole("heading", { name: "Beta" })).not.toBeNull());
+    const scroller = view.getByTestId("document-rendered");
+    scroller.scrollTop = 600;
+
+    fireEvent.click(view.getByTestId("file-viewer-back"));
+    await waitFor(() => expect(view.getByRole("heading", { name: "Alpha" })).not.toBeNull());
+    await waitFor(() => expect(view.getByTestId("document-rendered").scrollTop).toBe(0));
+    expect(view.getByTestId("file-viewer-forward")).not.toBeNull();
+    fireEvent.click(view.getByTestId("file-viewer-forward"));
+    await waitFor(() => expect(view.getByRole("heading", { name: "Beta" })).not.toBeNull());
+    // Back/Forward restore the place the reader left, not the link's original heading.
+    await waitFor(() => expect(view.getByTestId("document-rendered").scrollTop).toBe(600));
+
+    // A reader who returns to the linked document and saves zero must get zero back, not the
+    // heading the link first named.
+    view.getByTestId("document-rendered").scrollTop = 0;
+    fireEvent.click(view.getByTestId("file-viewer-back"));
+    await waitFor(() => expect(view.getByTestId("document-rendered").scrollTop).toBe(0));
+    fireEvent.click(view.getByTestId("file-viewer-forward"));
+    await waitFor(() => expect(view.getByRole("heading", { name: "Beta" })).not.toBeNull());
+    await waitFor(() => expect(view.getByTestId("document-rendered").scrollTop).toBe(0));
+  });
 });

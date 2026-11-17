@@ -93,8 +93,14 @@ END_TO_END_REQUEST = (
     "still holds, and where the evidence for each claim is."
 )
 
+#: What an empty Send on a task in planning asks for. A planning leaf has no change set and no
+#: invariants that hold yet; the explainer is to explain the requirement and the planned effects
+#: (BUG-R02 rule 2), so its first turn says exactly that, in one sentence.
+PLANNED_REQUEST = "Explain this task's requirement and its planned effects."
+
 __all__ = [
     "END_TO_END_REQUEST",
+    "PLANNED_REQUEST",
     "BoundComparison",
     "ExplainerDeps",
     "ExplainerHost",
@@ -821,8 +827,9 @@ def build_seat(
     if not composed.strip():
         # An empty request is not nothing to send: the form says "leave it empty for the end-to-end
         # review", so an empty Send is that review (MIK-R211 v2 rule 5). The words live in one place
-        # so the seat's first turn and the form's line cannot drift apart.
-        composed = END_TO_END_REQUEST
+        # so the seat's first turn and the form's line cannot drift apart. A planning leaf has no
+        # change set: its empty Send asks for the requirement and the planned effects (BUG-R02).
+        composed = PLANNED_REQUEST if options.get("history") == "planned" else END_TO_END_REQUEST
     _checked_facts(deps, scope)
     ledger = _ledger_path(deps.config, scope)
     workspace = _workspace(deps.config, scope)

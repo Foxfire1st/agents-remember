@@ -33,7 +33,7 @@ from pathlib import Path
 from stat import S_ISDIR, S_ISLNK, S_ISREG
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
 from agents_remember.errors import AuthorityError
@@ -43,6 +43,14 @@ from agents_remember.kernel.primitives.runtime_config import (
     path_is_relative_to,
 )
 from agents_remember.kernel.sidecar_pairing import confine_rel
+from agents_remember.serving.media import (
+    MEDIA_BYTE_LIMIT,
+    looks_binary,
+    media_answer,
+    media_response,
+    media_type_for,
+    working_media,
+)
 from agents_remember.serving.response_contract import (
     SCOPED_READ_RESPONSES,
     NoteContents,
@@ -296,15 +304,33 @@ def read_note(config: McpRuntimeConfig, repo_id: str, master: str, rel: str) -> 
     src = root / relp
     if not src.is_file():
         raise FileNotFoundError(rel)
+    size = src.stat().st_size
+    media_type = media_type_for(src)
+    if media_type is not None:
+        # A picture or video note is drawn from the notes bytes route, never decoded here.
+        return {
+            "repo": repo_id,
+            "master": master,
+            "path": relp,
+            "language": "binary",
+            "size": size,
+            "truncated": size > _MAX_FILE_BYTES,
+            "content": "",
+            "mediaType": media_type,
+            "tooLarge": size > MEDIA_BYTE_LIMIT,
+        }
     raw = src.read_bytes()
     truncated = len(raw) > _MAX_FILE_BYTES
-    try:
-        # Cut at a UTF-8 codepoint boundary: a multi-byte char straddling the cap must NOT make an
-        # oversize text/markdown note misdecode into an empty "binary" (260703-L18 finding 5).
-        content, truncated = decode_capped(raw, _MAX_FILE_BYTES)
-        language = language_for(src)
-    except UnicodeDecodeError:
+    if looks_binary(raw):
         content, language = "", "binary"
+    else:
+        try:
+            # Cut at a UTF-8 codepoint boundary: a multi-byte char straddling the cap must NOT make
+            # an oversize text/markdown note misdecode into an empty "binary".
+            content, truncated = decode_capped(raw, _MAX_FILE_BYTES)
+            language = language_for(src)
+        except UnicodeDecodeError:
+            content, language = "", "binary"
     return {
         "repo": repo_id,
         "master": master,
@@ -313,7 +339,20 @@ def read_note(config: McpRuntimeConfig, repo_id: str, master: str, rel: str) -> 
         "size": len(raw),
         "truncated": truncated,
         "content": content,
+        # A suffix outside the fixed media table has no bytes route.
+        "mediaType": None,
+        "tooLarge": False,
     }
+
+
+def read_note_media(
+    config: McpRuntimeConfig, repo_id: str, master: str, rel: str, range_header: str | None
+) -> Response:
+    """The bytes of one media note, whole or as one HTTP byte range."""
+
+    root = _notes_root(config, repo_id, master)
+    relp = confine_rel(root, rel)
+    return media_response(working_media(root / relp), range_header)
 
 
 def _notes_json(
@@ -326,6 +365,17 @@ def _notes_json(
     ``bad-path``, a missing note file -> 404 ``not-found`` — the same wire idiom as the
     files/change-set APIs so ``data/files.ts``'s error mapping applies unchanged.
     """
+
+    return _notes_response(
+        config, repo_id, master, lambda: JSONResponse(produce(), status_code=200)
+    )
+
+
+def _notes_response(
+    config: McpRuntimeConfig, repo_id: str, master: str, produce: Callable[[], Response]
+) -> Response:
+    """Run a response-producing notes route under the same selector and status idiom."""
+
     try:
         require_repo(config, repo_id)
     except AuthorityError:
@@ -336,7 +386,7 @@ def _notes_json(
             status_code=400,
         )
     try:
-        return JSONResponse(produce(), status_code=200)
+        return produce()
     except (AuthorityError, ValueError) as err:
         # ValueError: Path.resolve() rejects malformed input (e.g. an embedded null
         # byte) before confinement even runs — same wire answer as a confinement breach.
@@ -381,3 +431,16 @@ def register_notes_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
     @app.get("/api/notes/read", response_model=NoteContents, responses=SCOPED_READ_RESPONSES)
     def api_notes_read(repo: str, master: str = "", path: str = "") -> Response:
         return _notes_json(config, repo, master, lambda: read_note(config, repo, master, path))
+
+    # A note that is a picture or video is drawn from its own bytes; the text read above
+    # keeps answering the text routes' binary statement for the same file.
+    @app.get("/api/notes/bytes", responses=SCOPED_READ_RESPONSES)
+    def api_notes_bytes(request: Request, repo: str, master: str = "", path: str = "") -> Response:
+        return _notes_response(
+            config,
+            repo,
+            master,
+            lambda: media_answer(
+                lambda: read_note_media(config, repo, master, path, request.headers.get("range"))
+            ),
+        )

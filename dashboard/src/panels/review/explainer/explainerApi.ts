@@ -184,6 +184,23 @@ export interface ExplainerIdentityRecord {
  * `explanation` is null while none exists; `building` says the environment is being built, in which
  * case the view shows a still placeholder and sends the reader to the chat (rule 4.1, rule 6).
  */
+/**
+ * What the last render said when it ended unavailable for a missing browser.
+ * The review page's empty block repeats these words; a published page clears the record.
+ */
+/** Rule 1's sentence, carried by the state while this installation's first page is pending. */
+export interface BrowserNotice {
+  notice: string;
+  missing: string[];
+}
+
+export interface LastRenderFailure {
+  state: string | null;
+  missing: string[];
+  detail: string | null;
+  command: string;
+}
+
 export interface ExplainerState {
   state: 'ok' | 'refused';
   reason?: string;
@@ -201,6 +218,10 @@ export interface ExplainerState {
   retired: boolean;
   retiredAt: string | null;
   explanation: SavedExplanation | null;
+  /** The last render's failure, while it ended for a missing browser; null otherwise. */
+  lastRender?: LastRenderFailure | null;
+  /** Rule 1: the sentence the page says before its first fetch, when one is pending. */
+  browserNotice?: BrowserNotice | null;
   building: { state: 'idle' | 'building' | 'starting'; step?: string } | null;
   /**
    * The server's own build record, whatever its state (MIK-R106 v2 rule 4): the same record the
@@ -634,6 +655,41 @@ function rawExplanationRecord(answer: Record<string, unknown>): Record<string, u
   return null;
 }
 
+function readBrowserNotice(value: unknown): BrowserNotice | null {
+  if (!isRecord(value)) return null;
+  const notice = text(value.notice);
+  if (!notice) return null;
+  const missing = Array.isArray(value.missing)
+    ? value.missing.filter((part): part is string => typeof part === 'string')
+    : [];
+  return { notice, missing };
+}
+
+function readBrowserAnswers(
+  answer: Record<string, unknown>,
+  nested: Record<string, unknown>,
+): { lastRender: LastRenderFailure | null; browserNotice: BrowserNotice | null } {
+  return {
+    lastRender: readLastRender(answer.lastRender ?? nested.lastRender),
+    browserNotice: readBrowserNotice(answer.browserNotice ?? nested.browserNotice),
+  };
+}
+
+function readLastRender(value: unknown): LastRenderFailure | null {
+  if (!isRecord(value)) return null;
+  const missing = Array.isArray(value.missing)
+    ? value.missing.filter((part): part is string => typeof part === 'string')
+    : [];
+  const detail = text(value.detail) ?? null;
+  if (missing.length === 0 && detail === null) return null;
+  return {
+    state: text(value.state) ?? null,
+    missing,
+    detail,
+    command: text(value.command) ?? 'agents-remember explainer-browser --fetch',
+  };
+}
+
 function readExplanation(answer: Record<string, unknown>): SavedExplanation | null {
   const raw = rawExplanationRecord(answer);
   if (raw) {
@@ -806,6 +862,7 @@ export function parseState(answer: Record<string, unknown>): ExplainerState {
     retired,
     retiredAt,
     explanation: readExplanation(answer),
+    ...readBrowserAnswers(answer, nested),
     building: readBuilding(answer),
     build: parseExplainerBuild(answer.build ?? nested.build),
     stale,

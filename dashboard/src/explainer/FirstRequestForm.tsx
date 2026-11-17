@@ -148,6 +148,7 @@ export function FirstRequestForm({
   onCancel,
   onSend,
 }: FirstRequestFormProps) {
+  const planned = binding?.kind === 'planned';
   return (
     <div className={body} data-testid="explainer-first-request">
       <div className={card}>
@@ -170,7 +171,11 @@ export function FirstRequestForm({
           className={wish}
           rows={4}
           aria-label="What do you want explained?"
-          placeholder="What do you want explained? Leave it empty for the end-to-end review."
+          placeholder={
+            planned
+              ? 'What do you want explained? Leave it empty for the requirement and planned effects.'
+              : 'What do you want explained? Leave it empty for the end-to-end review.'
+          }
           value={message}
           onChange={(event) => onMessage(event.target.value)}
         />
@@ -183,7 +188,7 @@ export function FirstRequestForm({
         />
         <SendFailure failure={failure} />
         <p className={line} data-testid="explainer-form-line">
-          {firstRequestLine(references, message)}
+          {firstRequestLine(references, message, planned)}
         </p>
         <p className={line}>
           Nothing is sent until you press Send. Sending builds the explainer’s workspace for{' '}

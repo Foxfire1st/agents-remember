@@ -685,10 +685,16 @@ def _latest_history_path(request: LandingGateRequest) -> str | GateFinding:
     return attempts[max(attempts)] if attempts else history_path(request.leaf_owner)
 
 
-def net_stale_entries(request: LandingGateRequest) -> list[GateFinding]:
-    """Rule 4: every entry at a path the master's net code diff changed is ``current`` at C."""
+def net_stale_entries(request: LandingGateRequest, *, merge: bool = True) -> list[GateFinding]:
+    """Every entry at a path the net code diff changed must be current at the candidate tree.
 
-    net = _net_diff(request)
+    ``merge=True`` is the master's landing: the net diff runs from the merge base of the recorded
+    base and the landing's code commit. ``merge=False`` is a leaf's closeout:
+    the candidate is a tree, so the diff runs straight from the contract's
+    recorded base, and a leaf closeout refuses exactly as the master's landing does.
+    """
+
+    net = _net_diff(request, merge=merge)
     if isinstance(net, GateFinding):
         return [net]
     changed, tree = net
@@ -714,11 +720,17 @@ def net_stale_entries(request: LandingGateRequest) -> list[GateFinding]:
         return [_unreadable("git", f"a Git read failed at the master's code commit: {error}")]
 
 
-def _net_diff(request: LandingGateRequest) -> tuple[list[str], str] | GateFinding:
-    """The paths the master's net diff changed, and its code tree; or why they cannot be read."""
+def _net_diff(
+    request: LandingGateRequest, *, merge: bool = True
+) -> tuple[list[str], str] | GateFinding:
+    """The paths the net diff changed, and its code tree; or why they cannot be read."""
 
     assert request.code_base is not None
-    merge_base = _git(request.code_repository, "merge-base", request.code_base, request.code_commit)
+    merge_base = (
+        _git(request.code_repository, "merge-base", request.code_base, request.code_commit)
+        if merge
+        else request.code_base
+    )
     tree = _git(
         request.code_repository,
         "rev-parse",
@@ -753,8 +765,8 @@ def _not_current(
     return GateFinding(
         code,
         path,
-        f"{entry_id} of {observed.invariant} is {observed.state} at the master's code commit "
-        f"{request.code_commit} ({observed.reason}); the master's net diff changed its path and "
+        f"{entry_id} of {observed.invariant} is {observed.state} at the candidate code tree "
+        f"{request.code_commit} ({observed.reason}); the net code diff changed its path and "
         "no row and re-anchor made it current",
     )
 

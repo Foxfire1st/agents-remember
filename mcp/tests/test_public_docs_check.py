@@ -28,6 +28,7 @@ import pytest
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPOSITORY_ROOT / "scripts/check-public-docs.py"
 HARNESS_PAGE = "docs/install/codex.md"
+PICTURE = "docs/assets/a-new-picture.png"
 STEP_ITEM = re.compile(r"^( {0,3}\d+\.\s+\*\*)(.+?)(\*\*)", re.MULTILINE)
 
 Found = tuple[str, str, int, str]
@@ -63,6 +64,12 @@ def _found(tree: Any) -> set[Found]:
 def _with(tree: Any, path: str, text: str) -> Any:
     """The tree with one document written or replaced."""
     return dataclasses.replace(tree, files=tree.files | {path}, texts={**tree.texts, path: text})
+
+
+def _shown_by_the_front_page(tree: Any) -> Any:
+    """The tree with one more picture under ``docs/``, which the front page shows."""
+    held = dataclasses.replace(tree, files=tree.files | {PICTURE})
+    return _appended(held, "README.md", f'<img src="{PICTURE}" alt="A picture">')[0]
 
 
 def _appended(tree: Any, path: str, line: str) -> tuple[Any, int]:
@@ -130,6 +137,26 @@ def test_a_page_behind_two_index_pages_is_named(tree: Any, baseline: set[Found])
     chain = _with(chain, "docs/guides/deeper.md", "# Deeper\n")
     chain, _ = _appended(chain, "docs/guides/README.md", "[deep](deep.md)")
     assert _found(chain) - baseline == {("unreached", "docs/README.md", 1, "docs/guides/deeper.md")}
+
+
+def test_a_picture_that_the_front_page_shows_is_reached(tree: Any, baseline: set[Found]) -> None:
+    assert _found(_shown_by_the_front_page(tree)) - baseline == set()
+
+
+def test_a_page_that_only_the_front_page_links_is_named(tree: Any, baseline: set[Found]) -> None:
+    lonely = _with(_shown_by_the_front_page(tree), "docs/guides/unlinked.md", "# Unlinked\n")
+    lonely, _ = _appended(lonely, "README.md", "[unlinked](docs/guides/unlinked.md)")
+    assert _found(lonely) - baseline == {
+        ("unreached", "docs/README.md", 1, "docs/guides/unlinked.md")
+    }
+
+
+def test_a_picture_that_no_document_shows_is_named(tree: Any, baseline: set[Found]) -> None:
+    shown = _shown_by_the_front_page(tree)
+    lonely = dataclasses.replace(shown, files=shown.files | {"docs/assets/unshown.png"})
+    assert _found(lonely) - baseline == {
+        ("unreached", "docs/README.md", 1, "docs/assets/unshown.png")
+    }
 
 
 def _retitled(tree: Any, position: int, title: str) -> tuple[Any, int, str]:

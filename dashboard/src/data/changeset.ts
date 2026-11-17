@@ -46,6 +46,15 @@ export interface TaskChangeset {
   comparison?: number;
   trees?: { codeBase: string; codeTip: string; memoryBase: string; memoryTip: string };
 }
+// One side of a file diff. A text side carries `content`; a side that is not text carries no
+// decoded bytes at all — `binary` is true, `mediaType` names a served picture/video type when
+// the file is one, and `size` is the byte count the viewer states.
+export interface DiffSide {
+  content?: string | null;
+  binary?: boolean;
+  mediaType?: string | null;
+  size?: number | null;
+}
 // `fileDiff` — BEFORE (base) + AFTER (current) content for one file: feeds CodeMirror MergeView
 // a=before, b=after. `before` is null for an added file, `after` is null for a deleted one.
 export interface FileDiff {
@@ -53,8 +62,8 @@ export interface FileDiff {
   kind: 'code' | 'memory';
   path: string;
   language: string;
-  before: { content: string } | null;
-  after: { content: string } | null;
+  before: DiffSide | null;
+  after: DiffSide | null;
 }
 // `masterChangeset` — the series master's NET change-set: the single `git diff <master-base> ->
 // <selected-result>` for code + memory (so each file is inspectable, unlike a sum of leaves),

@@ -14,8 +14,10 @@
 import { useMemo, useState } from 'react';
 
 import { css } from '../../../../../styled-system/css';
+import { Markdown } from '../../../../grammar/Markdown';
 import {
   PLANNED_TOP_LINE,
+  PLANNED_TRUTH_LINE,
   rowDetail,
   scopeCaption,
   sortRows,
@@ -32,6 +34,12 @@ const topLine = css({
   margin: 0,
 });
 const notice = css({ fontFamily: 'mono', fontSize: '0.7rem', color: 'amber', margin: 0 });
+const truthLine = css({
+  fontFamily: 'mono',
+  fontSize: '0.78rem',
+  color: 'muted',
+  margin: 0,
+});
 const section = css({
   display: 'grid',
   gap: '0.4rem',
@@ -69,6 +77,9 @@ const body = css({
   maxWidth: '46rem',
   whiteSpace: 'pre-wrap',
 });
+// The packet's Markdown is rendered by the dashboard's existing renderer; the wrapper only bounds
+// its width. No pre-wrap: the renderer's own elements carry the layout (rule 5).
+const packetBody = css({ margin: 0, maxWidth: '46rem', minWidth: 0 });
 const list = css({ display: 'grid', gap: '0.25rem', listStyle: 'none', margin: 0, padding: 0 });
 const scopeLink = css({
   color: 'cyan',
@@ -112,6 +123,9 @@ export function PlannedReview({ payload, onOpenAddress }: PlannedReviewProps) {
       data-mode="planned"
       data-comparison={payload.binding.reference}
     >
+      <p className={truthLine} role="status" data-testid="review-planned-note">
+        {PLANNED_TRUTH_LINE}
+      </p>
       <p className={topLine} data-testid="planned-top-line">
         {PLANNED_TOP_LINE}
       </p>
@@ -338,8 +352,8 @@ function Packets({
                 {packet.state === 'unread' ? ' · text not read' : ''}
               </span>
               {packet.state === 'rendered' && packet.body ? (
-                <div className={body} data-testid="planned-packet-body">
-                  {packet.body}
+                <div className={packetBody} data-testid="planned-packet-body">
+                  <Markdown>{packet.body}</Markdown>
                 </div>
               ) : null}
               {packet.scope.length ? (

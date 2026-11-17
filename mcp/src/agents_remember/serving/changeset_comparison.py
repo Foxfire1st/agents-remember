@@ -11,6 +11,7 @@ from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRe
 from agents_remember.models.knowledge_files.shapes import require_repository_path
 from agents_remember.serving.changeset_reads import change_counters
 from agents_remember.serving.changeset_reads import read_git as run_git
+from agents_remember.serving.diff_side import committed_side
 from agents_remember.serving.scope import language_for
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -113,6 +114,17 @@ def comparison_changeset(contract: WorktreeContract, number: int) -> dict[str, A
     }
 
 
+def comparison_file_path(path: str, *, memory: bool) -> str:
+    """The one confined path a comparison diff and its bytes route both accept."""
+    try:
+        rel = require_repository_path(path)
+    except ValueError as error:
+        raise AuthorityError(str(error)) from error
+    if memory and not rel.startswith(("knowledge/", "onboarding/")):
+        raise AuthorityError("comparison memory files must be under knowledge/ or onboarding/")
+    return rel
+
+
 def comparison_file_diff(
     contract: WorktreeContract, number: int, kind: str, path: str
 ) -> dict[str, Any]:
@@ -120,18 +132,14 @@ def comparison_file_diff(
     memory = kind == "memory"
     root, base, tip = _range(record, memory)
     # Historical Git addresses must not follow today's filesystem aliases (L86-CODE-R1-F01).
-    try:
-        rel = require_repository_path(path)
-    except ValueError as error:
-        raise AuthorityError(str(error)) from error
-    if memory and not rel.startswith(("knowledge/", "onboarding/")):
-        raise AuthorityError("comparison memory files must be under knowledge/ or onboarding/")
+    rel = comparison_file_path(path, memory=memory)
     sides = []
     for tree in (base, tip):
-        # cat-file distinguishes a missing path (add/delete) from a lost tree without inventing
-        # content. The tree check is needed only after a failed blob read.
-        result = run_git(root, ["show", f"{tree}:{rel}"])
-        if result.returncode:
+        # cat-file distinguishes a missing path (add/delete) from a lost tree without
+        # inventing content. The tree check is needed only after a failed blob read. A
+        # side that is not text is reported as binary with its type and size.
+        side = committed_side(root, tree, rel)
+        if side is None:
             exists = run_git(root, ["cat-file", "-t", tree])
             if exists.returncode or exists.stdout.strip() != "tree":
                 raise FileNotFoundError(
@@ -139,13 +147,7 @@ def comparison_file_diff(
                 )
             sides.append(None)
         else:
-            sides.append(
-                {
-                    "content": result.stdout.encode("utf-8", "surrogateescape").decode(
-                        "utf-8", "replace"
-                    )
-                }
-            )
+            sides.append(side.to_wire())
     return {
         "scope": contract.leaf_id,
         "kind": "memory" if memory else "code",

@@ -189,6 +189,33 @@ describe('the planned page', () => {
     );
   });
 
+  it("renders a packet's Markdown: its table arrives as a table (BUG-R02 v3 rule 5)", () => {
+    const page = payload({
+      packets: [
+        {
+          ref: 'REQ@v1',
+          path: 'requirements/REQ-v1.md',
+          title: 'REQ @ v1 — A rendered packet',
+          state: 'rendered',
+          body:
+            '# Requirement\n\n| Name | Value |\n| --- | --- |\n| alpha | 1 |\n\n- one\n- two\n',
+          part: 'packets',
+          scope: [],
+        },
+      ],
+    });
+
+    render(<PlannedReview payload={page} />);
+
+    const body = screen.getByTestId('planned-packet-body');
+    const table = body.querySelector('table');
+    expect(table).toBeTruthy();
+    expect(text(body.querySelector('th'))).toBe('Name');
+    expect(text(body.querySelector('td'))).toBe('alpha');
+    expect(text(body.querySelector('h1'))).toBe('Requirement');
+    expect(body.querySelectorAll('li').length).toBe(2);
+  });
+
   it('shows the Prepared context section, or the word absent', () => {
     const { unmount } = render(<PlannedReview payload={payload()} />);
     expect(text(screen.getByTestId('planned-prepared-context'))).toBe('the tray mockup, picked');

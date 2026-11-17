@@ -36,6 +36,8 @@ from agents_remember.canvas.explainer_binding import (
     EXPLAINER_SURFACE,
     validate_explainer_binding,
 )
+from agents_remember.canvas.explainer_browser import PLAYWRIGHT_ENV
+from agents_remember.canvas.explainer_browser import module_file as browser_dependency
 from agents_remember.canvas.explainer_paths import INSTRUCTIONS_DIRECTORY, guard_explainer_path
 from agents_remember.canvas.explainer_state import AGENT_MARKER, ExplainerRefused
 from agents_remember.canvas.paths import PathRefused
@@ -63,7 +65,7 @@ CAPABILITY_LABEL = "review-explainer"
 #: The one environment name that marks every process of a seat, its children included.
 WORKSPACE_MARKER = "AR_EXPLAINER_WORKSPACE"
 #: The browser module the seat's publish step loads the page in (a file URL's target, or a module path).
-PLAYWRIGHT_ENV = "AR_PLAYWRIGHT"
+#: The name is the browser owner's own: one spelling, whether the host hands it on or the load reads it.
 SEAT_LIVE = "live"
 SEAT_CLOSED = "closed"
 #: A resume loads the stored session; it is not bounded by an ordinary bridge call's budget.
@@ -138,13 +140,17 @@ def browser_module() -> str | None:
     ``AR_PLAYWRIGHT``. Inheriting the variable is not enough — the host that launches the seat may be
     started without it, and then the seat reaches ``render`` blind: the load refuses, nothing is
     published, and the previous generation's page stays on screen as if it were current. So the
-    module is found here, from this installation's own tree, and handed on: the dashboard's
-    ``node_modules`` carries it, and the checkout's ``scripts/`` proof script names the same file.
+    module is found here, from this installation's own tree, and handed on: the module the product
+    fetched into its data folder, else the dashboard's ``node_modules`` of a checkout, whose
+    ``scripts/`` proof script names the same file.
     """
 
     from_env = os.environ.get(PLAYWRIGHT_ENV)
     if from_env:
         return from_env
+    fetched = browser_dependency()
+    if fetched is not None:
+        return fetched.as_posix()
     source = launching_source_root()
     for root in source.parents:
         candidate = root / "dashboard" / "node_modules" / "playwright" / "index.js"

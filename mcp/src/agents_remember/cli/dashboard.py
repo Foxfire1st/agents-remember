@@ -254,6 +254,9 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
     from agents_remember.application.knowledge_reader import (  # noqa: PLC0415 - composition
         read_knowledge_reader,
     )
+    from agents_remember.application.knowledge_reader.media import (  # noqa: PLC0415 - composition
+        read_knowledge_media,
+    )
     from agents_remember.application.knowledge_review import (  # noqa: PLC0415 - composition
         list_comparison_review_entries,
         read_complete_knowledge_review,
@@ -371,6 +374,11 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
 
         return read_knowledge_reader(config, query)
 
+    def knowledge_bytes_port(query):
+        """The code reader's media read: the selected tree's own blob, as bytes."""
+
+        return read_knowledge_media(config, query)
+
     def api_routes(app: Any) -> None:
         """The launcher's routes, then the tray's: seat list, developer send, sent picks."""
 
@@ -402,6 +410,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         review_trees=review_trees_port,
         review_trees_shutdown=review_trees_shutdown,
         knowledge_reader=knowledge_reader_port,
+        knowledge_bytes=knowledge_bytes_port,
         extra_api_routes=api_routes,
     )
     ports = opening_ports(config, collaborators)

@@ -64,6 +64,14 @@ def register_render_tool(
         page.png (the draft picture) and interactions/ (every interaction picture). The answer names
         them, the publication state and revision, and a summary and the errors that fit 1,000 tokens;
         `moved` names what is only in the report. No picture is returned: open them from the folder.
+        When this installation's browser is not here yet, the first call fetches nothing: it answers
+        state announce, browser.missing naming what is missing, and notice with the one sentence the
+        user is owed. Say that sentence to the user in one line -- at the place they asked, before the
+        fetch -- then call render again; that call fetches the browser, loads the draft and publishes,
+        and its browser state reads fetched. Later renders fetch nothing and say nothing. A page whose
+        browser is already here goes straight to publication. A fetch that fails leaves the load
+        unavailable: its errors name what is missing and the command that gets it, nothing is
+        published, and the review page's own empty block repeats those words until a page is published.
         An interaction run that ran out of time names its unvisited passes; render the same draft
         again to visit only those.
         """
@@ -82,6 +90,8 @@ def render_answer(report: dict[str, Any]) -> dict[str, Any]:
 
     if report.get("state") == "refused" and "run" not in report:
         return report  # refused before a run began: the refusal is the whole answer
+    if report.get("state") == "announce" and "run" not in report:
+        return report  # rule 1's first call: the missing browser, the sentence, the call to come
     run = report.get("run")
     path = report.get("reportPath")
     interactive = report.get("interactive") or {}
@@ -102,6 +112,9 @@ def render_answer(report: dict[str, Any]) -> dict[str, Any]:
         },
         **({"resumedFrom": interactive["resumedFrom"]} if interactive.get("resumedFrom") else {}),
     }
+    if report.get("browser"):
+        # What the load ran on, and whether this call fetched it: the answer's identity items.
+        answer["browser"] = report["browser"]
     return _packed(answer, report, path)
 
 

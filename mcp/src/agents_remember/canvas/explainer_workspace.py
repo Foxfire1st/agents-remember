@@ -55,6 +55,7 @@ from agents_remember.canvas.explainer_paths import (
     remove_workspace,
     repository_path,
 )
+from agents_remember.canvas.explainer_planned_read import PLANNED_FOLDER, planned_documents
 from agents_remember.canvas.explainer_state import (
     ExplainerBinding,
     ExplainerRefused,
@@ -86,6 +87,7 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.durable_evidence import durable_reports_root
 from agents_remember.models.knowledge.review_evidence import EvidencePacket
 from agents_remember.models.knowledge.review_frame import FrameBinding
+from agents_remember.tasks.planned_comparison import leaf_document
 from agents_remember.tasks.task_paths import slugify
 
 __all__ = [
@@ -374,20 +376,34 @@ def _copy_kit(workspace: Path, *, root: Path) -> int:
     return len(carried)
 
 
-def _copy_documents(ref: EnvironmentRef, workspace: Path, reporter: _Progress) -> None:
+def _copy_planned_documents(workspace: Path, *, root: Path, files: Mapping[str, str]) -> int:
+    """Write a planning leaf's requirement and its declared effects into ``planned/``."""
+
+    destination = workspace / PLANNED_FOLDER
+    for name, text in files.items():
+        target = destination / name
+        guard_explainer_path(target, root=root, label="explainer planned document")
+        atomic_write_text(target, text)
+    return len(files)
+
+
+def _copy_documents(run: EnvironmentRun, workspace: Path, reporter: _Progress) -> None:
     """Copy in what the explainer needs, as a task agent's documents are (MIK-R211 v5 rule 3).
 
     The task's reference notes for the leaf, the kit files and every published revision are plain
     folder copies. The draft starts as a copy of the latest revision when it holds nothing yet, so a
-    new revision starts from the published one rather than from an empty page.
+    new revision starts from the published one rather than from an empty page. A planned binding has
+    no changed trees to read; the plan itself -- the packets the task document names and its
+    declared planned effects -- is written into ``planned/`` as content.
     """
 
+    ref = run.ref
     root = workspace.parent
     kit = _copy_kit(workspace, root=root)
     try:
         task = task_root(ref.config, ref.repository_id, ref.task)
     except PathRefused:
-        reporter.step("documents", reference=0, kit=kit, revisions=0)
+        reporter.step("documents", reference=0, kit=kit, revisions=0, planned=0)
         return
     reference = task / "notes" / "reference" / ref.leaf_id
     notes = (
@@ -395,6 +411,12 @@ def _copy_documents(ref: EnvironmentRef, workspace: Path, reporter: _Progress) -
         if reference.is_dir() and not reference.is_symlink()
         else 0
     )
+    planned = 0
+    if run.inputs.planned is not None:
+        document = leaf_document(task, ref.leaf_id) or {}
+        planned = _copy_planned_documents(
+            workspace, root=root, files=planned_documents(document, task)
+        )
     revisions = _published_revisions(task, ref.leaf_id)
     for number, folder in revisions:
         copy_revision(folder, workspace, number)
@@ -409,6 +431,7 @@ def _copy_documents(ref: EnvironmentRef, workspace: Path, reporter: _Progress) -
         reference=notes,
         kit=kit,
         revisions=len(revisions),
+        planned=planned,
         draftFrom=revisions[-1][0] if started else None,
     )
 
@@ -428,7 +451,7 @@ def build_environment(run: EnvironmentRun) -> EnvironmentBuild:
         packet_bytes = _stage_and_commit_instructions(
             workspace=workspace, run=run, snapshot_name="trees", reporter=reporter
         )
-        _copy_documents(ref, workspace, reporter)
+        _copy_documents(run, workspace, reporter)
         binding = _environment_binding(run, packet_bytes)
         write_binding(workspace, binding)
         reporter.step("bound", trees="trees")

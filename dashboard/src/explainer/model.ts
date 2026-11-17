@@ -140,7 +140,11 @@ export function formReferences(picks: readonly TrayPick[], kindWords: (pick: Tra
 }
 
 /** "One message: 2 references the agent opens with AR's tools, 1 note, your text." */
-export function firstRequestLine(references: readonly FormReference[], message: string): string {
+export function firstRequestLine(
+  references: readonly FormReference[],
+  message: string,
+  planned = false,
+): string {
   const notes = references.filter((reference) => reference.note.trim() !== '').length;
   const parts = [
     references.length
@@ -151,15 +155,20 @@ export function firstRequestLine(references: readonly FormReference[], message: 
   ].filter(Boolean);
   return parts.length
     ? `One message: ${parts.join(', ')}.`
-    : END_TO_END_LINE;
+    : planned
+      ? PLANNED_LINE
+      : END_TO_END_LINE;
 }
 
 /**
  * What an empty Send asks for: the end-to-end review. `explainer_service.py` composes the same ask in
  * `END_TO_END_REQUEST` when a Send carries no words, so the form's line and the seat's first turn
- * say one thing (MIK-R211 v2 rule 5, and the developer's F1).
+ * say one thing (MIK-R211 v2 rule 5, and the developer's F1). On a task in planning there is no
+ * change set to review: the empty Send asks for its requirement and planned effects, as
+ * `explainer_service.py` composes in `PLANNED_REQUEST` (BUG-R02 rule 2).
  */
 export const END_TO_END_LINE = 'One message: the end-to-end review of the comparison on screen.';
+export const PLANNED_LINE = "One message: this task's requirement and its planned effects.";
 
 /**
  * Send is always possible: an empty request is the end-to-end review, so none of the request's facts

@@ -284,7 +284,8 @@ start.
   task that landed or was abandoned. The review page opens from a task's page.
 - **Knowledge** reads a memory tree: the records by kind, the invariants without proof and the
   knowledge of a path.
-- **File Viewer** shows a source file beside its card.
+- **File Viewer** shows a source file, a picture or a video beside its card, and switches a
+  Markdown file between the rendered document and its source.
 
 The button "Tray (n)" beside the tabs opens the tray, which collects picked lines and files and
 sends them to a chat. [The dashboard](dashboard.md) describes every tab and control.
@@ -317,7 +318,8 @@ four Git trees, the code and the memory before and after, and names each recorde
 
 The user asks questions on the page. The first request creates the task's explainer, an agent
 that answers with a chat reply or with a page of its own. Each published page is a numbered
-revision; to publish one, the explainer needs Playwright and its browser on the machine
+revision; to publish one, the explainer loads it in a browser that the product fetches itself at
+the first explanation, so nothing is installed by hand
 ([what the explainer needs](guides/review-page-and-explainer.md#what-the-explainer-needs-before-it-can-publish)). On request the explainer grades the blocks of the change set, and the page sorts by its
 grades. The explainer changes no code, no memory and no task document.
 

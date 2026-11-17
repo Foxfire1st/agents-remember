@@ -257,7 +257,9 @@ trees, the code and the memory that the closeout would commit.
 The closeout preview and publication routes judge the exact candidate trees,
 recomputing the knowledge gate rather than trusting a saved worklist. A
 `knowledge-gate-refused` result names repair findings; the Curator repairs memory
-and reruns checks. The knowledge gate has no waiver. The validated
+and reruns checks. The knowledge gate has no waiver; a master's recorded landing whose chain proof
+passes and whose only findings are stale entries keeps them as the master's debt and lands. The
+validated
 [coherence record](concepts.md#coherence-record) remains a separate readiness requirement.
 
 For file formats, commands and the read-only check of a

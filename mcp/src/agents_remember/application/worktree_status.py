@@ -452,9 +452,40 @@ def _replace_operation_status(
 ) -> None:
     result.pop("contractReadFailure", None)
     result.pop("lifecycleOperation", None)
+    # The saved result retains every projection; the answer roster keeps only count and progress.
     result["lifecycleOperations"] = [
         operation.model_dump(mode="json", exclude_none=True) for operation in operations
     ]
+    result["lifecycleOperationCount"] = len(operations)
+    if (line := _running_operation_line(operations)) is not None:
+        # A running closeout must survive the answer's size guard: the guard keeps a short
+        # string where it drops the projection list, and the closeout tool's own description
+        # tells the caller to poll this answer for progress. So one sentence names the
+        # operation, its generation and its state, and `_fixed_short_part` keeps it whole.
+        result["runningOperation"] = line
+
+
+LIVE_OPERATION_STATUSES = frozenset({"queued", "running"})
+
+
+def _running_operation_line(operations: list[LifecycleOperationProjection]) -> str | None:
+    """Name the operation this enclosure is running, in one short sentence, or ``None``."""
+
+    for operation in operations:
+        if operation.status not in LIVE_OPERATION_STATUSES:
+            continue
+        generation = f" generation {operation.generation}" if operation.generation else ""
+        phase = f", phase {operation.phase}" if operation.phase else ""
+        control = (
+            "worktree_operation_control can resume or cancel it"
+            if operation.cancellable
+            else "worktree_operation_control reports its controls"
+        )
+        return (
+            f"{operation.kind}{generation} is {operation.status}{phase}; "
+            f"{control}. The whole projection is in the file that holds this answer."
+        )
+    return None
 
 
 def _project_terminal_contract_status(

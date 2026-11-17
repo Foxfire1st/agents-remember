@@ -241,6 +241,11 @@ class TaskDocResponse(ToolResponse):
     wouldWrite: list[str] | None = Field(default=None, max_length=16)
     removedEdges: list[dict[str, Any]] | None = None
     taskArchive: dict[str, Any] | None = None
+    # The dry run surveys commanded masters with no row and rows whose recorded status
+    # differs from their master document's. taskArchive names the enclosures retired (or
+    # due for retirement) through the abandon routine. These payload fields must be declared:
+    # extra=forbid would otherwise reject the answer after the archive has run.
+    rowSurvey: dict[str, Any] | None = None
     # archive_sprint: the whole-sprint archive record, the state the request found or reached,
     # every commanded master with its archive location, every staying master and why, and what
     # a dry run would still change.

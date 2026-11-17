@@ -101,6 +101,34 @@ def _whole(answer):
     return json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
 
 
+def test_the_dry_run_lists_a_missing_row_and_a_row_that_differs_and_repairs_neither(world):
+    """The dry run lists missing or mismatched master rows without repairing them."""
+
+    sprint = world.sprint()
+    rows = list(sprint.subTasks)
+    # master-a's row records a terminal status other than its document's; master-b loses its row
+    # entirely (it stays commanded through ``orchestrates``, which is what the survey reads).
+    mismatched = rows[0].model_copy(update={"status": "abandoned"})
+    document = sprint.model_copy(update={"subTasks": [mismatched]})
+    write_task_doc(world.tasks / "sprint", document)
+    before = world.snapshot()
+
+    preview = world.archive(dry_run=True)
+
+    survey = _whole(preview)["rowSurvey"]
+    assert survey["mastersWithoutRow"] == ["agents-remember/master-b/task.json"]
+    assert survey["rowsThatDiffer"] == [
+        {
+            "master": "agents-remember/master-a/task.json",
+            "row": "0",
+            "recorded": "abandoned",
+            "document": "Completed",
+        }
+    ]
+    assert survey["repaired"] is False
+    assert world.snapshot() == before
+
+
 def test_archive_dry_run_reports_exact_moves_and_real_run_archives(world):
     before = world.snapshot()
     preview = world.archive(dry_run=True)
@@ -201,6 +229,20 @@ def test_archive_refuses_open_work_naming_master_and_action(world):
     for dry_run in (True, False):
         with pytest.raises(ValueError, match=r"master .*master-a/task\.json.*is not ready.*repair"):
             world.archive(dry_run=dry_run)
+        assert world.snapshot() == before
+
+
+def test_archive_names_every_blocked_master_in_one_refusal(world):
+    for name in ("master-a", "master-b"):
+        (world.tasks / name / "series-contract.md").write_text("not a contract\n")
+    before = world.snapshot()
+    for dry_run in (True, False):
+        with pytest.raises(ValueError) as raised:
+            world.archive(dry_run=dry_run)
+        message = str(raised.value)
+        assert "2 commanded master(s)" in message
+        assert "master-a/task.json" in message
+        assert "master-b/task.json" in message
         assert world.snapshot() == before
 
 

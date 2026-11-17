@@ -95,8 +95,11 @@ class Finding:
 # Commands outside the role instruction table. The check demands no row and no mention for
 # them and refuses a row for one of them in that table. `knowledge-convert` is told on two
 # guide pages, for a memory repository that was cloned before `memory_init`.
+# `explainer-browser` is told on the install page and in the guide: a person at the installation
+# runs it to see or fetch the browser the explainer publishes with, and no role has a step for it.
 UNDOCUMENTED_COMMANDS = frozenset(
     {
+        "explainer-browser",
         "knowledge-convert",
         "knowledge-census",
         "knowledge-census inventory",

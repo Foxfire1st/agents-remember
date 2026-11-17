@@ -463,7 +463,10 @@ def test_a_leaf_is_ready_only_once_current_rows_answer_every_item_and_a_new_edit
         "onboarding_trace onboarding:pkg/a.py",
         "onboarding_trace onboarding:pkg/overview",
     }
-    assert len(again.findings) == 4
+    # The entry is stale at C, so closeout reports it separately from the invariant row's
+    # open worklist item.
+    assert len(again.findings) == 5
+    assert [finding.code for finding in again.findings].count("knowledge-stale-at-landing") == 1
     assert "RLZ-A00001 is stale" in _open(again)["touched_invariant INV-AAAAAA"]
     assert "changed after" in _open(again)["onboarding_trace onboarding:pkg/a.py"]
 
@@ -1113,6 +1116,26 @@ def test_a_master_or_checkpoint_landing_waits_until_no_entry_at_a_changed_path_i
         LandingGateRequest(**{**request.__dict__, "memory_commit": broken})
     )
     assert invalid is not None and "R22.3-markers" in invalid
+
+
+def test_a_task_closeout_refuses_a_stale_entry_at_a_path_the_task_changed(world: Gated) -> None:
+    """Closeout and master landing judge entry currentness by the same check.
+
+    The candidate's code side holds the changed bytes and its memory side holds the entry as it
+    was. The entry is therefore stale at a path the task changed, which makes both checks refuse.
+    """
+
+    _edit(world, CODE_A.replace("return value", "return -value"))
+    stale = [
+        finding for finding in world.gate().findings if finding.code == "knowledge-stale-at-landing"
+    ]
+    assert [finding.path for finding in stale] == [A]
+    assert "RLZ-A00001" in stale[0].message
+
+    world.reanchor("RLZ-A00001")
+    assert not [
+        finding for finding in world.gate().findings if finding.code == "knowledge-stale-at-landing"
+    ]
 
 
 # --------------------------------------------------------------------------------------------------

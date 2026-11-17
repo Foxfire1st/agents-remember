@@ -159,6 +159,86 @@ def test_recorded_comparison_is_exact_including_dirty_and_rename_and_scoped_memo
     assert client.get("/api/changeset/task", params=params).json() == body
 
 
+def test_comparison_names_a_picture_side_and_serves_its_bytes(tmp_path):
+    """A changed picture is a media side, not mojibake, and its bytes answer per side."""
+    fixture = build_endpoint_fixture(tmp_path, memory_mode="external")
+    contract = fixture.contract
+    code = contract.code_worktree
+    assert code is not None
+    record, _ = _recorded_trees(contract)
+    before_bytes = b"\x89PNG-before\0"
+    after_bytes = b"\x89PNG-after\0"
+    clip_before = b"\x00\x00\x00\x18ftypmp42before"
+    clip_after = b"\x00\x00\x00\x18ftypmp42after"
+    (code / "pic.png").write_bytes(before_bytes)
+    (code / "clip.mp4").write_bytes(clip_before)
+    git(code, "add", "-A")
+    before = git(code, "write-tree")
+    (code / "pic.png").write_bytes(after_bytes)
+    (code / "clip.mp4").write_bytes(clip_after)
+    git(code, "add", "-A")
+    after = git(code, "write-tree")
+    record = record.model_copy(
+        update={
+            "code_base": ReviewTreeSide(repository=str(code), tree=before),
+            "code_candidate": ReviewTreeSide(repository=str(code), tree=after),
+        }
+    )
+    directory = comparison_directory(contract.task_root, contract.leaf_id)
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "5.json").write_text(record.model_dump_json(by_alias=True))
+    app = FastAPI()
+    register_changeset_routes(app, fixture.config)
+    client = TestClient(app)
+    params = {
+        "repo": contract.repo_name,
+        "master": fixture.master,
+        "leaf": contract.leaf_id,
+        "comparison": "5",
+    }
+    diff = client.get("/api/changeset/file-diff", params={**params, "path": "pic.png"}).json()
+    assert diff["before"] == {
+        "binary": True,
+        "mediaType": "image/png",
+        "size": len(before_bytes),
+    }
+    assert diff["after"] == {
+        "binary": True,
+        "mediaType": "image/png",
+        "size": len(after_bytes),
+    }
+    base = client.get(
+        "/api/changeset/file-bytes", params={**params, "path": "pic.png", "side": "before"}
+    )
+    tip = client.get("/api/changeset/file-bytes", params={**params, "path": "pic.png"})
+    assert base.status_code == tip.status_code == 200
+    assert base.content == before_bytes and tip.content == after_bytes
+    ranged = client.get(
+        "/api/changeset/file-bytes",
+        params={**params, "path": "pic.png", "side": "after"},
+        headers={"range": "bytes=0-1"},
+    )
+    assert ranged.status_code == 206 and ranged.content == after_bytes[:2]
+    video = client.get(
+        "/api/changeset/file-bytes",
+        params={**params, "path": "clip.mp4", "side": "before"},
+        headers={"range": "bytes=4-11"},
+    )
+    assert video.status_code == 206
+    assert video.headers["content-type"] == "video/mp4"
+    assert video.content == clip_before[4:12]
+    refused_side = client.get(
+        "/api/changeset/file-bytes", params={**params, "path": "pic.png", "side": "--no-pager"}
+    )
+    assert refused_side.status_code == 400
+    assert refused_side.json()["status"] == "bad-request"
+    refused_path = client.get(
+        "/api/changeset/file-bytes", params={**params, "path": "-rf.png", "side": "before"}
+    )
+    assert refused_path.status_code == 400
+    assert refused_path.json()["status"] == "bad-path"
+
+
 def _comparison_with_symlinks(tmp_path):
     """Create both historical file and symlink blobs on each comparison side."""
     fixture = build_endpoint_fixture(tmp_path, memory_mode="external")
@@ -270,3 +350,9 @@ def test_comparison_paths_ignore_current_aliases_on_both_git_halves(tmp_path):
             "/api/changeset/file-diff", params={**params, "kind": "memory", "path": requested}
         )
         assert refused.status_code == 400 and refused.json()["status"] == "bad-path"
+        # The bytes route must apply the same memory-subtree policy as the diff, not widen it.
+        refused_bytes = client.get(
+            "/api/changeset/file-bytes", params={**params, "kind": "memory", "path": requested}
+        )
+        assert refused_bytes.status_code == 400
+        assert refused_bytes.json()["status"] == "bad-path"

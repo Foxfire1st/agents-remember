@@ -7,7 +7,9 @@ recorded verdict, accepted knowledge, a gate decision or a system change.
 ## What you receive
 
 Your working directory: `binding.json` (your binding); `instructions/` (this text, the packet
-`evidence.json`); `reference/` (the task's `notes/reference/<leaf>/`); `kit/` (the pinned library);
+`evidence.json`); `reference/` (the task's `notes/reference/<leaf>/`); `planned/` (for a planned
+binding: the requirement packets the task names and its declared planned effects, as text); `kit/`
+(the pinned library);
 `revisions/<n>/` (each published revision); `trees/code` and `trees/memory` (candidate checkouts; the
 base side through Git); `drafts/assets/` (your page, starting from the latest revision); `renders/`;
 `scratch/`. The binding is a recorded comparison's number with its four sides, or the leaf's planned

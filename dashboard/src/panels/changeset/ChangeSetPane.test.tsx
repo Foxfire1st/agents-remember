@@ -58,4 +58,32 @@ describe("ChangeSetPane markdown rendered view", () => {
     expect(queryByTestId("changeset-rendered-toggle")).toBeNull();
     expect(queryByTestId("diff-pane")).not.toBeNull();
   });
+
+  it("shows a text side beside a binary side instead of calling both binary", () => {
+    const mixed = mdDiff({
+      kind: "code",
+      path: "pkg/data.bin",
+      language: "binary",
+      before: { content: "readable before\n" },
+      after: { binary: true, mediaType: null, size: 12 },
+    });
+    const view = render(<ChangeSetPane diff={mixed} keyPrefix="t.mixed" />);
+    expect(view.getByTestId("text-side-before").textContent).toBe("readable before\n");
+    expect(view.getByTestId("binary-side-after").textContent).toContain("binary file");
+    view.unmount();
+    const reverse = render(
+      <ChangeSetPane
+        diff={mdDiff({
+          kind: "code",
+          path: "pkg/data.bin",
+          language: "binary",
+          before: { binary: true, mediaType: null, size: 12 },
+          after: { content: "readable after\n" },
+        })}
+        keyPrefix="t.reverse"
+      />,
+    );
+    expect(reverse.getByTestId("text-side-after").textContent).toBe("readable after\n");
+    expect(reverse.getByTestId("binary-side-before").textContent).toContain("binary file");
+  });
 });

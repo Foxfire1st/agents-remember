@@ -5,6 +5,8 @@ import { remarkCachedParse } from './markdownParseCache';
 import ReactMarkdown, { type Components, type ExtraProps, type Options } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { remarkReferenceMarkers, remarkHeadingIds } from './referenceMarkers';
+import { documentComponents, type DocumentContext } from './DocumentMarkdown';
+import { documentRehypePlugins, noteRehypePlugins } from './documentMarkdown';
 
 import { css } from '../../styled-system/css';
 import { isRequirementAddress, resolveRequirementAddress } from '../data/requirements';
@@ -148,11 +150,35 @@ function RequirementAnchor({
   if (isRequirementAddress(href)) {
     return <span data-testid="requirement-link-refused">{linkChildren}</span>;
   }
+  // Rule 9: no rendered Markdown may move the dashboard's own tab. An outside address opens a
+  // new tab; an anchor stays in the page; a relative address is text that says it is not followed.
+  if (/^https?:/i.test(href))
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" {...props}>
+        {linkChildren}
+      </a>
+    );
+  if (href.startsWith("#"))
+    return (
+      <a href={href} {...props}>
+        {linkChildren}
+      </a>
+    );
   return (
-    <a href={href} {...props}>
+    <a
+      href={href}
+      {...props}
+      data-testid="link-not-followed"
+      title="not a file this page opens"
+      onClick={(event) => event.preventDefault()}
+    >
       {linkChildren}
     </a>
   );
+}
+
+function documentHtmlAllowed(documentContext: DocumentContext | undefined): boolean {
+  return documentContext?.allowHtml !== false;
 }
 
 // memo: the projection ticks (SSE) re-render DetailPanel every ~second, but section bodies are
@@ -164,34 +190,84 @@ export const Markdown = memo(function Markdown({
   referenceMarkers = false,
   headingIds = false,
   components: overrides,
+  document: documentContext,
 }: {
   children: string;
   inline?: boolean;
   referenceMarkers?: boolean;
   headingIds?: boolean;
   components?: Components;
+  // A repository document: HTML is cleaned to GitHub's list, headings get ids, and links and
+  // media resolve against the document's repository. Absent is the dashboard's own renderer for
+  // cards, task documents and notes, which never renders raw HTML.
+  document?: DocumentContext;
 }) {
   const resources = useDashboard((state) => state.taskDocuments);
-  const components = inline
-    ? { ...inlineComponents, a: RequirementAnchor, ...overrides }
-    : { ...blockComponents, a: RequirementAnchor, ...overrides };
-  const plugins = markdownPlugins(
+  const setup = markdownSetup({
+    inline,
+    overrides,
     referenceMarkers,
     headingIds,
-    !overrides && children.length >= 1000 ? resources : undefined,
-  );
+    resources: !overrides && children.length >= 1000 ? resources : undefined,
+    documentLinks: documentContext ? documentComponents(documentContext) : null,
+    documentHtml: documentHtmlAllowed(documentContext),
+  });
   const content = (
-    <ReactMarkdown remarkPlugins={plugins} components={components}>
+    <ReactMarkdown
+      remarkPlugins={setup.plugins}
+      rehypePlugins={setup.rehypePlugins}
+      components={setup.components}
+    >
       {children}
     </ReactMarkdown>
   );
   if (inline) return <span className={inlineBox}>{content}</span>;
   return (
-    <div className={box} data-document-headings={headingIds ? true : undefined}>
+    <div
+      className={box}
+      data-document-headings={headingIds ? true : undefined}
+      data-document-root={documentContext ? true : undefined}
+    >
       {content}
     </div>
   );
 });
+
+function markdownSetup({
+  inline,
+  overrides,
+  referenceMarkers,
+  headingIds,
+  resources,
+  documentLinks,
+  documentHtml,
+}: {
+  inline: boolean;
+  overrides: Components | undefined;
+  referenceMarkers: boolean;
+  headingIds: boolean;
+  resources: TaskDocumentResources | undefined;
+  documentLinks: Components | null;
+  documentHtml: boolean;
+}): {
+  components: Components;
+  plugins: NonNullable<Options['remarkPlugins']>;
+  rehypePlugins: NonNullable<Options['rehypePlugins']> | undefined;
+} {
+  if (documentLinks)
+    return {
+      components: { ...blockComponents, ...documentLinks, ...overrides },
+      plugins: [remarkGfm],
+      rehypePlugins: documentHtml ? documentRehypePlugins : noteRehypePlugins,
+    };
+  return {
+    components: inline
+      ? { ...inlineComponents, a: RequirementAnchor, ...overrides }
+      : { ...blockComponents, a: RequirementAnchor, ...overrides },
+    plugins: markdownPlugins(referenceMarkers, headingIds, resources),
+    rehypePlugins: undefined,
+  };
+}
 
 function markdownPlugins(
   referenceMarkers: boolean,

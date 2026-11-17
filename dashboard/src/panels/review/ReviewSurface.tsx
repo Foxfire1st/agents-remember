@@ -71,6 +71,7 @@ import {
 } from './explainer/explainerRead';
 import { PlannedReview } from './explainer/planned/PlannedReview';
 import type { PlannedPage } from './explainer/planned/plannedPage';
+import { PLANNED_TRUTH_LINE } from './explainer/planned/plannedPage';
 import { ReviewRefresh, generationOf } from './ReviewRefresh';
 import {
   type ReviewRead,
@@ -110,6 +111,9 @@ export interface ReviewTarget {
 
 const retryFor = (read: ReviewRead, reread: () => void) =>
   read.phase === 'failed' ? reread : undefined;
+
+// The centre's line for a task in planning: true before any review exists.
+const plannedNote = { color: 'var(--muted)', fontSize: '0.78rem', margin: '0.35rem 0' } as const;
 
 function insteadFor(
   read: ReviewRead,
@@ -767,36 +771,41 @@ function readingReplacementOf({
 function ReadingNotes({
   props,
   viewTab,
-  plannedPage,
 }: {
   props: PageProps & { reads: Surface };
   viewTab: ExplanationViewTab;
-  plannedPage: PlannedPage | null;
 }) {
   const { reads, page } = props;
   const read = reads.read;
+  if (props.planned) {
+    // A planning leaf has no worktree and no enclosure yet: its review read is refused by design.
+    // The planned view carries the truth line directly above "planned · no changes"; the
+    // Explanation tab's centre has no planned view, so it carries the same line itself.
+    if (viewTab === 'review') return null;
+    return (
+      <p style={plannedNote} role="status" data-testid="review-planned-note">
+        {PLANNED_TRUTH_LINE}
+      </p>
+    );
+  }
   return (
-    <>
-      {plannedPage && viewTab === 'review' ? null : (
-        <PageNotes
-          page={page}
-          frame={reads.frame}
-          outcome={
-            <ReviewOutcomeRegion
-              read={read}
-              instead={reads.instead}
-              shown={reads.shown}
-              lastCoherent={read.phase === 'failed' ? reads.coherent : null}
-              onRetry={retryFor(read, reads.retryReview)}
-              onOpenTaskContext={insteadFor(read, reads.problem, reads.instead, (failure) =>
-                reads.openTaskContext.current(failure),
-              )}
-              readingInWorkspace={reads.reading !== null}
-            />
-          }
+    <PageNotes
+      page={page}
+      frame={reads.frame}
+      outcome={
+        <ReviewOutcomeRegion
+          read={read}
+          instead={reads.instead}
+          shown={reads.shown}
+          lastCoherent={read.phase === 'failed' ? reads.coherent : null}
+          onRetry={retryFor(read, reads.retryReview)}
+          onOpenTaskContext={insteadFor(read, reads.problem, reads.instead, (failure) =>
+            reads.openTaskContext.current(failure),
+          )}
+          readingInWorkspace={reads.reading !== null}
         />
-      )}
-    </>
+      }
+    />
   );
 }
 
@@ -829,7 +838,7 @@ function PageReading(readingProps: PageReadingProps) {
         view={viewTab}
         orphan={<OrphanSlot props={props} layout={layout} />}
         notes={
-          <ReadingNotes props={props} viewTab={viewTab} plannedPage={plannedPage} />
+          <ReadingNotes props={props} viewTab={viewTab} />
         }
         summary={
           <SummaryLine
@@ -981,13 +990,10 @@ function isPlannedReadEnabled(
 ): boolean {
   // Only a leaf the task list says is planning has a planned view to read (MIK-R211 v2 rule 7). The
   // route refuses any other leaf, so asking anyway put a 4xx in the log for every review a developer
-  // opened; an unknown leaf asks nothing.
-  return (
-    plannedLeaf === true &&
-    surface.history !== 'recorded' &&
-    !hasInitialSubject &&
-    surface.read.phase === 'reviewed'
-  );
+  // opened; an unknown leaf asks nothing. A planning leaf has no worktree, so its ordinary review read
+  // is refused with no candidate to resolve: waiting for that read to succeed left the planned view
+  // unreadable and the page showed only the refusal.
+  return plannedLeaf === true && surface.history !== 'recorded' && !hasInitialSubject;
 }
 
 type ComparisonInfo = { reference: string; number?: number; owner?: 'planned' | 'recorded' };
@@ -1097,7 +1103,7 @@ function useSurfaceExplainer(
     [repo, master, leaf, resolutionContext, select, setViewTab],
   );
 
-  return { plannedPage, comparisonInfo, explainer, facts, onExplain, onEvidence, address };
+  return { plannedPage, plannedLeaf, comparisonInfo, explainer, facts, onExplain, onEvidence, address };
 }
 
 // The seat a press acts on: the full state when the Explanation tab has read it, else one `/state`
@@ -1246,7 +1252,7 @@ export function ReviewSurface(props: ReviewTarget & { onBack: () => void; chat?:
   const markers = usePageMarkers(surface, page);
   useSelectionFocus(payload, workspace, surface.reading, root);
   const title = useTaskTitle(repo, master, leaf);
-  const parts = { reads: { ...surface, initial: reads.initial }, page };
+  const parts = { reads: { ...surface, initial: reads.initial }, page, planned: explainerCtrl.plannedLeaf === true };
   return (
     <div ref={root} className={reviewRoot} data-testid="review-surface" data-kbzone="review" {...surfaceAttributes(surface, { markers: markers?.origin != null })}>
       <IntentMarkerScope.Provider value={markers}>

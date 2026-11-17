@@ -15,7 +15,8 @@ The check reads the files Git tracks, fetches nothing, and prints each finding a
   ``skills/`` belong to the instruction consistency test.
 - ``outside-docs``: a page under ``docs/`` links by a relative path to a file outside ``docs/``.
 - ``unreached``: no link from ``docs/README.md`` reaches a file under ``docs/``; a page must be
-  reached directly or through one index page.
+  reached directly or through one index page. A file that is no page is also reached when the
+  front page ``README.md`` shows or links it by a relative path.
 - ``entry-link``: an entry point lacks a link that the entry points owe each other, the front
   page does not link the roadmap, or the package description links by a relative path.
 - ``install-steps``: an entry point differs from ``docs/getting-started.md`` in the number, the
@@ -55,6 +56,7 @@ ROOT_DOCUMENTS = (
     "SECURITY.md",
     "CODE_OF_CONDUCT.md",
 )
+FRONT_PAGE = "README.md"
 ROADMAP = "ROADMAP.md"
 PACKAGE_DESCRIPTION = "mcp/README.md"
 INDEX = "docs/README.md"
@@ -380,13 +382,33 @@ def reach_findings(index: Index) -> Iterator[Finding]:
                 depth[target] = depth[here] + 1
                 if target in index.documents:
                     queue.append(target)
+    shown = front_page_files(index)
     for path in sorted(index.tree.files):
         if not path.startswith("docs/") or posixpath.basename(path).startswith("."):
+            continue
+        if path in shown:
             continue
         if path not in depth:
             yield Finding(INDEX, 1, "unreached", path, "no link from this page reaches the file")
         elif path.endswith(PAGE_SUFFIXES) and depth[path] > 2:
             yield Finding(INDEX, 1, "unreached", path, "reached through more than one index page")
+
+
+def front_page_files(index: Index) -> frozenset[str]:
+    """The files under ``docs/`` that the front page shows or links by a relative path, no pages.
+
+    A picture of the front page is no page of the site, so no link of the index leads to it. A
+    page is not among them: it must be reached from the index, whatever the front page links.
+    """
+    front = index.documents.get(FRONT_PAGE)
+    if front is None:
+        return frozenset()
+    targets = (index.page(link.path) for link in front.links if link.relative)
+    return frozenset(
+        target
+        for target in targets
+        if target.startswith("docs/") and not target.endswith(PAGE_SUFFIXES)
+    )
 
 
 def harness_pages(index: Index) -> list[str]:

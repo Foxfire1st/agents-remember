@@ -32,6 +32,9 @@ export interface ChipInput {
   latest: number | null;
   // The reader's current date: a recorded time of this year is written without its year.
   now: Date;
+  // The task list says the leaf is in planning: there is no change set to judge, and the read's
+  // refusal (no worktree yet) is not an unavailable review. The chip says what is true.
+  planned?: boolean;
 }
 
 const NOT_MEASURED = 'not measured';
@@ -117,6 +120,16 @@ export function chipFacts(input: ChipInput): ChipFacts {
     ['Subject staleness', stalenessValue(payload)],
     ['Bound comparison', comparisonValue(input)],
   ];
+  // A planning leaf has no worktree, so its review read is refused; that refusal is not the chip's
+  // answer. The task list says it is in planning, and nothing is built yet (BUG-R02 rule 1).
+  if (input.planned) {
+    return {
+      tone: 'grey',
+      label: 'planned',
+      rows,
+      reason: 'Nothing is built yet; this task is in planning.',
+    };
+  }
   if (input.phase === 'loading') return { tone: 'reading', label: 'reading…', rows, reason: 'The review is being read.' };
   if (input.problem !== null)
     return { tone: 'unavailable', label: 'unavailable', rows, reason: firstSentence(input.problem.detail) };

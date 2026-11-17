@@ -50,6 +50,14 @@ class _RemotePending:
         self.result: object = None
 
 
+# A row needs a distinct status when no pull request is part of the route;
+# "planned" would promise a pull request this route does not have.
+ABSENT_LANDING_STATE = "absent"
+# The strategy record_landing.PR_STRATEGY writes for a pull-request landing; a landing the
+# product performs itself records another one, which is how the route says it has no PR.
+PULL_REQUEST_STRATEGY = "pr"
+
+
 def _sweep_memo[R](key: tuple[str, str], compute: Callable[[], R]) -> R:
     """Run ``compute`` once per sweep for ``key``, sharing the result across threads.
 
@@ -181,40 +189,6 @@ def _probe_remote_branch(repo: Path, branch: str) -> tuple[str, str | None]:
     return ("observed", line.split()[0])
 
 
-def _default_branch(repo: Path) -> str:
-    """origin's default branch (e.g. ``main``) via the remote HEAD symref; ``"main"`` on any failure.
-
-    Used to name the protected target when no PR has resolved a base yet, so ``origin/main`` is
-    observable from the start of the landing window (slice 5l P2). ``ls-remote`` queries the remote
-    directly, so no ``fetch`` is needed and a stale local tracking ref can never mislead it.
-    """
-    if not repo.exists():
-        return "main"
-    # One symref probe per repository per sweep (F12): every contract names the same
-    # protected target, so the first contract's answer serves the whole sweep.
-    return _sweep_memo((repo.as_posix(), "\0default-branch"), lambda: _probe_default_branch(repo))
-
-
-def _probe_default_branch(repo: Path) -> str:
-    """One ``ls-remote --symref`` for ``origin/HEAD``; ``"main"`` on any failure."""
-
-    try:
-        result = run_git(
-            repo,
-            ["ls-remote", "--symref", "origin", "HEAD"],
-            GitRunnerOptions(timeout=_PROBE_TIMEOUT_SECONDS),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return "main"
-    if result.returncode != 0:
-        return "main"
-    for line in result.stdout.splitlines():
-        if line.startswith("ref:") and "HEAD" in line:
-            # "ref: refs/heads/main\tHEAD" -> "main"
-            return line.split()[1].rsplit("/", 1)[-1] or "main"
-    return "main"
-
-
 def _pr_for(repo: Path, head: str) -> dict[str, str] | None:
     """Best-effort PR lookup via ``gh`` for the branch ``head``.
 
@@ -286,17 +260,19 @@ def _branch_ref(kind: str, branch: str, fact: str, sha: str | None) -> dict[str,
     }
 
 
-def _main_ref(repo: Path, pr: dict[str, str] | None) -> dict[str, object]:
-    """The protected target ``origin/<base>``, probed directly (slice 5l P2).
+def _main_ref(repo: Path, pr: dict[str, str] | None, target: str) -> dict[str, object]:
+    """The branch this work lands into, probed directly.
 
-    Visible across the whole landing window -- not only after ``gh`` resolves a PR base -- so the
-    dashboard can show the line a worktree is landing into before any PR exists, even when ``gh`` is
-    unavailable (the probe is ``ls-remote``, independent of gh). ``state`` tracks whether *this* work
-    has landed (the PR merged), not merely whether ``origin/main`` exists, so a pre-merge target
-    reads honestly as ``planned`` rather than a misleading ``tip``/done; the current main tip rides
+    The target is the contract's source branch -- ``main`` for work that lands on the protected
+    line, and the master's line for a task whose work lands on a master. It is visible across
+    the whole landing window, not only after ``gh`` resolves a PR base, so the dashboard can show
+    the line a worktree is landing into before any PR exists, even when ``gh`` is unavailable (the
+    probe is ``ls-remote``, independent of gh). ``state`` tracks whether *this* work has landed
+    (the PR merged), not merely whether the remote branch exists, so a pre-merge target reads
+    honestly as ``planned`` rather than a misleading ``tip``/done; the current target tip rides
     along in ``detail``.
     """
-    base = (pr or {}).get("base") or _default_branch(repo)
+    base = (pr or {}).get("base") or target or "main"
     fact, sha = _remote_branch(repo, base)
     if pr and pr.get("state") == "merged":
         state = "merged"
@@ -313,8 +289,15 @@ def _main_ref(repo: Path, pr: dict[str, str] | None) -> dict[str, object]:
     }
 
 
-def _pr_ref(pr: dict[str, str] | None) -> list[dict[str, object]]:
-    """Render the PR participant from a best-effort lookup (origin-main is now its own direct probe)."""
+def _pr_ref(pr: dict[str, str] | None, contract: WorktreeContract) -> list[dict[str, object]]:
+    """Render the PR participant from a best-effort lookup (origin-main is now its own direct probe).
+
+    Where no pull request is part of the route, the row says so and never reads ``planned``.
+    A landing the product performs itself records a strategy other than ``pr`` once it lands.
+    Before any landing is recorded, the strategy is empty and the row stays ``planned`` because
+    a pull request may still be opened.
+    """
+
     if pr is None:
         return [
             {
@@ -326,6 +309,16 @@ def _pr_ref(pr: dict[str, str] | None) -> list[dict[str, object]]:
             }
         ]
     if not pr:
+        if contract.integration_strategy and contract.integration_strategy != PULL_REQUEST_STRATEGY:
+            return [
+                {
+                    "kind": "pr",
+                    "label": "PR",
+                    "state": ABSENT_LANDING_STATE,
+                    "factState": "observed",
+                    "detail": "no pull request is part of this route",
+                }
+            ]
         return [
             {
                 "kind": "pr",
@@ -365,8 +358,8 @@ def landing_refs(contract: WorktreeContract) -> list[dict[str, object]] | None:
     refs: list[dict[str, object]] = [
         _branch_ref(
             "origin-feat",
-            contract.code_source_branch,
-            *_remote_branch(contract.code_repo_path, contract.code_source_branch),
+            contract.code_work_branch,
+            *_remote_branch(contract.code_repo_path, contract.code_work_branch),
         )
     ]
 
@@ -376,10 +369,11 @@ def landing_refs(contract: WorktreeContract) -> list[dict[str, object]] | None:
             _branch_ref("origin-mem-main", mem, *_remote_branch(contract.memory_repo_path, mem))
         )
 
-    # The PR drives both its own ref and the protected target's merged state, so look it up once.
-    pr = _pr_for(contract.code_repo_path, contract.code_source_branch)
-    refs.append(_main_ref(contract.code_repo_path, pr))
-    refs.extend(_pr_ref(pr))
+    # The PR drives both its own ref and the target's merged state, so look it up once. Its head
+    # is the work branch this task pushed; its base is the branch the work lands into.
+    pr = _pr_for(contract.code_repo_path, contract.code_work_branch)
+    refs.append(_main_ref(contract.code_repo_path, pr, contract.code_source_branch))
+    refs.extend(_pr_ref(pr, contract))
     return refs
 
 
@@ -395,7 +389,7 @@ def unobserved_landing_refs(contract: WorktreeContract) -> list[dict[str, object
     refs: list[dict[str, object]] = [
         {
             "kind": "origin-feat",
-            "label": f"origin/{contract.code_source_branch}",
+            "label": f"origin/{contract.code_work_branch or contract.code_source_branch}",
             "state": "unknown",
             "factState": "missing",
             "detail": "observation pending",
@@ -415,7 +409,7 @@ def unobserved_landing_refs(contract: WorktreeContract) -> list[dict[str, object
         [
             {
                 "kind": "origin-main",
-                "label": "origin/main",
+                "label": f"origin/{contract.code_source_branch or 'main'}",
                 "state": "unknown",
                 "factState": "missing",
                 "detail": "observation pending",
