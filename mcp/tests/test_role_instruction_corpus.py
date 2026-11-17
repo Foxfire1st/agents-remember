@@ -41,6 +41,7 @@ from agents_remember_test_support.testing.instruction_consistency import (
     misplace_command_documentation,
     public_commands,
 )
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 from curation_statement_surface import fragment_one_surfaces
 from test_task_document import _config, _doc
 
@@ -859,10 +860,12 @@ class CurationPolicyTests:
         missing: list[str] = []
         for copy_root in GENERATED_SKILL_COPIES:
             root = REPOSITORY_ROOT / copy_root
-            assert root.is_dir(), f"generated skill copy is missing: {copy_root}"
+            assert root.is_dir(), (
+                f"generated skill copy is missing: {copy_root}; run {RENEW_COMMAND}"
+            )
             missing.extend(missing_curation_policy_statements(root, copy_root))
         assert missing == [], (
-            "generated skill copies do not carry the complete-curation policy:\n  "
+            f"generated skill copies do not carry the complete-curation policy; run {RENEW_COMMAND}:\n  "
             + "\n  ".join(missing)
         )
 

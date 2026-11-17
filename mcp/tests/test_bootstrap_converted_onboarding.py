@@ -13,7 +13,7 @@ a real Git repository, and every refusal is read from the refusal's own text.
             the four old-format signs, and its independence from ``accept_drift``.
     RULE 4  the order of the first hour is true: ``memory_init``, onboarding, the first
             baseline, then the knowledge foundation.
-    RULE 6  installed copies: regenerated with ``scripts/sync-skills.py``.
+    RULE 6  installed copies: regenerated with ``mcp/.venv/bin/python scripts/renew-instructions.py``.
 
 ``test_bootstrap_journey_from_init_to_second_fixer_refusal`` is the composed packet test:
 ``memory_init``, three cards written as the templates say, the fixer,

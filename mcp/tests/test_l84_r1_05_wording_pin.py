@@ -1,9 +1,19 @@
 """R1-05: the correct-write hand-write sentence is pinned in every carrier."""
 
 import json
+import shutil
 from pathlib import Path
 
+import pytest
+from agents_remember.errors import CapsuleManifestError
+from agents_remember.models.role_capsules.manifest_derived import compose_manifest
 from agents_remember_test_support.testing.curator_contracts import gfm_anchor
+from agents_remember_test_support.testing.digest_map import (
+    _assert_core_source_map,
+    _assert_digest_places,
+    load_digest_map,
+)
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 from agents_remember_test_support.testing.manifest_step_derivation import manifest_mismatches
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -48,7 +58,7 @@ def test_r1_05_sentence_is_pinned_once_in_every_carrier() -> None:
 
 
 def test_core_unit_sources_do_not_link_their_own_digest_place() -> None:
-    document = json.loads((LIFECYCLE / "core/digest-map.json").read_text(encoding="utf-8"))
+    document = load_digest_map(LIFECYCLE / "core/digest-map.json")
     places = {place["id"]: place for place in document["digest"]["places"]}
     for unit in document["units"]:
         place_id = unit.get("digestPlace")
@@ -71,11 +81,13 @@ def test_manifest_steps_name_the_pointer_derived_actions() -> None:
     """
     for root in (LIFECYCLE, PACKAGED_LIFECYCLE):
         document = json.loads((root / "composition-manifest.json").read_text(encoding="utf-8"))
-        references = document["references"]
+        references = compose_manifest(document)["references"]
         # Every step_detail entry declares a step (the product refuses one without);
         # every entry that declares a step is compared, so none is skipped.
-        assert all("step" in entry for entry in references.values() if entry.get("step_detail"))
-        assert manifest_mismatches(root, document) == []
+        assert all("step" in entry for entry in references.values() if entry.get("step_detail")), (
+            f"Run {RENEW_COMMAND}"
+        )
+        assert manifest_mismatches(root, document) == [], f"Run {RENEW_COMMAND}"
         assert "refused push" not in references["refused-write"]["description"].lower()
         for entry in references.values():
             assert not entry.get("description", "").startswith("Named-step"), entry.get("source")
@@ -87,10 +99,23 @@ def test_manifest_steps_name_the_pointer_derived_actions() -> None:
         ("curator/worklist", "roles", ["curator", "reviewer"]),
     ):
         mutant = json.loads(json.dumps(document))
-        mutant["references"][key][field] = value
+        mutant["derived"]["references"][key][field] = value
         assert any(
             problem.startswith(key + ":") for problem in manifest_mismatches(LIFECYCLE, mutant)
         )
+
+
+def test_manifest_requires_one_declared_step_shape_per_reference() -> None:
+    document = json.loads((LIFECYCLE / "composition-manifest.json").read_text(encoding="utf-8"))
+    key = "message-handover"
+    for missing in (True, False):
+        mutant = json.loads(json.dumps(document))
+        if missing:
+            del mutant["derived"]["references"][key]["step"]
+        else:
+            mutant["references"][key]["step"] = None
+        with pytest.raises(CapsuleManifestError, match=r"references.message-handover has"):
+            compose_manifest(mutant)
 
 
 def test_source_homes_carry_the_architect_wording() -> None:
@@ -142,3 +167,33 @@ def test_r1_05_carriers_also_name_the_same_tool_and_input_class() -> None:
     for carrier in CARRIERS:
         text = carrier.read_text(encoding="utf-8")
         assert "same tool and input class" in text or "same-tool/input-class" in text, carrier
+
+
+@pytest.mark.parametrize(
+    "fault", ["unmapped source line", "overlapping places", "unmapped digest prose"]
+)
+def test_audit_map_ownership_faults_name_the_authored_decision(tmp_path: Path, fault: str) -> None:
+    document = load_digest_map(LIFECYCLE / "core/digest-map.json")
+    text = (LIFECYCLE / "core/every-role.md").read_text()
+    if fault == "unmapped source line":
+        sources = {
+            row["file"] for row in document["units"] if row["disposition"] != "retired (D699, D700)"
+        }
+        for source in sources:
+            target = tmp_path / source
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(LIFECYCLE / source, target)
+        target = tmp_path / sorted(sources)[0]
+        target.write_text(target.read_text() + "\nAn unmapped obligation.\n")
+    elif fault == "overlapping places":
+        places = document["digest"]["places"]
+        places.insert(1, {**places[0], "id": "overlapping-place"})
+    else:
+        text += "\nAn unmapped obligation.\n"
+    with pytest.raises(AssertionError, match=fault) as raised:
+        if fault == "unmapped source line":
+            _assert_core_source_map(tmp_path, document)
+        else:
+            _assert_digest_places(document, text)
+    assert "hand-written part of core/digest-map.json" in str(raised.value)
+    assert RENEW_COMMAND not in str(raised.value)

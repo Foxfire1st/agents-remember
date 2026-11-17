@@ -26,6 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -418,6 +419,7 @@ def test_a_selected_run_with_an_unavailable_capsule_path_refuses_and_writes_noth
     assert "canonical-corpus-anchor" in message
     assert "refused before anything was written" in message
     assert "the selected mode is preserved" in message
+    assert RENEW_COMMAND in message
     assert not coordination_root.exists()
     assert not (coordination_root / "AGENTS.md").exists()
 

@@ -92,6 +92,7 @@ from agents_remember.application.skill_resources.responses import (
 from agents_remember.cli.__main__ import build_parser
 from agents_remember.cli.role_instruction_details import compose_launch_instructions
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.role_capsules.manifest_derived import compose_manifest
 from agents_remember.models.role_capsules.types import compute_content_digest
 from agents_remember.serving.capsule_delivery import CapsuleDelivery
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
@@ -141,7 +142,7 @@ def delivered_foundation(
     """
     budgets = current_budget_view(load_current_budget_view(root / "capsule-budgets-current.json"))
     assert FOUNDATION_SOURCE in budgets["step_details"], "undeclared budget detail"
-    manifest = json.loads((root / "composition-manifest.json").read_text())
+    manifest = compose_manifest(json.loads((root / "composition-manifest.json").read_text()))
     declared = manifest["references"]["curator/repository-foundation"]
     assert declared["source"] == FOUNDATION_SOURCE
     assert declared["step_detail"] is True
@@ -219,7 +220,7 @@ def foundation_delivery_controls(
         if mutation == "step_details":
             target = copied / "capsule-budgets-current.json"
             budgets = json.loads(target.read_text())
-            del budgets["current_measurements"]["step_details"][FOUNDATION_SOURCE]
+            del budgets["derived"]["current_measurements"]["step_details"][FOUNDATION_SOURCE]
             target.write_text(json.dumps(budgets))
         elif mutation == "relocated-pointer":
             marker = "{{detail:" + FOUNDATION_SOURCE + "}}"

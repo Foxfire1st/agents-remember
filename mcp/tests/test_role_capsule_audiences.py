@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
-from hashlib import sha256
 from pathlib import Path
 from typing import cast
 from urllib.parse import quote
@@ -39,23 +38,17 @@ from agents_remember_test_support.testing.capsule_audience_fixtures import (
     CURATOR_MESSAGE_TIMING,
     CURATOR_SEMANTIC_SCOPE_CLAUSES,
     CURATOR_SERVING_STAGE_BOUNDARY,
-    D656_OPERATION_SHA256,
-    D656_STAGE_SHA256,
     INLINE_RULE_CLAUSES,
     OPERATION_POINTER_ACTIONS,
-    ORDINARY_DETAIL_LINK_COUNTS,
-    R125_OPERATION_ROLES,
     ROLE_POINTER_ACTIONS,
     ROLE_POINTER_QUALIFICATIONS,
 )
-from agents_remember_test_support.testing.capsule_audience_v13_fixtures import (
-    V13_OPERATION_SHA256,
-    V13_PRE_SHORT_OPERATION_SHA256,
-    V13_PRE_SHORT_STAGE_SHA256,
-    V13_STAGE_SHA256,
-    inverse_v13_paths,
-    inverse_v13_short_rules,
+from agents_remember_test_support.testing.capsule_audience_structure import (
+    assert_operation_projection,
+    foreign_passage,
+    source_detail_link_count,
 )
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 from test_role_capsule_compiler import (
     all_sources,
     fixture_manifest_document,
@@ -99,10 +92,11 @@ def test_compiler_carries_declared_step_detail_bytes_as_separate_references() ->
     document["references"] = {
         "sample-detail": {
             "source": "reference/sample-detail.md",
-            "roles": ["worker"],
             "step_detail": True,
-            "step": "when writing the sample",
         }
+    }
+    document["derived"] = {
+        "references": {"sample-detail": {"roles": ["worker"], "step": "when writing the sample"}}
     }
     role = "Read {{detail:reference/sample-detail.md}} when writing the sample.\n"
     sources = (
@@ -567,7 +561,13 @@ def _required_action_paragraph(
             pattern, " ".join(paragraph.replace("*", "").replace("`", "").split())
         )
     ]
-    assert len(matches) == 1, (location, action, fragment, suffix)
+    assert len(matches) == 1, (
+        location,
+        action,
+        fragment,
+        suffix,
+        f"If derived facts are stale, run {RENEW_COMMAND}",
+    )
     _assert_bound_action(matches[0], location, action)
     return matches[0]
 
@@ -580,14 +580,13 @@ def _assert_step_detail_timing(text: str, records: list[dict], role: str, operat
     for entry in records:
         assert entry["step"].strip()
         required = [action for source, action in actions if source == entry["sourcePath"]]
-        ordinary = ORDINARY_DETAIL_LINK_COUNTS.get(role + "/" + operation, {}).get(
-            entry["sourcePath"], 0
-        )
+        root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
+        expected_links = source_detail_link_count(root, role, operation, entry["sourcePath"])
         # Count all exact final URL targets, but do not mistake ordinary section links
         # for additional metadata-driven read actions. Each action below remains unique.
         assert (
             text.count("](" + entry["path"] + ")") + text.count("](" + entry["path"] + "#")
-            == len(required) + ordinary
+            == expected_links
         )
         for action in required:
             _required_action_paragraph(text, entry["path"], action, role, entry["sourcePath"])
@@ -807,7 +806,9 @@ def test_d301_handoff_file_is_read_for_first_review_then_reused_for_repairs(tmp_
         review_source = (corpus / "operations/review.md").resolve()
         review_target = quote(review_source.as_posix(), safe="/:@") + "#boundaries"
         root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
-        assert review_source.read_bytes() == (root / "operations/review.md").read_bytes()
+        assert review_source.read_bytes() == (root / "operations/review.md").read_bytes(), (
+            f"Run {RENEW_COMMAND}"
+        )
     for clause in (
         "## Send the whole requested review or repair",
         "Before sending a memory candidate for review, read",
@@ -1022,16 +1023,14 @@ def _compile_corpus_pair(
     return outcome.result
 
 
-def test_real_operation_audiences_preserve_pinned_common_and_only_addressed_paragraphs() -> None:
+def test_real_operation_audiences_deliver_only_common_and_addressed_sections() -> None:
     root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
     manifest = (root / "composition-manifest.json").read_bytes()
     document = parse_composition_manifest(manifest)
-    assert set(document.operations) == set(R125_OPERATION_ROLES)
-    checked: set[tuple[str, str]] = set()
-    for operation, roles in R125_OPERATION_ROLES.items():
-        metadata = document.operations[operation]
-        assert set(metadata.applies_to_roles) == set(roles), operation
-        for role in roles:
+    checked = set()
+    foreign_fault_checked = False
+    for operation, metadata in document.operations.items():
+        for role in metadata.applies_to_roles:
             entry = document.roles[role]
             result = _compile_corpus_pair(
                 root, manifest, CapsuleRoleSeat(entry.role, entry.altitude), operation
@@ -1042,37 +1041,28 @@ def test_real_operation_audiences_preserve_pinned_common_and_only_addressed_para
                 for block in result.capsule.instructions
                 if block.source_path == metadata.source
             )
-            assert (
-                sha256(stage.content.encode()).hexdigest()
-                == V13_STAGE_SHA256[f"{operation}/{role}"]
-            ), (role, operation)
-            restored = inverse_v13_short_rules(stage.content, f"{operation}/{role}")
-            assert (
-                sha256(restored.encode()).hexdigest()
-                == V13_PRE_SHORT_STAGE_SHA256[f"{operation}/{role}"]
+            assert_operation_projection(
+                root, metadata.source, metadata.audience, role, stage.content
             )
-            assert (
-                sha256(inverse_v13_paths(restored).encode()).hexdigest()
-                == D656_STAGE_SHA256[f"{operation}/{role}"]
-            )
+            foreign = foreign_passage((root / metadata.source).read_text(), role)
+            if metadata.audience == "sections" and foreign:
+                with pytest.raises(AssertionError, match="addressed source sections"):
+                    assert_operation_projection(
+                        root, metadata.source, metadata.audience, role, stage.content + foreign
+                    )
+                foreign_fault_checked = True
             checked.add((role, operation))
+    assert foreign_fault_checked
     assert checked == {
         (role.role, operation) for role in document.roles.values() for operation in role.operations
     }
 
 
-def test_operation_audience_markings_preserve_pinned_bytes_and_immutable_closeout() -> None:
+def test_operation_audience_modes_match_their_declared_source_structure() -> None:
     root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
     document = parse_composition_manifest((root / "composition-manifest.json").read_bytes())
-    for operation, expected in D656_OPERATION_SHA256.items():
-        metadata = document.operations[operation]
+    for operation, metadata in document.operations.items():
         content = (root / metadata.source).read_bytes()
-        assert sha256(content).hexdigest() == V13_OPERATION_SHA256[operation], operation
-        restored = inverse_v13_short_rules(content.decode(), "operation/" + operation)
-        assert sha256(restored.encode()).hexdigest() == V13_PRE_SHORT_OPERATION_SHA256[operation], (
-            operation
-        )
-        assert sha256(inverse_v13_paths(restored).encode()).hexdigest() == expected, operation
         if operation == "authorized-closeout":
             assert metadata.audience == "all"
             assert metadata.source == "operations/closeout.md"

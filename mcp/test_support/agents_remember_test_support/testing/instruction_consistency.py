@@ -331,13 +331,13 @@ def _historical_path_text(root: Path, surface: Surface) -> str:
         "current": ("ar-role-capsule-budget-current/v1", None),
         "d694": ("ar-role-capsule-budget-current/v1", "predecessorD694Sha256"),
         "frozen": ("ar-role-capsule-budgets/v1", "historicalRegistrySha256"),
-        "digest": ("ar-shared-rule-digest/v1", "currentDigestMapSha256"),
+        "digest": ("ar-shared-rule-digest/v1", None),
     }
     schema, pin = expected[kind]
     assert document["schema"] == schema, "historical owner schema differs"
     if pin is not None:
         assert sha256(raw).hexdigest() == current["decision"][pin], "historical owner changed"
-    else:
+    elif kind == "current":
         assert document == current, "historical current record changed"
     masked = list(surface.text)
     for path, start, end, is_key in _json_tokens(surface.text):
