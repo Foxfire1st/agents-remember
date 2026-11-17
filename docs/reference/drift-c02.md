@@ -54,8 +54,16 @@ or records why the card needs no change.
 The Curator runs the full contract-scoped `memory_quality_check` on a task. Each full run replaces
 the two files of the checklist. The Markdown file is the checklist to read. The JSON file is the
 attestation of the run: it names the code tree and the memory tree that the run judged and the
-SHA-256 of the Markdown file. The answer names the two files in `reportPath` and
-`attestationPath`.
+SHA-256 of the complete Markdown file. It also records `measuredReportSha256`, the digest of
+all report bytes outside the `knowledgeReview` section that lists published assessments.
+The coherence record binds this measured result for freshness, while the complete report and
+attestation retain their integrity checks. Publishing assessments leaves them visible in the
+report without making the record stale at the next quality check on the unchanged pair.
+Records without `measuredReportSha256` or `measuredAttestationSha256` are readable,
+with their stored generations checked for integrity. The shared validator used by
+`memory_quality_check`, `status`, `validate` and closeout reports
+`curator-coherence-stale` with next action `publish` for such a live record.
+The answer names the two files in `reportPath` and `attestationPath`.
 
 ```text
 <enclosure>/reports/curator-memory-quality.md

@@ -78,9 +78,18 @@ def render_curator_coherence(record: CuratorCoherenceRecord) -> str:
             "## Validation contract",
             "",
             "The lifecycle validator requires the exact current code tree, memory tree, task",
-            "topology, attestation bytes, candidate identities, record bytes, and projection",
+            (
+                "topology, measured attestation result, candidate identities, record bytes, and projection"
+                if record.measuredAttestationSha256 is not None
+                else "topology, attestation bytes, candidate identities, record bytes, and projection"
+            ),
             "digest. Historical generations are audit evidence only; the stable authority",
             "manifest selects the sole live generation.",
+            *(
+                ["The complete retained attestation snapshot is checked for byte integrity."]
+                if record.measuredAttestationSha256 is not None
+                else []
+            ),
             "",
         ]
     )

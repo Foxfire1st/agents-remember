@@ -285,6 +285,8 @@ non-null. `semantic_requirement_revision` names the task's requirement packet as
 code tree and the memory tree, a digest of the task's place in its master (and in its sprint, when
 one commands the master), the task's
 intent, and the SHA-256 of the attestation of the [Curator's checklist](concepts.md#curators-checklist).
+`expected_attestation_sha256` is the SHA-256 of the complete attestation file that
+`prepare` observed; pass it unchanged.
 `caller` names the caller's role and a task document: the task's own document for a Curator; for
 any other role the sprint's document when one commands the master, otherwise the master's
 document. Each action takes only its own arguments, so `status`,
@@ -295,6 +297,18 @@ the record. An `evidenceRef` names one file in one of three namespaces, `code:`,
 `task:` (for example `code:src/example.py`); the tool records the SHA-256 of that file and checks
 it again at each later validation. `validate` is the same validator that `memory_quality_check`
 and the closeout use.
+
+The published record preserves the complete attestation and report hashes for integrity.
+For freshness it also binds the measured quality result: `measuredReportSha256` hashes every
+part of the report except its `knowledgeReview` section, which lists the published assessments;
+`measuredAttestationSha256` binds that digest and the other quality facts. The complete report
+is checked against its stored hash; the attestation's dependency envelope is checked against
+the report bytes and candidate trees.
+Published assessments remain visible in the report without making their own record stale on
+the next unchanged quality check. Records without `measuredReportSha256` or
+`measuredAttestationSha256` are readable, and their stored generations are checked for
+integrity. The shared validator used by `memory_quality_check`, `status`, `validate` and
+closeout reports `curator-coherence-stale` with next action `publish` for such a live record.
 
 After the closeout of a task, `status` and `validate` answer the state `closed-out` with the
 closeout's code commit and memory commit and the digest of the coherence record. They compare
@@ -348,8 +362,10 @@ It never changes code or memory. A full call with the worktree contract of a tas
 contract-scoped call that names no `checks`) atomically replaces the
 [Curator's checklist](concepts.md#curators-checklist) at
 `<enclosure>/reports/curator-memory-quality.md` and its `.json` attestation, which names the code
-tree and the memory tree that the run judged and the SHA-256 of the checklist; a call that names
-`checks` and a call without a contract write neither. Every contract-scoped execution also
+tree and the memory tree that the run judged, the SHA-256 of the complete checklist and
+`measuredReportSha256`, the SHA-256 of the checklist outside its `knowledgeReview` section;
+a call that names `checks` and a call without a contract write neither. Every contract-scoped
+execution also
 publishes the complete structural census, the cards, route overviews and rows of the entity
 catalog that the task's change reaches, to `<enclosure>/reports/memory-census.json`; the answer
 carries the counts and the checklist's location instead of the census, the sample and the
@@ -360,11 +376,13 @@ drift), not that the tool failed. `curatorActionableCount` and
 reach `0` and the status must read `ready-for-closeout`. Once the checklist is
 `ready-for-closeout`, the combined `checklistStatus=coherence-required` means the caller must
 prepare, publish and validate the [coherence record](concepts.md#coherence-record) with `curator_coherence`;
-`closeoutReady=true` is impossible until that same validator accepts the record. The checklist
-and the attestation are written byte for byte the same for the same inputs, so a rerun with the
-same inputs keeps the published coherence record current; changed inputs make it stale and require
-a new publication. The final commit stamps of the cards stay the closeout's work. The request has
-exactly one `mode`:
+`closeoutReady=true` is impossible until that same validator accepts the record. A rerun on the
+unchanged pair keeps the published coherence record current, including when publication adds
+assessments to the checklist's `knowledgeReview` section. The measured result outside that section
+stays bound, as do the other inputs of the record: a changed measured finding, count, status or
+other bound input makes it stale and requires a new publication. The complete checklist and
+attestation keep their separate integrity checks. The final commit stamps of the cards stay
+the closeout's work. The request has exactly one `mode`:
 `sync` and `start` carry the repository and optional fields for the scope, the checks and the
 detail, while `poll` carries the repository, the run id and, for a run on a task, the same
 contract path. A call with the repository only checks the memory repository itself, and its

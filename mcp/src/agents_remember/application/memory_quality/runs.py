@@ -11,11 +11,13 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
+from contextvars import Context
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Literal
 
 from agents_remember.application.memory_scope import MemoryScopeIdentity
+from agents_remember.memory_quality.style.citations.extents import definition_scope
 
 MAX_QUALITY_RUNS = 8
 QUALITY_RUN_TTL_SECONDS = 1800
@@ -99,6 +101,7 @@ def start_quality_run(
             args=(run, fn),
             name=f"quality-run-{run.run_id}",
             daemon=True,
+            context=Context(),
         )
         _registry[run.run_id] = run
         try:
@@ -130,7 +133,8 @@ def _complete_quality_run(
     fn: Callable[[], dict[str, object]],
 ) -> None:
     try:
-        result = fn()
+        with definition_scope():
+            result = fn()
     except Exception as exc:  # the retained run translates arbitrary worker failure
         with _lock:
             run.status = "failed"

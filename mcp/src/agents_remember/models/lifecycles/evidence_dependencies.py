@@ -59,17 +59,18 @@ MAX_CURATOR_REVIEW_ASSESSMENTS: Final = 256
 
 # MIK-R52 rule 12: the dependency capacity follows from the coherence record's own bounds, so no
 # bare number stands in the field below. The coherence record builder
-# (``worktrees/integration/closeout/curator_coherence_publication.py::_record``) declares at most:
+# (``worktrees/integration/closeout/curator_coherence_binding.py::curator_coherence_dependencies``) declares at most:
 # its fixed dependencies (code-tree, memory-tree, semantic-topology, task-intent,
 # memory-attestation, the memory-quality-report evidence-bytes edge, and at most one
-# predecessor-record edge), one evidence-bytes edge for each of at most
+# predecessor-record edge, plus the measured attestation and measured report edges),
+# one evidence-bytes edge for each of at most
 # ``MAX_CURATOR_SOURCE_CANDIDATES`` judgments, one review-record edge for each of at most
 # ``MAX_CURATOR_REVIEW_ASSESSMENTS`` assessments, and its validator edges. The bound covers every
-# record builder whose model bounds its payload, and it is coherence-derived: 7 + 2048 + 256 + 1
-# = 2312. The master-scope route review has no bound of its own: its model sets no upper bound on
+# record builder whose model bounds its payload, and it is coherence-derived: 9 + 2048 + 256 + 1
+# = 2314. The master-scope route review has no bound of its own: its model sets no upper bound on
 # its lists, so no cap is imposed on it here — but it is still limited by this shared constant,
 # and its refusal names the bound and the count.
-_COHERENCE_FIXED_DEPENDENCIES: Final = 7
+_COHERENCE_FIXED_DEPENDENCIES: Final = 9
 _COHERENCE_VALIDATOR_DEPENDENCIES: Final = 1
 MAX_EVIDENCE_DEPENDENCIES: Final = (
     _COHERENCE_FIXED_DEPENDENCIES

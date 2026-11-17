@@ -887,7 +887,7 @@ def test_the_closeout_validator_refuses_until_the_gate_passes_and_never_runs_ung
         memory_candidate_tree=candidate.memory,
         task_topology_fingerprint="t",
         task_intent=dumped,
-        attestation_sha256="s",
+        attestation=dumped,
         source_candidates=[],
         candidate=SimpleNamespace(ref="leaf.json"),
     )
@@ -914,6 +914,7 @@ def test_the_closeout_validator_refuses_until_the_gate_passes_and_never_runs_ung
         mock.patch.object(curator_coherence, "require_current_task_intent"),
         mock.patch.object(curator_coherence, "_require_current_dependencies"),
         mock.patch.object(curator_coherence, "require_recorded_judgments_current"),
+        mock.patch.object(curator_coherence, "require_current_quality_binding"),
         pytest.raises(CuratorCoherenceError) as refused,
     ):
         curator_coherence.require_current_curator_coherence(world.contract)

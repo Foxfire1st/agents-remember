@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+import threading
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 
 from agents_remember.memory_quality.style.citations import grammars
 
@@ -29,6 +32,35 @@ class Extent:
     test_case: bool = False
 
 
+@dataclass
+class _DefinitionCache:
+    values: dict[tuple[str, str | None, tuple[str, ...]], dict[str, list[Extent]]] = field(
+        default_factory=dict
+    )
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+_definitions_in_call: ContextVar[_DefinitionCache | None] = ContextVar(
+    "definitions_in_call", default=None
+)
+
+
+@contextmanager
+def definition_scope() -> Iterator[None]:
+    """Join a nested operation, or own definitions until this call finishes."""
+    if _definitions_in_call.get() is not None:
+        yield
+        return
+    cache = _DefinitionCache()
+    token = _definitions_in_call.set(cache)
+    try:
+        with grammars.parsing_scope():
+            yield
+    finally:
+        _definitions_in_call.reset(token)
+        cache.values.clear()
+
+
 def definitions(path: str, lines: Sequence[str]) -> dict[str, list[Extent]]:
     """Every name this file binds at any depth, and the extent of the construct binding it.
 
@@ -40,6 +72,20 @@ def definitions(path: str, lines: Sequence[str]) -> dict[str, list[Extent]]:
     none of it is this check's business. A grammar that will not LOAD is the other case
     entirely and raises; see :mod:`grammars`.
     """
+    cache = _definitions_in_call.get()
+    if cache is None:
+        return _definitions(path, lines)
+    key = (path, grammars.grammar_of(path), tuple(lines))
+    # A request's copied ContextVars share this table across its worker threads.
+    # Serialize a miss so concurrent anchors still parse their input exactly once.
+    with cache.lock:
+        if key not in cache.values:
+            cache.values[key] = _definitions(path, lines)
+        # Callers own their containers, as they did before definitions were reused.
+        return {name: list(items) for name, items in cache.values[key].items()}
+
+
+def _definitions(path: str, lines: Sequence[str]) -> dict[str, list[Extent]]:
     return {
         name: [
             Extent(
