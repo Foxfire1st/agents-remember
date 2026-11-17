@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from agents_remember.errors import CapsuleCompilationError, CapsuleManifestError
+from agents_remember.models.role_capsules.manifest_derived import compose_manifest
 from agents_remember.models.role_capsules.sources import CapsuleSource
 from agents_remember.models.role_capsules.types import (
     CapsuleDetailReference,
@@ -27,7 +28,7 @@ def parse_detail_declarations(
     document: Mapping[str, object],
 ) -> tuple[CapsuleDetailDeclaration, ...]:
     """References without step_detail stay ordinary metadata, never launch attachments."""
-    references = document.get("references", {})
+    references = compose_manifest(document).get("references", {})
     if not isinstance(references, dict):
         raise CapsuleManifestError(status="manifest-invalid", detail="references must be an object")
     declarations: list[CapsuleDetailDeclaration] = []
@@ -45,7 +46,12 @@ def parse_detail_declarations(
             or any(not isinstance(role, str) for role in roles)
         ):
             raise CapsuleManifestError(
-                status="manifest-invalid", detail=f"references.{name} needs source, roles and step"
+                status="manifest-invalid",
+                detail=f"references.{name} needs source, roles and step",
+                next_action=(
+                    "run mcp/.venv/bin/python scripts/renew-instructions.py "
+                    "from the source repository"
+                ),
             )
         declarations.append(CapsuleDetailDeclaration(source, tuple(roles), step))
     return tuple(declarations)
@@ -68,7 +74,11 @@ def compile_detail_references(
             raise CapsuleCompilationError(
                 status="detail-reference-missing",
                 detail=f"capsule names {path!r} but its role declaration or admitted file is missing",
-                next_action="Declare the file under references with step_detail, roles and step, and admit its bytes.",
+                next_action=(
+                    "Declare the file under references with step_detail and a role-addressed read "
+                    "pointer, run mcp/.venv/bin/python scripts/renew-instructions.py, "
+                    "and admit its bytes."
+                ),
             )
         references.append(CapsuleDetailReference(path, source.revision, source.content, entry.step))
     return tuple(references)

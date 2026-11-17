@@ -84,13 +84,14 @@ from unittest import mock
 
 import pytest
 from agents_remember.certification.repository_profiles import canonical
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 CANONICAL_SKILLS_PATH = REPOSITORY_ROOT / "skills"
 SCRIPT_PATH = REPOSITORY_ROOT / "scripts" / "sync-skills.py"
 CERTIFICATION_PROFILE_PATH = REPOSITORY_ROOT / "mcp" / "certification-profile-v1.json"
 CERTIFIED_GENERATED_INPUT_ID = "generated-skills"
-REPAIR_COMMAND = "python3 scripts/sync-skills.py"
+REPAIR_COMMAND = RENEW_COMMAND
 STAGING_SUFFIX = ".ar-sync-new"
 RETIRED_SUFFIX = ".ar-sync-old"
 

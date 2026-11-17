@@ -711,9 +711,11 @@ class RoleMessageWordingTests(unittest.TestCase):
                 elif mutation == "declaration":
                     del manifest["references"]["message-handover"]
                 elif mutation == "audience":
-                    manifest["references"]["message-handover"]["roles"].remove("reviewer")
+                    manifest["derived"]["references"]["message-handover"]["roles"].remove(
+                        "reviewer"
+                    )
                 elif mutation == "empty-step":
-                    manifest["references"]["message-handover"]["step"] = ""
+                    manifest["derived"]["references"]["message-handover"]["step"] = ""
                 else:
                     path = root / "roles/reviewer.md"
                     original = path.read_text()

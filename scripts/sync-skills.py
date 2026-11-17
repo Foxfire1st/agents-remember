@@ -224,7 +224,9 @@ def check_targets() -> int:
         print("[sync-skills] out of sync: generated-skills profile row", file=sys.stderr)
         failed = True
     if failed:
-        print("[sync-skills] run: python3 scripts/sync-skills.py", file=sys.stderr)
+        print(
+            "[sync-skills] run: mcp/.venv/bin/python scripts/renew-instructions.py", file=sys.stderr
+        )
         return 1
     return 0
 

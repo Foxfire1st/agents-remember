@@ -28,6 +28,8 @@ from agents_remember.models.role_capsules.types import (
 )
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
+
 AUTHORING = "reference/curator/card-sentence-decisions.md"
 CARD = "reference/curator/card-formats-and-citations.md"
 KNOWLEDGE = "reference/knowledge/commands.md"
@@ -94,7 +96,9 @@ def require_permission_delivery(detail: str, root: Path) -> None:
     # Require the actual emitted permission pointer and its complete reached rule.
     with shipped_composition_corpus() as (origin, _):
         target = origin / "operations/orientation.md"
-        assert target.read_bytes() == (root / "operations/orientation.md").read_bytes()
+        assert target.read_bytes() == (root / "operations/orientation.md").read_bytes(), (
+            f"Run {RENEW_COMMAND}"
+        )
         boundary = linked_section(
             detail,
             root / "reference/refused-write.md",

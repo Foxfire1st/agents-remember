@@ -130,21 +130,32 @@ source and run the script. Never edit a copy by hand.
 
 | Source | Copy | Script |
 | --- | --- | --- |
-| `skills/` | `mcp/src/agents_remember/package_data/runtime/skills/` | `python3 scripts/sync-skills.py` |
+| `skills/` and its derived instruction facts | `mcp/src/agents_remember/package_data/runtime/skills/` | `mcp/.venv/bin/python scripts/renew-instructions.py` |
+| `docs/tool-details.md` | `mcp/src/agents_remember/package_data/runtime/docs/tool-details.md` | `mcp/.venv/bin/python scripts/renew-instructions.py` |
 | `benchmarks/`, `providers/`, `system/` | `package_data/benchmarks/`, `package_data/runtime/providers/` and `package_data/runtime/system/` under `mcp/src/agents_remember/` | `python3 scripts/sync-runtime.py` |
 | The Python models of the dashboard's data | `dashboard/src/types/projection.schema.json`, `dashboard/src/types/projection.ts` | `mcp/.venv/bin/python scripts/sync-projection-types.py` |
 | `dashboard/dist/`, the built dashboard | `mcp/src/agents_remember/package_data/dashboard/` and the file `dashboard.fingerprint` beside it | `python3 scripts/sync-dashboard.py` |
 
 Each script takes `--check`, which compares, reports a difference and writes nothing. The
-first three also take `--list-targets`. The pre-commit hook runs the first three with
-`--check`.
+instruction, runtime and projection scripts also take `--list-targets`. The pre-commit hook checks
+instruction renewal, runtime copies and projection types with `--check`.
 
-Git tracks the first three copies. Git ignores the dashboard's build output and its copy, so
+Git tracks the instruction, documentation, runtime and projection copies. Git ignores the dashboard's build output and its copy, so
 neither is committed.
 
-One copy has no script. `docs/tool-details.md` has a copy at
-`mcp/src/agents_remember/package_data/runtime/docs/tool-details.md`, and a test fails when
-the two differ. Copy the file after you change it.
+After changing an instruction sentence, run `mcp/.venv/bin/python scripts/renew-instructions.py`. The command
+renews measured sizes, hashes, passage locations, routing metadata and package copies; its output
+shows which sizes grew or shrank. Authored ceilings and semantic decisions remain separate.
+When a mapped passage changes, the command names the affected units and shows the held and current
+text. Name the intended passage with `--bind-unit UNIT=FILE:START-END`, then run the same command.
+Evidence passages and clauses keep their own text bindings. To name a changed clause explicitly,
+use `--bind-unit UNIT@clause:PLACE:N=FILE:START-END`. A plain unit binding never rebinds its evidence
+or clauses; each clause matches its own held hash or needs its explicit selector.
+An ambiguous pointer action is resolved with `--bind-pointer ID=FILE:LINE`; the command never chooses
+by sentence position. Use `--check` to report stale values without writing.
+Step actions follow first-message source paths in lexicographic order and lines in increasing
+order, then detail references in manifest order and lines in increasing order; each action's
+first occurrence determines its position.
 
 ## Building the dashboard
 

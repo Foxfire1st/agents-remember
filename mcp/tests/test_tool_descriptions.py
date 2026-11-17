@@ -35,6 +35,7 @@ from agents_remember.models.tools.tool_descriptions import (
     TOOL_ARGUMENT_DESCRIPTION_MAX_CHARS,
     TOOL_DESCRIPTION_MAX_CHARS,
 )
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 from mcp.server.fastmcp import FastMCP
 
 # The length each interim-owned description has when this leaf lands. Recorded at
@@ -292,7 +293,7 @@ class ShippedToolDetailsTests(unittest.TestCase):
         self.assertEqual(
             TOOL_DETAILS_PACKAGED.read_bytes(),
             TOOL_DETAILS_CHECKOUT.read_bytes(),
-            "packaged docs/tool-details.md drifted from the checkout canonical",
+            f"packaged docs/tool-details.md drifted; run {RENEW_COMMAND}",
         )
 
     def test_disposable_install_reaches_the_named_place(self) -> None:
@@ -329,7 +330,7 @@ class ShippedToolDetailsTests(unittest.TestCase):
             self.assertEqual(
                 installed.read_bytes(),
                 TOOL_DETAILS_CHECKOUT.read_bytes(),
-                "installed docs/tool-details.md differs from the checkout canonical",
+                f"installed docs/tool-details.md differs from the checkout canonical; run {RENEW_COMMAND}",
             )
 
 

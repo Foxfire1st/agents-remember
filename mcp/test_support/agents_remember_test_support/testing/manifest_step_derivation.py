@@ -40,6 +40,10 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from agents_remember.models.role_capsules.manifest_derived import compose_manifest
+
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
+
 SKILL = "l-01-agent-lifecycles"
 SERVED_PREFIX = f"skill://agents-remember/skills/{SKILL}/"
 LINK = re.compile(r"\[(?:[^\[\]]|\[[^\[\]]*\])*\]\(\s*(<[^>\n]*>|[^)\s]+)(?:\s+\"[^\"]*\")?\s*\)")
@@ -260,7 +264,7 @@ def detail_pointers(root: Path, document: dict) -> list[Pointer]:
 
 
 def derive(root: Path, document: dict | None = None) -> dict[str, Derivation]:
-    """Derive step and roles for every manifest reference that declares a step."""
+    """Derive actions and roles for each classified Markdown reference."""
     manifest: dict = (
         document
         if document is not None
@@ -271,7 +275,7 @@ def derive(root: Path, document: dict | None = None) -> dict[str, Derivation]:
     result = {
         key: Derivation(key, entry["source"], entry.get("step"), tuple(entry.get("roles", [])))
         for key, entry in manifest["references"].items()
-        if "step" in entry
+        if "step_detail" in entry and entry["source"].endswith(".md")
     }
     for item in result.values():
         _collect(item, [p for p in first if p.target == item.source])
@@ -344,26 +348,33 @@ def manifest_mismatches(root: Path, document: dict) -> list[str]:
     ``rolesReason``; then they must equal the derived roles plus the roles the reason names.
     """
     problems: list[str] = []
-    for key, item in derive(root, document).items():
-        entry = document["references"][key]
-        if not item.actions:
+    manifest = compose_manifest(document)
+    for key, item in derive(root, manifest).items():
+        entry = manifest["references"][key]
+        if item.declared_step is None and entry.get("step_detail") is not True:
+            pass
+        elif not item.actions:
             problems.append(f"{key}: no pointer-derived action ({item.reached_from})")
         elif item.declared_actions != set(item.actions):
             problems.append(
-                f"{key}: step {sorted(item.declared_actions)} != derived {sorted(item.actions)}"
+                f"{key}: step {sorted(item.declared_actions)} != derived {sorted(item.actions)}; run {RENEW_COMMAND}"
             )
-        derived_roles = ordered_roles(document, item.roles)
+        derived_roles = ordered_roles(manifest, item.roles)
         reason = entry.get("rolesReason")
         if reason is None:
             if list(item.declared_roles) != derived_roles:
-                problems.append(f"{key}: roles {list(item.declared_roles)} != {derived_roles}")
+                problems.append(
+                    f"{key}: roles {list(item.declared_roles)} != {derived_roles}; run {RENEW_COMMAND}"
+                )
         elif not (isinstance(reason, str) and reason.strip()):
             problems.append(f"{key}: empty rolesReason")
         else:
             named = {
-                role for role in document["role_order"] if re.search(rf"\b{role}\b", reason, re.I)
+                role for role in manifest["role_order"] if re.search(rf"\b{role}\b", reason, re.I)
             }
-            expected = ordered_roles(document, set(derived_roles) | named)
+            expected = ordered_roles(manifest, set(derived_roles) | named)
             if list(item.declared_roles) != expected:
-                problems.append(f"{key}: roles {list(item.declared_roles)} != {expected} (reason)")
+                problems.append(
+                    f"{key}: roles {list(item.declared_roles)} != {expected} (reason); run {RENEW_COMMAND}"
+                )
     return problems

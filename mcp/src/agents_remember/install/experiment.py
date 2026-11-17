@@ -282,8 +282,8 @@ def probe_capabilities(*, source_root: Path) -> CapabilityReport:
                 blocking=True,
                 detail=f"sha256:{anchor_digest}" if anchor_digest else f"missing: {anchor}",
                 remedy=(
-                    "the canonical corpus anchor is not installed with the runtime assets; run "
-                    "scripts/sync-skills.py and scripts/sync-runtime.py"
+                    "the canonical corpus anchor is not installed with the runtime assets; "
+                    "from the source checkout, run mcp/.venv/bin/python scripts/renew-instructions.py"
                 ),
             ),
         )

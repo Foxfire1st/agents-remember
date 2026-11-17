@@ -32,6 +32,7 @@ from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.mcp.registration.knowledge import register_knowledge_tools
 from agents_remember.models.role_agents import RoleStartCall
+from agents_remember.models.role_capsules.manifest_derived import compose_manifest
 from agents_remember.models.role_capsules.types import (
     CapsuleCompilationResult,
     compute_content_digest,
@@ -52,6 +53,7 @@ from agents_remember.worktrees.scheduling_mode import effective_execution_nature
 from agents_remember.worktrees.source_lineage import source_lineage_for_contract
 from agents_remember.worktrees.task_resolver import series_contract_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract, contract_publication_text
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 from agents_remember_test_support.testing.leaf_instruction_wording import (
     assert_action_pointer,
     assert_emitted_detail_links,
@@ -158,7 +160,7 @@ def _linked_instruction_source(
     with shipped_composition_corpus() as (root, _manifest):
         assert path.resolve() == (root / source).resolve()
         actual = path.read_bytes()
-        assert actual == (LIFECYCLE_ROOT / source).read_bytes()
+        assert actual == (LIFECYCLE_ROOT / source).read_bytes(), f"Run {RENEW_COMMAND}"
     owner = actual.decode("utf-8")
     assert "\n## " + heading + "\n" in owner
     return owner
@@ -222,6 +224,7 @@ class RealDigestFirstMessageTests(FirstMessageMatrixBase):
     def test_native_worker_architect_and_bootstrap_carry_the_real_digest_once(self) -> None:
         """No corpus or compiler patch: the host receives the shipped digest's exact bytes."""
 
+        remedy = f"If derived facts are stale, run {RENEW_COMMAND}"
         digest = (LIFECYCLE_ROOT / "core/every-role.md").read_text(encoding="utf-8")
         heading = f"## {SHARED_BLOCK_HEADING}\n\n"
         for role, kind in (
@@ -239,8 +242,8 @@ class RealDigestFirstMessageTests(FirstMessageMatrixBase):
                     message, receipt, role=role, harness=FIXTURE_HARNESSES[0], kind=kind
                 )
                 self.assertEqual(message.count(heading), 1)
-                self.assertEqual(message.count(digest), 1)
-                self.assertIn(f"{heading}{digest}\n\n# {role.title()}", message)
+                self.assertEqual(message.count(digest), 1, remedy)
+                self.assertIn(f"{heading}{digest}\n\n# {role.title()}", message, remedy)
                 self.release(receipt)
 
 
@@ -401,7 +404,9 @@ def test_worker_measurement_checkpoint_steps_reach_every_worker_operation() -> N
 def test_digest_homes_declare_audiences_and_steps_without_injecting_the_map() -> None:
     """The digest and its audit map each have an exact path, audience and read step."""
 
-    document = json.loads((LIFECYCLE_ROOT / MANIFEST_RELATIVE).read_text(encoding="utf-8"))
+    document = compose_manifest(
+        json.loads((LIFECYCLE_ROOT / MANIFEST_RELATIVE).read_text(encoding="utf-8"))
+    )
     shared = document["core"]["every-role"]
     assert shared["source"] == "core/every-role.md"
     assert shared["roles"] == document["role_order"]

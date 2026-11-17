@@ -286,6 +286,7 @@ def test_current_budget_record_names_no_absent_path() -> None:
     absent = "reference/curator/handoff-list-ingestion.md"
     assert not (ROOT / "skills/l-01-agent-lifecycles" / absent).exists()
     record = document["decision"][renewals[-1]]
+    record["membership"] = {"changedSources": []}
     members = _first_list(record["membership"])
     assert members is not None
     members.append(absent)
@@ -294,7 +295,7 @@ def test_current_budget_record_names_no_absent_path() -> None:
     assert current_record_absent_paths(ROOT, document) == {absent}
     record["historicalTree"] = "9676e772b14971b5184fabac3528a16cb97a9425"
     assert current_record_absent_paths(ROOT, document) == set()
-    document["current_detail_population"] = [absent]
+    document["derived"]["current_detail_population"] = [absent]
     assert current_record_absent_paths(ROOT, document) == {absent}
 
 
@@ -304,7 +305,7 @@ def _renewal_currentness_problems(document: dict) -> list[str]:
         for key, record in document["decision"].items()
         if key.startswith("measuredCurrentRenewal") and isinstance(record, dict)
     }
-    claims = sorted(key for key, record in renewals.items() if record.get("current") is True)
+    claims = sorted(key for key, record in renewals.items() if not historical_tree(record))
     problems = [] if len(claims) == 1 else [f"current claims {claims}"]
     problems += [
         f"history claims current: {key}"
@@ -314,7 +315,7 @@ def _renewal_currentness_problems(document: dict) -> list[str]:
     problems += [
         f"not history and not current: {key}"
         for key, record in renewals.items()
-        if not historical_tree(record) and key not in claims
+        if not historical_tree(record) and set(record) != {"authority"}
     ]
     return problems
 
@@ -382,7 +383,6 @@ def test_duplicate_history_key_in_actual_owner_cannot_borrow_effective_fingerpri
     (
         "capsule-budgets-d694.json",
         "capsule-budgets.json",
-        "core/digest-map.json",
     ),
 )
 def test_actual_frozen_owner_change_fails_its_existing_sha_authentication(

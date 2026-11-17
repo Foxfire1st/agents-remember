@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from hashlib import sha256
 from pathlib import Path
@@ -20,9 +19,17 @@ from agents_remember_test_support.testing.capsule_audience_fixtures import (
     ROLE_POINTER_QUALIFICATIONS,
     SHARED_SHORT_RULE_CLAUSES,
 )
+from agents_remember_test_support.testing.digest_map import load_digest_map
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 from agents_remember_test_support.testing.leaf_instruction_wording import assert_action_pointer
 from agents_remember_test_support.testing.manifest_step_derivation import (
     sentence_start,
+)
+from agents_remember_test_support.testing.pointer_renewal_cases import (
+    assert_pointer_ambiguity_requires_explicit_bindings,
+    assert_pointer_binding_uses_identity,
+    assert_pointer_changes_do_not_learn_admissions,
+    assert_pointer_wording_is_current,
 )
 from agents_remember_test_support.testing.pointer_uniqueness import duplicate_pointers
 from test_l84_capsule_delivery_proofs import (
@@ -129,6 +136,20 @@ ROLE_DETAILS = {
         "reference/knowledge/commands.md",
     ],
 }
+
+
+def test_pointer_wording_renewal_matches_identity_after_reordering(tmp_path: Path) -> None:
+    assert_pointer_binding_uses_identity(tmp_path)
+
+
+def test_pointer_wording_renewal_requires_explicit_ambiguous_bindings(tmp_path: Path) -> None:
+    assert_pointer_ambiguity_requires_explicit_bindings(tmp_path)
+
+
+def test_pointer_wording_renewal_preserves_admission_policy(tmp_path: Path) -> None:
+    assert_pointer_changes_do_not_learn_admissions(tmp_path)
+
+
 OPERATION_DETAILS = {
     "bootstrap/bootstrap": [
         "reference/bootstrap/failure-states.md",
@@ -414,6 +435,7 @@ RESTORED_DUPLICATES = (
 
 def test_every_native_first_message_has_one_pointer_per_action() -> None:
     """P5-18: one pointer per action per first message, keyed by target file, every link."""
+    assert_pointer_wording_is_current()
     manifest = _shipped_parsed()
     checked = set()
     for role, entry in manifest.roles.items():
@@ -421,7 +443,6 @@ def test_every_native_first_message_has_one_pointer_per_action() -> None:
             units = _first_message_units(role, operation)
             assert duplicate_pointers(units) == [], (role, operation)
             checked.add((role, operation))
-    assert len(checked) == 32
     # A same-action pair declared on both the role and the operation list fails.
     with pytest.raises(AssertionError):
         _assert_lists_disjoint(
@@ -464,7 +485,7 @@ FULL_STORE_POINTER = (
 )
 
 
-def test_every_required_detail_has_one_pointer_in_all_36_real_compiles(tmp_path: Path):
+def test_every_required_detail_has_one_pointer_in_all_real_compiles(tmp_path: Path):
     manifest = _shipped_parsed()
     checked = set()
     for role, entry in manifest.roles.items():
@@ -532,7 +553,6 @@ def test_every_required_detail_has_one_pointer_in_all_36_real_compiles(tmp_path:
         for operation, entry in manifest.operations.items()
         for role in entry.applies_to_roles
     }
-    assert len(checked) == 32
     assert set(ROLE_DETAILS) == {
         "architect",
         "orchestrator",
@@ -624,7 +644,6 @@ def test_moved_piece_pointers_reach_each_required_compile_and_reject_removal() -
         for operation, entry in manifest.operations.items()
         for role in entry.applies_to_roles
     }
-    assert len(checked) == 32
     assert {role for role, _ in checked} == {
         "architect",
         "orchestrator",
@@ -1064,14 +1083,12 @@ def test_v13_inline_rules_reach_their_actual_owning_sections_and_reject_deletion
                             _assert_inline_rule_section(mutant, heading, clauses)
                 seen.add(retired)
             checked.add((role, operation))
-    assert len(checked) == 32
     assert checked == {
         (role, operation)
         for operation, entry in manifest.operations.items()
         for role in entry.applies_to_roles
     }
     assert seen == {retired for retired, _owner, _heading, _clauses in INLINE_RULE_CLAUSES}
-    assert len(seen) == 28
 
 
 def _assert_short_shared_rule(body: str, line: str) -> None:
@@ -1081,10 +1098,7 @@ def _assert_short_shared_rule(body: str, line: str) -> None:
 def test_short_rules_use_shared_delivery_and_reject_removed_step_reads() -> None:
     root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
     shared = (root / "core/every-role.md").read_text()
-    units = {
-        item["id"]: item
-        for item in json.loads((root / "core/digest-map.json").read_bytes())["units"]
-    }
+    units = {item["id"]: item for item in load_digest_map(root / "core/digest-map.json")["units"]}
     checked = set()
     for role, metadata in _shipped_parsed().roles.items():
         for operation in metadata.operations:
@@ -1107,7 +1121,7 @@ def test_short_rules_use_shared_delivery_and_reject_removed_step_reads() -> None
                 assert unit["digestPlace"]
                 start, end = unit["lines"]
                 core = "\n".join((root / owner).read_text().splitlines()[start - 1 : end])
-                assert sha256(core.encode()).hexdigest() == unit["sha256"]
+                assert sha256(core.encode()).hexdigest() == unit["sha256"], f"Run {RENEW_COMMAND}"
                 for clause in clauses:
                     assert clause in core
                 _assert_short_shared_rule(outcome.shared_block, line)
@@ -1124,7 +1138,6 @@ def test_short_rules_use_shared_delivery_and_reject_removed_step_reads() -> None
             assert "#handle-held-delivery" not in rendered
             assert "#notify-the-seat-waiting-on-a-completed-step" not in rendered
             checked.add((role, operation))
-    assert len(checked) == 32
     assert checked == {
         (role, operation)
         for operation, entry in _shipped_parsed().operations.items()

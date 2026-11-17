@@ -2,12 +2,10 @@
 
 import copy
 import json
-import shutil
 from hashlib import sha256
 from pathlib import Path
 
 import pytest
-from agents_remember_test_support.testing import capsule_budget_d695 as current_budget_module
 from agents_remember_test_support.testing.capsule_budget_d694 import (
     _current_area_findings,
     _source_findings,
@@ -16,10 +14,14 @@ from agents_remember_test_support.testing.capsule_budget_d694 import (
     load_current_budget_view,
 )
 from agents_remember_test_support.testing.capsule_budget_d695 import (
-    _assert_record as d695_assert_record,
+    COMMAND,
+    _current_source_findings,
 )
 from agents_remember_test_support.testing.capsule_budget_d695 import (
-    _current_source_findings,
+    _current_area_findings as current_area_findings,
+)
+from agents_remember_test_support.testing.capsule_budget_d695 import (
+    _source_findings as current_source_findings,
 )
 from agents_remember_test_support.testing.capsule_budget_d695 import (
     current_budget_findings as current_d695_findings,
@@ -170,180 +172,118 @@ def test_d694_linked_templates_keep_source_budgets_without_becoming_details() ->
     assert set(record["current_limits"]["step_details"]) == declared | linked
 
 
-def test_d695_rejects_changed_record() -> None:
+@pytest.mark.parametrize("area", ["capsules", "step_details", "digest", "ordinary_templates"])
+def test_current_measurements_reject_staleness_and_population_drift(area: str) -> None:
     record = load_d695_view(D695_CURRENT_BUDGETS_PATH)
-    for field in record:
-        changed = copy.deepcopy(record)
-        changed[field] = None
-        with pytest.raises(AssertionError, match="binding changed"):
-            d695_assert_record(changed)
-
-
-@pytest.mark.parametrize("area", ["capsules", "step_details", "digest"])
-def test_d695_rejects_each_unmeasured_growth_and_population_change(area: str) -> None:
-    record = load_d695_view(D695_CURRENT_BUDGETS_PATH)
-    baseline = record["current_measurements"][area]
-    assert not _current_area_findings(record, area, dict(baseline))
+    baseline = record["derived"]["current_measurements"][area]
+    assert not current_area_findings(record, area, dict(baseline))
     for key in baseline:
         actual = dict(baseline)
         actual[key] += 1
-        assert any(key in f and "stale" in f for f in _current_area_findings(record, area, actual))
-        actual[key] = record["current_limits"][area][key] + 1
-        assert any(key in f and "exceed" in f for f in _current_area_findings(record, area, actual))
+        assert any(
+            key in finding and "stale" in finding and COMMAND in finding
+            for finding in current_area_findings(record, area, actual)
+        )
         del actual[key]
         assert any(
-            key in f and "no current" in f for f in _current_area_findings(record, area, actual)
+            key in finding and "no current" in finding and COMMAND in finding
+            for finding in current_area_findings(record, area, actual)
         )
     assert any(
-        "missing" in f
-        for f in _current_area_findings(record, area, {**baseline, "unregistered": 1})
+        "missing measurement" in finding and COMMAND in finding
+        for finding in current_area_findings(record, area, {**baseline, "unregistered": 1})
     )
 
 
-def test_d695_authorized_boundaries_and_real_population() -> None:
+def test_current_growth_within_a_ceiling_has_no_individual_budget() -> None:
     record = load_d695_view(D695_CURRENT_BUDGETS_PATH)
-    assert record["current_step_ceiling_words"] == 2500
-    assert "ordinary_templates" not in record["current_limits"]
-    references = json.loads(
-        (REPOSITORY_ROOT / "skills/l-01-agent-lifecycles/composition-manifest.json").read_text()
-    )["references"]
-    assert record["current_detail_population"] == sorted(
-        entry["source"] for entry in references.values() if entry.get("step_detail") is True
-    )
-    assert "reference/curator/knowledge-ingest.md" in record["current_measurements"]["step_details"]
-    sizes = dict(record["current_measurements"]["capsules"])
-    details = dict(record["current_measurements"]["step_details"])
-    digest = record["current_measurements"]["digest"]["core/every-role.md"]
-    assert not current_d695_findings(record, sizes, details, digest, REPOSITORY_ROOT)
-    for changed in (
-        {
-            key: size
-            for key, size in details.items()
-            if key != "reference/curator/knowledge-ingest.md"
-        },
-        {**details, "reference/unregistered.md": 1},
+    assert "current_limits" not in record
+    actual = {"worker/implementation": 1}
+    record["derived"]["current_measurements"]["capsules"] = dict(actual)
+    for size in (2, record["current_capsule_ceilings_words"]["every_other_role"]):
+        actual["worker/implementation"] = size
+        record["derived"]["current_measurements"]["capsules"] = dict(actual)
+        assert not current_area_findings(record, "capsules", actual)
+
+
+def test_current_ceiling_failures_name_size_ceiling_and_developer() -> None:
+    record = load_d695_view(D695_CURRENT_BUDGETS_PATH)
+    for role, ceiling in record["current_capsule_ceilings_words"].items():
+        key = ("worker" if role == "every_other_role" else role) + "/orientation"
+        for size in (ceiling, ceiling + 1):
+            actual = {key: size}
+            record["derived"]["current_measurements"]["capsules"] = dict(actual)
+            findings = current_area_findings(record, "capsules", actual)
+            if size == ceiling:
+                assert not findings
+            else:
+                assert any(
+                    key in finding
+                    and str(size) in finding
+                    and str(ceiling) in finding
+                    and "developer's decision" in finding
+                    for finding in findings
+                )
+    for area, key, ceiling in (
+        ("step_details", "reference/example.md", record["current_step_ceiling_words"]),
+        ("digest", "core/every-role.md", record["current_digest_ceiling_words"]),
     ):
-        with pytest.raises(AssertionError, match="population changed"):
-            current_d695_findings(record, sizes, changed, digest, REPOSITORY_ROOT)
-    over_digest = record["current_digest_ceiling_words"] + 1
-    assert any(
-        str(over_digest) in finding and "exceed" in finding
-        for finding in current_d695_findings(record, sizes, details, over_digest, REPOSITORY_ROOT)
-    )
-    sizes["curator/curation"] = record["current_capsule_ceilings_words"]["curator"] + 1
-    assert any(
-        str(sizes["curator/curation"]) in finding and "exceed" in finding
-        for finding in current_d695_findings(record, sizes, details, digest, REPOSITORY_ROOT)
-    )
+        record["derived"]["current_measurements"][area] = {key: ceiling + 1}
+        findings = current_area_findings(record, area, {key: ceiling + 1})
+        assert any(
+            key in finding
+            and str(ceiling + 1) in finding
+            and str(ceiling) in finding
+            and "developer's decision" in finding
+            for finding in findings
+        )
 
 
 def _current_source_fixture(root: Path) -> tuple[dict, dict[str, int]]:
-    """Synthetic predicate inputs only; never a replacement authenticated current record."""
     lifecycle = root / "skills/l-01-agent-lifecycles"
-    ordinary = [
-        "templates/file-card.md",
-        "templates/repo-entity-catalog.md",
-        "templates/repo-overview.md",
-        "templates/route-local-overview.md",
-    ]
     declared = "reference/declared.md"
-    references = {"declared": {"source": declared, "step_detail": True}}
-    for index, path in enumerate(ordinary):
-        references[f"ordinary-{index}"] = {"source": path, "step_detail": False}
-    record = {
-        "current_detail_population": [declared],
-        "current_linked_template_population": ordinary,
-        "current_measurements": {"step_details": {declared: 2500}, "ordinary_templates": {}},
-        "current_limits": {"step_details": {declared: 2500}},
-        "current_step_ceiling_words": 2500,
-        "approved_source_sizes": {},
-        "compiler_input_revisions": {},
+    ordinary = "templates/file-card.md"
+    manifest = {
+        "references": {
+            "declared": {"source": declared, "step_detail": True},
+            "ordinary": {"source": ordinary, "step_detail": False},
+        },
+        "derived": {
+            "references": {
+                "declared": {"roles": ["worker"], "step": "before work"},
+                "ordinary": {"roles": ["worker"], "step": "before writing"},
+            }
+        },
     }
-    for index, path in enumerate([declared, *ordinary]):
-        source = lifecycle / path
-        source.parent.mkdir(parents=True, exist_ok=True)
-        source.write_text(
-            ("declared " * 2500)
-            if path == declared
-            else ("ordinary " * (2501 if index == 1 else 1))
-        )
-        raw = source.read_bytes()
-        count = len(raw.decode().split())
-        record["approved_source_sizes"]["skills/l-01-agent-lifecycles/" + path] = {
+    content = {
+        declared: b"one two\n",
+        ordinary: b"one two\n",
+        "composition-manifest.json": json.dumps(manifest).encode(),
+    }
+    inventory = {}
+    revisions = {}
+    for path, raw in content.items():
+        target = lifecycle / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(raw)
+        inventory["skills/l-01-agent-lifecycles/" + path] = {
             "sha256": sha256(raw).hexdigest(),
-            "size_words": count,
+            "size_words": len(raw.decode().split()),
         }
-        record["compiler_input_revisions"][path] = "sha256:" + sha256(raw).hexdigest()
-        if path != declared:
-            record["current_measurements"]["ordinary_templates"][path] = count
-    (lifecycle / "composition-manifest.json").write_text(json.dumps({"references": references}))
-    return record, {declared: 2500}
-
-
-def test_d695_ordinary_template_above_2500_has_no_size_limit(tmp_path: Path) -> None:
-    record, details = _current_source_fixture(tmp_path)
-    assert record["current_measurements"]["ordinary_templates"]["templates/file-card.md"] == 2501
-    assert "ordinary_templates" not in record["current_limits"]
-    assert not _current_source_findings(record, details, tmp_path)
-
-
-def test_d695_declared_detail_2501_still_fails(tmp_path: Path) -> None:
-    record, details = _current_source_fixture(tmp_path)
-    path = "reference/declared.md"
-    source = tmp_path / "skills/l-01-agent-lifecycles" / path
-    source.write_text("declared " * 2501)
-    raw = source.read_bytes()
-    record["current_measurements"]["step_details"][path] = 2501
-    record["current_limits"]["step_details"][path] = 2501
-    record["approved_source_sizes"]["skills/l-01-agent-lifecycles/" + path] = {
-        "sha256": sha256(raw).hexdigest(),
-        "size_words": 2501,
-    }
-    record["compiler_input_revisions"][path] = "sha256:" + sha256(raw).hexdigest()
-    details[path] = 2501
-    assert any(
-        path in finding and "ceiling 2500" in finding
-        for finding in _current_source_findings(record, details, tmp_path)
-    )
-
-
-@pytest.mark.parametrize(
-    "defect",
-    [
-        "measurement",
-        "same-size-content",
-        "hash",
-        "revision",
-        "missing-file",
-        "extra-approved-source",
-    ],
-)
-def test_d695_ordinary_source_drift_is_still_rejected(tmp_path: Path, defect: str) -> None:
-    record, details = _current_source_fixture(tmp_path)
-    assert not _current_source_findings(record, details, tmp_path)
-    path = "templates/file-card.md"
-    source = tmp_path / "skills/l-01-agent-lifecycles" / path
-    if defect == "measurement":
-        record["current_measurements"]["ordinary_templates"][path] += 1
-        expected = "stale recorded size"
-    elif defect == "same-size-content":
-        source.write_text("different " * 2501)
-        expected = "stale source identity"
-    elif defect == "hash":
-        record["approved_source_sizes"]["skills/l-01-agent-lifecycles/" + path]["sha256"] = "0" * 64
-        expected = "stale source identity"
-    elif defect == "revision":
-        record["compiler_input_revisions"][path] = "sha256:" + "0" * 64
-        expected = "compiler input revision changed"
-    elif defect == "missing-file":
-        source.unlink()
-        expected = "missing ordinary source"
-    else:
-        record["approved_source_sizes"]["unregistered.md"] = {"sha256": "0" * 64, "size_words": 1}
-        expected = "missing approved source"
-    assert any(
-        expected in finding for finding in _current_source_findings(record, details, tmp_path)
-    )
+        revisions[path] = "sha256:" + sha256(raw).hexdigest()
+    return {
+        "current_step_ceiling_words": 2500,
+        "derived": {
+            "current_detail_population": [declared],
+            "current_linked_template_population": [ordinary],
+            "current_measurements": {
+                "step_details": {declared: 2},
+                "ordinary_templates": {ordinary: 2},
+            },
+            "approved_source_sizes": inventory,
+            "compiler_input_revisions": revisions,
+        },
+    }, {declared: 2}
 
 
 @pytest.mark.parametrize(
@@ -356,124 +296,99 @@ def test_d695_ordinary_source_drift_is_still_rejected(tmp_path: Path, defect: st
         "overlap",
         "missing-linked",
         "extra-linked",
-        "ordinary-limit",
     ],
 )
-def test_d695_current_classification_rejects_population_corruption(
-    tmp_path: Path, defect: str
-) -> None:
+def test_current_classification_rejects_population_corruption(tmp_path: Path, defect: str) -> None:
     record, details = _current_source_fixture(tmp_path)
     assert not _current_source_findings(record, details, tmp_path)
+    derived = record["derived"]
     ordinary = "templates/file-card.md"
     if defect == "missing-detail":
         details.clear()
     elif defect == "extra-detail":
         details["reference/unregistered.md"] = 1
     elif defect == "missing-measurement":
-        del record["current_measurements"]["ordinary_templates"][ordinary]
+        del derived["current_measurements"]["ordinary_templates"][ordinary]
     elif defect == "extra-measurement":
-        record["current_measurements"]["ordinary_templates"]["templates/unregistered.md"] = 1
+        derived["current_measurements"]["ordinary_templates"]["templates/unregistered.md"] = 1
     elif defect == "overlap":
-        record["current_detail_population"] = sorted([*details, ordinary])
-        details[ordinary] = 2501
-        record["current_measurements"]["step_details"][ordinary] = 2501
-        record["current_limits"]["step_details"][ordinary] = 2501
+        derived["current_detail_population"].append(ordinary)
+        details[ordinary] = 2
+        derived["current_measurements"]["step_details"][ordinary] = 2
     elif defect == "missing-linked":
-        record["current_linked_template_population"].remove(ordinary)
-    elif defect == "extra-linked":
-        record["current_linked_template_population"].append("templates/unregistered.md")
-    elif defect == "ordinary-limit":
-        record["current_limits"]["ordinary_templates"] = {ordinary: 2500}
-    with pytest.raises(AssertionError):
+        derived["current_linked_template_population"].clear()
+    else:
+        derived["current_linked_template_population"].append("templates/unregistered.md")
+    with pytest.raises(AssertionError, match=COMMAND):
         _current_source_findings(record, details, tmp_path)
 
 
-@pytest.mark.parametrize("defect", ["misclassified", "ordinary-flag-absent"])
-def test_d695_current_classification_rejects_manifest_corruption(
-    tmp_path: Path, defect: str
-) -> None:
+@pytest.mark.parametrize("field", ["sha256", "size_words", "compiler_input_revisions"])
+def test_current_source_staleness_names_the_renewal_command(tmp_path: Path, field: str) -> None:
     record, details = _current_source_fixture(tmp_path)
-    assert not _current_source_findings(record, details, tmp_path)
-    if defect == "misclassified":
-        manifest = tmp_path / "skills/l-01-agent-lifecycles/composition-manifest.json"
-        document = json.loads(manifest.read_text())
-        document["references"]["ordinary-0"]["step_detail"] = True
-        manifest.write_text(json.dumps(document))
-    elif defect == "ordinary-flag-absent":
-        manifest = tmp_path / "skills/l-01-agent-lifecycles/composition-manifest.json"
-        document = json.loads(manifest.read_text())
-        del document["references"]["ordinary-0"]["step_detail"]
-        manifest.write_text(json.dumps(document))
-    with pytest.raises(AssertionError):
-        _current_source_findings(record, details, tmp_path)
+    path = "templates/file-card.md"
+    if field == "compiler_input_revisions":
+        record["derived"][field][path] = "sha256:" + "0" * 64
+    else:
+        row = record["derived"]["approved_source_sizes"]["skills/l-01-agent-lifecycles/" + path]
+        row[field] = "0" * 64 if field == "sha256" else 3
+    findings = _current_source_findings(record, details, tmp_path)
+    assert findings and all(COMMAND in finding for finding in findings)
 
 
-@pytest.mark.parametrize("defect", ["missing-hash", "missing-revision"])
-def test_d695_current_classification_rejects_source_inventory_corruption(
-    tmp_path: Path, defect: str
-) -> None:
-    record, details = _current_source_fixture(tmp_path)
-    assert not _current_source_findings(record, details, tmp_path)
-    ordinary = "templates/file-card.md"
-    if defect == "missing-hash":
-        del record["approved_source_sizes"]["skills/l-01-agent-lifecycles/" + ordinary]
-    elif defect == "missing-revision":
-        del record["compiler_input_revisions"][ordinary]
-    with pytest.raises(AssertionError):
-        _current_source_findings(record, details, tmp_path)
-
-
-def test_d695_whole_path_authentication_precedes_source_checks(tmp_path: Path) -> None:
-    record = load_d695_view(D695_CURRENT_BUDGETS_PATH)
-    changed = copy.deepcopy(record)
-    key = changed["current_linked_template_population"][0]
-    changed["current_measurements"]["ordinary_templates"][key] += 1
-    with pytest.raises(AssertionError, match="binding changed"):
-        current_d695_findings(changed, {}, {}, 0, tmp_path)
-
-
-def test_d695_whole_path_authenticates_uncapped_ordinary_template(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    record, details = _current_source_fixture(tmp_path)
-    record["current_measurements"].update(capsules={}, digest={"core/every-role.md": 0})
-    record["current_limits"].update(capsules={}, digest={"core/every-role.md": 0})
-    record["decision"] = {}
-    for path, key in (
-        ("skills/l-01-agent-lifecycles/capsule-budgets.json", "historicalRegistrySha256"),
-        (
-            "mcp/test_support/agents_remember_test_support/testing/capsule_budget_snapshot.py",
-            "historicalSnapshotSha256",
-        ),
-        ("skills/l-01-agent-lifecycles/capsule-budgets-d694.json", "predecessorD694Sha256"),
-        (
-            "mcp/test_support/agents_remember_test_support/testing/capsule_budget_d694.py",
-            "predecessorD694HelperSha256",
-        ),
-        ("skills/l-01-agent-lifecycles/core/digest-map.json", "currentDigestMapSha256"),
-    ):
-        target = tmp_path / path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(REPOSITORY_ROOT / path, target)
-        record["decision"][key] = sha256(target.read_bytes()).hexdigest()
-    digest_map = tmp_path / "skills/l-01-agent-lifecycles/core/digest-map.json"
-    record["current_digest_ceiling_words"] = json.loads(digest_map.read_text())["digest"][
-        "maximumWords"
-    ]
-    # Admit exactly this synthetic fixture record; keep the real authentication function active.
-    fixture_fingerprint = sha256(
-        json.dumps(record, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-    monkeypatch.setattr(current_budget_module, "_RECORD_FINGERPRINT", fixture_fingerprint)
-    assert record["current_measurements"]["ordinary_templates"]["templates/file-card.md"] == 2501
-    assert not current_d695_findings(record, {}, details, 0, tmp_path)
-    changed = copy.deepcopy(record)
-    changed["current_measurements"]["ordinary_templates"]["templates/file-card.md"] += 1
-    with pytest.raises(AssertionError, match="binding changed"):
-        current_d695_findings(changed, {}, details, 0, tmp_path)
-    ordinary = tmp_path / "skills/l-01-agent-lifecycles/templates/file-card.md"
-    ordinary.write_text("different " * 2501)
+def test_same_size_source_edit_and_missing_source_are_detected(tmp_path: Path) -> None:
+    record, _ = _current_source_fixture(tmp_path)
+    path = tmp_path / "skills/l-01-agent-lifecycles/templates/file-card.md"
+    path.write_text("two one\n")
+    findings = current_source_findings(record, tmp_path)
+    assert any("stale source identity" in finding and COMMAND in finding for finding in findings)
+    path.unlink()
     assert any(
-        "stale source identity" in finding
-        for finding in current_d695_findings(record, {}, details, 0, tmp_path)
+        "no current source" in finding and COMMAND in finding
+        for finding in current_source_findings(record, tmp_path)
     )
+
+
+def test_ordinary_templates_have_measurements_and_no_detail_ceiling(tmp_path: Path) -> None:
+    record, details = _current_source_fixture(tmp_path)
+    relative = "templates/file-card.md"
+    path = tmp_path / "skills/l-01-agent-lifecycles" / relative
+    raw = ("word " * 2501).encode()
+    path.write_bytes(raw)
+    derived = record["derived"]
+    derived["current_measurements"]["ordinary_templates"][relative] = 2501
+    derived["approved_source_sizes"]["skills/l-01-agent-lifecycles/" + relative] = {
+        "sha256": sha256(raw).hexdigest(),
+        "size_words": 2501,
+    }
+    derived["compiler_input_revisions"][relative] = "sha256:" + sha256(raw).hexdigest()
+    assert not _current_source_findings(record, details, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "defect", ["misclassified", "ordinary-flag-absent", "missing-hash", "missing-revision"]
+)
+def test_current_manifest_and_source_membership_stays_structural(
+    tmp_path: Path, defect: str
+) -> None:
+    record, details = _current_source_fixture(tmp_path)
+    ordinary = "templates/file-card.md"
+    if defect in {"misclassified", "ordinary-flag-absent"}:
+        manifest = tmp_path / "skills/l-01-agent-lifecycles/composition-manifest.json"
+        document = json.loads(manifest.read_text())
+        if defect == "misclassified":
+            document["references"]["ordinary"]["step_detail"] = True
+        else:
+            del document["references"]["ordinary"]["step_detail"]
+        manifest.write_text(json.dumps(document))
+    elif defect == "missing-hash":
+        del record["derived"]["approved_source_sizes"]["skills/l-01-agent-lifecycles/" + ordinary]
+        findings = _current_source_findings(record, details, tmp_path)
+        assert any(
+            "missing source measurement" in finding and COMMAND in finding for finding in findings
+        )
+        return
+    else:
+        del record["derived"]["compiler_input_revisions"]["reference/declared.md"]
+    with pytest.raises(AssertionError, match=COMMAND):
+        _current_source_findings(record, details, tmp_path)

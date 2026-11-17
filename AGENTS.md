@@ -96,8 +96,9 @@ Read [knowledge use at the working step](skills/l-01-agent-lifecycles/reference/
 ## Source Layout
 
 - `skills/` is the canonical skill source tree. Edit skills here first.
-- `scripts/sync-skills.py` copies root `skills/` into the MCP package-data copy,
-  which is the only generated skill copy: the tool server serves skills to a
+- `mcp/.venv/bin/python scripts/renew-instructions.py` renews instruction facts
+  and copies root `skills/` into the MCP package-data copy, which is the only
+  generated skill copy: the tool server serves skills to a
   harness as MCP resources, and no harness starter package carries a skill
   folder (MIK-R196). Run it after any skill edit.
 - `benchmarks/`, `providers/`, and `system/` are canonical
@@ -120,7 +121,7 @@ Read [knowledge use at the working step](skills/l-01-agent-lifecycles/reference/
 - Keep this root `AGENTS.md` scoped to working on the source checkout.
 - Keep shared instructions in the role corpus and the coordination root's `system/` files.
 - Do not edit generated skill copies directly; edit root `skills/` and run
-  `python3 scripts/sync-skills.py`.
+  `mcp/.venv/bin/python scripts/renew-instructions.py`.
 - Do not edit generated runtime asset copies directly; edit the matching root
   folder and run `python3 scripts/sync-runtime.py`.
 - Do not recreate repository harness starter packages or workspace harness configuration.

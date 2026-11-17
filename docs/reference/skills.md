@@ -16,7 +16,7 @@ mcp/src/agents_remember/package_data/runtime/skills/     # the generated copy, w
 
 The source tree and the generated copy keep the same paths and bytes. The generated copy is what
 an installed build serves. A contributor who edits a skill renews the generated copy with
-`python3 scripts/sync-skills.py`;
+`mcp/.venv/bin/python scripts/renew-instructions.py`;
 [CONTRIBUTING.md](https://github.com/Foxfire1st/agents-remember/blob/main/CONTRIBUTING.md) holds
 the rules for contributors.
 
