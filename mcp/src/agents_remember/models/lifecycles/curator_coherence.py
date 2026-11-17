@@ -94,7 +94,15 @@ class CuratorQualityAttestation(_StrictModel):
     onboardingRoot: str = Field(min_length=1, max_length=8192)
     reportPath: str = Field(min_length=1, max_length=8192)
     reportSha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
+    measuredReportSha256: Digest | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     dependencies: EvidenceDependencies | None = None
+
+    @model_serializer(mode="wrap")
+    def _canonical_measured_result(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        result = handler(self)
+        if self.measuredReportSha256 is None:
+            result.pop("measuredReportSha256", None)
+        return result
 
     @model_validator(mode="after")
     def _candidate_collection_is_exact(self) -> Self:
@@ -237,6 +245,8 @@ class CuratorCoherenceRecord(_StrictModel):
     attestationPath: str = Field(min_length=1, max_length=8192)
     attestationSha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
     attestationReportSha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
+    measuredAttestationSha256: Digest | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    measuredReportSha256: Digest | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     # The durable copy of the bytes ``attestationSha256`` commits to: task-root-relative, in the same
     # surviving tree as the record. ``attestationPath`` names the enclosure's own file, which
     # ``lifecycle_finalize_task`` reclaims -- without this copy the record's digest names bytes that
@@ -267,6 +277,14 @@ class CuratorCoherenceRecord(_StrictModel):
     publicationFingerprint: Digest = Field(pattern=r"^[0-9a-f]{64}$")
     publishedBy: str = Field(min_length=1, max_length=8192)
     reportSha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_serializer(mode="wrap")
+    def _canonical_measured_binding(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        result = handler(self)
+        for field in ("measuredAttestationSha256", "measuredReportSha256"):
+            if getattr(self, field) is None:
+                result.pop(field, None)
+        return result
 
     @model_validator(mode="before")
     @classmethod

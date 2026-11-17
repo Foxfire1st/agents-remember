@@ -248,11 +248,21 @@ names a file that the task adds outside `onboarding/`, `knowledge/` and `system/
 
 ## Derived index and reads
 
-The [knowledge index](../concepts.md#knowledge-index), an SQLite file, is derived from the selected memory text tree and keyed by its
-content. Its default cache is
-`<coordination-root>/runtime/knowledge-index/<tree-key>.sqlite`, outside Git
-working trees. A read reuses the matching index or rebuilds it; deleting the cache
-loses no authored knowledge. Do not stage or hand-edit it.
+The [knowledge index](../concepts.md#knowledge-index), an SQLite file, is derived from the
+selected memory text tree and keyed by its content and the source digest held by the loaded
+build. Its default cache is `<coordination-root>/runtime/knowledge-index/`, outside Git
+working trees, with separate files for each memory tree and build. A read reuses an index
+only when both match, or rebuilds it; deleting the cache loses no authored knowledge.
+Do not stage or hand-edit it.
+
+The build's identity is the package's source digest held by the process from its start,
+including for an installed package, a clean checkout or a checkout with uncommitted changes.
+It stays the same after a restart of the same build. A change to package source changes the
+identity; a change to a document outside that source does not. A process whose identity is
+unknown builds an index for its own use, takes no other process's cache file and leaves none
+that another process can reuse. A cache file named only by the memory-tree key is neither
+reused nor written by this build; the age and size eviction removes such files along with
+files named by build and tree.
 
 MCP `knowledge_read` names attributed records and memory-file locations for a
 selected view. Open those named files with the harness's file tools; the response

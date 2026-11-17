@@ -3,7 +3,7 @@
 The bound covers every record builder whose model bounds its payload: the coherence record
 builder declares at most its fixed edges plus one evidence-bytes edge per admitted judgment
 (2048) plus one review-record edge per admitted assessment (256) plus its validator edges,
-so MAX_EVIDENCE_DEPENDENCIES is exactly 7 + 2048 + 256 + 1 = 2312. The master-scope route
+so MAX_EVIDENCE_DEPENDENCIES is exactly 9 + 2048 + 256 + 1 = 2314. The master-scope route
 review has no bound of its own; it remains limited by this shared constant. Each test drives
 the production publication path, so removing the bound or the check makes it fail.
 """
@@ -260,11 +260,11 @@ def _destination_snapshot(contract: WorktreeContract) -> dict[str, int]:
 
 
 def test_capacity_constant_is_derived_from_the_coherence_record_bounds(ports: None) -> None:
-    """F04 derived-constant: 2312 is exactly fixed + judgments + assessments + validator."""
+    """F04 derived-constant: 2314 is exactly fixed + judgments + assessments + validator."""
 
     assert MAX_CURATOR_SOURCE_CANDIDATES == 2048
     assert MAX_CURATOR_REVIEW_ASSESSMENTS == 256
-    assert MAX_EVIDENCE_DEPENDENCIES == 7 + 2048 + 256 + 1 == 2312
+    assert MAX_EVIDENCE_DEPENDENCIES == 9 + 2048 + 256 + 1 == 2314
 
 
 def test_maximum_coherence_publication_validates_at_capacity(
@@ -275,8 +275,8 @@ def test_maximum_coherence_publication_validates_at_capacity(
 
     Distinct evidence bytes per judgment (one file each) keep all 2048 evidence edges;
     a first small publication supplies the predecessor edge, so the record carries the
-    full derived bound: 6 fixed + 2048 evidence-bytes + 256 review-record + 1 validator
-    + 1 predecessor = 2312."""
+    full derived bound: 8 fixed + 2048 evidence-bytes + 256 review-record + 1 validator
+    + 1 predecessor = 2314."""
 
     contract, sprint = enclosure
     write_curator_evidence(contract, caller_ref=sprint, source_candidates=_candidates(1))
@@ -296,7 +296,11 @@ def test_maximum_coherence_publication_validates_at_capacity(
     declaration = require_evidence_dependencies(
         authority.record.dependencies, record_type="curator-coherence/v1"
     )
-    assert len(declaration.edges) == MAX_EVIDENCE_DEPENDENCIES == 2312
+    assert len(declaration.edges) == MAX_EVIDENCE_DEPENDENCIES == 2314
+    assert {
+        ("memory-attestation", "measured-quality"),
+        ("evidence-bytes", "measured-memory-quality-report"),
+    } <= {edge.identity for edge in declaration.edges}
 
 
 def test_oversize_publication_refuses_before_any_write(

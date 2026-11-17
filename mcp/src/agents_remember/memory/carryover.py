@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from contextlib import ExitStack, contextmanager, suppress
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, fields
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -47,11 +47,11 @@ from agents_remember.memory.carryover_records import (
     record_payloads,
 )
 from agents_remember.memory.knowledge_index import (
-    IndexMismatchError,
     KnowledgeIndex,
     build_index,
     default_cache_directory,
     directory_snapshot,
+    open_cached_index,
 )
 from agents_remember.memory_quality.knowledge_validator import knowledge_tree_from_git
 from agents_remember.worktrees.integration.integration_branch_authority import (
@@ -113,12 +113,7 @@ def _record_context(request: CarryoverRequest):
             cache = default_cache_directory(load_config(request.config_path).coordination_root)
             for number, memory in enumerate((request.source_memory, request.target_memory)):
                 snapshot = directory_snapshot(memory)
-                cached = cache / f"{snapshot.key}.sqlite"
-                index = None
-                if cached.is_file():
-                    # A cache that does not serve this tree is not reused.
-                    with suppress(IndexMismatchError):
-                        index = KnowledgeIndex(cached, expected_key=snapshot.key)
+                index = open_cached_index(cache, snapshot.key)
                 if index is None:
                     destination = Path(temporary) / f"{number}.sqlite"
                     build_index(snapshot, destination)

@@ -14,6 +14,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
+from agents_remember.memory_quality.quality_identity import measured_report_sha256
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherenceJudgment,
@@ -154,6 +155,7 @@ def write_curator_attestation(
         "onboardingRoot": (contract.memory_worktree / "onboarding").resolve().as_posix(),
         "reportPath": report.resolve().as_posix(),
         "reportSha256": report_sha256,
+        "measuredReportSha256": measured_report_sha256(text),
         "dependencies": memory_quality_attestation_dependencies(
             pair_identity=pair,
             code_candidate_tree=code_tree,

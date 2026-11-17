@@ -29,8 +29,12 @@ def native(cache: KnowledgeIndexCache, key: str) -> Path:
         return index.database_path
 
 
+def tree_key(path: Path) -> str:
+    return path.stem.rsplit("--", 1)[-1]
+
+
 def reopen(cache: KnowledgeIndexCache, path: Path) -> KnowledgeIndex:
-    index = cache._reuse(path.stem)
+    index = cache._reuse(tree_key(path))
     assert index is not None
     return index
 
@@ -50,7 +54,7 @@ def test_access_changes_only_usage_and_preserves_identity_memo(
 ) -> None:
     cache = KnowledgeIndexCache(tmp_path / "indexes")
     path = cache.path_for("1" * 40)
-    build_index(MemoryTreeSnapshot(path.stem, "git", "tiny-native-index", {}), path)
+    build_index(MemoryTreeSnapshot(tree_key(path), "git", "tiny-native-index", {}), path)
     original_stat = stamp(path)
     original_bytes = hashlib.sha256(path.read_bytes()).hexdigest()
     memo = DatasetIdentityMemo()
@@ -110,7 +114,7 @@ def test_byte_eviction_orders_by_usage_and_keeps_the_protected_pair(tmp_path: Pa
 def test_legacy_markerless_index_preserves_recorded_age_until_first_reuse(tmp_path: Path) -> None:
     cache = KnowledgeIndexCache(tmp_path / "indexes", max_age_seconds=3600)
     path = cache.path_for("5" * 40)
-    build_index(MemoryTreeSnapshot(path.stem, "git", "existing-runtime-index", {}), path)
+    build_index(MemoryTreeSnapshot(tree_key(path), "git", "existing-runtime-index", {}), path)
     old(path, 100)
     legacy_stamp = stamp(path)
     assert not marker(path).exists()
@@ -127,7 +131,7 @@ def test_legacy_markerless_index_preserves_recorded_age_until_first_reuse(tmp_pa
 def test_stale_legacy_index_and_orphan_markers_are_removed(tmp_path: Path) -> None:
     cache = KnowledgeIndexCache(tmp_path / "indexes", max_age_seconds=3600)
     stale = cache.path_for("6" * 40)
-    build_index(MemoryTreeSnapshot(stale.stem, "git", "existing-runtime-index", {}), stale)
+    build_index(MemoryTreeSnapshot(tree_key(stale), "git", "existing-runtime-index", {}), stale)
     old(stale, 7200)
     orphan = marker(cache.path_for("7" * 40))
     orphan.touch()
@@ -143,11 +147,11 @@ def test_rebuild_replaces_stale_access_hint(tmp_path: Path) -> None:
     old(marker(path), 7200)
     previous = marker(path).stat().st_mtime_ns
     path.write_bytes(b"invalid previous index")
-    assert cache._reuse(path.stem) is None
-    native(cache, path.stem)
+    assert cache._reuse(tree_key(path)) is None
+    native(cache, tree_key(path))
     assert marker(path).stat().st_mtime_ns > previous
     with reopen(cache, path) as rebuilt:
-        assert rebuilt.state.key == path.stem
+        assert rebuilt.state.key == tree_key(path)
 
 
 @pytest.mark.parametrize("linked", ["symlink", "hardlink"])
@@ -165,7 +169,7 @@ def test_usage_link_never_touches_its_target(
         os.link(target, marker(path))
     before = stamp(target)
     with reopen(cache, path) as index:
-        assert index.state.key == path.stem
+        assert index.state.key == tree_key(path)
     assert stamp(target) == before and target.read_bytes() == b"unchanged target"
 
 
@@ -184,7 +188,7 @@ def test_usage_write_error_does_not_break_native_read_or_touch_dataset(
 
     monkeypatch.setattr(module.os, "open", refuse_marker)
     with reopen(cache, path) as index:
-        assert index.state.key == path.stem
+        assert index.state.key == tree_key(path)
     assert stamp(path) == before
 
 
@@ -230,5 +234,22 @@ def test_fifo_usage_marker_never_waits_for_a_reader(
     # O_WRONLY|O_NONBLOCK returns ENXIO with no FIFO reader. The access hint is
     # optional, so the real native index read must return normally.
     with reopen(cache, path) as index:
-        assert index.state.key == path.stem
+        assert index.state.key == tree_key(path)
     assert len(opened) == 1 and stamp(path) == before
+
+
+@pytest.mark.parametrize("population", [2, 5])
+def test_one_eviction_counts_legacy_and_all_build_namespaces(
+    tmp_path: Path, population: int
+) -> None:
+    cache = KnowledgeIndexCache(tmp_path / "indexes", max_bytes=10)
+    paths = [
+        cache.directory / ("legacy.sqlite" if i == 0 else f"build-{i}--tree.sqlite")
+        for i in range(population)
+    ]
+    for number, path in enumerate(paths):
+        path.write_bytes(b"x" * 10)
+        old(path, 100 - number)
+    assert cache.evict() == paths[:-1]
+    assert list(cache.directory.glob("*.sqlite")) == paths[-1:]
+    assert sum(path.stat().st_size for path in cache.directory.glob("*.sqlite")) == 10

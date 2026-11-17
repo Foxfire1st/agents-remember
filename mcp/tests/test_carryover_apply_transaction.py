@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import shutil
 import stat
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import apsw
 import pytest
 from agents_remember.application.memory_tools import (
     memory_carryover_apply_tool,
@@ -21,7 +24,9 @@ from agents_remember.memory.knowledge_index import (
     build_index,
     default_cache_directory,
 )
+from agents_remember.memory.knowledge_index import cache as cache_module
 from agents_remember.models.knowledge_files.canonical import canonical_text
+from agents_remember.serving.build_info import process_serving_build
 from knowledge_writer_test_support import (
     CODE_FILE,
     TEST_FILE,
@@ -219,6 +224,54 @@ def test_plan_reuses_exact_cache_and_removes_scratch_after_builder_refusal(tmp_p
     assert destinations and all(not path.parent.exists() for path in destinations)
     assert plan["candidates"][0]["records"]["conflicts"][0]["state"] == "index-incomplete"
     assert "injected refusal" in plan["candidates"][0]["reason"]
+
+
+@pytest.mark.parametrize("digest", ["sha256:" + "b" * 64, None])
+def test_plan_ignores_foreign_and_legacy_partial_indexes_without_writing_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, digest: str | None
+) -> None:
+    fixture, contract, selection = _converted_world(tmp_path)
+    roots = (Path(selection.source_memory), contract.memory_worktree)
+    assert roots[1] is not None
+    stamp = process_serving_build()
+    monkeypatch.setattr(
+        cache_module,
+        "process_serving_build",
+        lambda: replace(stamp, source_digest="sha256:" + "a" * 64),
+    )
+    cache = KnowledgeIndexCache(default_cache_directory(fixture.cfg.coordination_root))
+    keys = []
+    for root in roots:
+        assert root is not None
+        with cache.for_directory(root) as index:
+            keys.append(index.state.key)
+            path = index.database_path
+        connection = apsw.Connection(str(path))
+        try:
+            connection.execute("UPDATE ix_meta SET value='partial' WHERE name='state'")
+        finally:
+            connection.close()
+        shutil.copyfile(path, cache.directory / f"{keys[-1]}.sqlite")
+    before = {
+        path: (path.read_bytes(), path.stat().st_mtime_ns) for path in cache.directory.iterdir()
+    }
+    monkeypatch.setattr(
+        cache_module, "process_serving_build", lambda: replace(stamp, source_digest=digest)
+    )
+    built = []
+
+    def counted(snapshot, destination):
+        built.append((snapshot.key, destination))
+        return build_index(snapshot, destination)
+
+    monkeypatch.setattr(carryover, "build_index", counted)
+    plan = memory_carryover_plan_tool(fixture.cfg, selection)
+    assert not plan["candidates"][0]["records"]["conflicts"], plan
+    assert [key for key, _ in built] == keys
+    assert all(not path.parent.exists() for _, path in built)
+    assert {
+        path: (path.read_bytes(), path.stat().st_mtime_ns) for path in cache.directory.iterdir()
+    } == before
 
 
 def _record_retry(tmp_path: Path, cut: str):

@@ -24,12 +24,16 @@ False-positive boundaries:
 from __future__ import annotations
 
 import importlib
-from collections.abc import Sequence
+import threading
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from functools import cache
 from pathlib import PurePosixPath
 
-from tree_sitter import Language, Node, Parser
+from tree_sitter import Language, Node, Parser, Tree
 
 from agents_remember.errors import GrammarUnavailableError
 from agents_remember.memory_quality.style.citations import test_case_ranges, test_cases
@@ -137,6 +141,59 @@ class Binding:
     test_case: bool = False
 
 
+@dataclass(frozen=True)
+class _ParsedSource:
+    tree: Tree
+    nodes: list[Node]
+
+
+@dataclass
+class _ParseCache:
+    values: dict[tuple[str, str, tuple[str, ...]], _ParsedSource] = dataclass_field(
+        default_factory=dict
+    )
+    lock: threading.Lock = dataclass_field(default_factory=threading.Lock)
+
+
+_parsed_in_call: ContextVar[_ParseCache | None] = ContextVar("parsed_in_call", default=None)
+
+
+@contextmanager
+def parsing_scope() -> Iterator[None]:
+    """Keep only trees that the test-case diagnostics can revisit during this call."""
+    if _parsed_in_call.get() is not None:
+        yield
+        return
+    cache = _ParseCache()
+    token = _parsed_in_call.set(cache)
+    try:
+        yield
+    finally:
+        _parsed_in_call.reset(token)
+        cache.values.clear()
+
+
+def _parsed_source(path: str, grammar: str, lines: Sequence[str]) -> _ParsedSource:
+    cache = _parsed_in_call.get()
+    if (
+        cache is None
+        or grammar not in {TYPESCRIPT, TSX, JAVASCRIPT}
+        or not test_cases.is_test_file(path)
+    ):
+        return _parse_source(grammar, lines)
+    key = (path, grammar, tuple(lines))
+    with cache.lock:
+        if key not in cache.values:
+            cache.values[key] = _parse_source(grammar, lines)
+        return cache.values[key]
+
+
+def _parse_source(grammar: str, lines: Sequence[str]) -> _ParsedSource:
+    # A Parser holds mutable traversal state. Only its completed immutable tree is reused.
+    tree = Parser(language(grammar)).parse("\n".join(lines).encode("utf-8"))
+    return _ParsedSource(tree=tree, nodes=_walk(tree.root_node))
+
+
 def grammar_of(path: str) -> str | None:
     """The grammar that reads ``path``, or ``None`` when nothing does."""
     return SUFFIX_GRAMMARS.get(PurePosixPath(path).suffix.lower())
@@ -218,15 +275,12 @@ def bindings(path: str, lines: Sequence[str]) -> dict[str, list[Binding]]:
     grammar = grammar_of(path)
     if grammar is None:
         return {}
-    # A Parser is built per call rather than cached beside its Language: the Language is
-    # immutable and shared safely, a Parser holds the cursor for one parse and two
-    # concurrent gate runs sharing one would interleave.
-    tree = Parser(language(grammar)).parse("\n".join(lines).encode("utf-8"))
+    source = _parsed_source(path, grammar, lines)
     reader = _python_names if grammar == PYTHON else _script_names
     wrappers = PYTHON_WRAPPERS if grammar == PYTHON else SCRIPT_WRAPPERS
     test_file = grammar != PYTHON and test_cases.is_test_file(path)
     found: dict[str, list[Binding]] = {}
-    for node in _walk(tree.root_node):
+    for node in source.nodes:
         names = [] if node.has_error else reader(node)
         cases = test_cases.case_names(node) if test_file else ()
         names.extend(cases)
@@ -245,8 +299,7 @@ def test_case_refusal(path: str, lines: Sequence[str], name: str) -> str | None:
     grammar = grammar_of(path)
     if grammar not in {TYPESCRIPT, TSX, JAVASCRIPT} or not test_cases.is_test_file(path):
         return None
-    tree = Parser(language(grammar)).parse("\n".join(lines).encode("utf-8"))
-    return test_cases.refusal(_walk(tree.root_node), path, name)
+    return test_cases.refusal(_parsed_source(path, grammar, lines).nodes, path, name)
 
 
 def test_case_range(
@@ -265,8 +318,9 @@ def test_case_range(
     grammar = grammar_of(path)
     if grammar not in {TYPESCRIPT, TSX, JAVASCRIPT} or not test_cases.is_test_file(path):
         return test_case_ranges.not_a_case_file(path, start, end)
-    tree = Parser(language(grammar)).parse("\n".join(lines).encode("utf-8"))
-    return test_case_ranges.case_at(path, _walk(tree.root_node), start, end, reaches)
+    return test_case_ranges.case_at(
+        path, _parsed_source(path, grammar, lines).nodes, start, end, reaches
+    )
 
 
 def _walk(root: Node) -> list[Node]:

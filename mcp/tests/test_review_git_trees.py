@@ -54,6 +54,7 @@ from agents_remember.models.knowledge.review_tree_entries import (
 )
 from agents_remember.models.knowledge.review_trees import ReviewTreeSideState
 from agents_remember.models.knowledge_files import canonical_text
+from agents_remember.serving.build_info import process_serving_build
 from agents_remember.serving.review_answer_reuse import RecordedAnswerReuse
 from agents_remember.serving.review_trees import ReviewTreesQuery, register_review_trees_route
 from agents_remember.worktrees.modules.capture_baseline import (
@@ -147,8 +148,13 @@ def test_a_live_review_is_four_trees_with_its_uncommitted_candidates_pinned_and_
     assert json.loads(trees.record_path.read_text())["schema"] == "ar-review-tree-comparison/v1"
     # Each memory side is read through the index of its own tree -- never a dataset copy.
     cache = world.config.coordination_root / "runtime" / "knowledge-index"
-    assert resolved.baseline_database.parent == cache
-    assert resolved.candidate_database == cache / f"{record.memory_candidate.tree}.sqlite"
+    source_digest = process_serving_build().source_digest
+    assert source_digest is not None
+    namespace = source_digest.removeprefix("sha256:")
+    assert resolved.baseline_database == cache / f"{namespace}--{record.memory_base.tree}.sqlite"
+    assert (
+        resolved.candidate_database == cache / f"{namespace}--{record.memory_candidate.tree}.sqlite"
+    )
     # The landed composition reads the index unchanged (rule 6), and declares the tree comparison.
     review = compose_review(resolved, world.review(selector=_seed()))
     assert review.state == "review" and review.payload is not None, review.refusal

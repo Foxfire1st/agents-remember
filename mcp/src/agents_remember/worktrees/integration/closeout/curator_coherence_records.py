@@ -9,6 +9,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from agents_remember.errors import CuratorCoherenceError
+from agents_remember.memory_quality.quality_identity import measured_quality_attestation_sha256
 from agents_remember.models.closeout.source import EvidenceFact
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherencePaths,
@@ -109,6 +110,14 @@ def _attestation(
             or attestation.reportSha256 != record.attestationReportSha256
             or attestation.pairIdentity != record.pairIdentity
             or attestation.sourceChangeCandidates != record.sourceCandidates
+            or (
+                record.measuredAttestationSha256 is not None
+                and (
+                    record.measuredAttestationSha256
+                    != measured_quality_attestation_sha256(attestation)
+                    or record.measuredReportSha256 != attestation.measuredReportSha256
+                )
+            )
         ):
             raise ValueError("retained attestation does not match the immutable record")
         require_memory_quality_attestation_dependencies(

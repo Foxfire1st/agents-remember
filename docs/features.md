@@ -237,11 +237,13 @@ The [enclosure](concepts.md#enclosure) of a task isolates its changes: its code 
 memory worktree lie in it.
 
 The [knowledge index](concepts.md#knowledge-index) is an SQLite view derived from a selected
-memory text tree. It is cached by tree identity outside Git working trees, by default in
-`<coordination-root>/runtime/knowledge-index/` with one file for each tree, and rebuilt when
-absent. It is evicted by age and size: after a build, a file unused for 14 days is removed, then
-the oldest files until the folder holds at most 1 GiB. Knowledge writers change the text; they do
-not write or merge this index.
+memory text tree. It is cached by memory-tree identity and the source digest held by the
+loaded build, outside Git working trees, by default in
+`<coordination-root>/runtime/knowledge-index/`. Each build reuses only its own index for a
+tree, or builds one. One eviction by age and size covers all SQLite cache files, whether named
+by tree key alone or by build and tree: after a build, a file unused for 14 days is removed,
+then the oldest files until the folder holds at most 1 GiB. Knowledge writers change the text;
+they do not write or merge this index.
 
 ## Role agents and the host
 

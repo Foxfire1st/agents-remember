@@ -41,6 +41,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     load_config,
 )
+from agents_remember.memory_quality.style.citations.extents import definition_scope
 from agents_remember.serving.build_currentness import build_currentness
 from agents_remember.serving.server_registry import register_server
 
@@ -105,7 +106,7 @@ class AgentsRememberMCP(FastMCP):
         # the completed call; a call that raises is logged here and re-raised.
         # Dispatch input refusals happen inside the context so they are
         # logged like any other raised call.
-        with tool_call_context(name, arguments, config=config):
+        with definition_scope(), tool_call_context(name, arguments, config=config):
             launched = getattr(self, "_explainer_binding", None)
             if launched is not None and name in EXPLAINER_SURFACE:
                 # MIK-R186 @ v2 rule 3 sentences 3-4: each of the explainer's own tools checks that the

@@ -336,8 +336,9 @@ that the anchored test demonstrates one facet of an invariant. The review page p
 ### Knowledge index
 
 The knowledge index is an SQLite cache that Agents Remember derives from the text of one memory
-tree and keeps outside Git, by default under `<coordination-root>/runtime/knowledge-index/`. It is
-built anew when it is absent; a write of knowledge changes the text and never the index.
+tree and keeps outside Git, by default under `<coordination-root>/runtime/knowledge-index/`.
+A build reuses only the index for its own loaded source digest and the selected memory tree,
+or builds one; a write of knowledge changes the text and never the index.
 `agents-remember knowledge-index` builds or reuses it and reports it.
 
 ### Knowledge foundation
