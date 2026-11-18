@@ -104,7 +104,7 @@ over_tracked_python() {
 
 generated_copy_checks() {
   generated_projection_check || return 1
-  generated_check skills scripts/sync-skills.py || return 1
+  generated_check skills scripts/renew-instructions.py || return 1
   generated_check runtime scripts/sync-runtime.py || return 1
   return 0
 }

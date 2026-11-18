@@ -42,10 +42,9 @@ Each of these places carries `<version>`:
 
 ## Generated Copies
 
-- [ ] `python3 scripts/sync-skills.py --check`, `python3 scripts/sync-runtime.py --check` and
+- [ ] `mcp/.venv/bin/python scripts/renew-instructions.py --check`, `python3 scripts/sync-runtime.py --check` and
       `mcp/.venv/bin/python scripts/sync-projection-types.py --check` report no difference.
-- [ ] `docs/tool-details.md` equals its copy
-      `mcp/src/agents_remember/package_data/runtime/docs/tool-details.md`.
+- [ ] Instruction renewal reports current facts and package copies, including `docs/tool-details.md`.
 
 [Generated copies](https://github.com/Foxfire1st/agents-remember/blob/main/CONTRIBUTING.md#generated-copies)
 names the source of each copy.

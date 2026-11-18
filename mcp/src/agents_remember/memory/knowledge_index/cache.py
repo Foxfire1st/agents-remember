@@ -1,13 +1,16 @@
-"""The index cache: one SQLite file per tree key, untracked, rebuilt when absent (MIK-R23 rules 2, 4, 5).
+"""The index cache: one SQLite file per loaded build and tree key, rebuilt when absent.
 
 * **Where.** One directory under the coordination runtime, by default
   ``<coordination-root>/runtime/knowledge-index/`` (:func:`default_cache_directory`). A cache
   directory inside any Git working tree is refused, so an index file can never be staged or
   committed in a repository -- the code repository, the memory repository or any other.
-* **What.** ``<tree-key>.sqlite``, one per key. A file present for the key, of this index format and
+* **What.** ``<loaded-source-digest>--<tree-key>.sqlite``, one per build and key.
+  A file present for the key, of this index format and
   built for that key, is reused; any other file at that name is rebuilt. A build writes a temporary
   file in the same directory and renames it into place, so a reader never sees a half-built index
   and two concurrent builds of one key both end with a whole file.
+  A process without a loaded source digest never reuses a file; its private namespace is unique
+  and its files remain available to readers that reopen the dataset, under the same eviction.
 * **Freshness.** A lookup against a working tree recomputes the tree's key first
   (:meth:`KnowledgeIndexCache.for_directory`); the index opened is the one for that key and is
   checked against it on open, so an answer built for different content is never served.
@@ -29,6 +32,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
+from uuid import uuid4
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge_index.build import BuildReport, build_index
@@ -40,6 +44,7 @@ from agents_remember.memory.knowledge_index.tree import (
     directory_snapshot,
     git_tree_snapshot,
 )
+from agents_remember.serving.build_info import process_serving_build
 
 # The cache location under the coordination root: ``runtime/knowledge-index`` (a chosen spelling,
 # beside the runtime's other untracked state; the coordination root is not a Git working tree).
@@ -56,6 +61,27 @@ def default_cache_directory(coordination_root: Path) -> Path:
     """Return ``<coordination-root>/runtime/knowledge-index``."""
 
     return coordination_root.joinpath(*CACHE_DIRECTORY_PARTS)
+
+
+def open_cached_index(directory: Path, key: str) -> KnowledgeIndex | None:
+    """Open only this loaded build's existing index, without writing cache bookkeeping."""
+    digest = process_serving_build().source_digest
+    if digest is None:
+        return None
+    return _open_cached_index(_cache_path(directory, key, digest), key)
+
+
+def _cache_path(directory: Path, key: str, namespace: str) -> Path:
+    return directory / f"{namespace.removeprefix('sha256:')}--{key}{_SUFFIX}"
+
+
+def _open_cached_index(path: Path, key: str) -> KnowledgeIndex | None:
+    if not path.is_file():
+        return None
+    try:
+        return KnowledgeIndex(path, expected_key=key)
+    except IndexMismatchError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -93,9 +119,13 @@ class KnowledgeIndexCache:
         self.max_age_seconds = max_age_seconds
         self.max_bytes = max_bytes
         self.last_outcome: CacheOutcome | None = None
+        self._build_digest = process_serving_build().source_digest
+        self._namespace = (
+            self._build_digest if self._build_digest is not None else f"private-{uuid4().hex}"
+        )
 
     def path_for(self, key: str) -> Path:
-        return self.directory / f"{key}{_SUFFIX}"
+        return _cache_path(self.directory, key, self._namespace)
 
     def for_directory(self, directory: Path) -> KnowledgeIndex:
         """Open the index of a working-tree directory's current captured state."""
@@ -147,12 +177,11 @@ class KnowledgeIndexCache:
     # -- internals -------------------------------------------------------------------------------
 
     def _reuse(self, key: str) -> KnowledgeIndex | None:
-        path = self.path_for(key)
-        if not path.is_file():
+        if self._build_digest is None:
             return None
-        try:
-            index = KnowledgeIndex(path, expected_key=key)
-        except IndexMismatchError:
+        path = self.path_for(key)
+        index = _open_cached_index(path, key)
+        if index is None:
             return None
         _touch_usage(path)
         self.last_outcome = CacheOutcome(key=key, reused=True, report=None)
@@ -166,8 +195,8 @@ class KnowledgeIndexCache:
             os.replace(temporary, destination)
         finally:
             _unlink(temporary)
-        _touch_usage(destination)
         self.last_outcome = CacheOutcome(key=snapshot.key, reused=False, report=report)
+        _touch_usage(destination)
         self.evict(keep=destination)
         return KnowledgeIndex(destination, expected_key=snapshot.key)
 

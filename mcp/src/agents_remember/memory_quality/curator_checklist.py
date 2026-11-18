@@ -23,6 +23,7 @@ from agents_remember.memory_quality.knowledge_review import (
     knowledge_review_section,
 )
 from agents_remember.memory_quality.knowledge_worklist_section import knowledge_worklist_lines
+from agents_remember.memory_quality.quality_identity import measured_report_sha256
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorSourceCandidate,
     memory_quality_attestation_dependencies,
@@ -188,6 +189,7 @@ def write_curator_checklist(checklist: CuratorChecklist) -> dict[str, Any]:
         "onboardingRoot": onboarding_root.as_posix(),
         "reportPath": report_path.as_posix(),
         "reportSha256": hashlib.sha256(report.encode("utf-8")).hexdigest(),
+        "measuredReportSha256": measured_report_sha256(report),
     }
     attestation["dependencies"] = memory_quality_attestation_dependencies(
         pair_identity=checklist.pair_identity,

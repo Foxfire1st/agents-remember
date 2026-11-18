@@ -1,4 +1,4 @@
-"""Strict current-v13 pins, separate admitted short-rule inverse and frozen path inverse."""
+"""Frozen v13 historical hashes and admitted short-rule and path inverse records."""
 
 from agents_remember_test_support.testing.capsule_audience_v13_operation_inverse import (
     V13_OPERATION_SHORT_RULE_INVERSE,
@@ -51,52 +51,6 @@ V13_PRE_SHORT_STAGE_SHA256 = {
     "bootstrap/bootstrap": "9472403bc5f34c79b904a4baf63569789990684a42e0d66b9e208135ca9d1c83",
 }
 
-V13_OPERATION_SHA256 = {
-    "orientation": "3120f8aea8dbc2fafb10fd9722e54e4e58c03f87dbe630a343e44bdb87f5cd30",
-    "planning": "44ad84e9bca975aef237b6215e8a53f8cb279aee861e73f76cbe5d1b864d330b",
-    "implementation": "47244c585ee85f98726122e926fdb820910baf2a3f0c1fc7486e89f298e37ad5",
-    "review": "a580b2fb62f8f2464c9597d0b9f6490722c937a2716065c876c9d085bfb9f5a2",
-    "curation": "1857e1beb8ca9269588a3c811ad6b395f112edd2e0ddc81dc5bbb03b504b5a3a",
-    "coordination": "88a01dcb7dbda8adb7eb9754736b5852b88bd23e2804a37cf9c620a597e1e6af",
-    "authorized-closeout": "f9142dc78a06d5161689df432b2853591820987c143d246b08ea71baa2b6dc20",
-    "recovery": "5740777d773a2c8733d5696ac52af01718a1d40813d85b6e0a0c46d904d74429",
-    "bootstrap": "c988052b9a104b4206086b55f10178c308a38eebe091cac422d7b5976a73b96f",
-}
-
-V13_STAGE_SHA256 = {
-    "orientation/architect": "d52d7f894c30c1a0a188c92aaa1ba40b8273d96c5747d661dbe504c3ba3df108",
-    "orientation/orchestrator": "882dd8d60faebb788285396e31854b8be006eb852d9fa0c9c5b08f2fd9a48708",
-    "orientation/manager": "882dd8d60faebb788285396e31854b8be006eb852d9fa0c9c5b08f2fd9a48708",
-    "orientation/worker": "7fdc90ea78d128f8a90282edcfb2f48824d8adf94e8f94a407afba13a96a835e",
-    "orientation/curator": "ecda592b1da264c21c975adb5801b9a7800837b56dc4e7bad6839a42f251e44e",
-    "orientation/reviewer": "882dd8d60faebb788285396e31854b8be006eb852d9fa0c9c5b08f2fd9a48708",
-    "orientation/investigator": "8859b38155055803de969edafb6271a4a317e99ccccce8662c74754bc08c773c",
-    "orientation/bootstrap": "85495ca8b48fa4b642527224613f29321209acacd8249de265f789422aadee85",
-    "planning/architect": "446b1d4131dc189e017f644f83ce58f8027124a3afc1b25201279fa26df5ca8a",
-    "planning/orchestrator": "941fada5456e8e3c2aca84506c8373a5c5cf5d478082c17a6686a621ec0708ba",
-    "implementation/worker": "7802e28d450473d928a6d4992846e4ec30abd0c41e16f553de35c0da539d4007",
-    "review/reviewer": "59974d4b1c70910c50322296c5d1056b530b44c84af91860111ca666486bea7b",
-    "review/manager": "7406101fb7e929bd1309a6360d7f0607067153f60493a3a4ff91e64a5b84bd0a",
-    "review/orchestrator": "7406101fb7e929bd1309a6360d7f0607067153f60493a3a4ff91e64a5b84bd0a",
-    "review/architect": "feae147f879b1bf752d6c00aa762a8c93713314ad276df70b94b24c8e01db688",
-    "curation/curator": "76b77127259d5fd940ef0db0250b28d76211a6dc478a9ceb13e49d3347ed8436",
-    "curation/manager": "4311e44f0879b06b19bcef0161d91ac1627a7328256378b6a1b3e8a0a86fc7f0",
-    "coordination/architect": "09afba1837291cf5346483b1c64783a45a82d4aa11174f22ce44b4f331c197a1",
-    "coordination/orchestrator": "b2df083b36fa589d55108de4957e971777524e082169e066d958d818e9d06bff",
-    "coordination/manager": "1d673d02d8540b3705b2db18e36201defca80757eaaf2e50b353e1a0d1af2b54",
-    "authorized-closeout/manager": "f9142dc78a06d5161689df432b2853591820987c143d246b08ea71baa2b6dc20",
-    "authorized-closeout/orchestrator": "f9142dc78a06d5161689df432b2853591820987c143d246b08ea71baa2b6dc20",
-    "authorized-closeout/architect": "f9142dc78a06d5161689df432b2853591820987c143d246b08ea71baa2b6dc20",
-    "recovery/architect": "7df8e998451311111f17b2c007b289e2078c7eb79143a195be662af478e8c004",
-    "recovery/orchestrator": "7df8e998451311111f17b2c007b289e2078c7eb79143a195be662af478e8c004",
-    "recovery/manager": "7df8e998451311111f17b2c007b289e2078c7eb79143a195be662af478e8c004",
-    "recovery/worker": "48adf4af29a2dc921d985de149e258d86b7ae1d3b9c09d5cf92a189e5f7cbb48",
-    "recovery/curator": "419829fd62dd6e1f46f69d9ac27a6f14d966b75ced64e73f4b3dd80f2326e315",
-    "recovery/investigator": "48adf4af29a2dc921d985de149e258d86b7ae1d3b9c09d5cf92a189e5f7cbb48",
-    "recovery/bootstrap": "c770ba6d2024ae702664e3340a30f1aaa7f153ae8b3f9e6fdcced923fcaea285",
-    "recovery/reviewer": "48adf4af29a2dc921d985de149e258d86b7ae1d3b9c09d5cf92a189e5f7cbb48",
-    "bootstrap/bootstrap": "0d3729cc4e46d3247e75c53aaef76ff3649b529f457b530cb5510950c1205efc",
-}
 
 V13_PATH_INVERSE = {
     "reference/bootstrap/failure-states.md": "reference/bootstrap-failure-states.md",

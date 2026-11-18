@@ -11,6 +11,8 @@ import shutil
 from pathlib import Path
 
 import pytest
+from agents_remember.models.role_capsules.manifest_derived import compose_manifest
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 from agents_remember_test_support.testing.manifest_step_derivation import manifest_mismatches
 from test_l84_capsule_delivery_proofs import _shipped_parsed
 
@@ -28,14 +30,16 @@ def _assert_collaboration_reference_matches_pointers(root: Path, document: dict)
         for problem in manifest_mismatches(root, document)
         if problem.startswith(tuple(key + ":" for key in COLLABORATION_KEYS))
     ]
-    assert problems == []
-    assert document["references"]["tasks/collaboration-method"]["step"].strip()
+    assert problems == [], (problems, f"Run {RENEW_COMMAND}")
+    assert compose_manifest(document)["references"]["tasks/collaboration-method"]["step"].strip(), (
+        f"Run {RENEW_COMMAND}"
+    )
 
 
 def test_collaboration_reference_declares_actual_pointer_audiences_and_step() -> None:
     root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
     document = json.loads((root / "composition-manifest.json").read_bytes())
-    reference = document["references"]["tasks/collaboration-method"]
+    reference = compose_manifest(document)["references"]["tasks/collaboration-method"]
     assert reference["source"] == "reference/tasks/collaboration-method.md"
     _assert_collaboration_reference_matches_pointers(root, document)
     assert reference["injected"] is False
@@ -51,9 +55,9 @@ def test_collaboration_reference_rejects_unpointed_audience_and_outbound_step(
 ) -> None:
     source_root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
     document = json.loads((source_root / "composition-manifest.json").read_bytes())
-    reference = document["references"]["tasks/collaboration-method"]
+    reference = compose_manifest(document)["references"]["tasks/collaboration-method"]
     changed = json.loads(json.dumps(document))
-    changed["references"]["tasks/collaboration-method"]["roles"] += [
+    changed["derived"]["references"]["tasks/collaboration-method"]["roles"] += [
         next(role for role in document["role_order"] if role not in reference["roles"])
     ]
     with pytest.raises(AssertionError):
@@ -77,7 +81,7 @@ def test_collaboration_reference_rejects_missing_actual_pointer_audience() -> No
     root = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
     document = json.loads((root / "composition-manifest.json").read_bytes())
     changed = json.loads(json.dumps(document))
-    audience = changed["references"]["tasks/document-authoring"]["roles"]
+    audience = changed["derived"]["references"]["tasks/document-authoring"]["roles"]
     assert "worker" in audience
     audience.remove("worker")
     assert changed != document

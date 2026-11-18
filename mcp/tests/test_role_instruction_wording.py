@@ -47,6 +47,7 @@ from agents_remember_test_support.testing.curation_doctrine import (
     normalize_statement,
     retired_statement_findings,
 )
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 from agents_remember_test_support.testing.leaf_instruction_wording import (
     LEAF_CLAUSES,
     ROLES,
@@ -539,7 +540,7 @@ class InstructionFileWordingTests(unittest.TestCase):
                             if control == "required detail undeclared":
                                 del manifest["references"]["message-handover"]
                             else:
-                                manifest["references"]["message-handover"]["step"] = ""
+                                manifest["derived"]["references"]["message-handover"]["step"] = ""
                             manifest_path.write_text(json.dumps(manifest))
                             expected_error = (
                                 CapsuleManifestError
@@ -661,7 +662,7 @@ class InstructionFileWordingTests(unittest.TestCase):
                 self.assertEqual(
                     (PACKAGED / relative).read_bytes(),
                     (CANONICAL / relative).read_bytes(),
-                    "run python3 scripts/sync-skills.py",
+                    f"run {RENEW_COMMAND}",
                 )
 
     def test_every_passage_that_names_an_ar_tool_names_the_task_tool_server(

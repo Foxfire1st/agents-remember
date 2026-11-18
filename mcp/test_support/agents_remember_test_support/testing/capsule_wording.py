@@ -23,6 +23,7 @@ from agents_remember.models.role_capsules.types import (
 from agents_remember.models.role_capsules.vocabulary import CapsuleOperation, CapsuleRole
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 from agents_remember_test_support.testing.leaf_instruction_wording import (
     LEAF_CLAUSES,
     MESSAGE_HANDOVER_ACTIONS,
@@ -238,7 +239,9 @@ def _memory_review_surface(root: Path, report_path: Path) -> str:
     assert route in (root / MEMORY_HANDOVER_SOURCE).read_text()
     with shipped_composition_corpus() as (shipped, _manifest):
         owner = shipped / "operations/review.md"
-        assert owner.read_bytes() == (root / "operations/review.md").read_bytes()
+        assert owner.read_bytes() == (root / "operations/review.md").read_bytes(), (
+            f"Run {RENEW_COMMAND}"
+        )
         handover = _memory_surface(root, report_path)
         assert_memory_review_owner_link(handover, owner)
         return _owner_section(shipped, "operations/review.md", "Boundaries")

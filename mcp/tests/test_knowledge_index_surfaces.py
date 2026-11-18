@@ -150,7 +150,11 @@ def test_knowledge_read_resolves_a_converted_memory_tree_through_its_index(
     # The namespace is the index's constant, supplied by the server and stated in the response.
     assert response["repositoryId"] == INDEX_REPOSITORY_ID
     cached = list((coordination / "runtime" / "knowledge-index").glob("*.sqlite"))
-    assert [path.stem for path in cached] == [response["memoryTree"]["treeId"]]
+    assert cached == [
+        KnowledgeIndexCache(coordination / "runtime" / "knowledge-index").path_for(
+            response["memoryTree"]["treeId"]
+        )
+    ]
 
     refused = _read(root, None, view="family")
     assert refused["state"] == "refused"

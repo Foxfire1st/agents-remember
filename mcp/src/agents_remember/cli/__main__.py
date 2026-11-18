@@ -41,6 +41,7 @@ from agents_remember.cli import (
     tool_log_stats,
     upgrade_user_settings,
 )
+from agents_remember.memory_quality.style.citations.extents import definition_scope
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -52,6 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
     _register_memory_commands(sub)
     _register_knowledge_commands(sub)
     _register_runtime_commands(sub)
+    for command in sub.choices.values():
+        if command is not dash:
+            command.set_defaults(command_func=command.get_default("func"), func=_run_finite_command)
     return parser
 
 
@@ -203,12 +207,18 @@ def _register_runtime_commands(sub: argparse._SubParsersAction) -> None:
     stores.set_defaults(func=removed_stores.run)
 
 
+def _run_finite_command(args: argparse.Namespace) -> int:
+    with definition_scope():
+        return int(args.command_func(args))
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else list(argv)
     if arguments[:1] == [leaf_enclosure_start.COMMAND]:
         # Internal: the dashboard backend runs it as a child process. It is no sub-command of
         # the public parser, so no help lists it.
-        return leaf_enclosure_start.main(arguments[1:])
+        with definition_scope():
+            return leaf_enclosure_start.main(arguments[1:])
     args = build_parser().parse_args(arguments)
     return int(args.func(args))
 

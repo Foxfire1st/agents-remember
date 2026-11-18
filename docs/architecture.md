@@ -170,9 +170,16 @@ modes, scenarios, diagnostics, terms, weaknesses and dependents. The
 [realizations and proofs](concepts.md#realization-and-proof); [family](concepts.md#family)
 records own their members and routes. The derived
 [knowledge index](concepts.md#knowledge-index) is a disposable SQLite cache under
-`<coordination-root>/runtime/knowledge-index/`, outside Git working trees. Reads
-rebuild it from the selected text tree when needed; it is not a second source of
-truth.
+`<coordination-root>/runtime/knowledge-index/`, outside Git working trees. Reads reuse
+an index only for the selected text tree and the source digest held by their loaded
+build, or rebuild it; it is not a second source of truth.
+
+Within one MCP tool call, one finite command-line command or one background
+quality-check worker, anchor lookups parse each distinct path, content and grammar
+once and share its definitions. A nested operation joins that operation's context.
+The context is discarded when the operation ends; parsed definitions are not kept
+for another operation. The serving `dashboard` command runs without a definition
+scope; its requests parse without a shared table.
 
 The [worklist](concepts.md#worklist-and-knowledge-gate) compares four trees: the code and the
 memory of a task, each before and after its change. The [validator](concepts.md#validator) checks

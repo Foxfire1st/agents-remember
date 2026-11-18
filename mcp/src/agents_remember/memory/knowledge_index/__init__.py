@@ -12,8 +12,8 @@ memory tree and nothing else.
 * :mod:`.projection` also writes the index as a dataset of the knowledge store's newest schema
   generation, so the existing read, view and traversal code runs over it unchanged.
 * :mod:`.query` answers the lookups; every answer carries the index state.
-* :mod:`.cache` keeps one file per tree key under the coordination runtime, never inside a Git
-  working tree, rebuilt when absent and evicted by age and size.
+* :mod:`.cache` keeps one file per loaded build and tree key under the coordination runtime,
+  never inside a Git working tree, rebuilt when absent and evicted by age and size.
 
 No knowledge writer writes the index, and the index is never merged: it is rebuilt from the tree.
 """
@@ -25,6 +25,7 @@ from agents_remember.memory.knowledge_index.cache import (
     CacheOutcome,
     KnowledgeIndexCache,
     default_cache_directory,
+    open_cached_index,
 )
 from agents_remember.memory.knowledge_index.projection import (
     INDEX_AUTHORITY_HOME,
@@ -81,6 +82,7 @@ __all__ = [
     "directory_snapshot",
     "git_tree_snapshot",
     "is_indexed_path",
+    "open_cached_index",
     "parse_tree",
     "text_uuid",
     "with_prose_companions",

@@ -17,6 +17,7 @@ from agents_remember.errors import (
     MemoryCandidatePairError,
     TaskIntentError,
 )
+from agents_remember.memory_quality.quality_identity import measured_report_sha256
 from agents_remember.models.closeout.source import EvidenceFact
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherenceAuthority,
@@ -29,11 +30,7 @@ from agents_remember.models.lifecycles.curator_coherence import (
     require_memory_quality_attestation_dependencies,
 )
 from agents_remember.models.lifecycles.evidence_dependencies import (
-    EVIDENCE_DEPENDENCY_VALIDATOR,
     EvidenceDependencyError,
-    build_evidence_dependencies,
-    canonical_sha256,
-    dependency,
     require_evidence_dependencies,
 )
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
@@ -46,10 +43,6 @@ from agents_remember.models.lifecycles.review_assessment import (
 )
 from agents_remember.models.lifecycles.review_assessment_binding import (
     supplied_measurement_statuses,
-)
-from agents_remember.models.lifecycles.review_assessment_store import (
-    assessment_edge_name,
-    recorded_assessment_digest,
 )
 from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.tasks.document_refs import (
@@ -82,6 +75,10 @@ from agents_remember.worktrees.queue.closeout_projection_members import (
 from agents_remember.worktrees.queue.closeout_queue_graph import graph_context
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
+from .curator_coherence_binding import (
+    curator_coherence_dependencies,
+    require_current_quality_binding,
+)
 from .curator_coherence_judgments import require_recorded_judgments_current
 from .curator_coherence_paths import (
     curator_coherence_paths,
@@ -312,13 +309,13 @@ def require_current_curator_coherence(
         ) from exc
     _require_current_dependencies(record)
     require_recorded_judgments_current(contract, record.judgments)
+    require_current_quality_binding(record, observation.attestation)
     observed = {
         "pairIdentity": observation.pair_identity.model_dump(mode="json"),
         "codeCandidateTree": observation.code_candidate_tree,
         "memoryCandidateTree": observation.memory_candidate_tree,
         "taskTopologyFingerprint": observation.task_topology_fingerprint,
         "taskIntent": observation.task_intent.model_dump(mode="json", by_alias=True),
-        "attestationSha256": observation.attestation_sha256,
         "sourceCandidates": [
             candidate.model_dump(mode="json") for candidate in observation.source_candidates
         ],
@@ -329,7 +326,6 @@ def require_current_curator_coherence(
         "memoryCandidateTree": record.memoryCandidateTree,
         "taskTopologyFingerprint": record.taskTopologyFingerprint,
         "taskIntent": record.taskIntent.model_dump(mode="json", by_alias=True),
-        "attestationSha256": record.attestationSha256,
         "sourceCandidates": [
             candidate.model_dump(mode="json") for candidate in record.sourceCandidates
         ],
@@ -419,69 +415,8 @@ def _require_current_dependencies(record: CuratorCoherenceRecord) -> None:
             "curator coherence has no digest-bearing task intent dependency",
             next_action="publish",
         )
-    evidence = {judgment.evidenceRef: judgment.evidenceSha256 for judgment in record.judgments}
-    review_edges = {
-        assessment_edge_name(assessment.assessmentId): recorded_assessment_digest(assessment)
-        for assessment in record.assessments
-    }
     try:
-        expected = build_evidence_dependencies(
-            "curator-coherence/v1",
-            [
-                dependency(
-                    "code-tree",
-                    "candidate",
-                    record.codeCandidateTree,
-                    algorithm="git-object",
-                ),
-                dependency(
-                    "memory-tree",
-                    "candidate",
-                    record.memoryCandidateTree,
-                    algorithm="git-object",
-                ),
-                dependency(
-                    "semantic-topology",
-                    "leaf-placement",
-                    record.taskTopologyFingerprint,
-                ),
-                dependency("task-intent", "leaf", record.taskIntent.digest),
-                dependency(
-                    "memory-attestation",
-                    record.attestationPath,
-                    record.attestationSha256,
-                ),
-                dependency(
-                    "evidence-bytes",
-                    "memory-quality-report",
-                    record.attestationReportSha256,
-                ),
-                *(
-                    dependency("evidence-bytes", path, digest)
-                    for path, digest in sorted(evidence.items())
-                ),
-                *(
-                    dependency("review-record", name, digest)
-                    for name, digest in sorted(review_edges.items())
-                ),
-                dependency(
-                    "validator",
-                    EVIDENCE_DEPENDENCY_VALIDATOR,
-                    canonical_sha256(EVIDENCE_DEPENDENCY_VALIDATOR),
-                ),
-                *(
-                    [
-                        dependency(
-                            "predecessor-record",
-                            "prior-curator-coherence-authority",
-                            record.predecessorAuthorityDigest,
-                        )
-                    ]
-                    if record.predecessorAuthorityDigest
-                    else []
-                ),
-            ],
-        )
+        expected = curator_coherence_dependencies(record)
         observed = require_evidence_dependencies(
             record.dependencies,
             record_type="curator-coherence/v1",
@@ -512,8 +447,9 @@ def _quality_attestation(
     try:
         attestation_bytes = source.attestation_path.read_bytes()
         report_bytes = source.report_path.read_bytes()
+        report_text = report_bytes.decode("utf-8")
         attestation = CuratorQualityAttestation.model_validate_json(attestation_bytes)
-    except (OSError, ValidationError) as exc:
+    except (OSError, UnicodeError, ValidationError) as exc:
         raise CuratorCoherenceError(
             "curator-coherence-attestation-unreadable",
             "the exact ar-curator-memory-quality/v1 attestation is absent or invalid",
@@ -561,6 +497,15 @@ def _quality_attestation(
             exc.detail,
             next_action="memory_quality_check",
         ) from exc
+    if (
+        attestation.measuredReportSha256 is not None
+        and attestation.measuredReportSha256 != measured_report_sha256(report_text)
+    ):
+        raise CuratorCoherenceError(
+            "curator-coherence-memory-not-ready",
+            "memory quality and its rendered checklist do not prove exact closeout readiness",
+            next_action="memory_quality_check",
+        )
     return attestation, _digest(attestation_bytes)
 
 

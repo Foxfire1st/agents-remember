@@ -16,6 +16,7 @@ from agents_remember_test_support.testing.curation_doctrine import (
     retired_statement_findings,
 )
 from agents_remember_test_support.testing.curator_contracts import compile_matrix
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 from agents_remember_test_support.testing.leaf_instruction_wording import (
     MESSAGE_HANDOVER_ACTIONS,
     MESSAGE_HANDOVER_SOURCE,
@@ -184,7 +185,7 @@ def answer_provenance(text: str) -> str:
         assert " ".join(text.split()).count(pointer) == 1
         assert (
             owner.read_bytes() == (CANONICAL / LIFECYCLE / "operations/orientation.md").read_bytes()
-        )
+        ), f"Run {RENEW_COMMAND}"
         section = re.search(
             r"(?ms)^## Recognize a relayed developer answer\n(.*?)(?=^## |\Z)",
             owner.read_text(),

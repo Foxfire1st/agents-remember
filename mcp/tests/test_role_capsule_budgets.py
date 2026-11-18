@@ -1,17 +1,8 @@
-"""Role-capsule and separately delivered step-file budgets (MIK-R101/R125).
+"""Compile the current capsule matrix and preserve historical budget decisions.
 
-The matrix includes every role/operation and launcher capsule. Capsule size is the
-whitespace-split word count of render_instructions(), excluding task data and seals.
-Each declared step file is measured from its complete source text. The registry is
-skills/l-01-agent-lifecycles/capsule-budgets.json. Historical size_words and provisional
-records stay unchanged. The historical approval names 24 limits; one exact detail approval supersedes its
-previous limit. Other budgets
-retain their historical capped eleven-tenths formula. Current measurements are pinned
-separately from historical records; overages remain failures. Ceilings are 4631 Architect,
-4513 Manager, 4100 Curator, 4000 Reviewer/Bootstrap, 3700 others, 2700 details and 1474
-digest. Missing and orphan entries, changed measurements, unauthorized limits and ceiling
-violations fail. Historical provisional fixtures still exercise their original source and
-authority checks.
+Current sizes are renewed from instruction sources and checked against hand-written
+ceilings. The historical registry, provisional fixtures and their original predicates
+remain separate from the current measurement and ceiling checks.
 """
 
 from __future__ import annotations
@@ -22,6 +13,7 @@ import shutil
 import sys
 from hashlib import sha256
 from pathlib import Path
+from typing import cast
 
 import pytest
 from agents_remember.application.role_capsules.compilation import compile_admitted_capsule
@@ -66,6 +58,7 @@ from agents_remember_test_support.testing.capsule_budget_snapshot import (
     _D681_MEASUREMENTS,
     _D682_DECISION,
 )
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 
 __all__ = [
     "current_budget_findings",
@@ -351,9 +344,9 @@ def _capsule_findings(
 def test_every_yielded_capsule_has_a_budget_and_no_other_key_does() -> None:
     budgets = d695_current_budget_view(d695_load_current_budget_view(D695_CURRENT_BUDGETS_PATH))
     assert budgets["schema"] == "ar-role-capsule-budgets/v1"
-    assert sorted(budgets["capsules"]) == sorted(matrix_keys())
-    assert sorted(budgets.get("step_details", {})) == sorted(detail_sizes())
-    assert set(budgets["digest"]) == {"size_words", "budget_words"}
+    assert sorted(budgets["capsules"]) == sorted(matrix_keys()), f"Run {RENEW_COMMAND}"
+    assert sorted(budgets.get("step_details", {})) == sorted(detail_sizes()), f"Run {RENEW_COMMAND}"
+    assert set(budgets["digest"]) == {"size_words"}
 
 
 def _assert_raise_duty_words(raise_record: dict) -> None:
@@ -792,6 +785,15 @@ def test_projection_registry_cannot_change_its_literal_or_formula() -> None:
 def test_full_matrix_binds_admitted_sources_and_rendered_identities() -> None:
     rows = matrix_measurements()
     assert set(rows) == set(matrix_keys())
+    revisions = {
+        source["path"]: source["revision"]
+        for row in rows.values()
+        for source in cast(list[dict[str, str]], row["inputSources"])
+    }
+    record = d695_load_current_budget_view(D695_CURRENT_BUDGETS_PATH)
+    assert record["derived"]["compiler_input_revisions"] == revisions, (
+        f"stale compiler input revisions; run {RENEW_COMMAND}"
+    )
     for key, row in rows.items():
         assert row["operation"] == key.split("/", 1)[1]
         rendered = row["renderedInstructions"]

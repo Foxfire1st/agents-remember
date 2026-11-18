@@ -28,12 +28,6 @@ from agents_remember.models.lifecycles.curator_coherence import (
     ValidatedCuratorCoherenceGeneration,
     publication_input_statement,
 )
-from agents_remember.models.lifecycles.evidence_dependencies import (
-    EVIDENCE_DEPENDENCY_VALIDATOR,
-    build_evidence_dependencies,
-    canonical_sha256,
-    dependency,
-)
 from agents_remember.models.lifecycles.review_assessment import (
     AssessmentEvidenceByte,
     ReviewAssessment,
@@ -44,7 +38,6 @@ from agents_remember.models.lifecycles.review_assessment_store import (
     ReviewAssessmentError,
     bind_assessment,
     require_assessments_are_identified,
-    review_record_edges,
     reviewed_bytes,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -69,7 +62,7 @@ from .curator_coherence_judgments import (
     require_recorded_judgments_current,
     retain_judgment_evidence,
 )
-from .curator_coherence_render import render_curator_coherence
+from .curator_coherence_record_builder import RecordPublication, build_curator_coherence_record
 from .curator_judgments_file import (
     _parse_judgments_payload,
     _read_judgments_bytes,
@@ -89,15 +82,6 @@ ASSESSMENT_POLICY_VERSION = "review-assessment-policy/v1"
 CANDIDATES_FILE_NAME = "curator-coherence-candidates.json"
 CANDIDATES_RENDERING_NAME = "curator-coherence-candidates.md"
 CANDIDATES_FILE_SCHEMA = "ar-curator-coherence-candidates/v1"
-
-
-@dataclass(frozen=True)
-class _RecordPublication:
-    judgments: list[CuratorCoherenceRecordedJudgment]
-    assessments: list[ReviewAssessment]
-    fingerprint: str
-    predecessor: str
-    attestation_copy_path: str
 
 
 @dataclass(frozen=True)
@@ -421,11 +405,11 @@ def _publish(contract: WorktreeContract, request: CuratorCoherenceRequest) -> di
             next_action="prepare",
         )
     judgments = retain_judgment_evidence(contract, judgments)
-    record, report = _record(
+    record, report = build_curator_coherence_record(
         contract,
         request,
         observation,
-        _RecordPublication(
+        RecordPublication(
             judgments=judgments,
             assessments=assessments,
             fingerprint=publication_fingerprint,
@@ -628,110 +612,6 @@ def _assessment_inputs(
         resolverVersion=ASSESSMENT_RESOLVER_VERSION,
         policyVersion=ASSESSMENT_POLICY_VERSION,
     )
-
-
-def _record(
-    contract: WorktreeContract,
-    request: CuratorCoherenceRequest,
-    observation: CuratorCoherenceObservation,
-    publication: _RecordPublication,
-    *,
-    caller: DeclaredCaller,
-) -> tuple[CuratorCoherenceRecord, str]:
-    assert request.semantic_requirement_revision is not None
-    assert request.delivery_attempt is not None
-    evidence_edges = {
-        judgment.evidenceRef: judgment.evidenceSha256 for judgment in publication.judgments
-    }
-    dependencies = build_evidence_dependencies(
-        "curator-coherence/v1",
-        [
-            dependency(
-                "code-tree",
-                "candidate",
-                observation.code_candidate_tree,
-                algorithm="git-object",
-            ),
-            dependency(
-                "memory-tree",
-                "candidate",
-                observation.memory_candidate_tree,
-                algorithm="git-object",
-            ),
-            dependency(
-                "semantic-topology",
-                "leaf-placement",
-                observation.task_topology_fingerprint,
-            ),
-            dependency("task-intent", "leaf", observation.task_intent.digest),
-            dependency(
-                "memory-attestation",
-                observation.attestation_path.resolve().as_posix(),
-                observation.attestation_sha256,
-            ),
-            dependency(
-                "evidence-bytes",
-                "memory-quality-report",
-                observation.attestation.reportSha256,
-            ),
-            *(
-                dependency("evidence-bytes", path, digest)
-                for path, digest in sorted(evidence_edges.items())
-            ),
-            # The record's own edge to each assessment it stores. This is the ONE direction the
-            # ``review-record`` kind is used on this route: an assessment declares the inputs it
-            # examined, and the coherence record declares an edge to the assessment. Requiring the
-            # kind inside the assessment would be a record citing itself -- the self-invalidating
-            # sequence ``design/retrieval-review-design.md:368`` exists to avoid.
-            *review_record_edges(publication.assessments),
-            dependency(
-                "validator",
-                EVIDENCE_DEPENDENCY_VALIDATOR,
-                canonical_sha256(EVIDENCE_DEPENDENCY_VALIDATOR),
-            ),
-            *(
-                [
-                    dependency(
-                        "predecessor-record",
-                        "prior-curator-coherence-authority",
-                        publication.predecessor,
-                    )
-                ]
-                if publication.predecessor
-                else []
-            ),
-        ],
-    )
-    provisional = CuratorCoherenceRecord(
-        leafId=contract.leaf_id,
-        contractPath=contract.contract_path.as_posix(),
-        taskDocumentRef=observation.candidate.ref,
-        semanticRequirementRevision=request.semantic_requirement_revision.strip(),
-        deliveryAttempt=request.delivery_attempt.strip(),
-        pairIdentity=observation.pair_identity,
-        codeCandidateTree=observation.code_candidate_tree,
-        memoryCandidateTree=observation.memory_candidate_tree,
-        taskTopologyFingerprint=observation.task_topology_fingerprint,
-        taskIntent=observation.task_intent,
-        attestationPath=observation.attestation_path.resolve().as_posix(),
-        attestationSha256=observation.attestation_sha256,
-        attestationReportSha256=observation.attestation.reportSha256,
-        attestationCopyPath=publication.attestation_copy_path,
-        sourceCandidates=observation.source_candidates,
-        judgments=publication.judgments,
-        assessments=publication.assessments,
-        dependencies=dependencies,
-        predecessorAuthorityDigest=publication.predecessor,
-        publicationFingerprint=publication.fingerprint,
-        publishedBy=f"{caller.role}@{caller.task_document_ref.key}",
-        reportSha256="0" * 64,
-    )
-    report = render_curator_coherence(provisional)
-    record = provisional.model_copy(update={"reportSha256": _digest(report.encode("utf-8"))})
-    rendered = render_curator_coherence(record)
-    if rendered != report:
-        raise RuntimeError("curator-coherence projection unexpectedly depends on its own digest")
-    return record, rendered
 
 
 _CALLER_PATH_SHAPE = "task-root-relative document path '<task-slug>/<leaf-document-file>'"

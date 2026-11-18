@@ -48,7 +48,7 @@ READMEs and architecture docs orient people. A card answers a different question
 
 ### Does memory get slower as it grows?
 
-A card is loaded by path, so the cost of *reading* memory is proportional to the files in scope for a task, not the size of the repository. The [knowledge index](concepts.md#knowledge-index) is a cache that Agents Remember derives from one memory tree and rebuilds when it is absent; it helps the tools find records, and the cards themselves are still read by path.
+A card is loaded by path, so the cost of *reading* memory is proportional to the files in scope for a task, not the size of the repository. The [knowledge index](concepts.md#knowledge-index) is a cache that Agents Remember derives from one memory tree for its loaded build and rebuilds when that combination is absent; it helps the tools find records, and the cards themselves are still read by path.
 
 A large code repository can still accumulate a lot of memory, but the agent does not need to read all of it. It reads the root overview of the repository, the [route overview](concepts.md#route-overview) of the folder when one exists, and the cards for the files it is touching.
 

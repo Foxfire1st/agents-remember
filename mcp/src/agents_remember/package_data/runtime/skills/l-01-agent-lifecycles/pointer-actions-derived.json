@@ -1,0 +1,1360 @@
+{
+  "actions": {
+    "every-role-before-landing-leaves-whose-reviews-passed-5a926db702": [
+      {
+        "source": "operations/coordination.md",
+        "fragment": "parallel-work-and-waiting",
+        "wording": "before landing leaves whose reviews passed"
+      }
+    ],
+    "every-role-before-proposing-a-requirement-change-to-your-parent-2f5715877b": [
+      {
+        "source": "roles/investigator.md",
+        "fragment": "requirements-and-limits",
+        "wording": "before proposing a requirement change to your parent"
+      }
+    ],
+    "every-role-before-proposing-an-input-limit-or-a-new-guard-370ccadee2": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "requirements-and-limits",
+        "wording": "before proposing an input limit or a new guard"
+      }
+    ],
+    "every-role-before-sending-a-requirement-to-a-worker-aec2d93496": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "requirements-and-limits",
+        "wording": "before sending a requirement to a Worker"
+      }
+    ],
+    "every-role-for-a-check-that-blocks-a-legal-operation-0e274962e8": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "requirements-and-limits",
+        "wording": "for a check that blocks a legal operation"
+      }
+    ],
+    "every-role-for-an-uncertain-start-6adb914ea9": [
+      {
+        "source": "operations/coordination.md",
+        "fragment": "start-and-configure-role-agents",
+        "wording": "for an uncertain start"
+      }
+    ],
+    "every-role-for-helper-collection-and-continuation-54243a673b": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "parallel-work-and-waiting",
+        "wording": "for helper collection and continuation"
+      },
+      {
+        "source": "roles/curator.md",
+        "fragment": "parallel-work-and-waiting",
+        "wording": "for helper collection and continuation"
+      },
+      {
+        "source": "roles/investigator.md",
+        "fragment": "parallel-work-and-waiting",
+        "wording": "for helper collection and continuation"
+      },
+      {
+        "source": "roles/manager.md",
+        "fragment": "parallel-work-and-waiting",
+        "wording": "for helper collection and continuation"
+      },
+      {
+        "source": "roles/orchestrator.md",
+        "fragment": "parallel-work-and-waiting",
+        "wording": "for helper collection and continuation"
+      },
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "parallel-work-and-waiting",
+        "wording": "for helper collection and continuation"
+      }
+    ],
+    "every-role-include-the-review-mode-canonical-task-and-review-purpose-seam-e-646a81cc16": [
+      {
+        "source": "operations/planning.md",
+        "fragment": "requirements-and-limits",
+        "wording": "include the review mode, canonical task and review purpose, seam, exact requirement set with identifiers, versions, packets and the durable"
+      }
+    ],
+    "every-role-the-leaf-task-document-requirement-62fa3ca74c": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "requirements-and-limits",
+        "wording": "the leaf task document, requirement"
+      }
+    ],
+    "every-role-the-requirement-set-dispatched-to-the-builder-exact-stable-ident-58f10d91d0": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "requirements-and-limits",
+        "wording": "the requirement set dispatched to the builder: exact stable identifiers and versions, canonical packets and the durable"
+      }
+    ],
+    "every-role-the-requirement-set-includes-identifiers-versions-packets-and-th-817a1b73bd": [
+      {
+        "source": "operations/coordination.md",
+        "fragment": "requirements-and-limits",
+        "wording": "the requirement set includes identifiers, versions, packets and the durable"
+      }
+    ],
+    "every-role-when-the-send-answers-held-81d93d74fa": [
+      {
+        "source": "roles/orchestrator.md",
+        "fragment": "parallel-work-and-waiting",
+        "wording": "when the send answers held"
+      }
+    ],
+    "code-seam-row-atomic-master-integration-review-0519ef33fd": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: atomic-master integration review"
+      }
+    ],
+    "code-seam-row-leaf-code-change-review-9eebf60e9e": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: leaf code-change review"
+      }
+    ],
+    "code-seam-row-leaf-full-loop-review-a35fb2ddc0": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: leaf full-loop review"
+      }
+    ],
+    "code-seam-row-master-exit-3d314620d6": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: master-exit"
+      }
+    ],
+    "code-seam-row-super-exit-2797a4042b": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: super-exit"
+      }
+    ],
+    "doctrine-row-atomic-master-integration-review-bf3b5022a9": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: atomic-master integration review"
+      }
+    ],
+    "doctrine-row-leaf-code-change-review-727a0a3ce2": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: leaf code-change review"
+      }
+    ],
+    "doctrine-row-leaf-full-loop-review-b0a87d90ca": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: leaf full-loop review"
+      }
+    ],
+    "doctrine-row-master-exit-0aba781235": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: master-exit"
+      }
+    ],
+    "doctrine-row-super-exit-2f5d7f2e6d": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: super-exit"
+      }
+    ],
+    "onboarding-memory-row-atomic-master-integration-review-5e90f752a9": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: atomic-master integration review"
+      }
+    ],
+    "onboarding-memory-row-leaf-code-change-review-5b5d9c4b71": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: leaf code-change review"
+      }
+    ],
+    "onboarding-memory-row-leaf-full-loop-review-7065098b0d": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: leaf full-loop review"
+      }
+    ],
+    "onboarding-memory-row-master-exit-b62465b8a0": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: master-exit"
+      }
+    ],
+    "onboarding-memory-row-super-exit-3d37395671": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: super-exit"
+      }
+    ],
+    "report-verification-row-atomic-master-integration-review-0ab3fcea32": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: atomic-master integration review"
+      }
+    ],
+    "report-verification-row-leaf-code-change-review-1b166643eb": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: leaf code-change review"
+      }
+    ],
+    "report-verification-row-leaf-full-loop-review-8af368406e": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: leaf full-loop review"
+      }
+    ],
+    "report-verification-row-master-exit-29540aa9e7": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: master-exit"
+      }
+    ],
+    "report-verification-row-plan-review-b8f66ec7ae": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: plan review"
+      }
+    ],
+    "report-verification-row-super-exit-8eb3776c20": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "row: super-exit"
+      }
+    ],
+    "bootstrap-before-an-effectful-setup-step-067bdcc0ce": [
+      {
+        "source": "roles/bootstrap.md",
+        "fragment": "evidence-and-result-verification",
+        "wording": "before an effectful setup step"
+      }
+    ],
+    "bootstrap-before-continuing-setup-with-a-missing-branch-choice-memory-repos-d80fd44c97": [
+      {
+        "source": "roles/bootstrap.md",
+        "fragment": "a-developer-decision-is-missing",
+        "wording": "before continuing setup with a missing branch choice, memory-repository decision or intended repository"
+      }
+    ],
+    "bootstrap-before-initializing-user-settings-or-handling-an-existing-setting-99d588d117": [
+      {
+        "source": "roles/bootstrap.md",
+        "fragment": "4-write-the-initial-user-settings",
+        "wording": "before initializing user settings or handling an existing settings file"
+      }
+    ],
+    "bootstrap-before-resuming-a-failed-step-706d9458c9": [
+      {
+        "source": "roles/bootstrap.md",
+        "fragment": "a-step-fails-or-needs-a-developer-ruling",
+        "wording": "before resuming a failed step"
+      }
+    ],
+    "bootstrap-opens-owns-the-ordered-steps-their-surfaces-failure-states-and-au-c909f7978b": [
+      {
+        "source": "roles/bootstrap.md",
+        "fragment": "normal-workflow",
+        "wording": "opens: owns the ordered steps, their surfaces, failure states and authority gates"
+      }
+    ],
+    "bootstrap-state-in-the-report-how-its-claims-meet-31fa5d7257": [
+      {
+        "source": "roles/bootstrap.md",
+        "fragment": "evidence-and-result-verification",
+        "wording": "state in the report how its claims meet"
+      }
+    ],
+    "bootstrap-state-the-current-fact-and-report-a-surface-that-still-states-a-s-ab1da3694a": [
+      {
+        "source": "roles/bootstrap.md",
+        "fragment": "failure-handling",
+        "wording": "state the current fact, and report a surface that still states a superseded fact."
+      }
+    ],
+    "bootstrap-use-the-required-workspace-facts-in-2b549866ed": [
+      {
+        "source": "roles/bootstrap.md",
+        "fragment": "required-workspace-facts-and-decisions",
+        "wording": "use the required workspace facts in"
+      }
+    ],
+    "closeout-before-coordinating-paired-closeout-5fc3d144be": [
+      {
+        "source": "roles/manager.md",
+        "fragment": "",
+        "wording": "before coordinating paired closeout"
+      }
+    ],
+    "closeout-before-responding-to-gate-findings-from-closeout-preview-or-any-la-7dbfcf8f22": [
+      {
+        "source": "roles/manager.md",
+        "fragment": "repair-a-gate-refusal-through-its-owner",
+        "wording": "before responding to gate findings from closeout preview or any landing route"
+      }
+    ],
+    "coordination-before-delegating-coordination-0b1e038a7c": [
+      {
+        "source": "operations/planning.md",
+        "fragment": "choose-the-coordination-owner",
+        "wording": "before delegating coordination"
+      }
+    ],
+    "coordination-before-directing-handovers-repair-loops-review-rounds-memory-p-969d9acb28": [
+      {
+        "source": "roles/manager.md",
+        "fragment": "",
+        "wording": "before directing handovers, repair loops, review rounds, memory passes or relays"
+      }
+    ],
+    "coordination-before-filling-or-reading-message-fields-26e69910c5": [
+      {
+        "source": "operations/review.md",
+        "fragment": "message-files-and-receipts",
+        "wording": "before filling or reading message fields"
+      }
+    ],
+    "coordination-before-messaging-a-role-agent-through-role-message-on-agents-r-91f406d815": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "address-and-deliver-a-message",
+        "wording": "before messaging a role agent through `role_message` on `agents-remember-task`"
+      }
+    ],
+    "coordination-before-reconciling-that-start-e5ede19f6c": [
+      {
+        "source": "operations/recovery.md",
+        "fragment": "start-one-canonical-role-assignment",
+        "wording": "before reconciling that start"
+      }
+    ],
+    "coordination-before-restoring-an-existing-ar-leaf-1eb338e6a3": [
+      {
+        "source": "operations/recovery.md",
+        "fragment": "start-one-canonical-role-assignment",
+        "wording": "before restoring an existing AR leaf"
+      }
+    ],
+    "coordination-before-starting-a-role-and-delivering-its-first-intake-615aa479c1": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "start-leaf-stages-and-deliver-the-first-intake",
+        "wording": "before starting a role and delivering its first intake"
+      },
+      {
+        "source": "roles/architect.md",
+        "fragment": "start-one-canonical-role-assignment",
+        "wording": "before starting a role and delivering its first intake"
+      }
+    ],
+    "coordination-before-starting-and-coordinating-the-leaf-c94bd48d5c": [
+      {
+        "source": "roles/manager.md",
+        "fragment": "address-and-deliver-a-message",
+        "wording": "before starting and coordinating the leaf"
+      },
+      {
+        "source": "roles/manager.md",
+        "fragment": "start-leaf-stages-and-deliver-the-first-intake",
+        "wording": "before starting and coordinating the leaf"
+      }
+    ],
+    "coordination-before-starting-or-messaging-a-role-ca11cab1a6": [
+      {
+        "source": "roles/orchestrator.md",
+        "fragment": "address-and-deliver-a-message",
+        "wording": "before starting or messaging a role"
+      },
+      {
+        "source": "roles/orchestrator.md",
+        "fragment": "start-leaf-stages-and-deliver-the-first-intake",
+        "wording": "before starting or messaging a role"
+      },
+      {
+        "source": "roles/orchestrator.md",
+        "fragment": "start-one-canonical-role-assignment",
+        "wording": "before starting or messaging a role"
+      }
+    ],
+    "coordination-before-the-reviewer-s-first-inspection-830d329beb": [
+      {
+        "source": "roles/manager.md",
+        "fragment": "deliver-the-managers-first-reviewer-intake",
+        "wording": "before the Reviewer's first inspection"
+      }
+    ],
+    "coordination-for-a-closeout-result-notice-f58ea0a572": [
+      {
+        "source": "roles/manager.md",
+        "fragment": "recover-an-unfinished-closeout",
+        "wording": "for a closeout-result notice"
+      }
+    ],
+    "coordination-when-role-message-on-agents-remember-task-answers-held-because-ef792fb8c6": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "relay-a-childs-permission-notice",
+        "wording": "when `role_message` on `agents-remember-task` answers `held` because a child waits at a permission prompt, or its wait returns `permission-pending`"
+      },
+      {
+        "source": "roles/orchestrator.md",
+        "fragment": "relay-a-childs-permission-notice",
+        "wording": "when `role_message` on `agents-remember-task` answers `held` because a child waits at a permission prompt, or its wait returns `permission-pending`"
+      }
+    ],
+    "coordination-when-role-message-on-agents-remember-task-returns-held-because-373b1848c3": [
+      {
+        "source": "roles/manager.md",
+        "fragment": "relay-a-childs-permission-notice",
+        "wording": "when `role_message` on `agents-remember-task` returns `held` because a child waits at a permission prompt, or a wait returns `permission-pending`"
+      }
+    ],
+    "curation-before-closeout-51e9894b6a": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "obtain-the-independent-fact-check",
+        "wording": "before closeout"
+      }
+    ],
+    "curation-before-contacting-another-leaf-af03695473": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "handoff--exit",
+        "wording": "before contacting another leaf"
+      }
+    ],
+    "curation-before-contacting-the-manager-about-curation-f0f0c1a715": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "handoff--exit",
+        "wording": "before contacting the Manager about curation"
+      }
+    ],
+    "curation-before-continuing-after-a-memory-tool-failure-f4e04b998c": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "repair-and-republish",
+        "wording": "before continuing after a memory-tool failure"
+      }
+    ],
+    "curation-before-handover-8f0f557a2c": [
+      {
+        "source": "operations/curation.md",
+        "fragment": "run-the-complete-curation-checks",
+        "wording": "before handover"
+      }
+    ],
+    "curation-before-intake-and-writer-admission-b582a83569": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "bound-paseo-intake-and-capabilities",
+        "wording": "before intake and writer admission"
+      },
+      {
+        "source": "roles/curator.md",
+        "fragment": "required-inputs",
+        "wording": "before intake and writer admission"
+      }
+    ],
+    "curation-before-reporting-a-completed-curation-result-aac6a303ef": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "authority-gates",
+        "wording": "before reporting a completed curation result"
+      }
+    ],
+    "curation-before-running-curation-checks-572c914a4e": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "run-the-complete-curation-checks",
+        "wording": "before running curation checks"
+      }
+    ],
+    "curation-before-sending-an-evidenced-code-concern-8b34e89080": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "failure-handling",
+        "wording": "before sending an evidenced code concern"
+      }
+    ],
+    "curation-before-validating-coherence-7d7016e082": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "authority-gates",
+        "wording": "before validating coherence"
+      }
+    ],
+    "implementation-before-deciding-closeout-after-a-leaf-sync-4c358e1a57": [
+      {
+        "source": "roles/manager.md",
+        "fragment": "synchronize-the-leaf",
+        "wording": "before deciding closeout after a leaf sync"
+      }
+    ],
+    "implementation-before-deciding-whether-a-handover-was-taken-or-responding-t-d45a8a09fa": [
+      {
+        "source": "roles/worker.md",
+        "fragment": "boundaries",
+        "wording": "before deciding whether a handover was taken or responding to a provider, seat or busy refusal"
+      }
+    ],
+    "implementation-before-handing-over-a-frozen-candidate-87d208f864": [
+      {
+        "source": "roles/worker.md",
+        "fragment": "hand-over-the-frozen-candidate",
+        "wording": "before handing over a frozen candidate"
+      }
+    ],
+    "implementation-before-making-a-measurement-tooling-handover-37ae28e7b2": [
+      {
+        "source": "roles/worker.md",
+        "fragment": "make-the-measurement-handover",
+        "wording": "before making a measurement-tooling handover"
+      }
+    ],
+    "implementation-before-recovering-after-that-sync-6063dfe817": [
+      {
+        "source": "operations/recovery.md",
+        "fragment": "synchronize-the-leaf",
+        "wording": "before recovering after that sync"
+      }
+    ],
+    "implementation-before-repairing-a-native-memory-file-sync-conflict-01008b5e93": [
+      {
+        "source": "operations/curation.md",
+        "fragment": "synchronize-the-leaf",
+        "wording": "before repairing a native memory-file sync conflict"
+      }
+    ],
+    "implementation-before-repairing-a-sealed-finding-in-this-task-s-own-files-6c8c979b8f": [
+      {
+        "source": "roles/worker.md",
+        "fragment": "repair-a-sealed-own-file-finding",
+        "wording": "before repairing a sealed finding in this task's own files"
+      }
+    ],
+    "implementation-before-responding-to-a-non-work-reply-an-empty-or-doubled-se-6cfad93f70": [
+      {
+        "source": "operations/curation.md",
+        "fragment": "report-a-refused-handover",
+        "wording": "before responding to a non-work reply, an empty or doubled-seat refusal, an unreachable-Manager notice, or failed delivery of a required Manager notice"
+      }
+    ],
+    "implementation-before-responding-to-a-non-work-reply-empty-or-doubled-seat--941ac3a166": [
+      {
+        "source": "operations/review.md",
+        "fragment": "repair-defects-and-report-a-refused-handover",
+        "wording": "before responding to a non-work reply, empty or doubled-seat refusal, or an unreachable-Manager notice"
+      }
+    ],
+    "implementation-before-writing-the-report-650a46d425": [
+      {
+        "source": "roles/worker.md",
+        "fragment": "outputs",
+        "wording": "before writing the report"
+      }
+    ],
+    "implementation-when-one-small-item-costs-about-an-hour-a-second-repair-roun-7fbad14ae9": [
+      {
+        "source": "roles/worker.md",
+        "fragment": "report-a-costly-small-repair",
+        "wording": "when one small item costs about an hour, a second repair round or a second freeze"
+      }
+    ],
+    "implementation-when-ruling-on-a-measured-defect-or-costly-small-work-adf28f77a3": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "boundaries",
+        "wording": "when ruling on a measured defect or costly small work"
+      }
+    ],
+    "implementation-when-the-master-line-moves-run-the-supported-sync-of-your-ow-19e3c76ab6": [
+      {
+        "source": "roles/worker.md",
+        "fragment": "synchronize-the-leaf",
+        "wording": "when the master line moves, run the supported sync of your own leaf yourself"
+      }
+    ],
+    "orientation-before-acting-on-a-denied-or-unanswered-harness-request-1482ca975f": [
+      {
+        "source": "operations/coordination.md",
+        "fragment": "honor-harness-permission-decisions",
+        "wording": "before acting on a denied or unanswered harness request"
+      },
+      {
+        "source": "operations/curation.md",
+        "fragment": "honor-harness-permission-decisions",
+        "wording": "before acting on a denied or unanswered harness request"
+      },
+      {
+        "source": "operations/implementation.md",
+        "fragment": "honor-harness-permission-decisions",
+        "wording": "before acting on a denied or unanswered harness request"
+      },
+      {
+        "source": "operations/planning.md",
+        "fragment": "honor-harness-permission-decisions",
+        "wording": "before acting on a denied or unanswered harness request"
+      },
+      {
+        "source": "operations/review.md",
+        "fragment": "honor-harness-permission-decisions",
+        "wording": "before acting on a denied or unanswered harness request"
+      }
+    ],
+    "orientation-before-an-admitted-canonical-task-document-edit-4f585ccb08": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "confirm-the-assignment",
+        "wording": "before an admitted canonical task-document edit"
+      }
+    ],
+    "orientation-before-asking-a-question-27ac79f734": [
+      {
+        "source": "roles/worker.md",
+        "fragment": "ask-for-a-developer-decision",
+        "wording": "before asking a question"
+      }
+    ],
+    "orientation-before-changing-a-canonical-task-document-57ad8d7cbb": [
+      {
+        "source": "roles/manager.md",
+        "fragment": "confirm-the-assignment",
+        "wording": "before changing a canonical task document"
+      }
+    ],
+    "orientation-before-deciding-a-formal-permission-1a1510e105": [
+      {
+        "source": "operations/coordination.md",
+        "fragment": "formal-permissions",
+        "wording": "before deciding a formal permission"
+      }
+    ],
+    "orientation-before-deciding-or-writing-memory-5073c98684": [
+      {
+        "source": "operations/curation.md",
+        "fragment": "bind-curation-to-the-serving-build",
+        "wording": "before deciding or writing memory"
+      }
+    ],
+    "orientation-before-editing-a-canonical-task-document-or-marking-your-own-co-33a8fd6941": [
+      {
+        "source": "operations/implementation.md",
+        "fragment": "confirm-the-assignment",
+        "wording": "before editing a canonical task document or marking your own completed step"
+      }
+    ],
+    "orientation-before-making-a-formal-permission-decision-b8e750b84f": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "formal-permissions",
+        "wording": "before making a formal permission decision"
+      }
+    ],
+    "orientation-before-responding-to-an-advisory-reviewer-s-permission-prompt-e5d3f86652": [
+      {
+        "source": "operations/review.md",
+        "fragment": "formal-permissions",
+        "wording": "before responding to an advisory reviewer's permission prompt"
+      }
+    ],
+    "orientation-before-resuming-a-memory-decision-or-write-3d77526a1f": [
+      {
+        "source": "operations/recovery.md",
+        "fragment": "bind-curation-to-the-serving-build",
+        "wording": "before resuming a memory decision or write"
+      }
+    ],
+    "orientation-before-sending-a-developer-question-or-handling-a-relayed-answe-3292c9d062": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "ask-for-a-developer-decision",
+        "wording": "before sending a developer question or handling a relayed answer"
+      },
+      {
+        "source": "roles/curator.md",
+        "fragment": "recognize-a-relayed-developer-answer",
+        "wording": "before sending a developer question or handling a relayed answer"
+      },
+      {
+        "source": "roles/orchestrator.md",
+        "fragment": "ask-for-a-developer-decision",
+        "wording": "before sending a developer question or handling a relayed answer"
+      },
+      {
+        "source": "roles/orchestrator.md",
+        "fragment": "recognize-a-relayed-developer-answer",
+        "wording": "before sending a developer question or handling a relayed answer"
+      }
+    ],
+    "orientation-before-sending-a-developer-question-or-recognizing-a-relayed-an-fd9dd3021d": [
+      {
+        "source": "roles/manager.md",
+        "fragment": "ask-for-a-developer-decision",
+        "wording": "before sending a developer question or recognizing a relayed answer"
+      },
+      {
+        "source": "roles/manager.md",
+        "fragment": "recognize-a-relayed-developer-answer",
+        "wording": "before sending a developer question or recognizing a relayed answer"
+      }
+    ],
+    "orientation-before-sending-developer-questions-or-handling-relayed-answers-700fb4ea81": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "ask-for-a-developer-decision",
+        "wording": "before sending developer questions or handling relayed answers"
+      }
+    ],
+    "orientation-preserve-the-read-rules-under-22f85c695e": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "confirm-the-assignment",
+        "wording": "preserve the read rules under"
+      }
+    ],
+    "planning-before-assigning-an-issue-to-another-open-leaf-d2aec569fd": [
+      {
+        "source": "operations/planning.md",
+        "fragment": "complete-the-plan-and-preserve-its-boundaries",
+        "wording": "before assigning an issue to another open leaf"
+      }
+    ],
+    "planning-before-releasing-a-packet-7fa00e952d": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "cross-packet-alignment-sweep",
+        "wording": "before releasing a packet"
+      }
+    ],
+    "review-before-checking-repaired-findings-at-the-round-limit-42fbe8913d": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "verify-repaired-findings-at-the-round-limit",
+        "wording": "before checking repaired findings at the round limit"
+      }
+    ],
+    "review-before-commissioning-advisory-independent-reviews-0b5f60fa23": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "advisory-independent-reviews",
+        "wording": "before commissioning advisory independent reviews"
+      }
+    ],
+    "review-before-coordinating-a-memory-review-6c18151a07": [
+      {
+        "source": "operations/coordination.md",
+        "fragment": "boundaries",
+        "wording": "before coordinating a memory review"
+      }
+    ],
+    "review-before-handling-findings-received-after-sealing-including-those-arri-2257e515d0": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "boundaries",
+        "wording": "before handling findings received after sealing, including those arriving after code PASS, or sending the ready-for-closeout notice"
+      }
+    ],
+    "review-before-inspecting-the-assigned-packet-or-candidate-5a94ae7ca5": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "receive-the-intake-and-hand-over-the-leaf-verdict",
+        "wording": "before inspecting the assigned packet or candidate"
+      }
+    ],
+    "review-before-opening-or-recording-an-ordinary-code-review-round-fb43a2bf0c": [
+      {
+        "source": "operations/coordination.md",
+        "fragment": "record-code-review-rounds",
+        "wording": "before opening or recording an ordinary code review round"
+      }
+    ],
+    "review-before-rechecking-a-repaired-worker-record-ae2b005c06": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "recheck-a-repaired-worker-record",
+        "wording": "before rechecking a repaired Worker record"
+      }
+    ],
+    "review-before-recording-a-memory-round-requesting-an-extra-round-or-handlin-89bdef8876": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "boundaries",
+        "wording": "before recording a memory round, requesting an extra round or handling provider, seat or busy refusals"
+      }
+    ],
+    "review-before-recording-an-ordinary-leaf-code-round-a938dfa412": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "record-code-review-rounds",
+        "wording": "before recording an ordinary leaf code round"
+      }
+    ],
+    "review-write-and-record-the-verdict-then-follow-3d45d3319e": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "receive-the-intake-and-hand-over-the-leaf-verdict",
+        "wording": "write and record the verdict, then follow"
+      }
+    ],
+    "foundation-state-before-naming-the-next-step-in-the-conversation-and-report-de2636bc9c": [
+      {
+        "source": "operations/bootstrap.md",
+        "fragment": "name-the-next-step",
+        "wording": "before naming the next step in the conversation and report"
+      }
+    ],
+    "foundation-state-before-reading-and-reporting-the-knowledge-foundation-s-st-5f3255ffd9": [
+      {
+        "source": "roles/bootstrap.md",
+        "fragment": "read-the-state",
+        "wording": "before reading and reporting the knowledge foundation's state"
+      }
+    ],
+    "requirement-design-before-authoring-or-amending-a-requirement-and-its-task--54d61e4057": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "",
+        "wording": "before authoring or amending a requirement and its task structure"
+      }
+    ],
+    "requirement-design-before-grouping-primary-and-additional-same-topic-packet-c6cc728029": [
+      {
+        "source": "operations/planning.md",
+        "fragment": "plan-a-topic-merge-or-propose-a-split",
+        "wording": "before grouping primary and additional same-topic packets"
+      }
+    ],
+    "card-formats-and-citations-before-checking-or-repairing-citations-870073a455": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "prepare-citation-input",
+        "wording": "before checking or repairing citations"
+      }
+    ],
+    "card-formats-and-citations-before-creating-or-maintaining-cards-or-overview-93a803a9f5": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "choose-card-and-overview-scope",
+        "wording": "before creating or maintaining cards or overviews"
+      }
+    ],
+    "card-formats-and-citations-before-maintaining-the-entity-catalog-1e13763169": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "maintain-the-entity-catalog",
+        "wording": "before maintaining the entity catalog"
+      }
+    ],
+    "card-formats-and-citations-before-writing-card-history-87a3567855": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "choose-the-history-disposition",
+        "wording": "before writing card history"
+      }
+    ],
+    "governing-sources-before-authoring-a-governing-decision-record-b73cbfcf70": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "preserve-governing-decisions",
+        "wording": "before authoring a governing decision record"
+      }
+    ],
+    "governing-sources-before-explaining-an-assigned-contract-7b9040f96b": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "read-governing-documentation",
+        "wording": "before explaining an assigned contract"
+      }
+    ],
+    "intent-reconciliation-before-promoting-a-historical-oddity-8a72dc8862": [
+      {
+        "source": "operations/curation.md",
+        "fragment": "",
+        "wording": "before promoting a historical oddity"
+      }
+    ],
+    "intent-reconciliation-before-reconciling-current-intent-ruled-intent-and-im-8f92dc66d4": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "",
+        "wording": "before reconciling current intent, ruled intent and implementation"
+      }
+    ],
+    "commands-before-a-knowledge-system-command-or-check-e11771b5d9": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "",
+        "wording": "before a knowledge-system command or check"
+      }
+    ],
+    "commands-before-planning-repository-work-f354fc415a": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "",
+        "wording": "before planning repository work"
+      }
+    ],
+    "commands-before-retrieving-its-context-again-64f475e9a9": [
+      {
+        "source": "core/every-role.md",
+        "fragment": "use-related-workflow-tools",
+        "wording": "before retrieving its context again"
+      }
+    ],
+    "commands-before-using-a-knowledge-command-or-acting-on-its-result-f0057bd956": [
+      {
+        "source": "roles/orchestrator.md",
+        "fragment": "",
+        "wording": "before using a knowledge command or acting on its result"
+      }
+    ],
+    "commands-before-using-a-knowledge-command-or-interpreting-its-result-ffa261af02": [
+      {
+        "source": "roles/investigator.md",
+        "fragment": "",
+        "wording": "before using a knowledge command or interpreting its result"
+      },
+      {
+        "source": "roles/manager.md",
+        "fragment": "",
+        "wording": "before using a knowledge command or interpreting its result"
+      },
+      {
+        "source": "roles/worker.md",
+        "fragment": "",
+        "wording": "before using a knowledge command or interpreting its result"
+      }
+    ],
+    "commands-before-using-a-knowledge-command-or-its-result-f62bf894a2": [
+      {
+        "source": "roles/bootstrap.md",
+        "fragment": "",
+        "wording": "before using a knowledge command or its result"
+      }
+    ],
+    "commands-before-using-a-knowledge-system-command-or-interpreting-its-result-736de9c39c": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "",
+        "wording": "before using a knowledge-system command or interpreting its result"
+      }
+    ],
+    "use-before-checking-code-and-memory-23bce46d91": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "read-code-and-knowledge-together",
+        "wording": "before checking code and memory"
+      }
+    ],
+    "use-before-diagnosing-b338e1f9ff": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "architect-diagnose-before-proposing-a-repair",
+        "wording": "before diagnosing"
+      }
+    ],
+    "use-before-diagnosing-a-failing-test-d3b0c7772d": [
+      {
+        "source": "roles/worker.md",
+        "fragment": "worker-read-before-editing-and-after-a-test-fails",
+        "wording": "before diagnosing a failing test"
+      }
+    ],
+    "use-before-editing-source-b26c8e8871": [
+      {
+        "source": "roles/worker.md",
+        "fragment": "worker-read-before-editing-and-after-a-test-fails",
+        "wording": "before editing source"
+      }
+    ],
+    "use-before-interpreting-a-knowledge-read-75e1759f9d": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "bind-and-complete-the-knowledge-read",
+        "wording": "before interpreting a knowledge read"
+      }
+    ],
+    "use-before-interpreting-their-resolution-93247df79f": [
+      {
+        "source": "roles/bootstrap.md",
+        "fragment": "read-the-source-that-owns-a-setting",
+        "wording": "before interpreting their resolution"
+      }
+    ],
+    "use-before-investigating-repository-code-ff130ed307": [
+      {
+        "source": "roles/investigator.md",
+        "fragment": "investigator-distinguish-claims-observations-and-hypotheses",
+        "wording": "before investigating repository code"
+      }
+    ],
+    "use-before-relying-on-storage-or-path-eligibility-cross-repository-allowanc-13fc42b13f": [
+      {
+        "source": "core/every-role.md",
+        "fragment": "read-the-source-that-owns-a-setting",
+        "wording": "before relying on storage or path eligibility, cross-repository allowances, or serving-build metadata"
+      }
+    ],
+    "use-when-inspecting-changes-fd041ceb7c": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "reviewer-inspect-every-changed-file",
+        "wording": "when inspecting changes"
+      }
+    ],
+    "message-handover-before-delivering-a-developer-question-to-a-recipient-or-p-3ee8adce5f": [
+      {
+        "source": "operations/orientation.md",
+        "fragment": "send-a-message-that-names-the-files",
+        "wording": "before delivering a developer question to a recipient or parent"
+      }
+    ],
+    "message-handover-before-handing-over-work-896f91e068": [
+      {
+        "source": "roles/investigator.md",
+        "fragment": "send-a-message-that-names-the-files",
+        "wording": "before handing over work"
+      },
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "send-a-message-that-names-the-files",
+        "wording": "before handing over work"
+      }
+    ],
+    "message-handover-before-handing-work-to-a-waiting-seat-c6d5ce942c": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "",
+        "wording": "before handing work to a waiting seat"
+      },
+      {
+        "source": "roles/manager.md",
+        "fragment": "",
+        "wording": "before handing work to a waiting seat"
+      },
+      {
+        "source": "roles/orchestrator.md",
+        "fragment": "",
+        "wording": "before handing work to a waiting seat"
+      }
+    ],
+    "message-handover-before-locating-a-filed-message-or-receipt-24d3455219": [
+      {
+        "source": "operations/coordination.md",
+        "fragment": "find-filed-messages-and-receipts",
+        "wording": "before locating a filed message or receipt"
+      },
+      {
+        "source": "operations/review.md",
+        "fragment": "find-filed-messages-and-receipts",
+        "wording": "before locating a filed message or receipt"
+      }
+    ],
+    "message-handover-before-responding-to-a-full-store-refusal-0c68571173": [
+      {
+        "source": "operations/closeout.md",
+        "fragment": "handle-a-full-store-refusal",
+        "wording": "before responding to a full-store refusal"
+      },
+      {
+        "source": "operations/coordination.md",
+        "fragment": "handle-a-full-store-refusal",
+        "wording": "before responding to a full-store refusal"
+      },
+      {
+        "source": "operations/curation.md",
+        "fragment": "handle-a-full-store-refusal",
+        "wording": "before responding to a full-store refusal"
+      },
+      {
+        "source": "operations/implementation.md",
+        "fragment": "handle-a-full-store-refusal",
+        "wording": "before responding to a full-store refusal"
+      },
+      {
+        "source": "operations/orientation.md",
+        "fragment": "handle-a-full-store-refusal",
+        "wording": "before responding to a full-store refusal"
+      },
+      {
+        "source": "operations/planning.md",
+        "fragment": "handle-a-full-store-refusal",
+        "wording": "before responding to a full-store refusal"
+      },
+      {
+        "source": "operations/recovery.md",
+        "fragment": "handle-a-full-store-refusal",
+        "wording": "before responding to a full-store refusal"
+      },
+      {
+        "source": "operations/review.md",
+        "fragment": "handle-a-full-store-refusal",
+        "wording": "before responding to a full-store refusal"
+      }
+    ],
+    "message-handover-before-sending-a-handover-37bf446167": [
+      {
+        "source": "roles/worker.md",
+        "fragment": "send-a-message-that-names-the-files",
+        "wording": "before sending a handover"
+      }
+    ],
+    "message-handover-before-sending-a-message-6112e9ce74": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "",
+        "wording": "before sending a message"
+      }
+    ],
+    "refused-write-before-retiring-or-moving-a-task-0ff5836fa2": [
+      {
+        "source": "roles/manager.md",
+        "fragment": "apply-the-procedure-to-a-task-document-or-folder",
+        "wording": "before retiring or moving a task"
+      }
+    ],
+    "refused-write-for-a-correct-input-refusal-of-a-covered-write-task-doc-edits-1193753949": [
+      {
+        "source": "core/every-role.md",
+        "fragment": "",
+        "wording": "for a correct-input refusal of a covered write (`task_doc` edits (including an admitted task retirement or folder movement), `knowledge_write`, `citation_fix`, `citation_note_revision` and `curator_coherence` publication)"
+      }
+    ],
+    "document-authoring-before-authoring-a-task-document-or-requirement-packet-f737cf157b": [
+      {
+        "source": "roles/architect.md",
+        "fragment": "",
+        "wording": "before authoring a task document or requirement packet"
+      }
+    ],
+    "document-authoring-before-editing-skipping-or-previewing-task-document-fiel-af832d7374": [
+      {
+        "source": "roles/worker.md",
+        "fragment": "",
+        "wording": "before editing, skipping or previewing task-document fields"
+      }
+    ],
+    "document-authoring-before-editing-skipping-or-previewing-task-document-fiel-a7b9b94732": [
+      {
+        "source": "roles/manager.md",
+        "fragment": "",
+        "wording": "before editing, skipping or previewing task-document fields, or using `task_doc append_decision`"
+      }
+    ],
+    "document-authoring-before-making-the-change-537af426a2": [
+      {
+        "source": "core/every-role.md",
+        "fragment": "",
+        "wording": "before making the change"
+      }
+    ],
+    "document-authoring-before-using-task-doc-append-decision-0a48f4c36c": [
+      {
+        "source": "roles/orchestrator.md",
+        "fragment": "preserve-decisions-and-approved-intent",
+        "wording": "before using `task_doc append_decision`"
+      }
+    ],
+    "bootstrap-before-asking-a-setup-question-b632cc3308": [
+      {
+        "source": "operations/bootstrap.md",
+        "fragment": "boundaries",
+        "wording": "before asking a setup question"
+      }
+    ],
+    "bootstrap-before-taking-a-setup-action-de2e6e6d81": [
+      {
+        "source": "operations/bootstrap.md",
+        "fragment": "boundaries",
+        "wording": "before taking a setup action"
+      }
+    ],
+    "bootstrap-with-an-attributed-baseline-and-resolving-context-apply-8194f4aaa8": [
+      {
+        "source": "operations/bootstrap.md",
+        "fragment": "boundaries",
+        "wording": "with an attributed baseline and resolving context, apply"
+      }
+    ],
+    "curator-before-capturing-a-discovery-993bc68530": [
+      {
+        "source": "operations/curation.md",
+        "fragment": "reconcile-author-and-check",
+        "wording": "before capturing a discovery"
+      }
+    ],
+    "curator-before-repairing-a-failed-curation-step-e260171a20": [
+      {
+        "source": "operations/curation.md",
+        "fragment": "repair-and-finish-the-stage",
+        "wording": "before repairing a failed curation step"
+      }
+    ],
+    "curator-before-writing-the-handover-output-542939fb7c": [
+      {
+        "source": "operations/curation.md",
+        "fragment": "produce-the-handover",
+        "wording": "before writing the handover output"
+      }
+    ],
+    "curator-when-repairing-memory-encountered-during-curation-00fc524f5e": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "repair-and-finish-the-stage",
+        "wording": "when repairing memory encountered during curation"
+      }
+    ],
+    "manager-for-a-round-beyond-the-settings-limit-a455a8fe8b": [
+      {
+        "source": "roles/manager.md",
+        "fragment": "report-through-the-assigned-recipient",
+        "wording": "for a round beyond the settings limit"
+      }
+    ],
+    "manager-the-manager-receives-the-worker-s-freeze-notice-to-start-the-review-6283839f4b": [
+      {
+        "source": "operations/coordination.md",
+        "fragment": "handle-leaf-notices-and-maintain-records",
+        "wording": "the manager receives the worker's freeze notice to start the reviewer, the reviewer's code-`pass` notice to start the curator, and only the other occasions listed in"
+      }
+    ],
+    "orchestrator-forward-only-questions-requiring-the-developer-and-the-permiss-1e962adc22": [
+      {
+        "source": "roles/orchestrator.md",
+        "fragment": "questions-received-from-children",
+        "wording": "forward only questions requiring the developer and the permission notices described under"
+      }
+    ],
+    "orchestrator-pending-developer-questions-and-held-report-state-from-910407ef4d": [
+      {
+        "source": "roles/orchestrator.md",
+        "fragment": "developer-questions-and-answers",
+        "wording": "pending developer questions and held-report state from"
+      }
+    ],
+    "orchestrator-the-rulings-record-requirement-change-list-and-status-file-pat-907eaa982e": [
+      {
+        "source": "roles/orchestrator.md",
+        "fragment": "record-operational-decisions",
+        "wording": "the rulings record, requirement-change list and status file paths from"
+      }
+    ],
+    "orchestrator-verified-manager-delivery-with-reports-findings-review-curatio-2378a5b760": [
+      {
+        "source": "roles/orchestrator.md",
+        "fragment": "verify-and-hand-over",
+        "wording": "verified manager delivery, with reports, findings, review, curation and git publication separately addressed as"
+      }
+    ],
+    "reviewer-before-a-code-edit-task-acceptance-write-role-start-or-git-publica-e5b7dfded9": [
+      {
+        "source": "operations/review.md",
+        "fragment": "permitted-work-and-boundaries",
+        "wording": "before a code edit, task-acceptance write, role start or Git publication"
+      }
+    ],
+    "reviewer-in-fix-verification-reuse-the-sealed-evidence-and-verify-only-list-a30a4e514c": [
+      {
+        "source": "roles/reviewer.md",
+        "fragment": "report-problems-without-expanding-review",
+        "wording": "in `fix-verification`, reuse the sealed evidence and verify only listed identifiers, subject to the sanctioned routes under"
+      }
+    ],
+    "worker-before-handing-over-or-attempting-a-role-start-acceptance-or-publica-491deada88": [
+      {
+        "source": "operations/implementation.md",
+        "fragment": "preserve-role-and-task-boundaries",
+        "wording": "before handing over or attempting a role-start, acceptance or publication action"
+      }
+    ],
+    "worker-before-reading-the-task-inputs-8d86cc2666": [
+      {
+        "source": "operations/implementation.md",
+        "fragment": "establish-the-assignment",
+        "wording": "before reading the task inputs"
+      }
+    ],
+    "curator-handoff-list-before-producing-the-curator-hand-off-list-f289b28ae9": [
+      {
+        "source": "roles/worker.md",
+        "fragment": "shape",
+        "wording": "before producing the Curator hand-off list"
+      }
+    ],
+    "curator-handoff-list-when-naming-them-44f5147e6a": [
+      {
+        "source": "roles/worker.md",
+        "fragment": "the-two-record-kinds-a-producer-may-name",
+        "wording": "when naming them"
+      }
+    ],
+    "master-state-before-updating-master-state-through-completion-bee60d927b": [
+      {
+        "source": "roles/manager.md",
+        "fragment": "abandon-a-master-and-settle-a-landings-debt",
+        "wording": "before updating master state through completion"
+      },
+      {
+        "source": "roles/manager.md",
+        "fragment": "finish-documentation-before-master-completion",
+        "wording": "before updating master state through completion"
+      },
+      {
+        "source": "roles/manager.md",
+        "fragment": "update-the-master-after-starts-handovers-and-landings",
+        "wording": "before updating master state through completion"
+      }
+    ],
+    "curator-handoff-ingestion-before-ingesting-a-producer-list-or-authoring-its-eca4d69785": [
+      {
+        "source": "roles/curator.md",
+        "fragment": "curator-authored-semantic-scope",
+        "wording": "before ingesting a producer list or authoring its Curator fields"
+      },
+      {
+        "source": "roles/curator.md",
+        "fragment": "the-curators-authored-keys-beside-the-thirteen-fields",
+        "wording": "before ingesting a producer list or authoring its Curator fields"
+      },
+      {
+        "source": "roles/curator.md",
+        "fragment": "the-writers-input-sections",
+        "wording": "before ingesting a producer list or authoring its Curator fields"
+      }
+    ]
+  }
+}

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from agents_remember.kernel.onboarding_doc import unfenced_lines
+from agents_remember.models.role_capsules.manifest_derived import compose_manifest
 
 POINTERS = {
     "roles/architect.md": (
@@ -111,7 +112,9 @@ def assert_contract(repository_root: Path, generated_skill_copies: tuple[str, ..
                 assert clause in current, (name, clause)
                 with pytest.raises(AssertionError, match=re.escape(clause)):
                     assert clause in current.replace(clause, ""), clause
-        references = json.loads((root / "composition-manifest.json").read_text())["references"]
+        references = compose_manifest(json.loads((root / "composition-manifest.json").read_text()))[
+            "references"
+        ]
         for key in ("tasks/document-authoring", *TEMPLATE_CLAUSES):
             reference = references[key]
             source = (

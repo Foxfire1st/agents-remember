@@ -25,6 +25,7 @@ from agents_remember.cli.role_brief_message import shared_block
 from agents_remember.errors import CapsuleCompilationError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_capsules.compiler import compile_role_capsule
+from agents_remember.models.role_capsules.manifest_derived import compose_manifest
 from agents_remember.models.role_capsules.selection import narrow_role
 from agents_remember.models.role_capsules.source_set import admit_source_set
 from agents_remember.models.role_capsules.sources import (
@@ -43,6 +44,16 @@ from agents_remember.models.role_capsules.types import (
     compute_content_digest,
 )
 from agents_remember.serving.launch_capsule import LaunchCapsuleMode, LaunchCapsuleRequest
+from agents_remember_test_support.testing.digest_map import (
+    _assert_core_dispositions,
+    _assert_core_retirements,
+    _assert_core_source_map,
+    _assert_digest_audiences,
+    _assert_digest_places,
+    _assert_digest_structure,
+    load_digest_map,
+)
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
 from test_capsule_launch_wiring import LEAF_REF, launch_corpus_fixture, world_fixture
 from test_role_capsule_admission import (
     LIFECYCLE_ROOT,
@@ -97,7 +108,7 @@ def test_investigator_review_pointer_requires_its_declared_source(tmp_path: Path
     misplaced = instructions.replace(action, "Read", 1)
     with pytest.raises(AssertionError):
         assert pointer in " ".join(misplaced.split())
-    declaration = document["references"]["instruction-shortfall-review"]
+    declaration = compose_manifest(document)["references"]["instruction-shortfall-review"]
     assert declaration["source"] == source
     assert declaration["roles"] == ["investigator"]
     assert declaration["step_detail"] is True and declaration["injected"] is False
@@ -133,7 +144,7 @@ def test_progress_judgment_detail_reaches_all_declared_coordination_seats() -> N
     document = json.loads((LIFECYCLE_ROOT / MANIFEST_RELATIVE).read_text())
     key = "coordination/shared/third-rejected-round"
     source = "reference/coordination/shared/third-rejected-round.md"
-    declaration = document["references"][key]
+    declaration = compose_manifest(document)["references"][key]
     assert set(declaration["roles"]) == {"architect", "manager"}
     assert declaration["source"] == source
     assert declaration["step_detail"] is True and declaration["injected"] is False
@@ -196,7 +207,9 @@ def test_architect_measurement_detail_keeps_change_trigger_and_unknown_boundary(
     """Rule50's retained trigger and outcome meanings reach the actual Architect detail."""
     source = "reference/coordination/architect/curator-measurement.md"
     document = json.loads((LIFECYCLE_ROOT / MANIFEST_RELATIVE).read_text())
-    declaration = document["references"]["coordination/architect/curator-measurement"]
+    declaration = compose_manifest(document)["references"][
+        "coordination/architect/curator-measurement"
+    ]
     assert declaration["source"] == source and declaration["roles"] == ["architect"]
     assert declaration["step_detail"] is True and declaration["injected"] is False
     for operation in _shipped_parsed().roles["architect"].operations:
@@ -517,211 +530,8 @@ def test_composing_roots_answers_what_each_seat_kind_can_actually_contribute() -
     assert launcher_composed <= set(launcher_roots)
 
 
-_D700_RETIRED_CORE_UNITS = frozenset({"AU2.5", "LO0.4", "AC1.4", "AC1.5"})
-_D700_RETIREMENT_DECISION = {
-    "path": "/home/firefox/projects/ar-coordination/notes/reports/paseo-native-executions/architect/messages/20261107T145802Z_architect-97e0320d_to_manager-96726ec5.md",
-    "messageId": "bc7dacb7-24b8-40c9-9922-a5ddb930ef50",
-    "sections": ["Q1", "Q2"],
-    "sha256": "ebd655e1327fb427386324d7ad383ffe63398d8daeab1a4e138e19d74c298e68",
-}
-
-
-def _assert_core_retirements(document: dict) -> None:
-    retired = {
-        row["id"] for row in document["units"] if row["disposition"] == "retired (D699, D700)"
-    }
-    assert retired == _D700_RETIRED_CORE_UNITS, "unknown or missing retired unit"
-    for row in document["units"]:
-        if row["id"] in retired:
-            assert row.get("retirementDecision") == _D700_RETIREMENT_DECISION, (
-                row["id"],
-                "missing or wrong retirement decision",
-            )
-            assert "digestPlace" not in row and "evidence" not in row, (
-                row["id"],
-                "retired unit has live bindings",
-            )
-            assert row["retiredBinding"]["file"] and row["retiredBinding"]["lines"]
-            assert row["retiredBinding"]["sha256"], "missing retired binding history"
-
-
-def _assert_core_source_map(root: Path, document: dict) -> None:
-    """Every current non-heading source line belongs to exactly one frozen/new unit."""
-    _assert_core_retirements(document)
-    files: dict[str, list] = {}
-    for row in document["units"]:
-        if row["disposition"] == "retired (D699, D700)":
-            continue
-        source = (root / row["file"]).read_text().splitlines()
-        start, end = row["lines"]
-        assert 1 <= start <= end <= len(source), row["id"]
-        assert sha256("\n".join(source[start - 1 : end]).encode()).hexdigest() == row["sha256"], (
-            row["id"]
-        )
-        files.setdefault(row["file"], []).append(row)
-    for path, rows in files.items():
-        extents = [row["lines"] for row in rows]
-        assert extents == sorted(extents), path
-        covered = [number for start, end in extents for number in range(start, end + 1)]
-        assert len(covered) == len(set(covered)), path
-        lines = (root / path).read_text().splitlines()
-        for number, line in enumerate(lines, 1):
-            following = lines[number] if number < len(lines) else ""
-            table_header = line.startswith("|") and re.fullmatch(r"\|[\s:|\-]+\|", following)
-            structural = (
-                not line.strip()
-                or line.startswith("#")
-                or table_header
-                or re.fullmatch(r"\|[\s:|\-]+\|", line)
-            )
-            assert structural or number in covered, (path, number, "unmapped source line")
-
-
-def _digest_range(lines: list[str], extent: list[int]) -> set[int]:
-    assert isinstance(extent, list) and len(extent) == 2, "invalid digest range"
-    start, end = extent
-    assert type(start) is int and type(end) is int, "invalid digest range"
-    assert 1 <= start <= end <= len(lines), "invalid digest range"
-    assert lines[start - 1].strip() and lines[end - 1].strip(), "empty digest range"
-    return set(range(start, end + 1))
-
-
-def _assert_digest_structure(text: str) -> None:
-    lines = text.splitlines()
-    assert lines and lines[0].startswith("# "), "missing digest title"
-    headings = [i for i, line in enumerate(lines) if line.startswith("#")]
-    assert any(lines[i].startswith("## ") for i in headings), "missing digest sections"
-    for start, end in zip(headings, [*headings[1:], len(lines)], strict=True):
-        assert lines[start].lstrip("#").strip(), "empty heading"
-        assert any(line.strip() for line in lines[start + 1 : end]), "empty section"
-    assert not re.search(r"\b(?:AU|IN|LF|LO|AC)\d+\.\d+\b", text), "unit code in prose"
-
-
-def _assert_digest_places(document: dict, text: str) -> None:
-    _assert_digest_structure(text)
-    lines = text.splitlines()
-    rows = {row["id"]: row for row in document["units"] if row["disposition"] == "digest"}
-    places = document["digest"]["places"]
-    by_id = {place["id"]: place for place in places}
-    assert len(by_id) == len(places), "duplicate place"
-    intro = document["digest"]["introduction"]
-    covered = list(_digest_range(lines, intro["lines"]))
-    first_section = next(i for i, line in enumerate(lines, 1) if line.startswith("## "))
-    assert set(covered) == {i for i in range(2, first_section) if lines[i - 1].strip()}
-    assert (
-        sha256("\n".join(lines[i - 1] for i in sorted(covered)).encode()).hexdigest()
-        == intro["sha256"]
-    )
-    assert [p["lines"] for p in places] == sorted(p["lines"] for p in places)
-    homes: dict[str, list[str]] = {}
-    for place in places:
-        extent = _digest_range(lines, place["lines"])
-        assert not any(lines[i - 1].startswith("#") for i in extent), "heading inside place"
-        heading = next(
-            line.lstrip("#").strip()
-            for line in reversed(lines[: min(extent)])
-            if line.startswith("#")
-        )
-        assert heading == place["heading"], "wrong place heading"
-        body = "\n".join(lines[i - 1] for i in sorted(extent))
-        assert sha256(body.encode()).hexdigest() == place["sha256"], "stale place hash"
-        units = place["units"]
-        assert units and len(units) == len(set(units)), "invalid place units"
-        assert set(units) <= rows.keys(), "unknown place unit"
-        for identity in units:
-            homes.setdefault(identity, []).append(place["id"])
-        clauses = place["clauses"]
-        assert clauses, "missing clauses"
-        clause_lines, clause_units = [], set()
-        assert [c["lines"] for c in clauses] == sorted(c["lines"] for c in clauses)
-        for clause in clauses:
-            selected = _digest_range(lines, clause["lines"])
-            assert selected <= extent, "clause outside place"
-            assert clause["units"] and len(clause["units"]) == len(set(clause["units"]))
-            assert set(clause["units"]) <= set(units), "clause unit outside place"
-            clause_lines.extend(selected)
-            clause_units.update(clause["units"])
-        assert clause_units == set(units), "missing clause unit"
-        assert len(clause_lines) == len(set(clause_lines)), "overlapping clauses"
-        assert {i for i in clause_lines if lines[i - 1].strip()} == {
-            i for i in extent if lines[i - 1].strip()
-        }, "unmapped clause prose"
-        covered.extend(extent)
-    assert len(covered) == len(set(covered)), "overlapping places"
-    assert set(covered) >= {
-        i for i, line in enumerate(lines, 1) if line.strip() and not line.startswith("#")
-    }, "unmapped digest prose"
-    assert set(homes) == set(rows), "missing unit home"
-    for identity, row in rows.items():
-        assert "digestLines" not in row and "digestAudiences" not in row
-        assert homes[identity] == [row["digestPlace"]], "unit home mismatch"
-
-
-def _assert_core_dispositions(root: Path, document: dict, text: str) -> None:
-    _assert_core_retirements(document)
-    rows = {row["id"]: row for row in document["units"]}
-    assert len(rows) == len(document["units"]), "duplicate ID"
-    reasons = {
-        "rationale or history",
-        "stated already",
-        "enforced by the product",
-        "stage procedure reached through its operation file",
-        "no action",
-        "binds no started role",
-        "lead-in",
-    }
-    for row in rows.values():
-        if row["disposition"] == "retired (D699, D700)":
-            continue
-        if row["disposition"] == "digest":
-            assert row["digestPlace"], row["id"]
-        else:
-            assert row["disposition"] == "reference" and row["reason"] in reasons, row["id"]
-            assert row["evidence"], row["id"]
-            for evidence in row["evidence"]:
-                if "sha256" in evidence:
-                    source = (root.parents[1] / evidence["path"]).read_text().splitlines()
-                    start, end = evidence["lines"]
-                    assert (
-                        sha256("\n".join(source[start - 1 : end]).encode()).hexdigest()
-                        == evidence["sha256"]
-                    ), row["id"]
-    _assert_digest_places(document, text)
-
-
-def _assert_digest_audiences(document: dict, text: str) -> None:
-    roles = set(document["roles"])
-    admitted_roles = roles
-    assert admitted_roles == {
-        "architect",
-        "orchestrator",
-        "manager",
-        "worker",
-        "curator",
-        "reviewer",
-        "investigator",
-        "bootstrap",
-    }
-    rows = {row["id"]: row for row in document["units"] if row["disposition"] == "digest"}
-    lines = text.splitlines()
-    audiences: dict[str, set[str]] = {identity: set() for identity in rows}
-    for place in document["digest"]["places"]:
-        for clause in place["clauses"]:
-            start, end = clause["lines"]
-            body = " ".join(lines[start - 1 : end])
-            prefix = set(body.split(":", 1)[0].lower().split(", "))
-            expected = prefix if prefix <= roles else admitted_roles
-            actual = set(clause["audience"])
-            assert len(actual) == len(clause["audience"]) and actual <= roles
-            assert actual == expected, "clause audience union"
-            for identity in clause["units"]:
-                audiences[identity].update(actual)
-    for identity, row in rows.items():
-        assert audiences[identity] == set(row["audience"]), (identity, "unit audience union")
-
-
 def test_digest_line_and_unit_audiences_match_the_delivered_prefixes() -> None:
-    document = json.loads((LIFECYCLE_ROOT / "core/digest-map.json").read_text())
+    document = load_digest_map(LIFECYCLE_ROOT / "core/digest-map.json")
     text = (LIFECYCLE_ROOT / "core/every-role.md").read_text()
     _assert_digest_audiences(document, text)
     wrong_line = copy.deepcopy(document)
@@ -757,7 +567,7 @@ def _assert_digest_prose_corruption_rejected(document: dict, text: str) -> None:
 
 
 def test_digest_places_reject_lost_or_ambiguous_bindings() -> None:
-    document = json.loads((LIFECYCLE_ROOT / "core/digest-map.json").read_text())
+    document = load_digest_map(LIFECYCLE_ROOT / "core/digest-map.json")
     text = (LIFECYCLE_ROOT / "core/every-role.md").read_text()
     _assert_digest_places(document, text)
     for field, value in (
@@ -860,7 +670,7 @@ def test_structured_shared_digest_is_delivered_once_and_seals_each_role() -> Non
 
 
 def test_frozen_core_inventory_and_digest_map_remain_complete(tmp_path: Path) -> None:
-    document = json.loads((LIFECYCLE_ROOT / "core/digest-map.json").read_text())
+    document = load_digest_map(LIFECYCLE_ROOT / "core/digest-map.json")
     text = (LIFECYCLE_ROOT / "core/every-role.md").read_text()
     baseline = document["baseline"]
     assert baseline["tree"] == "cd0e68f0" and baseline["unitCount"] == 145
@@ -872,8 +682,8 @@ def test_frozen_core_inventory_and_digest_map_remain_complete(tmp_path: Path) ->
     removed = {row["id"] for row in document["removed"]}
     assert set(baseline["unitIds"]) <= current | removed
     assert not current & removed
-    assert document["digest"]["sha256"] == sha256(text.encode()).hexdigest()
-    assert document["digest"]["sizeWords"] == len(text.split())
+    assert document["digest"]["sha256"] == sha256(text.encode()).hexdigest(), f"Run {RENEW_COMMAND}"
+    assert document["digest"]["sizeWords"] == len(text.split()), f"Run {RENEW_COMMAND}"
     _assert_core_source_map(LIFECYCLE_ROOT, document)
     _assert_core_dispositions(LIFECYCLE_ROOT, document, text)
     for key, value in (("sha256", "0" * 64), ("lines", [0, 0])):
@@ -896,7 +706,7 @@ def test_frozen_core_inventory_and_digest_map_remain_complete(tmp_path: Path) ->
 
 
 def test_retired_core_units_require_the_exact_admitted_decision() -> None:
-    document = json.loads((LIFECYCLE_ROOT / "core/digest-map.json").read_text())
+    document = load_digest_map(LIFECYCLE_ROOT / "core/digest-map.json")
     _assert_core_retirements(document)
     unknown = copy.deepcopy(document)
     row = next(row for row in unknown["units"] if row["id"] == "AU1.1")
@@ -921,7 +731,7 @@ def test_retired_core_units_require_the_exact_admitted_decision() -> None:
 
 
 def test_git_root_scope_has_one_complete_source_and_digest_home() -> None:
-    document = json.loads((LIFECYCLE_ROOT / "core/digest-map.json").read_text())
+    document = load_digest_map(LIFECYCLE_ROOT / "core/digest-map.json")
     text = (LIFECYCLE_ROOT / "core/every-role.md").read_text()
     rule = next(row for row in document["units"] if row["id"] == "IN8.7")
     assert rule["file"] == "core/invariants.md" and rule["disposition"] == "digest"
@@ -936,9 +746,15 @@ def test_git_root_scope_has_one_complete_source_and_digest_home() -> None:
     )
     source = (LIFECYCLE_ROOT / rule["file"]).read_text().splitlines()
     start, end = rule["lines"]
-    assert "\n".join(source[start - 1 : end]) == expected
+    assert "\n".join(source[start - 1 : end]) == expected, (
+        f"Run {RENEW_COMMAND}. If this still fails after successful renewal, "
+        "the sentence changed; update the expected sentence with it."
+    )
     start, end = place["lines"]
-    assert "\n".join(text.splitlines()[start - 1 : end]) == expected
+    assert "\n".join(text.splitlines()[start - 1 : end]) == expected, (
+        f"Run {RENEW_COMMAND}. If this still fails after successful renewal, "
+        "the sentence changed; update the expected sentence with it."
+    )
     _assert_core_source_map(LIFECYCLE_ROOT, document)
     _assert_digest_places(document, text)
     _assert_digest_audiences(document, text)
@@ -1033,7 +849,7 @@ def test_inherited_step_details_reach_only_the_seats_that_use_them(tmp_path: Pat
     knowledge = "reference/knowledge/use.md"
     foundation = "reference/curator/repository-foundation.md"
     document = json.loads(manifest_bytes)
-    declaration = document["references"]["knowledge/use"]
+    declaration = compose_manifest(document)["references"]["knowledge/use"]
     assert declaration["source"] == knowledge
     assert set(declaration["roles"]) == {
         "architect",
@@ -1046,7 +862,9 @@ def test_inherited_step_details_reach_only_the_seats_that_use_them(tmp_path: Pat
         "bootstrap",
     }
     assert declaration["step_detail"] is True and declaration["injected"] is False
-    foundation_declaration = document["references"]["curator/repository-foundation"]
+    foundation_declaration = compose_manifest(document)["references"][
+        "curator/repository-foundation"
+    ]
     assert foundation_declaration["source"] == foundation
     # operations/curation.md:10 (a relative link, not a capsule detail) sits in an all-roles
     # passage, so the Manager's curation text points at it too (P5-05 first-message roles).

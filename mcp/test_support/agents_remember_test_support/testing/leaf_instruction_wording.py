@@ -31,6 +31,8 @@ from agents_remember.models.role_capsules.types import (
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.serving.capsule_delivery import capsule_delivery_from
 
+from agents_remember_test_support.testing.instruction_renewal import RENEW_COMMAND
+
 
 def assert_action_pointer(instructions: str, source: str, action: str) -> None:
     """Require one pointer at the named action, independently of metadata prose."""
@@ -44,7 +46,12 @@ def assert_action_pointer(instructions: str, source: str, action: str) -> None:
         for paragraph in instructions.split("\n\n")
         for match in pattern.finditer(normalized(paragraph))
     ]
-    assert len(matches) == 1, (source, action, "missing or repeated action pointer")
+    assert len(matches) == 1, (
+        source,
+        action,
+        "missing or repeated action pointer",
+        f"If derived facts are stale, run {RENEW_COMMAND}",
+    )
 
 
 def assert_emitted_detail_links(instructions: str, compiled: str, source: str, path: Path) -> None:
