@@ -36,7 +36,7 @@ def daemon_settings(settings: PaseoRuntimeSettings) -> tuple[DaemonSetting, ...]
     Paseo's own agent tools are written off, not left to Paseo's default (PNT-R06): Paseo lists
     that path among the ones it applies on a reload. Since Paseo 0.14 an agent idle for an hour has
     its runtime closed unless ``agents.idleRuntimeCleanup`` is false; a closed seat reads as ended
-    to the product, so the cleanup is written off. Paseo 0.15.4 applies that path on a reload.
+    to the product, so the cleanup is written off. Paseo 0.16.2 applies that path on a reload.
     This keeps the reclamation the product had before Paseo 0.14: a seat's runtime is closed when
     the seat is retired (``retire_child``) or archived, never by idle time alone.
     """

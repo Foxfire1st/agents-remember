@@ -17,7 +17,7 @@
  * named in `turn-ends.error.json`. A cleanup clears every pending wait, so a
  * reload starts afresh (rule 8).
  *
- * The handlers are registered under Paseo 0.15's hook names through
+ * The handlers are registered under the pinned host's (0.16.2) hook names through
  * `server.addHook`; the legacy `server.on` names stop working after 2027-04-30.
  */
 import type { PluginHookContext, PluginLifecycleRegistration } from "@getpaseo/plugin/server";
@@ -86,7 +86,9 @@ async function readHostState(
     for (let pages = 0; pages < HOST_STATE_PAGE_LIMIT; pages += 1) {
       if (states.length >= HOST_STATE_AGENT_LIMIT) break;
       const page = (await paseo.agents.list({
-        filter: { includeArchived: true },
+        // The pinned host (0.16.2) leaves background agents out of a list unless it is
+        // asked for them, and a role agent must never be missed by the wake decision.
+        filter: { includeArchived: true, includeBackground: true },
         page: cursor === undefined ? { limit: HOST_STATE_PAGE_SIZE } : { limit: HOST_STATE_PAGE_SIZE, cursor },
       })) as {
         entries?: ReadonlyArray<{ agent?: Record<string, unknown> }>;
@@ -141,19 +143,20 @@ interface TimelineReader {
 }
 
 /**
- * The ended turn's timeline. From Paseo 0.13 the `agent.turn.after` hook carries an
- * empty `timeline`, and the host says to read history through the API instead. The
- * whole timeline the host holds is read through `agents.ref(id).timeline.refetch`
- * (served since 0.12; `limit: 0` is Paseo's "every row"), which yields the same
- * projected rows the 0.12 hook carried, so the decision in `turn_ended.ts` reads
- * what it read on 0.12. The reply keeps each row's turn id beside the row, not in
- * it; it is put back on the row, because the decision scopes the ended turn's rows
- * by it.
+ * The ended turn's timeline. The pinned @getpaseo/plugin (0.16.2) types the
+ * `agent.turn.after` hook without `timeline` (dist/server/lifecycle.d.ts:107-117), and
+ * the server still sends `timeline: []` on the wire as compatibility
+ * (dist/server/server/plugins/runtime.js:1152-1155, applied at :375). The whole timeline is read through
+ * `agents.ref(id).timeline.refetch` (`limit: 0` is Paseo's "every row"), which
+ * yields the same projected rows the 0.12 hook carried, so the decision in
+ * `turn_ended.ts` reads what it read on 0.12. The reply keeps each row's turn id
+ * beside the row, not in it; it is put back on the row, because the decision
+ * scopes the ended turn's rows by it.
  *
  * A read that fails gives `null`, which the decision reads as an unreadable turn:
  * the line says its last line is unreadable, and nothing in it counts as a
- * hand-off or a declaration. The hook's own list is no fallback, since on 0.15 it
- * is always empty and would pass a failed read off as a turn without text.
+ * hand-off or a declaration. The event's own `timeline` is always empty and is no
+ * fallback, which is right: a failed read must not pass off as a turn without text.
  */
 export async function readTurnTimeline(paseo: TimelineReader, agentId: string): Promise<TurnRows> {
   try {

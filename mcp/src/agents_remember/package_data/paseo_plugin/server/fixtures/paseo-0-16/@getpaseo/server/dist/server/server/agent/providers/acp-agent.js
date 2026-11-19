@@ -1,0 +1,3268 @@
+import { ACPProviderOptionsSchema } from "./acp-options.js";
+import { applyProviderOptionsPatch } from "../option-controls.js";
+import { assertChangesAreLive } from "../provider-options.js";
+import { randomUUID } from "node:crypto";
+import { once } from "node:events";
+import fs from "node:fs/promises";
+import { homedir } from "node:os";
+import path from "node:path";
+import { Readable, Writable } from "node:stream";
+import { setImmediate } from "node:timers/promises";
+import { terminateWithTreeKill } from "../../../utils/tree-kill.js";
+import { ClientSideConnection, PROTOCOL_VERSION, } from "@agentclientprotocol/sdk";
+import { z } from "zod";
+import { getAgentStreamEventTurnId, } from "../agent-sdk-types.js";
+import { raceProviderRefreshAbort, runProviderRefreshActivity, } from "../provider-refresh-deadline.js";
+import { isDefaultAgentCreateConfigUnattended, resolveDefaultAgentCreateConfig, } from "../create-agent-mode.js";
+import { importSessionFromPersistence } from "../provider-session-import.js";
+import { checkProviderLaunchAvailable, createProviderEnv, createProviderEnvSpec, resolveProviderLaunch, } from "../provider-launch-config.js";
+import { renderPromptAttachmentAsText } from "../prompt-attachments.js";
+import { appendOrReplaceGrowingAssistantMessage, runProviderTurn } from "./provider-runner.js";
+import { resolveResumeProcessCwd } from "./resume-process-cwd.js";
+import { buildStringCommandShellInvocation, createStringCommandShellEnvOverlay, } from "../../../utils/string-command-shell.js";
+import { spawnProcess } from "../../../utils/spawn.js";
+import { toDiagnosticErrorMessage, truncateForDiagnostic, } from "./diagnostic-utils.js";
+import { withTimeout } from "../../../utils/promise-timeout.js";
+const ACP_AUTO_ACCEPT_FEATURE_ID = "auto_accept";
+function assertChildWithPipes(child) {
+    if (!child.stdin || !child.stdout || !child.stderr) {
+        throw new Error("Child process did not expose stdio pipes");
+    }
+}
+// Watch process failures as well as spawn errors: the SDK leaves initialize
+// pending when the child exits without replying. `close` waits for stderr to
+// drain, so the failure includes the launcher's diagnostic.
+function rejectOnProcessFailure(child, stderrChunks) {
+    return new Promise((_, reject) => {
+        child.once("error", (error) => {
+            const stderr = stderrChunks.join("").trim();
+            reject(new Error(stderr ? `${String(error)}\n${stderr}` : String(error)));
+        });
+        child.once("close", (code, signal) => {
+            const stderr = stderrChunks.join("").trim();
+            const status = signal ? `signal ${signal}` : `exit code ${code ?? "unknown"}`;
+            reject(new Error(`ACP agent process exited before initialization completed (${status})${stderr ? `\n${stderr}` : ""}`));
+        });
+    });
+}
+function describeACPDisconnect(child) {
+    if (child?.signalCode) {
+        return `ACP agent disconnected (signal ${child.signalCode})`;
+    }
+    if (child?.exitCode != null) {
+        return `ACP agent disconnected (exit code ${child.exitCode})`;
+    }
+    return "ACP agent disconnected";
+}
+function isRecord(value) {
+    return value != null && typeof value === "object" && !Array.isArray(value);
+}
+function isACPError(value) {
+    return isRecord(value) && typeof value.message === "string" && typeof value.code === "number";
+}
+function isACPInvalidParams(error) {
+    return isACPError(error) && error.code === -32602;
+}
+function extractACPErrorDataMessage(data) {
+    if (!isRecord(data)) {
+        return null;
+    }
+    for (const key of ["details", "errorMessage", "message", "detail", "title"]) {
+        const value = data[key];
+        if (typeof value === "string" && value.trim()) {
+            return value.trim();
+        }
+    }
+    return extractACPErrorDataMessage(data.error);
+}
+export function summarizeACPRequestError(error) {
+    // Promise rejections are untyped, but the ACP SDK rejects JSON-RPC failures as response.error.
+    if (isACPError(error)) {
+        const code = String(error.code);
+        const detail = extractACPErrorDataMessage(error.data);
+        const message = detail && detail !== error.message ? `${error.message}: ${detail}` : error.message;
+        const data = error.data === undefined ? "" : ` | data=${JSON.stringify(error.data)}`;
+        return {
+            message,
+            code,
+            diagnostic: `${message} | code=${code}${data}`,
+        };
+    }
+    if (error instanceof Error) {
+        return { message: error.message };
+    }
+    return { message: String(error) };
+}
+// Keeps the JSON-RPC code so callers can still tell invalid params from other failures.
+class ACPRequestError extends Error {
+    constructor(error) {
+        super(summarizeACPRequestError(error).message, { cause: error });
+        this.name = "ACPRequestError";
+        this.code = error.code;
+    }
+}
+function toACPRequestError(error) {
+    if (!isACPError(error)) {
+        return error instanceof Error ? error : new Error(String(error));
+    }
+    return new ACPRequestError(error);
+}
+function resolveTerminalCommand(command, args) {
+    if (args && args.length > 0) {
+        return { command, args };
+    }
+    if (!/\s/.test(command.trim())) {
+        return { command, args: [] };
+    }
+    const shell = buildStringCommandShellInvocation({ command, windowsShell: "cmd" });
+    return { command: shell.shell, args: shell.args, shell: false };
+}
+function formatDurationMs(startedAt) {
+    return `${Math.max(0, Date.now() - startedAt)}ms`;
+}
+function pushACPStderrRow(rows, stderrChunks) {
+    const stderr = stderrChunks.join("").trim();
+    if (!stderr) {
+        return;
+    }
+    rows.push({
+        label: "ACP stderr",
+        value: truncateForDiagnostic(stderr),
+    });
+}
+export const DEFAULT_ACP_CAPABILITIES = {
+    supportsStreaming: true,
+    supportsSessionPersistence: true,
+    supportsSessionListing: true,
+    supportsDynamicModes: true,
+    supportsMcpServers: true,
+    supportsReasoningStream: true,
+    supportsToolInvocations: true,
+    supportsRewindConversation: false,
+    supportsRewindFiles: false,
+    supportsRewindBoth: false,
+};
+function acpSessionListRequest(cursor, cwd) {
+    return {
+        ...(cursor ? { cursor } : {}),
+        ...(cwd ? { cwd } : {}),
+    };
+}
+const BASE_ACP_CLIENT_CAPABILITIES = {
+    fs: {
+        readTextFile: false,
+        writeTextFile: false,
+    },
+    terminal: true,
+};
+export function buildACPClientCapabilities(meta, override) {
+    const capabilities = {
+        ...BASE_ACP_CLIENT_CAPABILITIES,
+        ...override,
+        fs: {
+            ...BASE_ACP_CLIENT_CAPABILITIES.fs,
+            ...override?.fs,
+        },
+    };
+    return meta && Object.keys(meta).length > 0 ? { ...capabilities, _meta: meta } : capabilities;
+}
+// Suppress interactive auth side-effects (e.g. Gemini CLI opening a Google
+// sign-in URL in the browser) when probing an ACP agent for models/modes.
+// NO_BROWSER is honored by Gemini CLI; other ACP agents ignore it.
+const PROBE_ENV = { NO_BROWSER: "true" };
+const ACP_DIAGNOSTIC_PHASE_TIMEOUT_MS = 20000;
+const ACP_PROBE_CLOSE_TIMEOUT_MS = 2000;
+// Archive and delete await close(). The ACP SDK does not reject a pending
+// request when the provider never answers, so these calls must be bounded
+// or the provider process is never terminated.
+const ACP_CLOSE_REQUEST_TIMEOUT_MS = 2000;
+const ACP_DISCONNECT_EXIT_GRACE_MS = 1000;
+const ACP_IMPORT_HISTORY_LOAD_TIMEOUT_MS = 30000;
+const ACP_IMPORT_HISTORY_BUDGET_MS = 60000;
+/**
+ * An ACP agent publishes its slash-command inventory incrementally. Wait this
+ * long without another batch before treating the inventory as complete. MiniMax
+ * publishes its skills about 350ms after its built-in commands.
+ */
+const COMMAND_INVENTORY_QUIET_MS = 600;
+const COMMAND_INVENTORY_POLL_MS = 25;
+function summarizeMalformedACPStdoutError(error) {
+    return {
+        type: error instanceof Error ? error.name : typeof error,
+        message: "ACP stdout line was not valid JSON",
+    };
+}
+function normalizeACPIncomingMessage(message) {
+    if ("id" in message &&
+        !("method" in message) &&
+        typeof message.id === "string" &&
+        /^\d+$/.test(message.id)) {
+        const numericId = Number(message.id);
+        if (Number.isSafeInteger(numericId)) {
+            return {
+                ...message,
+                // COMPAT(deepseek-tui-acp-id): added v0.1.78, remove after 2026-11-19
+                // once the ACP SDK accepts stringified numeric response IDs.
+                id: numericId,
+            };
+        }
+    }
+    return message;
+}
+export function createLoggedNdJsonStream(output, input, options) {
+    const textEncoder = new TextEncoder();
+    const textDecoder = new TextDecoder();
+    const readable = new ReadableStream({
+        async start(controller) {
+            let content = "";
+            const reader = input.getReader();
+            try {
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        break;
+                    }
+                    if (!value) {
+                        continue;
+                    }
+                    content += textDecoder.decode(value, { stream: true });
+                    const lines = content.split("\n");
+                    content = lines.pop() || "";
+                    for (const line of lines) {
+                        const trimmedLine = line.trim();
+                        if (!trimmedLine) {
+                            continue;
+                        }
+                        try {
+                            const message = JSON.parse(trimmedLine);
+                            controller.enqueue(normalizeACPIncomingMessage(message));
+                        }
+                        catch (error) {
+                            options.logger.warn({
+                                err: summarizeMalformedACPStdoutError(error),
+                                provider: options.provider,
+                            }, "ACP agent emitted non-JSON stdout; ignoring line");
+                        }
+                    }
+                }
+            }
+            finally {
+                reader.releaseLock();
+                controller.close();
+            }
+        },
+    });
+    const writable = new WritableStream({
+        async write(message) {
+            const writer = output.getWriter();
+            try {
+                await writer.write(textEncoder.encode(`${JSON.stringify(message)}\n`));
+            }
+            finally {
+                writer.releaseLock();
+            }
+        },
+    });
+    return { readable, writable };
+}
+class ACPImportHistoryCollector {
+    constructor() {
+        this.prompts = new Map();
+    }
+    begin(sessionId) {
+        this.prompts.set(sessionId, { completed: [], current: null, hasConversation: false });
+    }
+    accept(params) {
+        const state = this.prompts.get(params.sessionId);
+        if (!state)
+            return;
+        const update = params.update;
+        if (isACPConversationUpdate(update))
+            state.hasConversation = true;
+        if (update.sessionUpdate !== "user_message_chunk") {
+            this.flushCurrent(state);
+            return;
+        }
+        const text = contentBlockToText(update.content);
+        if (!text)
+            return;
+        const messageId = update.messageId ?? null;
+        if (state.current?.messageId && messageId !== state.current.messageId) {
+            this.flushCurrent(state);
+        }
+        state.current ?? (state.current = { messageId, text: "" });
+        state.current.text += text;
+    }
+    finish(sessionId) {
+        const state = this.prompts.get(sessionId);
+        if (!state) {
+            return { firstPromptPreview: null, lastPromptPreview: null, hasConversation: false };
+        }
+        this.flushCurrent(state);
+        this.prompts.delete(sessionId);
+        return {
+            firstPromptPreview: normalizeACPImportPromptPreview(state.completed[0] ?? null),
+            lastPromptPreview: normalizeACPImportPromptPreview(state.completed.at(-1) ?? null),
+            hasConversation: state.hasConversation,
+        };
+    }
+    discard(sessionId) {
+        this.prompts.delete(sessionId);
+    }
+    flushCurrent(state) {
+        if (state.current?.text.trim())
+            state.completed.push(state.current.text);
+        state.current = null;
+    }
+}
+export function mapACPUsage(usage) {
+    if (!usage) {
+        return undefined;
+    }
+    return {
+        inputTokens: usage.inputTokens ?? undefined,
+        outputTokens: usage.outputTokens ?? undefined,
+        cachedInputTokens: usage.cachedReadTokens ?? undefined,
+    };
+}
+export function resolveACPModeSelection({ modeId, availableModes, configOptions, }) {
+    const configOption = findSelectConfigOption({ configOptions, category: "mode" });
+    return {
+        availableMode: availableModes.find((mode) => mode.id === modeId) ?? null,
+        configOption,
+        configChoice: findSelectConfigChoice({ option: configOption, value: modeId }),
+        hasAvailableModes: availableModes.length > 0,
+    };
+}
+export function resolveACPModelSelection({ modelId, availableModels, configOptions, }) {
+    const configOption = findSelectConfigOption({ configOptions, category: "model" });
+    return {
+        availableModel: availableModels?.find((model) => model.modelId === modelId) ?? null,
+        configOption,
+        configChoice: findSelectConfigChoice({ option: configOption, value: modelId }),
+        hasAvailableModels: Boolean(availableModels?.length),
+    };
+}
+export function deriveModesFromACP(fallbackModes, modeState, configOptions) {
+    if (modeState?.availableModes?.length) {
+        return {
+            modes: modeState.availableModes.map((mode) => ({
+                id: mode.id,
+                label: mode.name,
+                description: mode.description ?? undefined,
+            })),
+            currentModeId: modeState.currentModeId ?? null,
+        };
+    }
+    const modeOption = findSelectConfigOption({ configOptions, category: "mode" });
+    if (modeOption) {
+        const flatOptions = flattenSelectOptions(modeOption.options);
+        return {
+            modes: flatOptions.map((option) => ({
+                id: option.value,
+                label: option.name,
+                description: option.description ?? undefined,
+            })),
+            currentModeId: modeOption.currentValue,
+        };
+    }
+    return {
+        modes: fallbackModes,
+        currentModeId: null,
+    };
+}
+export function deriveModelDefinitionsFromACP(provider, models, configOptions) {
+    const sessionThinking = deriveSessionThinking(configOptions);
+    if (models?.availableModels?.length) {
+        return models.availableModels.map((model) => {
+            const isDefault = model.modelId === models.currentModelId;
+            const thinking = deriveACPModelThinking({
+                metadata: model._meta,
+                isDefault,
+                sessionThinking,
+            });
+            return {
+                provider,
+                id: model.modelId,
+                label: model.name,
+                description: model.description ?? undefined,
+                isDefault,
+                thinkingOptions: thinking.thinkingOptions,
+                defaultThinkingOptionId: thinking.defaultThinkingOptionId,
+            };
+        });
+    }
+    const modelOptions = deriveSelectorOptions(configOptions, "model");
+    return modelOptions.map((option) => {
+        const thinking = deriveACPModelThinking({
+            metadata: option.metadata,
+            isDefault: option.isDefault === true,
+            sessionThinking,
+        });
+        return {
+            provider,
+            id: option.id,
+            label: option.label,
+            description: option.description,
+            isDefault: option.isDefault,
+            thinkingOptions: thinking.thinkingOptions,
+            defaultThinkingOptionId: thinking.defaultThinkingOptionId,
+            metadata: option.metadata,
+        };
+    });
+}
+const NO_THINKING = {
+    thinkingOptions: undefined,
+    defaultThinkingOptionId: undefined,
+};
+// Some ACP agents describe each model's reasoning levels in the model's `_meta`.
+const ACPModelReasoningSchema = z.object({
+    supportsReasoningEffort: z.boolean().optional(),
+    reasoningEffort: z.string().min(1).nullish(),
+    reasoningEfforts: z
+        .array(z.object({
+        id: z.string().min(1),
+        value: z.string().min(1).optional(),
+        label: z.string(),
+        description: z.string().nullish(),
+        default: z.boolean().optional(),
+    }))
+        .optional(),
+});
+function deriveSessionThinking(configOptions) {
+    const thinkingOptions = deriveSelectorOptions(configOptions, "thought_level");
+    if (thinkingOptions.length === 0) {
+        return NO_THINKING;
+    }
+    return {
+        thinkingOptions,
+        defaultThinkingOptionId: thinkingOptions.find((option) => option.isDefault)?.id,
+    };
+}
+// A model's own reasoning metadata describes that model. A model that reports none
+// keeps the session's thought_level options, which describe the startup model.
+function deriveACPModelThinking(input) {
+    const { metadata, isDefault, sessionThinking } = input;
+    const parsed = ACPModelReasoningSchema.safeParse(metadata ?? {});
+    if (!parsed.success) {
+        return sessionThinking;
+    }
+    const { supportsReasoningEffort, reasoningEffort, reasoningEfforts } = parsed.data;
+    if (supportsReasoningEffort === false || reasoningEfforts?.length === 0) {
+        return NO_THINKING;
+    }
+    if (!reasoningEfforts) {
+        return sessionThinking;
+    }
+    const ids = reasoningEfforts.map((effort) => effort.value ?? effort.id);
+    if (new Set(ids).size !== ids.length) {
+        return sessionThinking;
+    }
+    const markedDefault = reasoningEfforts.find((effort) => effort.default);
+    const defaultCandidates = [
+        isDefault ? sessionThinking.defaultThinkingOptionId : undefined,
+        reasoningEffort,
+        markedDefault ? (markedDefault.value ?? markedDefault.id) : undefined,
+    ];
+    const defaultThinkingOptionId = defaultCandidates.find((id) => id && ids.includes(id)) ?? undefined;
+    return {
+        thinkingOptions: reasoningEfforts.map((effort, index) => ({
+            id: ids[index],
+            label: effort.label,
+            description: effort.description ?? undefined,
+            isDefault: ids[index] === defaultThinkingOptionId,
+        })),
+        defaultThinkingOptionId,
+    };
+}
+export function deriveControlsFromACP(configOptions, featureOptions) {
+    return featureOptions.flatMap((featureOption) => {
+        const option = findSelectConfigFeatureOption(configOptions, featureOption);
+        if (!option) {
+            return [];
+        }
+        return [
+            {
+                type: "select",
+                key: featureOption.id,
+                label: featureOption.label,
+                description: featureOption.description,
+                tooltip: featureOption.tooltip,
+                icon: featureOption.icon,
+                choices: deriveConfigFeatureSelectOptions(option, featureOption).map((choice) => ({
+                    value: choice.id,
+                    label: choice.label,
+                    description: choice.description,
+                })),
+            },
+        ];
+    });
+}
+/** The feature selects as the agent reports them, keyed by feature id. */
+function featureValuesFromACP(configOptions, featureOptions) {
+    const values = {};
+    for (const featureOption of featureOptions) {
+        const current = findSelectConfigFeatureOption(configOptions, featureOption)?.currentValue;
+        if (current != null)
+            values[featureOption.id] = current;
+    }
+    return values;
+}
+function isACPAutoAcceptEnabled(config) {
+    return config.providerOptions?.[ACP_AUTO_ACCEPT_FEATURE_ID] === true;
+}
+const ACP_AUTO_ACCEPT_CONTROL = {
+    type: "toggle",
+    key: ACP_AUTO_ACCEPT_FEATURE_ID,
+    label: "Auto Accept",
+    description: "Automatically approves ACP permission prompts.",
+    tooltip: "Auto accept permission prompts",
+    icon: "shield-check",
+};
+function resolveACPCreateConfig(input) {
+    const isUnattendedCreate = input.unattended || input.parent?.isUnattended === true;
+    const providerOptions = isUnattendedCreate && input.providerOptions?.[ACP_AUTO_ACCEPT_FEATURE_ID] === undefined
+        ? { ...input.providerOptions, [ACP_AUTO_ACCEPT_FEATURE_ID]: true }
+        : input.providerOptions;
+    if (input.requestedMode === undefined &&
+        isUnattendedCreate &&
+        input.parent !== null &&
+        input.parent.provider !== input.provider) {
+        return { modeId: undefined, providerOptions };
+    }
+    return resolveDefaultAgentCreateConfig({ ...input, providerOptions });
+}
+function isACPCreateConfigUnattended(input) {
+    return (isDefaultAgentCreateConfigUnattended(input) ||
+        input.config.providerOptions?.[ACP_AUTO_ACCEPT_FEATURE_ID] === true);
+}
+export class ACPAgentClient {
+    constructor(options) {
+        this.resolveCreateConfig = resolveACPCreateConfig;
+        this.isCreateConfigUnattended = isACPCreateConfigUnattended;
+        this.importPromptCache = new Map();
+        this.provider = options.provider;
+        this.usageProvider = options.usageProvider;
+        this.terminateProcess = options.terminateProcess ?? terminateWithTreeKill;
+        this.capabilities = options.capabilities ?? DEFAULT_ACP_CAPABILITIES;
+        this.logger = options.logger.child({
+            module: "agent",
+            provider: options.provider,
+        });
+        this.runtimeSettings = options.runtimeSettings;
+        this.defaultCommand = options.defaultCommand;
+        this.defaultModes = options.defaultModes ?? [];
+        this.catalogModelResolver = options.catalogModelResolver;
+        this.modelTransformer = options.modelTransformer;
+        this.sessionResponseTransformer = options.sessionResponseTransformer;
+        this.configOptionsTransformer = options.configOptionsTransformer;
+        this.configFeatureOptions = options.configFeatureOptions ?? [];
+        this.clientCapabilities = options.clientCapabilities;
+        this.clientCapabilityMeta = options.clientCapabilityMeta;
+        this.modeIdTransformer = options.modeIdTransformer;
+        this.toolSnapshotTransformer = options.toolSnapshotTransformer;
+        this.providerModeWriter = options.providerModeWriter;
+        this.beforeModeWriter = options.beforeModeWriter;
+        this.thinkingOptionWriter = options.thinkingOptionWriter;
+        this.waitForInitialCommands = options.waitForInitialCommands ?? false;
+        this.initialCommandsWaitTimeoutMs = options.initialCommandsWaitTimeoutMs ?? 1500;
+        this.extensionCommandsParser = options.extensionCommandsParser;
+        this.now = options.now ?? Date.now;
+    }
+    async createSession(config, launchContext, options) {
+        this.assertProvider(config);
+        const providerOptions = ACPProviderOptionsSchema.parse(config.providerOptions ?? {});
+        const session = new ACPAgentSession({ ...config, provider: this.provider }, {
+            provider: this.provider,
+            usageProvider: this.usageProvider,
+            logger: this.logger,
+            runtimeSettings: this.runtimeSettings,
+            defaultCommand: this.defaultCommand,
+            defaultModes: this.defaultModes,
+            modelTransformer: this.modelTransformer,
+            sessionResponseTransformer: this.sessionResponseTransformer,
+            configOptionsTransformer: this.configOptionsTransformer,
+            configFeatureOptions: this.configFeatureOptions,
+            clientCapabilities: providerOptions.clientCapabilities ?? this.clientCapabilities,
+            clientCapabilityMeta: this.clientCapabilityMeta,
+            modeIdTransformer: this.modeIdTransformer,
+            toolSnapshotTransformer: this.toolSnapshotTransformer,
+            providerModeWriter: this.providerModeWriter,
+            beforeModeWriter: this.beforeModeWriter,
+            thinkingOptionWriter: this.thinkingOptionWriter,
+            capabilities: {
+                ...this.capabilities,
+                supportsMcpServers: providerOptions.supportsMcpServers ?? this.capabilities.supportsMcpServers,
+            },
+            configuredModelIds: options?.configuredModelIds,
+            agentId: launchContext?.agentId,
+            launchEnv: launchContext?.env,
+            extensionCommandsParser: this.extensionCommandsParser,
+            waitForInitialCommands: this.waitForInitialCommands,
+            initialCommandsWaitTimeoutMs: this.initialCommandsWaitTimeoutMs,
+        });
+        await session.initializeNewSession();
+        return session;
+    }
+    async resumeSession(handle, overrides, launchContext, options) {
+        if (handle.provider !== this.provider) {
+            throw new Error(`Cannot resume ${handle.provider} handle with ${this.provider} provider`);
+        }
+        const storedConfig = coerceSessionConfigMetadata(handle.metadata);
+        const cwd = overrides?.cwd ?? storedConfig.cwd;
+        if (!cwd) {
+            throw new Error(`${this.provider} resume requires the original working directory`);
+        }
+        const mergedConfig = {
+            ...storedConfig,
+            ...overrides,
+            provider: this.provider,
+            cwd,
+        };
+        const providerOptions = ACPProviderOptionsSchema.parse(mergedConfig.providerOptions ?? {});
+        const session = new ACPAgentSession(mergedConfig, {
+            provider: this.provider,
+            usageProvider: this.usageProvider,
+            logger: this.logger,
+            runtimeSettings: this.runtimeSettings,
+            defaultCommand: this.defaultCommand,
+            defaultModes: this.defaultModes,
+            modelTransformer: this.modelTransformer,
+            sessionResponseTransformer: this.sessionResponseTransformer,
+            configOptionsTransformer: this.configOptionsTransformer,
+            configFeatureOptions: this.configFeatureOptions,
+            clientCapabilities: providerOptions.clientCapabilities ?? this.clientCapabilities,
+            clientCapabilityMeta: this.clientCapabilityMeta,
+            modeIdTransformer: this.modeIdTransformer,
+            toolSnapshotTransformer: this.toolSnapshotTransformer,
+            providerModeWriter: this.providerModeWriter,
+            beforeModeWriter: this.beforeModeWriter,
+            thinkingOptionWriter: this.thinkingOptionWriter,
+            capabilities: {
+                ...this.capabilities,
+                supportsMcpServers: providerOptions.supportsMcpServers ?? this.capabilities.supportsMcpServers,
+            },
+            handle,
+            resumePurpose: options?.purpose,
+            configuredModelIds: options?.configuredModelIds,
+            agentId: launchContext?.agentId,
+            launchEnv: launchContext?.env,
+            extensionCommandsParser: this.extensionCommandsParser,
+            waitForInitialCommands: this.waitForInitialCommands,
+            initialCommandsWaitTimeoutMs: this.initialCommandsWaitTimeoutMs,
+        });
+        await session.initializeResumedSession();
+        return session;
+    }
+    async fetchCatalog(options, context) {
+        const cwd = options.scope === "global" ? homedir() : options.cwd;
+        let probe = null;
+        let probeSessionId = null;
+        let probeSessionPromise = null;
+        let closePromise = null;
+        const closeProbe = () => {
+            if (!probe)
+                return Promise.resolve();
+            closePromise ?? (closePromise = (async () => {
+                if (!probeSessionId && probeSessionPromise) {
+                    try {
+                        probeSessionId = (await withTimeout(probeSessionPromise, ACP_PROBE_CLOSE_TIMEOUT_MS, `ACP probe session/new cleanup timed out after ${ACP_PROBE_CLOSE_TIMEOUT_MS}ms`)).sessionId;
+                    }
+                    catch (error) {
+                        this.logger.debug({ err: error }, "ACP probe session/new did not finish during cleanup");
+                    }
+                }
+                await this.closeProbe(probe, probeSessionId);
+            })());
+            return closePromise;
+        };
+        const handleAbort = () => void closeProbe().catch(() => undefined);
+        context?.signal.addEventListener("abort", handleAbort, { once: true });
+        try {
+            const initializedProbe = await runProviderRefreshActivity(context, "initialize", () => raceProviderRefreshAbort(context?.signal, this.spawnProcess(PROBE_ENV, {
+                providerOptions: options.providerOptions,
+                onSpawned: (spawned) => {
+                    probe = spawned;
+                    if (context?.signal.aborted)
+                        void closeProbe().catch(() => undefined);
+                },
+            })));
+            probe = initializedProbe;
+            probeSessionPromise = this.runACPRequest(() => initializedProbe.connection.newSession({
+                cwd,
+                mcpServers: [],
+            }));
+            const response = await runProviderRefreshActivity(context, "session/new", () => raceProviderRefreshAbort(context?.signal, probeSessionPromise));
+            probeSessionId = response.sessionId;
+            const transformed = this.transformSessionResponse(response);
+            const derivedModels = deriveModelDefinitionsFromACP(this.provider, transformed.models, transformed.configOptions);
+            const models = this.catalogModelResolver
+                ? await runProviderRefreshActivity(context, "catalog.resolve", () => raceProviderRefreshAbort(context?.signal, this.catalogModelResolver?.({
+                    connection: initializedProbe.connection,
+                    sessionId: response.sessionId,
+                    models: derivedModels,
+                    configOptions: transformed.configOptions,
+                    runRequest: (request) => this.runACPRequest(request),
+                    transformConfigOptions: (configOptions) => this.configOptionsTransformer
+                        ? this.configOptionsTransformer(configOptions)
+                        : configOptions,
+                    logger: this.logger,
+                    provider: this.provider,
+                }) ?? Promise.resolve(derivedModels)))
+                : derivedModels;
+            const modeInfo = deriveModesFromACP(this.defaultModes, transformed.modes, transformed.configOptions);
+            return {
+                models: this.modelTransformer ? this.modelTransformer(models) : models,
+                modes: modeInfo.modes,
+            };
+        }
+        finally {
+            context?.signal.removeEventListener("abort", handleAbort);
+            await closeProbe();
+        }
+    }
+    async listControls(config) {
+        const options = config.providerOptions ?? {};
+        if (this.configFeatureOptions.length === 0) {
+            return { controls: [ACP_AUTO_ACCEPT_CONTROL], options };
+        }
+        this.assertProvider(config);
+        const probe = await this.spawnProcess(PROBE_ENV);
+        let probeSessionId = null;
+        try {
+            const response = await this.runACPRequest(() => probe.connection.newSession({
+                cwd: config.cwd,
+                mcpServers: [],
+            }));
+            probeSessionId = response.sessionId;
+            const transformed = this.transformSessionResponse(response);
+            return {
+                controls: [
+                    ACP_AUTO_ACCEPT_CONTROL,
+                    ...deriveControlsFromACP(transformed.configOptions, this.configFeatureOptions),
+                ],
+                // The probe opened with the agent's own defaults, which a session would overwrite with
+                // the set values, so those stand over the probe's reading.
+                options: {
+                    ...featureValuesFromACP(transformed.configOptions, this.configFeatureOptions),
+                    ...options,
+                },
+            };
+        }
+        finally {
+            await this.closeProbe(probe, probeSessionId);
+        }
+    }
+    async listImportableSessions(options) {
+        const history = new ACPImportHistoryCollector();
+        const probe = await this.spawnProcess(PROBE_ENV, {
+            client: this.buildProbeClient((params) => history.accept(params)),
+        });
+        try {
+            if (!probe.initialize.agentCapabilities?.sessionCapabilities?.list) {
+                return [];
+            }
+            const sessions = [];
+            const resultLimit = options?.limit ?? Number.POSITIVE_INFINITY;
+            const scanLimit = Math.min(options?.scanLimit ?? 500, 500);
+            const canLoadHistory = probe.initialize.agentCapabilities.loadSession === true;
+            const historyDeadline = this.now() + ACP_IMPORT_HISTORY_BUDGET_MS;
+            let scanned = 0;
+            let cursor;
+            for (;;) {
+                const page = await this.runACPRequest(() => probe.connection.listSessions(acpSessionListRequest(cursor, options?.cwd)));
+                for (const session of page.sessions) {
+                    if (scanned >= scanLimit || sessions.length >= resultLimit)
+                        break;
+                    scanned += 1;
+                    const descriptor = await this.describeImportableSession(probe, history, session, canLoadHistory, historyDeadline);
+                    if (descriptor)
+                        sessions.push(descriptor);
+                }
+                cursor = page.nextCursor ?? null;
+                if (!cursor)
+                    break;
+                if (scanned >= scanLimit || sessions.length >= resultLimit)
+                    break;
+            }
+            return sessions;
+        }
+        finally {
+            await this.closeProbe(probe);
+        }
+    }
+    async describeImportableSession(probe, history, session, canLoadHistory, historyDeadline) {
+        const loadedPreviews = canLoadHistory
+            ? await this.loadImportPromptPreviews(probe, history, session, historyDeadline)
+            : null;
+        if (loadedPreviews?.hasConversation === false)
+            return null;
+        return {
+            providerHandleId: session.sessionId,
+            cwd: session.cwd,
+            title: session.title ?? null,
+            firstPromptPreview: loadedPreviews?.firstPromptPreview ?? null,
+            lastPromptPreview: loadedPreviews?.lastPromptPreview ?? null,
+            lastActivityAt: session.updatedAt ? new Date(session.updatedAt) : new Date(0),
+        };
+    }
+    async loadImportPromptPreviews(probe, history, session, historyDeadline) {
+        const updatedAt = session.updatedAt ?? null;
+        const cached = this.importPromptCache.get(session.sessionId);
+        if (updatedAt !== null && cached?.updatedAt === updatedAt) {
+            return {
+                firstPromptPreview: cached.firstPromptPreview,
+                lastPromptPreview: cached.lastPromptPreview,
+                hasConversation: cached.hasConversation,
+            };
+        }
+        const remainingMs = historyDeadline - this.now();
+        if (remainingMs <= 0)
+            return null;
+        const loadTimeoutMs = Math.min(ACP_IMPORT_HISTORY_LOAD_TIMEOUT_MS, remainingMs);
+        history.begin(session.sessionId);
+        try {
+            await withTimeout(this.runACPRequest(() => probe.connection.loadSession({
+                sessionId: session.sessionId,
+                cwd: session.cwd,
+                mcpServers: [],
+            })), loadTimeoutMs, `ACP import history load timed out after ${loadTimeoutMs}ms`);
+            const previews = history.finish(session.sessionId);
+            if (updatedAt !== null) {
+                this.importPromptCache.set(session.sessionId, { updatedAt, ...previews });
+            }
+            return previews;
+        }
+        catch (error) {
+            history.discard(session.sessionId);
+            this.logger.debug({ err: error, sessionId: session.sessionId }, "ACP import history load failed; keeping the session visible");
+            return null;
+        }
+        finally {
+            await this.closeLoadedSession(probe, session.sessionId, historyDeadline);
+        }
+    }
+    async closeLoadedSession(probe, sessionId, historyDeadline) {
+        if (!probe.initialize.agentCapabilities?.sessionCapabilities?.close)
+            return;
+        const remainingMs = historyDeadline - this.now();
+        if (remainingMs <= 0)
+            return;
+        const closeTimeoutMs = Math.min(ACP_PROBE_CLOSE_TIMEOUT_MS, remainingMs);
+        try {
+            await withTimeout(probe.connection.unstable_closeSession({ sessionId }), closeTimeoutMs, `ACP loaded session/close timed out after ${closeTimeoutMs}ms`);
+        }
+        catch (error) {
+            this.logger.debug({ err: error, sessionId }, "ACP loaded session close failed");
+        }
+    }
+    async importSession(input, context) {
+        return importSessionFromPersistence({
+            provider: this.provider,
+            request: input,
+            context,
+            resumeSession: this.resumeSession.bind(this),
+        });
+    }
+    async isAvailable() {
+        try {
+            await this.resolveLaunchCommand();
+            return true;
+        }
+        catch {
+            return false;
+        }
+    }
+    async spawnProcess(launchEnv, options) {
+        const configuredOptions = ACPProviderOptionsSchema.parse(options?.providerOptions ?? {});
+        const transport = await this.spawnTransport(launchEnv, options?.client);
+        const probe = {
+            child: transport.child,
+            connection: transport.connection,
+            stderrChunks: transport.stderrChunks,
+        };
+        options?.onSpawned?.(probe);
+        try {
+            const initialize = await this.initializeTransport(transport, options?.initializeTimeoutMs, configuredOptions.clientCapabilities);
+            const initializedProbe = {
+                ...probe,
+                initialize,
+            };
+            probe.initialize = initialize;
+            return initializedProbe;
+        }
+        catch (error) {
+            await terminateChildProcess(transport.child, 2000, this.terminateProcess);
+            throw error;
+        }
+    }
+    async spawnTransport(launchEnv, client = this.buildProbeClient()) {
+        const { command, args } = await this.resolveLaunchCommand();
+        const child = spawnProcess(command, args, {
+            cwd: process.cwd(),
+            ...createProviderEnvSpec({
+                runtimeSettings: this.runtimeSettings,
+                overlays: [launchEnv],
+            }),
+            stdio: ["pipe", "pipe", "pipe"],
+        });
+        assertChildWithPipes(child);
+        const stderrChunks = [];
+        child.stderr.on("data", (chunk) => {
+            stderrChunks.push(chunk.toString());
+        });
+        const processErrorPromise = rejectOnProcessFailure(child, stderrChunks);
+        const spawnReadyPromise = new Promise((resolve) => {
+            child.once("spawn", () => {
+                resolve();
+            });
+        });
+        const stream = createLoggedNdJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout), { logger: this.logger, provider: this.provider });
+        const connection = new ClientSideConnection(() => client, stream);
+        return {
+            child,
+            connection,
+            stderrChunks,
+            spawnReady: spawnReadyPromise,
+            processError: processErrorPromise,
+        };
+    }
+    async initializeTransport(transport, initializeTimeoutMs, clientCapabilities) {
+        let timeout = null;
+        const initializeTimeoutPromise = initializeTimeoutMs
+            ? new Promise((_, reject) => {
+                timeout = setTimeout(() => {
+                    reject(new Error(`ACP initialize timed out after ${initializeTimeoutMs}ms`));
+                }, initializeTimeoutMs);
+            })
+            : null;
+        try {
+            return await this.runACPRequest(() => Promise.race([
+                transport.connection.initialize({
+                    protocolVersion: PROTOCOL_VERSION,
+                    clientCapabilities: buildACPClientCapabilities(this.clientCapabilityMeta, clientCapabilities ?? this.clientCapabilities),
+                    clientInfo: { name: "Paseo", version: "dev" },
+                }),
+                transport.processError,
+                ...(initializeTimeoutPromise ? [initializeTimeoutPromise] : []),
+            ]));
+        }
+        finally {
+            if (timeout) {
+                clearTimeout(timeout);
+            }
+        }
+    }
+    buildProbeClient(onSessionUpdate) {
+        return {
+            async requestPermission() {
+                return { outcome: { outcome: "cancelled" } };
+            },
+            async sessionUpdate(params) {
+                await onSessionUpdate?.(params);
+            },
+            async readTextFile(params) {
+                const content = await fs.readFile(params.path, "utf8");
+                return { content };
+            },
+            async writeTextFile(params) {
+                await fs.mkdir(path.dirname(params.path), { recursive: true });
+                await fs.writeFile(params.path, params.content, "utf8");
+                return {};
+            },
+            async createTerminal() {
+                throw new Error("ACP model probe does not support terminal execution");
+            },
+        };
+    }
+    async closeProbe(probe, sessionId = null) {
+        try {
+            if (sessionId && probe.initialize?.agentCapabilities?.sessionCapabilities?.close) {
+                await withTimeout(probe.connection.unstable_closeSession({ sessionId }), ACP_PROBE_CLOSE_TIMEOUT_MS, `ACP probe session/close timed out after ${ACP_PROBE_CLOSE_TIMEOUT_MS}ms`);
+            }
+        }
+        catch (error) {
+            this.logger.debug({ err: error, sessionId }, "ACP probe closeSession failed during cleanup");
+        }
+        finally {
+            await terminateChildProcess(probe.child, 2000, this.terminateProcess);
+        }
+    }
+    async runACPRequest(request) {
+        try {
+            return await request();
+        }
+        catch (error) {
+            throw toACPRequestError(error);
+        }
+    }
+    async buildACPProbeDiagnosticRows(options = {}) {
+        const rows = [];
+        const phaseTimeoutMs = options.phaseTimeoutMs ?? ACP_DIAGNOSTIC_PHASE_TIMEOUT_MS;
+        const cwd = options.cwd ?? homedir();
+        let transport = null;
+        let initialize = null;
+        let probeSessionId = null;
+        try {
+            const spawnStartedAt = Date.now();
+            try {
+                transport = await this.spawnTransport(PROBE_ENV);
+                await withTimeout(Promise.race([transport.spawnReady, transport.processError]), phaseTimeoutMs, `ACP spawn timed out after ${phaseTimeoutMs}ms`);
+                rows.push({
+                    label: "ACP spawn",
+                    value: `ok (${formatDurationMs(spawnStartedAt)})`,
+                });
+            }
+            catch (error) {
+                rows.push({
+                    label: "ACP spawn",
+                    value: `error: ${toDiagnosticErrorMessage(error)}`,
+                });
+                return rows;
+            }
+            const activeTransport = transport;
+            const initializeStartedAt = Date.now();
+            try {
+                initialize = await this.initializeTransport(activeTransport, phaseTimeoutMs);
+                rows.push({
+                    label: "ACP initialize",
+                    value: `ok (${formatDurationMs(initializeStartedAt)})`,
+                });
+            }
+            catch (error) {
+                rows.push({
+                    label: "ACP initialize",
+                    value: `error: ${toDiagnosticErrorMessage(error)}`,
+                });
+                pushACPStderrRow(rows, activeTransport.stderrChunks);
+                return rows;
+            }
+            const sessionStartedAt = Date.now();
+            try {
+                const response = await withTimeout(this.runACPRequest(() => activeTransport.connection.newSession({
+                    cwd,
+                    mcpServers: [],
+                })), phaseTimeoutMs, `ACP session/new timed out after ${phaseTimeoutMs}ms`);
+                probeSessionId = response.sessionId;
+                const transformed = this.transformSessionResponse(response);
+                const models = deriveModelDefinitionsFromACP(this.provider, transformed.models, transformed.configOptions);
+                const modeInfo = deriveModesFromACP(this.defaultModes, transformed.modes, transformed.configOptions);
+                rows.push({
+                    label: "ACP session/new",
+                    value: `ok (${formatDurationMs(sessionStartedAt)}; models=${models.length}; modes=${modeInfo.modes.length})`,
+                });
+            }
+            catch (error) {
+                rows.push({
+                    label: "ACP session/new",
+                    value: `error: ${toDiagnosticErrorMessage(error)}`,
+                });
+                pushACPStderrRow(rows, activeTransport.stderrChunks);
+                return rows;
+            }
+            pushACPStderrRow(rows, activeTransport.stderrChunks);
+            return rows;
+        }
+        finally {
+            if (transport) {
+                const cleanupStartedAt = Date.now();
+                try {
+                    await this.closeProbe({
+                        child: transport.child,
+                        connection: transport.connection,
+                        stderrChunks: transport.stderrChunks,
+                        ...(initialize ? { initialize } : {}),
+                    }, probeSessionId);
+                    rows.push({
+                        label: "ACP cleanup",
+                        value: `ok (${formatDurationMs(cleanupStartedAt)})`,
+                    });
+                }
+                catch (error) {
+                    rows.push({
+                        label: "ACP cleanup",
+                        value: `error: ${toDiagnosticErrorMessage(error)}`,
+                    });
+                }
+            }
+        }
+    }
+    async resolveLaunchCommand() {
+        const prefix = await resolveProviderLaunch({
+            commandConfig: this.runtimeSettings?.command,
+            defaultBinary: this.defaultCommand[0],
+        });
+        const availability = await checkProviderLaunchAvailable(prefix);
+        if (!availability.available) {
+            throw new Error(`${this.provider} command '${this.defaultCommand[0]}' not found`);
+        }
+        return {
+            command: prefix.command,
+            args: [...prefix.args, ...this.defaultCommand.slice(1)],
+        };
+    }
+    assertProvider(config) {
+        if (config.provider !== this.provider) {
+            throw new Error(`Expected ${this.provider} config, received ${config.provider}`);
+        }
+    }
+    transformSessionResponse(response) {
+        const transformed = this.sessionResponseTransformer
+            ? this.sessionResponseTransformer(response)
+            : response;
+        if (!this.configOptionsTransformer || !transformed.configOptions) {
+            return transformed;
+        }
+        return {
+            ...transformed,
+            configOptions: this.configOptionsTransformer(transformed.configOptions),
+        };
+    }
+}
+export class ACPAgentSession {
+    constructor(config, options) {
+        this.usageSessionKey = randomUUID();
+        this.subscribers = new Set();
+        this.pendingPermissions = new Map();
+        this.pendingUserMessage = null;
+        this.submittedUserMessageTurnId = null;
+        this.toolCalls = new Map();
+        this.terminalEntries = new Map();
+        this.persistedHistory = [];
+        this.child = null;
+        this.connection = null;
+        this.agentCapabilities = null;
+        this.sessionId = null;
+        this.earlySessionUpdates = [];
+        this.currentMode = null;
+        this.sessionModeState = null;
+        this.currentModel = null;
+        this.availableModels = null;
+        this.thinkingOptionId = null;
+        this.currentTitle = null;
+        this.lastActivityAt = null;
+        this.configOptions = [];
+        /** How the opened session differs from the options it was given. */
+        this.openOptionsPatch = {};
+        /** Selects the provider moves while Paseo is opening or applying options belong to that result, not to events. */
+        this.optionsTransactionDepth = 0;
+        this.cachedCommands = [];
+        /** When the last command batch arrived; null while nothing has been published. */
+        this.commandsUpdatedAt = null;
+        this.commandsReadySettled = false;
+        this.activeForegroundTurnId = null;
+        this.fallbackAssistantMessageId = null;
+        this.closed = false;
+        this.historyPending = false;
+        this.historyRuntimeReleased = false;
+        this.replayingHistory = false;
+        this.bootstrapThreadEventPending = false;
+        this.provider = options.provider;
+        this.terminateProcess = options.terminateProcess ?? terminateWithTreeKill;
+        this.capabilities = options.capabilities;
+        this.logger = options.logger.child({ module: "agent", provider: options.provider });
+        this.runtimeSettings = options.runtimeSettings;
+        this.defaultCommand = options.defaultCommand;
+        this.defaultModes = options.defaultModes;
+        this.modelTransformer = options.modelTransformer;
+        this.sessionResponseTransformer = options.sessionResponseTransformer;
+        this.configOptionsTransformer = options.configOptionsTransformer;
+        this.configFeatureOptions = options.configFeatureOptions ?? [];
+        this.configuredModelIds = new Set(options.configuredModelIds);
+        this.clientCapabilities = options.clientCapabilities;
+        this.clientCapabilityMeta = options.clientCapabilityMeta;
+        this.modeIdTransformer = options.modeIdTransformer;
+        this.toolSnapshotTransformer = options.toolSnapshotTransformer;
+        this.providerModeWriter = options.providerModeWriter;
+        this.beforeModeWriter = options.beforeModeWriter;
+        this.thinkingOptionWriter = options.thinkingOptionWriter;
+        this.availableModes = options.defaultModes;
+        this.agentId = options.agentId;
+        this.launchEnv = options.launchEnv;
+        this.usageProvider = options.usageProvider;
+        this.harnessEnvironment = createProviderEnv({
+            runtimeSettings: options.runtimeSettings,
+            overlays: [options.launchEnv],
+        });
+        this.initialHandle = options.handle;
+        this.resumePurpose = options.resumePurpose ?? "interactive";
+        this.config = { ...config, provider: options.provider };
+        this.currentMode = config.modeId ?? null;
+        this.currentModel = config.model ?? null;
+        this.thinkingOptionId = config.thinkingOptionId ?? null;
+        this.currentTitle = config.title ?? null;
+        this.waitForInitialCommands = options.waitForInitialCommands ?? false;
+        this.initialCommandsWaitTimeoutMs = options.initialCommandsWaitTimeoutMs ?? 1500;
+        this.extensionCommandsParser = options.extensionCommandsParser;
+    }
+    get id() {
+        return this.sessionId;
+    }
+    usageSession() {
+        if (this.closed || !this.usageProvider)
+            return null;
+        return {
+            provider: this.usageProvider,
+            model: this.currentModel ?? undefined,
+            env: this.harnessEnvironment,
+            sessionKey: this.usageSessionKey,
+        };
+    }
+    async initializeNewSession() {
+        try {
+            const spawned = await this.spawnProcess();
+            this.child = spawned.child;
+            this.connection = spawned.connection;
+            this.agentCapabilities = spawned.initialize.agentCapabilities ?? null;
+            const response = await this.runACPRequest(() => this.connection.newSession({
+                cwd: this.config.cwd,
+                mcpServers: this.acpMcpServers(),
+            }));
+            this.sessionId = response.sessionId;
+            this.bootstrapThreadEventPending = true;
+            this.applySessionState(response);
+            for (const update of this.earlySessionUpdates.splice(0)) {
+                await this.sessionUpdate(update);
+            }
+            await this.applyConfiguredOverrides();
+        }
+        catch (error) {
+            await this.closeAfterInitializationFailure(error);
+        }
+    }
+    /**
+     * IMPORTANT: Some ACP providers (e.g., Devin CLI) require all three params
+     * (sessionId, cwd, mcpServers) to be present in session/load or
+     * unstable_resumeSession — even when mcpServers is an empty array — and
+     * return "Invalid params" if any are omitted. Never drop cwd or mcpServers
+     * from these calls regardless of capabilities.
+     */
+    async initializeResumedSession() {
+        try {
+            const handle = this.initialHandle;
+            if (!handle) {
+                throw new Error("Resume requested without persistence handle");
+            }
+            const spawned = await this.spawnProcess();
+            this.child = spawned.child;
+            this.connection = spawned.connection;
+            this.agentCapabilities = spawned.initialize.agentCapabilities ?? null;
+            this.sessionId = handle.sessionId;
+            this.bootstrapThreadEventPending = true;
+            const sessionCapabilities = this.agentCapabilities?.sessionCapabilities;
+            if (this.agentCapabilities?.loadSession) {
+                this.replayingHistory = true;
+                const response = await this.runACPRequest(() => this.connection.loadSession({
+                    sessionId: handle.sessionId,
+                    cwd: this.config.cwd,
+                    mcpServers: this.acpMcpServers(),
+                }));
+                this.deliverTranslatedEvents(this.flushPendingUserMessage());
+                this.replayingHistory = false;
+                this.historyPending = this.persistedHistory.length > 0;
+                this.applySessionState(response);
+            }
+            else if (sessionCapabilities?.resume) {
+                const response = await this.runACPRequest(() => this.connection.unstable_resumeSession({
+                    sessionId: handle.sessionId,
+                    cwd: this.config.cwd,
+                    mcpServers: this.acpMcpServers(),
+                }));
+                this.applySessionState(response);
+            }
+            else {
+                throw new Error(`${this.provider} does not support ACP session resume`);
+            }
+            await this.applyConfiguredOverrides();
+            if (this.resumePurpose === "history") {
+                await this.releaseHistoryRuntime();
+            }
+        }
+        catch (error) {
+            await this.closeAfterInitializationFailure(error);
+        }
+    }
+    // History resumes exist to replay persisted events into the canonical
+    // timeline; the provider process is released once replay finishes so
+    // archived agents hold no resident runtime. Interactive work goes through
+    // reloadAgentSession, which spawns a fresh process.
+    async releaseHistoryRuntime() {
+        const child = this.child;
+        if (child) {
+            const result = await this.terminateProcess(child, {
+                gracefulTimeoutMs: 2000,
+                forceTimeoutMs: 2000,
+            });
+            if (result === "kill-timeout") {
+                // Keep the child registered so close() can retry the shutdown.
+                this.logger.warn("ACP history resume could not release the provider process");
+                return;
+            }
+        }
+        this.historyRuntimeReleased = true;
+        this.connection = null;
+        this.child = null;
+        this.settleCommandsReady();
+    }
+    async closeAfterInitializationFailure(error) {
+        try {
+            await this.close();
+        }
+        catch (closeError) {
+            this.logger.warn({ err: closeError, initializationError: error }, "Failed to close ACP process after session initialization failure");
+        }
+        throw error;
+    }
+    async run(prompt, options) {
+        const result = await runProviderTurn({
+            prompt,
+            runOptions: options,
+            startTurn: (p, o) => this.startTurn(p, o),
+            subscribe: (callback) => this.subscribe(callback),
+            getSessionId: () => this.sessionId ?? "",
+            reduceFinalText: appendOrReplaceGrowingAssistantMessage,
+        });
+        if (!this.sessionId) {
+            throw new Error("ACP session did not expose a session id");
+        }
+        return result;
+    }
+    async startTurn(prompt, options) {
+        if (this.closed) {
+            throw new Error(`${this.provider} session is closed`);
+        }
+        if (!this.connection || !this.sessionId) {
+            throw new Error(`${this.provider} session is not initialized`);
+        }
+        if (this.connection.signal.aborted) {
+            throw new Error(describeACPDisconnect(this.child));
+        }
+        if (this.activeForegroundTurnId) {
+            throw new Error("A foreground turn is already active");
+        }
+        this.deliverTranslatedEvents(this.flushPendingUserMessage());
+        const turnId = randomUUID();
+        const messageId = options?.clientMessageId ?? randomUUID();
+        this.activeForegroundTurnId = turnId;
+        this.fallbackAssistantMessageId = null;
+        this.submittedUserMessageTurnId = null;
+        this.emitBootstrapThreadEvent();
+        this.pushEvent({ type: "turn_started", provider: this.provider, turnId });
+        this.emitSubmittedUserMessage(prompt, messageId, turnId, options?.clientMessageId);
+        const connection = this.connection;
+        const child = this.child;
+        const failOnDisconnect = () => void this.failDisconnectedTurn(turnId, child);
+        connection.signal.addEventListener("abort", failOnDisconnect, { once: true });
+        void connection
+            .prompt({
+            sessionId: this.sessionId,
+            messageId,
+            prompt: toACPContentBlocks(prompt),
+        })
+            .then((response) => {
+            this.handlePromptResponse(response, turnId);
+            return;
+        })
+            .catch((error) => {
+            const summary = summarizeACPRequestError(error);
+            this.finishTurn({
+                type: "turn_failed",
+                provider: this.provider,
+                error: summary.message,
+                code: summary.code,
+                diagnostic: this.collectDiagnostic(summary.diagnostic ?? summary.message),
+                turnId,
+            });
+        })
+            .finally(() => connection.signal.removeEventListener("abort", failOnDisconnect));
+        return { turnId };
+    }
+    // The SDK aborts the connection without rejecting the pending prompt, and before the child's
+    // exit event, so wait for the exit status before failing the turn.
+    async failDisconnectedTurn(turnId, child) {
+        await setImmediate();
+        if (child && child.exitCode === null && child.signalCode === null) {
+            await once(child, "exit", {
+                signal: AbortSignal.timeout(ACP_DISCONNECT_EXIT_GRACE_MS),
+            }).catch(() => undefined);
+        }
+        if (this.closed || this.activeForegroundTurnId !== turnId) {
+            return;
+        }
+        this.synthesizeCanceledToolCalls();
+        const error = describeACPDisconnect(child);
+        this.finishTurn({
+            type: "turn_failed",
+            provider: this.provider,
+            error,
+            diagnostic: this.collectDiagnostic(error),
+            turnId,
+        });
+    }
+    subscribe(callback) {
+        this.subscribers.add(callback);
+        if (this.sessionId) {
+            callback({
+                type: "thread_started",
+                provider: this.provider,
+                sessionId: this.sessionId,
+            });
+        }
+        return () => {
+            this.subscribers.delete(callback);
+        };
+    }
+    async *streamHistory() {
+        if (!this.historyPending || this.persistedHistory.length === 0) {
+            return;
+        }
+        const history = [...this.persistedHistory];
+        this.persistedHistory.length = 0;
+        this.historyPending = false;
+        for (const item of history) {
+            yield { type: "timeline", provider: this.provider, item };
+        }
+    }
+    async getRuntimeInfo() {
+        return this.runtimeInfo();
+    }
+    async getAvailableModes() {
+        return [...this.availableModes];
+    }
+    async getCurrentMode() {
+        return this.currentMode;
+    }
+    get controls() {
+        return [
+            ACP_AUTO_ACCEPT_CONTROL,
+            ...deriveControlsFromACP(this.configOptions, this.configFeatureOptions),
+        ];
+    }
+    settleCommandsReady() {
+        this.commandsReadySettled = true;
+    }
+    /**
+     * Providers publish their command inventory incrementally. MiniMax sends its
+     * built-in commands twice, then a third batch about 350ms later that merges in
+     * every discovered skill. Returning after the first batch loses the skills.
+     *
+     * Wait for the inventory to go quiet rather than for the first batch. The
+     * quiet window must exceed the gap between a provider's own batches; 600ms
+     * covers MiniMax with margin. `initialCommandsWaitTimeoutMs` still bounds the
+     * whole wait for providers that publish once or never publish at all.
+     */
+    async waitForCommandsToSettle() {
+        const deadline = Date.now() + this.initialCommandsWaitTimeoutMs;
+        while (!this.commandsReadySettled && !this.closed) {
+            const remaining = deadline - Date.now();
+            if (remaining <= 0)
+                return;
+            const quietFor = this.commandsUpdatedAt === null ? 0 : Date.now() - this.commandsUpdatedAt;
+            if (quietFor >= COMMAND_INVENTORY_QUIET_MS)
+                return;
+            await new Promise((resolve) => setTimeout(resolve, Math.min(remaining, COMMAND_INVENTORY_POLL_MS)));
+        }
+    }
+    async listCommands() {
+        if (this.commandsReadySettled || this.closed || !this.waitForInitialCommands) {
+            return this.cachedCommands;
+        }
+        await this.waitForCommandsToSettle();
+        this.settleCommandsReady();
+        return this.cachedCommands;
+    }
+    async setMode(modeId) {
+        if (!this.connection || !this.sessionId) {
+            throw new Error("ACP session not initialized");
+        }
+        const selection = this.resolveModeSelection(modeId);
+        await this.setModeWithSelection({ modeId, selection });
+    }
+    // Mode/model selection updates stay after ACP RPC success; this intentionally diverges from Zed's optimistic rollback path (acp.rs:3080-3104).
+    async setModeWithSelection({ modeId, selection, }) {
+        if (!this.connection || !this.sessionId) {
+            throw new Error("ACP session not initialized");
+        }
+        const context = this.createProviderModeWriterContext(modeId, selection);
+        const providerModeWriter = this.providerModeWriter;
+        const providerResult = providerModeWriter
+            ? await this.runACPRequest(() => providerModeWriter(context))
+            : { handled: false };
+        if (providerResult.handled) {
+            this.currentMode = providerResult.currentModeId ?? modeId;
+            if (providerResult.configOptions) {
+                this.configOptions = this.transformConfigOptions(providerResult.configOptions);
+            }
+            this.availableModes = this.modesFromConfig().modes;
+            this.pushEvent({
+                type: "mode_changed",
+                provider: this.provider,
+                currentModeId: this.currentMode,
+                availableModes: [...this.availableModes],
+            });
+            return;
+        }
+        if (selection.hasAvailableModes) {
+            if (!selection.availableMode) {
+                this.warnInvalidSelection(modeId, `is not valid ${this.provider} mode. Available options: ${this.availableModes
+                    .map((mode) => mode.id)
+                    .join(", ")}`);
+                return;
+            }
+        }
+        else {
+            const modeOption = selection.configOption;
+            if (!modeOption) {
+                throw new Error(`${this.provider} does not expose ACP mode switching`);
+            }
+            if (!selection.configChoice) {
+                this.warnInvalidSelection(modeId, `is not valid ${this.provider} mode config option. Available options: ${flattenSelectOptions(modeOption.options)
+                    .map((option) => option.value)
+                    .join(", ")}`);
+                return;
+            }
+        }
+        const beforeModeWriter = this.beforeModeWriter;
+        if (beforeModeWriter) {
+            const beforeResult = await this.runACPRequest(() => beforeModeWriter(context));
+            if (beforeResult?.configOptions) {
+                this.configOptions = this.transformConfigOptions(beforeResult.configOptions);
+            }
+        }
+        if (selection.hasAvailableModes) {
+            const { connection, sessionId } = this;
+            await this.runACPRequest(() => connection.setSessionMode({ sessionId, modeId }));
+            this.currentMode = modeId;
+            this.pushEvent({
+                type: "mode_changed",
+                provider: this.provider,
+                currentModeId: this.currentMode,
+                availableModes: [...this.availableModes],
+            });
+            return;
+        }
+        const modeOption = selection.configOption;
+        if (!modeOption) {
+            throw new Error(`${this.provider} does not expose ACP mode switching`);
+        }
+        const { connection, sessionId } = this;
+        const before = this.featureValues();
+        const response = await this.runACPRequest(() => connection.setSessionConfigOption({
+            sessionId,
+            configId: modeOption.id,
+            value: modeId,
+        }));
+        this.currentMode = this.applyConfigOptionResponse({
+            response,
+            configId: modeOption.id,
+            category: "mode",
+            requestedValue: modeId,
+            label: "mode",
+        });
+        this.reportFeatureChanges(before);
+        this.availableModes = this.modesFromConfig().modes;
+        this.pushEvent({
+            type: "mode_changed",
+            provider: this.provider,
+            currentModeId: this.currentMode,
+            availableModes: [...this.availableModes],
+        });
+    }
+    createProviderModeWriterContext(requestedModeId, selection) {
+        if (!this.connection || !this.sessionId) {
+            throw new Error("ACP session not initialized");
+        }
+        return {
+            connection: this.connection,
+            sessionId: this.sessionId,
+            requestedModeId,
+            currentModeId: this.currentMode,
+            selection,
+            configOptions: this.configOptions,
+            logger: this.logger,
+        };
+    }
+    async setModel(modelId) {
+        if (!this.connection || !this.sessionId) {
+            throw new Error("ACP session not initialized");
+        }
+        if (!modelId) {
+            this.currentModel = null;
+            return { model: this.currentModel };
+        }
+        await this.setModelWithSelection({ modelId, selection: this.resolveModelSelection(modelId) });
+        return { model: this.currentModel };
+    }
+    resolveModelSelection(modelId) {
+        const selection = resolveACPModelSelection({
+            modelId,
+            availableModels: this.availableModels,
+            configOptions: this.configOptions,
+        });
+        if (selection.availableModel || !this.configuredModelIds.has(modelId)) {
+            return selection;
+        }
+        // A model the user added in provider config is applied even when the agent does not advertise it.
+        return { ...selection, availableModel: { modelId, name: modelId } };
+    }
+    async setModelWithSelection({ modelId, selection, }) {
+        if (!this.connection || !this.sessionId) {
+            throw new Error("ACP session not initialized");
+        }
+        if (selection.hasAvailableModels && !selection.availableModel) {
+            this.warnInvalidSelection(modelId, `is not a valid ${this.provider} model. Available options: ${this.availableModels
+                ?.map((model) => model.modelId)
+                .join(", ")}`);
+            return;
+        }
+        if (selection.availableModel &&
+            typeof this.connection.unstable_setSessionModel === "function") {
+            try {
+                await this.connection.unstable_setSessionModel({
+                    sessionId: this.sessionId,
+                    modelId,
+                });
+                this.currentModel = modelId;
+                this.pushEvent({
+                    type: "model_changed",
+                    provider: this.provider,
+                    runtimeInfo: this.runtimeInfo(),
+                });
+                return;
+            }
+            catch {
+                // Fall through to config option path.
+            }
+        }
+        const modelOption = selection.configOption;
+        if (!modelOption) {
+            throw new Error(this.modelSelectionUnavailableMessage());
+        }
+        if (!selection.configChoice) {
+            this.warnInvalidSelection(modelId, `is not a valid ${this.provider} model config option. Available options: ${flattenSelectOptions(modelOption.options)
+                .map((option) => option.value)
+                .join(", ")}`);
+            return;
+        }
+        const { connection, sessionId } = this;
+        const before = this.featureValues();
+        const response = await this.runACPRequest(() => connection.setSessionConfigOption({
+            sessionId,
+            configId: modelOption.id,
+            value: modelId,
+        }));
+        this.currentModel = this.applyConfigOptionResponse({
+            response,
+            configId: modelOption.id,
+            category: "model",
+            requestedValue: modelId,
+            label: "model",
+        });
+        this.reportFeatureChanges(before);
+        this.pushEvent({
+            type: "model_changed",
+            provider: this.provider,
+            runtimeInfo: this.runtimeInfo(),
+        });
+    }
+    async setThinkingOption(thinkingOptionId) {
+        if (!this.connection || !this.sessionId) {
+            throw new Error("ACP session not initialized");
+        }
+        if (!thinkingOptionId) {
+            this.thinkingOptionId = null;
+            return;
+        }
+        const thinkingOptionWriter = this.thinkingOptionWriter;
+        if (thinkingOptionWriter) {
+            const { connection, sessionId } = this;
+            await this.runACPRequest(() => thinkingOptionWriter(connection, sessionId, thinkingOptionId));
+            this.thinkingOptionId = thinkingOptionId;
+            this.pushEvent({
+                type: "thinking_option_changed",
+                provider: this.provider,
+                thinkingOptionId: this.thinkingOptionId,
+            });
+            return;
+        }
+        const option = findSelectConfigOption({
+            configOptions: this.configOptions,
+            category: "thought_level",
+        });
+        if (!option) {
+            throw new Error(`${this.provider} does not expose ACP thought-level selection`);
+        }
+        const { connection, sessionId } = this;
+        const before = this.featureValues();
+        const response = await this.runACPRequest(() => connection.setSessionConfigOption({
+            sessionId,
+            configId: option.id,
+            value: thinkingOptionId,
+        }));
+        this.thinkingOptionId = this.applyConfigOptionResponse({
+            response,
+            configId: option.id,
+            category: "thought_level",
+            requestedValue: thinkingOptionId,
+            label: "thought-level",
+        });
+        this.reportFeatureChanges(before);
+        this.pushEvent({
+            type: "thinking_option_changed",
+            provider: this.provider,
+            thinkingOptionId: this.thinkingOptionId,
+        });
+    }
+    /**
+     * Applies only the options the patch sets; returns the selects that ended up different.
+     * Provider notifications that arrive meanwhile are part of that result. When a write is
+     * rejected, what the provider moved is reported as an event, since nothing is stored.
+     * The agent manager sends one apply at a time per session.
+     */
+    async applyOptions(options) {
+        assertChangesAreLive({
+            provider: this.config.provider,
+            patch: options,
+            current: this.config.providerOptions,
+            live: [ACP_AUTO_ACCEPT_FEATURE_ID, ...this.configFeatureOptions.map(({ id }) => id)],
+        });
+        ACPProviderOptionsSchema.parse(applyProviderOptionsPatch({ options: this.config.providerOptions, patch: options }));
+        const before = this.featureValues();
+        const requested = {};
+        try {
+            await this.inOptionsTransaction(async () => {
+                for (const [id, value] of Object.entries(options)) {
+                    const featureOption = this.configFeatureOptions.find((candidate) => candidate.id === id);
+                    if (!featureOption)
+                        continue;
+                    // A removal asks for the select's empty choice; a provider without one rejects it. The
+                    // choice it lands on is reported against the `null` that was asked, so the options
+                    // hold the value the session runs with.
+                    requested[id] = value;
+                    const option = findSelectConfigFeatureOption(this.configOptions, featureOption);
+                    if (!option || (value ?? "") !== option.currentValue) {
+                        await this.setConfigFeature(id, value);
+                    }
+                }
+            });
+        }
+        catch (error) {
+            this.reportFeatureChanges(before);
+            throw error;
+        }
+        // Auto Accept is Paseo's own setting, so it changes only once every write has been accepted.
+        if (ACP_AUTO_ACCEPT_FEATURE_ID in options) {
+            this.config.providerOptions = {
+                ...this.config.providerOptions,
+                [ACP_AUTO_ACCEPT_FEATURE_ID]: options[ACP_AUTO_ACCEPT_FEATURE_ID] === true,
+            };
+        }
+        return this.featureDifferences({ ...before, ...requested });
+    }
+    async inOptionsTransaction(run) {
+        this.optionsTransactionDepth += 1;
+        try {
+            return await run();
+        }
+        finally {
+            this.optionsTransactionDepth -= 1;
+        }
+    }
+    /** The selects as the provider reports them now. */
+    featureValues() {
+        return featureValuesFromACP(this.configOptions, this.configFeatureOptions);
+    }
+    /** The selects whose value is not what `expected` says, including ones it does not name. */
+    featureDifferences(expected) {
+        return Object.fromEntries(Object.entries(this.featureValues()).filter(([id, value]) => expected[id] !== value));
+    }
+    /** Reports the selects the provider moved on its own, compared with their values `before`. */
+    reportFeatureChanges(before) {
+        if (this.optionsTransactionDepth > 0)
+            return;
+        const patch = this.featureDifferences(before);
+        if (Object.keys(patch).length > 0) {
+            this.pushEvent({ type: "options_changed", provider: this.provider, patch });
+        }
+    }
+    async setConfigFeature(featureId, value) {
+        if (!this.connection || !this.sessionId) {
+            throw new Error("ACP session not initialized");
+        }
+        if (featureId === ACP_AUTO_ACCEPT_FEATURE_ID) {
+            this.config.providerOptions = {
+                ...this.config.providerOptions,
+                [ACP_AUTO_ACCEPT_FEATURE_ID]: value === true,
+            };
+            return;
+        }
+        const featureOption = this.configFeatureOptions.find((option) => option.id === featureId);
+        if (!featureOption) {
+            throw new Error(`Unknown ${this.provider} feature: ${featureId}`);
+        }
+        const option = findSelectConfigFeatureOption(this.configOptions, featureOption);
+        if (!option) {
+            throw new Error(this.featureUnavailableMessage(featureId));
+        }
+        const requestedValue = normalizeConfigFeatureValue(value);
+        const choice = findSelectConfigChoice({ option, value: requestedValue });
+        if (!choice) {
+            throw new Error(`${this.provider} feature '${featureId}' does not include option '${requestedValue}'`);
+        }
+        const { connection, sessionId } = this;
+        const response = await this.runACPRequest(() => connection.setSessionConfigOption({
+            sessionId,
+            configId: option.id,
+            value: requestedValue,
+        }));
+        this.applyConfigOptionResponse({
+            response,
+            configId: option.id,
+            category: featureOption.category,
+            requestedValue,
+            label: featureOption.label,
+        });
+    }
+    applyConfigOptionResponse({ response, configId, category, requestedValue, label, }) {
+        this.configOptions = this.transformConfigOptions(response.configOptions);
+        const responseOption = category === undefined
+            ? findSelectConfigOptionById({ configOptions: this.configOptions, id: configId })
+            : findSelectConfigOption({
+                configOptions: this.configOptions,
+                category,
+                id: configId,
+            });
+        if (responseOption?.currentValue != null) {
+            return responseOption.currentValue;
+        }
+        this.logger.warn({ configId, value: requestedValue }, `ACP setSessionConfigOption response did not include the requested ${label} option currentValue; using requested value`);
+        return requestedValue;
+    }
+    getPendingPermissions() {
+        return Array.from(this.pendingPermissions.values(), (entry) => entry.request);
+    }
+    async respondToPermission(requestId, response) {
+        const pending = this.pendingPermissions.get(requestId);
+        if (!pending) {
+            throw new Error(`No pending permission request with id '${requestId}'`);
+        }
+        const selectedOption = selectPermissionOption(pending.options, response);
+        if (response.selectedActionId !== undefined && !selectedOption) {
+            throw new Error(`ACP permission action '${response.selectedActionId}' does not exist or does not match '${response.behavior}' behavior`);
+        }
+        this.pendingPermissions.delete(requestId);
+        pending.resolve(selectedOption
+            ? {
+                outcome: {
+                    outcome: "selected",
+                    optionId: selectedOption.optionId,
+                },
+            }
+            : { outcome: { outcome: "cancelled" } });
+        this.pushEvent({
+            type: "permission_resolved",
+            provider: this.provider,
+            requestId,
+            resolution: response,
+            turnId: pending.turnId ?? undefined,
+        });
+        if (response.behavior === "deny" && response.interrupt && this.connection && this.sessionId) {
+            await this.connection.cancel({ sessionId: this.sessionId });
+        }
+    }
+    describePersistence() {
+        if (!this.sessionId) {
+            return null;
+        }
+        const { providerOptions: _providerOptions, ...persistedConfig } = this.config;
+        return {
+            provider: this.provider,
+            sessionId: this.sessionId,
+            nativeHandle: this.sessionId,
+            metadata: {
+                ...persistedConfig,
+                title: this.currentTitle,
+            },
+        };
+    }
+    async interrupt() {
+        if (!this.connection || !this.sessionId) {
+            return;
+        }
+        this.cancelPendingPermissions();
+        if (this.activeForegroundTurnId) {
+            await this.connection.cancel({ sessionId: this.sessionId });
+        }
+    }
+    async canStopRuntime() {
+        return (this.activeForegroundTurnId === null &&
+            this.pendingPermissions.size === 0 &&
+            this.pendingUserMessage === null &&
+            !Array.from(this.terminalEntries.values()).some((terminal) => terminal.running));
+    }
+    async close() {
+        if (this.closed) {
+            return;
+        }
+        this.closed = true;
+        this.deliverTranslatedEvents(this.flushPendingUserMessage());
+        this.settleCommandsReady();
+        this.cancelPendingPermissions();
+        if (this.connection && this.sessionId) {
+            try {
+                if (this.activeForegroundTurnId) {
+                    await withTimeout(this.connection.cancel({ sessionId: this.sessionId }), ACP_CLOSE_REQUEST_TIMEOUT_MS, `ACP cancel timed out after ${ACP_CLOSE_REQUEST_TIMEOUT_MS}ms`);
+                }
+            }
+            catch { }
+            try {
+                if (this.agentCapabilities?.sessionCapabilities?.close) {
+                    await withTimeout(this.connection.unstable_closeSession({ sessionId: this.sessionId }), ACP_CLOSE_REQUEST_TIMEOUT_MS, `ACP closeSession timed out after ${ACP_CLOSE_REQUEST_TIMEOUT_MS}ms`);
+                }
+            }
+            catch (error) {
+                this.logger.debug({ err: error }, "ACP closeSession failed during shutdown");
+            }
+        }
+        const terminalTerminations = Array.from(this.terminalEntries.values())
+            .filter((terminal) => terminal.running)
+            .map((terminal) => this.terminateProcess(terminal.child, {
+            gracefulTimeoutMs: 2000,
+            forceTimeoutMs: 2000,
+        }));
+        await Promise.all(terminalTerminations);
+        this.terminalEntries.clear();
+        if (this.child) {
+            await this.terminateProcess(this.child, { gracefulTimeoutMs: 2000, forceTimeoutMs: 2000 });
+        }
+        this.subscribers.clear();
+        this.connection = null;
+        this.child = null;
+        this.activeForegroundTurnId = null;
+    }
+    async requestPermission(params) {
+        const canAutoAccept = isACPAutoAcceptEnabled(this.config) && !isACPChooserRequest(params.options);
+        if (canAutoAccept) {
+            const allowOption = selectPermissionOption(params.options, { behavior: "allow" });
+            if (allowOption) {
+                this.logger.info({ toolCallId: params.toolCall.toolCallId, optionId: allowOption.optionId }, "Auto-accepting ACP permission request");
+                return {
+                    outcome: { outcome: "selected", optionId: allowOption.optionId },
+                };
+            }
+        }
+        // Match Zed acp.rs:3189-3220 when Paseo is not handling the request locally.
+        const requestId = randomUUID();
+        let toolSnapshot = this.toolCalls.get(params.toolCall.toolCallId) ??
+            mergeToolSnapshot(params.toolCall.toolCallId, params.toolCall);
+        if (this.toolSnapshotTransformer) {
+            toolSnapshot = this.toolSnapshotTransformer(toolSnapshot);
+        }
+        const request = mapPermissionRequest(this.provider, requestId, params, toolSnapshot);
+        const promise = new Promise((resolve, reject) => {
+            this.pendingPermissions.set(requestId, {
+                request,
+                options: params.options,
+                resolve,
+                reject,
+                turnId: this.activeForegroundTurnId,
+                toolCallId: params.toolCall.toolCallId,
+            });
+        });
+        this.pushEvent({
+            type: "permission_requested",
+            provider: this.provider,
+            request,
+            turnId: this.activeForegroundTurnId ?? undefined,
+        });
+        return promise;
+    }
+    async sessionUpdate(params) {
+        this.logger.trace({
+            agentId: this.agentId,
+            provider: this.provider,
+            sessionId: params.sessionId,
+            rawEvent: params,
+        }, "provider.acp.raw_event");
+        if (!this.sessionId) {
+            this.earlySessionUpdates.push(params);
+            return;
+        }
+        if (params.sessionId !== this.sessionId) {
+            return;
+        }
+        const events = this.translateSessionUpdate(params.update);
+        this.logger.trace({
+            agentId: this.agentId,
+            provider: this.provider,
+            sessionId: this.sessionId,
+            turnId: this.activeForegroundTurnId ?? undefined,
+            rawEvent: params,
+            events,
+        }, "provider.acp.parsed_event");
+        this.deliverTranslatedEvents(events);
+    }
+    deliverTranslatedEvents(events) {
+        if (this.replayingHistory) {
+            for (const event of events) {
+                if (event.type === "timeline") {
+                    this.persistedHistory.push(event.item);
+                }
+            }
+            return;
+        }
+        for (const event of events) {
+            this.pushEvent(event);
+        }
+    }
+    async extNotification(method, params) {
+        this.logger.trace({
+            agentId: this.agentId,
+            provider: this.provider,
+            sessionId: typeof params.sessionId === "string" ? params.sessionId : undefined,
+            method,
+            rawEvent: params,
+        }, "provider.acp.extension_notification");
+        const parsedCommands = this.extensionCommandsParser?.(method, params);
+        if (parsedCommands) {
+            this.applyResolvedCommands(parsedCommands, {
+                sessionId: typeof params.sessionId === "string" ? params.sessionId : undefined,
+            });
+        }
+    }
+    // Cache an asynchronously-delivered slash-command batch from a provider that
+    // supplies an extensionCommandsParser (e.g. a vendor extension notification).
+    // An empty batch is the provider saying it has no commands, so it settles the
+    // waiter immediately instead of letting it wait out the quiet window. An
+    // optional sessionId scopes the batch to this session; notifications
+    // addressed to a different session are ignored.
+    applyResolvedCommands(commands, options) {
+        if (options?.sessionId !== undefined &&
+            this.sessionId !== null &&
+            options.sessionId !== this.sessionId) {
+            return;
+        }
+        if (commands.length > 0) {
+            this.commandsUpdatedAt = Date.now();
+            this.cachedCommands = commands;
+            // A non-empty batch may be followed by more. Let the quiet window decide
+            // when the inventory is complete rather than settling here; an empty
+            // batch is the provider saying it has nothing, which must still unblock
+            // the waiter immediately.
+            return;
+        }
+        this.settleCommandsReady();
+    }
+    async readTextFile(params) {
+        const raw = await fs.readFile(params.path, "utf8");
+        if (!params.line && !params.limit) {
+            return { content: raw };
+        }
+        const lines = raw.split(/\r?\n/);
+        const start = Math.max((params.line ?? 1) - 1, 0);
+        const end = params.limit ? start + params.limit : undefined;
+        return { content: lines.slice(start, end).join("\n") };
+    }
+    async writeTextFile(params) {
+        await fs.mkdir(path.dirname(params.path), { recursive: true });
+        await fs.writeFile(params.path, params.content, "utf8");
+        return {};
+    }
+    async createTerminal(params) {
+        const terminalId = randomUUID();
+        const env = Object.fromEntries((params.env ?? []).map((entry) => [entry.name, entry.value]));
+        const terminalCommand = resolveTerminalCommand(params.command, params.args);
+        // The terminal is a sibling of the agent process, not a child, so it inherits
+        // nothing from it. Carry the agent's launch environment the way spawnProcess
+        // does, keeping the requested terminal environment on top.
+        const commandEnvOverlays = terminalCommand.shell === false
+            ? [this.launchEnv, env, createStringCommandShellEnvOverlay()]
+            : [this.launchEnv, env];
+        const child = spawnProcess(terminalCommand.command, terminalCommand.args, {
+            cwd: params.cwd ?? this.config.cwd,
+            ...createProviderEnvSpec({
+                runtimeSettings: this.runtimeSettings,
+                overlays: commandEnvOverlays,
+            }),
+            shell: terminalCommand.shell,
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        let resolveExit;
+        let rejectExit;
+        const waitForExit = new Promise((resolve, reject) => {
+            resolveExit = resolve;
+            rejectExit = reject;
+        });
+        waitForExit.catch(() => undefined);
+        const entry = {
+            running: true,
+            id: terminalId,
+            child,
+            output: "",
+            truncated: false,
+            outputByteLimit: params.outputByteLimit ?? null,
+            exit: null,
+            waitForExit,
+            resolveExit,
+            rejectExit,
+        };
+        child.stdout.on("data", (chunk) => appendTerminalOutput(entry, chunk.toString()));
+        child.stderr.on("data", (chunk) => appendTerminalOutput(entry, chunk.toString()));
+        child.once("error", (error) => {
+            const spawnError = error instanceof Error ? error : new Error(String(error));
+            appendTerminalOutput(entry, `${spawnError.message}\n`);
+            // A failed spawn has no exit event. Other process errors do not prove exit.
+            if (child.pid === undefined)
+                entry.running = false;
+            rejectExit(spawnError);
+        });
+        child.once("exit", (code, signal) => {
+            const exit = { exitCode: code, signal };
+            entry.running = false;
+            entry.exit = exit;
+            resolveExit(exit);
+        });
+        this.terminalEntries.set(terminalId, entry);
+        return { terminalId };
+    }
+    async terminalOutput(params) {
+        const entry = this.getTerminalEntry(params.terminalId);
+        return {
+            output: entry.output,
+            truncated: entry.truncated,
+            exitStatus: entry.exit ?? undefined,
+        };
+    }
+    async waitForTerminalExit(params) {
+        const entry = this.getTerminalEntry(params.terminalId);
+        return entry.waitForExit;
+    }
+    async releaseTerminal(params) {
+        const entry = this.getTerminalEntry(params.terminalId);
+        if (entry.running) {
+            await this.terminateProcess(entry.child, { gracefulTimeoutMs: 2000, forceTimeoutMs: 2000 });
+        }
+        this.terminalEntries.delete(params.terminalId);
+    }
+    async killTerminal(params) {
+        const entry = this.getTerminalEntry(params.terminalId);
+        if (entry.running) {
+            await this.terminateProcess(entry.child, { gracefulTimeoutMs: 2000, forceTimeoutMs: 2000 });
+        }
+        return {};
+    }
+    // Loading an archived agent's history runs nothing in its working directory, which
+    // may have been removed with its worktree. session/load still names the original
+    // directory; only the process starts from the home directory.
+    resolveProcessCwd() {
+        return resolveResumeProcessCwd(this.config.cwd, this.resumePurpose);
+    }
+    async spawnProcess() {
+        const prefix = await resolveProviderLaunch({
+            commandConfig: this.runtimeSettings?.command,
+            defaultBinary: this.defaultCommand[0],
+        });
+        const availability = await checkProviderLaunchAvailable(prefix);
+        if (!availability.available) {
+            throw new Error(`${this.provider} command '${this.defaultCommand[0]}' not found`);
+        }
+        const command = prefix.command;
+        const args = [...prefix.args, ...this.defaultCommand.slice(1)];
+        const child = spawnProcess(command, args, {
+            cwd: await this.resolveProcessCwd(),
+            ...createProviderEnvSpec({
+                runtimeSettings: this.runtimeSettings,
+                overlays: [this.launchEnv],
+            }),
+            stdio: ["pipe", "pipe", "pipe"],
+        });
+        assertChildWithPipes(child);
+        const stderrChunks = [];
+        child.stderr.on("data", (chunk) => {
+            stderrChunks.push(chunk.toString());
+        });
+        const processError = rejectOnProcessFailure(child, stderrChunks);
+        child.once("exit", (code, signal) => {
+            if (this.closed || this.historyRuntimeReleased) {
+                return;
+            }
+            if (this.activeForegroundTurnId) {
+                this.synthesizeCanceledToolCalls();
+                this.finishTurn({
+                    type: "turn_failed",
+                    provider: this.provider,
+                    error: `ACP agent exited unexpectedly (${code ?? "null"}${signal ? `, ${signal}` : ""})`,
+                    diagnostic: stderrChunks.join("").trim() || undefined,
+                    turnId: this.activeForegroundTurnId,
+                });
+            }
+        });
+        const stream = createLoggedNdJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout), { logger: this.logger, provider: this.provider });
+        const connection = new ClientSideConnection(() => this, stream);
+        // Take ownership before initialize so the outer initialization guard can
+        // close the process even when the ACP handshake itself rejects.
+        this.child = child;
+        this.connection = connection;
+        const initialize = await this.runACPRequest(() => Promise.race([
+            connection.initialize({
+                protocolVersion: PROTOCOL_VERSION,
+                clientCapabilities: buildACPClientCapabilities(this.clientCapabilityMeta, this.clientCapabilities),
+                clientInfo: { name: "Paseo", version: "dev" },
+            }),
+            processError,
+        ]));
+        return { child, connection, initialize };
+    }
+    async runACPRequest(request) {
+        try {
+            return await request();
+        }
+        catch (error) {
+            throw toACPRequestError(error);
+        }
+    }
+    acpMcpServers() {
+        return this.capabilities.supportsMcpServers ? normalizeMcpServers(this.config.mcpServers) : [];
+    }
+    applySessionState(response) {
+        const transformed = this.sessionResponseTransformer
+            ? this.sessionResponseTransformer(response)
+            : response;
+        this.configOptions = this.transformConfigOptions(transformed.configOptions ?? []);
+        this.sessionModeState = transformed.modes ?? null;
+        const modeInfo = deriveModesFromACP(this.defaultModes, transformed.modes, this.configOptions);
+        this.availableModes = modeInfo.modes;
+        this.currentMode = modeInfo.currentModeId ?? this.currentMode;
+        this.availableModels = transformed.models?.availableModels ?? null;
+        this.currentModel =
+            transformed.models?.currentModelId ?? deriveCurrentConfigValue(this.configOptions, "model");
+        this.thinkingOptionId =
+            deriveCurrentConfigValue(this.configOptions, "thought_level") ?? this.thinkingOptionId;
+    }
+    transformConfigOptions(configOptions) {
+        return this.configOptionsTransformer
+            ? this.configOptionsTransformer(configOptions)
+            : configOptions;
+    }
+    transformModeId(modeId) {
+        return this.modeIdTransformer ? this.modeIdTransformer(modeId) : modeId;
+    }
+    applyConfiguredOverrides() {
+        return this.inOptionsTransaction(() => this.writeConfiguredOverrides());
+    }
+    async writeConfiguredOverrides() {
+        const configuredModeId = this.config.modeId;
+        if (configuredModeId && configuredModeId !== this.currentMode) {
+            const selection = this.resolveModeSelection(configuredModeId);
+            await this.setModeWithSelection({ modeId: configuredModeId, selection });
+        }
+        const configuredModelId = this.config.model;
+        let switchedModel = false;
+        if (configuredModelId && configuredModelId !== this.currentModel) {
+            try {
+                await this.setModelWithSelection({
+                    modelId: configuredModelId,
+                    selection: this.resolveModelSelection(configuredModelId),
+                });
+                switchedModel = true;
+            }
+            catch (error) {
+                if (!this.isModelSelectionUnavailableError(error)) {
+                    throw error;
+                }
+                this.logger.warn({ value: configuredModelId }, `${this.provider} does not expose ACP model selection; using provider default model`);
+            }
+        }
+        if (this.config.thinkingOptionId && this.config.thinkingOptionId !== this.thinkingOptionId) {
+            await this.setThinkingOption(this.config.thinkingOptionId);
+        }
+        const configuredFeatureValues = this.config.providerOptions ?? {};
+        for (const featureOption of this.configFeatureOptions) {
+            if (!Object.prototype.hasOwnProperty.call(configuredFeatureValues, featureOption.id)) {
+                continue;
+            }
+            try {
+                await this.setConfigFeature(featureOption.id, configuredFeatureValues[featureOption.id]);
+            }
+            catch (error) {
+                if (!this.isStaleFeatureValueError(error, featureOption.id, switchedModel)) {
+                    throw error;
+                }
+                this.logger.warn({ err: error, featureId: featureOption.id, model: this.currentModel }, `${this.provider} cannot apply ACP feature '${featureOption.id}' to the current model; using the provider default`);
+            }
+        }
+        // The options are the state, so every select the session opened with is reported, including
+        // ones nobody set (a native default is stored like any other value).
+        this.openOptionsPatch = this.featureDifferences(configuredFeatureValues);
+    }
+    /**
+     * A stored feature value is a preference carried over from whichever model the user
+     * last configured, so the session it lands on may have no such option. Paseo's own
+     * guard says so when the session's options are accurate. A model switch answers with
+     * an empty response, leaving Paseo holding the previous model's options, and then the
+     * provider is the one that rejects the write as invalid params. Outside those two
+     * cases the write failed for a reason the user needs to see.
+     */
+    isStaleFeatureValueError(error, featureId, switchedModel) {
+        if (this.isFeatureUnavailableError(error, featureId)) {
+            return true;
+        }
+        return switchedModel && isACPInvalidParams(error);
+    }
+    warnInvalidSelection(value, message) {
+        this.logger.warn({ value }, message);
+    }
+    modelSelectionUnavailableMessage() {
+        return `${this.provider} does not expose ACP model selection`;
+    }
+    isModelSelectionUnavailableError(error) {
+        return error instanceof Error && error.message === this.modelSelectionUnavailableMessage();
+    }
+    featureUnavailableMessage(featureId) {
+        return `${this.provider} does not expose ACP feature '${featureId}'`;
+    }
+    isFeatureUnavailableError(error, featureId) {
+        return error instanceof Error && error.message === this.featureUnavailableMessage(featureId);
+    }
+    translateSessionUpdate(update) {
+        if (update.sessionUpdate === "user_message_chunk") {
+            return this.handleUserMessageChunk(update);
+        }
+        const pendingUserEvents = this.flushPendingUserMessage();
+        switch (update.sessionUpdate) {
+            case "agent_message_chunk": {
+                const item = this.createMessageTimelineItem("assistant_message", update);
+                return item ? [...pendingUserEvents, this.wrapTimeline(item)] : pendingUserEvents;
+            }
+            case "agent_thought_chunk": {
+                this.fallbackAssistantMessageId = null;
+                const item = this.createMessageTimelineItem("reasoning", update);
+                return item ? [...pendingUserEvents, this.wrapTimeline(item)] : pendingUserEvents;
+            }
+            case "tool_call":
+                this.fallbackAssistantMessageId = null;
+                return [
+                    ...pendingUserEvents,
+                    ...this.handleToolCallUpdate(update.toolCallId, update, undefined),
+                ];
+            case "tool_call_update":
+                return [
+                    ...pendingUserEvents,
+                    ...this.handleToolCallUpdate(update.toolCallId, update, this.toolCalls.get(update.toolCallId)),
+                ];
+            case "plan":
+                this.fallbackAssistantMessageId = null;
+                return [...pendingUserEvents, this.wrapTimeline(mapPlanToTimeline(update))];
+            case "current_mode_update":
+                this.handleCurrentModeUpdate(update);
+                return [
+                    ...pendingUserEvents,
+                    {
+                        type: "mode_changed",
+                        provider: this.provider,
+                        currentModeId: this.currentMode,
+                        availableModes: [...this.availableModes],
+                    },
+                ];
+            case "config_option_update":
+                return [...pendingUserEvents, ...this.handleConfigOptionUpdate(update)];
+            case "session_info_update":
+                this.handleSessionInfoUpdate(update);
+                return pendingUserEvents;
+            case "usage_update":
+                this.handleUsageUpdate(update);
+                return pendingUserEvents;
+            case "available_commands_update":
+                this.commandsUpdatedAt = Date.now();
+                this.cachedCommands = update.availableCommands.map((command) => ({
+                    name: command.name,
+                    description: command.description,
+                    argumentHint: command.input?.hint ?? "",
+                    kind: "command",
+                }));
+                // An empty batch means the agent has no commands and would otherwise
+                // wait out the whole quiet window. A non-empty batch may be one of
+                // several, so completion belongs to the quiet window.
+                if (update.availableCommands.length === 0) {
+                    this.settleCommandsReady();
+                }
+                return pendingUserEvents;
+            default:
+                return pendingUserEvents;
+        }
+    }
+    handleUserMessageChunk(update) {
+        this.fallbackAssistantMessageId = null;
+        if (this.activeForegroundTurnId &&
+            this.submittedUserMessageTurnId === this.activeForegroundTurnId) {
+            return [];
+        }
+        const chunkText = contentBlockToText(update.content);
+        if (!chunkText) {
+            return [];
+        }
+        const messageId = update.messageId ?? undefined;
+        const pending = this.pendingUserMessage;
+        const startsNewMessage = Boolean(pending?.messageId && messageId && pending.messageId !== messageId);
+        const events = startsNewMessage ? this.flushPendingUserMessage() : [];
+        this.pendingUserMessage ?? (this.pendingUserMessage = {
+            text: "",
+            ...(messageId ? { messageId } : {}),
+        });
+        if (!this.pendingUserMessage.messageId && messageId) {
+            this.pendingUserMessage.messageId = messageId;
+        }
+        this.pendingUserMessage.text += chunkText;
+        return events;
+    }
+    flushPendingUserMessage() {
+        const pending = this.pendingUserMessage;
+        if (!pending) {
+            return [];
+        }
+        this.pendingUserMessage = null;
+        return [
+            this.wrapTimeline({
+                type: "user_message",
+                text: pending.text,
+                ...(pending.messageId ? { messageId: pending.messageId } : {}),
+            }),
+        ];
+    }
+    handleToolCallUpdate(toolCallId, update, previous) {
+        let snapshot = mergeToolSnapshot(toolCallId, update, previous);
+        if (this.toolSnapshotTransformer) {
+            snapshot = this.toolSnapshotTransformer(snapshot);
+        }
+        this.toolCalls.set(toolCallId, snapshot);
+        if (update.status === "completed" || update.status === "failed") {
+            this.cancelPendingPermissions((pending) => pending.toolCallId === toolCallId);
+        }
+        return [this.wrapTimeline(mapToolSnapshotToTimeline(snapshot, this.terminalEntries))];
+    }
+    createMessageTimelineItem(type, update) {
+        const chunkText = contentBlockToText(update.content);
+        if (!chunkText) {
+            return null;
+        }
+        if (type === "assistant_message") {
+            return {
+                type: "assistant_message",
+                text: chunkText,
+                messageId: this.resolveAssistantMessageId(update.messageId),
+            };
+        }
+        return { type: "reasoning", text: chunkText };
+    }
+    resolveAssistantMessageId(messageId) {
+        if (messageId) {
+            this.fallbackAssistantMessageId = null;
+            return messageId;
+        }
+        this.fallbackAssistantMessageId ?? (this.fallbackAssistantMessageId = randomUUID());
+        return this.fallbackAssistantMessageId;
+    }
+    handleCurrentModeUpdate(update) {
+        this.currentMode = this.transformModeId(update.currentModeId);
+    }
+    modesFromConfig() {
+        let modes = this.sessionModeState;
+        if (modes) {
+            let currentModeId = this.currentMode ?? modes.currentModeId;
+            const configMode = findSelectConfigOption({
+                configOptions: this.configOptions,
+                category: "mode",
+            });
+            // Copilot config updates name real modes; Hermes config values are a separate policy namespace.
+            if (configMode && modes.availableModes.some((mode) => mode.id === configMode.currentValue)) {
+                currentModeId = configMode.currentValue;
+            }
+            modes = { ...modes, currentModeId };
+        }
+        return deriveModesFromACP(this.defaultModes, modes, this.configOptions);
+    }
+    resolveModeSelection(modeId) {
+        const hasSessionModes = Boolean(this.sessionModeState?.availableModes.length);
+        const modeConfig = findSelectConfigOption({
+            configOptions: this.configOptions,
+            category: "mode",
+        });
+        const configOnly = !hasSessionModes && modeConfig !== null;
+        const availableModes = configOnly ? [] : this.availableModes;
+        return resolveACPModeSelection({ modeId, availableModes, configOptions: this.configOptions });
+    }
+    handleConfigOptionUpdate(update) {
+        const before = this.featureValues();
+        this.configOptions = this.transformConfigOptions(update.configOptions);
+        const modeInfo = this.modesFromConfig();
+        const nextMode = modeInfo.currentModeId;
+        const nextModel = deriveCurrentConfigValue(this.configOptions, "model");
+        const nextThinkingOptionId = deriveCurrentConfigValue(this.configOptions, "thought_level");
+        this.availableModes = modeInfo.modes;
+        this.currentMode = nextMode ?? this.currentMode;
+        this.currentModel = nextModel ?? this.currentModel;
+        this.thinkingOptionId = nextThinkingOptionId ?? this.thinkingOptionId;
+        this.reportFeatureChanges(before);
+        const events = [];
+        if (nextMode !== null) {
+            events.push({
+                type: "mode_changed",
+                provider: this.provider,
+                currentModeId: this.currentMode,
+                availableModes: [...this.availableModes],
+            });
+        }
+        if (nextModel !== null) {
+            events.push({
+                type: "model_changed",
+                provider: this.provider,
+                runtimeInfo: this.runtimeInfo(),
+            });
+        }
+        if (nextThinkingOptionId !== null) {
+            events.push({
+                type: "thinking_option_changed",
+                provider: this.provider,
+                thinkingOptionId: this.thinkingOptionId,
+            });
+        }
+        return events;
+    }
+    handleSessionInfoUpdate(update) {
+        if ("title" in update) {
+            this.currentTitle = update.title ?? null;
+        }
+        if ("updatedAt" in update) {
+            this.lastActivityAt = update.updatedAt ?? null;
+        }
+    }
+    // ACP reports context occupancy out of band from the prompt response, so the
+    // composer's context meter cannot read it from `turn_completed`. Forward it as
+    // the same `usage_updated` snapshot the native adapters emit, preserving the
+    // turn usage this session already recorded. The guards match the meter's own
+    // validity rules, so a provider cannot push a window the meter would reject.
+    handleUsageUpdate(update) {
+        const contextWindowMaxTokens = Number.isFinite(update.size) && update.size > 0 ? update.size : undefined;
+        const contextWindowUsedTokens = Number.isFinite(update.used) && update.used >= 0 ? update.used : undefined;
+        if (contextWindowMaxTokens === undefined || contextWindowUsedTokens === undefined) {
+            return;
+        }
+        this.pushEvent({
+            type: "usage_updated",
+            provider: this.provider,
+            usage: {
+                ...this.currentTurnUsage,
+                contextWindowMaxTokens,
+                contextWindowUsedTokens,
+            },
+            turnId: this.activeForegroundTurnId ?? undefined,
+        });
+    }
+    handlePromptResponse(response, turnId) {
+        this.currentTurnUsage = mapACPUsage(response.usage) ?? this.currentTurnUsage;
+        switch (response.stopReason) {
+            case "cancelled":
+                this.synthesizeCanceledToolCalls();
+                this.finishTurn({
+                    type: "turn_canceled",
+                    provider: this.provider,
+                    reason: "Interrupted",
+                    turnId,
+                });
+                break;
+            case "end_turn":
+            case "max_tokens":
+            case "max_turn_requests":
+            case "refusal":
+            default:
+                this.finishTurn({
+                    type: "turn_completed",
+                    provider: this.provider,
+                    usage: this.currentTurnUsage,
+                    turnId,
+                });
+                break;
+        }
+    }
+    wrapTimeline(item) {
+        return {
+            type: "timeline",
+            provider: this.provider,
+            item,
+            turnId: this.activeForegroundTurnId ?? undefined,
+        };
+    }
+    pushEvent(event) {
+        this.logger.trace({
+            agentId: this.agentId,
+            provider: this.provider,
+            sessionId: this.sessionId,
+            turnId: getAgentStreamEventTurnId(event) ?? this.activeForegroundTurnId ?? undefined,
+            event,
+        }, "provider.acp.event_emit");
+        for (const subscriber of this.subscribers) {
+            subscriber(event);
+        }
+    }
+    emitSubmittedUserMessage(prompt, messageId, turnId, clientMessageId) {
+        const text = extractPromptText(prompt);
+        if (text.trim().length === 0) {
+            return;
+        }
+        this.submittedUserMessageTurnId = turnId;
+        this.pushEvent({
+            type: "timeline",
+            provider: this.provider,
+            turnId,
+            item: {
+                type: "user_message",
+                text,
+                messageId,
+                ...(clientMessageId ? { clientMessageId } : {}),
+            },
+        });
+    }
+    runtimeInfo() {
+        return {
+            provider: this.provider,
+            sessionId: this.sessionId,
+            model: this.currentModel,
+            thinkingOptionId: this.thinkingOptionId,
+            modeId: this.currentMode,
+            extra: {
+                title: this.currentTitle,
+                updatedAt: this.lastActivityAt,
+            },
+        };
+    }
+    finishTurn(event) {
+        this.deliverTranslatedEvents(this.flushPendingUserMessage());
+        // Failed and canceled turns clear every request in the manager. Answer the
+        // same set here so an outside-turn request cannot keep the provider blocked.
+        this.cancelPendingPermissions((pending) => event.type !== "turn_completed" || pending.turnId === event.turnId);
+        this.activeForegroundTurnId = null;
+        this.fallbackAssistantMessageId = null;
+        if (this.submittedUserMessageTurnId === event.turnId) {
+            this.submittedUserMessageTurnId = null;
+        }
+        this.pushEvent(event);
+    }
+    cancelPendingPermissions(matches = () => true) {
+        for (const [requestId, pending] of this.pendingPermissions) {
+            if (!matches(pending))
+                continue;
+            this.pendingPermissions.delete(requestId);
+            pending.resolve({ outcome: { outcome: "cancelled" } });
+            this.pushEvent({
+                type: "permission_resolved",
+                provider: this.provider,
+                requestId,
+                resolution: { behavior: "deny", message: "Permission request canceled" },
+                turnId: pending.turnId ?? undefined,
+            });
+        }
+    }
+    emitBootstrapThreadEvent() {
+        if (!this.bootstrapThreadEventPending || !this.sessionId) {
+            return;
+        }
+        this.bootstrapThreadEventPending = false;
+        this.pushEvent({
+            type: "thread_started",
+            provider: this.provider,
+            sessionId: this.sessionId,
+        });
+    }
+    synthesizeCanceledToolCalls() {
+        for (const snapshot of this.toolCalls.values()) {
+            const mapped = mapToolSnapshotToTimeline(snapshot, this.terminalEntries);
+            if (mapped.status === "running") {
+                this.pushEvent(this.wrapTimeline({
+                    ...mapped,
+                    status: "canceled",
+                    error: null,
+                }));
+            }
+        }
+    }
+    collectDiagnostic(message) {
+        const parts = [message];
+        if (this.child?.exitCode != null) {
+            parts.push(`exitCode=${this.child.exitCode}`);
+        }
+        if (this.child?.signalCode) {
+            parts.push(`signal=${this.child.signalCode}`);
+        }
+        return parts.length > 0 ? parts.join(" | ") : undefined;
+    }
+    getTerminalEntry(terminalId) {
+        const entry = this.terminalEntries.get(terminalId);
+        if (!entry) {
+            throw new Error(`Unknown terminal '${terminalId}'`);
+        }
+        return entry;
+    }
+}
+export function findSelectConfigOption({ configOptions, category, id, }) {
+    const option = configOptions?.find((entry) => entry.type === "select" && entry.category === category && (!id || entry.id === id));
+    return option ?? null;
+}
+function findSelectConfigOptionById({ configOptions, id, }) {
+    const option = configOptions?.find((entry) => entry.type === "select" && entry.id === id);
+    return option ?? null;
+}
+function findSelectConfigFeatureOption(configOptions, featureOption) {
+    const option = configOptions?.find((entry) => entry.type === "select" &&
+        entry.id === featureOption.configId &&
+        (featureOption.category === undefined || entry.category === featureOption.category));
+    return option ?? null;
+}
+function findSelectConfigChoice({ option, value, }) {
+    if (!option) {
+        return null;
+    }
+    return flattenSelectOptions(option.options).find((choice) => choice.value === value) ?? null;
+}
+function flattenSelectOptions(options) {
+    const flattened = [];
+    for (const option of options) {
+        if ("value" in option) {
+            flattened.push(option);
+            continue;
+        }
+        for (const groupOption of option.options) {
+            flattened.push({ ...groupOption, group: option.group });
+        }
+    }
+    return flattened;
+}
+function deriveConfigFeatureSelectOptions(option, featureOption) {
+    return flattenSelectOptions(option.options).map((choice) => ({
+        id: choice.value,
+        label: normalizeConfigFeatureOptionLabel(choice, featureOption),
+        description: choice.description ?? undefined,
+        isDefault: choice.value === option.currentValue,
+        metadata: choice.group ? { group: choice.group } : undefined,
+    }));
+}
+function normalizeConfigFeatureOptionLabel(choice, featureOption) {
+    const name = choice.name.trim();
+    if (name) {
+        return name;
+    }
+    if (choice.value === "" && featureOption.emptyOptionLabel) {
+        return featureOption.emptyOptionLabel;
+    }
+    return choice.value;
+}
+function normalizeConfigFeatureValue(value) {
+    if (typeof value === "string") {
+        return value;
+    }
+    if (value === null) {
+        return "";
+    }
+    throw new Error(`ACP feature value must be a string`);
+}
+export function deriveSelectorOptions(configOptions, category) {
+    const option = findSelectConfigOption({ configOptions, category });
+    if (!option) {
+        return [];
+    }
+    return flattenSelectOptions(option.options).map((value) => ({
+        id: value.value,
+        label: value.name,
+        description: value.description ?? undefined,
+        isDefault: value.value === option.currentValue,
+        metadata: value.group ? { group: value.group } : undefined,
+    }));
+}
+function deriveCurrentConfigValue(configOptions, category) {
+    const option = configOptions?.find((entry) => entry.type === "select" && entry.category === category);
+    return option?.currentValue ?? null;
+}
+function normalizeMcpServers(servers) {
+    if (!servers) {
+        return [];
+    }
+    return Object.entries(servers).map(([name, config]) => {
+        if (config.type === "stdio") {
+            return {
+                name,
+                command: config.command,
+                args: config.args ?? [],
+                env: Object.entries(config.env ?? {}).map(([envName, value]) => ({
+                    name: envName,
+                    value,
+                })),
+            };
+        }
+        if (config.type === "http") {
+            return {
+                type: "http",
+                name,
+                url: config.url,
+                headers: Object.entries(config.headers ?? {}).map(([headerName, value]) => ({
+                    name: headerName,
+                    value,
+                })),
+            };
+        }
+        return {
+            type: "sse",
+            name,
+            url: config.url,
+            headers: Object.entries(config.headers ?? {}).map(([headerName, value]) => ({
+                name: headerName,
+                value,
+            })),
+        };
+    });
+}
+function toACPContentBlocks(prompt) {
+    if (typeof prompt === "string") {
+        return [{ type: "text", text: prompt }];
+    }
+    const contentBlocks = [];
+    for (const block of prompt) {
+        switch (block.type) {
+            case "text":
+                contentBlocks.push({ type: "text", text: block.text });
+                break;
+            case "image":
+                contentBlocks.push({ type: "image", data: block.data, mimeType: block.mimeType });
+                break;
+            default:
+                contentBlocks.push({ type: "text", text: renderPromptAttachmentAsText(block) });
+                break;
+        }
+    }
+    return contentBlocks;
+}
+function extractPromptText(prompt) {
+    if (typeof prompt === "string") {
+        return prompt;
+    }
+    return prompt
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("");
+}
+function contentBlockToText(content) {
+    switch (content.type) {
+        case "text":
+            return content.text;
+        case "resource_link":
+            return content.title ?? content.uri;
+        case "resource":
+            return "text" in content.resource
+                ? content.resource.text
+                : `[resource:${content.resource.mimeType ?? "binary"}]`;
+        case "image":
+            return "[image]";
+        case "audio":
+            return "[audio]";
+        default:
+            return "";
+    }
+}
+function normalizeACPImportPromptPreview(text) {
+    const normalized = text?.trim().replace(/\s+/g, " ") ?? "";
+    if (!normalized)
+        return null;
+    return normalized.length > 160 ? normalized.slice(0, 160) : normalized;
+}
+function isACPConversationUpdate(update) {
+    return (update.sessionUpdate === "user_message_chunk" ||
+        update.sessionUpdate === "agent_message_chunk" ||
+        update.sessionUpdate === "agent_thought_chunk" ||
+        update.sessionUpdate === "tool_call" ||
+        update.sessionUpdate === "tool_call_update" ||
+        update.sessionUpdate === "plan");
+}
+function coalesceDefined(next, previous, fallback) {
+    if (next !== undefined) {
+        return next;
+    }
+    if (previous !== undefined) {
+        return previous;
+    }
+    return fallback;
+}
+function mergeToolSnapshot(toolCallId, update, previous) {
+    return {
+        toolCallId,
+        title: update.title ?? previous?.title ?? toolCallId,
+        kind: update.kind ?? previous?.kind ?? null,
+        status: update.status ?? previous?.status ?? null,
+        content: coalesceDefined(update.content, previous?.content, null),
+        locations: coalesceDefined(update.locations, previous?.locations, null),
+        rawInput: update.rawInput !== undefined ? update.rawInput : previous?.rawInput,
+        rawOutput: update.rawOutput !== undefined ? update.rawOutput : previous?.rawOutput,
+    };
+}
+function mapPlanToTimeline(plan) {
+    return {
+        type: "todo",
+        items: plan.entries.map((entry) => ({
+            text: entry.content,
+            completed: entry.status === "completed",
+        })),
+    };
+}
+function mapToolSnapshotToTimeline(snapshot, terminals) {
+    const status = mapToolStatus(snapshot.status);
+    const detail = mapToolDetail(snapshot, terminals);
+    const base = {
+        type: "tool_call",
+        callId: snapshot.toolCallId,
+        name: snapshot.kind ?? snapshot.title,
+        detail,
+        metadata: {
+            kind: snapshot.kind ?? undefined,
+            title: snapshot.title,
+        },
+    };
+    if (status === "failed") {
+        return {
+            ...base,
+            status: "failed",
+            error: { message: readErrorMessage(snapshot.rawOutput) },
+        };
+    }
+    if (status === "completed") {
+        return {
+            ...base,
+            status: "completed",
+            error: null,
+        };
+    }
+    return {
+        ...base,
+        status: "running",
+        error: null,
+    };
+}
+function mapToolStatus(status) {
+    switch (status) {
+        case "completed":
+            return "completed";
+        case "failed":
+            return "failed";
+        case "pending":
+        case "in_progress":
+        default:
+            return "running";
+    }
+}
+function mapToolDetail(snapshot, terminals) {
+    const context = {
+        snapshot,
+        firstLocation: snapshot.locations?.[0]?.path,
+        textContent: extractToolText(snapshot.content),
+        diffContent: extractDiffContent(snapshot.content),
+        terminalContent: extractTerminalContent(snapshot.content, terminals),
+        rawInput: readRecord(snapshot.rawInput),
+        rawOutput: readRecord(snapshot.rawOutput),
+    };
+    switch (snapshot.kind) {
+        case "read":
+            return buildReadToolDetail(context);
+        case "edit":
+        case "delete":
+            return buildEditToolDetail(context);
+        case "search":
+            return buildSearchAcpToolDetail(context);
+        case "execute":
+            return buildShellToolDetail(context);
+        case "fetch":
+            return buildFetchToolDetail(context);
+        case "think":
+            return {
+                type: "plain_text",
+                label: snapshot.title,
+                icon: "brain",
+                text: context.textContent ?? stringifyUnknown(snapshot.rawOutput),
+            };
+        case "switch_mode":
+            return {
+                type: "plain_text",
+                label: snapshot.title,
+                icon: "sparkles",
+                text: context.textContent ?? stringifyUnknown(snapshot.rawInput),
+            };
+        default:
+            return buildDefaultToolDetail(context);
+    }
+}
+function buildReadToolDetail(context) {
+    const { snapshot, firstLocation, textContent, rawInput, rawOutput } = context;
+    return {
+        type: "read",
+        filePath: firstLocation ?? readString(rawInput, ["path", "filePath", "file"]) ?? snapshot.title,
+        content: textContent ?? readString(rawOutput, ["content", "text"]),
+        offset: readNumber(rawInput, ["offset", "line"]),
+        limit: readNumber(rawInput, ["limit"]),
+    };
+}
+function buildEditToolDetail(context) {
+    const { snapshot, firstLocation, textContent, diffContent, rawInput } = context;
+    return {
+        type: "edit",
+        filePath: firstLocation ?? readString(rawInput, ["path", "filePath", "file"]) ?? snapshot.title,
+        oldString: diffContent?.oldText ?? readString(rawInput, ["oldText", "oldString"]),
+        newString: snapshot.kind === "delete"
+            ? ""
+            : (diffContent?.newText ?? readString(rawInput, ["newText", "newString"])),
+        unifiedDiff: textContent ?? undefined,
+    };
+}
+function buildSearchAcpToolDetail(context) {
+    const { snapshot, textContent, rawInput, rawOutput } = context;
+    return {
+        type: "search",
+        query: readString(rawInput, ["query", "pattern"]) ?? snapshot.title,
+        toolName: "search",
+        content: textContent ?? readString(rawOutput, ["content", "text"]),
+        filePaths: snapshot.locations?.map((location) => location.path),
+    };
+}
+function buildShellToolDetail(context) {
+    const { snapshot, textContent, terminalContent, rawInput, rawOutput } = context;
+    return {
+        type: "shell",
+        command: terminalContent?.command ??
+            buildShellCommand(rawInput) ??
+            readString(rawInput, ["command"]) ??
+            snapshot.title,
+        cwd: terminalContent?.cwd ?? readString(rawInput, ["cwd"]),
+        output: terminalContent?.output ?? textContent ?? readString(rawOutput, ["output", "text"]),
+        exitCode: terminalContent?.exitCode ?? readNumber(rawOutput, ["exitCode"]),
+    };
+}
+function buildFetchToolDetail(context) {
+    const { snapshot, textContent, rawInput, rawOutput } = context;
+    return {
+        type: "fetch",
+        url: readString(rawInput, ["url"]) ?? snapshot.title,
+        prompt: readString(rawInput, ["prompt"]),
+        result: textContent ?? readString(rawOutput, ["result", "text", "content"]),
+        code: readNumber(rawOutput, ["status", "code"]),
+    };
+}
+function buildDefaultToolDetail(context) {
+    const { snapshot, textContent, terminalContent } = context;
+    if (terminalContent) {
+        return {
+            type: "shell",
+            command: terminalContent.command ?? snapshot.title,
+            cwd: terminalContent.cwd,
+            output: terminalContent.output,
+            exitCode: terminalContent.exitCode,
+        };
+    }
+    if (textContent) {
+        return {
+            type: "plain_text",
+            label: snapshot.title,
+            text: textContent,
+            icon: "wrench",
+        };
+    }
+    return {
+        type: "unknown",
+        input: snapshot.rawInput ?? null,
+        output: snapshot.rawOutput ?? null,
+    };
+}
+function extractToolText(content) {
+    if (!content) {
+        return undefined;
+    }
+    const parts = [];
+    for (const item of content) {
+        if (item.type === "content") {
+            const text = contentBlockToText(item.content);
+            if (text) {
+                parts.push(text);
+            }
+        }
+    }
+    return parts.length > 0 ? parts.join("\n") : undefined;
+}
+function extractDiffContent(content) {
+    const diff = content?.find((item) => item.type === "diff");
+    return diff ? { oldText: diff.oldText ?? undefined, newText: diff.newText } : null;
+}
+function extractTerminalContent(content, terminals) {
+    const terminal = content?.find((item) => item.type === "terminal");
+    if (!terminal) {
+        return undefined;
+    }
+    const entry = terminals.get(terminal.terminalId);
+    if (!entry) {
+        return undefined;
+    }
+    return {
+        output: entry.output,
+        exitCode: entry.exit?.exitCode ?? null,
+    };
+}
+function mapPermissionRequest(provider, requestId, params, snapshot) {
+    const kind = snapshot.kind === "switch_mode" ? "mode" : "tool";
+    const chooserText = isACPChooserRequest(params.options)
+        ? extractToolText(params.toolCall.content)
+        : undefined;
+    return {
+        id: requestId,
+        provider,
+        name: snapshot.kind ?? snapshot.title,
+        kind,
+        title: params.toolCall.title ?? snapshot.title,
+        detail: chooserText
+            ? {
+                type: "plain_text",
+                label: params.toolCall.title ?? snapshot.title,
+                text: chooserText,
+                icon: "wrench",
+            }
+            : mapToolDetail(snapshot, new Map()),
+        actions: params.options.map((option) => ({
+            id: option.optionId,
+            label: option.name,
+            behavior: option.kind.startsWith("allow") ? "allow" : "deny",
+        })),
+        metadata: {
+            toolCallId: params.toolCall.toolCallId,
+            rawRequest: params,
+            options: params.options,
+        },
+    };
+}
+function selectPermissionOption(options, response) {
+    if (response.selectedActionId !== undefined) {
+        const selectedOption = options.find((option) => option.optionId === response.selectedActionId);
+        if (!selectedOption)
+            return null;
+        const selectedBehavior = selectedOption.kind.startsWith("allow") ? "allow" : "deny";
+        return selectedBehavior === response.behavior ? selectedOption : null;
+    }
+    const order = response.behavior === "allow"
+        ? ["allow_once", "allow_always"]
+        : ["reject_once", "reject_always"];
+    for (const kind of order) {
+        const match = options.find((option) => option.kind === kind);
+        if (match) {
+            return match;
+        }
+    }
+    return null;
+}
+function isACPChooserRequest(options) {
+    const allowKinds = new Set();
+    for (const option of options) {
+        if (!option.kind.startsWith("allow")) {
+            continue;
+        }
+        if (allowKinds.has(option.kind)) {
+            return true;
+        }
+        allowKinds.add(option.kind);
+    }
+    return false;
+}
+function appendTerminalOutput(entry, chunk) {
+    entry.output += chunk;
+    const limit = entry.outputByteLimit;
+    if (!limit) {
+        return;
+    }
+    const output = Buffer.from(entry.output, "utf8");
+    if (output.length <= limit) {
+        return;
+    }
+    let start = output.length - limit;
+    while (start < output.length && (output[start] & 0xc0) === 0x80) {
+        start += 1;
+    }
+    entry.output = output.subarray(start).toString("utf8");
+    entry.truncated = true;
+}
+function readRecord(value) {
+    return isRecord(value) ? value : null;
+}
+function readString(record, keys) {
+    if (!record) {
+        return undefined;
+    }
+    for (const key of keys) {
+        const value = record[key];
+        if (typeof value === "string" && value.trim().length > 0) {
+            return value;
+        }
+    }
+    return undefined;
+}
+function readNumber(record, keys) {
+    if (!record) {
+        return undefined;
+    }
+    for (const key of keys) {
+        const value = record[key];
+        if (typeof value === "number" && Number.isFinite(value)) {
+            return value;
+        }
+    }
+    return undefined;
+}
+function buildShellCommand(record) {
+    if (!record) {
+        return undefined;
+    }
+    const command = readString(record, ["command"]);
+    const args = Array.isArray(record["args"])
+        ? record["args"].filter((value) => typeof value === "string")
+        : [];
+    if (!command) {
+        return undefined;
+    }
+    return args.length > 0 ? `${command} ${args.join(" ")}` : command;
+}
+function readErrorMessage(value) {
+    if (typeof value === "string") {
+        return value;
+    }
+    const record = readRecord(value);
+    return readString(record, ["message", "error"]) ?? "Tool call failed";
+}
+function stringifyUnknown(value) {
+    if (value == null) {
+        return undefined;
+    }
+    if (typeof value === "string") {
+        return value;
+    }
+    try {
+        return JSON.stringify(value);
+    }
+    catch {
+        return typeof value === "bigint" ? String(value) : "[unserializable]";
+    }
+}
+function coerceSessionConfigMetadata(metadata) {
+    if (!metadata || typeof metadata !== "object") {
+        return {};
+    }
+    return metadata;
+}
+async function terminateChildProcess(child, timeoutMs, terminate) {
+    try {
+        await terminate(child, { gracefulTimeoutMs: timeoutMs, forceTimeoutMs: timeoutMs });
+    }
+    finally {
+        child.stdin.destroy();
+        child.stdout.destroy();
+        child.stderr.destroy();
+    }
+}
+//# sourceMappingURL=acp-agent.js.map

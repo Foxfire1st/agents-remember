@@ -67,7 +67,7 @@ export type ActivityAgentSnapshot = Pick<
 export interface HostActivityReader {
   agents: {
     list(options: {
-      filter: { includeArchived: boolean };
+      filter: { includeArchived: boolean; includeBackground?: boolean };
       page: { limit: number; cursor?: string };
     }): Promise<{
       entries: { agent: ActivityAgentSnapshot }[];
@@ -297,7 +297,9 @@ export class HostActivityPublisher {
       let cursor: string | undefined;
       for (;;) {
         const page = await paseo.agents.list({
-          filter: { includeArchived: true },
+          // The pinned host (0.16.2) leaves background agents out unless it is asked for
+          // them; a role agent's record must never be dropped from the publication.
+          filter: { includeArchived: true, includeBackground: true },
           page: { limit: 200, ...(cursor ? { cursor } : {}) },
         });
         const records = this.records();
@@ -584,9 +586,9 @@ export function createHostActivityPublisher(
 }
 
 /**
- * The Paseo 0.15 hook each publication event is heard on (`server.addHook`); the
- * legacy `server.on` names, kept here as the publication's own event names, stop
- * working after 2027-04-30.
+ * The hook each publication event is heard on (`server.addHook`) on the pinned host
+ * (0.16.2); the legacy `server.on` names, kept here as the publication's own event
+ * names, stop working after 2027-04-30.
  */
 export const HOST_ACTIVITY_HOOKS = [
   ["agent.turn.before", "agent.turn_started"],

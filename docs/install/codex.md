@@ -102,7 +102,7 @@ settings file is `~/.config/agents-remember/agents-remember-settings.json`.
     seconds. For a command of that kind, run it outside the agent's sandbox.
   - Who: you, for the command outside the sandbox; the 300-second bound is Codex's own.
   - Checked: the host's start of a Codex role agent passes its tool server as `command`, `args` and
-    `env` only, read in the host 0.15.4 source this build installs, and passes no timeout; the
+    `env` only, read in the host 0.16.2 source this build installs, and passes no timeout; the
     sandbox's read-only answer outside its working folder and its write inside it, by commands run
     through `codex sandbox` with `sandbox_mode="workspace-write"` on a scratch home; and the
     300-second end was measured on this version earlier, not repeated.

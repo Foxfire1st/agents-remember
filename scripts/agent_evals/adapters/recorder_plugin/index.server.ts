@@ -1,9 +1,10 @@
-// Native @getpaseo/plugin/server 0.15.4 lifecycle (`server.addHook`) + PaseoApi.observeEvents.
+// Native @getpaseo/plugin/server 0.16.2 lifecycle (`server.addHook`) + PaseoApi.observeEvents.
 // No roles, prompts, approvals, agent state changes or subscription snapshots
 // invented as helper events. Every recorded native object is retained unchanged.
-// From Paseo 0.13 the turn-end hook carries an empty `timeline`; the recorder
-// reads the agent's held timeline through `agents.ref(id).timeline.refetch` and
-// records its items in the hook's place, each with the turn id of its row.
+// The pinned plugin interface's type omits `timeline` from the turn-end hook
+// (dist/server/lifecycle.d.ts:107-117); the server still sends `timeline: []` as compatibility, and the recorder reads the agent's held timeline
+// through `agents.ref(id).timeline.refetch` and records its items in the hook's
+// place, each with the turn id of its row.
 import {
   appendFileSync,
   mkdirSync,

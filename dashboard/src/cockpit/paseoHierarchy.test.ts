@@ -178,6 +178,29 @@ describe("trusted host hierarchy and agent-specific parent actions", () => {
     expect(load.posted.every((p) => p.targetOrigin === DASHBOARD && p.data.source === "ar-plugin")).toBe(true);
   });
 
+  it("asks for background agents on both reads, and publishes a background role seat carried by either page", async () => {
+    const fixture = host();
+    const background = {
+      ...nativeState, id: "background-seat", status: "running" as const, workspaceId: "task",
+      labels: { "ar.role": "worker", "paseo.parent-agent-id": "parent", "ar.request-id": "request-2" },
+    };
+    const first = { ...fixture.initialAgents, pageInfo: { hasMore: true, nextCursor: "page-2" }, subscription: fixture.agentStream.subscription };
+    fixture.agentStream.snapshot(first);
+    // Only the continuation page carries it: a list that omits background agents would lose it.
+    vi.mocked(fixture.client.paseo.agents.list).mockImplementation(async (options) =>
+      options.page.cursor ? page([{ agent: background }]) : first);
+    const load = connect(fixture);
+    await flush();
+    const filters = vi.mocked(fixture.client.paseo.agents.list).mock.calls.map(([options]) => options.filter);
+    expect(filters.length).toBeGreaterThanOrEqual(2);
+    for (const filter of filters) expect(filter).toMatchObject({ includeArchived: true, includeBackground: true });
+    expect(hierarchy(load).agents.map((agent) => agent.agentId)).toContain("background-seat");
+    // The subscribed page carries one too: a seat arriving there is published the same way.
+    fixture.agentStream.snapshot({ ...first, entries: [...first.entries, { agent: { ...background, id: "background-live" } }] });
+    await flush();
+    expect(hierarchy(load).agents.map((agent) => agent.agentId)).toContain("background-live");
+  });
+
   it("checks current visible caller and parent relation, including deferred navigation, unavailable parents and root transitions", async () => {
     visibleChats(["child"], ["child"]);
     const fixture = host(), load = connect(fixture);

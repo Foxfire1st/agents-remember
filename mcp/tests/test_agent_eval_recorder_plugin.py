@@ -1,7 +1,8 @@
 """The agent-eval recorder plugin records a native seat's helper rows and its ended turn.
 
-The plugin runs in Node against the pinned Paseo hook shape: ``agent.turn.after`` carries an
-empty timeline, so the recorder reads the ended turn through ``agents.ref(id).timeline.refetch``.
+The plugin runs in Node against the pinned hook shape: its SDK type omits ``timeline`` from
+``agent.turn.after`` while the server still sends ``timeline: []``, so the recorder reads the
+ended turn through ``agents.ref(id).timeline.refetch``.
 """
 
 from __future__ import annotations
@@ -49,12 +50,12 @@ const native = { type: 'agent.provider_subagents.update', payload: { kind: 'upse
 }} }
 listener.update(native)
 listener.update({ type: native.type, payload: { kind: 'remove', parentAgentId: 'owner', subagentId: 'helper' } })
-// Paseo 0.15.4's hook shape: an empty timeline; the recorder reads the turn through refetch.
+// The pinned SDK type has no timeline field; the server still sends timeline: []; the recorder reads the turn through refetch.
 const refetched = { entries: [
   { item: { type: 'user_message', text: 'Begin' }, turnId: 'actual-turn' },
   { item: { type: 'assistant_message', text: 'Complete' }, turnId: 'actual-turn' },
 ] }
-await ending({ agent: { id: 'owner' }, turnId: 'actual-turn', outcome: { kind: 'completed' }, timeline: [] }, { paseo: {
+await ending({ agent: { id: 'owner' }, turnId: 'actual-turn', outcome: { kind: 'completed' } }, { paseo: {
   agents: { ref(id) {
     if (id !== 'owner') throw Error('wrong agent')
     return { timeline: { async refetch(options) {

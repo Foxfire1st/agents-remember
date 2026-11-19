@@ -11,6 +11,9 @@ export async function listLiveAgents({ daemon }) {
   let complete = false
   for (let page = 0; page < LIVE_PAGES; page += 1) {
     const listed = await daemon.fetchAgents({
+      // The pinned host (0.16.2) leaves background agents out of a list unless it is asked
+      // for them, and this list is what the product treats as live: a seat must not be missed.
+      filter: { includeBackground: true },
       page: { limit: LIVE_PAGE_LIMIT, ...(cursor ? { cursor } : {}) }
     })
     for (const entry of listed.entries ?? []) {
